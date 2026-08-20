@@ -183,7 +183,7 @@ requestEvent.
 ## MCP tool surface
 
 All forge tools carry the `@mcp` annotation and are available to any MCP host
-connected to a memQL cluster with the forge bundle loaded.
+connected to a MemQL cluster with the forge bundle loaded.
 
 ### Project management
 
@@ -232,15 +232,15 @@ Claude and the MCP connector.
 
 ### 1. Connect the MCP connector
 
-The team member (or the operator on their behalf) connects Claude to the memQL
-MCP server. See [Connect to the memQL MCP server](mcp-connect.md) for the
+The team member (or the operator on their behalf) connects Claude to the MemQL
+MCP server. See [Connect to the MemQL MCP server](mcp-connect.md) for the
 full connector setup.
 
 ### 2. Register a project (one-time, owner)
 
 ```
 User (owner): "Register the memql repo as a forge project."
-Claude: calls forgeRegisterProject with slug="memql", name="memQL", ...
+Claude: calls forgeRegisterProject with slug="memql", name="MemQL", ...
 ```
 
 Once a project exists, `forgeActiveProjects` resolves the `projectId` for
@@ -296,7 +296,7 @@ performs no graph write.
 At any point, any team member can call `forgeRequestHistory` to see the full
 audit trail for a request: every routing decision, validation, approval,
 rejection, comment, and mentoring touch — a durable, queryable time-series in
-the memQL graph.
+the MemQL graph.
 
 ---
 

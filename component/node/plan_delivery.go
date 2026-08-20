@@ -68,7 +68,7 @@ import (
 // EventID collapse to one re-publish); per-key ordering is the substrate's
 // per-key monotonic seq + cursor. The EventID is the plan row id suffixed with
 // the bus event's emission timestamp (see publish), so a status transition that
-// re-inserts under the same plan id (memQL is append-only; each write is a new
+// re-inserts under the same plan id (MemQL is append-only; each write is a new
 // row VERSION under the same logical id) still gets a distinct durable row
 // rather than being swallowed by the outbox's EventID uniqueness -- the same
 // per-occurrence keying the chat-reply presence path needed (memql#1324).

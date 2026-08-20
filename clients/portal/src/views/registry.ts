@@ -105,7 +105,7 @@ export const VIEWS: readonly ViewDefinition[] = [
     conceptId: "v1:identity:account",
     title: "Customers",
     blurb:
-      "The businesses you run memQL for. An account is your record of a " +
+      "The businesses you run MemQL for. An account is your record of a " +
       "customer -- it holds no credential and nothing signs in as one.",
   },
   {

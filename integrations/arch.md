@@ -3,7 +3,7 @@
 > **Last Updated:** 2026-04-29
 
 External-service adapters and DSL-callable capabilities. The
-`integrations/` package bridges protocols memQL doesn't speak natively
+`integrations/` package bridges protocols MemQL doesn't speak natively
 (LiveKit, OpenAI WebSocket, Microsoft Graph, GCS)
 into the MemQL DSL via typed capability functions.
 
@@ -54,7 +54,7 @@ integrations/
 
 ## Self-registration (`RegisterPlugin`) vs explicit `app/` wiring
 
-memQL has two registration paths for integration providers:
+MemQL has two registration paths for integration providers:
 
 1. **Self-registration** (`memql.RegisterPlugin(name, factory)`
    from `init()`). Factory receives a narrow `PluginContext`

@@ -1,5 +1,5 @@
 ---
-title: memQL auth threat model
+title: MemQL auth threat model
 audience: internal
 status: historical
 area: design
@@ -7,13 +7,13 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL auth threat model
+# MemQL auth threat model
 
 > Historical: shipped in 0.9.0; kept for rationale.
 
 **Status:** v1, written 2026-05-20 as part of the Wave 3 security audit (see #86). Companion to [access-model.md](../../public/operate/auth/access-model.md), [actor-envelope.md](../../public/operate/auth/actor-envelope.md), [identity-service.md](../../public/operate/auth/identity-service.md), and [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
 
-This document inventories the auth surfaces, the threats considered, the defenses in place, the trust assumptions, and the known limitations. It is intended to be the single place a reviewer can read to understand what memQL's auth model *is* — both its enforcement and its boundaries.
+This document inventories the auth surfaces, the threats considered, the defenses in place, the trust assumptions, and the known limitations. It is intended to be the single place a reviewer can read to understand what MemQL's auth model *is* — both its enforcement and its boundaries.
 
 ---
 
@@ -120,7 +120,7 @@ For each surface above, the audit walks this checklist. Findings tracked on #86.
 
 ## 3. Authorization model
 
-memQL's authorization model is **per-row, classified, and tested at load time.** Every query/mutation in the DSL falls into one of four buckets:
+MemQL's authorization model is **per-row, classified, and tested at load time.** Every query/mutation in the DSL falls into one of four buckets:
 
 | Bucket | Filter shape | Example |
 |---|---|---|
@@ -265,7 +265,7 @@ Each defense in §4 lands with negative tests:
 
 ## 7. Injection surfaces (Wave 4, #87)
 
-The injection-surface audit (Wave 4, issue #87) walked the standard injection vectors against memQL. Most are **closed** by existing design; two are deferred as architectural follow-ups.
+The injection-surface audit (Wave 4, issue #87) walked the standard injection vectors against MemQL. Most are **closed** by existing design; two are deferred as architectural follow-ups.
 
 ### 7.1 SQL injection — closed
 

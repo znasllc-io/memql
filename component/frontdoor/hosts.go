@@ -18,7 +18,7 @@
 // The host set used to be the product of role x ENVIRONMENT, with an
 // environment carried as a DNS label that hyphenated into a role host
 // (api-staging.<d>) and nested into a site host (shop.staging.<d>). Epic
-// memql#3943 removed "environment" as a product concept: memQL ships ONE
+// memql#3943 removed "environment" as a product concept: MemQL ships ONE
 // installation shape, and an operator who wants a second environment installs a
 // second instance, which brings its own domain and therefore its own host set.
 // So the product has one factor left, and every host here is a single label

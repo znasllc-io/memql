@@ -172,7 +172,7 @@ export async function startSudoAgent(secret: string, nodePath: string): Promise<
  * It is handed the agent's directory and finds the socket and the nonce inside,
  * so the only thing that varies between runs is an argument, never the program.
  */
-const SUDO_ASKPASS_CLIENT = `// Reads the password from the memQL installer and prints it for sudo.
+const SUDO_ASKPASS_CLIENT = `// Reads the password from the MemQL installer and prints it for sudo.
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");

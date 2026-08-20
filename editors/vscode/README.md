@@ -81,7 +81,7 @@ DEPLOYMENTS
    \- rollout v0.9.1   rolled_back   3d ago
 ```
 
-**An instance** is a memQL you operate. It is derived rather than declared:
+**An instance** is a MemQL you operate. It is derived rather than declared:
 `local` is whatever is on this machine (an install receipt, a `local: true`
 registry row, and whether the front door answers), and every other
 `clusters.yaml` entry is a remote one. A machine with no local cluster still

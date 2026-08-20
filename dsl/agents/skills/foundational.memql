@@ -1,6 +1,6 @@
 // skills/foundational.memql
 //
-// Foundational skills shipped with every memQL installation. These
+// Foundational skills shipped with every MemQL installation. These
 // are NOT product-specific; every cluster gets them so the agent
 // factory + the Planner Agent always have a known-good baseline to
 // bundle. One v1:agents:skill catalog row per `seed`. Materialized by

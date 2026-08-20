@@ -1,4 +1,4 @@
-// Package server implements memQL's HTTP surface: the documented exceptions
+// Package server implements MemQL's HTTP surface: the documented exceptions
 // to the gRPC-first endpoint policy (health probes, WebSocket upgrades, file
 // uploads, inbound webhooks) plus the middleware they share.
 //

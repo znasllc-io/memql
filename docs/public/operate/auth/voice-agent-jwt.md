@@ -10,7 +10,7 @@ owner: znas
 # Voice-agent service-account JWTs
 
 The Go voice-agent (`integrations/voice/agent/`) authenticates to
-memQL's `MemqlService.Stream` via an identity-issued service-account JWT.
+MemQL's `MemqlService.Stream` via an identity-issued service-account JWT.
 Closes [threat-model §5.2](../../../internal/design/auth-threat-model.md#52-voice-agent-shared-secret-f4)
 / [#109](https://github.com/znasllc-io/memql/issues/109).
 
@@ -171,7 +171,7 @@ The deploy pipeline does the same dance:
 3. The minted JWT lands in the deploy pipeline's secret store --
    Azure Key Vault, synced into the cluster via External Secrets
    Operator (ESO) -- and is injected as `VOICE_AGENT_TOKEN` into the
-   voice-agent container at startup. memQL's cloud target is Azure
+   voice-agent container at startup. MemQL's cloud target is Azure
    Kubernetes Service, not Cloud Run; see the "Deploy targets" table
    in the repo's top-level CLAUDE.md.
 4. Rotation = re-mint + re-inject + restart on the same cadence

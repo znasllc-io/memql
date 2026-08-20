@@ -1,7 +1,7 @@
 {
   "name": "@znasllc-io/memql-view-kit",
   "version": "0.1.0",
-  "description": "Framework-agnostic renderer for memQL concept rows: rows plus @displayCard hints in, HTML out. No DOM dependency.",
+  "description": "Framework-agnostic renderer for MemQL concept rows: rows plus @displayCard hints in, HTML out. No DOM dependency.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

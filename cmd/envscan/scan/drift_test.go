@@ -44,7 +44,7 @@ func TestNoEnvRegistryDrift(t *testing.T) {
 		CountKind(res.Unresolvable, KindUnresolvedKey),
 		CountKind(res.Unresolvable, KindReaderPrefix))
 	if len(res.ExemptUnprefixed) > 0 {
-		t.Logf("%d memQL-owned key(s) read but NOT registered, exempt from forward drift pending a "+
+		t.Logf("%d MemQL-owned key(s) read but NOT registered, exempt from forward drift pending a "+
 			"MEMQL_ rename: %v", len(res.ExemptUnprefixed), res.ExemptUnprefixed)
 	}
 

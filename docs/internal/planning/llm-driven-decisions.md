@@ -218,7 +218,7 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 ## Out of scope for this plan
 
 - New product features. This is infrastructure work; it should be invisible to users except as fewer bugs and more consistent latency.
-- Frontend changes. Almost all of this lives in memQL.
+- Frontend changes. Almost all of this lives in MemQL.
 - Migration of user-facing strings. Those are i18n, not decisions.
 - The conductor itself. The conductor already does LLM-driven decisions with structured outputs; we don't re-architect it. We just stop letting hardcoded pre-stages override its signal.
 

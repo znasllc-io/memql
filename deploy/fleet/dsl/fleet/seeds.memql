@@ -1,4 +1,4 @@
-// fleet domain -- the memQL Cloud price list, as seeded rows.
+// fleet domain -- the MemQL Cloud price list, as seeded rows.
 //
 // THIS FILE IS THE PRICE LIST. It is the single place the numbers live, and
 // three surfaces read them from here rather than restating them: the public
@@ -47,7 +47,7 @@ use fleet.concepts.{ tierSpec }
 /// at zero and capped hard -- 500 message credits and 60 voice minutes, then throttled. The caps
 /// are what bound a trial's cost of goods to roughly $30-40; the throttle (rather than metered
 /// overage) is what makes that a bound rather than an estimate.
-@description("memQL Cloud trial -- 14 days, card required, hard-capped and throttled at the ceiling.")
+@description("MemQL Cloud trial -- 14 days, card required, hard-capped and throttled at the ceiling.")
 seed tierSpec cloudTrial {
   tier:                     "trial"
   displayName:              "Trial"
@@ -67,7 +67,7 @@ seed tierSpec cloudTrial {
 /// Node -- the entry tier. $199/mo, 2,000 message credits, no bundled voice, HA available as a paid
 /// add-on. Runs the condensed 'solo' instance profile (task memql#3856), which is what takes entry
 /// cost of goods from roughly $143 to roughly $90 and the margin from >=21% to ~48%.
-@description("memQL Cloud Node -- the entry tier: a private instance, 2,000 message credits, voice and HA available as add-ons.")
+@description("MemQL Cloud Node -- the entry tier: a private instance, 2,000 message credits, voice and HA available as add-ons.")
 seed tierSpec cloudNode {
   tier:                     "node"
   displayName:              "Node"
@@ -88,7 +88,7 @@ seed tierSpec cloudNode {
 /// INCLUDED rather than optional: the tier promises every service replicated, and a tier that
 /// promises replication while running one replica is a promise the cluster does not keep. Full mesh
 /// on the shared cluster, `mid` database preset (two instances, PDB on).
-@description("memQL Cloud Graph -- the featured tier: full mesh, HA included, 10,000 message credits and 1,000 voice minutes.")
+@description("MemQL Cloud Graph -- the featured tier: full mesh, HA included, 10,000 message credits and 1,000 voice minutes.")
 seed tierSpec cloudGraph {
   tier:                     "graph"
   displayName:              "Graph"
@@ -109,7 +109,7 @@ seed tierSpec cloudGraph {
 /// cluster and a three-zone database (`top` preset). Zone redundancy comes from Postgres replication
 /// rather than from disk replication, which is why `top` sets no storage class -- see the cnpg-db
 /// component README.
-@description("memQL Cloud Mesh -- dedicated cluster, three-zone database, 50,000 message credits and 5,000 voice minutes.")
+@description("MemQL Cloud Mesh -- dedicated cluster, three-zone database, 50,000 message credits and 5,000 voice minutes.")
 seed tierSpec cloudMesh {
   tier:                     "mesh"
   displayName:              "Mesh"
@@ -131,7 +131,7 @@ seed tierSpec cloudMesh {
 /// has a tier row to point at; the actual commercial terms live in a contract, and the allowances
 /// on the subscription's meters are set from that contract at period open rather than from here.
 /// `hidden` keeps it out of the self-serve picker -- there is no checkout path that ends here.
-@description("memQL Cloud Enterprise -- custom terms; present in the catalog so the pricing page and enterprise subscriptions have a tier to name.")
+@description("MemQL Cloud Enterprise -- custom terms; present in the catalog so the pricing page and enterprise subscriptions have a tier to name.")
 seed tierSpec cloudEnterprise {
   tier:                     "enterprise"
   displayName:              "Enterprise"

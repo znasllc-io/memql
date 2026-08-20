@@ -12,7 +12,7 @@ use agents.concepts.{ skill }
 seed skill knowledge-ingestion {
   slug:          "knowledge-ingestion"
   name:          "Knowledge Ingestion"
-  description:   "Ingest external documents into the memQL knowledge graph: the validation lifecycle, supersession, per-format item concepts."
+  description:   "Ingest external documents into the MemQL knowledge graph: the validation lifecycle, supersession, per-format item concepts."
   category:      "foundational"
   tags:          ["knowledge", "documents"]
   domainIds:     ["research-methodology"]

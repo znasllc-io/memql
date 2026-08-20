@@ -3,7 +3,7 @@
 # scripts/install/clone-stack.sh
 # ==============================
 #
-# Capability: install.cloneStack -- fetch the memQL stack at a release tag into
+# Capability: install.cloneStack -- fetch the MemQL stack at a release tag into
 # ~/.memql/src, the checkout the rest of the install substrate then runs.
 #
 # WHY --tag REFUSES A BRANCH, AND WHY --branch EXISTS ANYWAY
@@ -70,8 +70,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "install.cloneStack" "Fetch the memQL stack at a tag, a labelled branch, or an exact commit into a pinned local checkout."
-cap_spec_param "repo"  "git repository URL (default: the memQL engine)"
+cap_init "install.cloneStack" "Fetch the MemQL stack at a tag, a labelled branch, or an exact commit into a pinned local checkout."
+cap_spec_param "repo"  "git repository URL (default: the MemQL engine)"
 # DECLARED REQUIRED, and it stays that way even though --branch and --commit can
 # stand in for it (memql#3568's property, memql#3901): the spec's contract is
 # that a caller supplying everything marked required always succeeds, and for
@@ -275,7 +275,7 @@ function dir_is_empty() {
 # checkout; `rev-parse HEAD` is the wanted commit, so the idempotency branch
 # calls it up to date; and there is not one file on disk. The run then reports
 # ok/changed=false with the correct commit sha, and the install fails two steps
-# later complaining that the directory "is a git checkout, but not of memQL".
+# later complaining that the directory "is a git checkout, but not of MemQL".
 #
 # A ref is not a working tree. This asks about the tree.
 #
@@ -490,7 +490,7 @@ function main() {
     state="$(classify_dest "$dest")"
     case "$state" in
         occupied)
-            cap_fail 3 "refusing to overwrite ${dest}: it exists and is not a memQL checkout; move it aside or pass --dest"
+            cap_fail 3 "refusing to overwrite ${dest}: it exists and is not a MemQL checkout; move it aside or pass --dest"
             ;;
         absent|empty)
             case "$ref_kind" in

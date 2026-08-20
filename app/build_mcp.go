@@ -5,7 +5,7 @@ package app
 import "log/slog"
 
 // Build constructs service dependencies for an MCP (Model Context Protocol)
-// node -- the protocol head that exposes a memQL deployment's tool surface to
+// node -- the protocol head that exposes a MemQL deployment's tool surface to
 // external MCP hosts (Claude Desktop / Claude Code and others). It is a new
 // node role selected by the `mcp` build tag (epic memql#1529), a protocol
 // head over the engine's existing tool surface, mirroring app/build_bff.go.

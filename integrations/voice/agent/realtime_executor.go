@@ -291,7 +291,7 @@ type transcriptJob struct {
 }
 
 // forwardTranscriptLoop is the parallel goroutine that actually sends the human
-// transcript to memQL. It owns ALL forwardPartial/forwardFinal blocking, so the
+// transcript to MemQL. It owns ALL forwardPartial/forwardFinal blocking, so the
 // realtime conversation path (drainEvents) never waits on the chat-utterance
 // insert -- the human transcript is a best-effort, parallel concern (exactly the
 // "utterances run in their own goroutine, added to chat later" contract).
@@ -1154,7 +1154,7 @@ func (e *RealtimeExecutor) drainEvents() {
 	}
 }
 
-// captureOutput forwards one completed assistant transcript to memQL as an AI
+// captureOutput forwards one completed assistant transcript to MemQL as an AI
 // utterance (#458 output capture). Runs on its own goroutine so the wire
 // round-trip never blocks the event drain. A nil forwarder or a blank
 // transcript is a no-op; a failed insert is logged (the voice turn still

@@ -274,7 +274,7 @@ export function useAccountConsole(
           )
           .then(
             () =>
-              "Archived. The record is kept in full -- memQL has no hard delete.",
+              "Archived. The record is kept in full -- MemQL has no hard delete.",
           ),
       refetchAccounts,
     );

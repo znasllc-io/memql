@@ -1,5 +1,5 @@
 ---
-title: memQL Cloud -- the launch checklist
+title: MemQL Cloud -- the launch checklist
 audience: public
 status: stable
 area: operate
@@ -7,7 +7,7 @@ sinceVersion: 0.13.0
 owner: znas
 ---
 
-# The memQL Cloud launch checklist
+# The MemQL Cloud launch checklist
 
 **Audience:** whoever signs off the first paying customer.
 **Epic:** memql#3852. **This task:** memql#3857.
@@ -46,7 +46,7 @@ These are checked:
 | Every metering tier prices its overage above zero | `TestEveryTierAllowanceIsBoundedAndPriced` |
 | Every tenant renders and mounts a spend ceiling | `TestEveryTenantRendersASpendCeiling` |
 | The runbook's price table matches the price list | `TestThePublishedPriceTableMatchesTheSeeds` |
-| No public copy calls memQL a database | `TestNoDatabaseProductClaims` |
+| No public copy calls MemQL a database | `TestNoDatabaseProductClaims` |
 | The teardown sweep cannot act on the whole fleet | `TestEverySweepNarrowsItsCandidates` |
 | Cross-tenant reads are impossible | `deploy/fleet/authz_test.go` |
 
@@ -85,7 +85,7 @@ go test ./deploy/... ./test/dslconformance/ .
 - [ ] Pricing page reads `publicTiers` live. **No number is copied into markup** —
       the query is `@public` for exactly this reason, and it is what makes "one
       place" true rather than aspirational.
-- [ ] memQL described as an AI platform throughout. Zero "is a database" claims —
+- [ ] MemQL described as an AI platform throughout. Zero "is a database" claims —
       this is a [licence-compliance](../../internal/ops/timescaledb-license-compliance.md)
       condition, not a style preference.
 - [ ] Small print present: overage rates, trial terms, annual = two months free.

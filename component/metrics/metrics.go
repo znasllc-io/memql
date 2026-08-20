@@ -1,8 +1,8 @@
 // Package metrics exposes the process-wide Prometheus metrics surface
-// for every memQL binary (bff / voice / cognition / agent / planner /
+// for every MemQL binary (bff / voice / cognition / agent / planner /
 // workbench / identity).
 //
-// Historically memQL emitted no Prometheus metrics at all -- auth
+// Historically MemQL emitted no Prometheus metrics at all -- auth
 // rejects and JWKS incoherence were WARN-level slog lines only, so a
 // ~50% auth-failure incident (2026-06-16) stayed silent until a user
 // noticed the product was broken (memql#1523). This package is the

@@ -1,4 +1,4 @@
-// Package pack is the Go SDK surface for the memQL pack browser -- the
+// Package pack is the Go SDK surface for the MemQL pack browser -- the
 // read-only enumeration of a node's embedded + plugin-registered .memql
 // tree. It powers the cockpit's "browse packs" view: list the DSL domains
 // a node carries, list the .memql files inside a domain, and fetch a

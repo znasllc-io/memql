@@ -207,7 +207,7 @@ automation deployWithArgs {
 //
 //   @enabled
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
-//   @description("Deploy the memQL ENGINE cluster. No bff / product nodes.")
+//   @description("Deploy the MemQL ENGINE cluster. No bff / product nodes.")
 //   automation deployEngineCluster {
 //     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
 //     step record    { mutation createDeployment(                   // ONE write

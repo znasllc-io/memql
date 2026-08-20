@@ -90,7 +90,7 @@ export function arrangementFor(
 
 export interface SavedViewInput {
   // Empty for a create; the caller mints the id (newShortId) exactly as every
-  // other memQL write does, so a create is idempotent under a retry.
+  // other MemQL write does, so a create is idempotent under a retry.
   readonly viewId: string;
   readonly name: string;
   readonly description: string;

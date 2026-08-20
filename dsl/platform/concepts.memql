@@ -52,7 +52,7 @@ concept globalVariable {
 //     manifest-listed (scripts/secrets/manifest.yaml) DEFAULTED
 //     concept-stored entries, run on every node boot (Epic 7 / memql#2109).
 //   * scripts/secrets (Go CLI, `seed --env-file <path>`) -- an operator
-//     tool, invoked internally by memQL's dev-refresh flow, that reads a
+//     tool, invoked internally by MemQL's dev-refresh flow, that reads a
 //     .env file and upserts manifest-listed entries as v1:platform:global*
 //     rows against a running memql.
 //   * The setGlobalSecret / setPartitionSecret mutations directly, e.g.

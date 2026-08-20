@@ -2,7 +2,7 @@ package agent
 
 // timing.go is the voice-path timing instrumentation helper (#1426). Every
 // timed phase on the realtime voice path -- session setup, per-turn latency,
-// tool round-trips, and each individual memQL/DB/mesh call inside those spans
+// tool round-trips, and each individual MemQL/DB/mesh call inside those spans
 // -- is logged through logVoiceTiming so one grep key (`voice_timing`) finds
 // the whole breakdown:
 //

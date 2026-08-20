@@ -133,7 +133,7 @@ func newDeviceWebServer(t *testing.T) (*Server, *fakeDeviceAdapter, string) {
 		// consent_device_unverified_test.go drives the self-registered side.
 		ClientDisplay: func(_ context.Context, clientId string) (string, bool) {
 			if clientId == "vscode-memql" {
-				return "memQL for VS Code", false
+				return "MemQL for VS Code", false
 			}
 			return "", false
 		},
@@ -218,7 +218,7 @@ func TestDeviceApprovalPanelNamesClientSourceIPAndUserAgent(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"memQL for VS Code",          // the client's human name
+		"MemQL for VS Code",          // the client's human name
 		"vscode-memql",               // and the id the session actually binds to
 		"203.0.113.9",                // the source IP
 		"memql-vscode/1.2.3 (linux)", // the user agent

@@ -1,10 +1,10 @@
-# gitleaks configuration for memQL
+# gitleaks configuration for MemQL
 #
 # Wired into CI in a follow-up (Wave 2 of the pre/post-OSS security audit, see
 # issue #91). This file establishes the baseline and documents the known false
 # positives so the audit history stays explicit.
 
-title = "memQL gitleaks config"
+title = "MemQL gitleaks config"
 
 [extend]
 # Inherit the upstream default rule set.
@@ -13,7 +13,7 @@ useDefault = true
 # -----------------------------------------------------------------------------
 # Rules
 # -----------------------------------------------------------------------------
-# The upstream default set knows nothing about memQL's own credentials, so
+# The upstream default set knows nothing about MemQL's own credentials, so
 # until memql#3962 this file's `useDefault = true` and zero custom rules meant
 # every bearer token this platform mints was undetectable by its own secret
 # scanner. A leaked PAT, worker token or recovery key would have passed the
@@ -21,8 +21,8 @@ useDefault = true
 
 [[rules]]
 id          = "memql-credential-token"
-description = "memQL credential bearer token (mql_<kind>_<43 base64url chars>)"
-# MATCH THE SHAPE, NOT THE CONSTANTS. Every memQL credential minter draws 32
+description = "MemQL credential bearer token (mql_<kind>_<43 base64url chars>)"
+# MATCH THE SHAPE, NOT THE CONSTANTS. Every MemQL credential minter draws 32
 # CSPRNG bytes and encodes them with base64.RawURLEncoding, which is 43
 # characters with no padding -- so one shape covers all of them, including the
 # ones no constant declares. `mql_node_` is an inline literal at

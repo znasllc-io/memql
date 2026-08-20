@@ -1,6 +1,6 @@
 -- Cross-replica automation execution claims (znasllc-io/memql#561).
 --
--- When a memQL node-type runs >=2 replicas, the same triggering event can
+-- When a MemQL node-type runs >=2 replicas, the same triggering event can
 -- reach more than one replica (the EventBridge dedup is per-process, not
 -- cluster-wide). To keep event-triggered automations exactly-once across
 -- the cluster, each replica claims an execution by inserting a row keyed by

@@ -1,11 +1,11 @@
-# memQL monitoring: metrics scrape config + alert rules (memql#1523).
+# MemQL monitoring: metrics scrape config + alert rules (memql#1523).
 #
 # Apply with:  kubectl apply -k deploy/k8s/monitoring
 #
 # Deliberately NOT wired into deploy/k8s/base or the staging/prod overlays:
 # these resources require the prometheus-operator CRDs (PodMonitor /
 # PrometheusRule / ServiceMonitor), which live in the monitoring stack,
-# not in the memQL app deploy. Keeping them separate means a `kubectl
+# not in the MemQL app deploy. Keeping them separate means a `kubectl
 # apply -k deploy/k8s/overlays/cloud` of the app never fails on a
 # cluster that has no operator installed. See README.md.
 #

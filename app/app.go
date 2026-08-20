@@ -1,4 +1,4 @@
-// Package app implements the phased bootstrap for the memQL service.
+// Package app implements the phased bootstrap for the MemQL service.
 // It separates the monolithic mustCreateDependencies into clearly scoped
 // phases: config, database, engine, integrations, transport, and cluster.
 //
@@ -215,7 +215,7 @@ type App struct {
 	workerService any
 
 	// deployControlService is the DeployControlService gRPC
-	// implementation behind the memQL Deployment Console
+	// implementation behind the MemQL Deployment Console
 	// (znasllc-io/memql#725 + #728). Set on the identity build only
 	// (the identity node is where the on-disk overlay checkout lives).
 	// Stored as `any` to avoid importing component/deploycontrol in

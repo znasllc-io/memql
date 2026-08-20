@@ -84,7 +84,7 @@ type ResponsibilityIntakeDispatcher struct {
 	// this process has already run first-pass intake for. Distinct from
 	// `claimed`, which releases after the run so the row can be re-evaluated.
 	//
-	// memQL is append-only: every successful update() (including the
+	// MemQL is append-only: every successful update() (including the
 	// routing-only assignResponsibility) materialises as a new row
 	// that re-fires graph.node.created. Without a permanent guard, assigning
 	// an agent to a still-draft responsibility (intakeStatus=='') re-enters

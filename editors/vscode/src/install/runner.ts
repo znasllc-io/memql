@@ -123,12 +123,12 @@ export interface ScriptOutcome {
 export type RunScript = (run: ScriptRun) => Promise<ScriptOutcome>;
 
 /**
- * The exit codes memQL assigns ITSELF, as opposed to the ones a capability
+ * The exit codes MemQL assigns ITSELF, as opposed to the ones a capability
  * script reports (docs/internal/design/capability-script-contract.md).
  *
  * NAMED, AND EXPORTED, because they have to be explainable. A step killed by
- * the ten-minute ceiling reaching the operator as "memQL cannot say what code
- * 124 means" is memQL disclaiming a number it chose -- and that was live until
+ * the ten-minute ceiling reaching the operator as "MemQL cannot say what code
+ * 124 means" is MemQL disclaiming a number it chose -- and that was live until
  * memql#3493. `installProgress.test.ts` derives its reachable set from this
  * object plus the contract's own table, so a code added here without guidance
  * is a red test rather than a shrug in front of an operator.

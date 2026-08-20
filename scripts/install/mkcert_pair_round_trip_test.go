@@ -168,8 +168,8 @@ func TestMkcertPairRoundTripLeavesNoKeyMaterial(t *testing.T) {
 // The removal cannot read its authority off the step's `--pre-existing` flag:
 // that flag carries `result.caPreExisting`, a fact about the CA in a DIFFERENT
 // directory, and the two answers differ in both directions -- an operator can
-// hold a CA of their own while memQL issues the pair (the reported case), and
-// can hold a pair of their own from a plain `make up` while memQL creates the
+// hold a CA of their own while MemQL issues the pair (the reported case), and
+// can hold a pair of their own from a plain `make up` while MemQL creates the
 // CA (this one; scripts/k3d/up.sh issues into the same ~/.memql/certs).
 //
 // So the authority is a provenance marker beside the pair, exactly as memql#3576
@@ -213,15 +213,15 @@ func TestMkcertPairRoundTripKeepsAPairItDidNotIssue(t *testing.T) {
 	for _, f := range []string{e.certFile(), e.keyFile()} {
 		body, err := os.ReadFile(f)
 		if err != nil {
-			t.Fatalf("uninstalling memQL deleted a pair it did not issue (%s): %v", f, err)
+			t.Fatalf("uninstalling MemQL deleted a pair it did not issue (%s): %v", f, err)
 		}
 		if !strings.HasPrefix(string(body), "operator-") {
 			t.Errorf("%s was rewritten: %q", f, string(body))
 		}
 	}
-	// ...and the CA, which memQL DID create, still goes.
+	// ...and the CA, which MemQL DID create, still goes.
 	if _, err := os.Stat(e.caPEM()); err == nil {
-		t.Errorf("the CA memQL created survived the uninstall")
+		t.Errorf("the CA MemQL created survived the uninstall")
 	}
 	if left := memqlHomeFiles(t, memqlHome); len(left) != 2 {
 		t.Errorf("expected exactly the operator's two files under %s, got: %v", memqlHome, left)

@@ -79,10 +79,10 @@ import (
 )
 
 // external is the explicit allow-list of env keys that are NOT
-// memQL-owned configuration: CI / build / OS / runtime-platform vars.
+// MemQL-owned configuration: CI / build / OS / runtime-platform vars.
 // They are excluded from BOTH drift directions (the epic calls out
 // GITHUB_STEP_SUMMARY, K_REVISION, VERSION specifically). Keep this
-// tight -- anything memQL actually configures belongs in the registry.
+// tight -- anything MemQL actually configures belongs in the registry.
 var external = map[string]bool{
 	"GITHUB_STEP_SUMMARY": true,
 	"K_REVISION":          true,
@@ -97,9 +97,9 @@ var external = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
-	// LiveKit runtime-platform var (LiveKit's own convention, not memQL-owned
+	// LiveKit runtime-platform var (LiveKit's own convention, not MemQL-owned
 	// config): the externally-dialable LiveKit URL that avatardirect + the
-	// voice-agent hand to the cloud media plane. The memQL-owned equivalent is
+	// voice-agent hand to the cloud media plane. The MemQL-owned equivalent is
 	// MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; this bare form is the third-party knob.
 	"LIVEKIT_PUBLIC_URL": true,
 	// The rest of LiveKit's own credential trio, surfaced when memql#3834's
@@ -108,25 +108,25 @@ var external = map[string]bool{
 	// than in a judgement call: integrations/telephony/plugin.go reads
 	// `firstEnv("LIVEKIT_URL", "MEMQL_POLYPHON_LIVEKIT_URL")` -- the bare name
 	// FIRST because it is what LiveKit's own CLI and SDKs expect an operator to
-	// have set, and the MEMQL_ name second because that is the one memQL owns.
+	// have set, and the MEMQL_ name second because that is the one MemQL owns.
 	// Renaming these (the exit memql#3831 prescribes for a pre-convention name)
-	// would be wrong here: it is not memQL's name to change.
+	// would be wrong here: it is not MemQL's name to change.
 	"LIVEKIT_URL":        true,
 	"LIVEKIT_API_KEY":    true,
 	"LIVEKIT_API_SECRET": true,
 }
 
 // externalPrefixes are key prefixes owned by the CI / build / Go
-// toolchain rather than memQL.
+// toolchain rather than MemQL.
 var externalPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}
 
-// ownedPreConvention lists keys that ARE memQL-owned configuration but do not
+// ownedPreConvention lists keys that ARE MemQL-owned configuration but do not
 // carry the MEMQL_ prefix. They are exempt from FORWARD drift and from nothing
 // else -- CheckDrift returns them separately and every report PRINTS them, so
 // the exemption is a line a reader can see rather than an absence.
 //
 // They are NOT in `external`, and that distinction is the point. `external`
-// means "not memQL's variable"; these are memQL's variables, read by
+// means "not MemQL's variable"; these are MemQL's variables, read by
 // component/memql's engine config and component/server's HTTP router. Putting
 // them there would be false, and would also exempt them from the reverse
 // direction.
@@ -386,7 +386,7 @@ type Result struct {
 	// instead of implying coverage it does not have (memql#3818).
 	Unresolvable []Unresolvable
 	// ExemptUnprefixed is the ownedPreConvention set that this scan
-	// actually read: memQL-owned keys that a registry entry cannot yet
+	// actually read: MemQL-owned keys that a registry entry cannot yet
 	// name (see ownedPreConvention). Reported, not failed -- and reported
 	// precisely so the exemption cannot become the thing nobody sees.
 	ExemptUnprefixed []string

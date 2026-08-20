@@ -1,4 +1,4 @@
-// Package authoring holds the slice of the memQL authoring / dry-run suite
+// Package authoring holds the slice of the MemQL authoring / dry-run suite
 // that needs the AUTOMATION STEPS registered as well as the engine.
 //
 // It exists because of a module boundary, not because the tests changed. These

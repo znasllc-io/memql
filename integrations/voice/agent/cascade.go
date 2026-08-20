@@ -12,7 +12,7 @@ import (
 )
 
 // cascade.go is the Go cascade voice loop: human audio -> OpenAI STT ->
-// memQL cognition -> OpenAI TTS -> room audio, with turn-taking and
+// MemQL cognition -> OpenAI TTS -> room audio, with turn-taking and
 // barge-in. It is the Go analog of the Python cascade
 // (the Python voice-agent's main.py + memql_llm_plugin.py +
 // transcript_forwarder.py + tts_plugin.py), at parity with that baseline.
@@ -228,7 +228,7 @@ func (c *Cascade) handleASRResult(speakerIdentity string, r polyphon.ASRResult) 
 		c.machine.OnFinal(text)
 		return
 	}
-	// Interim: keep the machine's partial fresh and forward to memQL as a
+	// Interim: keep the machine's partial fresh and forward to MemQL as a
 	// VoiceAgentPartialTranscript (event-only server-side, drives the live
 	// transcript in chat). Mirrors transcript_forwarder.forward_partial.
 	c.machine.OnInterim(text)

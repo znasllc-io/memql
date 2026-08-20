@@ -6,7 +6,7 @@ import "log/slog"
 
 // Build constructs service dependencies for an EDGE node -- the eventual
 // surface that will serve this cluster's web surfaces: every hosted SPA and
-// website, and the memQL Portal itself, which is site #1 and takes no
+// website, and the MemQL Portal itself, which is site #1 and takes no
 // special path.
 //
 // It is a node type rather than a handler bolted onto the bff for three

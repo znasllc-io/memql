@@ -120,7 +120,7 @@ func claimsFromRequestToken(r *http.Request, issuer *identity.JWTIssuer) *identi
 
 // handleRoot answers /admin/ now that the console serves no pages.
 //
-// Everything it served is in the memQL portal: the dashboard, users, tokens,
+// Everything it served is in the MemQL portal: the dashboard, users, tokens,
 // audit, JWKS and settings moved in memql#3324, and Deployments followed in
 // memql#3380 once a deploy call could reach the identity node from a
 // bff-served portal.
@@ -138,7 +138,7 @@ func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	dest := s.portalHome()
 	msg := "The server-rendered admin console has been retired.\n\n" +
 		"Every surface it served -- users, tokens, audit, JWKS, settings and " +
-		"Deployments -- now lives in the memQL portal"
+		"Deployments -- now lives in the MemQL portal"
 	if dest != "" && dest != "/me" {
 		msg += " at " + dest + ".\n"
 	} else {

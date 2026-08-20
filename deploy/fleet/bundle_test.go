@@ -1,4 +1,4 @@
-// Package fleet holds the gates for the memQL Cloud control-plane DSL bundle
+// Package fleet holds the gates for the MemQL Cloud control-plane DSL bundle
 // (epic memql#3852, task memql#3853).
 //
 // # Why this file exists at all
@@ -6,7 +6,7 @@
 // The fleet DSL is a PRODUCT bundle. It is not embedded (`dsl/embed.go` does
 // not name it), it is not compiled into any binary, and it reaches a node at
 // runtime through MEMQL_DSL_PATH -- which is exactly the delivery any
-// customer's product uses, and exactly why memQL Cloud can run on a
+// customer's product uses, and exactly why MemQL Cloud can run on a
 // product-neutral engine.
 //
 // The cost of that is that NOTHING ELSE IN THIS REPOSITORY LOOKS AT IT.
@@ -157,7 +157,7 @@ func TestEveryQueryShapeIsDefined(t *testing.T) {
 
 // TestFleetBundleIsNotEmbedded is the product-neutrality half.
 //
-// The engine is product-neutral by doctrine, and memQL Cloud is a product. The
+// The engine is product-neutral by doctrine, and MemQL Cloud is a product. The
 // moment this bundle is named in `dsl/embed.go` it is compiled into every
 // engine binary -- including the ones a customer runs -- and the acceptance bar
 // the consolidation epic sets ("a second product boots a full stack with ZERO
@@ -182,7 +182,7 @@ func TestFleetBundleIsNotEmbedded(t *testing.T) {
 		}
 		for tok := range strings.FieldsSeq(line) {
 			if tok == "all:fleet" || tok == "fleet" {
-				t.Fatalf("dsl/embed.go embeds the `fleet` domain (%q). The memQL Cloud control plane is a PRODUCT and must reach a node through MEMQL_DSL_PATH; compiling it into the engine puts our own product inside the product-neutral engine every customer runs.", strings.TrimSpace(line))
+				t.Fatalf("dsl/embed.go embeds the `fleet` domain (%q). The MemQL Cloud control plane is a PRODUCT and must reach a node through MEMQL_DSL_PATH; compiling it into the engine puts our own product inside the product-neutral engine every customer runs.", strings.TrimSpace(line))
 			}
 		}
 	}

@@ -1,7 +1,7 @@
 // Deep-linkable addresses (src/concepts/urls.ts).
 //
 // memql#3316 asks that "a concept, and a row within it, should each have an
-// address someone can paste into chat". memQL ids are colon-delimited, and a
+// address someone can paste into chat". MemQL ids are colon-delimited, and a
 // colon is legal-but-escapable in a URL path segment, so the encoding is a
 // real decision with a real failure mode: escape too little and an id with a
 // slash breaks the router; escape too much and every link is a %3A thicket.

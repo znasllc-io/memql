@@ -9,12 +9,12 @@ owner: znas
 
 # Owner Recovery Key
 
-**Audience:** whoever is accountable for a memQL cluster staying reachable.
+**Audience:** whoever is accountable for a MemQL cluster staying reachable.
 
 The recovery key is the answer to one question: *the owner cannot sign in, and
 nobody else can promote them — now what?*
 
-Every other credential memQL issues assumes a working route in. A magic link
+Every other credential MemQL issues assumes a working route in. A magic link
 needs a mailbox. An enrolment link needs a browser session someone can hand it
 to. A passkey needs the device it was created on. This one assumes none of
 them, which is why it exists — and why it is refused on every day it is not
@@ -268,7 +268,7 @@ not stamp).
 
 ## Where it came from
 
-memQL used to deliver config two ways: the `memql-secrets` Secret every node
+MemQL used to deliver config two ways: the `memql-secrets` Secret every node
 `envFrom`s, and a sealed **genesis envelope** that autoloaded into the process
 environment at boot. The envelope's own tooling wrote
 `export MEMQL_MASTER_KEY=` into a world-readable `~/.bashrc` — the defect

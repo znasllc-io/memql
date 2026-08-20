@@ -1695,7 +1695,7 @@ type MemqlClientMessage_DslSpec struct {
 	// authoring surface (component/language/dslspec; epic memql#2122 / A4,
 	// issue #2125). The cockpit (and a future web/Monaco editor) fetch this
 	// ONE machine-readable spec so their language intelligence is derived
-	// from the exact same source of truth memQL Sense is. Read-only.
+	// from the exact same source of truth MemQL Sense is. Read-only.
 	DslSpec *DslSpecMsg `protobuf:"bytes,80,opt,name=dsl_spec,json=dslSpec,proto3,oneof"`
 }
 
@@ -17610,7 +17610,7 @@ func (x *RevokeAccountTokenResult) GetErrorMessage() string {
 // existed as a mutation -- updateUser, revokePATIdentity,
 // revokeWorkerTokenIdentity, updateClusterSettings -- and the portal could
 // have called them directly over the ordinary query surface. That would have
-// DELETED the gate rather than moved it. A memQL mutation cannot carry a role
+// DELETED the gate rather than moved it. A MemQL mutation cannot carry a role
 // predicate (a `filter` is a read construct; there is no mutation-side spec),
 // so the owner/admin rule those writes ran under was the templ app's HTTP
 // ROUTE and nothing else: updateUser is @serverOnly with no client-reachable

@@ -60,15 +60,15 @@ export interface FailureGuidance {
  *      capability.sh's EXIT trap emits a failure envelope for any non-zero
  *      abort, so a `set -e` death lands here too.
  *
- * -- PLUS every code memQL SYNTHESISES for itself, named in
+ * -- PLUS every code MemQL SYNTHESISES for itself, named in
  * `runner.SYNTHESISED_EXIT_CODES`: 124 (the step outran its ceiling), 127 (the
  * script could not be spawned) and 128 (the child died on a signal nobody here
- * sent). A number memQL assigned itself and then cannot explain is the worst
+ * sent). A number MemQL assigned itself and then cannot explain is the worst
  * version of this failure, and `installProgress.test.ts` derives its reachable
  * set from that object rather than from a list written out beside it.
  *
  * Both were once falling through to the default branch, which told the
- * operator memQL "cannot say what it means" about the two cases it understands
+ * operator MemQL "cannot say what it means" about the two cases it understands
  * best. That is the confident-wrong-advice failure this function exists to
  * prevent, inverted into confidently disclaiming knowledge the system has.
  */
@@ -128,8 +128,8 @@ export function failureGuidance(exitCode: number | null, remedy = ""): FailureGu
     case 124:
       // SYNTHESISED BY US, not by the script. runner.ts kills a step that
       // outruns its timeout and reports 124 with SIGKILL. Leaving it to the
-      // default branch had memQL say it "cannot say what it means" about a
-      // code memQL assigned itself -- and to an operator whose install just
+      // default branch had MemQL say it "cannot say what it means" about a
+      // code MemQL assigned itself -- and to an operator whose install just
       // stopped after ten minutes, that is the least useful moment to be
       // vague.
       return {
@@ -152,7 +152,7 @@ export function failureGuidance(exitCode: number | null, remedy = ""): FailureGu
         headline: "The installer could not start this step at all.",
         advice:
           "The script behind this step could not be launched -- missing, or not " +
-          "executable. That is a fault in this memQL build rather than in your " +
+          "executable. That is a fault in this MemQL build rather than in your " +
           "machine, and retrying will not change it. Please report it with the " +
           "output below.",
         retryable: false,
@@ -164,9 +164,9 @@ export function failureGuidance(exitCode: number | null, remedy = ""): FailureGu
       // is precisely what makes it worth its own sentence rather than a
       // near-enough mapping onto one.
       return {
-        headline: "Something outside memQL stopped this step.",
+        headline: "Something outside MemQL stopped this step.",
         advice:
-          "The step was killed by a signal memQL did not send -- a Ctrl-C in the " +
+          "The step was killed by a signal MemQL did not send -- a Ctrl-C in the " +
           "window behind this one, a system running out of memory, or a process " +
           "supervisor. Nothing about the step itself failed. Retry is safe: every " +
           "step checks first and skips what is already done.",
@@ -176,7 +176,7 @@ export function failureGuidance(exitCode: number | null, remedy = ""): FailureGu
       return {
         headline: "The installer passed this step something it would not accept.",
         advice:
-          "This is a fault in memQL rather than in your machine or your answers. " +
+          "This is a fault in MemQL rather than in your machine or your answers. " +
           "Retrying unchanged will fail the same way; please report it with the output below.",
         retryable: false,
       };
@@ -222,7 +222,7 @@ export function failureGuidance(exitCode: number | null, remedy = ""): FailureGu
         headline: `The step exited with code ${exitCode}.`,
         advice:
           "That is not one of the codes the capability-script contract defines, so " +
-          "memQL cannot say what it means. The output below is the authority.",
+          "MemQL cannot say what it means. The output below is the authority.",
         retryable: true,
       };
   }

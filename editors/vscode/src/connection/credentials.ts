@@ -41,7 +41,7 @@
 // WHERE THE SECRETS LIVE, and why the two halves differ
 // -----------------------------------------------------------------------------
 //
-// clusters.yaml is plaintext and SHARED with the memQL Cockpit, which owns the
+// clusters.yaml is plaintext and SHARED with the MemQL Cockpit, which owns the
 // file. That ownership is exactly why the extension cannot simply move all
 // credentials into VS Code's SecretStorage: the Cockpit would then read a
 // cluster entry with no credential at all, and a registry two tools disagree

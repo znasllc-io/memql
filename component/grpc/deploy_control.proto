@@ -4,7 +4,7 @@ package znasllc.memql.deploycontrol.v1;
 
 option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 
-// DeployControlService is the gRPC surface behind the memQL Deployment
+// DeployControlService is the gRPC surface behind the MemQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
 // machinery -- the image authority (the kustomize overlay), the release
 // lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and

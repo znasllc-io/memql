@@ -1,4 +1,4 @@
-// Package backup is memQL's portable data export: a whole cluster's graph
+// Package backup is MemQL's portable data export: a whole cluster's graph
 // written as a stream a LATER engine can still read.
 //
 // WHY NOT pg_dump. A dump is coupled to the physical schema -- the two node
@@ -8,7 +8,7 @@
 // opposite of what a backup is for: the moment it matters is the moment the
 // thing that wrote it is gone.
 //
-// WHAT THIS IS INSTEAD. memQL's data model is not tables. A row is
+// WHAT THIS IS INSTEAD. MemQL's data model is not tables. A row is
 // (concept, id, createdAt, payload) and the CONCEPT is defined in the DSL, not
 // in DDL. So the honest unit of export is the row as the engine understands it,
 // and the format is one JSON object per line: a manifest first, then every row.
@@ -139,7 +139,7 @@ func (e *ErrFormatTooNew) Error() string {
 // checkFormatVersion applies the one-directional promise.
 func checkFormatVersion(found int) error {
 	if found <= 0 {
-		return fmt.Errorf("backup manifest has no formatVersion: this is not a memQL backup, or it is truncated")
+		return fmt.Errorf("backup manifest has no formatVersion: this is not a MemQL backup, or it is truncated")
 	}
 	if found > FormatVersion {
 		return &ErrFormatTooNew{Found: found, Supported: FormatVersion}

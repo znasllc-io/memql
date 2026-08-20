@@ -1,9 +1,9 @@
-// Package dslspec is the Go SDK surface for the memQL DSL spec export -- the
+// Package dslspec is the Go SDK surface for the MemQL DSL spec export -- the
 // portable, versioned JSON form of the DSL authoring surface (the top-level
 // constructs, keywords, operators, field types, per-construct annotation
 // legality, and "legal-next" completion rules). The cockpit (and a future
 // web/Monaco editor) fetch it so their language intelligence is derived from
-// the EXACT same source of truth memQL Sense is driven from
+// the EXACT same source of truth MemQL Sense is driven from
 // (component/language/dslspec; epic memql#2122 / A4, issue #2125).
 //
 // The package mirrors sdk/go/pack + sdk/go/sense in shape -- a Client that

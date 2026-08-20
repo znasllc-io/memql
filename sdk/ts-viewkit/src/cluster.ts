@@ -33,7 +33,7 @@ export interface TopologyNodeView {
   label: string;
   /** Secondary identity: the short node id, or the advertised address. */
   detail: string;
-  /** The memQL version this node is running. Empty renders as "version unknown". */
+  /** The MemQL version this node is running. Empty renders as "version unknown". */
   version: string;
   /** The short deployment id. Empty renders as "no deployment id". */
   deployment: string;

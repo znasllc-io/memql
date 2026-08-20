@@ -19,7 +19,7 @@ import (
 // test mode, somebody is on call.
 //
 // Three of them are not opinions. "No unbounded-spend path exists", "the
-// pricing page and the price list agree", and "no public copy calls memQL a
+// pricing page and the price list agree", and "no public copy calls MemQL a
 // database" are claims about the repository that can be checked, and a checklist
 // item that can be checked and is not is an item somebody ticks from memory at
 // the end of a long day.

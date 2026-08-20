@@ -1,5 +1,5 @@
 ---
-title: memQL Cloud billing -- Stripe, metering, and the spend ceiling
+title: MemQL Cloud billing -- Stripe, metering, and the spend ceiling
 audience: public
 status: stable
 area: operate
@@ -7,9 +7,9 @@ sinceVersion: 0.13.0
 owner: znas
 ---
 
-# memQL Cloud billing
+# MemQL Cloud billing
 
-**Audience:** operators running memQL Cloud's billing.
+**Audience:** operators running MemQL Cloud's billing.
 **Epic:** memql#3852. **This task:** memql#3854.
 **Companion:** [the fleet control plane](memql-cloud.md), which this pays for.
 

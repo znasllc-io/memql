@@ -89,7 +89,7 @@ automation trialNudgeDay7 {
         requestId:   concat("fleet-trial-nudge-7-", item.id),
         medium:      "email",
         target:      item.payload.notifyEmail,
-        subject:     "One week left on your memQL Cloud trial",
+        subject:     "One week left on your MemQL Cloud trial",
         body:        concat("Your trial instance at https://", item.payload.domain, " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends."),
         requestedBy: "fleet.trialNudgeDay7"
       }
@@ -111,7 +111,7 @@ automation trialNudgeDay12 {
         requestId:   concat("fleet-trial-nudge-12-", item.id),
         medium:      "email",
         target:      item.payload.notifyEmail,
-        subject:     "Your memQL Cloud trial ends in two days",
+        subject:     "Your MemQL Cloud trial ends in two days",
         body:        concat("Your trial instance at https://", item.payload.domain, " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back."),
         requestedBy: "fleet.trialNudgeDay12"
       }

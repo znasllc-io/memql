@@ -11,10 +11,10 @@ owner: znas
 
 **Status:** authoritative reference
 **Audience:** engineers writing Go code, MemQL DSL, or any client that
-consumes memQL over the wire (browser / WS, the SDK, the LLM tool loop,
+consumes MemQL over the wire (browser / WS, the SDK, the LLM tool loop,
 the voice-agent).
 
-memQL uses **one** id form internally and a **different** id form on the
+MemQL uses **one** id form internally and a **different** id form on the
 wire toward clients. Get this distinction and every "why is this id short
 here but long there" question answers itself:
 
@@ -34,7 +34,7 @@ rules (unchanged), then the bare-ids client contract (new as of #2438).
 
 ## The canonical format
 
-Every stored node in memQL has a fully-qualified id of the shape:
+Every stored node in MemQL has a fully-qualified id of the shape:
 
 ```
 {concept}:{shortId}

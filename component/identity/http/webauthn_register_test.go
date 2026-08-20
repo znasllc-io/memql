@@ -317,7 +317,7 @@ func newPasskeyTestServer(t *testing.T, engine *passkeyStubEngine) *Server {
 		BaseURL:     passkeyTestBaseURL,
 		JWTAudience: "memql",
 		KeyDir:      dir,
-		BrandName:   "memQL Test",
+		BrandName:   "MemQL Test",
 	}
 	iss, err := identity.NewJWTIssuer(km, cfg)
 	require.NoError(t, err)

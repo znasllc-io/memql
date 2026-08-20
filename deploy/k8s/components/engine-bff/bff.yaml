@@ -2,7 +2,7 @@
 # Decision 5). This is the mesh ROOT + the backend-for-frontend / gRPC + WS edge
 # every client connects to. It carries NO product code and NO product DSL
 # bundle: it serves the engine's own surface (engine + cluster concepts), which
-# is exactly what a product-neutral client like the memQL Cockpit needs
+# is exactly what a product-neutral client like the MemQL Cockpit needs
 # (api.<domain>). The bespoke cockpit-bff module (memql-cockpit#289) is
 # retired -- the Cockpit just connects to this bff.
 #
@@ -63,7 +63,7 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "bff" }
             - { name: MEMQL_NODE_ADDRESS, value: "bff:50058" }
             # Unique per-pod mesh identity (#1042); overrides the shared genesis

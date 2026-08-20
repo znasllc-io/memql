@@ -3,7 +3,7 @@
 # scripts/lib/capability.sh
 # =========================
 #
-# Shared runtime for memQL **capability scripts** -- the deterministic shell
+# Shared runtime for MemQL **capability scripts** -- the deterministic shell
 # backends that the DSL `action` executor (and humans) invoke. It is the
 # mechanism that makes the capability-script contract real and uniform:
 #

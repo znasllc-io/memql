@@ -41,7 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "fleet.tenantResume" "Bring a suspended memQL tenant back up at the counts its overlay declares."
+cap_init "fleet.tenantResume" "Bring a suspended MemQL tenant back up at the counts its overlay declares."
 cap_spec_param_required "tenant" "tenant slug -- its namespace and its ArgoCD Application name"
 cap_spec_param "dbInstances"     "CNPG Cluster instance count to restore (from the tier's database preset)"
 cap_spec_param "argocdNamespace" "namespace the ArgoCD Application lives in"

@@ -27,7 +27,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // NodeService provides bidirectional streaming for inter-node communication
-// in a memQL cluster. All node types use this service to discover peers,
+// in a MemQL cluster. All node types use this service to discover peers,
 // exchange heartbeats, forward events, and coordinate work.
 type NodeServiceClient interface {
 	Stream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[NodeClientMessage, NodeServerMessage], error)
@@ -59,7 +59,7 @@ type NodeService_StreamClient = grpc.BidiStreamingClient[NodeClientMessage, Node
 // for forward compatibility.
 //
 // NodeService provides bidirectional streaming for inter-node communication
-// in a memQL cluster. All node types use this service to discover peers,
+// in a MemQL cluster. All node types use this service to discover peers,
 // exchange heartbeats, forward events, and coordinate work.
 type NodeServiceServer interface {
 	Stream(grpc.BidiStreamingServer[NodeClientMessage, NodeServerMessage]) error

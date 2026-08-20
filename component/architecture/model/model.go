@@ -1,4 +1,4 @@
-// Package model defines the in-memory and on-disk schema for memQL's
+// Package model defines the in-memory and on-disk schema for MemQL's
 // architecture graph: the intermediate representation that sits between
 // static analysis of the Go source and the cockpit's diagram renderer.
 //

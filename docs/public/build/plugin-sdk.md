@@ -9,7 +9,7 @@ owner: znas
 
 # Plugin SDK -- the pack extension contract
 
-A **pack** extends memQL with product-specific behavior: Go integrations plus a
+A **pack** extends MemQL with product-specific behavior: Go integrations plus a
 `.memql` DSL bundle. The Go integrations compile into a node-type binary via
 build tags; the `.memql` domains load compiled-in or at runtime from disk (see
 Scope below). A product's DSL bundle plus its client is the reference consumer.
@@ -240,7 +240,7 @@ a pack's build-tag-gated `init()`:
 3. `RegisterRoutingRule(rule)` -- cross-node event routing (required for any
    event that must cross a node boundary).
 
-memQL validates both halves at load time and **fails loudly on a violation** --
+MemQL validates both halves at load time and **fails loudly on a violation** --
 a broken pack aborts startup rather than silently mis-binding:
 
 - **Contract version** -- `app.materializePlugins` calls
@@ -251,7 +251,7 @@ a broken pack aborts startup rather than silently mis-binding:
   `dsl.ValidatePackDomain(domain, coreDomains, existing)` before mounting it. A
   domain must be non-empty, contain no `/`, and **collide with neither a core
   embedded domain nor another pack's already-registered domain**. A core domain
-  is canonical and owned by memQL -- a pack cannot shadow or extend one. Two
+  is canonical and owned by MemQL -- a pack cannot shadow or extend one. Two
   packs claiming the same namespace is ambiguous. Either collision **panics**
   at `init()` time (the only caller), consistent with `RegisterTree`'s other
   input guards, so the conflict surfaces at startup with an actionable message.

@@ -13,7 +13,7 @@ import (
 
 // clone_stack_test.go -- znasllc-io/memql#3363.
 //
-// scripts/install/clone-stack.sh fetches the memQL stack at a release tag into
+// scripts/install/clone-stack.sh fetches the MemQL stack at a release tag into
 // ~/.memql/src, which is what the rest of the install substrate then runs.
 //
 // The assertion that matters is that a BRANCH ref is rejected -- exit 2, no
@@ -344,7 +344,7 @@ func interruptCheckout(t *testing.T, dest string) {
 // this step is resultNonEmpty on result.commit, and the commit IS present in
 // exactly the broken case. So the step went green and the NEXT step failed with
 // "repo-root ... has no deploy/argocd/bootstrap -- it is a git checkout, but not
-// of memQL" -- a true sentence about the wrong problem, which sends the operator
+// of MemQL" -- a true sentence about the wrong problem, which sends the operator
 // hunting for a bad clone URL when what they have is the right repository with
 // nothing checked out of it.
 //

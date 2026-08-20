@@ -1,5 +1,5 @@
 ---
-title: Why memQL Is a Harness, Not a Library
+title: Why MemQL Is a Harness, Not a Library
 audience: public
 status: stable
 area: overview
@@ -7,14 +7,14 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# Why memQL Is a Harness, Not a Library
+# Why MemQL Is a Harness, Not a Library
 
 Most "AI frameworks" hand you parts: a model client, a prompt
 template, a chain, maybe a tool interface. You still have to build the
 hard part yourself — the **harness**: the thing that runs an agent
 turn after turn, remembers what happened, keeps a runaway loop from
 burning your budget, routes work across a fleet, and survives a
-restart. memQL **is** that harness, shipped as a runtime + memory
+restart. MemQL **is** that harness, shipped as a runtime + memory
 substrate rather than a box of parts.
 
 This page is the proof, not the pitch. Every claim below points at the
@@ -34,7 +34,7 @@ in production has to:
 - be **inspectable** after the fact — what ran, what it cost, why it
   decided that.
 
-These are the things teams rebuild badly, over and over. memQL makes
+These are the things teams rebuild badly, over and over. MemQL makes
 them the substrate.
 
 ## The proof
@@ -54,7 +54,7 @@ the tools and the reply shape.
 
 ### 2. A safety + cost spine that is on by default
 
-This is where libraries leave you exposed and memQL does the unglamorous
+This is where libraries leave you exposed and MemQL does the unglamorous
 work:
 
 - **A process-wide LLM rate ceiling** at the provider chokepoint —
@@ -78,7 +78,7 @@ README suggestion.
 
 ### 3. Memory is the database, and it consolidates
 
-memQL is built on an append-only, time-series **memory graph**
+MemQL is built on an append-only, time-series **memory graph**
 (PostgreSQL + TimescaleDB). Every node carries its own history; the
 primary key is `(id, createdAt)`, so a write never overwrites its
 predecessor — it adds a version alongside it. That means provenance and
@@ -126,11 +126,11 @@ observable version for free — not as "an exercise for the reader."
 ## Why "it's real"
 
 The strongest proof that this is a harness and not a slide deck: a
-multi-agent, voice + canvas product is being built on memQL right now,
+multi-agent, voice + canvas product is being built on MemQL right now,
 on the path to release. The breakers, the budgets, the memory
 consolidation, the cross-node tool relay described above exist because
-a shipping product needs them. memQL is the extracted, open-source
+a shipping product needs them. MemQL is the extracted, open-source
 harness underneath.
 
-> Next: [memQL vs. other harnesses](vs-other-harnesses.md) — an honest
+> Next: [MemQL vs. other harnesses](vs-other-harnesses.md) — an honest
 > comparison with the Go and Python field.

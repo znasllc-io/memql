@@ -1,7 +1,7 @@
 # Platform Compatibility
 
-This is the **hub document** for how the memQL platform repos fit
-together at a given point in time. memQL is the upstream engine, so
+This is the **hub document** for how the MemQL platform repos fit
+together at a given point in time. MemQL is the upstream engine, so
 this doc lives here; downstream repos link to it.
 
 It answers one question: **given a version of one repo, what versions
@@ -12,15 +12,15 @@ explicit pins rather than lockstep.
 
 ## The repo shape
 
-Every product built on memQL follows the same constellation (see
+Every product built on MemQL follows the same constellation (see
 [docs/public/operate/downstream-stacks.md](docs/public/operate/downstream-stacks.md)):
 
 | Repo | Role |
 |---|---|
 | `znasllc-io/memql` (this repo) | The engine + node-type binaries (bff / voice / cognition / agent / planner / workbench / mcp / identity) and the wire protocol. **Upstream.** |
-| the product's **carrier** repo | Imports memQL's Go packages, registers its DSL subtree + product integrations through the plugin-SDK seams, and builds the deployable backend (carrier) images. Owns the product's deploy/release estate. |
+| the product's **carrier** repo | Imports MemQL's Go packages, registers its DSL subtree + product integrations through the plugin-SDK seams, and builds the deployable backend (carrier) images. Owns the product's deploy/release estate. |
 | the product's **frontend** repo | The SPA and its client-side deploy config. |
-| `znasllc-io/memql-cockpit` | The **CLI / ops console** (display name "memQL Cockpit"), and the worker run-mode binary. A gRPC client of memQL. |
+| `znasllc-io/memql-cockpit` | The **CLI / ops console** (display name "MemQL Cockpit"), and the worker run-mode binary. A gRPC client of MemQL. |
 
 The concrete repo names, versions, and pin values for a given product
 live in that product's carrier repo (its VERSIONING/COMPATIBILITY
@@ -28,7 +28,7 @@ docs), not here.
 
 ## The pin chain
 
-The dependency graph points **downward toward memQL**, and so does the
+The dependency graph points **downward toward MemQL**, and so does the
 pinning:
 
 ```
@@ -39,24 +39,24 @@ pinning:
       │  go.mod require + image built from ──►
       ▼
   memql  (engine + protocol)          ◄── memql-cockpit declares the
-                                          min memQL / protocol it speaks
+                                          min MemQL / protocol it speaks
 ```
 
 1. **frontend → carrier.** The frontend's `deploy/backend-version`
    file pins the **carrier** version it deploys against. This is the
    one number the product team bumps to move to a newer backend.
 
-2. **carrier → memql.** The carrier imports memQL's Go packages
+2. **carrier → memql.** The carrier imports MemQL's Go packages
    (`app`, `server`, `envregistry`, `core/...`) and mounts its own DSL
-   subtree via `dsl.RegisterTree`. It pins the memQL version it
+   subtree via `dsl.RegisterTree`. It pins the MemQL version it
    builds against and bakes it into the immutable backend image.
-   Because the import graph is **carrier → memQL** (never the
-   reverse), memQL carries no require on any carrier — see the product
+   Because the import graph is **carrier → MemQL** (never the
+   reverse), MemQL carries no require on any carrier — see the product
    pack repo's docs/operate/deployment-strategy.md.
 
 3. **memql-cockpit → memql (declared minimum).** Cockpit is a gRPC
    client, not part of the backend image, so it is not in the build
-   pin chain above. Instead it **declares the minimum memQL engine /
+   pin chain above. Instead it **declares the minimum MemQL engine /
    wire-protocol version it speaks** and checks the connected
    cluster's reported version against that minimum at connect time.
    Cockpit and the engine can therefore advance on independent
@@ -75,13 +75,13 @@ chain once:
 ```
 
 One product bump (the `backend-version` pin) transitively fixes one
-carrier build, which transitively fixes one memQL engine build. The
+carrier build, which transitively fixes one MemQL engine build. The
 image tag `memql:X.Y.Z` is **write-once / immutable**, which is what
 makes each link in the chain a trustworthy pin.
 
 ## The platform train
 
-Repos version **independently** by default — memQL may be at `0.14`
+Repos version **independently** by default — MemQL may be at `0.14`
 while a carrier is at `0.11` and Cockpit at `0.10`. The pins above
 keep any deployed combination coherent without forcing the numbers to
 match.

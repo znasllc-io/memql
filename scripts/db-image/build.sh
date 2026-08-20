@@ -3,7 +3,7 @@
 # scripts/db-image/build.sh
 # =========================
 #
-# Capability: db.buildImage -- build the memQL database operand image
+# Capability: db.buildImage -- build the MemQL database operand image
 # (PostgreSQL + TimescaleDB Community + pgvector) locally and, optionally,
 # import it into the local k3d cluster.
 #
@@ -26,7 +26,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && cd .. && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "db.buildImage" "Build the memQL database operand image for local development."
+cap_init "db.buildImage" "Build the MemQL database operand image for local development."
 cap_spec_param "tag"        "image tag to build (default: 16-dev; MUST start with the PostgreSQL major -- CNPG parses it)"
 cap_spec_param "pgMajor"    "PostgreSQL major version"
 cap_spec_param "timescaledb" "TimescaleDB minor to install as CURRENT"

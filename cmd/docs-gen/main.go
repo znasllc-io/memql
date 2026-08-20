@@ -80,7 +80,7 @@ func renderConceptCatalog(concepts []*memoryNodes.Concept) string {
 	b.WriteString("---\n\n")
 	b.WriteString("# Concept Catalog\n\n")
 	b.WriteString("Generated from the live DSL by `cmd/docs-gen` -- do not hand-edit.\n")
-	b.WriteString("A memQL node is an instance of one of these concepts; each concept's\n")
+	b.WriteString("A MemQL node is an instance of one of these concepts; each concept's\n")
 	b.WriteString("fields below are its schema.\n\n")
 	fmt.Fprintf(&b, "Total: **%d** concepts.\n\n", len(sorted))
 

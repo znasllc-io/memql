@@ -6,7 +6,7 @@
 // list needs the merge. Detail rendering deliberately does not flatten --
 // renderValueView shows the nesting, which is what an operator came to read.
 //
-// ROW INTRINSICS WIN over a payload field of the same name. memQL concepts
+// ROW INTRINSICS WIN over a payload field of the same name. MemQL concepts
 // routinely carry a payload `id`, `createdAt` or `type`, and view-kit sources
 // `data-row-id` from whatever lands at `id` -- so a payload value winning
 // there means a subsequent row fetch resolves the wrong row, or none at all.

@@ -39,7 +39,7 @@ var renderPathPageFiles = []string{
 	"clients/portal/src/pages/conceptContext.ts",
 }
 
-// conceptIDLiteral matches a memQL concept id: a version segment, a domain and
+// conceptIDLiteral matches a MemQL concept id: a version segment, a domain and
 // an entity, colon-separated (the `{version}:{domain}:{entity}` grammar in
 // docs/public/concepts/identifiers.md). A row id -- the same prefix plus a
 // short id -- matches too, which is intended: hard-coding one row is as much a

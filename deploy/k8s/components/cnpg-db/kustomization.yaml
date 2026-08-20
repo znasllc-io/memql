@@ -1,7 +1,7 @@
-# Reusable kustomize Component: the memQL database, on CloudNativePG.
+# Reusable kustomize Component: the MemQL database, on CloudNativePG.
 #
 # Epic memql#3842, task memql#3851. The seam a deployment composes its database
-# from -- a client cluster today, a memQL Cloud tenant later -- mirroring the way
+# from -- a client cluster today, a MemQL Cloud tenant later -- mirroring the way
 # the `dsl-bundle` component delivers product DSL.
 #
 # ONE SHAPE, VALUES PER OVERLAY. Every environment gets the SAME four resources:

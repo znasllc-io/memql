@@ -1,6 +1,6 @@
 // shopify domain -- thin product index (memql#4137).
 //
-// Shopify writes, memQL reads. The row is a projection of three
+// Shopify writes, MemQL reads. The row is a projection of three
 // Storefront fields: GID (the row id), handle, availableForSale.
 // Images, collections, prices, and inventory counts are NOT stored.
 // Merchandising still comes from the Storefront API via

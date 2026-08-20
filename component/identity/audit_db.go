@@ -13,7 +13,7 @@ import (
 )
 
 // EngineExecutor is the narrow interface this package depends on for
-// running mutations / queries against the memQL engine.
+// running mutations / queries against the MemQL engine.
 // *memql.MemQLEngine satisfies this directly.
 //
 // Returning *memql.ExecuteResult (rather than `any`) lets the Store

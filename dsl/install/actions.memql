@@ -27,7 +27,7 @@
 // that default expresses a rule -- never deploy from inside the cluster you are
 // deploying. For an INSTALL action it is not a preference at all: these run on
 // the operator's own machine, placing k3d, editing /etc/hosts and installing a
-// trust-store CA before any memQL cluster exists to host them. The runner is
+// trust-store CA before any MemQL cluster exists to host them. The runner is
 // the only placement that can execute.
 //
 // ARGUMENT SPELLING. The `args { ... }` block uses camelCase names; the
@@ -233,7 +233,7 @@ action installPinnedTool {
 
 // Backend: scripts/install/hosts-entries.sh. Writes inside a marked block so
 // uninstall can take back exactly what it wrote and nothing else.
-/// Add or remove the memQL front-door hostnames in the system hosts file, inside a marked block.
+/// Add or remove the MemQL front-door hostnames in the system hosts file, inside a marked block.
 action manageHostsEntries {
   args {
     action    string!
@@ -279,7 +279,7 @@ action ensureLocalCa {
 
 // Backend: scripts/install/clone-stack.sh. A TAG only -- a branch moves, and an
 // install pinned to something that moves is not pinned.
-/// Check the memQL stack out at a release tag into the pinned local source directory.
+/// Check the MemQL stack out at a release tag into the pinned local source directory.
 action cloneStackAtTag {
   args {
     tag   string!

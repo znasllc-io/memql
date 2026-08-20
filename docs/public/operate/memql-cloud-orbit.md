@@ -1,5 +1,5 @@
 ---
-title: Orbit -- the memQL Cloud customer console
+title: Orbit -- the MemQL Cloud customer console
 audience: public
 status: stable
 area: operate
@@ -9,7 +9,7 @@ owner: znas
 
 # Orbit
 
-**Audience:** anyone building or deploying the memQL Cloud customer console.
+**Audience:** anyone building or deploying the MemQL Cloud customer console.
 **Epic:** memql#3852. **This task:** memql#3855.
 **Companions:** [the fleet control plane](memql-cloud.md), [billing](memql-cloud-billing.md).
 
@@ -133,7 +133,7 @@ needs the same clusterOwner-tier read the billing gaps need.
 
 ## Deploying Orbit
 
-Orbit is a memQL product client: a DSL bundle plus an SPA, built from the
+Orbit is a MemQL product client: a DSL bundle plus an SPA, built from the
 `memql-project` template, in **its own repository**. The engine's `clients/`
 allowlist is untouched — a customer's SPA belongs in a product repo, and so does
 ours.

@@ -13,7 +13,7 @@ import (
 	"github.com/livekit/protocol/auth"
 )
 
-// LocalRoomProvider generates LiveKit JWT tokens directly in the memQL
+// LocalRoomProvider generates LiveKit JWT tokens directly in the MemQL
 // process. This allows browser participants to join LiveKit rooms without
 // the Bridge Agent running. Room deletion (DestroyRoom) is supported via
 // the LiveKit RoomService Twirp HTTP API; CreateRoom/GetRoomInfo are not

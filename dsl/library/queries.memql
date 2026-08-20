@@ -4,7 +4,7 @@
 // payload.ownerUserId==actor.userId so a caller can only ever read
 // their own Library; no arg widens the row set beyond their ownership.
 //
-// memQL query filters are equality / membership predicates with no OR
+// MemQL query filters are equality / membership predicates with no OR
 // and no in-filter substring match, so the surface here mirrors the
 // notes / calendar pattern: a small set of server-side-narrowed reads
 // (all / by lens / by kind / by space / by id) over the owner-scoped
@@ -158,7 +158,7 @@ query artifact libraryWorkspaceLiveSources {
 
 // ---- documentVersion: version-history reads (memql#1230) ----
 //
-// History is grouped by the logical documentId. memQL is append-only by
+// History is grouped by the logical documentId. MemQL is append-only by
 // (id, createdAt); since each version is a DISTINCT row with its own id,
 // every version of a document persists and is returned by these reads.
 // Owned: ownerUserId==actor.userId so a caller can only ever read their

@@ -2,19 +2,19 @@
 //
 // Platform engineering skills. The bundles the Planner Agent attaches
 // when minting / extending a specialist for first-party engineering
-// work on the memQL platform itself (Go services, the DSL, gRPC
+// work on the MemQL platform itself (Go services, the DSL, gRPC
 // surfaces, the cockpit CLI). User-facing engineering specialists
 // (frontend / mobile / iOS / etc.) live under their own product /
-// professional roles -- these skills are scoped to the memQL platform
+// professional roles -- these skills are scoped to the MemQL platform
 // surface.
 
 use agents.concepts.{ skill }
 
-@description("Go service development against the memQL platform: idiomatic Go, the project's bus + integration patterns, build-tag-gated node binaries, the testing surface. Pairs with workbench-baseline -- the skill bundles the knowledge; the workbench provides the execution surface.")
+@description("Go service development against the MemQL platform: idiomatic Go, the project's bus + integration patterns, build-tag-gated node binaries, the testing surface. Pairs with workbench-baseline -- the skill bundles the knowledge; the workbench provides the execution surface.")
 seed skill go-backend-engineering {
   slug:          "go-backend-engineering"
   name:          "Go Backend Engineering"
-  description:   "Idiomatic Go against the memQL platform: bus + integration patterns, node-type build tags, gRPC servers, testing conventions."
+  description:   "Idiomatic Go against the MemQL platform: bus + integration patterns, node-type build tags, gRPC servers, testing conventions."
   category:      "engineering"
   tags:          ["platform", "go"]
   domainIds:     ["software-development", "eng-software-architecture", "api-design"]
@@ -24,11 +24,11 @@ seed skill go-backend-engineering {
   predefined:    true
 }
 
-@description("Authoring memQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/public/language/authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")
+@description("Authoring MemQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/public/language/authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")
 seed skill memql-dsl-author {
   slug:          "memql-dsl-author"
   name:          "MemQL DSL Authoring"
-  description:   "Author memQL DSL constructs (concepts / queries / mutations / seeds / shapes / specs / policies / tools / prompts / builtins) under the canonical struct form + import model."
+  description:   "Author MemQL DSL constructs (concepts / queries / mutations / seeds / shapes / specs / policies / tools / prompts / builtins) under the canonical struct form + import model."
   category:      "engineering"
   tags:          ["platform", "memql"]
   domainIds:     ["software-development", "eng-software-architecture"]

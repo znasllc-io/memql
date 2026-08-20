@@ -4,7 +4,7 @@
 **Language:** Go
 **Type:** Reusable service modules (database, server, auth, etc.)
 
-memQL has **exactly three** extension words -- component / integration / pack;
+MemQL has **exactly three** extension words -- component / integration / pack;
 intake "plugin" means pack. See
 [Component vs integration vs pack](../docs/public/concepts/component-integration-pack.md).
 
@@ -114,7 +114,7 @@ Component wiring and lifecycle now lives in `core/component/component.go`
 - Query execution
 
 ### server/ - **HTTP & WebSocket Servers**
-**Purpose:** Expose memQL via HTTP API and WebSocket connections
+**Purpose:** Expose MemQL via HTTP API and WebSocket connections
 
 **Components:**
 - `memqlws/` - MemQL query WebSocket
@@ -217,7 +217,7 @@ core), pending engine-generic absorption or bundle delivery.
 
 ---
 
-## START memQL Engine Deep Dive
+## START MemQL Engine Deep Dive
 
 The heart of the system - executes all MemQL queries.
 
@@ -367,7 +367,7 @@ kubectl logs -n memql deploy/bff | grep "component.*started"
 ### Watch Component Activity
 ```bash
 # MemQL engine
-kubectl logs -n memql deploy/bff -f | grep "memQLEngine"
+kubectl logs -n memql deploy/bff -f | grep "MemQLEngine"
 
 # Database
 kubectl logs -n memql deploy/bff -f | grep "memoryNodesDB"

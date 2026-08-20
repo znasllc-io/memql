@@ -178,8 +178,8 @@ function plainObject(v: unknown): Record<string, unknown> {
  *   IS IT OURS TO REMOVE -- the OLDEST answer, and only the oldest. If the
  *   first run created the mkcert CA (`preExisting: false`) then a later run
  *   found it there (`preExisting: true`), taking the newest would conclude the
- *   operator already had it and refuse to remove something memQL created. The
- *   question is "was this here before memQL ever touched this machine", and
+ *   operator already had it and refuse to remove something MemQL created. The
+ *   question is "was this here before MemQL ever touched this machine", and
  *   only the first run can answer it.
  *
  * Results and params are merged oldest-to-newest so a later run overrides a key
@@ -278,7 +278,7 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
     if (at >= 0) {
       // `preExisting` RATCHETS: once false, always false (memql#3605).
       //
-      // It answers "was this artifact already on the machine before memQL ever
+      // It answers "was this artifact already on the machine before MemQL ever
       // ran", which is a fact about the PAST. A later run cannot change it, and
       // a newest-wins upsert let it flip anyway -- because a repair re-runs
       // `clusterUp` against a cluster that now exists, reports
@@ -287,7 +287,7 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
       //
       // The consequence lands at uninstall, which is the one place that cannot
       // afford to be wrong: `refuse_if_pre_existing` is an unconditional exit 3,
-      // so after any repair the uninstall REFUSED to delete a cluster memQL had
+      // so after any repair the uninstall REFUSED to delete a cluster MemQL had
       // created -- leaving the operator to run `k3d cluster delete` by hand,
       // which is exactly the manual step the installer exists to remove.
       //
@@ -413,7 +413,7 @@ const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
   // missing certFile must not veto the whole removal, because the CA half still
   // has work to do. remove-artifact.sh then leaves any pair alone, which is the
   // right answer for a run that never recorded issuing one. The pair is removed
-  // only where memQL can prove it wrote it -- the marker beside it, not this
+  // only where MemQL can prove it wrote it -- the marker beside it, not this
   // entry's single `preExisting` verdict, which is a fact about the CA.
   mkcertCA: [
     { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
@@ -431,7 +431,7 @@ const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
  * `--pre-existing` is always present and always the recorded verdict. That
  * flag is an unconditional refusal inside the script; passing it faithfully is
  * what keeps a developer's own k3d cluster, mkcert CA or checkout when they
- * uninstall memQL.
+ * uninstall MemQL.
  *
  * A REQUIRED TARGET NOBODY RECORDED MEANS THERE IS NOTHING TO REMOVE, and this
  * returns null so the step skips (memql#3564). It used to omit the flag and let
@@ -441,7 +441,7 @@ const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
  * guessing and failing, which is recognising that a step which never recorded
  * where it wrote never wrote anywhere. `hostsBlock` failing on a read-only
  * /etc/hosts records `{remedy}` and no `hostsFile`, and the uninstall that
- * followed died on it -- reported to the operator as "a fault in memQL", which
+ * followed died on it -- reported to the operator as "a fault in MemQL", which
  * it was, about a hosts block that does not exist.
  *
  * The value is looked for in the result FIRST and in the recorded invocation

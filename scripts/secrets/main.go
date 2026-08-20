@@ -1,6 +1,6 @@
 // scripts/secrets is a slim operator tool invoked internally by
-// memQL's dev-refresh flow. Its only job is to read a .env file and
-// seed manifest-listed entries into a running memQL as concept rows.
+// MemQL's dev-refresh flow. Its only job is to read a .env file and
+// seed manifest-listed entries into a running MemQL as concept rows.
 //
 // THE `decrypt` SUBCOMMAND IS GONE (epic memql#3958). It opened a
 // genesis.znas envelope into a temp .env, and there is no envelope any
@@ -10,14 +10,14 @@
 // Subcommands:
 //
 //	seed --env-file <path>
-//	         Read the .env file, walk memQL's manifest at
+//	         Read the .env file, walk MemQL's manifest at
 //	         scripts/secrets/manifest.yaml, and upsert manifest-listed
-//	         entries into the running memQL as v1:platform:global*
+//	         entries into the running MemQL as v1:platform:global*
 //	         rows. Entries in the .env that are NOT in the manifest
 //	         are ignored -- they're bootstrap-only env vars consumed
 //	         from k8s Secrets, not concept rows.
 //
-//	health   Quick gRPC handshake check against the running memQL.
+//	health   Quick gRPC handshake check against the running MemQL.
 //
 // All authoring previously done by `secrets init / set / delete /
 // edit / export / variable-set / variable-delete / list / master-key`
@@ -99,12 +99,12 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `memQL secrets seed tool (internal)
+	fmt.Fprint(os.Stderr, `MemQL secrets seed tool (internal)
 
 Subcommands:
   seed --env-file <path>
             Push manifest-listed entries from a .env into the running
-            memQL. Requires MEMQL_MASTER_KEY.
+            MemQL. Requires MEMQL_MASTER_KEY.
   health    Quick gRPC handshake check. Prints "ok" or an error.
 
 Env:

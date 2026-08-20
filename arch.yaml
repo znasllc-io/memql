@@ -8,9 +8,9 @@
 # Authoritative schema:  component/architecture/extract/archyaml.go
 
 service: memql
-display_name: "memQL Core"
+display_name: "MemQL Core"
 description: |
-  The core memQL service. Owns the MemQL engine, the DSL loaders,
+  The core MemQL service. Owns the MemQL engine, the DSL loaders,
   the gRPC + WebSocket surfaces, and every node-type binary (bff /
   voice / cognition / agent / planner) compiled out of this tree.
 

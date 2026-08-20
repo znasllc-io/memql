@@ -254,7 +254,7 @@ func conductorTruncate(s string, n int) string {
 // PolyphonSession (which is the scoring engine's state); the conductor
 // reads polyphon state and layers its own awareness on top.
 //
-// Lives in memory; rebuilt on memQL restart from the utterance log.
+// Lives in memory; rebuilt on MemQL restart from the utterance log.
 type ConductorState struct {
 	mu sync.Mutex
 

@@ -7,7 +7,7 @@
 #   Why a ConfigMap and not a meter
 # =============================================================================
 #
-# There are two layers of allowance in memQL Cloud, and they answer different
+# There are two layers of allowance in MemQL Cloud, and they answer different
 # questions.
 #
 #   THE METER (v1:fleet:usageMeter, on the mothership) is the ACCOUNTING truth:

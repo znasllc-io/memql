@@ -1,4 +1,4 @@
-# Edge node -- serves every hosted site (the memQL Portal is site #1) behind
+# Edge node -- serves every hosted site (the MemQL Portal is site #1) behind
 # the `*.<domain>` and apex Ingress rules (deploy/k8s/overlays/local/
 # edge-front-door.yaml, memql#3714a). Resolves the request Host against
 # v1:platform:site (cached, a miss is cached too, concurrent cold-cache
@@ -82,7 +82,7 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "edge" }
             - { name: MEMQL_NODE_ADDRESS, value: "edge:50062" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis

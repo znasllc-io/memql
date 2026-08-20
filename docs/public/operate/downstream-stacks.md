@@ -9,9 +9,9 @@ owner: platform
 
 # Downstream product stacks (the DSL-bundle contract)
 
-The memQL engine repo is **product-agnostic**: it builds, runs, and tests
+The MemQL engine repo is **product-agnostic**: it builds, runs, and tests
 the engine mesh only, and it contains no product names. A product built on
-memQL is **not** a Go constellation -- it is a **DSL bundle plus one or
+MemQL is **not** a Go constellation -- it is a **DSL bundle plus one or
 more client surfaces**, deployed as one overlay over the product-agnostic
 engine:
 

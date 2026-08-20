@@ -10,7 +10,7 @@
 //
 //   - which deployment is CURRENT, which is what makes every other node an
 //     orphan (see currentDeploymentId below), and
-//   - which memQL version a given node type actually runs, which is the
+//   - which MemQL version a given node type actually runs, which is the
 //     engine-as-spine resolution the deploymentNodeSpec concept describes.
 //
 // Both live here rather than in the renderer or the panel so the VS Code tab
@@ -198,7 +198,7 @@ export function pendingDeploymentId(records: readonly DeploymentRecord[]): strin
 }
 
 /**
- * Resolve the memQL version a tier runs under a deployment.
+ * Resolve the MemQL version a tier runs under a deployment.
  *
  * Engine-as-spine, exactly as the deploymentNodeSpec concept defines it: a
  * non-empty per-tier `version` pins that node type; an empty one resolves
@@ -324,7 +324,7 @@ export function indexDeployments(
 
 export function tierKey(deploymentId: string, nodeType: string): string {
   // A newline separator rather than ":" -- a deploymentId is an opaque hash
-  // and a canonical memQL id contains colons, so ":" could make two distinct
+  // and a canonical MemQL id contains colons, so ":" could make two distinct
   // (deployment, tier) pairs collide onto one key.
   return `${deploymentId}\n${nodeType}`;
 }

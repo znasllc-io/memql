@@ -6,7 +6,7 @@
 //
 // The generator is consumed two ways:
 //
-//   - memQL's own `make sdk-gen` runs the thin CLI wrapper in
+//   - MemQL's own `make sdk-gen` runs the thin CLI wrapper in
 //     scripts/sdk-gen over a single root (the core DSL) to emit the Go
 //     SDK under sdk/go/client.
 //   - A backend-for-frontend (BFF) -- a separate Go module that
@@ -16,7 +16,7 @@
 //
 // Multi-root composition is the reason the parse+emit logic lives in
 // an importable package rather than only in package main: a BFF can't
-// shell out to memQL's CLI with its own on-disk DSL tree merged in,
+// shell out to MemQL's CLI with its own on-disk DSL tree merged in,
 // but it can import gen and pass both roots.
 //
 // Design notes:

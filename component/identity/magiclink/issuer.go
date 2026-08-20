@@ -310,7 +310,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	if i.Sender != nil {
 		brandName := i.Cfg.BrandName
 		if brandName == "" {
-			brandName = "memQL"
+			brandName = "MemQL"
 		}
 		if err := i.Sender.SendMagicLink(ctx, SendInput{
 			Email:             email,

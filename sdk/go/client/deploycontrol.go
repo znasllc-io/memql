@@ -1,7 +1,7 @@
 package client
 
 // This file is the hand-rolled SDK surface for the DeployControlService
-// (znasllc-io/memql#725 + #728) -- the gRPC service behind the memQL
+// (znasllc-io/memql#725 + #728) -- the gRPC service behind the MemQL
 // Deployment Console / external cockpit (issues #144/#145).
 //
 // Carve-out rationale (per sdk/go/CLAUDE.md): DeployControlService is a

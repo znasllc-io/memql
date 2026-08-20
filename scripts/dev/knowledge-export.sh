@@ -4,7 +4,7 @@
 # ===============================
 #
 # Pulls every LLM-seeded knowledge chunk + its vector out of the
-# running memQL Postgres and writes them to a local cache at
+# running MemQL Postgres and writes them to a local cache at
 # ~/.memql/dev-knowledge.sql. Mirrors the secrets-export pattern --
 # the goal is to survive a `make dev-refresh` (which wipes the DB)
 # without burning fresh LLM tokens to regenerate the seed corpus.
@@ -93,7 +93,7 @@ function export_chunks_and_vectors() {
     # cleanly replaces whatever was there with the cached snapshot.
 
     {
-        echo "-- memQL knowledge cache, generated $(date -u +%FT%TZ)"
+        echo "-- MemQL knowledge cache, generated $(date -u +%FT%TZ)"
         echo "-- Restored by knowledge-import.sh during 'make dev-refresh'"
         echo "-- See scripts/dev/knowledge-export.sh for the export query."
         echo ""
@@ -167,7 +167,7 @@ function main() {
     # legitimately runs when there's nothing to back up yet.
     if ! postgres_running; then
         echo "knowledge-export: no running postgres yet (first-run); nothing to cache."
-        echo "-- memQL knowledge cache (empty -- no postgres at $(date -u +%FT%TZ))" > "${KNOWLEDGE_CACHE_FILE}"
+        echo "-- MemQL knowledge cache (empty -- no postgres at $(date -u +%FT%TZ))" > "${KNOWLEDGE_CACHE_FILE}"
         exit 0
     fi
     local count
@@ -175,7 +175,7 @@ function main() {
     if [[ -z "${count}" || "${count}" == "0" ]]; then
         echo "knowledge-export: no LLM-seeded chunks in DB (nothing to cache)."
         # Still write an empty cache file so import is a no-op.
-        echo "-- memQL knowledge cache (empty -- nothing to cache at $(date -u +%FT%TZ))" > "${KNOWLEDGE_CACHE_FILE}"
+        echo "-- MemQL knowledge cache (empty -- nothing to cache at $(date -u +%FT%TZ))" > "${KNOWLEDGE_CACHE_FILE}"
         exit 0
     fi
     export_chunks_and_vectors

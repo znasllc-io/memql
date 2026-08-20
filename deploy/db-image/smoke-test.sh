@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Smoke test for the memQL database operand image (epic memql#3842, task
+# Smoke test for the MemQL database operand image (epic memql#3842, task
 # memql#3844).
 #
 # Run against a BUILT image, before it is pushed anywhere. One script so the

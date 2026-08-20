@@ -1,5 +1,5 @@
 ---
-title: memQL Cloud -- the fleet control plane
+title: MemQL Cloud -- the fleet control plane
 audience: public
 status: stable
 area: operate
@@ -7,13 +7,13 @@ sinceVersion: 0.13.0
 owner: znas
 ---
 
-# memQL Cloud: the fleet control plane
+# MemQL Cloud: the fleet control plane
 
-**Audience:** operators running memQL Cloud, and anyone running a fleet of
-memQL instances for other people.
+**Audience:** operators running MemQL Cloud, and anyone running a fleet of
+MemQL instances for other people.
 **Epic:** memql#3852. **This task:** memql#3853.
 
-memQL Cloud sells private memQL instances by subscription. This page is how the
+MemQL Cloud sells private MemQL instances by subscription. This page is how the
 fleet that provisions them works, and how to drive it by hand when you need to.
 
 ## The one idea

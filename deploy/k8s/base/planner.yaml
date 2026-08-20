@@ -61,7 +61,7 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "planner" }
             - { name: MEMQL_NODE_ADDRESS, value: "planner:50056" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis

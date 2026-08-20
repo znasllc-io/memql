@@ -17,7 +17,7 @@ import (
 //
 // The receiver could read a signature from ONE header, strip a fixed leading
 // PREFIX, and read a timestamp from a SEPARATE header. Stripe -- the sender the
-// memQL Cloud epic needs -- sends both in one header:
+// MemQL Cloud epic needs -- sends both in one header:
 //
 //	Stripe-Signature: t=1614556800,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd
 //

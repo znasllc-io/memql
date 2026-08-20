@@ -1,6 +1,6 @@
 # @znasllc-io/memql-sdk-core
 
-The client-agnostic **runtime core** for the memQL web SDK. It owns
+The client-agnostic **runtime core** for the MemQL web SDK. It owns
 everything coupled to the wire protocol (the `/memql/ws` WebSocket
 bridge to `MemqlService.Stream`) and nothing coupled to a particular
 product's concept set.

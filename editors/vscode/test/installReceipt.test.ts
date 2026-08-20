@@ -125,7 +125,7 @@ test("appendReceiptEntry writes each step and leaves the file readable after eve
 test("appendReceiptEntry replaces an entry for a step that ran twice, but preExisting RATCHETS", async () => {
   // THIS ASSERTION USED TO READ `true`, and that was the bug (memql#3605).
   //
-  // `preExisting` answers "was this artifact on the machine before memQL ever
+  // `preExisting` answers "was this artifact on the machine before MemQL ever
   // ran" -- a fact about the PAST, which a later run cannot change. Newest-wins
   // let it flip anyway: a repair re-runs `clusterUp` against a cluster that now
   // exists, reports `clusterCreated: false`, and the derivation reads that as
@@ -133,7 +133,7 @@ test("appendReceiptEntry replaces an entry for a step that ran twice, but preExi
   //
   // The damage lands at uninstall, which cannot afford to be wrong:
   // `refuse_if_pre_existing` is an unconditional exit 3, so after any repair the
-  // uninstall REFUSED to delete a cluster memQL had created -- leaving the
+  // uninstall REFUSED to delete a cluster MemQL had created -- leaving the
   // operator to run `k3d cluster delete` by hand, the very manual step the
   // installer exists to remove.
   //
@@ -148,7 +148,7 @@ test("appendReceiptEntry replaces an entry for a step that ran twice, but preExi
   assert.equal(
     entryFor(r!, "toolK3d")?.preExisting,
     false,
-    "a later run must not be able to claim memQL found an artifact it created",
+    "a later run must not be able to claim MemQL found an artifact it created",
   );
 });
 
@@ -273,7 +273,7 @@ test("removalParams has nothing to remove when no run recorded a target", () => 
   // first half is right; the conclusion is not the only alternative to guessing
   // (memql#3564). A step that never recorded WHERE it wrote never wrote
   // anywhere -- and the operator who hit this got their whole uninstall stopped,
-  // reported as "a fault in memQL", over a hosts block that does not exist.
+  // reported as "a fault in MemQL", over a hosts block that does not exist.
   //
   // Nothing is guessed here either: null means "nothing to remove", the step
   // skips as satisfied, and the removals waiting on it still run.
@@ -420,7 +420,7 @@ test("a retried step resolves to what the successful run recorded", () => {
 // The two questions an uninstall asks have opposite answers in time. "Is it
 // ours to remove" can only be answered by the FIRST run: if run 1 created the
 // CA and run 2 then found it there, reading the newest would conclude the
-// operator already had it and refuse to remove something memQL created.
+// operator already had it and refuse to remove something MemQL created.
 test("pre-existence is the FIRST run's answer, not the latest", () => {
   const receipt: Receipt = {
     ...emptyReceipt("install"),
@@ -434,14 +434,14 @@ test("pre-existence is the FIRST run's answer, not the latest", () => {
   assert.equal(
     resolved.preExisting,
     false,
-    "memQL created this CA on the first run; a later run finding it there does not make it the operator's",
+    "MemQL created this CA on the first run; a later run finding it there does not make it the operator's",
   );
 });
 
 // The failure the operator actually hit. hostsBlock died on a read-only
 // /etc/hosts and recorded `{remedy}` -- no hostsFile, because nothing was
 // written. The uninstall then passed no --path, remove-artifact.sh exited 2,
-// and the wizard reported "a fault in memQL" about a block that does not exist.
+// and the wizard reported "a fault in MemQL" about a block that does not exist.
 test("a step that never recorded where it wrote has nothing to remove", () => {
   const hostsBlock = entry({
     stepId: "hostsBlock",

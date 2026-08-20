@@ -59,12 +59,12 @@ externally-driven (conductor) "speak now" trigger and clean barge-in?
 
 The conductor-gate posture is not optional context -- it is the defining
 constraint. Epic #440 already established (see
-`docs/internal/design/voice-432-conductor-response-gate.md`) that **memQL's conductor decides
+`docs/internal/design/voice-432-conductor-response-gate.md`) that **MemQL's conductor decides
 WHEN the assistant speaks**, not raw VAD. A multi-human polyphon room is up to 5
 humans + 1 assistant; humans talk to each other constantly. The Python agent
 runs in exactly this gated posture today: the realtime executor is built with
 `turn_detection=None` (`main.py:242-247`) and the assistant speaks only when
-memQL pushes a `VoiceAgentSpeak` (`main.py:313-363`) or a turn directive. So
+MemQL pushes a `VoiceAgentSpeak` (`main.py:313-363`) or a turn directive. So
 the Go state machine inherits a hard requirement: **it must NOT auto-respond on
 every pause.** End-of-utterance detection produces a *transcript boundary* that
 flows to cognition; whether the assistant then speaks is a separate, externally
@@ -138,9 +138,9 @@ This is the right shape for the existing transcript-forwarding consumer
 needs start-of-speech as a first-class event to drive barge-in. Closing this gap
 is the core of the spike's build plan (section 5).
 
-### 2.3 The memQL-side contract already exists end to end
+### 2.3 The MemQL-side contract already exists end to end
 
-The entire memQL-side voice contract is in Go and stays untouched
+The entire MemQL-side voice contract is in Go and stays untouched
 (epic #449 "what survives"): `component/grpc/voice_agent_handlers.go` (~1,700
 LOC) handles `VoiceAgentSessionStart/End`, `VoiceAgentPartialTranscript`,
 `VoiceAgentFinalTranscript`, `VoiceAgentTurnRequest/Delta/Complete`, and the
@@ -325,7 +325,7 @@ barge-in onset latency if live testing demands it.
 ## 5. Integration plan (file-by-file, real symbols)
 
 New code is additive and lives on the Go voice node (`-tags voice`,
-`app/build_voice.go`). The memQL-side gRPC contract
+`app/build_voice.go`). The MemQL-side gRPC contract
 (`voice_agent_handlers.go`) is reused verbatim.
 
 ### Step 1 -- Surface start-of-speech and turn structure from the Deepgram client
@@ -412,7 +412,7 @@ side simply forwards those frames into the existing
 | Go voice agent entrypoint (#449 skeleton) | Registers the `VoiceAgentSpeak` push handler (transition B); forwards committed turns via `handleVoiceAgentFinalTranscript`'s wire message. |
 | (realtime only, from #432) | `VoiceAgentRealtimeRespond` / `VoiceAgentRealtimeCancel` drive B / C. |
 
-Nothing here deletes or alters the memQL-side handlers, the transcript
+Nothing here deletes or alters the MemQL-side handlers, the transcript
 forwarder, the conductor, or the cascade vs realtime executor selection. The
 Deepgram client change is additive (one dropped event becomes a surfaced event).
 

@@ -39,7 +39,7 @@ import (
 // The conformance suite walks `dsl.Tree()` -- the embedded tree plus
 // plugin-registered subtrees. This bundle is neither: it is a directory under
 // deploy/, delivered at runtime through MEMQL_DSL_PATH. So the domain that
-// holds every memQL Cloud customer's account, subscription and usage data is
+// holds every MemQL Cloud customer's account, subscription and usage data is
 // the one domain the repository's own authz gate does not look at.
 
 var (

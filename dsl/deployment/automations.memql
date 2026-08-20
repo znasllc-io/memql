@@ -142,7 +142,7 @@
 // authored + dry-runnable and goes live once the build-server + ArgoCD wiring
 // is exercised.
 
-/// Deploy the memQL ENGINE cluster on the cockpit/runner surface. Sequences clone -> build ->
+/// Deploy the MemQL ENGINE cluster on the cockpit/runner surface. Sequences clone -> build ->
 /// place (provider switch) -> gate -> success/failure finish, recording the deployment lifecycle.
 /// Engine mesh ONLY -- no bff or product-carrier nodes.
 @trigger(event="deploy.requested")

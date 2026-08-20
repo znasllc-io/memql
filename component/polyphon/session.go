@@ -10,7 +10,7 @@ import (
 
 // SessionManager manages Polyphon sessions across spaces.
 // Sessions are kept in memory (not persisted to database) because they
-// represent ephemeral real-time voice state. If memQL restarts, active
+// represent ephemeral real-time voice state. If MemQL restarts, active
 // sessions are recreated when participants rejoin.
 type SessionManager struct {
 	mu       sync.RWMutex

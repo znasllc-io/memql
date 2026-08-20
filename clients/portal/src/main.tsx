@@ -16,7 +16,7 @@ if (container === null) {
   // index.html owns the mount point, so this is a build/deploy inconsistency
   // rather than a runtime condition. Fail loudly instead of rendering
   // nothing into a blank page with a clean console.
-  throw new Error("memQL portal: no #root element in the document");
+  throw new Error("MemQL portal: no #root element in the document");
 }
 
 createRoot(container).render(

@@ -11,7 +11,7 @@
 // THE ENCODING DECISION. Read this before "simplifying" encodeSegment.
 // ===========================================================================
 //
-// memQL ids are colon-delimited -- `<version>:<domain>:<entity>` names a
+// MemQL ids are colon-delimited -- `<version>:<domain>:<entity>` names a
 // concept, and a row id may be equally punctuated. A colon is a perfectly
 // legal `pchar` in a URL path segment (RFC 3986 §3.3), so it does NOT have to
 // be escaped -- and escaping it turns every id in the address bar into a
@@ -39,7 +39,7 @@
 // test/conceptUrls.test.ts pins the whole table, including the paste-back
 // round trip through a real router.
 
-// encodeSegment escapes a memQL id for use as ONE path segment. See above.
+// encodeSegment escapes a MemQL id for use as ONE path segment. See above.
 export function encodeSegment(value: string): string {
   return encodeURIComponent(value).replace(/%3A/g, ":");
 }

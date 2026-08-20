@@ -109,8 +109,8 @@ seedChunkId = sha256("seed:" + recipeVersion + ":" + domainId + ":" + chunkIndex
 ```
 
 So:
-- Same `(recipeVersion, domain, index)` → same id → re-insert is a no-op (memQL latest-wins with identical content writes the same row).
-- Bump `recipeVersion` → all ids change → next run re-generates and writes new chunks. Old chunks get superseded on read by the latest version of the new chunks. (memQL is time-series; the old rows still exist but reads return the latest.)
+- Same `(recipeVersion, domain, index)` → same id → re-insert is a no-op (MemQL latest-wins with identical content writes the same row).
+- Bump `recipeVersion` → all ids change → next run re-generates and writes new chunks. Old chunks get superseded on read by the latest version of the new chunks. (MemQL is time-series; the old rows still exist but reads return the latest.)
 
 This means iteration on the recipe is cheap: improve the prompt, bump `recipeVersion` from `"v1"` to `"v2"`, run the seeder. New content lands; old content stays as historical versions.
 

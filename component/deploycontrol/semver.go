@@ -2,7 +2,7 @@
 // flow (#1877). It parses a version, bumps a chosen part, and compares
 // two versions to find the highest succeeded deployment.
 //
-// memQL release tags are a three-part numeric version. Two schemes are
+// MemQL release tags are a three-part numeric version. Two schemes are
 // in use and BOTH fit one parser: classic semver (0.9.9, 1.2.3) and the
 // date-ish CalVer the concept doc mentions (2026.6.21) -- each is three
 // dot-separated non-negative integers. That is exactly what the release

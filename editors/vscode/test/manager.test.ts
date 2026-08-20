@@ -198,7 +198,7 @@ test("onDidChangeState's disposer stops delivering further state changes", async
 });
 
 test("a credential-less OIDC cluster reports a MISSING CREDENTIAL, without dialing", async () => {
-  // It used to say "authenticate it in the memQL Cockpit first" -- an
+  // It used to say "authenticate it in the MemQL Cockpit first" -- an
   // instruction that does not produce a credential this extension can then use
   // (memql#3383). An issuer and a client id are not a token; the honest report
   // is that there is no credential, and what kind to supply.

@@ -1,5 +1,5 @@
 ---
-title: memQL DSL Engine — Architecture + Cleanup Audit
+title: MemQL DSL Engine — Architecture + Cleanup Audit
 audience: internal
 status: historical
 area: design
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL DSL Engine — Architecture + Cleanup Audit
+# MemQL DSL Engine — Architecture + Cleanup Audit
 
 > Historical: shipped in 0.9.0; kept for rationale.
 

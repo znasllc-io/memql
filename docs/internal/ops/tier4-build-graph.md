@@ -52,7 +52,7 @@ queue (Tier 3) regardless.
   `bazel query 'rdeps(//..., set(<changed targets>))'` (or
   `target-determinator`) so CI runs only the impacted targets.
 
-## memQL-specific hard parts (must be handled in the spike)
+## MemQL-specific hard parts (must be handled in the spike)
 
 These are the reasons this is a spike, not a drop-in:
 
@@ -126,7 +126,7 @@ Makefile target.
 
 ## Acceptance status (#859)
 
-- [x] Migration plan documented (this file) with the memQL-specific
+- [x] Migration plan documented (this file) with the MemQL-specific
       hard parts and an incremental, non-big-bang path.
 - [x] Spike scaffold provided (`scripts/bazel-spike/`) — runnable on a
       branch.

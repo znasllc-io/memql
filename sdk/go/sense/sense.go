@@ -1,4 +1,4 @@
-// Package sense is the Go SDK surface for memQL Sense -- the
+// Package sense is the Go SDK surface for MemQL Sense -- the
 // language-intelligence service that powers editor affordances over
 // .memql source: syntax tokens, diagnostics, autocompletion, hover
 // docs, and signature help.
@@ -8,7 +8,7 @@
 // SDK-owned values (not raw protobuf), and errors that bubble up
 // instead of being silently swallowed.
 //
-// Why a dedicated SDK module: consumers (the memQL Cockpit editor,
+// Why a dedicated SDK module: consumers (the MemQL Cockpit editor,
 // future thin clients) used to hand-build the five Sense gRPC
 // envelopes (SenseTokenizeMsg / SenseDiagnoseMsg / SenseCompleteMsg /
 // SenseHoverMsg / SenseSignatureHelpMsg) and translate the proto
@@ -115,7 +115,7 @@ type Parameter struct {
 	Documentation string
 }
 
-// Signature is one overload in a SignatureHelp response. Most memQL
+// Signature is one overload in a SignatureHelp response. Most MemQL
 // functions have a single signature; the slice exists to mirror the
 // gRPC envelope (which exists so the engine can grow into overload
 // resolution without a wire break).

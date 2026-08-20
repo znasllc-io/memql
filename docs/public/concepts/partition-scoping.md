@@ -9,7 +9,7 @@ owner: znas
 
 # Partition scoping -- the canonical tenant scope
 
-`partition` is memQL's **canonical tenant/scope primitive**. When core code
+`partition` is MemQL's **canonical tenant/scope primitive**. When core code
 (the engine and the core services) needs to scope work to a tenant, it scopes
 by **partition** -- never by a product notion like a pack's `spaceId`.
 

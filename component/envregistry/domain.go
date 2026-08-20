@@ -58,7 +58,7 @@ var numericTLD = regexp.MustCompile(`\.[0-9]+$`)
 //
 // There is no environment label in the derivation (epic memql#3943). It used to
 // take one, so that a second environment in the same cluster could hyphenate
-// its role hosts and nest its site hosts; memQL ships one installation shape,
+// its role hosts and nest its site hosts; MemQL ships one installation shape,
 // and a second environment is a second install with its own domain.
 func DomainDerivations(domain string) map[string]string {
 	d := strings.TrimSpace(domain)

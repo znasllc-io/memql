@@ -1,7 +1,7 @@
 // memql-arch walks a Go workspace and emits a topology.model.json
 // describing its architecture: cluster, services, packages, types,
 // and the relationships between them. The output is consumed by
-// memQL Cockpit to render the Topology tab and by anything else that
+// MemQL Cockpit to render the Topology tab and by anything else that
 // wants to talk about the system in software-architecture terms
 // (docs exporters, observability overlays, CI gates on import
 // cycles, etc.).

@@ -9,7 +9,7 @@ owner: znas
 
 # The cluster front door — five host rules
 
-A memQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
+A MemQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
 traefik locally, nginx in the cloud — terminating TLS once with a wildcard plus
 apex certificate and routing by hostname. Port 80 exists only to redirect.
 
@@ -49,7 +49,7 @@ to match.
 
 (The set was once the product of role × ENVIRONMENT, with a label that
 hyphenated into role hosts — `api-staging.<domain>` — and nested into site
-hosts. Epic memql#3943 removed the environment dimension: memQL ships one
+hosts. Epic memql#3943 removed the environment dimension: MemQL ships one
 installation shape, and a second environment is a second install with its own
 domain, so the product has one factor left.)
 
@@ -270,7 +270,7 @@ the repo keeps honest instead of from somebody's memory. Hand-edits between the
 markers are reverted by the generator; the pair mirrors `make arch-model` /
 `make arch-model-check`.
 
-**Why it is generated is memQL's own history.** `POST /inbound/{source}` and
+**Why it is generated is MemQL's own history.** `POST /inbound/{source}` and
 `GET+POST /unsubscribe` are documented public HTTP exceptions that third
 parties dial — a Shopify webhook, a mail client executing RFC 8058 — and **no
 overlay in this repository routed either one.**
@@ -405,7 +405,7 @@ to annotations and secret sources, is
 
 The local cluster maps Postgres on `5432` and that is **not a connection
 path**. It is there so an operator can attach `psql` to a local database. No
-client reaches memQL that way anywhere, nothing in the connection
+client reaches MemQL that way anywhere, nothing in the connection
 model depends on it, and a proposal that routes application traffic through it
 is the port-forward-as-architecture anti-pattern
 [environment-parity.md](environment-parity.md) rejects.

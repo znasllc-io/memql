@@ -3,7 +3,7 @@
 # scripts/fleet/tenant-provision.sh
 # =================================
 #
-# Capability: fleet.tenantProvision -- render one memQL tenant's overlay and its
+# Capability: fleet.tenantProvision -- render one MemQL tenant's overlay and its
 # ArgoCD Application from the tenant component's templates, and (unless
 # dry-running) ask ArgoCD to adopt it.
 #
@@ -40,7 +40,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
 TEMPLATE_DIR="${REPO_ROOT}/deploy/k8s/components/tenant/template"
 
-cap_init "fleet.tenantProvision" "Render a memQL tenant overlay + ArgoCD Application and adopt it."
+cap_init "fleet.tenantProvision" "Render a MemQL tenant overlay + ArgoCD Application and adopt it."
 cap_spec_param_required "tenant"     "tenant slug -- the namespace, the Application name and the subdomain label (a DNS label)"
 cap_spec_param_required "domain"     "the tenant's fully-qualified domain, e.g. acme.memql.cloud"
 cap_spec_param_required "profile"    "instance profile: solo | standard | dedicated"

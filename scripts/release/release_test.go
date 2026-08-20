@@ -1,4 +1,4 @@
-// Package release holds tests for the memQL release-image shell
+// Package release holds tests for the MemQL release-image shell
 // script (scripts/release/release.sh) plus a standalone-build
 // resolution guard for the Azure deployment foundation
 // (znasllc-io/memql#493, epic #491).

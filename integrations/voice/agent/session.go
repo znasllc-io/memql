@@ -103,7 +103,7 @@ type RoomRequest struct {
 	RegisterSpeakSink func(SpeakSink)
 }
 
-// Session drives one voice-agent session against a single memQL space.
+// Session drives one voice-agent session against a single MemQL space.
 type Session struct {
 	cfg    Config
 	client *Client
@@ -151,9 +151,9 @@ func (s *Session) SetSpeakSink(sink SpeakSink) {
 func (s *Session) Persona() Persona { return s.persona }
 
 // NewSession builds a session for the given space. roomName is the LiveKit
-// room name (the memQL convention is "polyphon-<partitionId>"); partitionId is
+// room name (the MemQL convention is "polyphon-<partitionId>"); partitionId is
 // derived by stripping that prefix, matching the Python agent so the value
-// sent to memQL matches the participant row's spaceID exactly. The joiner
+// sent to MemQL matches the participant row's spaceID exactly. The joiner
 // may be nil, in which case the session runs the gRPC handshake and returns
 // immediately after the ack (used by the default CGO-free build + tests; the
 // voice build supplies a real RoomJoiner).
@@ -216,7 +216,7 @@ func (s *Session) Run(ctx context.Context) error {
 			"avatar_enabled", s.persona.AvatarEnabled())
 	}
 
-	// Register the unsolicited VoiceAgentSpeak handler. memQL pushes one
+	// Register the unsolicited VoiceAgentSpeak handler. MemQL pushes one
 	// Speak per AI reply utterance that lands while audio output is enabled
 	// and no VoiceAgentTurnRequest is in flight; the audio loop (#455) drives
 	// TTS playout from it. For #454 we register the seam and log receipt so
@@ -329,7 +329,7 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 	return ack, nil
 }
 
-// end announces VoiceAgentSessionEnd to memQL for audit + cleanup.
+// end announces VoiceAgentSessionEnd to MemQL for audit + cleanup.
 // Best-effort: failures are logged, never returned, so they can't wedge
 // teardown.
 func (s *Session) end(ctx context.Context, reason string) {

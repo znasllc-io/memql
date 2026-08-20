@@ -168,7 +168,7 @@ func TestGarbageIsRefusedBeforeAnyRow(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NewReader(strings.NewReader(body)); err == nil {
-				t.Fatal("accepted a file that is not a memQL backup")
+				t.Fatal("accepted a file that is not a MemQL backup")
 			}
 		})
 	}

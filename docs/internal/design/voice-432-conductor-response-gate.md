@@ -12,7 +12,7 @@ owner: znas
 > Historical: shipped in 0.9.0; kept for rationale.
 
 Spike deliverable for issue #432, part of the Hybrid Realtime Voice epic #440
-(Option B: memQL is the director, OpenAI `gpt-realtime` is the fast voice
+(Option B: MemQL is the director, OpenAI `gpt-realtime` is the fast voice
 executor).
 
 > **Historical note (epic #449 complete).** This spike predates the Go
@@ -61,7 +61,7 @@ test for this spike states it directly:
 > "5 humans talking, one asks the assistant" -> assistant engages only when
 > the conductor detects it's addressed/relevant.
 
-memQL already solves exactly this decision for the **text/cascade** path. The
+MemQL already solves exactly this decision for the **text/cascade** path. The
 conductor (`integrations/cognition/conductor.go` +
 `integrations/cognition/conductor_consult.go`) observes utterances +
 presence + Polyphon scoring and decides *who* responds, *whether* anyone
@@ -69,7 +69,7 @@ responds at all (silence is a first-class outcome), and *how* (mode +
 brevity). The Realtime executor must inherit that decision instead of
 re-deriving it from raw VAD.
 
-So the fit question this spike de-risks: **can memQL's conductor drive WHEN
+So the fit question this spike de-risks: **can MemQL's conductor drive WHEN
 the Realtime model speaks, replacing the model's built-in VAD?** The answer
 below is yes, and the mechanism is: disable the model's auto-response, and
 drive `response.create` explicitly from the conductor's directive.
@@ -128,7 +128,7 @@ keeps **option B** as a tuning lever.
 
 **Option A (recommended) -- `turn_detection: null`.** The model never runs
 input VAD, never commits the input buffer on its own, and never auto-creates
-a response. memQL becomes the sole driver of both:
+a response. MemQL becomes the sole driver of both:
 
 - input commit -- driven from Deepgram finals (we already have these; see
   2.5), via `input_audio_buffer.commit`.
@@ -143,9 +143,9 @@ code path that creates a response, and it is gated on the conductor.
 interrupt_response: true }` (the Realtime API exposes `create_response` and
 `interrupt_response` toggles on the VAD object). Here the model still runs
 input VAD, but `create_response: false` means a detected end-of-speech does
-NOT auto-create a response -- memQL still owns `response.create`. The win is
+NOT auto-create a response -- MemQL still owns `response.create`. The win is
 `interrupt_response: true`: the model auto-cancels its own in-flight audio the
-instant it hears a human start, without a round-trip to memQL. The risk is
+instant it hears a human start, without a round-trip to MemQL. The risk is
 that "hears a human start" includes humans talking to *each other*, so the
 assistant's audio would cut out on unrelated cross-talk. For a polyphon room
 that is usually wrong (we want the assistant to keep talking over side
@@ -250,7 +250,7 @@ under option A, a conductor decision -- not raw VAD. Two cases:
 
 Where the hook lives in code:
 
-- **memQL side.** Today there is exactly one place where a human utterance
+- **MemQL side.** Today there is exactly one place where a human utterance
   begins a new decision: the cognition automation on
   `graph.node.created.v1:cognition:utterance`, which leads into the
   suppression classifier (`cognition_handler.go:545-590`) and the conductor
@@ -268,7 +268,7 @@ Where the hook lives in code:
 - **Wire side.** The cancel is `{ "type": "response.cancel" }` on the Realtime
   data channel, plus `output_audio_buffer.clear`. In the LiveKit-plugin
   framing (option B fast path), `interrupt_response: true` would do this
-  locally without the memQL round-trip; we keep option A's explicit cancel as
+  locally without the MemQL round-trip; we keep option A's explicit cancel as
   the correct-by-default path and treat option B as the latency optimization.
 
 Acceptance criterion "mid-response human interjection cancels the assistant
@@ -305,9 +305,9 @@ alternative implementation selected behind this same seam:
   load at `main.py:150-151` is retained only for option B / input-commit
   gating; under option A the input buffer is committed from Deepgram finals.
 
-### Step 2 -- A "drive response" control channel from memQL to the executor
+### Step 2 -- A "drive response" control channel from MemQL to the executor
 
-Today memQL drives the voice agent through two server-push messages already
+Today MemQL drives the voice agent through two server-push messages already
 defined in `component/grpc/memql.proto` and handled in
 `component/grpc/voice_agent_handlers.go`:
 
@@ -438,7 +438,7 @@ and `request_id`):
 The headline number is **T5 - T2** (decision -> first audio). Supporting
 splits: T2-T1 (conductor LLM cost -- already ~1-1.5s per the
 `cognition_handler.go:590` comment, the dominant term to watch), T4-T3
-(memQL->executor push), T5-T4 (model TTFB). For the silence/suppress path the
+(MemQL->executor push), T5-T4 (model TTFB). For the silence/suppress path the
 assertion is simpler: **no `realtime.response.create` is ever emitted** when
 `Respond==false` -- that is the gate-correctness check, measured by absence,
 not latency.
@@ -488,11 +488,11 @@ These genuinely cannot be settled without running it on live infra:
    immediately, full conductor refines instructions in parallel), or option B
    for interruption.
 2. **Option A vs option B interruption latency.** Whether conductor-driven
-   `response.cancel` (a memQL round-trip) is fast enough, or whether we must
+   `response.cancel` (a MemQL round-trip) is fast enough, or whether we must
    fall back to option B's local `interrupt_response: true` and accept that
    side chatter sometimes cuts the assistant off. Needs live measurement.
 3. **Input-commit cadence under `turn_detection: null`.** With model VAD off,
-   memQL owns `input_audio_buffer.commit`. The commit cadence must be driven
+   MemQL owns `input_audio_buffer.commit`. The commit cadence must be driven
    from Deepgram finals -- and the EOU tuning that governs those finals
    (`docs/public/operate/voice-eou-tuning.md`: `endpointing_ms`, and the note that the LK
    Deepgram 1.5 plugin does NOT expose `utterance_end_ms`) directly affects

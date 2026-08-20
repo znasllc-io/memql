@@ -1,6 +1,6 @@
-// Package referencepack is the minimal REFERENCE PACK for the memQL pack
+// Package referencepack is the minimal REFERENCE PACK for the MemQL pack
 // model (epic 2, issue 2.5). It demonstrates, end-to-end, every primitive a
-// real product pack uses to drop into the memQL engine:
+// real product pack uses to drop into the MemQL engine:
 //
 //   - dsl.RegisterTree(domain, Tree())   -- mount an embedded .memql subtree
 //     (concept + builtin + tool + automation) under its own namespace.

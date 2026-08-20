@@ -787,7 +787,7 @@ const workspaceTrustWhenClause = "isWorkspaceTrusted"
 // src/extension.ts already gates the runtime surface at RUNTIME: an untrusted
 // activation registers the language client and nothing else. The manifest did
 // not, and a manifest contribution is what the editor draws BEFORE any code
-// runs -- so an untrusted workspace showed the memQL activity-bar container
+// runs -- so an untrusted workspace showed the MemQL activity-bar container
 // with two permanently empty views, and offered six palette commands that all
 // failed with "command not found" because their handlers were never
 // registered. Every one of those is a promise the extension cannot keep in

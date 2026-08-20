@@ -32,7 +32,7 @@
 #   kubectl port-forward -n memql svc/bff 50051:50051
 # (the `mcp` node is the MCP-protocol head; it also serves gRPC on :50051.)
 #
-# The memQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
+# The MemQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
 # and reached through the same front door, at
 # https://api.memql.localhost/portal/ (memql#3314). Its bundle is baked into
 # the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
@@ -63,7 +63,7 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 cap_init "k3d.up" "Bootstrap a local k3d cluster running ArgoCD pointed at the local overlay."
 cap_spec_param "cluster"        "k3d cluster name"
 cap_spec_param "revision"       "git branch/tag/SHA for the ArgoCD Application"
-cap_spec_param "namespace"      "k8s namespace for the memQL stack"
+cap_spec_param "namespace"      "k8s namespace for the MemQL stack"
 cap_spec_param "repo-url"       "git repo URL for the ArgoCD Application"
 cap_spec_param "servers"        "number of k3d server nodes"
 cap_spec_param "agents"         "number of k3d agent nodes"
@@ -79,7 +79,7 @@ cap_spec_param "db-image-tag"   "tag for the DATABASE OPERAND image, which is ve
 cap_spec_param "domain"         "front-door apex the cluster is served at (default: memql.localhost)"
 cap_spec_param "caroot"         "mkcert CAROOT the front-door certificate is issued from, forwarded to secret seeding (default: whatever mkcert reports)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
-cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
+cap_spec_param "repo-root"      "the MemQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
 
 #=============================================================================
@@ -371,7 +371,7 @@ function scaled_up_deployments() {
         --no-headers 2>/dev/null || true)
 }
 
-# wait_for_workloads -- the memQL Deployments, not just the thing that applies
+# wait_for_workloads -- the MemQL Deployments, not just the thing that applies
 # them (memql#3570).
 #
 # WHY THIS EXISTS. ArgoCD being ready means the RECONCILER is up. It says
@@ -443,7 +443,7 @@ function wait_for_workloads() {
     # a trailing "s" (CI exports 720s); accept both spellings.
     local deadline="${WORKLOAD_TIMEOUT:-${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}}" names waited=0 tick=5 since_report=0
     deadline="${deadline%s}"
-    info "Waiting up to ${deadline}s for the memQL workloads to become Available..."
+    info "Waiting up to ${deadline}s for the MemQL workloads to become Available..."
 
     if [[ -z "$(all_deployments)" ]]; then
         warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
@@ -475,7 +475,7 @@ function wait_for_workloads() {
         # shellcheck disable=SC2086
         if kubectl wait --for=condition=Available --timeout=1s \
             -n "$NAMESPACE" $names >/dev/null 2>&1; then
-            info "every memQL workload is Available (after ${waited}s)."
+            info "every MemQL workload is Available (after ${waited}s)."
             WORKLOADS_READY=true
             return 0
         fi
@@ -925,7 +925,7 @@ function print_summary() {
         echo ""
         echo "  Entry points (front door on 443; *.memql.localhost resolves to 127.0.0.1):"
         echo "    https://identity.memql.localhost         identity (web UI + JWKS)"
-        echo "    https://api.memql.localhost/portal/      memQL Portal (graphical ops console)"
+        echo "    https://api.memql.localhost/portal/      MemQL Portal (graphical ops console)"
         echo "    localhost:5432                           postgres (debug)"
         echo ""
         echo "  Client edge (Cockpit / SDKs), on demand:"
@@ -1000,7 +1000,7 @@ function gate_voice_lane_post_sync() {
         ${MKCERT_CAROOT:+--caroot="${MKCERT_CAROOT}"} >&2 || true
 }
 
-# require_checkout <dir> -- refuse a root that is not a real memQL checkout.
+# require_checkout <dir> -- refuse a root that is not a real MemQL checkout.
 #
 # A BEHAVIOUR CHANGE, stated plainly: this script used to proceed with whatever
 # it derived. It now fails.
@@ -1057,10 +1057,10 @@ function require_checkout() {
         cap_fail 4 "repo-root ${root} does not exist"
     fi
     if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        cap_fail 4 "repo-root ${root} is not a git checkout, so the ArgoCD target revision cannot be read from it -- pass --repo-root=<a memQL checkout> (the install graph passes the directory install.cloneStack created)"
+        cap_fail 4 "repo-root ${root} is not a git checkout, so the ArgoCD target revision cannot be read from it -- pass --repo-root=<a MemQL checkout> (the install graph passes the directory install.cloneStack created)"
     fi
     if [[ ! -d "${root}/deploy/argocd/bootstrap" ]]; then
-        cap_fail 4 "repo-root ${root} has no deploy/argocd/bootstrap -- it is a git checkout, but not of memQL"
+        cap_fail 4 "repo-root ${root} has no deploy/argocd/bootstrap -- it is a git checkout, but not of MemQL"
     fi
 }
 
@@ -1145,7 +1145,7 @@ function main() {
         cap_fail 4 "project manifest not found at ${PROJECT_MANIFEST}"
     fi
 
-    info "memQL k3d bootstrap"
+    info "MemQL k3d bootstrap"
     info "Cluster:   ${CLUSTER_NAME}"
     info "Revision:  ${TARGET_REVISION}"
     info "Namespace: ${NAMESPACE}"

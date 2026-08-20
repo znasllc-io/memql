@@ -24,7 +24,7 @@ const defaultOpenAIEmbeddingsURL = "https://api.openai.com/v1/embeddings"
 // body. The text this client submits for embedding is user content (e.g.
 // v1:harness:observation.content, v1:actions:action.intent), and errors from here
 // propagate unbroken into log sinks that log them verbatim. Whether the vendor
-// echoes the submitted input back in an error body is a vendor behaviour memQL
+// echoes the submitted input back in an error body is a vendor behaviour MemQL
 // neither controls nor is notified about when it changes -- so the bound is held
 // here, at the source, rather than at each of the (unbounded set of) log lines.
 //
@@ -132,7 +132,7 @@ func (c *OpenAIEmbeddingClient) EmbedBatch(ctx context.Context, texts []string) 
 		// begun echoing the submitted input -- or of a WAF/proxy interstitial
 		// that quotes request headers -- is still a verbatim leak, and the
 		// issue's own rationale is precisely that the vendor's echo behaviour
-		// can change without memQL being told. A prefix bound does not survive
+		// can change without MemQL being told. A prefix bound does not survive
 		// that change; an allow-list does.
 		//
 		// A blanket drop was rejected too: `error.type` / `error.code` are the

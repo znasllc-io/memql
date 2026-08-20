@@ -201,7 +201,7 @@ func (a *App) configAndAuth() {
 	authMiddleware := verifier.HTTPMiddleware(a.identityVerifier, verifier.MiddlewareOptions{
 		Logger:      a.Logger,
 		PublicPaths: server.PublicPaths(),
-		// Third tier (memql#3062): reachable without a memQL bearer because the
+		// Third tier (memql#3062): reachable without a MemQL bearer because the
 		// route verifies a vendor HMAC itself. Bounded to one path segment, and
 		// only on a path the mux routes to that handler (memql#3128).
 		SelfAuthenticatedPaths: server.SelfAuthenticatedPaths(),

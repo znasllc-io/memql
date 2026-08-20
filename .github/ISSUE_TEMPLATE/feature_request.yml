@@ -1,11 +1,11 @@
 name: Feature request
-description: Propose a new feature or enhancement for memQL
+description: Propose a new feature or enhancement for MemQL
 labels: ["enhancement", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        memQL is pre-1.0 and the DSL/engine surface is still evolving.
+        MemQL is pre-1.0 and the DSL/engine surface is still evolving.
         For larger changes please discuss the design here before opening a PR.
   - type: textarea
     id: problem

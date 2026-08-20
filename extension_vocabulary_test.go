@@ -29,7 +29,7 @@ import (
 //   - the prose patterns hit exactly one file,
 //     docs/internal/design/voice-432-conductor-response-gate.md:295, which
 //     is `status: historical` and therefore exempt (and is also about a
-//     Python plugin class in a retired design, not memQL vocabulary);
+//     Python plugin class in a retired design, not MemQL vocabulary);
 //   - the editors/vscode source pattern hit nothing (the sweep in this
 //     same change removed the last ~30 comment mentions).
 //

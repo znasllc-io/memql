@@ -9,7 +9,7 @@ owner: znas
 
 # Component vs integration vs pack
 
-memQL has **exactly three** extension words. Do not invent a fourth.
+MemQL has **exactly three** extension words. Do not invent a fourth.
 
 | Word | Means | Lives |
 |---|---|---|

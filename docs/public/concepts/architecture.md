@@ -817,7 +817,7 @@ Parse Errors:
 
 ## Distributed Node Architecture
 
-memQL supports running as a distributed cluster where each node type specializes in
+MemQL supports running as a distributed cluster where each node type specializes in
 a subset of functionality. See [component/node/CLAUDE.md](../../../component/node/CLAUDE.md)
 for full details.
 

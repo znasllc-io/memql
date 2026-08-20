@@ -1,5 +1,5 @@
 // Package graph is the install/uninstall STEP GRAPH: the declarative
-// description of what a local memQL cluster install does, in what order, what
+// description of what a local MemQL cluster install does, in what order, what
 // each step must prove before the next one runs, and what uninstall has to take
 // back afterwards.
 //
@@ -63,7 +63,7 @@
 // safe to keep that promise when the receipt also records whether the installer
 // CREATED the artifact or merely FOUND it: a developer who already had mkcert,
 // or a k3d cluster, or a checkout at that path must not lose it because they
-// uninstalled memQL. So `receipt` and `preExistingPath` are required together.
+// uninstalled MemQL. So `receipt` and `preExistingPath` are required together.
 //
 //	"preExistingPath": "result.preExisting"    // pre-existed when that is truthy
 //	"preExistingPath": "!result.cloned"        // pre-existed when cloned is FALSE
@@ -232,12 +232,12 @@ type Step struct {
 	// when Retained is set: "this is kept" is a decision an operator reading
 	// the graph is entitled to see argued.
 	RetainedReason string `json:"retainedReason,omitempty"`
-	// Shared marks an uninstall step whose artifact is NOT memQL-only -- k3d,
+	// Shared marks an uninstall step whose artifact is NOT MemQL-only -- k3d,
 	// kubectl, mkcert, the local CA. Those are general tools the operator may
 	// now depend on, so removing them is OFFERED rather than assumed, and the
 	// wizard shows them unticked (memql#3566). A step without this flag removes
-	// something only memQL put there and only memQL uses, and needs no
-	// permission beyond "uninstall memQL". Uninstall graphs only.
+	// something only MemQL put there and only MemQL uses, and needs no
+	// permission beyond "uninstall MemQL". Uninstall graphs only.
 	Shared bool `json:"shared,omitempty"`
 	// SharedReason is what the operator reads beside the checkbox: what else
 	// this thing is good for. Required when Shared is set.

@@ -1,4 +1,4 @@
-// Package deploycontrol is the deploy CAPABILITY BACKEND for the memQL DevOps
+// Package deploycontrol is the deploy CAPABILITY BACKEND for the MemQL DevOps
 // deployment bundle -- NOT the orchestrator. (I11 #2225, epic #2212.)
 //
 // # Role after I11

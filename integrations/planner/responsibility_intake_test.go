@@ -21,7 +21,7 @@ func responsibilityEvent(id, status, intakeStatus string) events.Event {
 }
 
 // TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass locks in the
-// memql#1645 fix. memQL is append-only: a routing-only
+// memql#1645 fix. MemQL is append-only: a routing-only
 // assignResponsibility materialises a fresh row version and re-fires
 // graph.node.created for a still-draft (intakeStatus=="") responsibility.
 // Before the fix, that re-entered first-pass intake -- re-inferring

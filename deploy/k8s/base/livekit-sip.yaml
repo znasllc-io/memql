@@ -10,7 +10,7 @@
 # API key/secret pair the BFF/voice token minter uses (POLYPHON_LIVEKIT_API_*
 # in livekit-secrets) and coordinates session/trunk state with the server over
 # Redis (livekit-redis). Trunks + dispatch rules themselves are created
-# programmatically by the memQL telephony integration via the LiveKit SIP API,
+# programmatically by the MemQL telephony integration via the LiveKit SIP API,
 # not declared here.
 #
 # Ports exposed to the carrier (LoadBalancer):

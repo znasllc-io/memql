@@ -1,6 +1,6 @@
 package agent
 
-// mcp_tool_bridge.go exposes memQL's tool surface to the gpt-realtime model
+// mcp_tool_bridge.go exposes MemQL's tool surface to the gpt-realtime model
 // via async function calling, and mirrors every model-driven tool call back
 // into cognition so cognition is never blind to what the model did (#458).
 //
@@ -30,7 +30,7 @@ package agent
 // stays denied rather than being exposed to fail.
 //
 // Awareness mirror. When the model calls a tool, the bridge (1) executes it
-// through memQL's MCP surface (CallToolMsg -> CallToolResult), the same
+// through MemQL's MCP surface (CallToolMsg -> CallToolResult), the same
 // authorized backend path the text loop uses, so server-side enforcement is
 // the source of truth; and (2) emits a best-effort mirror of the call +
 // result into cognition so transcripts / history / the conductor / the
@@ -76,10 +76,10 @@ func isExposableTool(clientExecution bool, relayCapable bool) bool {
 	return true
 }
 
-// ToolCallTransport executes a tool against memQL's MCP surface and
+// ToolCallTransport executes a tool against MemQL's MCP surface and
 // returns (resultText, isError). The production transport sends a CallToolMsg
 // on the stream and awaits the CallToolResult; tests inject a fake. Running the
-// model-driven call through memQL's CallTool path (rather than any direct
+// model-driven call through MemQL's CallTool path (rather than any direct
 // provider tool) is itself part of the awareness contract: the call traverses
 // the same authorized backend path the text loop uses, so server-side
 // enforcement (role gate, scopes, kill switch) is the source of truth.
@@ -238,7 +238,7 @@ func (b *McpToolBridge) Dispatch(ctx context.Context, name, argumentsJSON string
 		return "[tool error] no tool transport configured"
 	}
 
-	// #1426: the transport leg is the synchronous memQL CallTool round-trip
+	// #1426: the transport leg is the synchronous MemQL CallTool round-trip
 	// (server-side engine + DB work) inside the tool span -- time it
 	// individually so it separates from the model-side legs.
 	transportStart := time.Now()
@@ -364,7 +364,7 @@ type toolBridgeLister interface {
 	SendRequest(ctx context.Context, envelope *memqlv1.MemqlClientMessage) (*memqlv1.MemqlServerMessage, error)
 }
 
-// FetchToolDefinitions lists the memQL tool registry via ListToolsMsg. A failed
+// FetchToolDefinitions lists the MemQL tool registry via ListToolsMsg. A failed
 // list returns nil (not an error to the caller's session build): the realtime
 // session simply comes up with no model-driven tools, a safe degradation
 // (privileged tools were never exposed anyway, and the cognition tool loop is
@@ -425,7 +425,7 @@ func NewGrpcToolCallTransport(client toolBridgeLister) ToolCallTransport {
 
 // NewLogMirrorSink builds the default cognition-awareness sink: a structured
 // voiceTrace-shaped log line carrying the call + result. Because the tool
-// itself executed through memQL's CallTool path, the backend already saw the
+// itself executed through MemQL's CallTool path, the backend already saw the
 // call; this breadcrumb makes it legible in the per-space trace that history /
 // the conductor / the chat-canvas "searched the web" affordance consume. A
 // dedicated cognition event message (threading the breadcrumb into the

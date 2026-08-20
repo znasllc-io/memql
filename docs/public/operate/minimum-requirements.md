@@ -7,9 +7,9 @@ sinceVersion: 0.9.88
 owner: znas
 ---
 
-# Minimum Requirements — running memQL beyond local
+# Minimum Requirements — running MemQL beyond local
 
-This page is the short answer to *"what do I actually need to stand memQL up
+This page is the short answer to *"what do I actually need to stand MemQL up
 somewhere real?"* — i.e. anything past the local dev cluster. It states the
 minimums and links the deep runbooks for each piece. The biggest non-obvious
 requirement is the **database**, so that section is first and most detailed.
@@ -26,7 +26,7 @@ identical from a local k3d cluster to a cloud one; only the *config values*
 (DSNs, replica counts, sizes) differ. If a requirement is "do X differently
 over there," that's a bug, not a feature.
 
-memQL ships **one installation shape** (epic memql#3943) — there is no
+MemQL ships **one installation shape** (epic memql#3943) — there is no
 staging-versus-production dimension inside the product. An operator who wants a
 second environment installs a second instance, with its own domain and its own
 database. What varies is the deploy TARGET (`provider`: `docker-local` |
@@ -36,7 +36,7 @@ database. What varies is the deploy TARGET (`provider`: `docker-local` |
 
 ## 1. Database — **self-hosted CloudNativePG**
 
-memQL stores everything (the time-series memory graph + the observability
+MemQL stores everything (the time-series memory graph + the observability
 hypertables) in **PostgreSQL 16 + TimescaleDB Community + pgvector**, run
 **inside the cluster** by the CloudNativePG operator (epic memql#3842). The
 same operator, the same operand image and the same four resource kinds run in

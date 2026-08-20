@@ -1,6 +1,6 @@
-# memQL Go SDK
+# MemQL Go SDK
 
-**Purpose:** The canonical client surface for memQL. Every consumer
+**Purpose:** The canonical client surface for MemQL. Every consumer
 (memql-cockpit, future thick clients, future thin clients) goes
 through this package. No bespoke wire wrappers in the consumer.
 

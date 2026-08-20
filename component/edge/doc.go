@@ -3,7 +3,7 @@
 // (resolve.go) and serves the bundle that row names (bundle.go, blob.go),
 // with the same headers for every one of them (csp.go, handler.go).
 //
-// The memQL Portal is site #1 -- its row's bundleRef is file:///app/portal,
+// The MemQL Portal is site #1 -- its row's bundleRef is file:///app/portal,
 // the directory the image has always shipped -- and it takes no special path
 // through this package to get served; see
 // TestPortalHasNoSpecialCaseInTheServingPath in dogfood_test.go, which fails

@@ -107,7 +107,7 @@ var capabilityScriptAllowlist = map[string]string{
 	//
 	// REGISTERED HERE, THOUGH THE ACTIONS THAT CALL THEM ARE NOT IN THIS REPO.
 	// The fleet DSL is a product bundle (deploy/fleet/dsl/) mounted at
-	// MEMQL_DSL_PATH, deliberately not compiled in -- memQL Cloud is a product
+	// MEMQL_DSL_PATH, deliberately not compiled in -- MemQL Cloud is a product
 	// and the engine is product-neutral. These four scripts are the other half
 	// of that split and belong on this side of it: they take a tenant name, a
 	// profile and a domain, render an overlay, and talk to ArgoCD. They know

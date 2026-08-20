@@ -234,7 +234,7 @@ func sortedSet(m map[string]bool) []string {
 
 // An install action has no cluster to run inside. It places k3d on the
 // operator's laptop, edits /etc/hosts and installs a trust-store CA, all before
-// anything memQL exists to host it -- so cockpit/runner is not a policy
+// anything MemQL exists to host it -- so cockpit/runner is not a policy
 // preference that could reasonably go the other way, it is the only placement
 // that can execute at all.
 func TestInstallActionsResolveToTheRunnerSurface(t *testing.T) {

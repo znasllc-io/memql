@@ -192,7 +192,7 @@ flag exists to let disposable data be written without a dialog. Verifying that
 item against a local k3d cluster therefore needs a second entry pointing at the
 same cluster *without* the flag.
 
-`~/.memql/clusters.yaml` is shared with the memQL Cockpit. Add:
+`~/.memql/clusters.yaml` is shared with the MemQL Cockpit. Add:
 
 ```yaml
 clusters:
@@ -270,7 +270,7 @@ Full narrative: [VS Code Runtime Panel](vscode-runtime-panel.md).
 
 ## 1. Panel basics (B1)
 
-- [ ] The memQL icon appears in the activity bar and reads cleanly at 24x24
+- [ ] The MemQL icon appears in the activity bar and reads cleanly at 24x24
 - [ ] Clusters lists both entries from `~/.memql/clusters.yaml`
 - [ ] Selecting one connects, and the icon turns to a filled green circle
 - [ ] Concepts lists domains, and expanding one lists its concepts
@@ -326,7 +326,7 @@ they are the one part of this checklist you can run **without** hand-pasting a
 token into `clusters.yaml`. Take one cluster entry through them with its `token`
 and `refresh_token` keys deliberately blank.
 
-- [ ] **memQL: Sign In** (the cluster's context menu, or the palette) opens a
+- [ ] **MemQL: Sign In** (the cluster's context menu, or the palette) opens a
       cancellable progress notification reading `signing in to <cluster>` and
       opens a browser at the cluster's `identity.<domain>` login page
 - [ ] Signing in there returns to VS Code without a manual paste, and the tree's
@@ -340,9 +340,9 @@ and `refresh_token` keys deliberately blank.
       unreachable, or which names neither an `issuer` nor a `domain`, offers
       only the message -- a button whose sole outcome is another error is not
       shown
-- [ ] **memQL: Sign Out** removes both `token:` and `refresh_token:` from
+- [ ] **MemQL: Sign Out** removes both `token:` and `refresh_token:` from
       `clusters.yaml`, drops a live connection to that cluster, and says
-      `Run "memQL: Sign In" to authenticate again`
+      `Run "MemQL: Sign In" to authenticate again`
 - [ ] After Sign Out the tree shows the yellow key ("no credential"), not the red
       error dot
 - [ ] **Refresh after expiry:** with a signed-in cluster connected, wait past the
@@ -354,10 +354,10 @@ and `refresh_token` keys deliberately blank.
       long-expired `token:` back into `clusters.yaml`) and connect: the tree
       shows the yellow key with `CREDENTIAL EXPIRED:` and the offered recovery is
       Sign In
-- [ ] **memQL: Sign In With a Device Code** (palette only) shows an
+- [ ] **MemQL: Sign In With a Device Code** (palette only) shows an
       `XXXX-XXXX` code and a verification URL, and approving at
       `https://identity.<domain>/device` completes the sign-in on the editor side
-- [ ] **memQL: Sign In** falls back to a device code on a host that cannot do
+- [ ] **MemQL: Sign In** falls back to a device code on a host that cannot do
       loopback (memql#3515). The cheapest arrangement is a Remote-SSH window
       onto a box with no browser; a firewall that refuses the loopback bind
       works too. The switch is **announced** -- a progress line reading
@@ -365,7 +365,7 @@ and `refresh_token` keys deliberately blank.
       loopback failure -- and then the same `XXXX-XXXX` code appears. A host
       that *can* do loopback must still open a browser: the fallback firing
       unconditionally would be its own defect
-- [ ] Renaming a signed-in cluster (**memQL: Edit Cluster**, change the name)
+- [ ] Renaming a signed-in cluster (**MemQL: Edit Cluster**, change the name)
       leaves it signed in (memql#3515). Rename it, then reconnect: no
       credential prompt. The stranded half is invisible by construction --
       SecretStorage cannot be enumerated and the access token rides on the

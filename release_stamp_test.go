@@ -3,7 +3,7 @@
 //
 // # The failure mode
 //
-// A memQL node could not state which release it was running. `ServerHello`
+// A MemQL node could not state which release it was running. `ServerHello`
 // carried the literal "v1" (the wire protocol version), and the version the
 // engine reported everywhere else came from a checked-in `VERSION` file that
 // had said `0.15.0` at every tag from v0.16.1 onward, which the image build

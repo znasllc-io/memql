@@ -18,7 +18,7 @@ export function ClusterBadge(): ReactNode {
   const cluster = clusterLabelFor(globalThis.location);
   return (
     <div className="flex min-w-0 items-baseline gap-2">
-      <span className="text-lg font-semibold tracking-tight">memQL Portal</span>
+      <span className="text-lg font-semibold tracking-tight">MemQL Portal</span>
       {cluster ? (
         <span className="truncate font-mono text-sm text-muted" title={cluster}>
           {cluster}

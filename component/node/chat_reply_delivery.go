@@ -249,7 +249,7 @@ func (d *ChatReplyDelivery) onLocalEvent(ctx context.Context, event events.Event
 //
 // The suffix exists because the row id alone is NOT unique per occurrence for
 // upsert-style concepts: presence keeps ONE deterministic row id per
-// participant across every state transition (memQL is append-only -- each
+// participant across every state transition (MemQL is append-only -- each
 // write is a new row VERSION under the same logical id), and update() re-emits
 // its row id too. The outbox enforces uniqueness on EventID, so a bare row id
 // silently swallowed every write after the first -- the "assistant stuck at

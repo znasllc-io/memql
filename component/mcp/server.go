@@ -1,6 +1,6 @@
-// Package mcp implements the memQL MCP (Model Context Protocol) server --
+// Package mcp implements the MemQL MCP (Model Context Protocol) server --
 // the protocol head that lets external MCP hosts (Claude Desktop / Claude
-// Code and others) talk to a memQL deployment's tool surface.
+// Code and others) talk to a MemQL deployment's tool surface.
 //
 // It is the engine side of a new `mcp` node role (epic memql#1529): a
 // transport/protocol head over the engine's existing tool surface, selected
@@ -67,7 +67,7 @@ type Server struct {
 	name    string
 	version string
 
-	// engine is the in-process memQL engine handle this head serves. It is
+	// engine is the in-process MemQL engine handle this head serves. It is
 	// the "connection to the engine" Phase 0 stands up. Stored as any (Phase 0
 	// decoupling); the Phase 1 tool surface adapts it to the narrow Engine
 	// interface via asEngine().
@@ -472,7 +472,7 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 		},
 		"serverInfo": map[string]any{
 			"name":       s.name,
-			"title":      "memQL",
+			"title":      "MemQL",
 			"version":    s.version,
 			"websiteUrl": "https://memql.io",
 			// Branded connector icon (MCP Implementation.icons). Clients such

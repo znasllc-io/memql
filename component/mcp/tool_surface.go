@@ -27,7 +27,7 @@ type ToolLister interface {
 	Get(name string) (*memql.Tool, error)
 }
 
-// Engine is the narrow slice of the in-process memQL engine the MCP tool
+// Engine is the narrow slice of the in-process MemQL engine the MCP tool
 // surface needs. *memql.MemQLEngine is bridged onto it by engineAdapter (its
 // Tools() returns the concrete *ToolRegistry, which satisfies ToolLister). A
 // nil Engine yields an empty surface so the protocol head still answers (the
@@ -196,7 +196,7 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 	if tierAllows(tier, classAuthor) && roleCanAuthor(role) {
 		out = append(out, map[string]any{
 			"name":        toolDefine,
-			"description": "Author a memQL .memql bundle: validate + register session-scoped (non-durable) constructs callable by name within this session. Requires the authoring tier + owner/developer role.",
+			"description": "Author a MemQL .memql bundle: validate + register session-scoped (non-durable) constructs callable by name within this session. Requires the authoring tier + owner/developer role.",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"bundle": map[string]any{"type": "string", "description": "The .memql source to author."}},
@@ -241,10 +241,10 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 	if tierAllows(tier, classInline) && roleCanRunInline(role) {
 		out = append(out, map[string]any{
 			"name":        toolQuery,
-			"description": "Run ad-hoc inline memQL query text. Requires the inline tier + owner/developer role.",
+			"description": "Run ad-hoc inline MemQL query text. Requires the inline tier + owner/developer role.",
 			"inputSchema": map[string]any{
 				"type":       "object",
-				"properties": map[string]any{"query": map[string]any{"type": "string", "description": "Inline memQL query text."}},
+				"properties": map[string]any{"query": map[string]any{"type": "string", "description": "Inline MemQL query text."}},
 				"required":   []any{"query"},
 			},
 		})
@@ -293,9 +293,9 @@ func metaToolDefs() []map[string]any {
 		"required": []any{"name"},
 	}
 	return []map[string]any{
-		{"name": toolRunQuery, "description": "Run a named memQL query by name with args.", "inputSchema": schema("query")},
-		{"name": toolRunMutation, "description": "Run a named memQL mutation by name with args.", "inputSchema": schema("mutation")},
-		{"name": toolRunAutomation, "description": "Run a named memQL automation's action chain directly with an input payload; set dry_run to preview without committing writes.", "inputSchema": automationSchema},
+		{"name": toolRunQuery, "description": "Run a named MemQL query by name with args.", "inputSchema": schema("query")},
+		{"name": toolRunMutation, "description": "Run a named MemQL mutation by name with args.", "inputSchema": schema("mutation")},
+		{"name": toolRunAutomation, "description": "Run a named MemQL automation's action chain directly with an input payload; set dry_run to preview without committing writes.", "inputSchema": automationSchema},
 	}
 }
 

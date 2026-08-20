@@ -3,7 +3,7 @@
 # scripts/portal/build.sh
 # =======================
 #
-# The memQL Portal's install / typecheck / test / build / clean cycle
+# The MemQL Portal's install / typecheck / test / build / clean cycle
 # (memql#3314).
 #
 # WHY A SCRIPT AND NOT FIVE MAKEFILE RECIPES

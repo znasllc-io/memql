@@ -183,7 +183,7 @@
             signal: controller.signal,
             publicKey: {
               challenge: randomBytes(32),
-              rp: { id: rpId, name: "memQL spike 3405" },
+              rp: { id: rpId, name: "MemQL spike 3405" },
               user: { id: randomBytes(16), name: "probe@" + rpId, displayName: "Probe" },
               pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
               authenticatorSelection: { userVerification: "discouraged" },
@@ -270,7 +270,7 @@
           const cred = await navigator.credentials.create({
             publicKey: {
               challenge: randomBytes(32),
-              rp: { id: RP_ID, name: "memQL spike 3405" },
+              rp: { id: RP_ID, name: "MemQL spike 3405" },
               user: { id: randomBytes(16), name: "spike@" + RP_ID, displayName: "Spike User" },
               pubKeyCredParams: [
                 { type: "public-key", alg: -7 },   // ES256

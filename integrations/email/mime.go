@@ -14,7 +14,7 @@ import (
 //
 // # Why this exists now and did not before
 //
-// Until campaigns, every message memQL sent was transactional and carried
+// Until campaigns, every message MemQL sent was transactional and carried
 // exactly the five headers a sender composes for itself. Bulk mail cannot
 // be: RFC 8058 one-click unsubscribe is delivered as TWO HEADERS on the
 // message (`List-Unsubscribe` with an https URI, and

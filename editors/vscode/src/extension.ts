@@ -319,7 +319,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   //
   //   - context.secrets  -- VS Code's SecretStorage, where the LONG-LIVED
   //     refresh token is kept. clusters.yaml is plaintext and owned by the
-  //     memQL Cockpit, so the 30-day credential must not live there; the
+  //     MemQL Cockpit, so the 30-day credential must not live there; the
   //     15-minute access token still does, because the Cockpit reads it too.
   //     See src/connection/credentials.ts for the full split.
   //   - a write-back into clusters.yaml, so a refreshed access token is there
@@ -542,7 +542,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         confirm: (prompt, phrase) =>
           Promise.resolve(
             window.showInputBox({
-              title: 'memQL: confirm',
+              title: 'MemQL: confirm',
               prompt,
               placeHolder: phrase,
               ignoreFocusOut: true,
@@ -873,7 +873,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (state?.status === 'error' && isFirstCredentialPending(state.reason, await ownershipRouteFor(dialing))) {
         void (async () => {
           const choice = await window.showInformationMessage(
-            `memQL: "${displayLabel(dialing)}" is installed and running.`,
+            `MemQL: "${displayLabel(dialing)}" is installed and running.`,
             {
               modal: true,
               detail:
@@ -906,8 +906,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // `canSignIn` and `signInToCluster` read to find the identity service.
         const offer = signInCanRecover(state.reason) && canSignIn(dialing);
         const choice = offer
-          ? await window.showErrorMessage(`memQL: ${state.message}`, 'Sign in')
-          : await window.showErrorMessage(`memQL: ${state.message}`);
+          ? await window.showErrorMessage(`MemQL: ${state.message}`, 'Sign in')
+          : await window.showErrorMessage(`MemQL: ${state.message}`);
         if (choice === 'Sign in') {
           await signInToCluster(dialing, {
             clustersPath,
@@ -949,7 +949,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (route === 'claim') {
         const wizard = setupUrl(target.cluster.issuer);
         const choice = await window.showInformationMessage(
-          `memQL: "${displayLabel(target.cluster)}" has no owner yet. A cluster is claimed by its first sign-in, so there is no account to sign in to -- claim it first.`,
+          `MemQL: "${displayLabel(target.cluster)}" has no owner yet. A cluster is claimed by its first sign-in, so there is no account to sign in to -- claim it first.`,
           'Claim this cluster',
           'Sign in anyway'
         );
@@ -978,7 +978,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // phrase survives only as the id of the command this button invokes.
       if (route === 'enrol') {
         const choice = await window.showInformationMessage(
-          `memQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
+          `MemQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
             'Create the owner passkey if this is your first time on this machine; sign in if you already have one.',
           'Create the owner passkey',
           'Sign in'
@@ -1027,7 +1027,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       let url: string;
       try {
         url = await window.withProgress(
-          { location: ProgressLocation.Notification, title: 'memQL: minting an enrolment link...' },
+          { location: ProgressLocation.Notification, title: 'MemQL: minting an enrolment link...' },
           () =>
             mintOwnershipLink(
               {
@@ -1041,7 +1041,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         );
       } catch (err) {
         const detail = err instanceof OwnershipError ? err.message : String(err);
-        window.showErrorMessage(`memQL: ${detail}`);
+        window.showErrorMessage(`MemQL: ${detail}`);
         return;
       }
       try {
@@ -1054,7 +1054,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         });
       } catch (err) {
         const detail = err instanceof EnrolmentError ? err.message : String(err);
-        window.showErrorMessage(`memQL: ${detail}`);
+        window.showErrorMessage(`MemQL: ${detail}`);
         return;
       }
       // THE REST OF THE WALK, offered rather than assumed (memql#3906).
@@ -1079,7 +1079,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // owns; "take ownership" survives only as this command's id and palette
       // title, which are contributions, not copy.
       const enrolled = await window.showInformationMessage(
-        `memQL: approved the passkey prompt in your browser? Sign in to "${displayLabel(target.cluster)}" to finish.`,
+        `MemQL: approved the passkey prompt in your browser? Sign in to "${displayLabel(target.cluster)}" to finish.`,
         'Sign in'
       );
       if (enrolled !== 'Sign in') return;
@@ -1090,7 +1090,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       });
       if (!signedIn) return;
       const next = await window.showInformationMessage(
-        `memQL: setup is complete -- you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
+        `MemQL: setup is complete -- you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
         'Open portal'
       );
       if (next === 'Open portal') {
@@ -1108,7 +1108,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await signInStore.signOut(target.cluster.name);
       } catch (err) {
         window.showErrorMessage(
-          `memQL: signing out of "${target.cluster.name}" failed: ${err instanceof Error ? err.message : String(err)}`
+          `MemQL: signing out of "${target.cluster.name}" failed: ${err instanceof Error ? err.message : String(err)}`
         );
         return;
       }
@@ -1120,7 +1120,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       clustersTree.refresh();
       window.showInformationMessage(
-        `memQL: signed out of "${target.cluster.name}". Run "memQL: Sign In" to authenticate again.`
+        `MemQL: signed out of "${target.cluster.name}". Run "MemQL: Sign In" to authenticate again.`
       );
     }),
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
@@ -1216,7 +1216,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         });
       } catch (err) {
         window.showErrorMessage(
-          `memQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
+          `MemQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
         );
         return;
       }
@@ -1225,7 +1225,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // must not wait out the memo window (see presence.ts invalidate).
       presence.invalidate();
       clustersTree.refresh();
-      window.showInformationMessage(`memQL: removed "${name}" from the cluster list.`);
+      window.showInformationMessage(`MemQL: removed "${name}" from the cluster list.`);
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -1301,7 +1301,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       const url = portalTarget(target.cluster, page?.rows ?? []).url;
       if (url === '') {
         void window.showErrorMessage(
-          'memQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+          'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
         );
         return;
       }
@@ -1311,12 +1311,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
   // The DELIBERATE device-code sign-in (memql#3411). The fallback fires by
   // itself when the loopback flow proves this host cannot do it -- since
-  // memql#3515 that is actually true of `memQL: Sign In`, where it had been
+  // memql#3515 that is actually true of `MemQL: Sign In`, where it had been
   // documented but unreachable -- but it costs a callback deadline first, so a
   // user who already knows their environment (a container, a hardened network,
   // an SSH session with no browser) can ask for the device code straight away.
   //
-  // Same shell as `memQL: Sign In`, differing only in which grant runs, so this
+  // Same shell as `MemQL: Sign In`, differing only in which grant runs, so this
   // command also refreshes the tree and reconnects the selected cluster. It used
   // to reach a second sign-in implementation that did neither.
   context.subscriptions.push(
@@ -1395,7 +1395,7 @@ function registerRunSurface(
   // referencing constructs -- does not fit in a toast, and the toast is where a
   // developer learns something happened. So both: the headline notifies, the
   // channel keeps the record.
-  const trainingOutput = window.createOutputChannel('memQL Training');
+  const trainingOutput = window.createOutputChannel('MemQL Training');
   context.subscriptions.push(trainingDiagnostics, trainingOutput);
 
   // Assigned once the language client exists (see the client block below).
@@ -1410,7 +1410,7 @@ function registerRunSurface(
   // default explains instead.
   let showTrainingList: () => Promise<void> = async () => {
     window.showInformationMessage(
-      'memQL: training state needs the memQL language server, which is not running. Set "memql.lsp.serverPath" or install memql-lsp on your PATH.'
+      'MemQL: training state needs the MemQL language server, which is not running. Set "memql.lsp.serverPath" or install memql-lsp on your PATH.'
     );
   };
 
@@ -1472,7 +1472,7 @@ function registerRunSurface(
       const override = 'Override and promote...';
       const answer = await window.showWarningMessage(
         refusal?.headline ??
-          'The engine refused this promote. The classified diff is in the memQL Training output.',
+          'The engine refused this promote. The classified diff is in the MemQL Training output.',
         override
       );
       if (answer !== override) return;
@@ -1800,7 +1800,7 @@ function registerRunSurface(
     commands.registerCommand('memql.runs.refresh', () => runsTree.refresh()),
     commands.registerCommand('memql.runs.open', async () => {
       if (workspaceRoot === undefined) {
-        window.showErrorMessage('memQL: run configurations live in the workspace; open a folder first.');
+        window.showErrorMessage('MemQL: run configurations live in the workspace; open a folder first.');
         return;
       }
       // Opens the actual file. The point of the format is that it IS plain
@@ -1855,7 +1855,7 @@ function registerRunSurface(
           removeRunConfig(current, node.config.name)
         );
       } catch (err) {
-        window.showErrorMessage(`memQL: ${err instanceof Error ? err.message : String(err)}`);
+        window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
       runsTree.refresh();
@@ -2342,7 +2342,7 @@ async function constructForConfig(
 ): Promise<{ uri: string; construct: ReturnType<typeof parseRunnableConstructs>[number] } | undefined> {
   if (config.file === undefined || workspaceRoot === undefined) {
     window.showErrorMessage(
-      `memQL: the run configuration "${config.name}" names no file, so there is no buffer to run. Add a "file" pointing at the .memql file that declares ${config.construct}.`
+      `MemQL: the run configuration "${config.name}" names no file, so there is no buffer to run. Add a "file" pointing at the .memql file that declares ${config.construct}.`
     );
     return undefined;
   }
@@ -2352,7 +2352,7 @@ async function constructForConfig(
     document = await workspace.openTextDocument(uri);
   } catch (err) {
     window.showErrorMessage(
-      `memQL: cannot open ${config.file}: ${err instanceof Error ? err.message : String(err)}`
+      `MemQL: cannot open ${config.file}: ${err instanceof Error ? err.message : String(err)}`
     );
     return undefined;
   }
@@ -2369,7 +2369,7 @@ async function constructForConfig(
     });
   } catch (err) {
     window.showErrorMessage(
-      `memQL: the language server could not describe ${config.file}: ${err instanceof Error ? err.message : String(err)}`
+      `MemQL: the language server could not describe ${config.file}: ${err instanceof Error ? err.message : String(err)}`
     );
     return undefined;
   }
@@ -2378,7 +2378,7 @@ async function constructForConfig(
   );
   if (found === undefined) {
     window.showErrorMessage(
-      `memQL: ${config.file} declares no ${config.kind} named ${config.construct}. The construct was renamed, or the file does not currently parse.`
+      `MemQL: ${config.file} declares no ${config.kind} named ${config.construct}. The construct was renamed, or the file does not currently parse.`
     );
     return undefined;
   }
@@ -2455,13 +2455,13 @@ async function openRowInConcepts(
   try {
     list = await query.listConcepts();
   } catch (err) {
-    window.showErrorMessage(`memQL: ${err instanceof Error ? err.message : String(err)}`);
+    window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
   const concept = list.find((c) => c.id === conceptId);
   if (concept === undefined) {
     window.showWarningMessage(
-      `memQL: ${conceptId} is not registered on the connected cluster, so row ${rowId} has no Concepts view.`
+      `MemQL: ${conceptId} is not registered on the connected cluster, so row ${rowId} has no Concepts view.`
     );
     return;
   }
@@ -2484,7 +2484,7 @@ async function writeCluster(
   try {
     await write();
   } catch (err) {
-    window.showErrorMessage(`memQL: ${err instanceof Error ? err.message : String(err)}`);
+    window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
   clustersTree.refresh();
@@ -2497,7 +2497,7 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
   // raw command-error toast for a file the tree was calmly explaining.
   const result = await readClustersFileSafe(clustersPath);
   if (!result.ok) {
-    window.showErrorMessage(`memQL: ${result.error}`);
+    window.showErrorMessage(`MemQL: ${result.error}`);
     return undefined;
   }
   const file = result.file;
@@ -2507,7 +2507,7 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
       description: cluster.endpoint,
       cluster,
     })),
-    { placeHolder: 'Select a memQL cluster' }
+    { placeHolder: 'Select a MemQL cluster' }
   );
   if (picked === undefined) {
     return undefined;
@@ -2561,7 +2561,7 @@ async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute
 // THIS IS THE ONLY SIGN-IN SHELL (memql#3515). There used to be two functions
 // with this name -- this one, and an exported one in auth/deviceCodeUi.ts that
 // ran the loopback-to-device-code fallback. The exported one had ZERO importers:
-// `memQL: Sign In` reached this one, which ran loopback alone, so a host that
+// `MemQL: Sign In` reached this one, which ran loopback alone, so a host that
 // genuinely could not do loopback (Remote-SSH onto a box whose browser is
 // elsewhere, a hardened network) waited out the callback deadline and was then
 // told it had failed, with the code to hand it a device code sitting unreachable
@@ -2598,8 +2598,8 @@ async function signInToCluster(
       location: ProgressLocation.Notification,
       title:
         flow === 'deviceCode'
-          ? `memQL: signing in to ${displayLabel(cluster)} with a device code`
-          : `memQL: signing in to ${displayLabel(cluster)}`,
+          ? `MemQL: signing in to ${displayLabel(cluster)} with a device code`
+          : `MemQL: signing in to ${displayLabel(cluster)}`,
       cancellable: true,
     },
     async (progress, token) => {
@@ -2683,12 +2683,12 @@ async function signInToCluster(
           await connections?.connect(fresh);
           const state = connections?.state;
           if (state?.status === 'error') {
-            void window.showErrorMessage(`memQL: ${state.message}`);
+            void window.showErrorMessage(`MemQL: ${state.message}`);
             return true;
           }
         }
       }
-      void window.showInformationMessage(`memQL: signed in to "${cluster.name}".`);
+      void window.showInformationMessage(`MemQL: signed in to "${cluster.name}".`);
       // The second half of memql#3885's three-state table (memql#3902). Runs
       // here and nowhere earlier because passkey state is only knowable to an
       // AUTHENTICATED caller -- there is deliberately no unauthenticated way to
@@ -2796,7 +2796,7 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
   try {
     const admin = new IdentityAdminClient(dispatcher);
     const minted = await window.withProgress(
-      { location: ProgressLocation.Notification, title: 'memQL: minting an enrolment link...' },
+      { location: ProgressLocation.Notification, title: 'MemQL: minting an enrolment link...' },
       () => admin.issueEnrolmentLink(decision.userId)
     );
     // asExternalUri first, for the reason every other opener in this file does
@@ -2808,7 +2808,7 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
     // LOUD here, unlike the decision above: the operator asked for this one, so
     // silence would leave them waiting for a browser tab that is not coming.
     void window.showErrorMessage(
-      `memQL: could not mint an enrolment link -- ${err instanceof Error ? err.message : String(err)}`
+      `MemQL: could not mint an enrolment link -- ${err instanceof Error ? err.message : String(err)}`
     );
   }
 }
@@ -2856,13 +2856,13 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   //
   // The field is now OPTIONAL IN PRACTICE (memql#3403): the extension can mint
   // its own credential through the browser, so leaving this empty and running
-  // "memQL: Sign In" is the ordinary path rather than a dead end. Saying so
+  // "MemQL: Sign In" is the ordinary path rather than a dead end. Saying so
   // here is the difference between an operator who signs in and one who goes
   // hunting for a token to paste -- the prompt is where they are standing when
   // the question arises.
   const token = await window.showInputBox({
     prompt:
-      'Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. Leave empty and run "memQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
+      'Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. Leave empty and run "MemQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
     value: existing?.token ?? '',
     ignoreFocusOut: true,
     password: true,

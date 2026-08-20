@@ -9,7 +9,7 @@ owner: znas
 
 # Training Constructs Into a Running Cluster
 
-A memQL cluster can be **taught** a construct while it is running. The
+A MemQL cluster can be **taught** a construct while it is running. The
 construct is validated, persisted, registered on every node within seconds,
 and replayed at the next boot. No image build, no rollout, no restart.
 
@@ -216,7 +216,7 @@ Concepts are trainable, and they are the reason the rest of this exists: a
 customer's domain arrives as nouns first, and every other construct kind binds
 to one.
 
-There is **no migration**, ever. Every row in memQL lives in one generic
+There is **no migration**, ever. Every row in MemQL lives in one generic
 hypertable keyed by a `concept TEXT` column, so a new concept is a new *string
 value* in that column. There is no per-concept table to create and no DDL to
 run.
@@ -563,7 +563,7 @@ own checkout because their laptop went to sleep.
 ## Every installation is trained separately
 
 A promoted construct is a row in a database, so it exists in exactly the
-installation whose database it was written to. memQL ships one installation
+installation whose database it was written to. MemQL ships one installation
 shape (epic memql#3943): a second environment is a second install, with its own
 database, and the two are **trained independently**.
 

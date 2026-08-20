@@ -3,7 +3,7 @@
 //
 // # Why this exists (memql#3998)
 //
-// Before this package a memQL node had no honest answer to "which version are
+// Before this package a MemQL node had no honest answer to "which version are
 // you?", and the dishonesty had two halves that reinforced each other:
 //
 //   - ServerHello.version was the literal "v1". That is the WIRE PROTOCOL

@@ -207,7 +207,7 @@ func runPATRevoke(args []string) int {
 
 // bootstrapPATEngine builds the app, applies the local .env overlay, and starts
 // the dependencies up to AND INCLUDING the engine (config -> database ->
-// memQLEngine), then STOPS -- it does NOT start the identity service,
+// MemQLEngine), then STOPS -- it does NOT start the identity service,
 // automations, or the transport servers that come after the engine in the
 // bootstrap order. Returns the started deps, the engine, the CLI logger, and a
 // zero exit code on success.
@@ -244,7 +244,7 @@ func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine,
 }
 
 // depsUpToEngine returns the prefix of the bootstrap dependency list up to AND
-// INCLUDING the memQLEngine (config -> database -> engine + the supporting
+// INCLUDING the MemQLEngine (config -> database -> engine + the supporting
 // components ordered before it), plus whether the engine was found. pat mint
 // starts ONLY these -- it must NOT start the identity service / automations /
 // transport servers that follow the engine in the order (#686), since the

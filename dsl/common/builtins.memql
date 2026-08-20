@@ -498,11 +498,11 @@ builtin embedDomainItems {
 // builtinServiceVersion - Service Version
 // ==========================================
 //
-// Returns the current memQL service version.
+// Returns the current MemQL service version.
 
 @executor("serviceVersion")
 @alias("memqlVersion")
-@description("Returns the current memQL service version.")
+@description("Returns the current MemQL service version.")
 builtin serviceVersion {
 }
 

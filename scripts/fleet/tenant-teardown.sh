@@ -42,7 +42,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "fleet.tenantTeardown" "Destroy a memQL tenant after taking a final backup. Irreversible."
+cap_init "fleet.tenantTeardown" "Destroy a MemQL tenant after taking a final backup. Irreversible."
 cap_spec_param_required "tenant"  "tenant slug -- its namespace and its ArgoCD Application name"
 cap_spec_param_required "confirm" "the exact phrase 'teardown <tenant>'"
 cap_spec_param "skipBackup"       "skip the final backup (only for a tenant that never provisioned)"

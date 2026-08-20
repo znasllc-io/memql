@@ -167,7 +167,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	// model-driven tools (FetchToolDefinitions returns nil) -- privileged tools
 	// were never exposed anyway, so this is a safe degradation.
 	//
-	// #1429: the memQL ListTools round-trip (engine agent-tool-scope query on a
+	// #1429: the MemQL ListTools round-trip (engine agent-tool-scope query on a
 	// slow DB) used to SERIALIZE with the OpenAI websocket dial. The two legs
 	// are independent: fetch concurrently, dial with the tools-less base
 	// config, then apply the tools via session.UpdateSession before the bridge
@@ -178,7 +178,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	go func() {
 		toolFetchStart := time.Now()
 		defs := FetchToolDefinitions(ctx, client, logger)
-		// Setup phase (#1426): memQL round-trip (ListTools -> agent tool-scope
+		// Setup phase (#1426): MemQL round-trip (ListTools -> agent tool-scope
 		// engine queries server-side), now overlapped with the realtime dial.
 		logVoiceTiming(logger, "setup.fetch_tools", toolFetchStart,
 			"partition_id", req.PartitionID, "tool_count", len(defs))
@@ -616,7 +616,7 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 	b.mu.Unlock()
 
 	// Register the participant on the roster for labeled-transcript
-	// attribution (#433 section 3). Display name + role resolution from memQL
+	// attribution (#433 section 3). Display name + role resolution from MemQL
 	// is a follow-up; the identity is the stable key in the interim.
 	b.executor.SetParticipant(identity, rp.Name(), "")
 	// Seed the active speaker from the LiveKit identity. With labeled ASR off the

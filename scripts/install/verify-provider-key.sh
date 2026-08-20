@@ -187,18 +187,18 @@ function classify_and_finish() {
         400)
             # A 400 IS OUR FAULT, NOT THE KEY'S (memql#3549). The provider
             # understood the request well enough to say it was malformed, which
-            # is a statement about what memQL sent -- the headers it composed,
+            # is a statement about what MemQL sent -- the headers it composed,
             # the version it asserted -- and says nothing whatever about the
             # credential. Reporting it as "the key could not be verified" points
             # the operator at the one thing that is not wrong, and exit 5 invites
             # a retry that cannot behave differently.
             #
             # Exit 2 is the honest code: the wizard renders it as "a fault in
-            # memQL rather than in your machine or your answers", which is
+            # MemQL rather than in your machine or your answers", which is
             # exactly what a 400 here is.
             cap_result_set_raw valid false
             cap_result_set     detail "${provider} refused the request as malformed (HTTP 400): ${body_note}"
-            cap_fail 2 "${provider} refused the request as malformed (HTTP 400), which is a fault in memQL and not in your key: ${body_note}"
+            cap_fail 2 "${provider} refused the request as malformed (HTTP 400), which is a fault in MemQL and not in your key: ${body_note}"
             ;;
         *)
             cap_result_set_raw valid false

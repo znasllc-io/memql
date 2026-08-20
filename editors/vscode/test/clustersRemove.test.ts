@@ -1,6 +1,6 @@
 // Removing a cluster from clusters.yaml.
 //
-// The file is SHARED with the memQL Cockpit, so removal inherits the same two
+// The file is SHARED with the MemQL Cockpit, so removal inherits the same two
 // properties every other write here has: an operator's comments survive, and a
 // key a newer cockpit wrote on an entry this version does not model survives on
 // the entries that REMAIN. A parse-and-reserialize removal would satisfy the

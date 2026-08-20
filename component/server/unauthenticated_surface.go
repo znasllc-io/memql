@@ -114,7 +114,7 @@ func HandlerAuthorizedPaths() []string {
 	// certification that is unqualified where a shipped configuration
 	// contradicts it is worse than none.
 	//
-	// The credential is a per-source shared secret rather than a memQL
+	// The credential is a per-source shared secret rather than a MemQL
 	// identity, which is why this cannot be an ordinary authenticated route:
 	// the caller is a third party and has no user.
 	paths = append(paths, InboundWebhookPaths()...)
@@ -136,7 +136,7 @@ func HandlerAuthorizedPaths() []string {
 	// membership means here, so this deliberately does NOT go in
 	// PublicPaths() (which would admit every bearer, not just a
 	// service-account one) and NOT in SelfAuthenticatedPaths() either
-	// (the credential IS a memQL identity, just a narrower class of one,
+	// (the credential IS a MemQL identity, just a narrower class of one,
 	// so there is no third-party-HMAC reason to make the bearer verifier
 	// step aside).
 	//
@@ -166,7 +166,7 @@ func HandlerAuthorizedPaths() []string {
 
 // SelfAuthenticatedPaths returns routes that must remain reachable on a
 // verifier-consuming node because they authenticate themselves with a
-// credential that is NOT a memQL identity (memql#3062).
+// credential that is NOT a MemQL identity (memql#3062).
 //
 // This is the third tier, and it exists because the first two cannot express
 // this route:
@@ -196,7 +196,7 @@ func SelfAuthenticatedPaths() []string {
 	// AssertSelfAuthenticatedRoutesFailClosed.
 	//
 	// GET+POST /unsubscribe -- the mail client that POSTs here holds no
-	// memQL credential and never will, so the verifier has to step aside
+	// MemQL credential and never will, so the verifier has to step aside
 	// for the same reason it does for a third-party webhook. The
 	// authorization is the HMAC-signed token: it is verified before any
 	// row is read, and the identity the handler then impersonates comes

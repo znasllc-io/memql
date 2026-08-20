@@ -258,7 +258,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  *
  *   NO USABLE KEY PATH -- the run cannot pass wave 2 (`providerKey` gates every
  *   mutating step), and the failure it would produce is exit 2, whose guidance
- *   reads "a fault in memQL rather than in your machine". Say the true thing
+ *   reads "a fault in MemQL rather than in your machine". Say the true thing
  *   before anything runs. `--provider-key-file` still supplies it, because a
  *   path the receipt never carried is not a value the receipt is overriding.
  */

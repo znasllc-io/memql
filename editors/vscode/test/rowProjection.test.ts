@@ -2,7 +2,7 @@
 //
 // flattenForList lifts payload fields to the top level for the row-list
 // display card. The one correctness rule that matters is that a payload
-// field can never shadow a row intrinsic of the same name -- memQL concepts
+// field can never shadow a row intrinsic of the same name -- MemQL concepts
 // routinely carry payload fields, so a payload `id` (or `createdAt`,
 // `type`, `concept`, ...) colliding with the intrinsic is reachable, and a
 // payload value winning there breaks the row's data-row-id, so clicking it

@@ -1,8 +1,8 @@
-// fleet domain -- the memQL Cloud control plane, as ordinary graph state
+// fleet domain -- the MemQL Cloud control plane, as ordinary graph state
 // (epic memql#3852, task memql#3853).
 //
-// WHY THIS IS A BUNDLE AND NOT ENGINE CODE. memQL Cloud is a PRODUCT built on
-// memQL; the engine underneath it is product-neutral by doctrine
+// WHY THIS IS A BUNDLE AND NOT ENGINE CODE. MemQL Cloud is a PRODUCT built on
+// MemQL; the engine underneath it is product-neutral by doctrine
 // (docs/internal/design/platform-consolidation.md). So the control plane's
 // state lives here, in a data-only DSL bundle mounted at MEMQL_DSL_PATH on an
 // otherwise-plain engine mesh -- the same delivery any customer's product uses.
@@ -15,7 +15,7 @@
 // lifecycle capability scripts (scripts/fleet/) and the `tenant` kustomize
 // component. Those provision A MEMQL INSTANCE -- they take a tenant name, a
 // tier and a domain, and render an ArgoCD Application. They know nothing about
-// subscriptions, money, or trials. Any operator running memQL for anyone would
+// subscriptions, money, or trials. Any operator running MemQL for anyone would
 // want them; that is what makes them platform rather than product.
 //
 // FIVE CONCEPTS. They answer the four questions a subscription business has to
@@ -25,7 +25,7 @@
 //   subscriber    WHO      the paying account (one per customer org)
 //   subscription  WHAT     the plan they bought, and its billing state
 //   tierSpec      WHAT     the catalog row: what a tier costs and includes
-//   instance      RUNNING  one provisioned memQL deployment
+//   instance      RUNNING  one provisioned MemQL deployment
 //   usageMeter    USED     one (subscription, period, metric) accumulator
 //
 // PER-ROW AUTHZ. Four tiers are in play and the split is deliberate:
@@ -67,7 +67,7 @@ use identity.concepts.{ user }
 //   subscriber -- WHO
 // =============================================================================
 
-/// A paying account on memQL Cloud: one customer organisation, one Stripe customer, one billing
+/// A paying account on MemQL Cloud: one customer organisation, one Stripe customer, one billing
 /// relationship. Created at signup, before any money moves and before any instance exists, so that
 /// a checkout that never completes leaves a subscriber with no subscription rather than a dangling
 /// half-record. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write.
@@ -87,7 +87,7 @@ concept subscriber {
 //   tierSpec -- the price list
 // =============================================================================
 
-/// One row of the memQL Cloud price list: what a tier costs, what it includes, and what shape of
+/// One row of the MemQL Cloud price list: what a tier costs, what it includes, and what shape of
 /// infrastructure it provisions. PUBLIC by design -- the pricing page reads it without
 /// authenticating, which is what a price list is for, and it carries no customer data.
 ///
@@ -152,7 +152,7 @@ concept subscription {
 //   instance -- what is RUNNING
 // =============================================================================
 
-/// One provisioned memQL deployment belonging to one subscription: its namespace, its domain, its
+/// One provisioned MemQL deployment belonging to one subscription: its namespace, its domain, its
 /// tier-derived shape, and where it is in its lifecycle. This is the row Orbit's dashboard renders
 /// and the row the provisioning capability scripts report back into. Per-row authz: owned.
 ///

@@ -199,7 +199,7 @@ func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, den
 // "id" top-level; we flatten into one map per row carrying both.
 //
 // The call is composed by buildNamedCall rather than by fmt's %q (memql#3611).
-// %q is Go's escape grammar, not the memQL lexer's: it emits \x00, \a, \v and
+// %q is Go's escape grammar, not the MemQL lexer's: it emits \x00, \a, \v and
 // \xNN, and readString implements the JSON escapes and rejects every one of
 // them, so one such byte in an interpolated value makes the whole statement
 // unparseable. The correlationKey is a SHA-256 hex digest and could never

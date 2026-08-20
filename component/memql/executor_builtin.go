@@ -132,7 +132,7 @@ func (e *MemQLEngine) evaluateServiceVersionExpression(ctx context.Context) ([]m
 	}
 
 	schemaBytes, err := json.Marshal(map[string]any{
-		"description": "Current memQL service version.",
+		"description": "Current MemQL service version.",
 	})
 	if err != nil {
 		return nil, err

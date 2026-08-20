@@ -1608,7 +1608,7 @@ func (*PromptDecl) node() {}
 // / memql#2328, epic #2322):
 //
 //	use capabilities.shell.{ script }
-//	@description("Check out the memQL repo at a specific version.")
+//	@description("Check out the MemQL repo at a specific version.")
 //	action cloneRepoAtVersion {
 //	  args { workdir string @required; ref string @required }
 //	  capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)

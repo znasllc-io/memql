@@ -30,7 +30,7 @@ spec:
     # session GUCs, advisory locks, LISTEN/NOTIFY and temp tables do not survive
     # between transactions.
     #
-    # memQL holds session state that matters in the migrations, which take
+    # MemQL holds session state that matters in the migrations, which take
     # advisory locks: an advisory lock acquired in one transaction and released
     # in another is, on a transaction-pooled connection, released by whoever
     # happens to hold that backend next. Migrations must go through

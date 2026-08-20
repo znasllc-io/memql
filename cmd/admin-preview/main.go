@@ -2,7 +2,7 @@
 // still serves, with representative mock data, into /tmp/admin-preview/.
 //
 // It previews far less than it used to. The admin console's pages moved into
-// the memQL portal in memql#3324, and a React page is previewed by RUNNING the
+// the MemQL portal in memql#3324, and a React page is previewed by RUNNING the
 // portal -- `make portal-install && npm run dev` in clients/portal -- rather
 // than by rendering a template into a file. What is left here is the identity
 // service's own web surface: the public sign-in flow and the admin sign-in
@@ -58,7 +58,7 @@ func main() {
 
 	// Mirrors adminNav in component/identity/admin/server.go, which is now
 	// EMPTY: the dashboard, users, tokens, audit, JWKS and settings pages moved
-	// into the memQL portal in memql#3324 and Deployments followed in
+	// into the MemQL portal in memql#3324 and Deployments followed in
 	// memql#3380. Their previews went with them -- a React page is previewed by
 	// running the portal, not by rendering templ into a file.
 	var nav []webtempl.NavLink

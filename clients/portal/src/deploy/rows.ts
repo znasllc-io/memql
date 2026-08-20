@@ -25,7 +25,7 @@ import type { ConceptLike, RowLike } from "@znasllc-io/memql-view-kit";
 //
 // THE DESCRIPTORS ARE NOT CONCEPTS, and their ids say so: `deploy.gateLeg`,
 // not `v1:deploy:gateLeg`. Nothing in the DSL declares these, no query
-// returns them, and an id in memQL's `{version}:{domain}:{entity}` grammar
+// returns them, and an id in MemQL's `{version}:{domain}:{entity}` grammar
 // would be a claim that one does.
 //
 // This module lives OUTSIDE src/views/ deliberately. Reshaping data is not

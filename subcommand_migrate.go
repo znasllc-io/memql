@@ -90,7 +90,7 @@ func runMigrateSubcommand(args []string) int {
 
 const migrateUsage = `usage: memql migrate
 
-Apply pending memQL DB migrations and exit (gated pre-deploy step, memql#553).
+Apply pending MemQL DB migrations and exit (gated pre-deploy step, memql#553).
 
 Requires the database environment (MEMQL_DATABASE_DSN and
 MEMORY_NODES_DATABASE_MIGRATE_ON_START=true). Idempotent: a no-op when the

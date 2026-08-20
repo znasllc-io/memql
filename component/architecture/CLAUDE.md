@@ -1,6 +1,6 @@
 # Architecture Framework
 
-**Purpose:** Auto-generate the architecture model (UML / C4 diagrams) from the live Go source. Static map of the workspace; consumed by memQL Cockpit's Topology drill-down navigator and by anything else that wants to talk about the system in software-engineering terms.
+**Purpose:** Auto-generate the architecture model (UML / C4 diagrams) from the live Go source. Static map of the workspace; consumed by MemQL Cockpit's Topology drill-down navigator and by anything else that wants to talk about the system in software-engineering terms.
 
 **Language:** Go (stdlib + `golang.org/x/tools`, no third-party renderers)
 
@@ -12,7 +12,7 @@
 
 ## Why this exists
 
-memQL Cockpit's Topology pane needs to show the user "what's in this system" at every level of zoom -- cluster, service, package, type, method. Hand-maintained diagrams drift; commercial diagram tools couple us to a renderer. The team-Go-team toolchain (`go/ast`, `go/types`, `golang.org/x/tools/go/packages`, `.../callgraph`) can give us everything we need from the source alone. This package is that pipeline: source -> typed graph -> on-disk JSON -> embedded asset -> cockpit drill-down.
+MemQL Cockpit's Topology pane needs to show the user "what's in this system" at every level of zoom -- cluster, service, package, type, method. Hand-maintained diagrams drift; commercial diagram tools couple us to a renderer. The team-Go-team toolchain (`go/ast`, `go/types`, `golang.org/x/tools/go/packages`, `.../callgraph`) can give us everything we need from the source alone. This package is that pipeline: source -> typed graph -> on-disk JSON -> embedded asset -> cockpit drill-down.
 
 The framework is intentionally **build-time**, not runtime. The model is a property of a commit, not of a running process. That matches what users expect when they look at a diagram ("this is the code as it is now") and gives the model the same versioning guarantee as any other source file.
 

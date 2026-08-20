@@ -412,7 +412,7 @@ function device_sign_in() {
 # write_cluster_entries calls the EXTENSION'S OWN writer (src/clusters/file.ts)
 # rather than dumping YAML.
 #
-# clusters.yaml is shared with the memQL Cockpit, and the checklist has an item
+# clusters.yaml is shared with the MemQL Cockpit, and the checklist has an item
 # for exactly this: "comments and unknown fields already in clusters.yaml
 # survive a write". A pyyaml round-trip drops every comment in the file. Using
 # the writer that has to satisfy that item is both safer and one more place it

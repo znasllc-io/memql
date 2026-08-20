@@ -15,7 +15,7 @@ import (
 
 // Drift guard over the VS Code activity-bar icon (znasllc-io/memql#3342).
 //
-// THE DEFECT. The activity-bar glyph was not the memQL mark. It was a
+// THE DEFECT. The activity-bar glyph was not the MemQL mark. It was a
 // hand-drawn 4-node diamond, while the brand logo shipped alongside it
 // (icons/memql.png, used for the .memql file icon in the Explorer) is a 9-node
 // polyhedral graph with a pendant node. Side by side in the same window the
@@ -135,7 +135,7 @@ func TestActivityIconIsTheBrandMark(t *testing.T) {
 	if len(icon) != len(logo) {
 		t.Fatalf("the activity-bar icon has %d nodes but the brand logo "+
 			"(icons/memql.png) has %d.\n"+
-			"The activity glyph must BE the memQL mark, not an approximation of "+
+			"The activity glyph must BE the MemQL mark, not an approximation of "+
 			"it: the two render side by side -- the glyph in the activity bar, the "+
 			"logo on every .memql file in the Explorer -- and a simplified glyph "+
 			"reads as a broken or cropped logo (#3342).", len(icon), len(logo))

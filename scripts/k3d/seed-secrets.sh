@@ -76,7 +76,7 @@ cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-do
 cap_spec_param "caroot"    "mkcert CAROOT the front-door pair is issued from, passed through to install.mkcert (default: whatever mkcert reports)"
 cap_spec_param "allow-missing-certutil" "proceed without browser (NSS) trust on Linux, passed through to install.mkcert (flag)"
 cap_spec_param "mkcert-setup" "path to the install.mkcert capability that decides reuse vs reissue (default: alongside this script)"
-cap_spec_param "repo-root"      "the memQL checkout to read deploy/ from (default: this script's own repository)"
+cap_spec_param "repo-root"      "the MemQL checkout to read deploy/ from (default: this script's own repository)"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
@@ -884,7 +884,7 @@ function seed_internal_ca() {
         # with or without a backend), and the install ran three more steps
         # before anything noticed. A skip whose documented consequence is a
         # cluster that can never start is not a skip.
-        cap_fail 4 "the internal CA generator is not at ${gen}, so identity-tls and memql-ca cannot be created -- and every node that mounts memql-ca would stall in ContainerCreating forever. Point --repo-root at a memQL checkout (the installer's is ~/.memql/src)."
+        cap_fail 4 "the internal CA generator is not at ${gen}, so identity-tls and memql-ca cannot be created -- and every node that mounts memql-ca would stall in ContainerCreating forever. Point --repo-root at a MemQL checkout (the installer's is ~/.memql/src)."
     fi
     # Already present? Leave them be (preserves a manually-rotated CA).
     if kubectl get secret memql-ca identity-tls -n "$NAMESPACE" &>/dev/null; then
@@ -1205,7 +1205,7 @@ function main() {
     gate_voice_lane
     seed_telephony_secrets
 
-    info "All local secrets seeded. The k3d cluster can now start the memQL stack."
+    info "All local secrets seeded. The k3d cluster can now start the MemQL stack."
     info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"
 
     cap_changed

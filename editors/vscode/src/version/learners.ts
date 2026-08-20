@@ -131,7 +131,7 @@ export function decideVersionWrite(
   }
   if (chosen.value === (recorded ?? "").trim()) {
     // Not an optimisation. Every write is a read-modify-write of a file the
-    // memQL Cockpit also writes, so a no-op write is a real chance to lose a
+    // MemQL Cockpit also writes, so a no-op write is a real chance to lose a
     // concurrent edit in exchange for nothing.
     return { write: false, reason: `already recorded as ${chosen.value}` };
   }

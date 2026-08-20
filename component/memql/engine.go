@@ -195,7 +195,7 @@ type LogicRunner interface {
 	RunLogic(ctx context.Context, fnName string, body *languageParser.AutomationDef, args map[string]any) (any, error)
 }
 
-const ComponentName = common.ComponentName("memQLEngine")
+const ComponentName = common.ComponentName("MemQLEngine")
 
 // New constructs a MemQLEngine instance backed by the default implementation.
 func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {

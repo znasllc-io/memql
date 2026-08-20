@@ -1,7 +1,7 @@
 // The instance and run model: what an operator deploys to, and what changed it.
 //
 // The Deployments view has two levels and this file is both of them. An
-// INSTANCE is a memQL you operate -- the local cluster on this machine, or a
+// INSTANCE is a MemQL you operate -- the local cluster on this machine, or a
 // remote one you can reach. A RUN is something that moved an instance's
 // deployed state. Everything the tree, the instance page and the action
 // catalog read comes from here.
@@ -57,7 +57,7 @@ export const LOCAL_INSTANCE_NAME = "local";
 export type InstanceKind = "local" | "remote";
 
 /**
- * A memQL an operator deploys to.
+ * A MemQL an operator deploys to.
  *
  * `presence` is the same three-valued verdict clusters/presence.ts produces for
  * the local machine, reused for remote instances by way of `remotePresence`.
@@ -138,7 +138,7 @@ export type RunStatus =
  *
  * The six states are the install executor's, carried over whole. `preserved`
  * is the one that cannot be folded into either success or failure: it means the
- * uninstall KEPT something because the operator already had it before memQL
+ * uninstall KEPT something because the operator already had it before MemQL
  * ever ran -- a k3d cluster, a mkcert CA, a checkout. Rounding it to "ok" tells
  * the operator the artifact is gone when it is still there; rounding it to
  * "skipped" loses the reason. The two-tier model that stops an uninstall

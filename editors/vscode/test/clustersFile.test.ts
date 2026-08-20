@@ -1,6 +1,6 @@
 // clusters.yaml round-trip tests.
 //
-// The file is SHARED with the memQL Cockpit. Two properties matter more than
+// The file is SHARED with the MemQL Cockpit. Two properties matter more than
 // anything else here: an unknown key written by a newer cockpit must survive a
 // write from this extension, and the operator's comments must not be stripped.
 // Both are silent data loss if they regress.

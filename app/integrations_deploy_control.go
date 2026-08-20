@@ -10,7 +10,7 @@ import (
 )
 
 // setupDeployControlService stands up the DeployControlService gRPC
-// surface behind the memQL Deployment Console (znasllc-io/memql#725 +
+// surface behind the MemQL Deployment Console (znasllc-io/memql#725 +
 // #728). It lives on the identity node because the identity binary
 // hosts the admin portal; the same audit logger that backs the rest
 // of the identity service backs the console's write-action audit

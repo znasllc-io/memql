@@ -2529,7 +2529,7 @@ global identity is the full **import path** plus the name —
 only a file-local qualifier, which is exactly why two packages may both be named
 `tools` and why collisions inside one file are fixed by aliasing the import.
 
-memQL follows that. A namespace is the whole directory path, so a concept
+MemQL follows that. A namespace is the whole directory path, so a concept
 declared in `dsl/agents/tools/` assembles as:
 
 ```

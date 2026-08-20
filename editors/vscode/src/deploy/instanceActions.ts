@@ -93,7 +93,7 @@ export interface InstanceAction {
 const CREATE_LOCAL_ABSENT: InstanceAction = {
   id: "createDeployment",
   label: "Create deployment",
-  detail: "Install a local memQL cluster on this machine.",
+  detail: "Install a local MemQL cluster on this machine.",
   flow: "installGraph",
 };
 

@@ -2,7 +2,7 @@ package steps
 
 // Expression-evaluator conformance matrix (memql#593).
 //
-// memQL evaluates DSL value-expressions with TWO engines depending on where
+// MemQL evaluates DSL value-expressions with TWO engines depending on where
 // the expression appears: ARG-TIME (mutation/function step args ->
 // MutationExecutor.evaluateValue) and LOGIC-TIME (logic-body RHS / return ->
 // the LogicRunner's local-leaf entry automations.EvaluateLocalExpr). Same

@@ -1,5 +1,5 @@
 // Package annotations is the single physical source of truth for the
-// memQL construct-annotation surface: which annotations each receiver
+// MemQL construct-annotation surface: which annotations each receiver
 // kind accepts (ByReceiver) and the one-line doc for each annotation
 // (Docs).
 //

@@ -14,7 +14,7 @@ owner: znas
 **Status:** accepted — validated by spike [#2473](https://github.com/znasllc-io/memql/issues/2473) (2026-07-08) · **Epic:** [#2472](https://github.com/znasllc-io/memql/issues/2472) · **Issue:** [#2474](https://github.com/znasllc-io/memql/issues/2474)
 
 This ADR records the target architecture the owner decided on 2026-07-08 to
-collapse the per-product complexity of the memQL ecosystem. The load-bearing
+collapse the per-product complexity of the MemQL ecosystem. The load-bearing
 assumption — that a mesh node with **no compiled-in product DSL**, loading it at
 boot from `MEMQL_DSL_PATH`, routes and runs a turn identically to a
 statically-linked node — was **validated by spike #2473** on the live local
@@ -212,7 +212,7 @@ The decisions and their rejected alternatives live in
 This section records what they mean for the repo topology this ADR governs, and
 does not restate their arguments.
 
-### Isolation is the cluster: one memQL cluster per customer
+### Isolation is the cluster: one MemQL cluster per customer
 
 A customer gets their own cluster, one domain, and as many sites, apps and
 products as they want inside it. Not a shared cluster with account-scoped rows.

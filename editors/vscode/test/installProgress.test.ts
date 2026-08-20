@@ -175,7 +175,7 @@ test("exit 0 is explained, because it is how most real failures arrive", () => {
   // hold -- "an exit code of 0 is a precondition and nothing more". All 13
   // install steps verify a result field, so this is the common path, not an
   // edge case. It previously fell to the default branch and told the operator
-  // memQL "cannot say what it means" about the case it understands best.
+  // MemQL "cannot say what it means" about the case it understands best.
   const g = failureGuidance(0);
   assert.match(g.headline, /ran without error|not in the state/i);
   assert.ok(!/cannot say/i.test(g.advice), "exit 0 still reaching the unknown-code branch");
@@ -192,11 +192,11 @@ test("exit 1 is explained as the catch-all, not as unknown", () => {
 });
 
 
-test("a bad parameter is named as memQL's fault, not the operator's", () => {
+test("a bad parameter is named as MemQL's fault, not the operator's", () => {
   // Exit 2 means the installer passed something wrong. Telling the operator to
   // check their answers would send them to fix something they did not break.
   const g = failureGuidance(2);
-  assert.match(g.advice, /fault in memQL/i);
+  assert.match(g.advice, /fault in MemQL/i);
   assert.equal(g.retryable, false);
 });
 
@@ -246,13 +246,13 @@ test("a run with no steps yet is NOT settled", () => {
 });
 
 // ---------------------------------------------------------------------------
-// the codes memQL synthesises for itself (memql#3474 review)
+// the codes MemQL synthesises for itself (memql#3474 review)
 // ---------------------------------------------------------------------------
 
 test("a timed-out step is explained, not disclaimed", () => {
   // 124 is OURS: runner.ts kills a step that outruns its timeout and reports
-  // 124/SIGKILL. Letting it fall to the default branch had memQL say it
-  // "cannot say what it means" about a code memQL assigned itself -- to an
+  // 124/SIGKILL. Letting it fall to the default branch had MemQL say it
+  // "cannot say what it means" about a code MemQL assigned itself -- to an
   // operator whose install just stopped dead after ten minutes.
   const g = failureGuidance(124);
   assert.match(g.headline, /ran out of time|stopped/i);
@@ -265,7 +265,7 @@ test("a step that could not be started is named as an installer fault", () => {
   // That is a broken package, not a broken machine, and retrying cannot help.
   const g = failureGuidance(127);
   assert.ok(!/cannot say/i.test(g.advice), "127 still reaching the unknown-code branch");
-  assert.match(g.advice, /fault in this memQL build|memQL build/i);
+  assert.match(g.advice, /fault in this MemQL build|MemQL build/i);
   assert.equal(g.retryable, false);
 });
 
@@ -273,8 +273,8 @@ test("every code the installer can produce is claimed -- derived, not listed", (
   // THE SET IS DERIVED. Both halves of this used to be a hand-written array,
   // which asserts that the array is complete rather than that the function is:
   // a code added to the contract, or a fourth one synthesised by runner.ts,
-  // would keep the test green while an operator read "memQL cannot say what it
-  // means" about a number memQL had chosen.
+  // would keep the test green while an operator read "MemQL cannot say what it
+  // means" about a number MemQL had chosen.
   //
   // Two sources, because there are two: the capability contract's own table
   // (parsed from the document that defines it) and runner.ts's own constants.

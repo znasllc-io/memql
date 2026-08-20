@@ -1,5 +1,5 @@
 ---
-title: memQL Roadmap
+title: MemQL Roadmap
 audience: internal
 status: draft
 area: planning
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL Roadmap
+# MemQL Roadmap
 
 Future-work tracker. Items here are deliberately deferred to keep landed
 work shippable -- not "we'll never do this." Update entries as scope gets

@@ -22,7 +22,7 @@
 # the default distroless `runtime` for CGO-free nodes and `voice-runtime`
 # (debian + libopus) for voice, which needs CGO for LibOpus.
 #
-# PORTAL_DIST_STAGE selects where the runtime copies the memQL Portal bundle
+# PORTAL_DIST_STAGE selects where the runtime copies the MemQL Portal bundle
 # from (memql#3314). Only the edge serves the portal (memql#3711 -- the
 # portal is site #1, bundleRef file:///app/portal, resolved and served the
 # same way as any other hosted site's bundle; component/portal, which used

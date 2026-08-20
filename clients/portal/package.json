@@ -2,7 +2,7 @@
   "name": "@znasllc-io/memql-portal",
   "version": "0.1.0",
   "private": true,
-  "description": "memQL Portal -- the platform's own graphical operations console. An APPLICATION, not a library: it is never published to a registry (hence \"private\": true and no publishConfig), unlike sdk/ts and sdk/ts-viewkit which are consumed outside this repo.",
+  "description": "MemQL Portal -- the platform's own graphical operations console. An APPLICATION, not a library: it is never published to a registry (hence \"private\": true and no publishConfig), unlike sdk/ts and sdk/ts-viewkit which are consumed outside this repo.",
   "type": "module",
   "scripts": {
     "dev": "vite",

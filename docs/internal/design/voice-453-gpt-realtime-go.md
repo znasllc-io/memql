@@ -91,7 +91,7 @@ posture the Python executor used?** That posture, established by the
 merged spike #432 and implemented in the Python realtime executor, was:
 
 - `turn_detection = None` -- the model never runs input VAD, never
-  commits the input buffer, never self-triggers a response. memQL's
+  commits the input buffer, never self-triggers a response. MemQL's
   conductor is the sole driver (#432 section 2.2, option A).
 - Explicit `response.create` per conductor "engage" decision, with a
   per-response `instructions` string carrying the directive.
@@ -152,7 +152,7 @@ This is incremental work over a proven base, not a new integration.
 The Realtime protocol is ~20 event types over a single JSON websocket.
 A hand-rolled client lets us:
 
-- Map server events **directly** onto the memQL voice gRPC contract
+- Map server events **directly** onto the MemQL voice gRPC contract
   (`VoiceAgentRealtimeRespond` / `Cancel` / `Output` already exist;
   see #432 section 4 and `component/grpc/voice_agent_handlers.go`).
 - Keep `turn_detection: null` and the single-`response.create`-emitter
@@ -238,7 +238,7 @@ upsampled to 24 kHz PCM16 exactly as `asr.go` does today via
 ```
 
 Under `turn_detection: null` the buffer is **never auto-committed**.
-memQL commits it explicitly, driven from Deepgram finals (the parallel
+MemQL commits it explicitly, driven from Deepgram finals (the parallel
 STT that the conductor already consumes -- #432 section 2.5):
 
 ```jsonc

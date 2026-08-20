@@ -3,7 +3,7 @@
 # scripts/release/tag-submodules.sh
 # =================================
 #
-# Cut the Go module tags for memQL's nested modules (memql#3245, epic
+# Cut the Go module tags for MemQL's nested modules (memql#3245, epic
 # memql#3228).
 #
 # A nested module is only fetchable by an external consumer if a tag exists at
@@ -277,7 +277,7 @@ main() {
 		return 2
 	fi
 
-	echo "memQL submodule tags"
+	echo "MemQL submodule tags"
 	echo "  version : v$version"
 	echo "  line    : $line (${#mods[@]} modules)"
 	echo "  commit  : $commit ($(git rev-parse --short "$commit"))"

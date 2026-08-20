@@ -7,7 +7,7 @@
 // The defect this file exists for was not a wrong answer -- every function
 // involved was correct and tested. `src/auth/deviceCodeUi.ts` exported a
 // sign-in that falls back to the device grant when the host cannot do loopback,
-// and NOTHING IMPORTED IT. What `memQL: Sign In` actually ran was a second
+// and NOTHING IMPORTED IT. What `MemQL: Sign In` actually ran was a second
 // function of the same name, private to `src/extension.ts`, that ran loopback
 // alone. A host that genuinely cannot open a browser sat out the callback
 // deadline and was told it failed, with the code to hand it a device code

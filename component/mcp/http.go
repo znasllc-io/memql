@@ -2,7 +2,7 @@ package mcp
 
 // http.go is the MCP Streamable HTTP transport head -- the remote path that
 // lets Claude Code (`claude mcp add --transport http <url>`) and other MCP
-// hosts reach a hosted memQL deployment over the network, as opposed to the
+// hosts reach a hosted MemQL deployment over the network, as opposed to the
 // local-subprocess stdio path in stdio.go (memql#1550).
 //
 // It implements the spec's single-endpoint Streamable HTTP binding over the
@@ -254,7 +254,7 @@ func (h *httpHead) handleProtectedResource(w http.ResponseWriter, r *http.Reques
 	doc := protectedResourceMetadata{
 		Resource:               resource,
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "memQL MCP",
+		ResourceName:           "MemQL MCP",
 	}
 	if h.authServerURL != "" {
 		doc.AuthorizationServers = []string{h.authServerURL}

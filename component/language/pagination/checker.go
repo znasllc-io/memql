@@ -1,4 +1,4 @@
-// Package pagination is the single source of truth for memQL's
+// Package pagination is the single source of truth for MemQL's
 // pagination authoring rule (epic 5, issue 5.1 / memql#1965).
 //
 // The rule: every LIST-RETURNING query must declare how it is bounded.

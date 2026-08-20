@@ -14,7 +14,7 @@ owner: znas
 Status: APPROVED ARCHITECTURE; build not started. Decisions locked with the code
 owner. Phased child issues #972-#978 carry the build, low-risk first.
 
-Scoped out of the syntax audit (#964). Goal: collapse the memQL operator surface
+Scoped out of the syntax audit (#964). Goal: collapse the MemQL operator surface
 onto Go conventions so there is **one boolean-expression grammar** across every
 context — and so the planner-authoring LLM (#954) has a single, consistent syntax
 to emit.

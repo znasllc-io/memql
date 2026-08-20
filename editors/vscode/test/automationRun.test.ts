@@ -40,7 +40,7 @@ const TARGET: AutomationTarget = {
 };
 
 const LOCAL: RunCluster = { name: "local", label: "local", local: true };
-const STAGING: RunCluster = { name: "staging", label: "memQL staging", local: false };
+const STAGING: RunCluster = { name: "staging", label: "MemQL staging", local: false };
 
 function okResult(overrides: Partial<AutomationRunResult> = {}): AutomationRunResult {
   return {
@@ -135,7 +135,7 @@ test("run -- not connected names the cluster it is not connected to", async () =
   const h = harness({ cluster: STAGING, engine: undefined });
   const outcome = await h.runner.run(TARGET, {}, new StepTraceModel());
   assert.equal(outcome.status, "error");
-  assert.match(outcome.status === "error" ? outcome.message : "", /memQL staging/);
+  assert.match(outcome.status === "error" ? outcome.message : "", /MemQL staging/);
 });
 
 // -----------------------------------------------------------------------------
@@ -150,7 +150,7 @@ test("run -- a non-local cluster prompts before an automation run", async () => 
   assert.equal(outcome.status, "ok");
   assert.equal(h.prompts.length, 1);
   assert.match(h.prompts[0] ?? "", /autoJoinSI/);
-  assert.match(h.prompts[0] ?? "", /memQL staging/);
+  assert.match(h.prompts[0] ?? "", /MemQL staging/);
 });
 
 test("run -- a local cluster does not prompt", async () => {

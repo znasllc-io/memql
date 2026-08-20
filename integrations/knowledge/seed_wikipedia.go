@@ -52,8 +52,8 @@ import (
 // wikipediaUserAgent is what we send in the User-Agent header.
 // Wikipedia's API policy asks for a contact / project identifier
 // so abusive callers can be rate-limited / contacted; we identify
-// ourselves as memQL with the project URL.
-const wikipediaUserAgent = "memQL/1.0 (https://github.com/znasllc-io/memql; knowledge-seeder)"
+// ourselves as MemQL with the project URL.
+const wikipediaUserAgent = "MemQL/1.0 (https://github.com/znasllc-io/memql; knowledge-seeder)"
 
 // wikipediaSummaryAPI is the REST API endpoint that returns a
 // page summary -- title, extract (plain-text intro), description.

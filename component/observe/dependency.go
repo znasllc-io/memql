@@ -17,7 +17,7 @@ import (
 const ComponentName = common.ComponentName("observe")
 
 // BunDBProvider is the narrow seam between the observe runtime and
-// the memQL database component. The sink doesn't import the database
+// the MemQL database component. The sink doesn't import the database
 // package directly because that's a heavy graph; instead the
 // bootstrap hands it a closure that resolves to the underlying
 // *bun.DB at Start time. Returns nil if the database isn't ready yet

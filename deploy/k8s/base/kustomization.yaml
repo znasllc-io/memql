@@ -1,4 +1,4 @@
-# memQL backend cluster on AKS (epic znasllc-io/memql#522) -- the BASE.
+# MemQL backend cluster on AKS (epic znasllc-io/memql#522) -- the BASE.
 #
 # deployment-v2 Phase 1 (#699): do NOT apply this base directly. The committed
 # overlay deploy/k8s/overlays/<env> is the single image authority -- it pins

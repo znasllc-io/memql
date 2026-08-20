@@ -529,7 +529,7 @@ test("a repair restores the answers the operator is never asked for again", () =
 
 test("a repair refuses rather than guesses, and every refusal names the remedy", () => {
   // Each of these would otherwise start a run that cannot finish, and fail deep
-  // inside it with an exit code whose guidance says "a fault in memQL rather
+  // inside it with an exit code whose guidance says "a fault in MemQL rather
   // than in your machine" -- which would be a lie in all three cases.
   assert.throws(() => repairOptions(repairArgs(), null), /no receipt .*Install rather than repair/s);
 

@@ -40,7 +40,7 @@ package deploycontrol
 //     replica served them. That is the cost of withholding; the benefit of
 //     withholding is, per the two points above, zero.
 //
-// This is also the call memQL already made on the neighbouring surface.
+// This is also the call MemQL already made on the neighbouring surface.
 // adminops.Result (memql#3324) documents its AuditEventId as "Present on
 // refusals" and IdentityAdminResult carries it on the denied path, for the
 // same operator argument. The deploy console being the one gated write surface

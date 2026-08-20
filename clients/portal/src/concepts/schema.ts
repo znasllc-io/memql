@@ -18,7 +18,7 @@
 //
 // The two sources that DO answer that question, both concept-agnostic:
 //
-//   1. THE DECLARED SCHEMA. Every memQL row carries its concept's JSON Schema
+//   1. THE DECLARED SCHEMA. Every MemQL row carries its concept's JSON Schema
 //      document on the `schema` row intrinsic (MemoryNode.schema on the wire;
 //      `browseConceptPage` preserves it because it returns rawNodes()). That
 //      document is generated from the `concept` declaration itself, so its
@@ -147,7 +147,7 @@ function customAnnotations(property: Record<string, unknown>): string[] {
 }
 
 // enumValuesOf reads a property's declared `enum` array, filtered to
-// strings. Every memQL `enum(...)` field's values ARE strings, but the
+// strings. Every MemQL `enum(...)` field's values ARE strings, but the
 // filter keeps this honest against a hand-authored JSON Schema document that
 // mixed types into the array.
 function enumValuesOf(property: Record<string, unknown>): string[] {

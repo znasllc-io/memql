@@ -2,7 +2,7 @@
 //
 // The app-native `calendar` capability surface (#642). The issue's
 // "calendar tool (actions list/create/update/delete/find)" maps to
-// five narrowly-typed tools here -- one per action -- because a memQL
+// five narrowly-typed tools here -- one per action -- because a MemQL
 // tool binds to exactly one handler. The `calendar` skill
 // (skills/calendar.memql) bundles all five slugs so an agent that
 // carries the skill gets the whole surface as a unit.

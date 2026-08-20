@@ -1,5 +1,5 @@
 ---
-title: Telephony -- PSTN calling for memQL voice agents
+title: Telephony -- PSTN calling for MemQL voice agents
 audience: public
 status: stable
 area: operate
@@ -7,9 +7,9 @@ sinceVersion: 0.9.90
 owner: znas
 ---
 
-# Telephony -- PSTN calling for memQL voice agents
+# Telephony -- PSTN calling for MemQL voice agents
 
-memQL voice agents can answer inbound PSTN calls and place outbound PSTN
+MemQL voice agents can answer inbound PSTN calls and place outbound PSTN
 calls. A phone call is just another LiveKit room participant: a `livekit/sip`
 edge turns a SIP call into a room participant (inbound) and dials a number into
 a room on demand (outbound), and the existing voice agent answers via the

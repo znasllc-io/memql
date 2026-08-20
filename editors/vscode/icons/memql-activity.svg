@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <!-- The memQL mark: the same 9-node graph as icons/memql.png, traced from
+  <!-- The MemQL mark: the same 9-node graph as icons/memql.png, traced from
        that artwork and fitted to the 24x24 canvas. Monochrome via currentColor
        because VS Code tints the activity-bar glyph to the theme's foreground. -->
   <g fill="none" stroke="currentColor" stroke-width="0.78" stroke-linecap="round">

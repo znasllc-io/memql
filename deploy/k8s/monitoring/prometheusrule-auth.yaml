@@ -33,9 +33,9 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL auth-reject rate elevated ({{ $value | printf \"%.2f\" }}/s)"
+            summary: "MemQL auth-reject rate elevated ({{ $value | printf \"%.2f\" }}/s)"
             description: >
-              memQL is rejecting more than 1 authentication/authorization
+              MemQL is rejecting more than 1 authentication/authorization
               request per second (5m avg) across the cluster. Likely a
               JWKS / signing-key skew or a misconfigured verifier.
               Break down by reason/surface:
@@ -54,7 +54,7 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL rejecting tokens for unknown signing key (kid)"
+            summary: "MemQL rejecting tokens for unknown signing key (kid)"
             description: >
               Verifiers are rejecting JWTs whose kid is absent from their
               JWKS cache. The identity signing key and the per-node

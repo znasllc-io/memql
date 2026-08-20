@@ -489,7 +489,7 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 // or nil if no match exists.
 
 // dslJSONString returns a JSON-encoded string literal (with surrounding
-// quotes) for safe interpolation into a memQL DSL call. encoding/json's
+// quotes) for safe interpolation into a MemQL DSL call. encoding/json's
 // quoting keeps a value containing a double quote from breaking out of its
 // enclosing literal -- and is the form CodeQL go/unsafe-quoting recognizes
 // as safe.
@@ -564,7 +564,7 @@ func (s *Store) CurrentUserRevocationEpoch(ctx context.Context, userId string) (
 	return user.RevocationEpoch, nil
 }
 
-// userRowFromNode projects a memQL node onto UserRow. Shared by every
+// userRowFromNode projects a MemQL node onto UserRow. Shared by every
 // LookupUserBy* path so they all surface the same fields.
 func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
 	if node == nil {

@@ -1,4 +1,4 @@
-// Package authoring is the Go SDK surface for memQL's authoring operations --
+// Package authoring is the Go SDK surface for MemQL's authoring operations --
 // the cockpit-facing way to VALIDATE and SESSION-DEFINE a user "bundle" (a set
 // of .memql sources) over the engine's gRPC stream (issue memql#2128 / C1).
 //

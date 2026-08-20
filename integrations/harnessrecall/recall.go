@@ -339,7 +339,7 @@ func (i *Integration) resolveParams(ctx context.Context, args map[string]any, ta
 //	$7 w_rec
 //	$8 limit k
 //
-// `latest` picks the newest version per id (memQL is append-only /
+// `latest` picks the newest version per id (MemQL is append-only /
 // time-series). The owner + window predicates live INSIDE the latest
 // CTE so the time-window prunes hypertable chunks before the vector
 // join. Cosine similarity is `1 - (embedding <=> qv)`; the recency

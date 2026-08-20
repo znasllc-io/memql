@@ -1,5 +1,5 @@
 ---
-title: memQL Deployment Console -- Operator Guide
+title: MemQL Deployment Console -- Operator Guide
 audience: public
 status: stable
 area: operate
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL Deployment Console -- Operator Guide
+# MemQL Deployment Console -- Operator Guide
 
 The Deployment Console is the role-gated UI (see
 [the role matrix](#the-role-matrix)) for driving the
@@ -15,7 +15,7 @@ The Deployment Console is the role-gated UI (see
 deployed, is it healthy, and how do I deploy / promote / roll back" --
 from a UI instead of a terminal.
 
-> memQL ships **one installation shape** (epic memql#3943). Every RPC on this
+> MemQL ships **one installation shape** (epic memql#3943). Every RPC on this
 > surface operates on THIS installation and takes no environment: an operator
 > who wants a second environment installs a second instance, which has its own
 > console at its own address.
@@ -33,8 +33,8 @@ here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **memQL portal -- Deployments** | `https://portal.<env>.example.com/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). The portal is site #1 (memql#3711), served at its own hostname rather than a `/portal/` sub-path of another node's origin. |
-| **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
+| **MemQL portal -- Deployments** | `https://portal.<env>.example.com/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). The portal is site #1 (memql#3711), served at its own hostname rather than a `/portal/` sub-path of another node's origin. |
+| **Cockpit Topology** | MemQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
 > **How the portal reaches the deploy surface.** `DeployControlService` runs
 > shell scripts against an on-disk overlay checkout, so it exists only on the
@@ -61,11 +61,11 @@ here.
 > portal.
 
 Every surface calls the same role-gated **deploy-control API**
-(memQL `DeployControlService`); none shells out to
+(MemQL `DeployControlService`); none shells out to
 `kubectl` / `argocd` / `git` directly. They show the same data and
 offer the same actions. Pick whichever you are already in.
 
-A surface may HIDE an action the caller's role cannot take -- the memQL
+A surface may HIDE an action the caller's role cannot take -- the MemQL
 portal does, so an admin is not offered a rollback that would come back
 `PermissionDenied`. That is a courtesy, not a control: the gate is the
 service's, and it applies identically however the RPC arrived.
@@ -75,14 +75,14 @@ service's, and it applies identically however the RPC arrived.
 `DeployControlService` is a **unary** gRPC service mounted on the same
 listener as `MemqlService`. A native gRPC client (the Go SDK, the
 cockpit) dials it directly. A **browser cannot** -- and neither can
-anything else reaching memQL through the `/memql/ws` WebSocket bridge,
+anything else reaching MemQL through the `/memql/ws` WebSocket bridge,
 which tunnels `MemqlService.Stream` and nothing else.
 
 So every deploy RPC is **also** reachable on the stream, as a
 `DeployControlMsg` envelope whose `request` oneof carries the service's
 own request messages verbatim (the reply is `DeployControlResult`). The
 TS SDK exposes it as `@znasllc-io/memql-sdk-core/deploy`; that is how
-the VS Code extension and the memQL portal drive the console.
+the VS Code extension and the MemQL portal drive the console.
 
 This is a transport, not a second implementation. The stream handler
 calls the identical service methods the unary path calls, so **the role
@@ -107,7 +107,7 @@ rows are ordinary concept rows, read with a normal query.
 the same listener. That is dialable from Go (`sdk/go`'s
 `DeployControlClient`) and from `grpcurl`, but **not from a browser and
 not from any WebSocket client** -- so the VS Code extension and the
-memQL portal, which both speak `/memql/ws`, could not reach the deploy
+MemQL portal, which both speak `/memql/ws`, could not reach the deploy
 surface at all. (The identity portal only sidesteps this by being
 server-rendered.)
 
@@ -255,7 +255,7 @@ posture, not a status badge.
 
 ### Enforcement per surface
 
-- **memQL portal:** the Deployments view resolves your cluster role and
+- **MemQL portal:** the Deployments view resolves your cluster role and
   hides an action you cannot take. That is a courtesy, not the control:
   the call still crosses to the identity node and is gated there.
 - **Cockpit:** the Topology view resolves your cluster role; non-admins
@@ -305,7 +305,7 @@ a surface you are admitted to.
 ## Reading the console
 
 Both surfaces show the same installation's state. There is no env to
-scope by -- memQL ships one installation shape (epic memql#3943); an
+scope by -- MemQL ships one installation shape (epic memql#3943); an
 operator who wants a second environment installs a second instance
 with its own console.
 
@@ -388,7 +388,7 @@ reality.
 ## Where audit events land
 
 All console writes and denials append to the identity audit log
-(`v1:identity:auditEvent`), visible in the memQL portal's Audit view
+(`v1:identity:auditEvent`), visible in the MemQL portal's Audit view
 view. Deploy and rollback in particular are auditable after
 the fact: actor, target version / digest, and outcome.
 

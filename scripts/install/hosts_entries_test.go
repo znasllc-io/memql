@@ -15,7 +15,7 @@ import (
 
 // hosts_entries_test.go -- znasllc-io/memql#3361.
 //
-// scripts/install/hosts-entries.sh writes the memQL front-door hostnames into
+// scripts/install/hosts-entries.sh writes the MemQL front-door hostnames into
 // the system hosts file inside a delimited `# BEGIN memql` block. It is the
 // only script in the install substrate that edits a file the operator owns and
 // that the rest of the machine depends on, so the bar is higher than "it

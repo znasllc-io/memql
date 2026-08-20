@@ -68,7 +68,7 @@ trigger paths:
 
 ## Idempotency
 
-Materialization is create-only with deterministic ids: memQL is
+Materialization is create-only with deterministic ids: MemQL is
 time-series, so repeat inserts with the same id stamp a new version while
 reads still see one logical row. Operator or user edits to a seeded row
 (e.g. renaming an assistant) survive engine restarts -- the seed declaration

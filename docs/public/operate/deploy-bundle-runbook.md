@@ -43,7 +43,7 @@ SPA) deploys from its own repo's release track -- see
 
 ## The deploy target: `provider`, not `env`
 
-memQL ships one installation shape (epic memql#3943); there is no
+MemQL ships one installation shape (epic memql#3943); there is no
 staging-versus-production dimension for a command to select. What still
 varies is the deploy TARGET, which `deployEngineCluster`
 (`dsl/deployment/automations.memql`) switches on via its `provider` field --

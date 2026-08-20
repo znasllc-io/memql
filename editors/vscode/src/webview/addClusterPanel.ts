@@ -159,13 +159,13 @@ const CONNECT_LABELS: Record<ConnectField, string> = {
 };
 
 const CONNECT_HINTS: Record<ConnectField, string> = {
-  name: "How this cluster is stored in clusters.yaml, and what every other memQL command calls it.",
+  name: "How this cluster is stored in clusters.yaml, and what every other MemQL command calls it.",
   domain:
     "Optional, e.g. example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
   endpoint:
     "The gRPC front door as host:port -- api.<domain>:443 for a cluster behind the usual ingress.",
   token:
-    'Optional. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "memQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
+    'Optional. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "MemQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
 };
 
 /** The token is the one field on this page that should not render as plain text. */
@@ -391,7 +391,7 @@ export class AddClusterPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       "memqlAddCluster",
-      "Add a memQL cluster",
+      "Add a MemQL cluster",
       // Beside, not Active: the operator asked for this from a tree in the side
       // bar and is very likely reading something else. Taking over their editor
       // to ask five questions is not the same as opening beside it.
@@ -694,7 +694,7 @@ export class AddClusterPanel {
    *
    * WHY IT MATTERS MORE THAN A TIDY ERROR. Without it, the first thing to
    * notice is `verify-provider-key.sh`, which exits 2 -- and the wizard renders
-   * exit 2 as "a fault in memQL rather than in your machine or your answers".
+   * exit 2 as "a fault in MemQL rather than in your machine or your answers".
    * That sentence is false here and points the operator away from the one thing
    * they can fix. Nine minutes of install can precede it.
    *
@@ -822,10 +822,10 @@ export class AddClusterPanel {
     if (providerKeyFile === "") {
       // REFUSE RATHER THAN START. Without a key path the run cannot pass wave
       // 2, and the failure it would produce is exit 2 -- whose guidance
-      // correctly says "a fault in memQL rather than in your machine", which
+      // correctly says "a fault in MemQL rather than in your machine", which
       // would be a lie here. Say the true thing before anything runs.
       this.runError =
-        "memQL has no record of an AI provider key for this machine. " +
+        "MemQL has no record of an AI provider key for this machine. " +
         "Install rather than repair, so the key can be collected and verified.";
       this.state.finish({ ok: false });
       this.render();
@@ -1194,9 +1194,9 @@ export class AddClusterPanel {
     // file drops the memo rather than reasoning about which reads it affects.
     this.presence.invalidate();
     void vscode.window.showInformationMessage(
-      `memQL: registered "${draft.name}" at ${draft.endpoint}. ` +
+      `MemQL: registered "${draft.name}" at ${draft.endpoint}. ` +
         (draft.token === undefined
-          ? 'Run "memQL: Sign In" to authenticate.'
+          ? 'Run "MemQL: Sign In" to authenticate.'
           : "Select it in the Clusters view to connect."),
     );
     this.dispose();
@@ -1252,7 +1252,7 @@ export class AddClusterPanel {
       //
       // This used to read "nothing is skipped", reasoning that narrowing an
       // uninstall would leave a machine in a state no receipt describes. That
-      // holds for memQL's OWN artifacts and not for the toolchain: k3d, kubectl,
+      // holds for MemQL's OWN artifacts and not for the toolchain: k3d, kubectl,
       // mkcert and the local CA are general tools the operator may now depend on
       // for other work, and taking them away is a decision they get to make
       // rather than a consequence of uninstalling an application. The receipt
@@ -1431,7 +1431,7 @@ export class AddClusterPanel {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>Add a memQL cluster</title>
+<title>Add a MemQL cluster</title>
 <style nonce="${nonce}">
   :root {
     --vk-fg: var(--vscode-foreground);
@@ -1630,7 +1630,7 @@ ${this.bodyHtml()}
     const failure = this.state.failures.find((f) => f.id === stepId);
     if (failure === undefined || failure.remedy === "") return;
 
-    const terminal = vscode.window.createTerminal({ name: "memQL install -- fix" });
+    const terminal = vscode.window.createTerminal({ name: "MemQL install -- fix" });
     terminal.show();
     // false: typed, NOT executed. See remedyHtml.
     terminal.sendText(failure.remedy, false);
@@ -1642,7 +1642,7 @@ ${this.bodyHtml()}
     // a cluster already in the list has nothing to compose (memql#3741).
     const choices = addClusterMenu(this.verdict, this.localRegistered);
     const cards = choices.map((choice) => this.cardHtml(choice)).join("");
-    return `<h1>Add a memQL cluster</h1>
+    return `<h1>Add a MemQL cluster</h1>
 <p class="lede">${escapeHtml(VERDICT_LEDE[this.verdict])}</p>
 ${cards}`;
   }
@@ -1812,7 +1812,7 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
   private uninstallListHtml(): string {
     if (this.uninstallProblem !== "") {
       return `<h1>Uninstall the local cluster</h1>
-<p class="lede">memQL cannot say what an uninstall would remove, so it will not run one.</p>
+<p class="lede">MemQL cannot say what an uninstall would remove, so it will not run one.</p>
 <p class="error">${escapeHtml(this.uninstallProblem)}</p>
 <div class="actions">
   <button class="secondary" type="button" data-act="uninstallBack">Back</button>
@@ -1836,7 +1836,7 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
       privileged.length === 0
         ? ""
         : `<p class="hint">${escapeHtml(
-            "The marked steps interrupt the run to ask for something outside memQL's own " +
+            "The marked steps interrupt the run to ask for something outside MemQL's own " +
               "footprint: [sudo] needs your password to edit a system file, [user-trust] needs " +
               "your approval to withdraw a certificate authority your browsers trust.",
           )}</p>`;
@@ -1899,7 +1899,7 @@ ${this.sharedToolsHtml()}
       const secret = await vscode.window.showInputBox({
         password: true,
         ignoreFocusOut: true,
-        title: "memQL installer",
+        title: "MemQL installer",
         prompt:
           attempt === 0
             ? "Your password, once. Some steps have to edit system files -- the hosts file, the certificate store your browsers read."
@@ -1942,7 +1942,7 @@ ${this.sharedToolsHtml()}
     if (agent !== undefined) await agent.dispose();
   }
 
-  /** Whether this removal step takes away something that is not memQL-only. */
+  /** Whether this removal step takes away something that is not MemQL-only. */
   private isShared(stepId: string): boolean {
     return (this.uninstallPreview?.removals ?? []).some((s) => s.id === stepId && s.shared);
   }
@@ -1953,7 +1953,7 @@ ${this.sharedToolsHtml()}
    * WHY THEY ARE NOT IN THE LIST ABOVE. Docker, k3d, kubectl, mkcert and the
    * local CA are general tools; the operator may be using them for other work
    * by now, and the mkcert CA may be signing certificates for half a dozen
-   * other local stacks. "Uninstall memQL" is consent to remove what memQL put
+   * other local stacks. "Uninstall MemQL" is consent to remove what MemQL put
    * there for itself -- the cluster, the checkout, the hosts block -- and is not
    * consent to take away the toolchain (memql#3566).
    *
@@ -1961,7 +1961,7 @@ ${this.sharedToolsHtml()}
    * leaves alone. Skipping is the session's own `skip` set, which the executor
    * already honours, so nothing new decides anything here.
    *
-   * Docker appears nowhere at all: memQL did not install it and will not remove
+   * Docker appears nowhere at all: MemQL did not install it and will not remove
    * it. See docs/public/operate/install-prerequisites.md.
    */
   private sharedToolsHtml(): string {
@@ -1979,8 +1979,8 @@ ${this.sharedToolsHtml()}
       .join("");
     return `<h2>Also remove these?</h2>
 <p class="hint">${escapeHtml(
-      "These are general tools, not memQL's own. They stay unless you tick them. Docker is " +
-        "never touched -- memQL did not install it.",
+      "These are general tools, not MemQL's own. They stay unless you tick them. Docker is " +
+        "never touched -- MemQL did not install it.",
     )}</p>
 ${rows}`;
   }
@@ -2218,13 +2218,13 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       await vscode.env.clipboard.writeText(key);
     } catch (err) {
       vscode.window.showErrorMessage(
-        "memQL: the recovery key could not be copied -- select it in the panel and copy it " +
+        "MemQL: the recovery key could not be copied -- select it in the panel and copy it " +
           `by hand (${err instanceof Error ? err.message : String(err)}).`,
       );
       return;
     }
     vscode.window.showInformationMessage(
-      "memQL: recovery key copied. Put it somewhere this machine is not -- it will not be shown again.",
+      "MemQL: recovery key copied. Put it somewhere this machine is not -- it will not be shown again.",
     );
   }
 

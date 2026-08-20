@@ -193,7 +193,7 @@ func (e *MemQLEngine) conceptRowCounter() conceptRowCounter {
 // owner and every tier -- see this file's header for why the count deliberately
 // runs under no actor.
 //
-// DISTINCT id, not raw row count: memQL is append-only, so one row updated twice
+// DISTINCT id, not raw row count: MemQL is append-only, so one row updated twice
 // is three physical versions of ONE row. Reporting "3" for a single node would
 // make the number the operator is shown disagree with the number they can see,
 // and the number is being shown precisely so they can check the decision.

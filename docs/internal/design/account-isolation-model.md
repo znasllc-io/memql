@@ -27,7 +27,7 @@ owner: znas
 >
 > **Update (memql#3700 D12): parked, not stale.** The cluster front-door
 > design chose per-cluster-per-customer as the isolation model (D1 — one
-> memQL cluster per customer) rather than a shared-cluster multi-tenant
+> MemQL cluster per customer) rather than a shared-cluster multi-tenant
 > registry. `v1:identity:account` stays exactly where this note left it —
 > inert, not removed — and §6(a)/(b)/(c) below are PARKED, not scheduled:
 > nothing there needs building unless that isolation model changes.
@@ -100,7 +100,7 @@ Three sentences.
 
 ### 3.1 Why a direct `accountId`, not a relationship walk
 
-A memQL query's `filter` compiles to a single SQL `WHERE` over one concept's
+A MemQL query's `filter` compiles to a single SQL `WHERE` over one concept's
 payload. There is no join. So a relationship walk ("this row belongs to a
 project, which belongs to an account, which the caller may see") has to run
 either as N+1 reads or as an in-process post-filter, and **an in-process

@@ -15,9 +15,9 @@ import (
 // # SPF / DKIM alignment is STRUCTURAL here, not configured
 //
 // Alignment means the domain in the visible `From:` matches the domain
-// the message was authenticated as. memQL cannot sign DKIM itself -- the
+// the message was authenticated as. MemQL cannot sign DKIM itself -- the
 // relay (Microsoft Graph, or whatever SMTP endpoint is configured) signs
-// with the keys published for the mailbox it authenticated as. What memQL
+// with the keys published for the mailbox it authenticated as. What MemQL
 // CAN guarantee is that it never sets a From address the relay did not
 // authenticate as, and it does:
 //

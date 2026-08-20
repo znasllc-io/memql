@@ -3,7 +3,7 @@
 # scripts/dev/install-deps.sh
 # ===========================
 #
-# Verifies + installs every build-time tool the memQL dev workflow
+# Verifies + installs every build-time tool the MemQL dev workflow
 # expects. Idempotent: skips anything already present. Safe to run
 # before `make generate` or `make up`.
 #
@@ -229,7 +229,7 @@ EOF
 # -----------------------------------------------------------------
 
 function main() {
-    echo "[deps] Verifying memQL dev dependencies..."
+    echo "[deps] Verifying MemQL dev dependencies..."
     check_go
     check_docker
     check_k3d

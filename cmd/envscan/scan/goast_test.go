@@ -740,7 +740,7 @@ func withSyntheticExemption(t *testing.T, key string) {
 	t.Cleanup(func() { ownedPreConvention = prev })
 }
 
-// Six memQL-owned keys predated the MEMQL_ prefix convention. Registering one
+// Six MemQL-owned keys predated the MEMQL_ prefix convention. Registering one
 // failed component/envregistry's TestOwnedVarsArePrefixed; omitting one failed
 // forward drift. They are renamed now (memql#3831), but an exemption nobody
 // reads is how a gap becomes permanent, so these tests still pin that an
@@ -825,7 +825,7 @@ func TestPreConventionExemptionIsEmpty(t *testing.T) {
 }
 
 // The exemption must not be laundered through the `external` denylist, which
-// means "not memQL's variable" and exempts a key from BOTH drift directions.
+// means "not MemQL's variable" and exempts a key from BOTH drift directions.
 //
 // Vacuous while the list is empty, and deliberately kept: it is the property a
 // seventh entry would have to satisfy, and the moment it is added is the moment
@@ -836,7 +836,7 @@ func TestPreConventionKeysAreNotTreatedAsExternal(t *testing.T) {
 	for key := range ownedPreConvention {
 		if isExternal(key) {
 			t.Errorf("%s is in the external denylist as well as ownedPreConvention. external means "+
-				"the var is not memQL's; this one is read by memQL's own config loader, and being "+
+				"the var is not MemQL's; this one is read by MemQL's own config loader, and being "+
 				"external would drop it from the read set entirely.", key)
 		}
 	}

@@ -25,7 +25,7 @@ owner: znas
 
 ## Context
 
-This framework was written while memQL still relied on
+This framework was written while MemQL still relied on
 **partition-as-isolation-boundary** for defense-in-depth: a request
 authenticated as user X could only read rows under partition X, so a
 DSL query with a bug still had the partition boundary under it.

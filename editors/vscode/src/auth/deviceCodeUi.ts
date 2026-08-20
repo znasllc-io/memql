@@ -37,7 +37,7 @@
 //
 // PRESENTATION ONLY. It used to carry two full sign-in shells of its own --
 // `signInWithDeviceCode` and an exported `signInToCluster` -- and the second was
-// the bug memql#3515 was filed about: `memQL: Sign In` called a PRIVATE function
+// the bug memql#3515 was filed about: `MemQL: Sign In` called a PRIVATE function
 // of the same name in extension.ts that ran loopback with no fallback, so the
 // capability here shipped with zero importers. A host that genuinely could not
 // do loopback sat through the callback deadline and was told it had failed,
@@ -76,7 +76,7 @@ export function announceDeviceCodeFallback(
     message: 'This host cannot complete a browser sign-in; switching to a device code...',
   });
   void window.showInformationMessage(
-    `memQL: the browser sign-in could not complete (${reason.message}) Falling back to a device code.`,
+    `MemQL: the browser sign-in could not complete (${reason.message}) Falling back to a device code.`,
   );
 }
 
@@ -92,7 +92,7 @@ export function showDeviceCodeActions(
 ): void {
   const COPY = 'Copy Code';
   const OPEN = 'Open Verification Page';
-  const message = `memQL: enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in.`;
+  const message = `MemQL: enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in.`;
   // The pre-filled form when the server offered one -- it saves the person
   // typing the code twice when they open the page on THIS machine.
   const target = authorization.verificationUriComplete || authorization.verificationUri;

@@ -1,4 +1,4 @@
-# PodMonitor: scrape every memQL node pod's /metrics endpoint once.
+# PodMonitor: scrape every MemQL node pod's /metrics endpoint once.
 #
 # memql#1523. The app emits Prometheus metrics on the http container
 # port (8085, path /metrics) from component/metrics -- auth-reject
@@ -33,7 +33,7 @@ spec:
     matchLabels:
       app.kubernetes.io/part-of: memql
   podMetricsEndpoints:
-    - port: http # the named container port 8085 on every memQL node
+    - port: http # the named container port 8085 on every MemQL node
       path: /metrics
       interval: 30s
       scrapeTimeout: 10s

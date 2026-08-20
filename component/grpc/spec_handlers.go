@@ -11,7 +11,7 @@ import (
 //
 // Returns the portable JSON form of the DSL authoring surface
 // (component/language/dslspec) so the cockpit and a future web/Monaco editor
-// consume the EXACT same language intelligence memQL Sense is driven from.
+// consume the EXACT same language intelligence MemQL Sense is driven from.
 // Read-only: the spec is assembled from the engine's own grammar tables +
 // annotation registry by dslspec.Build(); there is no mutation path.
 //

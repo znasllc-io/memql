@@ -30,7 +30,7 @@ import (
 // file's bytes are unchanged. mkcert's CA is per-machine, not per-project --
 // the operator may already have one signing certificates for half a dozen
 // other local stacks, and an installer that REGENERATES it is reaching into
-// shared machine state it does not own. Installing memQL must never be the
+// shared machine state it does not own. Installing MemQL must never be the
 // reason someone's other local projects start failing TLS.
 //
 // That restraint used to be asserted as "never runs `mkcert -install`", which
@@ -960,7 +960,7 @@ func TestMkcertStampsProvenanceOnACAItCreates(t *testing.T) {
 	}
 }
 
-// A CA memQL created stays memQL's across runs -- which is the whole point.
+// A CA MemQL created stays MemQL's across runs -- which is the whole point.
 // Without the marker this second run would see a file on disk and report it as
 // the operator's, and nothing could ever remove it again.
 func TestMkcertRecognisesItsOwnCAOnASecondRun(t *testing.T) {
@@ -974,7 +974,7 @@ func TestMkcertRecognisesItsOwnCAOnASecondRun(t *testing.T) {
 		t.Fatalf("second run failed (exit %d): %s", code, out)
 	}
 	if mkcertBool(t, env, "caPreExisting") {
-		t.Errorf("a CA memQL created was reported as pre-existing on the next run -- "+
+		t.Errorf("a CA MemQL created was reported as pre-existing on the next run -- "+
 			"that is the ratchet: it can never be removed again: %s", out)
 	}
 }

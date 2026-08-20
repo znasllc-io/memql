@@ -1,12 +1,12 @@
 # @znasllc-io/memql-view-kit
 
-Framework-agnostic renderer for memQL concept rows: rows plus `@displayCard`
+Framework-agnostic renderer for MemQL concept rows: rows plus `@displayCard`
 hints in, HTML out. No DOM dependency, no runtime dependencies.
 
 ## Why it exists
 
 Two surfaces render the same thing: the VS Code extension's concept browser
-(`editors/vscode/src/webview/conceptPanel.ts`) and the memQL portal. Any
+(`editors/vscode/src/webview/conceptPanel.ts`) and the MemQL portal. Any
 concept-aware markup written inside either one is markup the other has to
 rebuild, and the two answers diverge on day one rather than in some future
 refactor. view-kit is the shared answer.
@@ -50,7 +50,7 @@ const detailHtml = renderToHtml(renderValueView(row));
 ```
 
 `concept` is a `ConceptLike` -- `{ id, entity, displayCard? }`, mirroring
-memQL's `ConceptInfo`. `rows` are `RowLike` (`Record<string, unknown>`). The
+MemQL's `ConceptInfo`. `rows` are `RowLike` (`Record<string, unknown>`). The
 types are declared structurally rather than imported from the SDK so any
 caller that can produce these shapes can use the package without taking on the
 SDK's wire types.

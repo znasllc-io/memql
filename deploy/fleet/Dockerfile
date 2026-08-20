@@ -1,4 +1,4 @@
-# The memQL Cloud control-plane DSL bundle, as a data-only image
+# The MemQL Cloud control-plane DSL bundle, as a data-only image
 # (epic memql#3852, task memql#3853).
 #
 # WHAT A BUNDLE IMAGE IS. Not a program. The `dsl-bundle` kustomize component
@@ -6,13 +6,13 @@
 # whole job is `cp -a /bundle/. /var/lib/memql/dsl/` into a shared volume; the
 # engine container then reads that path as MEMQL_DSL_PATH and mounts every
 # domain it finds. So the image needs a filesystem and a shell to copy with, and
-# nothing else -- no Go toolchain, no engine binary, no memQL code of any kind.
+# nothing else -- no Go toolchain, no engine binary, no MemQL code of any kind.
 #
 # THAT IS THE POINT. A product-agnostic engine image plus this image is a
-# running memQL Cloud control plane. Swap this image for another product's
+# running MemQL Cloud control plane. Swap this image for another product's
 # bundle and the same engine runs that product instead, with no rebuild. It is
 # the mechanism the platform-consolidation epic's acceptance bar names ("a
-# second product boots a full stack with ZERO engine-repo edits"), and memQL
+# second product boots a full stack with ZERO engine-repo edits"), and MemQL
 # Cloud goes through it rather than around it so we find out when it breaks.
 #
 # BUILD (from the repository root, so the context contains dsl/):
@@ -37,4 +37,4 @@ USER 65534:65534
 # Never executed -- the component overrides the command with its copy. Present
 # so that `docker run` on this image says what it is instead of dropping into a
 # shell and implying it is something you can use.
-CMD ["/bin/sh", "-c", "echo 'memQL Cloud fleet DSL bundle: data only. Mount /bundle at MEMQL_DSL_PATH.' && ls -R /bundle"]
+CMD ["/bin/sh", "-c", "echo 'MemQL Cloud fleet DSL bundle: data only. Mount /bundle at MEMQL_DSL_PATH.' && ls -R /bundle"]

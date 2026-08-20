@@ -132,7 +132,7 @@ func TestSiteBundleHandler_WrongCredentialClassIs403(t *testing.T) {
 	}
 }
 
-// Even an owner-role user JWT (a real, valid memQL identity, with no
+// Even an owner-role user JWT (a real, valid MemQL identity, with no
 // explicit "class" claim at all -- the common shape for an ordinary user
 // token) must not pass: this endpoint is pinned to the service-account
 // class specifically, not merely "any authenticated caller". This is the

@@ -1,6 +1,6 @@
 // builtins.memql -- the deploy pack (examples/deploypack), Epic 2 / #2095.
 //
-// The deploy pack dogfoods memQL's OWN deployment workflow: it packages the
+// The deploy pack dogfoods MemQL's OWN deployment workflow: it packages the
 // deploy EFFECTS that component/deploycontrol performs imperatively today as
 // DSL-callable builtins, each backed by the pack's IntegrationProvider
 // (see ../pack.go). Every @executor names a capability FQN

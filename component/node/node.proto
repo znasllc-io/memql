@@ -8,7 +8,7 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 // NodeService provides bidirectional streaming for inter-node communication
-// in a memQL cluster. All node types use this service to discover peers,
+// in a MemQL cluster. All node types use this service to discover peers,
 // exchange heartbeats, forward events, and coordinate work.
 service NodeService {
   rpc Stream(stream NodeClientMessage) returns (stream NodeServerMessage);

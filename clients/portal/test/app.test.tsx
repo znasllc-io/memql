@@ -84,7 +84,7 @@ describe("the portal shell", () => {
     const dial = vi.fn(async () => fakeConnection()) as unknown as typeof Connection.dial;
     renderApp(dial);
 
-    await waitFor(() => expect(screen.getByText("memQL Portal")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("MemQL Portal")).toBeTruthy());
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Connected"));
     await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());
   });

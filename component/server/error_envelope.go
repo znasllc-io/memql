@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 )
 
-// errorEnvelope is the canonical shape memQL writes for HTTP error responses.
+// errorEnvelope is the canonical shape MemQL writes for HTTP error responses.
 // Mirrors the gRPC QueryError envelope: a short stable code, a safe message,
 // and an error_id that operators can grep server-side logs for. The handler
 // logs the full error against the error_id; the response surfaces only the

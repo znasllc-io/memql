@@ -357,7 +357,7 @@ function check_grpc() {
 #     the handshake succeeds against a trusted cert either way.
 #
 # So the gate cannot ask "did something answer" or "what did it say" -- only
-# "did a memQL node name itself".
+# "did a MemQL node name itself".
 #
 # GET /healthz is positive identification instead of inference: the node that
 # served the request NAMES ITSELF (`{"status":"ok","nodeId":...,"nodeType":...}`),
@@ -587,7 +587,7 @@ function check_precedence() {
     if [[ "$_FD_HZ_RC" != "0" ]]; then
         why="the unclaimed wildcard name ${probe_host} did not answer (curl exit ${_FD_HZ_RC}: $(curl_tls_hint "$_FD_HZ_RC")), so the wildcard router is not loaded and there is nothing for an exact host to take precedence over"
     elif [[ -z "$_FD_HZ_NODETYPE" ]]; then
-        why="the unclaimed wildcard name ${probe_host} answered HTTP ${_FD_HZ_CODE} without naming a memQL node -- which is what the ingress controller's own default backend returns when no router matches -- so the wildcard router is not loaded (an absent backend Service drops the whole router) and there is nothing for an exact host to take precedence over"
+        why="the unclaimed wildcard name ${probe_host} answered HTTP ${_FD_HZ_CODE} without naming a MemQL node -- which is what the ingress controller's own default backend returns when no router matches -- so the wildcard router is not loaded (an absent backend Service drops the whole router) and there is nothing for an exact host to take precedence over"
     fi
     if [[ -n "$why" ]]; then
         for host in "${testable[@]}"; do
@@ -633,7 +633,7 @@ function check_precedence() {
                 "${host} is answered by a gRPC backend on a path declared to the HTTP one: HTTP ${_FD_HZ_CODE} with Content-Type ${_FD_HZ_CONTENT_TYPE}. /healthz routes to the bff's HTTP Service, and only an h2c gRPC server answers an HTTP/1.1 request this way -- so an HTTP path is falling through to the gRPC catch-all rule. This is memql#3703's failure mode (a protocol error naming nothing, not a 404) and memql#3810 is the worked example: an Ingress-level router.priority flattened the path ordering so \`/\` outranked the 21 specific paths. Check that no multi-path Ingress carries a uniform traefik.ingress.kubernetes.io/router.priority (deploy/k8s/overlays/local/render_priority_test.go gates this)"
         elif [[ -z "$_FD_HZ_NODETYPE" ]]; then
             record_check_status precedence "$host" inconclusive \
-                "the wildcard router is live (nodeType=${wildcard_type}) but ${host} answered HTTP ${_FD_HZ_CODE} without naming a memQL node, so which backend serves it cannot be established"
+                "the wildcard router is live (nodeType=${wildcard_type}) but ${host} answered HTTP ${_FD_HZ_CODE} without naming a MemQL node, so which backend serves it cannot be established"
         elif [[ "$_FD_HZ_NODETYPE" == "$wildcard_type" ]]; then
             # The remedy belongs in the detail, the way curl_tls_hint puts
             # `mkcert -install` there. BOTH branches are named because this

@@ -1,6 +1,6 @@
-# memQL backend cluster on AKS
+# MemQL backend cluster on AKS
 
-Kubernetes manifests for the memQL multi-node mesh, deployed to AKS
+Kubernetes manifests for the MemQL multi-node mesh, deployed to AKS
 (epic [znasllc-io/memql#522](https://github.com/znasllc-io/memql/issues/522)
 -- pivot from ACA, which can't host the per-node multi-port mesh).
 
@@ -11,7 +11,7 @@ memql#3842). It is not in this directory, and that is deliberate: the database
 is composed by each overlay from `deploy/k8s/components/cnpg-db` with a tier
 preset, so a deployment picks its own size without a per-environment manifest.
 
-Base carries only the memQL node-types. Every node reaches the database through
+Base carries only the MemQL node-types. Every node reaches the database through
 the `MEMQL_DATABASE_DSN` / `MEMORY_NODES_DATABASE_DIRECT_DSN` keys in the
 `memql-secrets` Secret, which point at CNPG's `-rw` Service -- the one that
 follows the current primary across a failover.
@@ -110,7 +110,7 @@ automations could double-fire; both paths are now cluster-singleton:
 **The product `bff` replica policy** is the product overlay's concern: before
 going multi-replica it must pin an engine image digest that carries these
 guards (>= the #561 version), expressed as the overlay digest -- not a
-carrier's compile-time memQL pin. **`identity`** HA is
+carrier's compile-time MemQL pin. **`identity`** HA is
 [#550](https://github.com/znasllc-io/memql/issues/550); the product SPA's
 replica story is in [#551](https://github.com/znasllc-io/memql/issues/551).
 

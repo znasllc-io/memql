@@ -10,7 +10,7 @@ import (
 
 // up_workloads_wait_test.go -- znasllc-io/memql#3585.
 //
-// `k3d.up` waits for the memQL Deployments to become Available and reports the
+// `k3d.up` waits for the MemQL Deployments to become Available and reports the
 // verdict as `workloadsReady`, which the install graph verifies (memql#3570).
 // The wait was asked to wait for EVERY Deployment in the namespace, including
 // the voice lane -- which the very next line of main() scales to 0, because the

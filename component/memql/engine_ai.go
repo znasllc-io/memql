@@ -177,7 +177,7 @@ func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[
 // ai() invocations. Cache key includes templateId + schema name +
 // schema body + rendered prompt text + provider name, so callers
 // with identical inputs collapse to a single LLM round-trip across
-// the entire memQL instance (multiple frontends, multiple users,
+// the entire MemQL instance (multiple frontends, multiple users,
 // any background work). TTL follows the AI cache config (default
 // 60s, ceiling 300s -- short enough that an agent or domain
 // re-train invalidates within a minute, long enough to swallow

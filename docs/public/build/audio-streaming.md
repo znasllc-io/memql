@@ -11,14 +11,14 @@ owner: znas
 
 > **Last Updated:** 2026-04-29
 
-This document describes the audio paths in memQL: the **audio
+This document describes the audio paths in MemQL: the **audio
 WebSocket** (browser-based STT/TTS for spaces), the **gRPC streaming
 transcription** flow on `MemqlService.Stream`, and the **Polyphon
 pipeline** (multi-agent real-time voice conversations).
 
 ## Overview
 
-memQL provides three audio paths, each for a different use case:
+MemQL provides three audio paths, each for a different use case:
 
 1. **Audio WebSocket** (`/memql/audio`) -- legacy browser path for
    in-space STT and the "Read Aloud" TTS feature. Users speak into
@@ -660,5 +660,5 @@ env vars are configured.
 
 ---
 
-*For the overall memQL architecture, see [docs/public/concepts/architecture.md](../concepts/architecture.md)*
+*For the overall MemQL architecture, see [docs/public/concepts/architecture.md](../concepts/architecture.md)*
 *For integration patterns, see [integrations/CLAUDE.md](../../../integrations/CLAUDE.md)*

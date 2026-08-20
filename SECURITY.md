@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-memQL is pre-1.0 and under active development. Only the latest commit on `main` is supported. Security fixes are applied to `main`; there are no backported branches yet.
+MemQL is pre-1.0 and under active development. Only the latest commit on `main` is supported. Security fixes are applied to `main`; there are no backported branches yet.
 
 ## Reporting a vulnerability
 

@@ -1,4 +1,4 @@
-// The deploy-control surface (memql#3311): the memQL Deployment Console's
+// The deploy-control surface (memql#3311): the MemQL Deployment Console's
 // nine RPCs, bridged onto MemqlService.Stream so a WebSocket client -- the
 // VS Code extension, the portal -- can reach them at all.
 

@@ -1,4 +1,4 @@
-// Static guard: the memQL Portal bundle actually reaches the EDGE IMAGE
+// Static guard: the MemQL Portal bundle actually reaches the EDGE IMAGE
 // (znasllc-io/memql#3314, retargeted from the bff by #3711 -- the portal is
 // site #1, served by component/edge; component/portal, which used to serve
 // it from the bff, is retired).

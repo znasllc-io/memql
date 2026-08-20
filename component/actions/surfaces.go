@@ -68,7 +68,7 @@ func BuiltinSurfaces() []surfaceresolver.Surface {
 // `install/` is here for a stronger reason than deploy's (#3371). A deploy
 // action MUST run outside the cluster it deploys; an INSTALL action has no
 // cluster to run inside -- it places k3d on the operator's laptop, edits
-// /etc/hosts and installs a trust-store CA, all before anything memQL exists to
+// /etc/hosts and installs a trust-store CA, all before anything MemQL exists to
 // host it. Resolving an install action anywhere but the runner is not a policy
 // preference that could reasonably go the other way; it is the only placement
 // that can execute at all.

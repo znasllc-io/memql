@@ -3,7 +3,7 @@
 # scripts/release/release.sh
 # ==========================
 #
-# Cut an IMMUTABLE memQL release image for the Azure deployment
+# Cut an IMMUTABLE MemQL release image for the Azure deployment
 # foundation (znasllc-io/memql#493, epic #491).
 #
 # The engine is the whole platform: this repo builds EVERY node type
@@ -257,7 +257,7 @@ function check_prerequisites() {
 
 function print_plan() {
     echo "========================================="
-    echo "memQL release image"
+    echo "MemQL release image"
     echo "========================================="
     echo "Version:    $VERSION"
     echo "Source SHA: $SHORT_SHA"

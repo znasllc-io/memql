@@ -24,7 +24,7 @@ const (
 )
 
 // InternalMessage is the universal envelope for all inter-component
-// communication within a memQL process. Components exchange these messages
+// communication within a MemQL process. Components exchange these messages
 // over typed Go channels instead of direct method calls.
 type InternalMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`

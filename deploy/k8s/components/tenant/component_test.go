@@ -1,7 +1,7 @@
 // Package tenant holds the gates for the per-tenant shape component (epic
 // memql#3852, task memql#3853).
 //
-// A memQL Cloud tenant is the same base, the same engine images and the same
+// A MemQL Cloud tenant is the same base, the same engine images and the same
 // ArgoCD reconciliation as staging and production, differing in namespace,
 // domain, replica counts and database preset. This component is where the
 // replica counts live, so its failure mode is specific: a preset whose numbers

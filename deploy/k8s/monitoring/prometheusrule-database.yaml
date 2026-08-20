@@ -53,7 +53,7 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL database WAL archiving is failing ({{ $labels.namespace }}/{{ $labels.pod }})"
+            summary: "MemQL database WAL archiving is failing ({{ $labels.namespace }}/{{ $labels.pod }})"
             description: >
               The WAL archiver has failed more recently than it has succeeded for
               5 minutes. The database is still serving, and is accumulating an
@@ -75,7 +75,7 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL database has never archived a WAL segment ({{ $labels.namespace }})"
+            summary: "MemQL database has never archived a WAL segment ({{ $labels.namespace }})"
             description: >
               This cluster has been up for 30 minutes and has never successfully
               archived a WAL segment, so it has no backups at all. The usual
@@ -105,7 +105,7 @@ spec:
             severity: warning
             team: memql
           annotations:
-            summary: "memQL database volume {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} free"
+            summary: "MemQL database volume {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} free"
             description: >
               Under 20% free for 15 minutes. PVC expansion is online for the
               storage classes in use, so this is a resize rather than an outage --
@@ -126,7 +126,7 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL database volume {{ $labels.persistentvolumeclaim }} is nearly full ({{ $value | humanizePercentage }} free)"
+            summary: "MemQL database volume {{ $labels.persistentvolumeclaim }} is nearly full ({{ $value | humanizePercentage }} free)"
             description: >
               Under 10% free. Postgres stops rather than degrades when a volume
               fills. Expand the PVC now.
@@ -146,7 +146,7 @@ spec:
             severity: warning
             team: memql
           annotations:
-            summary: "memQL database replica lag {{ $value | humanizeDuration }} ({{ $labels.namespace }}/{{ $labels.pod }})"
+            summary: "MemQL database replica lag {{ $value | humanizeDuration }} ({{ $labels.namespace }}/{{ $labels.pod }})"
             description: >
               A replica has been more than 5 minutes behind the primary for 10
               minutes. A promotion now would lose that window. Common causes are
@@ -165,7 +165,7 @@ spec:
             severity: critical
             team: memql
           annotations:
-            summary: "memQL database replica is not streaming ({{ $labels.namespace }}/{{ $labels.pod }})"
+            summary: "MemQL database replica is not streaming ({{ $labels.namespace }}/{{ $labels.pod }})"
             description: >
               This instance is in recovery but its WAL receiver is down, so it is
               not replicating -- the cluster has no usable failover target even

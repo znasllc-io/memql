@@ -11,7 +11,7 @@ import (
 // znas.io is one company's domain, and a hostname is product (memql#3593).
 //
 // The engine is meant to carry none, and this name was in eight files across
-// deploy/, scripts/ and editors/ -- an operator cloning memQL to learn it got a
+// deploy/, scripts/ and editors/ -- an operator cloning MemQL to learn it got a
 // cluster named under a stranger's domain. The local default is
 // memql.localhost, an RFC 6761 loopback name that belongs to nobody; anything
 // else is the operator's own choice, arriving as --domain.

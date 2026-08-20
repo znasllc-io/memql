@@ -304,7 +304,7 @@ func fdDialled(t *testing.T, env []string) []string {
 	return strings.Fields(string(body))
 }
 
-// fdHealth is the /healthz body a memQL node returns. It is the discriminator
+// fdHealth is the /healthz body a MemQL node returns. It is the discriminator
 // the precedence check reads: the node that served the request names itself, and
 // nothing weaker can separate the site edge from the ingress controller's own
 // default backend (both 404s are Go's http.NotFound, byte for byte).
@@ -962,7 +962,7 @@ func TestVerifyFrontDoorPrecedenceApexIsRecognisedInAnyPosition(t *testing.T) {
 
 // TestVerifyFrontDoorPrecedenceIsInconclusiveWhenAnExactHostNamesNoNode: the
 // wildcard is live, so precedence IS testable, but this host's backend does not
-// answer /healthz with a memQL identity (an mcp-style 401 to an unauthenticated
+// answer /healthz with a MemQL identity (an mcp-style 401 to an unauthenticated
 // probe). Which backend served it cannot be established, and a check that
 // cannot see the answer must not guess it.
 func TestVerifyFrontDoorPrecedenceIsInconclusiveWhenAnExactHostNamesNoNode(t *testing.T) {

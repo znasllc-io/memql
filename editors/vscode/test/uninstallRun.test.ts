@@ -47,7 +47,7 @@ function graph(doc: unknown): Graph {
  * Shaped on scripts/install/graph/uninstall.json: the cluster first, then the
  * things that depended on it, with the hosts block declaring `sudo` and the CA
  * declaring `user-trust` -- the two of the shipped graph's seven steps that stop
- * and ask for something outside memQL's own footprint.
+ * and ask for something outside MemQL's own footprint.
  */
 const UNINSTALL_GRAPH: Graph = graph({
   name: "test-uninstall",

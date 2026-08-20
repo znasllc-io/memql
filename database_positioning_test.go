@@ -13,22 +13,22 @@ import (
 // TestNoDatabaseProductClaims is a LICENSE-COMPLIANCE gate wearing a prose
 // test's clothes (memql#3843, epic memql#3842).
 //
-// memQL embeds TimescaleDB Community Edition, which is source-available under
+// MemQL embeds TimescaleDB Community Edition, which is source-available under
 // the Timescale License rather than an OSI-approved one. Self-hosting it is free
 // for our model only because of the TSL §2.1(b) "Value Added Products or
 // Services" grant -- and §3.10 prong (i) withholds that grant from a product
 // that is "primarily [a] database storage or operations" product. This
-// repository is PUBLIC, so a sentence in it describing memQL as a database is a
+// repository is PUBLIC, so a sentence in it describing MemQL as a database is a
 // public claim bearing directly on the condition the grant turns on.
 //
 // The rule this enforces:
 //
 //   - ALLOWED: naming the storage layer precisely -- "built on a time-series
 //     memory graph", "PostgreSQL + TimescaleDB substrate". It genuinely is one.
-//   - REFUSED: claiming memQL IS a database, of any kind, in a public-facing
+//   - REFUSED: claiming MemQL IS a database, of any kind, in a public-facing
 //     file.
 //
-// WHY A TEST AND NOT A CONVENTION. "memQL is a time-series database with
+// WHY A TEST AND NOT A CONVENTION. "MemQL is a time-series database with
 // event-driven automations" is a natural sentence, reads as accurate, and was
 // the literal first line of CLAUDE.md until this task. It is also the exact
 // sentence §3.10 prong (i) is about. A rule enforced only by review re-acquires
@@ -39,7 +39,7 @@ import (
 // request to TigerData: docs/internal/ops/timescaledb-license-compliance.md.
 func TestNoDatabaseProductClaims(t *testing.T) {
 	// Matched case-insensitively against each line. Kept to the phrases that
-	// assert memQL's CATEGORY -- deliberately not the bare "is a database",
+	// assert MemQL's CATEGORY -- deliberately not the bare "is a database",
 	// which would flag the compliance doc and this comment saying it must not
 	// be claimed, and would push authors toward evading the test rather than
 	// fixing the sentence.
@@ -118,9 +118,9 @@ func TestNoDatabaseProductClaims(t *testing.T) {
 	}
 
 	if len(hits) > 0 {
-		t.Errorf("a public-facing file claims memQL IS a database, which is the condition "+
+		t.Errorf("a public-facing file claims MemQL IS a database, which is the condition "+
 			"TSL §3.10 prong (i) withholds the §2.1(b) grant on. Describe the substrate instead "+
-			"(\"built on a time-series memory graph\"); the canonical line is \"memQL -- the AI "+
+			"(\"built on a time-series memory graph\"); the canonical line is \"MemQL -- the AI "+
 			"memory platform: agents, automations, and voice on a time-series memory graph\". "+
 			"See docs/internal/ops/timescaledb-license-compliance.md. %d hit(s):\n  %s",
 			len(hits), strings.Join(hits, "\n  "))

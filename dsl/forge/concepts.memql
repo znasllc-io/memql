@@ -8,7 +8,7 @@
 // Forge is agnostic: one `request` spine serves bugs, features, and (later)
 // HR flows (time off, check-in) -- discriminated by `type`, routed by the
 // submitter's role. It sits ON TOP of the apps it develops (memql,
-// memql-cockpit, client apps, future clients) -- it is a CORE memQL platform
+// memql-cockpit, client apps, future clients) -- it is a CORE MemQL platform
 // capability (partition-scoped team-ops backbone, product-agnostic, reused by
 // any cluster), NOT a surface of any one downstream product.
 //

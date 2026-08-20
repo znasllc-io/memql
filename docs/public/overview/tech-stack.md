@@ -1,5 +1,5 @@
 ---
-title: memQL Tech Stack & Deployment Practices
+title: MemQL Tech Stack & Deployment Practices
 audience: public
 status: stable
 area: overview
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL Tech Stack & Deployment Practices
+# MemQL Tech Stack & Deployment Practices
 
 **Version:** 1.0
 **Date:** February 8, 2026
@@ -17,7 +17,7 @@ owner: znas
 
 ## [TASKS] Purpose
 
-This document establishes the **opinionated technologies and practices** for memQL development and deployment. These standards ensure consistency, effectiveness, and clear separation of environments across all teams.
+This document establishes the **opinionated technologies and practices** for MemQL development and deployment. These standards ensure consistency, effectiveness, and clear separation of environments across all teams.
 
 ---
 
@@ -50,7 +50,7 @@ This document establishes the **opinionated technologies and practices** for mem
 | Component | Technology | Notes |
 |-----------|-----------|-------|
 | **Framework** | TBD | Coordinate with frontend team |
-| **API Client** | HTTP + WebSocket | Connect to memQL service |
+| **API Client** | HTTP + WebSocket | Connect to MemQL service |
 | **Auth** | In-house identity service (magic-link JWT) | Same auth provider as backend |
 
 ---
@@ -64,7 +64,7 @@ This document establishes the **opinionated technologies and practices** for mem
 | Component | Technology | Location |
 |-----------|-----------|----------|
 | **Database** | PostgreSQL + TimescaleDB | Pod in the local k3d cluster |
-| **Service** | memQL node pods | k3d cluster, reconciled by ArgoCD from `deploy/k8s/overlays/local` |
+| **Service** | MemQL node pods | k3d cluster, reconciled by ArgoCD from `deploy/k8s/overlays/local` |
 | **Access** | kubectl port-forwards (mcp gRPC :50051, identity :8085, postgres :5432) | localhost |
 | **Data** | Ephemeral | Recreated by `make down && make up` |
 
@@ -89,7 +89,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 
 ### 2. Cloud Deploy Target
 
-**Purpose:** The installation an operator runs for real. memQL ships ONE
+**Purpose:** The installation an operator runs for real. MemQL ships ONE
 installation shape (epic memql#3943) -- an operator who wants a second
 environment installs a second instance, with its own domain, its own ArgoCD and
 its own database, so this section describes ONE target rather than a ladder of
@@ -98,7 +98,7 @@ them.
 | Component | Technology | Location |
 |-----------|-----------|----------|
 | **Database** | Self-hosted CloudNativePG (PostgreSQL + TimescaleDB Community + pgvector) | In-cluster, reconciled by the CloudNativePG operator |
-| **Service** | memQL node pods | Azure Kubernetes Service, reconciled by ArgoCD from `deploy/k8s/overlays/cloud` |
+| **Service** | MemQL node pods | Azure Kubernetes Service, reconciled by ArgoCD from `deploy/k8s/overlays/cloud` |
 | **URL** | HTTPS | `https://api.<domain>`, `https://identity.<domain>`, `https://mcp.<domain>`, `*.<domain>` |
 | **Data** | Persistent | Managed by the database platform |
 
@@ -134,7 +134,7 @@ All environments use the in-house identity service
   authority and does not verify against itself; the edge node serves
   public bytes to anonymous visitors and is not an auth boundary
 - Role-based access control (owner / admin / developer / writer / reader)
-- Centralized user + invitation management via the memQL Portal's
+- Centralized user + invitation management via the MemQL Portal's
   People surface (`IdentityAdminMsg`, gated by
   `component/identity/adminops`). The server-rendered admin web app is
   retired -- `/admin/` now answers `410 Gone` except its sign-in pages
@@ -245,7 +245,7 @@ develop on.
 ### Documentation Structure
 
 ```
-memQL/
+MemQL/
 ├── CLAUDE.md              # Project overview (read first)
 ├── GLOSSARY.md            # Complete doc index
 ├── docs/
@@ -303,7 +303,7 @@ kubectl get deployments -n memql                            # Deployment status
 
 ### Environment Variables
 
-**Managed via memQL concept storage** (`v1:platform:globalVariable` and
+**Managed via MemQL concept storage** (`v1:platform:globalVariable` and
 `v1:platform:globalSecret`). The bootstrap envelope (master key, identity
 signing seed, node bootstrap token, DB DSN, ...) is seeded into the
 `memql-secrets` k8s Secret by `make secrets`; see
@@ -328,7 +328,7 @@ bootstrap-envelope-vs-concept-storage design.
   non-secret config lives in the k8s manifest env. See
   [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
   for the canonical add/rotate flow.
-- Everything else lives in memQL's `v1:platform:globalSecret` /
+- Everything else lives in MemQL's `v1:platform:globalSecret` /
   `v1:platform:globalVariable` concepts
 - Never commit secrets to git
 
@@ -353,7 +353,7 @@ bootstrap-envelope-vs-concept-storage design.
 2. **Stage by explicit path** (`git add <file>`) -- never `git add -A` /
    `.`. Multiple Claude sessions may share a worktree.
 3. **Pre-release; no backwards-compat shims.** When a contract changes,
-   fix both memQL and the consumer (typically the downstream product)
+   fix both MemQL and the consumer (typically the downstream product)
    at once and delete what's no longer needed.
 4. **Commit messages:** Clear, imperative mood. Subject under ~70
    chars. Body explains the why.

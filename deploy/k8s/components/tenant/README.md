@@ -1,4 +1,4 @@
-# `tenant` — one memQL Cloud tenant, as values
+# `tenant` — one MemQL Cloud tenant, as values
 
 The seam a per-tenant deployment composes its **shape** from. Its sibling
 [`cnpg-db`](../cnpg-db/README.md) already does this for the database and says
@@ -8,7 +8,7 @@ Epic memql#3852, task memql#3853.
 
 ## The claim this component exists to make true
 
-A memQL Cloud tenant is **not a new kind of deployment**. It is the same base,
+A MemQL Cloud tenant is **not a new kind of deployment**. It is the same base,
 the same engine images and the same ArgoCD reconciliation as our own cloud
 install — differing only in namespace, domain, replica counts and database
 preset. That is the environment-parity standard

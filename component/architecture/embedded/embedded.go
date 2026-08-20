@@ -1,7 +1,7 @@
 // Package embedded ships the workspace's architecture model baked
 // into every binary that imports it. The JSON file is regenerated
 // by `go generate` (which invokes memql-arch over the full workspace)
-// and embedded via //go:embed so consumers -- chiefly memQL Cockpit --
+// and embedded via //go:embed so consumers -- chiefly MemQL Cockpit --
 // see the same view of the system as the source tree at the commit
 // they were built from.
 //

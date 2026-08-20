@@ -180,7 +180,7 @@ type SessionConfig struct {
 // encodeSessionUpdate renders the session.update client event. turn_detection is
 // emitted as the explicit null of the conductor gate when cfg.TurnDetection is
 // nil (the null is load-bearing: it disables the model's input VAD, auto-commit,
-// and auto-response so memQL's conductor is the sole driver of response.create,
+// and auto-response so MemQL's conductor is the sole driver of response.create,
 // spike section 3.1), or as the configured detector object when set (the #478
 // native path). Native input-audio transcription is added under audio.input only
 // when cfg.InputTranscription is set.

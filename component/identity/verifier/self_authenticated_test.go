@@ -9,7 +9,7 @@ import (
 // self_authenticated_test.go -- memql#3062, split out of memql#2957.
 //
 // The inbound receiver is reached by a third party (Shopify, Amazon SP-API, a
-// POS) that holds no memQL identity and authenticates with a per-source HMAC
+// POS) that holds no MemQL identity and authenticates with a per-source HMAC
 // over the request body. Before this tier existed the route fitted NEITHER
 // unauthenticated tier:
 //
@@ -53,7 +53,7 @@ func TestSelfAuthenticatedRouteIsReachableWithoutAMemqlBearer(t *testing.T) {
 	if !bypassed(t, opts, "/inbound/shopify") {
 		t.Error("POST /inbound/shopify with no credentials did not reach the handler.\n\n" +
 			"This is the defect memql#3062 was filed for: the route's credential is a vendor " +
-			"HMAC, not a memQL bearer, so the middleware must step aside and let the handler " +
+			"HMAC, not a MemQL bearer, so the middleware must step aside and let the handler " +
 			"do the authenticating. While this fails, the inbound receiver cannot function on " +
 			"the documented default configuration -- its allowlist and signature check never " +
 			"execute, because every delivery is 401'd first.")
@@ -262,7 +262,7 @@ func TestHTTPMiddlewareLetsASelfAuthenticatedRouteThrough(t *testing.T) {
 
 	if !reached {
 		t.Fatalf("%s did not reach the handler through the real middleware (status %d). The "+
-			"third-tier exemption is not wired: a third-party webhook carries no memQL bearer, so "+
+			"third-tier exemption is not wired: a third-party webhook carries no MemQL bearer, so "+
 			"this is the 401 memql#3062 exists to remove.", exempt, rec.Code)
 	}
 

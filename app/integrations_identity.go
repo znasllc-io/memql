@@ -492,7 +492,7 @@ func (a *App) integrationsIdentity() {
 
 	// What is left of the admin web app under /admin/*: the sign-in pages, and
 	// an /admin/ root that says where the console went. Every page it served
-	// is in the memQL portal now -- six moved in memql#3324 (writes and
+	// is in the MemQL portal now -- six moved in memql#3324 (writes and
 	// owner/admin gate together, the gate landing in
 	// component/identity/adminops and reached over MemqlService.Stream), and
 	// Deployments followed in memql#3380 once a deploy call could cross the

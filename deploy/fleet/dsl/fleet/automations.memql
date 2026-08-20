@@ -1,4 +1,4 @@
-// fleet domain -- ORCHESTRATION: the memQL Cloud control plane's controller
+// fleet domain -- ORCHESTRATION: the MemQL Cloud control plane's controller
 // (epic memql#3852, task memql#3853).
 //
 // THE DESIGN IN ONE SENTENCE: the v1:fleet:instance row is DESIRED STATE, and
@@ -307,8 +307,8 @@ automation welcomeOnInstanceRunning {
           requestId:   concat("fleet-welcome-", id),
           medium:      "email",
           target:      notifyEmail,
-          subject:     "Your memQL instance is ready",
-          body:        concat("Your memQL instance is running at https://", domain, " -- sign in there to get started."),
+          subject:     "Your MemQL instance is ready",
+          body:        concat("Your MemQL instance is running at https://", domain, " -- sign in there to get started."),
           requestedBy: "fleet.welcomeOnInstanceRunning"
         }
       }

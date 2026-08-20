@@ -58,7 +58,7 @@ spec:
             - secretRef:
                 name: memql-secrets
           env:
-            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             # LiveKit (internal cluster signaling for the agent; the same
             # self-chosen key/secret the BFF mints with). Note the agent reads
             # the non-POLYPHON_-prefixed names.

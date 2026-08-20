@@ -1,5 +1,5 @@
 ---
-title: memQL MCP server — node role, capability tiers, and tool surface
+title: MemQL MCP server — node role, capability tiers, and tool surface
 audience: internal
 status: historical
 area: design
@@ -7,11 +7,11 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL MCP server — node role, capability tiers, and tool surface
+# MemQL MCP server — node role, capability tiers, and tool surface
 
 > Historical: shipped in 0.9.0; kept for rationale.
 
-Phase 0 design for exposing memQL over the Model Context Protocol (MCP) to
+Phase 0 design for exposing MemQL over the Model Context Protocol (MCP) to
 external clients (Claude Desktop / Claude Code and any other MCP host). This
 document records the architecture decision, the security model, the tool
 surface, and a phased implementation plan. It changes no runtime behavior on
@@ -65,7 +65,7 @@ front-end (the client), or an independent consumer (the cockpit).**
 
 ### 1.2 An MCP server is a generic protocol head → it belongs in `memql`
 
-memQL already represents its tools in MCP-compatible form
+MemQL already represents its tools in MCP-compatible form
 (`ToolDefinitionToMCP` / `ToolListToMCP`, `component/memql/tool_loader.go:20-51`)
 and already bridges model-driven tool calls through the authorized backend
 path for the realtime voice agent
@@ -129,7 +129,7 @@ A call is allowed only if the **tier enables the operation class** AND the
 
 ## 3. Capability tiers
 
-memQL's roles today are `owner`, `admin`, `writer`, `reader`
+MemQL's roles today are `owner`, `admin`, `writer`, `reader`
 (`component/auth/rbac.go:23-26`). The engine distinguishes *runtime* execution
 (inline query text via `ExecuteQueryMsg`, `component/grpc/memql.proto:392`,
 which carries a raw `query` string + `variables`) from *authored* constructs
@@ -293,7 +293,7 @@ design note `docs/internal/design/authored-automations-954.md`.
   (`memql.proto:1086`); reading a concept resource runs a query for its rows.
   Live updates via `SubscribeMsg` / `ConceptsSubscribeMsg`
   (`memql.proto:420`) → MCP `resources/subscribe` + update notifications.
-  memQL is subscription-native, so this is the most differentiated surface and
+  MemQL is subscription-native, so this is the most differentiated surface and
   also the largest transport lift (keeping the engine subscription alive
   across the MCP session).
 - **Prompts** — DSL `prompt` definitions map naturally onto MCP prompts; a
@@ -370,7 +370,7 @@ the most-flexible mode.
 
 **Phase 6 — Resources & prompts.** Concept resources, `resources/subscribe`
 backed by engine subscriptions, and DSL `prompt` → MCP prompt mapping.
-*Outcome:* memQL's memory/subscription surface is consumable as MCP resources.
+*Outcome:* MemQL's memory/subscription surface is consumable as MCP resources.
 
 Each phase carries server-side authz tests (mirroring `rbac_test.go`) and
 gate-bypass tests asserting that neither a wrong tier nor a wrong role can

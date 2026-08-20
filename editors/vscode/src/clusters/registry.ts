@@ -3,7 +3,7 @@
 // Three things carry a cluster's existence, and deleting one of them is not
 // deleting the cluster:
 //
-//   the ENTRY       -- ~/.memql/clusters.yaml, shared with the memQL Cockpit
+//   the ENTRY       -- ~/.memql/clusters.yaml, shared with the MemQL Cockpit
 //   the CREDENTIAL  -- SecretStorage, keyed per cluster name, thirty days
 //   the CONNECTION  -- the live stream, if this happens to be the one dialled
 //
@@ -62,7 +62,7 @@ export interface RemoveClusterDeps {
  *
  * The re-read this costs is the same one `addCluster` performs for the same
  * reason, and carries the same caveat: no read here is authoritative for longer
- * than the call that made it, because the memQL Cockpit writes this file too.
+ * than the call that made it, because the MemQL Cockpit writes this file too.
  * Caching it would not make the check any less racy, and the real refusal
  * arrives from removeCluster below regardless.
  *
@@ -232,7 +232,7 @@ export async function completeLocalUninstall(follow: UninstallFollowUp): Promise
     await follow.deleteReceipt();
   } catch (err) {
     problems.push(
-      `the record of the install could not be removed, so memQL will go on ` +
+      `the record of the install could not be removed, so MemQL will go on ` +
         `reporting a cluster on this machine: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

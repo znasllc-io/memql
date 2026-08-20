@@ -11,7 +11,7 @@ owner: znas
 
 One-shot scripts that fix up data shapes that earlier engine code
 left in a non-canonical state. These are **not** schema migrations
-in the conventional ORM sense — memQL has no rigid schema; every
+in the conventional ORM sense — MemQL has no rigid schema; every
 node row is a JSON payload validated at write time against the
 concept's `@field` declarations. What lives here are corrective
 scripts run on existing databases to bring rows in line with a
@@ -47,7 +47,7 @@ every migration script reads; `--dsn=...` is the explicit override.
 
 ## Why hard delete?
 
-memQL is time-series. Soft delete (a new node version with
+MemQL is time-series. Soft delete (a new node version with
 `deleted=true`) leaves the prior versions in `MemoryNodes` and the
 PK includes `createdAt`, so even a "deleted" version of a
 doomed-id row keeps every prior version queryable. For
