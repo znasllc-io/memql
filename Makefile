@@ -564,3 +564,190 @@ frontdoor-paths-check:
 ## neighbors.
 dsl-lint:
 	$(GO) run ./cmd/memqllint dsl/
+
+## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
+## (typescript). Idempotent.
+##
+## `npm ci`, not `npm install`: sdk/ts commits its package-lock.json as of
+## memql#3344, so the install is reproducible and integrity-pinned. It used
+## `npm install` only because that lockfile had never been committed.
+sdk-ts-install:
+	cd sdk/ts && npm ci --no-audit --no-fund
+
+## Typecheck the runtime core. Runs `tsc --noEmit` against sdk/ts. CI
+## gates the core SDK through this target. Requires node + npm.
+sdk-ts-typecheck:
+	cd sdk/ts && npm run typecheck
+
+## Run the runtime-core test suite. Compiles src + test via the
+## tsconfig.test.json overlay and drives node:test against the
+## emitted JS. Zero new runtime deps -- uses Node's built-in
+## test runner. Requires node + npm.
+sdk-ts-test:
+	cd sdk/ts && npm test
+
+## Install view-kit (@znasllc-io/memql-view-kit) dev dependencies. Idempotent.
+viewkit-install:
+	cd sdk/ts-viewkit && npm install --no-audit --no-fund
+
+## Typecheck view-kit. Runs `tsc --noEmit` against sdk/ts-viewkit.
+viewkit-typecheck:
+	cd sdk/ts-viewkit && npm run typecheck
+
+## Run the view-kit test suite via node:test. Zero runtime deps.
+viewkit-test:
+	cd sdk/ts-viewkit && npm test
+
+## Build the workspace packages the extension depends on via `file:`. Their
+## dist/ must exist before `npm ci` in editors/vscode can resolve them, so a
+## clean checkout needs this first.
+##
+## The recipe itself lives in scripts/vscode/deps.sh rather than here, because
+## EVERY lane that compiles the extension needs it. While it existed as three
+## hand-maintained copies the fourth consumer -- package.sh, behind
+## `make vscode-install` -- was written without one and shipped broken from a
+## clean checkout (memql#3340).
+vscode-deps:
+	bash scripts/vscode/deps.sh
+
+## Run the VS Code extension's unit tests. Covers only modules that do not
+## import `vscode`; the API layer is exercised by the host lane below.
+vscode-test: vscode-deps
+	cd editors/vscode && npm ci --no-audit --no-fund && npm test
+
+## Install the MemQL Portal's dependencies (clients/portal), building the
+## sdk/ts + sdk/ts-viewkit `file:` dependencies first -- their dist/ must
+## exist before anything in the portal can resolve against them. Idempotent.
+portal-install:
+	bash scripts/portal/build.sh install
+
+## Typecheck the portal. `tsc -b` over both projects: the browser sources and
+## vite.config.ts are deliberately separate type environments.
+portal-typecheck:
+	bash scripts/portal/build.sh typecheck
+
+## Run the portal test suite (vitest + @testing-library/react on jsdom).
+portal-test:
+	bash scripts/portal/build.sh test
+
+## Build the portal bundle into clients/portal/dist. This is what the
+## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
+## site row's bundleRef at it (file:///abs/path/clients/portal/dist via
+## updateSiteBundle) -- the portal is site #1 (memql#3711), so there is no
+## longer an env var that repoints it.
+portal-build:
+	bash scripts/portal/build.sh build
+
+## Remove the portal's build output (dist + the vite/tsc caches). Leaves
+## node_modules alone -- `npm ci` already fixes anything stale in there.
+portal-clean:
+	bash scripts/portal/build.sh clean
+
+## Run the VS Code extension's Extension Development Host smoke lane
+## (memql#3302): downloads a real VS Code and asserts the host-only surface --
+## activation, command registration, the activity-bar views, the host runtime's
+## WebSocket story, a watcher on a path OUTSIDE the workspace, and webview
+## creation. Needs a display (falls back to xvfb-run when DISPLAY is unset).
+## Deliberately not folded into `vscode-test`, which stays fast and
+## Electron-free.
+vscode-test-host:
+	bash scripts/vscode/host-test.sh
+
+## Run all tests
+test:
+	$(GO) test $(ALL_PKGS)
+
+## Run all tests with verbose output
+test-v:
+	$(GO) test -v $(ALL_PKGS)
+
+## Run tests with coverage report
+test-cover:
+	$(GO) test -coverprofile=coverage.out $(ALL_PKGS)
+	$(GO) tool cover -func=coverage.out
+	@rm -f coverage.out
+
+## Run Polyphon/cognition tests only
+test-polyphon:
+	$(GO) test ./component/polyphon/... ./integrations/cognition/...
+
+# ---------------------------------------------------------------------------
+# Code quality
+# ---------------------------------------------------------------------------
+
+##@ Quality & codegen
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check
+
+## Run go vet on all packages
+vet:
+	$(GO) vet $(ALL_PKGS)
+
+## Format all Go files
+fmt:
+	$(GO) fmt $(ALL_PKGS)
+
+## Run vet + fmt (quick lint)
+lint: fmt vet
+
+## Report PRs nobody is advancing: green + mergeable + un-enqueued (memql#2833),
+## and closed-without-merging whose branch and issue are both still live
+## (memql#2887). READ-ONLY: it never enqueues, because green is not reviewed.
+## IDLE_MINUTES=15 tightens the idle threshold -- head-commit age, not last
+## activity. CLOSED_MAX_AGE_MINUTES=43200 widens the closed-PR lookback from its
+## 14-day default. REPO=owner/name retargets.
+prs-stalled:
+	bash scripts/dev/stalled-prs.sh
+
+## Report claimed:* labels no live session is holding (memql#2834). READ-ONLY by
+## default. Pass APPLY=1 to remove the label from CLOSED issues whose claim has
+## also gone cold; claims on OPEN issues are always reported, never swept.
+##
+## $(filter ...), not a bare $(if $(APPLY),...): make's $(if) tests emptiness,
+## not truth, so APPLY=0 / APPLY=no / APPLY=false would all have passed --apply
+## and written to GitHub. On a target whose whole safety story is "mutation is
+## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent. Anything
+## outside {1,true,yes,on} -- including APPLY=Y and APPLY=2 -- is read as false,
+## which is the fail-safe direction.
+claims-stale:
+	bash scripts/dev/stale-claims.sh $(if $(filter 1 true yes on,$(APPLY)),--apply,)
+
+## Tidy go.mod dependencies
+tidy:
+	$(GO) mod tidy
+
+## Run code generation (protobuf, etc.)
+generate:
+	$(GO) generate $(ALL_PKGS)
+
+## Regenerate the pinned-toolchain proto bindings (component/grpc,
+## component/node, component/bus). The fix command for `proto-gen-check`, and
+## since memql#3251 the ONLY generation path: the //go:generate directives in
+## those three packages delegate here rather than invoking a bare `protoc`,
+## which is what let `make generate` disagree with this target about the protoc
+## version and rewrite the stamp in all nine generated files.
+##
+## PROTO_GEN_ONLY=<proto dir> narrows the run to one directory. It exists for
+## those directives, which are necessarily per-package: each one delegates here
+## scoped to itself, so `go generate` over the tree regenerates each dir once
+## instead of regenerating all three, three times. Unset means every target,
+## which is what a human running `make proto-gen` and the drift gate both want.
+##
+## Emptiness is the right test for $(if) here (unlike claims-stale, where it
+## would read APPLY=0 as yes): an empty PROTO_GEN_ONLY genuinely means "no
+## narrowing", and an unrecognised value is rejected by the script.
+proto-gen:
+	@bash scripts/dev/proto-gen.sh $(if $(PROTO_GEN_ONLY),--only=$(PROTO_GEN_ONLY),)
+
+## CI gate: regenerate the pinned proto bindings, then diff against the
+## checked-in tree (ignoring the cosmetic protoc version stamp). Fails if a
+## .proto evolved without the generator running. Mirrors `sdk-gen-check`.
+proto-gen-check:
+	@bash scripts/dev/proto-gen.sh --check
+
+# ---------------------------------------------------------------------------
+# Docker image targets
+# ---------------------------------------------------------------------------
+
+##@ Release (engine image)
+##> The cloud deploy is GitOps: bump the digest in deploy/k8s/overlays/cloud + merge -> ArgoCD reconciles.
+.PHONY: release tag-submodules
