@@ -170,8 +170,8 @@ jobs:
             #                                    here; this completes the tree
             #                                    rather than starting a new
             #                                    route.
-            #   examples/*/dsl/**             -> the deploypack + referencepack
-            #                                    `all:dsl` embeds.
+            #   examples/*/dsl/**             -> the deploypack + referencepack +
+            #                                    reviewspack `all:dsl` embeds.
             #   integrations/*.json           -> integrations/embed.go
             #
             # The remaining pinned packages (component/architecture/embedded,
@@ -278,6 +278,7 @@ jobs:
               - 'dsl/**'
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
+              - 'examples/reviewspack/dsl/**'
               - 'integrations/*.json'
               # The `clients/` tree (memql#3326). clients_allowlist_test.go in
               # the ROOT package sweeps `git ls-files clients` and fails on a
