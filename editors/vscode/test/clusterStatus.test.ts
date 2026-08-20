@@ -134,21 +134,72 @@ test("a cluster with an endpoint and no token asks for a JWT, not for a PAT", ()
 
 const LISTING = { tags: ["v0.18.0", "v0.17.0"], fetchedAt: 1000 };
 
-test("a row shows the endpoint alone when no version is recorded", () => {
+test("an idle row with nothing recorded says nothing -- and never the endpoint", () => {
   // The ordinary case on a fresh install. Appending "unknown" to every row
   // would be noise; the connection page says the word where there is room.
+  // And the ENDPOINT is not the subtitle any more (memql#4194, audit 10):
+  // internal addresses do not sit on permanent display in the sidebar.
   const text = clusterRowText(CLUSTER, { status: "disconnected" }, LISTING);
-  assert.equal(text.description, "api.memql.localhost:443");
+  assert.equal(text.description, "");
+  assert.match(text.tooltip, /api\.memql\.localhost:443/, "the address lives in the hover");
 });
 
-test("a row shows the recorded version beside the endpoint", () => {
+test("a row shows the recorded version, and the endpoint only in the tooltip", () => {
   const text = clusterRowText(
     { ...CLUSTER, version: "v0.18.0" },
     { status: "disconnected" },
     LISTING,
   );
-  assert.match(text.description, /api\.memql\.localhost:443/);
+  assert.doesNotMatch(text.description, /api\.memql\.localhost/);
   assert.match(text.description, /v0\.18\.0/);
+  assert.match(text.tooltip, /Endpoint: api\.memql\.localhost:443/);
+});
+
+test("a row's subtitle leads with the verdict when there is one", () => {
+  // memql#4195: the list answers "which of my clusters needs me".
+  const missingCredential = clusterRowText(
+    { name: "x", endpoint: "api.example.com:443", version: "v0.18.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.match(missingCredential.description, /^needs sign-in/);
+  assert.match(missingCredential.description, /v0\.18\.0/);
+
+  const connected = clusterRowText(
+    { ...CLUSTER, version: "v0.18.0" },
+    { status: "connected", clusterName: "local", nodeId: "bff-0" },
+    LISTING,
+  );
+  assert.match(connected.description, /^connected/);
+});
+
+test("a failed dial's tooltip is brief and names the Connection channel", () => {
+  // Raw transport errors belong to the MemQL Connection output channel
+  // (memql#4194, audit 12); a hover can be neither scrolled nor copied.
+  const longMessage = `dial tcp 10.0.0.4:50051: ${"x".repeat(300)}\nsecond line of stack`;
+  const text = clusterRowText(
+    CLUSTER,
+    { status: "error", clusterName: "local", reason: "unreachable", message: longMessage },
+    LISTING,
+  );
+  assert.doesNotMatch(text.tooltip, /second line of stack/);
+  assert.ok(text.tooltip.split("\n")[0]!.length <= 141, "first line is capped");
+  assert.match(text.tooltip, /MemQL Connection output channel/);
+});
+
+test("a recorded release behind the extension pin gets the skew sentence", () => {
+  const behind = clusterRowText(
+    { ...CLUSTER, version: "v0.9.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.match(behind.tooltip, /older than the v\d+\.\d+\.\d+ this extension ships for/);
+  const current = clusterRowText(
+    { ...CLUSTER, version: "v99.0.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.doesNotMatch(current.tooltip, /older than the/);
 });
 
 test("a row behind the newest release carries the availability clause", () => {
@@ -180,11 +231,11 @@ test("the tooltip carries the version sentence beneath the connection verdict", 
   assert.match(text.tooltip, /v0\.18\.0/, "and the version sentence follows");
 });
 
-test("the tooltip is unchanged when nothing is known about the version", () => {
+test("the tooltip adds no version paragraph when nothing is known", () => {
   // A row that grew a paragraph saying "we know nothing" on every cluster
   // would make the tooltip worth less, not more.
   const text = clusterRowText(CLUSTER, { status: "disconnected" }, undefined);
-  assert.equal(text.tooltip, clusterRowStatus(CLUSTER, { status: "disconnected" }).tooltip);
+  assert.equal(text.tooltip, "Endpoint: api.memql.localhost:443");
 });
 
 test("an unfetched listing does not make a known version disappear", () => {

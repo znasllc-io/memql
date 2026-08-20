@@ -241,6 +241,51 @@ export function withholdsFromReceipt(name: string, value: unknown): boolean {
   return /^(sk-|mql_)/i.test(trimmed);
 }
 
+// ---------------------------------------------------------------------------
+// display redaction -- text on its way to a HUMAN surface (memql#4194)
+// ---------------------------------------------------------------------------
+//
+// The two families above govern the FILES. This third family governs what a
+// panel, a tooltip or an output channel may show: capability stderr, exception
+// messages and file paths, which routinely carry the operator's home directory
+// and can carry a credential a subprocess echoed. One module on purpose -- the
+// audit's rule is that there is exactly one redactor, extended here rather
+// than duplicated somewhere a future surface would miss.
+
+/** What a credential scrubbed out of display text reads as. */
+export const SCRUBBED = "[scrubbed credential]";
+
+/**
+ * Replaces the home directory prefix with `~` wherever it appears.
+ *
+ * A path under $HOME names the operator's account to anyone reading a
+ * screenshot or a screen share; `~/.memql/clusters.yaml` says everything the
+ * surface needs. Callers pass `os.homedir()`; a degenerate home ("" or "/")
+ * masks nothing rather than corrupting every path.
+ */
+export function maskHomePath(text: string, home: string): string {
+  const trimmedHome = home.replace(/[\\/]+$/, "");
+  if (trimmedHome.length < 2) return text;
+  return text.split(trimmedHome).join("~");
+}
+
+/**
+ * Text as a human surface may show it: home masked, credentials scrubbed.
+ *
+ * The credential patterns are the two families this product actually mints or
+ * collects -- provider keys (`sk-...`) and MemQL credentials (`mql_pat_`,
+ * `mql_wkr_`, `mql_rec_`, `mql_enr_`, and any future `mql_*_` sibling). This
+ * is NOT a general secret detector, for `looksLikeProviderKey`'s reason: a
+ * heuristic wide enough to catch everything also eats the ordinary paths and
+ * ids an operator is reading the text FOR. Anything else a subprocess echoes
+ * is bounded by the channel being local output, not a file or a wire.
+ */
+export function redactForDisplay(text: string, home: string): string {
+  return maskHomePath(text, home)
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, SCRUBBED)
+    .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]{8,}/g, SCRUBBED);
+}
+
 /**
  * A step's result as the run log may keep it.
  *
