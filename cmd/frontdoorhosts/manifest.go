@@ -35,15 +35,15 @@ const clusterIssuer = "letsencrypt-prod"
 // the annotations below change together and nothing else here does.
 const ingressClass = "nginx"
 
-// manifest renders the cloud overlay's whole front door.
+// manifest renders one instance overlay's whole front door.
 //
 // The order is: certificate first (nothing else works without it), then the
 // roles in the order component/frontdoor declares them, then the sites
 // wildcard. Stable, because a reordering would show up as a diff in a generated
 // file and cost a review round for nothing.
-func manifest(domain, pathBlock string) string {
+func manifest(overlay, domain, pathBlock string) string {
 	var b strings.Builder
-	b.WriteString(header(domain))
+	b.WriteString(header(overlay, domain))
 	b.WriteString(certificate(domain))
 	b.WriteString(apiIngress(domain, pathBlock))
 	b.WriteString(apiGRPCIngress(domain))
@@ -53,7 +53,7 @@ func manifest(domain, pathBlock string) string {
 	return b.String()
 }
 
-func header(domain string) string {
+func header(overlay, domain string) string {
 	var rows strings.Builder
 	for _, h := range frontdoor.Hosts(domain) {
 		fmt.Fprintf(&rows, "#   %-12s %s\n", h.Role, h.Name)
@@ -64,7 +64,7 @@ func header(domain string) string {
 		"# Run `make frontdoor` (hosts, then paths). Hand edits are reverted by the generator\n" +
 		"# and TestFrontDoorHostsAreNotStale fails the build until they are.\n" +
 		"#\n" +
-		"# The front door for the `cloud` overlay, derived from the closed ROLE set\n" +
+		"# The front door for the `" + overlay + "` overlay, derived from the closed ROLE set\n" +
 		"# (memql#3767). The host COUNT never grows with customers, apps or sites, which is\n" +
 		"# what the sites wildcard is for (memql#3700).\n" +
 		"#\n" +
