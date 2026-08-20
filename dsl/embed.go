@@ -36,7 +36,17 @@ import (
 // RegisterTree; engine-only core builds omit them (ids preserved: v1:guide:*
 // / v1:curriculum:*).
 //
-//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:common all:data all:deployment all:forge all:harness all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
+// memql#4190: `harness` is deliberately ABSENT from this list. The harness
+// is the platform's own proof that a substantial capability can be a
+// module: its tree still lives at dsl/harness/ and still ships in every
+// binary, but it is embedded by dsl/harness_pack.go's own directive and
+// registered through RegisterTree like any other pack -- which is what
+// makes it enable/disable-able per instance (v1:platform:packState).
+// Removing the token here is also what frees the domain name:
+// coreDomains() reads THIS FS's root, so the pack registration below
+// passes ValidatePackDomain without a second list to maintain.
+//
+//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
 var embedFS embed.FS
 
 // pluginTrees holds the additional DSL subtrees registered by external
@@ -94,6 +104,19 @@ func RegisterTree(domain string, tree fs.FS) {
 		panic("dsl.RegisterTree: " + err.Error())
 	}
 	pluginTrees[trimmed] = tree
+}
+
+// pluginTreeRegistered reports whether a plugin tree is already registered
+// under domain. Read-only companion to RegisterTree for callers that must
+// decide BEFORE registering whether a registration would collide -- the
+// lint overlay mount (lint_mount.go), which walks a disk root that can
+// legitimately contain a domain an in-tree pack has already registered
+// from init() (harness, memql#4190).
+func pluginTreeRegistered(domain string) bool {
+	pluginTreesMu.RLock()
+	defer pluginTreesMu.RUnlock()
+	_, ok := pluginTrees[strings.TrimSpace(domain)]
+	return ok
 }
 
 // UnregisterTree removes a previously registered plug-in domain from the

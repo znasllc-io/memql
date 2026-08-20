@@ -256,6 +256,7 @@ function open(options: {
   }
 
   const deps: AddClusterDeps = {
+    diagnostics: { appendLine: () => {} },
     clustersPath,
     receiptFile,
     installRoot: REPO_ROOT,
@@ -1134,8 +1135,19 @@ test("the claimed recovery key is shown once, on the done screen", async () => {
   // never had.
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   try {
+    // THE REVEAL IS A CLICK, NOT A DEFAULT (memql#4194, audit 1). The done
+    // screen offers the reveal and keeps the plaintext out of the DOM until it
+    // is asked for -- so it can sit open on a shared screen with nothing on it.
+    const before = h.html();
+    assert.match(before, /Your cluster is ready/, "the run should have reached the done screen");
+    assert.ok(
+      !before.includes(RECOVERY_KEY),
+      "the plaintext must not render before the operator asks for it",
+    );
+    assert.match(before, /data-act="revealRecoveryKey"/, "the reveal must be offered");
+
+    h.post({ type: "revealRecoveryKey" });
     const html = h.html();
-    assert.match(html, /Your cluster is ready/, "the run should have reached the done screen");
     assert.ok(
       html.includes(RECOVERY_KEY),
       "the one-time reveal must reach the operator's eyes: the step claimed the key, " +
@@ -1157,7 +1169,9 @@ test("the reveal is DISPLAY, not storage: the receipt and the run log still with
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   try {
     // Asserted FIRST so the containment half cannot pass vacuously against a
-    // screen that revealed nothing at all.
+    // screen that revealed nothing at all. The reveal is click-through now
+    // (memql#4194, audit 1), so the click comes first.
+    h.post({ type: "revealRecoveryKey" });
     assert.ok(h.html().includes(RECOVERY_KEY), "the reveal must be on screen");
 
     // The receipt: written once, kept for the life of the install, read back by

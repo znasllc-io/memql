@@ -21,6 +21,9 @@ import {
   wrongTokenClassMessage,
 } from "../connection/credentials.js";
 import type { ConnectionState } from "../connection/manager.js";
+import { DEFAULT_STACK_TAG } from "../install/stackPin.js";
+import { briefMessage } from "../state/diagnostics.js";
+import { compareVersions } from "../version/compare.js";
 import { describeVersion } from "../version/describe.js";
 import type { ReleaseListing } from "../version/releaseCache.js";
 import { needsAuth, type ClusterConfig } from "./model.js";
@@ -100,8 +103,48 @@ export interface ClusterRowText {
 }
 
 /**
- * The row's words: what this editor is dialling, and what release it is
- * (memql#3995).
+ * The one-or-two-word verdict a row's dimmed description leads with.
+ *
+ * The clusters-first IA (memql#4195) reads the list as "which of my clusters
+ * needs me", so the subtitle answers STATE, not address. `idle` answers
+ * nothing: a configured cluster that simply is not the working one has no
+ * state worth a word, and the version alone is the useful fact.
+ */
+export function rowVerdict(icon: ClusterRowIcon): string {
+  switch (icon) {
+    case "connected":
+      return "connected";
+    case "connecting":
+      return "connecting...";
+    case "failed":
+      return "unreachable";
+    case "credential":
+      return "needs sign-in";
+    case "unconfigured":
+      return "no endpoint";
+    case "idle":
+      return "";
+  }
+}
+
+/**
+ * The one-sentence skew fact for a cluster whose recorded release is behind
+ * the release this extension build is pinned to (src/install/stackPin.ts).
+ * Empty when the versions are not comparable or the cluster is not behind --
+ * an incomparable pair proves nothing, and saying "maybe" on every row is
+ * noise. The transport-failure variant of the same fact lives in
+ * version/skewHint.ts; this is the AT-REST rendering the tree can show
+ * without any call having failed.
+ */
+export function recordedSkewSentence(recorded: string | undefined): string {
+  const version = (recorded ?? "").trim();
+  if (version === "") return "";
+  if (compareVersions(version, DEFAULT_STACK_TAG) !== "behind") return "";
+  return `This cluster records ${version}, older than the ${DEFAULT_STACK_TAG} this extension ships for -- it may not answer this editor's newer calls.`;
+}
+
+/**
+ * The row's words: this cluster's STATE and release (memql#3995, memql#4195).
  *
  * THIS IS THE SURFACE THAT MAKES A DISCONNECTED OR NEVER-DIALLED CLUSTER'S
  * VERSION VISIBLE AT ALL. Every other place a version could appear needs a live
@@ -109,10 +152,17 @@ export interface ClusterRowText {
  * switched off -- which is the situation the motivating incident happened in,
  * and the reason memql#3990 records the version rather than observing it.
  *
- * Two decisions are COMPOSED here rather than taken here: the connection
- * verdict above, and the version verdict in `version/describe.ts`. Keeping the
- * composition in this module is what leaves views/clustersTree.ts as a mapping
- * onto VS Code's icon vocabulary.
+ * THE ENDPOINT IS NOT THE SUBTITLE ANY MORE (memql#4194, audit rows 10/42).
+ * A `host:port` on every row put internal addresses on permanent display in
+ * the sidebar -- in every screenshot and screen share -- to answer a question
+ * nobody asks at a glance. It lives in the tooltip here and on the Connection
+ * page, which is the surface FOR addresses.
+ *
+ * THE TOOLTIP IS BRIEF ON FAILURE. Raw transport errors go to the MemQL
+ * Connection output channel (extension.ts records them as the state changes);
+ * the hover carries the classified first line and names the channel, because a
+ * hover can be neither scrolled nor copied and must never be the only home of
+ * a diagnostic.
  *
  * An unknown version adds NOTHING. A row that appended "unknown" to every
  * cluster on a fresh install would be noise, and the connection page says the
@@ -123,15 +173,36 @@ export function clusterRowText(
   state: ConnectionState,
   listing: ReleaseListing | undefined,
 ): ClusterRowText {
+  // The synthetic error row (empty name -- a name the registry refuses to
+  // store) says nothing here; the tree renders its own words for it.
+  if (cluster.name === "") {
+    return { description: "", tooltip: "" };
+  }
   const status = clusterRowStatus(cluster, state);
   const version = describeVersion({ recorded: cluster.version, listing });
-  return {
-    description:
-      version.short === "" ? cluster.endpoint : `${cluster.endpoint} - ${version.short}`,
-    // The connection verdict stays FIRST. It is what an operator opened the
-    // tooltip for; the version is context beneath it, and a tooltip that led
-    // with the version would bury the reason the row is red.
-    tooltip:
-      version.state === "unknown" ? status.tooltip : `${status.tooltip}\n${version.sentence}`,
-  };
+  const verdict = rowVerdict(status.icon);
+  const description = [verdict, version.short].filter((part) => part !== "").join(" - ");
+
+  const endpoint = cluster.endpoint.trim();
+  // An idle row's status "verdict" is the bare endpoint (pinned by the status
+  // tests); rendered here under its label so the hover has exactly one
+  // address line whatever the state.
+  const lines =
+    status.icon === "idle" && endpoint !== ""
+      ? [`Endpoint: ${endpoint}`]
+      : [briefMessage(status.tooltip)];
+  if (status.icon === "failed") {
+    lines.push("Full error: the MemQL Connection output channel.");
+  }
+  if (status.icon !== "idle" && endpoint !== "") {
+    lines.push(`Endpoint: ${endpoint}`);
+  }
+  if (version.state !== "unknown") {
+    lines.push(version.sentence);
+  }
+  const skew = recordedSkewSentence(cluster.version);
+  if (skew !== "") {
+    lines.push(skew);
+  }
+  return { description, tooltip: lines.join("\n") };
 }

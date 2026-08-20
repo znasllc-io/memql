@@ -50,6 +50,10 @@ import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
+import { maskHomePath, redactForDisplay } from "../install/secrets.js";
+import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
+import { preflightItems, type PreflightInputs, type PreflightItem } from "../state/preflight.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -205,6 +209,13 @@ const STEP_TIMEOUT_MS = 600_000;
 export interface AddClusterDeps {
   /** ~/.memql/clusters.yaml, resolved once at activation. */
   clustersPath: string;
+  /**
+   * The MemQL Install output channel (memql#4194). Every line of capability
+   * stderr is recorded here, redacted, as the run emits it -- the panel's step
+   * list keeps only the short what-failed line, so this is where the whole
+   * story lives.
+   */
+  diagnostics: DiagnosticSink;
   /** Repaints the Clusters view once an entry lands. */
   refreshTree: () => void;
   /**
@@ -301,6 +312,15 @@ export class AddClusterPanel {
   private runAbort: AbortController | undefined;
   /** Why the run could not be attempted at all. Not a step failure. */
   private runError = "";
+  /**
+   * Whether the operator has clicked through the recovery-key reveal
+   * (memql#4194, audit 1). The plaintext renders only after a deliberate
+   * click, so the done screen can sit open -- in a screen share, on a
+   * projector -- without the key on it.
+   */
+  private recoveryKeyRevealed = false;
+  /** The "Before it runs" checklist for the collect screen (memql#4195). */
+  private preflight: PreflightItem[] | undefined;
 
   /** The removal's own state (memql#3476). See state/uninstallRun.ts. */
   private readonly uninstall = new UninstallRunState();
@@ -381,6 +401,9 @@ export class AddClusterPanel {
     // default, so the form is answerable the instant it renders and the list
     // only widens what can be chosen.
     if (action === "install" || action === "installGuided") void this.loadVersionChoices();
+    if (action === "install" || action === "installGuided" || action === "repair") {
+      void this.computePreflight(action);
+    }
     this.render();
   }
 
@@ -468,6 +491,9 @@ export class AddClusterPanel {
       // recorded answers already in the boxes -- nobody retypes a good path,
       // and a bad one is finally reachable.
       if (action === "repair") void this.prefillFromReceipt();
+      if (action === "install" || action === "installGuided" || action === "repair") {
+        void this.computePreflight(action);
+      }
       // The itemized list is the confirmation, so it is read the moment the
       // branch opens rather than behind a further click: there is nothing on
       // this screen for the operator to do until it is on screen.
@@ -618,6 +644,10 @@ export class AddClusterPanel {
     }
     if (type === "copyRecoveryKey") {
       void this.copyRecoveryKey();
+    }
+    if (type === "revealRecoveryKey") {
+      this.recoveryKeyRevealed = true;
+      this.render();
     }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
@@ -924,6 +954,14 @@ export class AddClusterPanel {
         }),
         this.hooks({
           onEvent: (event) => {
+            // The FULL log's home (memql#4194, audit 30): every stderr line,
+            // redacted, as the run emits it. The step list keeps only the
+            // short what-failed line (state/installProgress.ts).
+            if (event.type === "stepLog") {
+              this.deps.diagnostics.appendLine(
+                `[${event.step.id}] ${redactForDisplay(event.line, os.homedir())}`,
+              );
+            }
             this.state.apply(event);
             void recorder.apply(event);
             this.render();
@@ -937,7 +975,14 @@ export class AddClusterPanel {
       // not be attempted at all -- a missing graph document, an unreadable
       // script -- and the step list would otherwise sit empty with no account
       // of why.
-      failure = err instanceof Error ? err.message : String(err);
+      const raw = err instanceof Error ? err.message : String(err);
+      recordDiagnostic(
+        this.deps.diagnostics,
+        "the run could not be attempted",
+        raw,
+        new Date().toISOString(),
+      );
+      failure = redactForDisplay(raw, os.homedir());
     } finally {
       this.runAbort = undefined;
       // The run is over either way; the password has no further use.
@@ -1370,6 +1415,14 @@ export class AddClusterPanel {
         this.uninstallOptions(),
         this.hooks({
           onEvent: (event) => {
+            // The FULL log's home (memql#4194, audit 30): every stderr line,
+            // redacted, as the run emits it. The step list keeps only the
+            // short what-failed line (state/installProgress.ts).
+            if (event.type === "stepLog") {
+              this.deps.diagnostics.appendLine(
+                `[${event.step.id}] ${redactForDisplay(event.line, os.homedir())}`,
+              );
+            }
             this.uninstall.apply(event);
             void recorder.apply(event);
             this.render();
@@ -1433,56 +1486,43 @@ export class AddClusterPanel {
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Add a MemQL cluster</title>
 <style nonce="${nonce}">
-  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-  }
-
+${brandStyleBlock()}
 ${viewKitStyles}
 
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0;
-         padding: 16px 20px; max-width: 780px; }
-  h1 { font-size: 1.2em; margin: 0 0 4px; }
-  .lede { color: var(--vscode-descriptionForeground); margin: 0 0 16px; }
+  body { max-width: 780px; }
   .card { display: block; width: 100%; text-align: left; cursor: pointer;
-          border: 1px solid var(--vscode-panel-border); border-radius: 4px;
-          background: transparent; color: var(--vscode-foreground);
+          border: 1px solid var(--memql-border); border-radius: 6px;
+          background: var(--memql-surface); color: var(--memql-fg);
           padding: 10px 12px; margin-bottom: 8px; font: inherit; }
-  .card:hover { background: var(--vscode-list-hoverBackground); }
+  .card:hover { background: var(--memql-raised); border-color: var(--memql-accent); }
   .card-label { font-weight: 600; }
-  .card-detail { color: var(--vscode-descriptionForeground); margin-top: 2px; }
-  .card[data-tone="destructive"] .card-label { color: var(--vscode-editorWarning-foreground); }
+  .card-detail { color: var(--memql-muted); margin-top: 2px; }
+  .card[data-tone="destructive"] .card-label { color: var(--memql-danger); }
   .field { margin-bottom: 12px; }
   .field label { display: block; margin-bottom: 3px; }
   .field input, .field select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
-                 color: var(--vscode-input-foreground);
-                 background: var(--vscode-input-background);
-                 border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+                 color: var(--memql-fg);
+                 background: var(--memql-surface);
+                 border: 1px solid var(--memql-border-strong); border-radius: 3px; }
+  .field input:focus, .field select:focus { outline: 1px solid var(--memql-accent); }
   /* The box and its Browse button read as one control (memql#3547): the button
      is an alternative way to fill the field beside it, not a separate action. */
   .control-row { display: flex; gap: 6px; align-items: stretch; }
   .control-row input { flex: 1 1 auto; min-width: 0; }
   button.browse { flex: 0 0 auto; white-space: nowrap; }
-  .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
   /* What the step itself said, as opposed to the generic advice for its code. */
   .said { margin: 0 0 8px; }
   .remedy { font-family: var(--vscode-editor-font-family, monospace);
-            background: var(--vscode-textCodeBlock-background, transparent);
-            border: 1px solid var(--vscode-panel-border);
+            background: var(--memql-raised);
+            border: 1px solid var(--memql-border);
             border-radius: 4px; padding: 8px 10px; margin: 6px 0 0;
             overflow-x: auto; white-space: pre; }
-  .error { color: var(--vscode-inputValidation-errorForeground,
-                   var(--vscode-editorError-foreground)); margin-top: 3px; }
+  .error { color: var(--memql-danger); margin-top: 3px; }
   /* A refusal that belongs to the whole form rather than to one box, so it
      sits away from the fields instead of looking like the last one's. */
   .form-error { margin: 14px 0 0; }
   .field[data-invalid="true"] input, .field[data-invalid="true"] select {
-    border-color: var(--vscode-editorError-foreground); }
+    border-color: var(--memql-danger); }
   /* The one-time recovery key reveal (memql#4079). Monospace and boxed like
      .remedy so the value reads as the credential it is; user-select: all so a
      single click selects the whole 47 characters for the operator who prefers
@@ -1491,21 +1531,14 @@ ${viewKitStyles}
   .recovery-heading { font-size: 1.05em; margin: 16px 0 4px; }
   .recovery-key-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
   .recovery-key { font-family: var(--vscode-editor-font-family, monospace);
-                  background: var(--vscode-textCodeBlock-background, transparent);
-                  border: 1px solid var(--vscode-panel-border);
+                  background: var(--memql-raised);
+                  border: 1px solid var(--memql-accent);
                   border-radius: 4px; padding: 6px 8px; overflow-x: auto;
-                  user-select: all; }
-  .actions { display: flex; gap: 8px; margin-top: 16px; }
-  button.primary, button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
-    border: 1px solid transparent; }
-  button.primary { background: var(--vscode-button-background);
-                   color: var(--vscode-button-foreground); }
-  button.secondary { background: var(--vscode-button-secondaryBackground);
-                     color: var(--vscode-button-secondaryForeground); }
+                  user-select: all; color: var(--memql-data-number); }
 </style>
 </head>
 <body>
+${brandStrip("MemQL")}
 ${this.bodyHtml()}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
@@ -1670,6 +1703,7 @@ ${cards}`;
       errors: this.state.errors,
       versionChoices: this.versionChoices,
       latestRelease: this.latestRelease(),
+      ...(this.preflight === undefined ? {} : { preflight: this.preflight }),
     });
   }
 
@@ -1919,6 +1953,44 @@ ${this.sharedToolsHtml()}
       }
       await agent.dispose();
     }
+  }
+
+  /**
+   * Gathers the "Before it runs" facts and repaints (memql#4195).
+   *
+   * The same sources the run itself consults -- the graph document, the
+   * `sudo -n` probe (through the deps seam the elevation tests use), the
+   * receipt's recorded key path -- so the checklist can never promise a
+   * different run than the one Start begins. Stale answers are prevented by
+   * re-checking the action when the async work lands.
+   */
+  private async computePreflight(action: "install" | "installGuided" | "repair"): Promise<void> {
+    this.preflight = undefined;
+    let graph: PreflightInputs["graph"];
+    let needsElevation = false;
+    try {
+      const loaded = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
+      needsElevation = loaded.steps.some((step) => step.elevation !== "none");
+      graph = { ok: true, steps: loaded.steps.length, needsElevation };
+    } catch (err) {
+      graph = {
+        ok: false,
+        error: redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()),
+      };
+    }
+    let sudoFree = process.getuid?.() === 0;
+    if (!sudoFree && needsElevation) {
+      const isFree = this.deps.sudoIsFree ?? (() => sudoRunsWithoutAsking());
+      sudoFree = await isFree().catch(() => false);
+    }
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    const recordedKeyPath = maskHomePath(
+      usablePath(recordedProviderKeyFile(receipt)),
+      os.homedir(),
+    );
+    if (this.disposed || this.state.action !== action || this.state.screen !== "collect") return;
+    this.preflight = preflightItems({ action, graph, sudoFree, recordedKeyPath });
+    this.render();
   }
 
   /** Whether any step of this graph needs a privilege this process lacks. */
@@ -2217,9 +2289,16 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     try {
       await vscode.env.clipboard.writeText(key);
     } catch (err) {
+      // Generic sentence; the exception detail is record material, not toast
+      // material (memql#4194, audit 3).
+      recordDiagnostic(
+        this.deps.diagnostics,
+        "the recovery key could not be copied to the clipboard",
+        err instanceof Error ? err.message : String(err),
+        new Date().toISOString(),
+      );
       vscode.window.showErrorMessage(
-        "MemQL: the recovery key could not be copied -- select it in the panel and copy it " +
-          `by hand (${err instanceof Error ? err.message : String(err)}).`,
+        "MemQL: the recovery key could not be copied -- select it in the panel and copy it by hand.",
       );
       return;
     }
@@ -2373,6 +2452,18 @@ ${claimNote}
   private recoveryKeyBlock(): string {
     const state = this.state.recoveryKeyState;
     const key = this.state.revealedRecoveryKey;
+    if (state === "claimed" && key !== "" && !this.recoveryKeyRevealed) {
+      // THE REVEAL IS A CLICK, NOT A DEFAULT (memql#4194, audit 1). The value
+      // stays out of the DOM entirely until asked for -- this branch renders a
+      // button, not a hidden element a style could unhide.
+      return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- shown once")}</h2>
+<p>${escapeHtml(
+        "This cluster minted its break-glass recovery key. It is shown exactly once, on this screen, when you choose to look.",
+      )}</p>
+<div class="actions">
+  <button class="primary" type="button" data-act="revealRecoveryKey">Reveal the recovery key</button>
+</div>`;
+    }
     if (state === "claimed" && key !== "") {
       return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- shown once")}</h2>
 <div class="recovery-key-row">

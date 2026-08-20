@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 	"github.com/znasllc-io/memql/integrations"
 )
 
@@ -67,6 +68,16 @@ func (h *harnessReconcilerComponent) Stop(ctx context.Context) {
 func (a *App) setupHarnessReconciler() {
 	if a.engine == nil {
 		a.Logger.Warn("harness reconciler: engine not ready; skipping wiring")
+		return
+	}
+
+	// The harness is a pack (memql#4190). A disabled harness loaded
+	// mounted-inert in phase 3 -- its mutations, builtins and automation are
+	// absent from every registry -- so wiring the reconciler here would give
+	// it a loop with nothing it could legally drive. One honest line; the
+	// module inventory reports the state.
+	if a.packDisabled(memqldsl.HarnessPackDomain) {
+		a.Logger.Info("harness pack disabled by v1:platform:packState; reconciler not wired")
 		return
 	}
 

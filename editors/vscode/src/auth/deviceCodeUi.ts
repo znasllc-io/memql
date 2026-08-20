@@ -52,6 +52,7 @@
 import { env, Uri, window, type Progress } from 'vscode';
 
 import type { AuthFlowError } from './errors.js';
+import { recordDiagnostic, type DiagnosticSink } from '../state/diagnostics.js';
 import type { DeviceAuthorization } from './deviceCode.js';
 
 /**
@@ -67,16 +68,29 @@ export function deviceCodeProgressLine(authorization: DeviceAuthorization): stri
 /**
  * announceDeviceCodeFallback explains the switch when loopback proved
  * impossible. A flow that silently changes shape reads as a bug.
+ *
+ * The toast says WHAT happened; WHY lives in the MemQL Connection channel
+ * (memql#4194, audit 6) -- the AuthFlowError's message is a raw transport or
+ * OAuth detail, which is record material rather than toast material.
  */
 export function announceDeviceCodeFallback(
   progress: Progress<{ message?: string }>,
   reason: AuthFlowError,
+  diagnostics?: DiagnosticSink,
 ): void {
   progress.report({
     message: 'This host cannot complete a browser sign-in; switching to a device code...',
   });
+  if (diagnostics !== undefined) {
+    recordDiagnostic(
+      diagnostics,
+      'browser sign-in could not complete; fell back to a device code',
+      reason.message,
+      new Date().toISOString(),
+    );
+  }
   void window.showInformationMessage(
-    `MemQL: the browser sign-in could not complete (${reason.message}) Falling back to a device code.`,
+    'MemQL: the browser sign-in could not complete on this host. Falling back to a device code -- details in the MemQL Connection output.',
   );
 }
 

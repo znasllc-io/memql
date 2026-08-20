@@ -38,6 +38,8 @@ import {
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
 
+import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+
 import type { ConnectionManager } from "../connection/manager.js";
 import { ConceptPanelState } from "../state/conceptPanelState.js";
 import { flattenForList } from "../state/rowProjection.js";
@@ -423,15 +425,7 @@ export class ConceptPanel {
      entire coupling between the two: view-kit never names a --vscode-*
      variable, so the same renderer + stylesheet drop into the portal with a
      different six-line mapping and nothing else. */
-  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-  }
-
+${brandStyleBlock()}
   /* view-kit's own stylesheet, shipped with the markup contract it styles.
      Hand-authoring rules for vk- classes here is what this replaces: those
      rules and view-kit's class names drifted the moment either side moved,
@@ -440,28 +434,29 @@ ${viewKitStyles}
 
   /* Page chrome below -- the panel's, not view-kit's. view-kit renders rows;
      it has no view of this layout and must not style it. */
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0; padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);
+  body { padding: 0; }
+  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
              display: flex; gap: 12px; align-items: center; }
   .layout { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; height: calc(100vh - 42px); }
   .pane { overflow: auto; padding: 8px 12px; }
-  .pane + .pane { border-left: 1px solid var(--vscode-panel-border); }
+  .pane + .pane { border-left: 1px solid var(--memql-border); }
   /* This panel's OWN empty-state text. Deliberately not view-kit's .vk-empty:
      that class means "this row set is empty" and belongs to the renderer that
      emits it. Borrowing it for "Select a row." would put a second author on a
      view-kit class -- the exact drift the shared stylesheet exists to stop. */
-  .placeholder { color: var(--vscode-descriptionForeground); opacity: 0.6; padding: 8px 0; }
-  .error { color: var(--vscode-errorForeground); padding: 8px 12px; }
-  .warning { color: var(--vscode-editorWarning-foreground); padding: 8px 12px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 2px; }
+  .placeholder { color: var(--memql-muted); opacity: 0.6; padding: 8px 0; }
+  .error { color: var(--memql-danger); padding: 8px 12px; }
+  .warning { color: var(--memql-data-string); padding: 8px 12px; }
+  button { background: var(--memql-accent); color: var(--memql-on-accent);
+           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
+  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
 </style>
 </head>
 <body>
 <div class="toolbar">
-  <strong>${escapeHtml(this.concept.id)}</strong>
-  <span>${this.state.nodes.length} loaded</span>
+  ${brandMarkSvg(16)}
+  <strong class="data">${escapeHtml(this.concept.id)}</strong>
+  <span><span class="data data-number">${this.state.nodes.length}</span> loaded</span>
   <button id="reload" type="button">Reload</button>
   ${moreHtml}
 </div>

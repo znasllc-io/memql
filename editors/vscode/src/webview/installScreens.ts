@@ -35,6 +35,7 @@
 // Refs: #3738 #3733
 
 import { renderInstallSteps } from "@znasllc-io/memql-view-kit";
+import type { PreflightItem } from "../state/preflight.js";
 import { escapeHtml, renderToHtml } from "@znasllc-io/memql-view-kit";
 
 import type { AddClusterAction } from "../clusters/presence.js";
@@ -130,6 +131,28 @@ export interface CollectScreenInput {
    * (memql#3901). Empty renders as "the newest release".
    */
   latestRelease?: string;
+  /**
+   * The "Before it runs" checklist (memql#4195): what the run will need,
+   * stated before the Start button rather than at the moment each fact bites.
+   * Absent while the panel is still gathering it; the screen renders without.
+   */
+  preflight?: readonly PreflightItem[];
+}
+
+/** The preflight checklist, above the actions so Start is an informed click. */
+function renderPreflight(items: readonly PreflightItem[] | undefined): string {
+  if (items === undefined || items.length === 0) return "";
+  const rows = items
+    .map(
+      (item) => `<li class="preflight-item ${item.state}">
+  <span class="preflight-mark">${item.state === "ok" ? "OK" : "NOTE"}</span>
+  <span class="preflight-label">${escapeHtml(item.label)}</span>
+  <span class="preflight-detail">${escapeHtml(item.detail)}</span>
+</li>`,
+    )
+    .join("");
+  return `<h2 class="preflight-heading">Before it runs</h2>
+<ul class="preflight">${rows}</ul>`;
 }
 
 export function renderCollectScreen(input: CollectScreenInput): string {
@@ -203,6 +226,7 @@ export function renderCollectScreen(input: CollectScreenInput): string {
   return `<h1>${escapeHtml(COLLECT_TITLE[input.action] ?? "Install a local cluster")}</h1>
 <p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
 ${fields}
+${renderPreflight(input.preflight)}
 <div class="actions">
   <button class="primary" type="button" data-act="begin">Start</button>
   <button class="secondary" type="button" data-act="back">Back</button>

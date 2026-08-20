@@ -6,6 +6,7 @@
 // up here with no client change. That is the whole point of a generic browser.
 
 import * as vscode from "vscode";
+import { briefMessage } from "../state/diagnostics.js";
 
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionManager } from "../connection/manager.js";
@@ -78,8 +79,10 @@ export class DataTreeProvider implements vscode.TreeDataProvider<ConceptTreeNode
         vscode.TreeItemCollapsibleState.None,
       );
       item.contextValue = "memqlDataError";
-      item.description = node.message;
-      item.tooltip = `ERROR: ${node.message}`;
+      // Brief, per the information policy (memql#4194, audit 18); the dial
+      // failures behind this row are recorded to the MemQL Connection channel.
+      item.description = briefMessage(node.message, 60);
+      item.tooltip = `${briefMessage(node.message)}\nFull error: the MemQL Connection output channel.`;
       item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
       return item;
     }

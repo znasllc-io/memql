@@ -216,6 +216,11 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 
 func Register(domain string) {
 	memqldsl.RegisterTree(domain, Tree())
+	// Bind the Go half to the pack domain so a v1:platform:packState
+	// disable skips the factory and the module inventory folds this
+	// integration under its pack row (memql#4183). Contract packs register
+	// the plugin under the domain name, so the pair is (domain, domain).
+	memql.BindPluginToPack(domain, domain)
 	memql.RegisterPluginForContract(domain, ContractVersion, NewProvider)
 }
 

@@ -28,6 +28,18 @@ type RawFile struct {
 
 // ReadAll walks dsl.Tree() and returns the (path, content) pair for
 // every .memql file. Walk failures are logged and yield nil.
+//
+// A DISABLED pack's behavioral files are excluded here, and this is the
+// load-bearing seam for mounted-inert pack disablement (module-registry
+// design section 4.2): every behavioral consumer -- the unified construct
+// loaders, the contract-gate corpus pass, the duplicate detector, the
+// construct catalog -- reads through this function, so one filter keeps
+// them all consistent. The concepts loader deliberately does NOT read
+// through here (it walks the tree itself), and concepts.memql is carved
+// out of the skip anyway, so a disabled pack's schemas still load, its
+// cross-domain imports still resolve, and a malformed behavioral file in
+// a disabled pack cannot refuse boot -- it resurfaces at re-enable time,
+// at boot, fail-loud, which is when it matters.
 func ReadAll(logger *slog.Logger) []RawFile {
 	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -39,6 +51,9 @@ func ReadAll(logger *slog.Logger) []RawFile {
 	}
 	var out []RawFile
 	for _, p := range paths {
+		if memqldsl.SkipsBehavioralLoad(p) {
+			continue
+		}
 		f, openErr := tree.Open(p)
 		if openErr != nil {
 			continue

@@ -32,6 +32,7 @@
 // Refs: #3752 #3747
 
 import * as vscode from "vscode";
+import { briefMessage } from "../state/diagnostics.js";
 
 import type { ConnectionManager } from "../connection/manager.js";
 import {
@@ -235,8 +236,11 @@ function stateItem(state: CatalogState): vscode.TreeItem {
     }
     case "failed": {
       const item = new vscode.TreeItem("Failed to read the catalog", vscode.TreeItemCollapsibleState.None);
-      item.description = state.message;
-      item.tooltip = `ERROR: ${state.message}`;
+      // A BRIEF verdict, not the raw error (memql#4194, audit 17): the full
+      // text is recorded to the MemQL Connection channel where the fetch
+      // failed, and a sidebar row is no place for a stack fragment.
+      item.description = briefMessage(state.message, 60);
+      item.tooltip = `${briefMessage(state.message)}\nFull error: the MemQL Connection output channel.`;
       item.contextValue = "memqlConstructsError";
       item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
       return item;

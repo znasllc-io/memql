@@ -19,6 +19,7 @@
 import { classifyToken } from "../connection/credentials.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
 import type { ConnectionState } from "../connection/manager.js";
+import { briefMessage } from "../state/diagnostics.js";
 import type { ClusterConfig } from "./model.js";
 import { describeVersion } from "../version/describe.js";
 import type { ReleaseListing } from "../version/releaseCache.js";
@@ -134,7 +135,9 @@ function reachabilityNote(state: ConnectionState, active: boolean): string {
     case "connecting":
       return "dialling";
     case "error":
-      return `did not answer: ${state.message}`;
+      // Brief, per the information policy (memql#4194, audit 23): the raw
+      // transport error is in the MemQL Connection output channel.
+      return `did not answer: ${briefMessage(state.message)} (full error: the MemQL Connection output channel)`;
     default:
       return "";
   }

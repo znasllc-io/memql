@@ -14,6 +14,8 @@ package memql
 //     validateDeclaredUsage (declared_usage_validator.go).
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -385,5 +387,33 @@ func TestLintParity_EngineOwnTreeIsClean(t *testing.T) {
 	diags := lint(t, fstest.MapFS{})
 	if len(diags) != 0 {
 		t.Fatalf("embedded core tree must lint clean; got: %+v", diags)
+	}
+}
+
+// TestLintParity_RepositoryTreeWithInTreePack is the memql#4190 regression
+// at the LintUnifiedTree altitude: run the full engine-parity lint over the
+// REPOSITORY'S OWN dsl/ directory, in a process where the harness pack's
+// init() has run (importing dsl from this package guarantees it). Before
+// the in-tree-pack skip in MountOverlayDomains, this exact call -- the one
+// `go run ./cmd/memqllint dsl/` makes -- panicked on the duplicate
+// "harness" registration, and only CI's dsl-lint step could see it because
+// no in-process test walked the real tree with the pack init loaded.
+//
+// Assertions: no panic, no error, ZERO diagnostics (the repo's own tree is
+// gated lint-clean in CI, so anything here is a real regression), and
+// harness absent from skippedCore -- it is not core, and its registered
+// tree IS the validated content.
+func TestLintParity_RepositoryTreeWithInTreePack(t *testing.T) {
+	diags, skippedCore, err := LintUnifiedTree(nil, os.DirFS(filepath.Join("..", "..", "dsl")))
+	if err != nil {
+		t.Fatalf("LintUnifiedTree over the repository dsl/ tree: %v", err)
+	}
+	for _, d := range diags {
+		t.Errorf("repository tree must lint clean; got %s: %s", d.File, d.Message)
+	}
+	for _, d := range skippedCore {
+		if d == "harness" {
+			t.Errorf("harness reported through skippedCore; it is an in-tree pack, not a core domain (memql#4190)")
+		}
 	}
 }

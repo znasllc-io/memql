@@ -34,6 +34,8 @@ import {
   type ConceptLike,
 } from "@znasllc-io/memql-view-kit";
 
+import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+
 import type { RunTarget } from "../constructs/runnable.js";
 import type { RunOutcome } from "../run/orchestrator.js";
 import {
@@ -237,7 +239,8 @@ ${panelChrome()}
 </head>
 <body>
 <div class="toolbar">
-  <strong>${escapeHtml(this.target.kind)} ${escapeHtml(this.target.name)}</strong>
+  ${brandMarkSvg(16)}
+  <strong class="data">${escapeHtml(this.target.kind)} ${escapeHtml(this.target.name)}</strong>
   <span>${this.fields.length} argument${this.fields.length === 1 ? "" : "s"}</span>
 </div>
 ${noticeHtml}
@@ -472,6 +475,7 @@ ${viewKitStyles}
 </head>
 <body>
 <div class="toolbar">
+  ${brandMarkSvg(16)}
   <strong>${escapeHtml(resultTitle(this.outcome))}</strong>
   <button id="raw" type="button">${this.showRaw ? "Show rows" : "Show the raw result"}</button>
 </div>
@@ -532,25 +536,19 @@ function toolContentHtml(content: readonly { type: string; text: string }[]): st
 // The chrome both panels share. Kept as one string rather than duplicated so
 // the two tabs cannot drift apart visually.
 function panelChrome(): string {
-  return `  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-  }
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0; padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);
+  return `${brandStyleBlock()}
+  body { padding: 0; }
+  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
              display: flex; gap: 12px; align-items: center; }
+  .toolbar .memql-mark { color: var(--memql-accent); }
   .pane { overflow: auto; padding: 8px 12px; }
-  .placeholder { color: var(--vscode-descriptionForeground); opacity: 0.6; padding: 8px 0; }
-  .error { color: var(--vscode-errorForeground); padding: 8px 0; }
-  .warning { color: var(--vscode-editorWarning-foreground); padding: 8px 12px; }
-  .notice { color: var(--vscode-descriptionForeground); padding: 8px 12px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 2px; }
+  .placeholder { color: var(--memql-muted); opacity: 0.7; padding: 8px 0; }
+  .error { color: var(--memql-danger); padding: 8px 0; }
+  .warning { color: var(--memql-data-string); padding: 8px 12px; }
+  .notice { color: var(--memql-muted); padding: 8px 12px; }
+  button { background: var(--memql-accent); color: var(--memql-on-accent);
+           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
+  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
   button:disabled { opacity: 0.6; cursor: default; }`;
 }
 

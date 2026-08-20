@@ -12137,6 +12137,48 @@ func SetNumberE911Build(args SetNumberE911Args) string {
 	return b.String()
 }
 
+// SetPackEnabled -- Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
+//
+// Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.go).
+type SetPackEnabledArgs struct {
+	Id         string
+	PackDomain string
+	Enabled    bool
+	Reason     string
+}
+
+// SetPackEnabled calls the engine mutation setPackEnabled.
+func (qc *QueryClient) SetPackEnabled(ctx context.Context, args SetPackEnabledArgs) (*Result, error) {
+	call := SetPackEnabledBuild(args)
+	return qc.executeNamed(ctx, "setPackEnabled", call)
+}
+
+func SetPackEnabledBuild(args SetPackEnabledArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setPackEnabled(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("packDomain: ")
+	b.WriteString(quoteMemQL(args.PackDomain))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	if args.Reason != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.go).

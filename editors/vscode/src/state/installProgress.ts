@@ -23,7 +23,12 @@
 //
 // Refs: #3474 #3470 #3469 #3463
 
+import * as os from "node:os";
+
 import type { InstallStepView } from "@znasllc-io/memql-view-kit";
+
+import { redactForDisplay } from "../install/secrets.js";
+import { briefMessage } from "./diagnostics.js";
 
 import type { StepProgress } from "./addCluster.js";
 
@@ -256,12 +261,16 @@ export function toStepViews(steps: readonly StepProgress[]): InstallStepView[] {
     // alarming and wrong.
     if (step.state === "failed" && step.exitCode !== null) view.exitCode = step.exitCode;
 
-    // Stderr goes through verbatim. It is the one text that says what actually
-    // broke, and it is only worth surfacing where something went wrong --
-    // attaching the log to every successful step would bury the failure in
-    // twelve disclosures that all say "fine".
+    // A SHORT what-failed line, never the verbatim stderr (memql#4194, audit
+    // row 30). The full log -- paths, hostnames, kubectl output -- goes to the
+    // MemQL Install output channel as the run emits it; the panel keeps the
+    // last line, redacted and capped, which is where a capability script's
+    // actual error sentence lands. Only where something went wrong: attaching
+    // a log line to every successful step would bury the failure in twelve
+    // disclosures that all say "fine".
     if (step.log !== "" && (step.state === "failed" || step.state === "preserved")) {
-      view.error = step.log;
+      const inline = inlineStepError(step.log);
+      if (inline !== "") view.error = inline;
     }
 
     return view;
@@ -298,4 +307,27 @@ function detailFor(step: StepProgress): string {
 export function runIsSettled(steps: readonly StepProgress[]): boolean {
   if (steps.length === 0) return false;
   return !steps.some((s) => s.state === "pending" || s.state === "running");
+}
+
+/**
+ * The one line of a step's stderr the PANEL may show (memql#4194, audit 30).
+ *
+ * The last non-empty line is where a capability script's own failure sentence
+ * lands (cap_fail writes it last); it is redacted -- home masked, credentials
+ * scrubbed -- and capped, and the panel line names where the rest went. The
+ * full log's home is the MemQL Install output channel, fed line-by-line as
+ * the run emits stderr.
+ *
+ * `home` is a parameter for the tests; callers take the default.
+ */
+export function inlineStepError(log: string, home: string = os.homedir()): string {
+  const lines = log
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const last = lines[lines.length - 1];
+  if (last === undefined) return "";
+  const brief = briefMessage(redactForDisplay(last, home));
+  if (brief === "") return "";
+  return `${brief}\nFull log: the MemQL Install output channel.`;
 }

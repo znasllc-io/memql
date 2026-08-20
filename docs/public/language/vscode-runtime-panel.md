@@ -121,8 +121,8 @@ the four sound alike and are deliberately kept apart.
 
 | Action | Where it lives | What it touches |
 |---|---|---|
-| **Create deployment** | Deployments, on the instance row | On a machine with nothing installed, the full install graph. On one that has a cluster, a move to another release tag. |
-| **Repair** | Deployments, on the local instance row | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one -- and so is a deployment to another tag. |
+| **Create deployment** | Deployments, on the instance row; also the Clusters view's title menu and its zero-cluster welcome (memql#4195) | On a machine with nothing installed, the full install graph. On one that has a cluster, a move to another release tag. |
+| **Repair** | Deployments, on the local instance row; also the Clusters view's title menu | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one -- and so is a deployment to another tag. |
 | **Remove** | Clusters, the trash can beside a row, inline | Drops the registry entry, the stored credential, and the live connection. Nothing on the machine is touched, and for a local cluster the confirmation says so and names Deployments as where to uninstall it. |
 | **Uninstall** | Deployments, on the local instance row | Reverses the install receipt: the k3d cluster, the hosts-file block, the mkcert CA, the pinned tools. |
 

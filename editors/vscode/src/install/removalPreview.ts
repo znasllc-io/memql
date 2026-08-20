@@ -24,7 +24,10 @@
 //
 // Refs: #3476 #3469
 
+import * as os from "node:os";
+
 import type { RemovalElevation, RemovalItemView } from "@znasllc-io/memql-view-kit";
+import { maskHomePath } from "./secrets.js";
 
 /**
  * The row type, re-exported so a caller of this mapping needs one import.
@@ -182,7 +185,9 @@ function label(step: PreviewStep): string {
   // cluster."), and a list item that ends in a full stop before its
   // parenthetical reads as two fragments. The trailing stop comes off.
   const described = step.description.trim().replace(/\.+$/, "");
-  const target = step.target.trim();
+  // Home masked (memql#4194, audit 32): the preview is the consent screen and
+  // stays fully informative as `~/.memql/...`; the account name adds nothing.
+  const target = maskHomePath(step.target.trim(), os.homedir());
   if (described !== "" && target !== "") return `${described} (${target})`;
   // A row with no words at all is unreadable, and an unreadable row is an
   // artifact the operator cannot consent to. The step id is a poor name but it

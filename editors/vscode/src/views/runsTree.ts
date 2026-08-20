@@ -11,6 +11,7 @@
 import * as vscode from "vscode";
 
 import { readRunConfigs, runConfigPath, type RunConfig } from "../run/runConfig.js";
+import { argShapeLines } from "../state/diagnostics.js";
 
 export type RunsTreeNode =
   | { kind: "run"; config: RunConfig }
@@ -70,6 +71,12 @@ export class RunsTreeProvider implements vscode.TreeDataProvider<RunsTreeNode> {
     // matches, so the run and delete actions appear on configuration rows and
     // not on the error/dropped rows.
     item.contextValue = "memqlRun";
+    // ARG SHAPES, NEVER ARG VALUES (memql#4194, audit row 19). Saved run
+    // arguments are whatever a developer typed -- an address, a name, a pasted
+    // credential -- and a hover republished them wholesale to anyone looking
+    // at the screen. The shape distinguishes the rows; the values are one
+    // click away behind "Open Run Configurations File".
+    const shapes = argShapeLines(node.config.args);
     item.tooltip = new vscode.MarkdownString(
       [
         `**${node.config.name}**`,
@@ -77,9 +84,10 @@ export class RunsTreeProvider implements vscode.TreeDataProvider<RunsTreeNode> {
         `\`${node.config.kind} ${node.config.construct}\``,
         node.config.file === undefined ? "" : `File: \`${node.config.file}\``,
         "",
-        "```json",
-        JSON.stringify(node.config.args, null, 2),
-        "```",
+        shapes.length === 0 ? "No saved arguments." : "Saved arguments (shapes):",
+        ...shapes.map((line) => `- \`${line}\``),
+        "",
+        "_Values live in the file: run \"MemQL: Open Run Configurations File\"._",
       ].join("\n"),
     );
     // NO `command` on the item. A tree item with a command runs it on a plain

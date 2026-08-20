@@ -148,6 +148,12 @@ type Server struct {
 	// the writes are ordinary engine mutations and the gate is Go. Nil
 	// elsewhere; the handler answers Unimplemented.
 	identityAdminHandler *adminops.Service
+	// moduleAudit is the audit sink the module registry's one write
+	// (SetPackEnabledMsg) emits through -- one event per call including
+	// refusals (epic memql#4183). Set by app bootstrap next to the
+	// identity-admin wiring; nil refuses the write surface rather than
+	// flipping packs unaudited.
+	moduleAudit identitycomp.AuditLogger
 	// automationRunner is the mesh-aware automation invoke path the
 	// RunAutomation surface dispatches to (memql#3310). Set by app bootstrap
 	// on every binary that carries an automation scheduler; nil elsewhere,
@@ -368,6 +374,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		deployControlHandler:   s.deployControlHandler,
 		deployControlForwarder: s.deployControlForwarder,
 		identityAdminHandler:   s.identityAdminHandler,
+		moduleAudit:            s.moduleAudit,
 		automationRunner:       s.automationRunner,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
@@ -684,6 +691,9 @@ type service struct {
 	// app bootstrap wired an engine + audit sink; nil elsewhere, where the
 	// handler answers Unimplemented.
 	identityAdminHandler *adminops.Service
+
+	// moduleAudit: see the Server field of the same name (memql#4183).
+	moduleAudit identitycomp.AuditLogger
 
 	// automationRunner is the mesh-aware automation invoke path the
 	// RunAutomation surface dispatches to (memql#3310). Non-nil wherever an
@@ -1747,6 +1757,12 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// message above, not a third verb.
 	case *memqlv1.MemqlClientMessage_StageBundle:
 		return s.handleStageBundle(envelope, payload.StageBundle)
+	case *memqlv1.MemqlClientMessage_ModulesList:
+		return s.handleModulesList(envelope, payload.ModulesList)
+	case *memqlv1.MemqlClientMessage_ModuleDetail:
+		return s.handleModuleDetail(envelope, payload.ModuleDetail)
+	case *memqlv1.MemqlClientMessage_SetPackEnabled:
+		return s.handleSetPackEnabled(envelope, payload.SetPackEnabled)
 	// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
 	case *memqlv1.MemqlClientMessage_DslSpec:
 		return s.handleDslSpec(envelope, payload.DslSpec)

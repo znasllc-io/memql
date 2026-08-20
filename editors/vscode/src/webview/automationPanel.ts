@@ -44,6 +44,8 @@ import {
   renderValueView,
 } from "@znasllc-io/memql-view-kit";
 
+import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+
 import type { AutomationTarget } from "../constructs/runnable.js";
 import type {
   AutomationRunOutcome,
@@ -373,19 +375,19 @@ ${panelChrome()}
 ${viewKitStyles}
   .field { margin: 12px 0; }
   .field label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .field .type { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 8px; }
-  .field .desc { color: var(--vscode-descriptionForeground); margin: 2px 0 6px; }
-  .field .err { color: var(--vscode-errorForeground); margin-top: 4px; }
+  .field .type { color: var(--memql-muted); font-weight: 400; margin-left: 8px; }
+  .field .desc { color: var(--memql-muted); margin: 2px 0 6px; }
+  .field .err { color: var(--memql-danger); margin-top: 4px; }
   input[type="text"], textarea { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family);
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    background: var(--memql-surface); color: var(--memql-fg);
     border: 1px solid var(--vscode-input-border, transparent); padding: 4px 6px; }
   textarea { min-height: 9em; }
   .modes { display: flex; gap: 4px; margin: 12px 0 4px; }
   .modes .mode { background: transparent; color: var(--vscode-foreground);
-    border: 1px solid var(--vscode-panel-border); }
+    border: 1px solid var(--memql-border); }
   .modes .mode.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
     border-color: transparent; }
-  .picker { border: 1px solid var(--vscode-panel-border); max-height: 40vh; overflow: auto; padding: 4px 8px; }
+  .picker { border: 1px solid var(--memql-border); max-height: 40vh; overflow: auto; padding: 4px 8px; }
   .picker-bar { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
   .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
   .actions input { width: auto; flex: 1 1 12em; }
@@ -395,7 +397,8 @@ ${viewKitStyles}
 </head>
 <body>
 <div class="toolbar">
-  <strong>automation ${escapeHtml(this.target.name)}</strong>
+  ${brandMarkSvg(16)}
+  <strong class="data">automation ${escapeHtml(this.target.name)}</strong>
   <span>${escapeHtml(triggerSummary(this.target))}</span>
 </div>
 <div class="warning">${escapeHtml(DEPLOYED_FORM_WARNING)}</div>
@@ -649,28 +652,29 @@ ${panelChrome()}
   /* The TIMELINE. Deliberately not a table and emphatically not view-kit's row
      list: an automation returns no rows, and the shape a developer needs to
      read here is a sequence with a spine, not a grid of records. */
-  .timeline { list-style: none; margin: 0; padding: 0 0 0 20px; border-left: 2px solid var(--vscode-panel-border); }
+  .timeline { list-style: none; margin: 0; padding: 0 0 0 20px; border-left: 2px solid var(--memql-border); }
   .timeline li { position: relative; padding: 0 0 16px 12px; }
   .timeline li::before { content: ""; position: absolute; left: -27px; top: 4px;
-    width: 10px; height: 10px; border-radius: 50%; background: var(--vscode-panel-border); }
-  .timeline li.success::before { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #3fb950)); }
-  .timeline li.failed::before { background: var(--vscode-errorForeground); }
-  .timeline li.skipped::before { background: var(--vscode-descriptionForeground); }
+    width: 10px; height: 10px; border-radius: 50%; background: var(--memql-border); }
+  .timeline li.success::before { background: var(--memql-accent); }
+  .timeline li.failed::before { background: var(--memql-danger); }
+  .timeline li.skipped::before { background: var(--memql-muted); }
   .step-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .step-seq { color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; min-width: 2em; }
+  .step-seq { color: var(--memql-muted); font-variant-numeric: tabular-nums; min-width: 2em; }
   .step-id { font-weight: 600; font-family: var(--vscode-editor-font-family); }
   .step-status { text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.04em; }
-  .step-status.failed { color: var(--vscode-errorForeground); }
-  .step-status.skipped { color: var(--vscode-descriptionForeground); }
-  .step-duration { color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
-  .step-error { color: var(--vscode-errorForeground); margin-top: 4px; }
-  .where { color: var(--vscode-descriptionForeground); padding: 4px 12px 8px; display: flex; gap: 16px; flex-wrap: wrap; }
-  .summary { padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
+  .step-status.failed { color: var(--memql-danger); }
+  .step-status.skipped { color: var(--memql-muted); }
+  .step-duration { color: var(--memql-muted); font-variant-numeric: tabular-nums; }
+  .step-error { color: var(--memql-danger); margin-top: 4px; }
+  .where { color: var(--memql-muted); padding: 4px 12px 8px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .summary { padding: 8px 12px; border-top: 1px solid var(--memql-border); color: var(--memql-muted); }
 </style>
 </head>
 <body>
 <div class="toolbar">
-  <strong>${escapeHtml(this.target.name)}</strong>
+  ${brandMarkSvg(16)}
+  <strong class="data">${escapeHtml(this.target.name)}</strong>
   <span>${escapeHtml(statusLabel(this.trace))}</span>
   <button id="raw" type="button">${this.showRaw ? "Show trace" : "Show raw JSON"}</button>
 </div>
@@ -803,25 +807,18 @@ function statusLabel(trace: StepTraceModel): string {
 // exporting it would make a shared style token out of what is currently two
 // independent adapters.
 function panelChrome(): string {
-  return `  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-  }
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0; padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);
+  return `${brandStyleBlock()}
+  body { padding: 0; }
+  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
              display: flex; gap: 12px; align-items: center; }
   .pane { overflow: auto; padding: 8px 12px; }
-  .placeholder { color: var(--vscode-descriptionForeground); opacity: 0.6; padding: 8px 0; }
-  .error { color: var(--vscode-errorForeground); padding: 8px 12px; }
-  .warning { color: var(--vscode-editorWarning-foreground); padding: 8px 12px; }
-  .notice { color: var(--vscode-descriptionForeground); padding: 8px 12px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 2px; }
+  .placeholder { color: var(--memql-muted); opacity: 0.6; padding: 8px 0; }
+  .error { color: var(--memql-danger); padding: 8px 12px; }
+  .warning { color: var(--memql-data-string); padding: 8px 12px; }
+  .notice { color: var(--memql-muted); padding: 8px 12px; }
+  button { background: var(--memql-accent); color: var(--memql-on-accent);
+           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
+  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
   button:disabled { opacity: 0.6; cursor: default; }`;
 }
 
