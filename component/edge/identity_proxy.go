@@ -55,6 +55,10 @@ func (h *Handler) serveIdentityXHR(w http.ResponseWriter, r *http.Request, site 
 			// Keep the path identity mounted: /oauth/token stays /oauth/token.
 			pr.Out.Host = target.Host
 		},
+		// Identity sets two Set-Cookie headers (memql_refresh + memql_session).
+		// Do not add a ModifyResponse that copies headers with Header.Set --
+		// that is the ReverseProxy footgun that drops every cookie but the first
+		// (memql#4158). The default copy uses Header.Add and keeps both.
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			h.logger.Error("edge: proxying to identity failed",
 				"component", "edge", "site", site.ID, "err", err)

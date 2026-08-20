@@ -12,17 +12,17 @@ import {
 
 describe("bridgePathFor", () => {
   it("derives the bridge path from the default mount", () => {
-    expect(bridgePathFor("/portal/")).toBe("/memql/ws");
+    expect(bridgePathFor("/portal/")).toBe("/_memql/ws");
   });
 
   it("tolerates the mount without a trailing slash", () => {
-    expect(bridgePathFor("/portal")).toBe("/memql/ws");
+    expect(bridgePathFor("/portal")).toBe("/_memql/ws");
   });
 
   it("preserves a deployment base path in front of the mount", () => {
-    // MEMQL_SERVER_PUBLIC_PATH=/memql registers /memql/portal/ and /memql/memql/ws
+    // MEMQL_SERVER_PUBLIC_PATH=/memql registers /memql/portal/ and /memql/_memql/ws
     // together, so the prefix has to survive.
-    expect(bridgePathFor("/memql/portal/")).toBe("/memql/memql/ws");
+    expect(bridgePathFor("/memql/portal/")).toBe("/memql/_memql/ws");
   });
 
   it("stays relative -- it must resolve against the serving origin", () => {
@@ -32,7 +32,7 @@ describe("bridgePathFor", () => {
   // The production value since memql#3711: the portal is site #1, served at
   // its own origin's root, not a /portal/ sub-path of the bff.
   it("derives the bridge path from a root mount", () => {
-    expect(bridgePathFor("/")).toBe("/memql/ws");
+    expect(bridgePathFor("/")).toBe("/_memql/ws");
   });
 });
 

@@ -55,7 +55,7 @@
 // The ASSETS are public -- this package answers any Host it can resolve to
 // a live site with no auth check of its own. The DATA a site's own
 // application reads is not: for the portal that is the gRPC/WebSocket auth
-// the bundle dials at /memql/ws; for a site with apiProxy=true it is
+// the bundle dials at /_memql/ws; for a site with apiProxy=true it is
 // whatever auth the proxied API applies (the /_memql/* reverse proxy,
 // memql#3712). Serving a bundle to an unauthenticated browser grants
 // nothing -- the bundle is the same bytes for everyone who resolves that
