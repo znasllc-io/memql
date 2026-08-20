@@ -80,6 +80,10 @@ export interface AuthState {
   signIn: (returnTo?: string) => void;
   // Drop the local credential and clear the refresh cookie.
   signOut: () => void;
+  // True only after a cold signed-out landing (bootstrap probe found no
+  // session). SignInPage auto-starts PKCE then. After an in-tab Sign out
+  // this is false -- stay on the card until Continue (memql#4152).
+  autoStartAuthorize: boolean;
   // Finish the flow. Called only by the callback route.
   completeSignIn: (params: {
     code: string;
@@ -139,6 +143,7 @@ export function AuthProvider({
   redirectUri = defaultRedirectUri(),
 }: AuthProviderProps): ReactNode {
   const [status, setStatus] = useState<AuthStatus>("loading");
+  const [autoStartAuthorize, setAutoStartAuthorize] = useState(false);
   const [config, setConfig] = useState<PortalRuntimeConfig>(
     configOverride ?? UNKNOWN_RUNTIME_CONFIG,
   );
@@ -166,6 +171,8 @@ export function AuthProvider({
         // Reactive sign-out: identity says the session is gone (revoked
         // elsewhere, refresh expired). Distinct from a transient failure,
         // which createIdentityAuthSource deliberately does not report here.
+        // Not a cold landing -- do not auto-start PKCE (memql#4152).
+        setAutoStartAuthorize(false);
         setStatus((current) => (current === "authDisabled" ? current : "signedOut"));
       },
     });
@@ -222,6 +229,10 @@ export function AuthProvider({
       // cold load.
       const token = await authSource.refresh();
       if (cancelled || generation.current !== mine) return;
+      // Cold landing: no session on first probe. SignInPage auto-starts
+      // PKCE so a magic-link dest with no OAuth params still mints a
+      // portal token (memql#4152). A later in-tab Sign out must not.
+      setAutoStartAuthorize(!token);
       setStatus(token ? "signedIn" : "signedOut");
     })();
 
@@ -322,6 +333,7 @@ export function AuthProvider({
     // stops holding a credential; the server round-trip that clears the
     // refresh cookie is best-effort behind it.
     authSource.forget();
+    setAutoStartAuthorize(false);
     setStatus((current) => (current === "authDisabled" ? current : "signedOut"));
     void endIdentitySession(fetchImpl, configRef.current);
   }, [authSource, fetchImpl]);
@@ -335,13 +347,14 @@ export function AuthProvider({
       signIn,
       signOut,
       completeSignIn,
+      autoStartAuthorize,
       // NOT A PERMISSION CHECK. This only decides whether to open a WebSocket;
       // what the resulting stream may read or write is decided server-side by
       // the verifier interceptors in component/grpc. Nothing in the portal
       // gates data on a client-side boolean.
       connectable: status === "signedIn" || status === "authDisabled",
     }),
-    [status, config, authSource, error, signIn, signOut, completeSignIn],
+    [status, config, authSource, error, signIn, signOut, completeSignIn, autoStartAuthorize],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
