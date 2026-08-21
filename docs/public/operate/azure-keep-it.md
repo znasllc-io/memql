@@ -304,10 +304,227 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
 Full runbook:
 [auth/identity-service.md](auth/identity-service.md#email-delivery).
 
+## Handoff to an instance repo (memql-znas)
+
+Keep-it's definition is not in git today. This section is the operator's
+record of where it lives, what the target shape is, and the exact switch --
+from the read-only research pass on memql#4210 (the instance repo) and
+memql#4205 (twice-daily entry deploys), 2026-08-21. Nothing below has been
+executed: creating the repo, the ESO credential and vault, the AppProject and
+repo-credential writes, and the Argo source switch are owner-gated.
+
+### Today's source of truth
+
+- **The hand-made ArgoCD Application `memql` in this instance's own Argo.**
+  Source `https://github.com/znasllc-io/memql.git` at a pinned `main` SHA
+  (rolled forward SHA by SHA, one engine pin PR at a time), path
+  `deploy/k8s/overlays/cloud-entry`, manual sync. The engine repo
+  deliberately carries no Application for this cluster:
+  `deploy/argocd/apps/memql.yaml` points at `overlays/cloud`, which
+  reconciles nothing live, and
+  `TestCloudStaysOnTopAndTheInClusterAppIsUnchanged` fails the build if it
+  is retargeted or a second Application appears.
+- **Every install-time value lives ONLY in that Application's
+  `spec.source.kustomize.patches`:** the host patches listed under
+  [Argo host-patch](#argo-host-patch), the `memql-domain` ConfigMap's
+  `MEMQL_DOMAIN`, the CNPG `serviceAccountTemplate` workload-identity
+  client id (`REPLACE-WITH-DB-IDENTITY-CLIENT-ID` in the overlay), and the
+  backup `ObjectStore` `destinationPath` (the storage account is an install
+  value -- capture it, do not reconstruct it).
+- **Out of band -- no engine manifest defines them:** the cluster-scoped
+  `ClusterIssuer letsencrypt-prod` (HTTP-01), and the hand-seeded
+  `memql-secrets` (the Graph mail credentials included). Until memql#4224
+  and memql#4225 are deployed, two cluster-only workarounds sit beside
+  them -- the `portal-front-door` Ingress and the LiveKit Services forced
+  to `ClusterIP`; with those fixes in the engine tag the instance
+  composes, both become generated / overlay content and the cluster
+  copies are overwritten on sync.
+- **Pins today are a human loop:** tag `vX.Y.Z` on `main`, dispatch
+  `build-engine-images.yml` with `version=X.Y.Z` (it pushes the same image
+  to ACR and to `ghcr.io/znasllc-io/memql-<node>:X.Y.Z`), edit
+  `overlays/cloud-entry/kustomization.yaml`, land the PR through the merge
+  queue, retarget the Application to the new `main` SHA, sync.
+  `dispatch-engine-images-on-release.yml` fires only on a PUBLISHED GitHub
+  Release, and tags are not published as releases, so it never fires today.
+
+### The target shape
+
+- **An instance repo that holds the cluster's definition, not the cluster's
+  code** (`znasllc-io/memql-znas`, private; it does not exist yet): an
+  overlay, the pins, and an ArgoCD app-of-apps. It is NOT a product repo
+  stamped from the `memql-project` template: the template stamps a product
+  (DSL bundle, a client surface, a `bff-<product>` head, its own public
+  entry and its own `letsencrypt-prod` ClusterIssuer), and its Makefile and
+  CI fail by design with no `dsl/<domain>` and no `clients/<name>/`. Keep-it
+  runs the plain engine plus the portal.
+- **The mechanism exists and is verified** (kustomize v5.8.1, 54 documents
+  rendered): compose the engine's entry overlay as a remote kustomize
+  resource and override the install values on top.
+
+```yaml
+resources:
+  - https://github.com/znasllc-io/memql//deploy/k8s/overlays/cloud-entry?ref=<engine tag>
+  - memql-domain.yaml          # MEMQL_DOMAIN: $MEMQL_DOMAIN
+  - cluster-issuer.yaml        # letsencrypt-prod, HTTP-01, captured from live
+patches:                       # Certificate dnsNames + Ingress hosts (the Argo host-patch list, now in git),
+                               # Cluster memql-db serviceAccountTemplate client-id,
+                               # ObjectStore memql-db-backup destinationPath
+images:                        # the eight engine digests (identity bff cognition voice agent planner workbench edge)
+```
+
+  kustomize shallow-clones the public engine repo at the ref and resolves
+  `cloud-entry`'s `../../base` and `../../components/*` inside that clone;
+  the engine's ArgoCD bootstrap already raises the repo-server exec
+  timeout to 300s for this repo's size. The Application loses its
+  `spec.source.kustomize` block entirely: the patches live in git, under
+  review, like everything else.
+- **Digests come from GHCR, with no Azure credential.**
+  `ghcr.io/znasllc-io/memql-<node>:<version>` digests are byte-identical
+  to the ACR pins on `main` (identity / bff / edge 0.19.6 checked), so a
+  pin workflow resolves them anonymously.
+- **What stays in the engine:** `overlays/cloud-entry` remains the
+  canonical entry overlay -- `cmd/frontdoorhosts`, `make frontdoor` and
+  the overlay gates all reference it -- and its `images:` become reference
+  defaults that may lag what the instance runs; the live cluster no longer
+  depends on them. `overlays/cloud` is untouched and is never
+  auto-applied.
+- **Who owns the pins** is the owner's decision. The recommendation is the
+  shape above (the instance repo owns them). The alternatives were: the
+  engine keeps them, so every keep-it deploy stays an engine PR through
+  the merge queue; or the instance repo vendors a copy of `base` and
+  `cloud-entry`, rejected because a CVE then means patching every fork.
+
+### The External Secrets caveat
+
+`deploy/external-secrets/` as committed cannot authenticate from this
+cluster: its SecretStore uses a workload-identity federated credential
+issued for ANOTHER cluster's OIDC issuer, and the vault it names holds that
+retired cluster's values. That is why `memql-secrets` is hand-seeded here,
+and why the two base ExternalSecrets (`livekit`, `telephony`) that
+reference `keyvault-staging` are expected to stay unhealthy -- harmless
+under voice-off, and part of the OutOfSync / Degraded noise.
+
+**Do not "fix" it by repairing the federated credential or pointing the
+SecretStore at the old vault.** Its entries are another cluster's master
+key, operator key and DSN; syncing them over `memql-secrets` breaks auth
+and database access on the live cluster. Secrets stay hand-seeded until
+this instance has its own vault holding its own values -- an owner
+decision, not part of the switch.
+
+### Capture, switch, rollback
+
+**Capture first (reads only).** The rollback artifact is the full
+Application manifest; never the kubeconfig, never secret values:
+
+```bash
+kubectl -n argocd get application memql -o yaml > capture/memql-app.before.yaml
+kubectl -n argocd get appproject memql -o yaml    > capture/appproject.before.yaml
+kubectl -n argocd get applications -o name                          # are cert-manager / cnpg-operator Applications there?
+kubectl -n argocd get secret -l argocd.argoproj.io/secret-type=repository -o name
+kubectl get clusterissuer letsencrypt-prod -o yaml                  > capture/clusterissuer.yaml
+kubectl -n memql get ingress,certificate,configmap/memql-domain -o yaml > capture/memql-ns.yaml
+kubectl -n memql get objectstore memql-db-backup -o yaml             > capture/objectstore.yaml
+kubectl -n memql get cluster memql-db -o jsonpath='{.spec.serviceAccountTemplate}'
+kubectl -n memql get svc livekit livekit-rtc livekit-sip -o yaml     > capture/livekit-svcs.yaml
+argocd app get memql ; argocd app manifests memql > capture/live-render.yaml
+kubectl -n memql get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.template.spec.containers[0].image}{"\n"}{end}'
+```
+
+**Parity is the go / no-go.** Render the instance overlay and diff it
+against the live render:
+
+```bash
+kubectl kustomize <instance repo>/deploy/k8s/overlays/keep-it | diff - capture/live-render.yaml
+```
+
+The diff must be empty apart from the items deliberately being moved into
+git (the ClusterIssuer, and the memql#4224 / memql#4225 workarounds until
+the engine tag carries them).
+
+**Switch (every line is a cluster write; each is reversible; the order
+matters):**
+
+```bash
+gh repo deploy-key add argocd-keepit-ro.pub --repo znasllc-io/memql-znas --title argocd-keepit-ro            # read-only
+kubectl -n argocd create secret generic repo-memql-znas --from-literal=type=git \
+  --from-literal=url=git@github.com:znasllc-io/memql-znas.git --from-file=sshPrivateKey=argocd-keepit-ro
+kubectl -n argocd label secret repo-memql-znas argocd.argoproj.io/secret-type=repository
+kubectl -n argocd patch appproject memql --type=json \
+  -p '[{"op":"add","path":"/spec/sourceRepos/-","value":"git@github.com:znasllc-io/memql-znas.git"}]'
+kubectl -n argocd replace -f deploy/argocd/apps/memql.yaml                  # REPLACE, in place, same name `memql`
+argocd app get memql --refresh                                              # Synced, or OutOfSync listing ONLY the moved items
+argocd app diff memql                                                       # must be empty / known
+argocd app sync memql --dry-run && argocd app sync memql && argocd app wait memql --health
+kubectl -n memql rollout status deploy/identity                             # then bff, edge
+scripts/install/verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN   # from an engine checkout
+curl -s https://portal.$MEMQL_DOMAIN/runtime-config.json
+```
+
+Why each line is what it is:
+
+- The repo Secret's `url` must match the Application's `repoURL` byte for
+  byte, or Argo reports a ComparisonError; the AppProject `sourceRepos`
+  entry must exist first, or the Application is refused as "repo not
+  permitted in project" (harmless, but it stops reconciling).
+- **`kubectl replace` the Application IN PLACE under the same name --
+  never delete and recreate it.** It carries
+  `resources-finalizer.argocd.argoproj.io`, so deleting it cascade-deletes
+  the mesh AND the CNPG cluster, PVCs included. `replace` drops the old
+  `spec.source.kustomize` block wholesale; with the render
+  content-identical, the sync costs no pod churn.
+- **Manual sync with prune OFF until `argocd app diff memql` is empty.** A
+  prune sync from a render that omits anything the old render had deletes
+  it. Only after a green sync: `automated: {selfHeal: true}` with prune
+  still off until a second clean sync, then apply `root.yaml` so the
+  app-of-apps manages itself.
+
+**Rollback, at any step:** restore the captured manifest. The render is
+content-identical, so the sync is a no-op.
+
+```bash
+kubectl -n argocd replace -f capture/memql-app.before.yaml && argocd app sync memql
+# the AppProject entry and the repo Secret are harmless to leave; to remove them:
+kubectl -n argocd replace -f capture/appproject.before.yaml ; kubectl -n argocd delete secret repo-memql-znas
+```
+
+### The twice-daily entry pin loop (sketch)
+
+`.github/workflows/pin-entry.yml` in the instance repo, `schedule: cron
+'0 */12 * * *'` plus `workflow_dispatch`, with the default policy "latest
+engine release TAG" -- a no-op until a human cuts a tag, so "twice daily"
+means "within 12 hours of a cut":
+
+1. `git ls-remote --tags https://github.com/znasllc-io/memql.git` -> the
+   newest `vX.Y.Z`.
+2. For each of the eight nodes,
+   `docker buildx imagetools inspect ghcr.io/znasllc-io/memql-<node>:X.Y.Z`
+   -> digest. Abort if any node lacks the tag (the images are not built
+   yet; never half-pin).
+3. Rewrite `?ref=vX.Y.Z` and the eight `digest:` lines in
+   `deploy/k8s/overlays/keep-it/kustomization.yaml`; render. A render
+   failure -- typically a patch target the new engine tag renamed -- means
+   do not commit; an unchanged render is a no-op.
+4. One-file commit: a PR with auto-merge, or direct to `main` -- the
+   owner's call. With automated sync on the Application, Argo rolls within
+   its refresh interval.
+5. Post-roll gate (a `workflow_run` after the merge, or a second cron 30
+   minutes later): `/healthz` on `identity.`, `api.` and `portal.`,
+   `verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN`,
+   and, once the SDK exposes it, ServerHello `engine_version == X.Y.Z`.
+   Failure opens an issue; rollback is `git revert` of the pin commit plus
+   a sync.
+
+"Never auto-apply top" is structural, not a policy: the workflow edits one
+file in the instance repo and has no path to `overlays/cloud`. The
+engine-side process fix is the owner's: publish a GitHub Release for each
+tag, so `dispatch-engine-images-on-release.yml` builds images without a
+manual dispatch.
+
 ## What is not this page
 
 - The local k3d + Argo cluster --
   [reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md)
 - The six host rules in general -- [front-door.md](front-door.md)
-- Twice-daily entry deploys and the client-repo template -- later
-  tickets, not this bring-up
+- The `memql-project` template's own retirement of staging / prod and
+  the Azure provisioning script -- the template repo and later tickets,
+  not this page

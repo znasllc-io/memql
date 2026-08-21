@@ -36,7 +36,7 @@ These are the same everywhere. Changing them for one install is a bug.
   clusters opt into the `bff` via `deploy/k8s/components/engine-bff`; products
   add their own `bff-<product>` + DSL bundle. Same node graph everywhere.
 - **The deployment process** — GitOps: one `deploy/k8s/base` composed by one
-  overlay (`local` or `cloud`), reconciled by ArgoCD. `make up` locally applies the same
+  overlay (`local`, `cloud` or `cloud-entry`), reconciled by ArgoCD. `make up` locally applies the same
   manifests ArgoCD applies in the cloud. A release is `{engine version, bundle
   digest, client digest}` pinned in the overlay. There is no second, "local"
   way to deploy.
@@ -130,16 +130,22 @@ low-level debugging, but it is **not** part of the connection path.
 The base + overlay + component split is how the standard is enforced mechanically:
 
 - **`deploy/k8s/base`** — the topology. Product-agnostic, no per-install values.
-- **`deploy/k8s/overlays/{local,cloud}`** — the config: image digests/tags,
+- **`deploy/k8s/overlays/{local,cloud,cloud-entry}`** — the config: image digests/tags,
   replicas, the domain/cert/DNS wiring, the ingress-controller annotations.
 - **`deploy/k8s/components/*`** — opt-in capabilities (`engine-bff`,
   `dsl-bundle`) an overlay composes; they add topology without a branch.
 
-There are exactly two overlays, and the gates keep them honest against one
-derivation rather than against each other: `render_cloud_test.go` renders the
-cloud overlay and asserts its namespace containment, its stated replica counts
-and its ArgoCD wiring, while `frontdoor_hosts_test.go` computes the host set from
-`component/frontdoor` and asserts BOTH overlays serve exactly it.
+There are three overlays -- `local`, `cloud` (the top-sized instance, what
+`deploy/argocd/apps/memql.yaml` points at) and `cloud-entry` (the keep-it /
+client instance, memql#4203) -- and the two cloud ones are two INSTANCE
+shapes, not two environments (epic memql#3943). The gates keep all three
+honest against one derivation rather than against each other:
+`render_cloud_test.go` and `render_cloud_entry_test.go` render the two cloud
+overlays and assert namespace containment, stated replica counts and (for
+`cloud`) the ArgoCD wiring, `frontdoor_hosts_test.go` computes the host set
+from `component/frontdoor` and asserts both generated front doors serve
+exactly it, and the local overlay's `render_frontdoor_test.go` asserts the
+same of the hand-authored one.
 
 When you add something new, ask: *is this the shape of the system, or a value?*
 Shape goes in base/components (everywhere); values go in the overlay. If a
