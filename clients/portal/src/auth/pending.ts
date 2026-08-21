@@ -8,7 +8,7 @@
 // landing page, breaking the deep links #3316 requires).
 //
 // ---------------------------------------------------------------------------
-// WHY sessionStorage, and why that is not the same decision as "where does the
+// WHY localStorage, and why that is not the same decision as "where does the
 // access token live".
 // ---------------------------------------------------------------------------
 //
@@ -23,10 +23,14 @@
 // storage-free alternative: the redirect is a document navigation, so an
 // in-memory value cannot survive it.
 //
-// sessionStorage rather than localStorage, deliberately: it is scoped to the
-// tab and cleared when the tab closes, so an abandoned half-finished sign-in
-// does not persist on a shared machine. And cleared eagerly the moment the
-// exchange completes or fails -- consume(), not read(), is the API.
+// localStorage rather than sessionStorage (memql#4228): a magic-link from
+// mail opens a NEW tab on this origin. sessionStorage is tab-scoped, so the
+// tab that started Continue would hold the PKCE verifier and the tab that
+// landed on the callback would find nothing -- "This sign-in could not be
+// matched to a request from this tab." Any portal tab on this origin must be
+// able to finish the exchange. The record is still consume-once, still
+// discarded after MAX_AGE_MS, and still not the access token: memql_admin
+// stays off portal.*.
 
 const STORAGE_KEY = "memql-portal-pending-auth";
 
@@ -58,7 +62,7 @@ export interface StorageLike {
 
 function defaultStorage(): StorageLike | null {
   try {
-    return globalThis.sessionStorage ?? null;
+    return globalThis.localStorage ?? null;
   } catch {
     // Throws outright on an origin with storage blocked. Treated as absent;
     // savePending's caller surfaces the failure as an unusable sign-in rather
@@ -144,7 +148,7 @@ export const DEFAULT_RETURN_TO = "/";
 // safeReturnTo admits only an in-app path.
 //
 // This is an OPEN-REDIRECT guard, and it matters even though the value came
-// out of this origin's own sessionStorage: the record is written before a
+// out of this origin's own localStorage: the record is written before a
 // navigation to a third party and read after coming back, so treating it as
 // trusted input is exactly the assumption that goes wrong. Anything that is
 // not a single-slash-rooted path -- "https://evil.example", "//evil.example"

@@ -119,3 +119,41 @@ describe("safeReturnTo", () => {
     expect(consumePending(storage, RECORD.createdAt)?.returnTo).toBe(DEFAULT_RETURN_TO);
   });
 });
+
+// #4228: magic-link from mail opens a NEW tab. sessionStorage is empty there;
+// localStorage (same origin) is how the pending PKCE record reaches consume.
+const PENDING_KEY = "memql-portal-pending-auth";
+
+describe("pending authorization across magic-link new tabs (#4228)", () => {
+  it("defaultStorage writes localStorage so a fresh tab can consume", () => {
+    sessionStorage.clear();
+    localStorage.clear();
+
+    expect(savePending(RECORD)).toBe(true);
+
+    // The mail client opened a new tab: that tab has empty sessionStorage.
+    expect(sessionStorage.getItem(PENDING_KEY)).toBeNull();
+    expect(localStorage.getItem(PENDING_KEY)).not.toBeNull();
+
+    // Same Storage object / jsdom localStorage stands in for the new tab.
+    expect(consumePending(localStorage, RECORD.createdAt + 1000)).toEqual(RECORD);
+  });
+
+  it("still discards an expired record when it lives in localStorage", () => {
+    sessionStorage.clear();
+    localStorage.clear();
+    expect(savePending(RECORD)).toBe(true);
+    expect(localStorage.getItem(PENDING_KEY)).not.toBeNull();
+    expect(consumePending(localStorage, RECORD.createdAt + 11 * 60 * 1000)).toBeNull();
+  });
+
+  it("consume still removes the localStorage record", () => {
+    sessionStorage.clear();
+    localStorage.clear();
+    expect(savePending(RECORD)).toBe(true);
+    expect(localStorage.getItem(PENDING_KEY)).not.toBeNull();
+    expect(consumePending(localStorage, RECORD.createdAt)).not.toBeNull();
+    expect(localStorage.getItem(PENDING_KEY)).toBeNull();
+    expect(consumePending(localStorage, RECORD.createdAt)).toBeNull();
+  });
+});
