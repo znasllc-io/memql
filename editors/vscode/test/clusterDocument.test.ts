@@ -14,6 +14,8 @@ import assert from "node:assert/strict";
 import {
   CLUSTER_DOCUMENT_SCHEME,
   clusterDocumentUri,
+  detailsRefusal,
+  fetchFailedNotice,
   notConnectedNotice,
   packLocator,
   parseClusterDocumentUri,
@@ -57,4 +59,39 @@ test("the not-connected notice names the cluster and the way back", () => {
   const notice = notConnectedNotice("staging");
   assert.match(notice, /staging/);
   assert.match(notice, /reconnect/i);
+});
+
+test("details are refused when the connection is not the document's cluster, and the toast names both", () => {
+  // The lens outlives the connection, and a cluster document's body is rewritten
+  // to the not-connected notice while the lens still says where it came from. So
+  // "open its details" has to answer against the cluster the DOCUMENT names, not
+  // whatever is connected now -- otherwise a click renders another cluster's
+  // construct of the same name with nothing saying so.
+  assert.equal(detailsRefusal("staging", "staging"), undefined);
+
+  const crossed = detailsRefusal("staging", "prod");
+  assert.match(String(crossed), /staging/);
+  assert.match(String(crossed), /prod/);
+  assert.match(String(crossed), /reconnect/i);
+
+  const none = detailsRefusal("staging", undefined);
+  assert.match(String(none), /staging/);
+  assert.equal(/prod/.test(String(none)), false, "there is no other cluster to name when nothing is connected");
+});
+
+test("a document with no cluster claim is not refused", () => {
+  // Nothing in this tree posts one, but the handler's argument is untrusted:
+  // an empty claim must not become a refusal naming an empty cluster.
+  assert.equal(detailsRefusal("", "prod"), undefined);
+});
+
+test("the fetch-failed notice points at the channel and carries no raw error", () => {
+  const notice = fetchFailedNotice("staging", "cognition/queries.memql");
+  assert.match(notice, /staging/);
+  assert.match(notice, /cognition\/queries\.memql/);
+  assert.match(notice, /MemQL Connection/);
+  // Every line is a comment: the notice is rendered INTO a .memql buffer.
+  for (const line of notice.split("\n").filter((l) => l !== "")) {
+    assert.match(line, /^\/\//, `"${line}" is not a comment line`);
+  }
 });

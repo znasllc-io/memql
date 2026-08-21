@@ -62,6 +62,49 @@ export function notFoundNotice(cluster: string, originPath: string): string {
   return `// ${cluster} does not serve ${originPath}.\n// The catalog named this path, but the pack browser has no such file.\n`;
 }
 
+/**
+ * What the document says when the cluster could not be read at all.
+ *
+ * NEVER THE RAW ERROR. This text is rendered INTO a .memql buffer, so every
+ * line is a comment and none of it is the transport's own words -- those go to
+ * the MemQL Connection channel, through the redactor, which is what this points
+ * the reader at. See the information policy (memql#4194).
+ */
+export function fetchFailedNotice(cluster: string, originPath: string): string {
+  return (
+    `// ${cluster} could not be read for ${originPath}.\n` +
+    `// Reconnect and reopen it; the failure is recorded in the MemQL Connection output channel.\n`
+  );
+}
+
+/**
+ * The refusal for opening a cluster document's construct details, or undefined
+ * when the connection in hand IS the document's cluster.
+ *
+ * THE DOCUMENT NAMES ITS OWN CLUSTER, and the answer must come from that name
+ * rather than from whatever is connected now. A cluster document outlives the
+ * connection that produced it: its body is rewritten to the not-connected
+ * notice while its header lens still says where it came from, so a click after
+ * a switch would otherwise resolve the same {kind, name} against a DIFFERENT
+ * cluster and render that one's construct with nothing saying so. This is the
+ * same refusal the provider makes on the way in, said out loud.
+ *
+ * `connectedCluster` is the name of a CONNECTED stream, or undefined when there
+ * is none -- the two produce different sentences because they ask the reader
+ * for different things. An empty `documentCluster` is no claim at all and is
+ * never refused: the argument arrives over the untrusted command boundary.
+ */
+export function detailsRefusal(
+  documentCluster: string,
+  connectedCluster: string | undefined,
+): string | undefined {
+  if (documentCluster === "" || connectedCluster === documentCluster) return undefined;
+  if (connectedCluster === undefined) {
+    return `MemQL: this document came from ${documentCluster}. Reconnect to ${documentCluster} to open its details.`;
+  }
+  return `MemQL: this document came from ${documentCluster}; you are connected to ${connectedCluster}. Reconnect to ${documentCluster} to open its details.`;
+}
+
 function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);

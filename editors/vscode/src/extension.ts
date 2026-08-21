@@ -177,7 +177,7 @@ import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
 import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
-import { CLUSTER_DOCUMENT_SCHEME } from './constructs/clusterDocument.js';
+import { CLUSTER_DOCUMENT_SCHEME, detailsRefusal } from './constructs/clusterDocument.js';
 import {
   ClusterDocumentLens,
   ClusterDocumentProvider,
@@ -756,7 +756,16 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // names a tree this machine does not have. Every decision is in
   // constructs/clusterDocument.ts; this is where the provider meets the live
   // connection it fetches over.
-  const clusterDocuments = new ClusterDocumentProvider({ connections });
+  const clusterDocuments = new ClusterDocumentProvider({
+    connections,
+    // The information policy (memql#4194) for a fetch nobody is waiting on: the
+    // raw text goes through the redactor into the channel, the buffer gets a
+    // notice, and the toast is short and points at the record.
+    onError: (headline, detail) => {
+      noteDiagnostic(connectionOutput, headline, detail);
+      void offerDetails('error', connectionOutput, 'MemQL: a cluster document could not be read from its cluster.');
+    },
+  });
   // ONE FACTORY, TWO CALL SITES: both commands open the same singleton panel
   // and must hand it the same behaviour. The closure reads `connections` when
   // the BUTTON IS PRESSED rather than when the panel was opened, which is the
@@ -807,20 +816,32 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     }),
     // The cluster document's lens posts this: the way BACK from source to the
     // detail page. Palette-hidden for the same reason as `open` -- it takes a
-    // {kind, name} the palette cannot supply. The construct is re-read from the
-    // cluster rather than carried in the uri, because the uri holds an address
-    // and the page needs the record.
-    commands.registerCommand('memql.constructs.showDetails', async (key?: { kind?: string; name?: string }) => {
+    // {cluster, kind, name} the palette cannot supply. The construct is re-read
+    // from the cluster rather than carried in the uri, because the uri holds an
+    // address and the page needs the record.
+    commands.registerCommand('memql.constructs.showDetails', async (key?: { cluster?: string; kind?: string; name?: string }) => {
       // No argument is unreachable through the lens and is not worth a message:
       // there is nothing to name in one.
       if (key?.kind === undefined || key?.name === undefined) {
         return;
       }
+      // THE DOCUMENT'S CLUSTER DECIDES, not the connection in hand. The lens
+      // outlives the connection that produced the bytes, so resolving this key
+      // against a cluster that merely happens to be connected would render a
+      // DIFFERENT cluster's construct of the same name with nothing saying so.
+      const state = connections?.state;
+      const refusal = detailsRefusal(
+        key.cluster ?? '',
+        state?.status === 'connected' ? state.clusterName : undefined
+      );
+      if (refusal !== undefined) {
+        void window.showInformationMessage(refusal);
+        return;
+      }
       const dispatcher = connections?.dispatcher;
       if (dispatcher === undefined) {
-        // The lens outlives the connection -- a cluster document stays open
-        // after a disconnect -- so this is reachable, and a click that does
-        // nothing would read as the extension being broken.
+        // Reachable when the lens carried no cluster claim to refuse on: a
+        // click that does nothing would read as the extension being broken.
         void window.showInformationMessage('MemQL: connect to a cluster to read its constructs.');
         return;
       }

@@ -8,6 +8,13 @@
 // document of this scheme -- VS Code re-asks, and the provider answers with the
 // not-connected notice until the stream is back.
 //
+// A RE-FETCH HAS NO CALLER, which is why the failure path is inside the
+// provider rather than around it. invalidate() makes VS Code ask again with
+// nobody waiting on the promise, so a rejection would surface as the editor's
+// own raw error text -- unclassified, unredacted, and nowhere in the MemQL
+// Connection channel. The provider answers with a notice and hands the raw
+// detail to the host through `onError` instead.
+//
 // Refs: #4248
 
 import * as vscode from "vscode";
@@ -18,6 +25,7 @@ import { signatureLine } from "./signature.js";
 import {
   CLUSTER_DOCUMENT_SCHEME,
   clusterDocumentUri,
+  fetchFailedNotice,
   notConnectedNotice,
   notFoundNotice,
   packLocator,
@@ -25,13 +33,34 @@ import {
   type ClusterDocumentRef,
 } from "./clusterDocument.js";
 
+/**
+ * What the provider needs, declared STRUCTURALLY rather than as the concrete
+ * ConnectionManager -- the same reason constructs/lensProvider.ts declares its
+ * client that way. The dependency is the capability (a state, a dispatcher, a
+ * change signal), which is what makes the fetch path drivable from a plain Node
+ * process. A real ConnectionManager satisfies it, so
+ * `new ClusterDocumentProvider({ connections })` is unchanged.
+ */
+export interface ClusterDocumentDeps {
+  connections: Pick<ConnectionManager, "state" | "dispatcher" | "onDidChangeState">;
+  /**
+   * Where a failed fetch is REPORTED, given the headline and the raw detail.
+   *
+   * Optional because a caller with no output channel is a legitimate one (a
+   * test, a future headless host), and because the document is already honest
+   * without it. The host wires this to the redactor and the channel; nothing
+   * about the raw detail reaches the buffer either way.
+   */
+  onError?: (headline: string, detail: string) => void;
+}
+
 export class ClusterDocumentProvider implements vscode.TextDocumentContentProvider {
   private readonly changed = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.changed.event;
   private readonly cache = new Map<string, string>();
   private readonly unsubscribe: () => void;
 
-  constructor(private readonly deps: { connections: ConnectionManager }) {
+  constructor(private readonly deps: ClusterDocumentDeps) {
     this.unsubscribe = deps.connections.onDidChangeState(() => this.invalidate());
   }
 
@@ -51,7 +80,14 @@ export class ClusterDocumentProvider implements vscode.TextDocumentContentProvid
     }
     const locator = packLocator(ref.originPath);
     if (locator === undefined) return notFoundNotice(ref.cluster, ref.originPath);
-    const file = await new PackClient(dispatcher).readFile(locator.domain, locator.path);
+    let file;
+    try {
+      file = await new PackClient(dispatcher).readFile(locator.domain, locator.path);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.deps.onError?.(`reading ${ref.originPath} from "${ref.cluster}" failed`, detail);
+      return fetchFailedNotice(ref.cluster, ref.originPath);
+    }
     const text = file.found ? file.source : notFoundNotice(ref.cluster, ref.originPath);
     // Only a real answer is cached. A notice is a statement about right now,
     // and caching one would outlive the condition that produced it.
@@ -71,7 +107,13 @@ export class ClusterDocumentProvider implements vscode.TextDocumentContentProvid
   }
 }
 
-/** One lens at line 0: where the bytes came from, and the way to the detail page. */
+/**
+ * One lens at line 0: where the bytes came from, and the way to the detail page.
+ *
+ * THE CLUSTER TRAVELS WITH THE KEY. A `{kind, name}` on its own would be
+ * resolved against whatever is connected when the lens is CLICKED, which is not
+ * necessarily the cluster these bytes came from -- see `detailsRefusal`.
+ */
 export class ClusterDocumentLens implements vscode.CodeLensProvider {
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const ref = parseClusterDocumentUri({ authority: document.uri.authority, path: document.uri.path, query: document.uri.query });
@@ -80,7 +122,7 @@ export class ClusterDocumentLens implements vscode.CodeLensProvider {
       new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
         title: `From ${ref.cluster} -- read-only -- Open construct details`,
         command: "memql.constructs.showDetails",
-        arguments: [{ kind: ref.kind, name: ref.name }],
+        arguments: [{ cluster: ref.cluster, kind: ref.kind, name: ref.name }],
       }),
     ];
   }
