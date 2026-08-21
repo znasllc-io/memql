@@ -53,6 +53,7 @@ package citags
 import (
 	"go/build"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -69,7 +70,7 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e":  "needs a provisioned parity cluster (k3d + ArgoCD); covered by the parity-cluster e2e workflow, not by this repo's CI",
+	"clustere2e":  "live suite needs a provisioned parity cluster; compile/vet is TestClusterE2EPackageCompiles (memql#4212)",
 	"telnyx_live": "hits the live Telnyx API with real credentials; must not run on every PR",
 }
 
@@ -322,5 +323,24 @@ func TestDeliberateExclusionsAreHonest(t *testing.T) {
 			t.Errorf("deliberatelyNotRunInCI lists %q, but no tagged *_test.go requires it any more. "+
 				"Remove the entry (memql#2903).", tag)
 		}
+	}
+}
+
+// TestClusterE2EPackageCompiles is the #4212 compile lock. The live suite
+// cannot run here, but a tagged package that does not even compile is how
+// this lane rotted through #4201. `go test -tags clustere2e -c` is the
+// cheapest honest gate.
+func TestClusterE2EPackageCompiles(t *testing.T) {
+	root := repoRoot(t)
+	out := filepath.Join(t.TempDir(), "clustere2e.test")
+	cmd := exec.Command("go", "test", "-tags", "clustere2e", "-c", "-o", out, "./test/clustere2e/")
+	cmd.Dir = root
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go test -tags clustere2e -c ./test/clustere2e/: %v\n%s", err, b)
+	}
+	cmd = exec.Command("go", "vet", "-tags", "clustere2e", "./test/clustere2e/")
+	cmd.Dir = root
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go vet -tags clustere2e ./test/clustere2e/: %v\n%s", err, b)
 	}
 }
