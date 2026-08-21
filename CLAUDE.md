@@ -1899,6 +1899,12 @@ concept id.
   the AST converter runs, write the `!=` comparison form instead.
 - Membership is the single `in` operator: `args.x in list`
   or `kind in ["a", "b"]` (payload props bare).
+- Prefix selection is `<field> startsWith <prefix>` (memql#4208): a string
+  literal, a list of string literals (starts with ANY of), or an
+  `args.<field>` resolving to either. Parameterized `^@ ANY(text[])` in
+  SQL; an EMPTY list and a BLANK prefix match nothing -- a selection,
+  never a pass-through (authoring-rules.md §32). Filters and spec bodies
+  only; the automations condition grammar refuses it by name.
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
   if `args.x` is absent the guarded block AND its connective are
   dropped as if never written (unambiguous under `||`).
@@ -2329,7 +2335,7 @@ Runtime side of the architecture framework (dsl/observability/; infrastructure m
 See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
 - `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
 - `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
-- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
+- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node). Clients read it through `codeMetricsInWindow` (`dsl/observability/queries.memql`, memql#4208): one bucket, one `[windowStart, windowEnd)` range, `codeReference startsWith` any of the caller's prefixes or equal to an exact key -- the prefix-scoped read the portal's module drill-in uses instead of a capped client-side walk.
 
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads)

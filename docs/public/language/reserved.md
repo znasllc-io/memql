@@ -252,6 +252,11 @@ Plus body-level keywords inside specific constructs: `args`, `body`,
 `include`. Their reservation is scoped to the construct that defines
 them.
 
+The filter-expression keywords are reserved wherever an expression is
+parsed: `in`, `not` (only as `not in`), `when`, and `startsWith`
+(memql#4208). A payload property or an arg named `startsWith` cannot be
+referenced bare.
+
 ---
 
 ## 6. Reserved annotation names
