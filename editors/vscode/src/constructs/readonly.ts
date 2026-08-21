@@ -10,17 +10,20 @@
 // checkout of that bundle changes nothing THERE, and the engine's core-first
 // invariant seals core constructs against promotion anywhere.
 //
-// ON A LOCAL CLUSTER WHOSE WORKSPACE IS THE CHECKOUT THE INSTALL RECORDED, an
-// edit to ANY file -- core included -- changes what the cluster runs the next
-// time it is rebuilt from that checkout (Deployments: Rebuild from checkout).
-// So locality is TWO FACTS, not one: the cluster is local, AND this workspace
-// is its checkout. A different clone stays editable (it is the developer's
-// file) but is told it is not the one the cluster builds from.
+// A LOCAL CLUSTER LOCKS NOTHING -- no origin, core included. It is rebuilt from
+// a checkout on this machine (Deployments: Rebuild from checkout), so an edit to
+// any file it loaded can change what it runs, and the editor has no business
+// deciding which of a developer's clones is the real one. Nothing here is a
+// permission system; the safe direction is the developer's own file staying
+// writable.
 //
-// The second fact is the one that is easy to drop, and dropping it is not a
-// near miss: a developer with the engine cloned twice would have both copies
-// unlocked on the strength of one of them being wired to the cluster, and the
-// edits they made in the other would reach nothing while looking live.
+// THE CHECKOUT MATCH DECIDES THE HINT, NOT THE VERDICT. Whether a workspace
+// folder IS the checkout the install recorded is what `showsCheckoutHint`
+// answers, and its consequence is a hover -- "this folder is not the checkout
+// <cluster> rebuilds from" -- plus the "applies on the next rebuild" wording
+// the lens carries. Wiring that fact into `readonlyVerdict` instead would lock
+// a second clone of the engine, which is a file the developer is entitled to
+// edit and which no rule of this module has anything to say about.
 //
 // THE MARKING IS A COURTESY, NOT THE CONTROL. Same doctrine `deploy/actions.ts`
 // states for role tiers: a user can override `files.readonlyInclude`, and what
@@ -85,9 +88,24 @@ export interface ReadonlyVerdict {
 
 const EDITABLE: ReadonlyVerdict = { readonly: false };
 
-/** What the badge shows. Short, because it sits beside a filename. */
+/**
+ * What the badge shows.
+ *
+ * ONE CHARACTER, AND THAT IS A HARD LIMIT RATHER THAN A STYLE. VS Code
+ * validates a `FileDecoration` badge at no more than two code points and DROPS
+ * THE WHOLE DECORATION when it is longer -- badge, colour and hover together --
+ * logging `The 'badge'-property must be undefined or a short character` to a
+ * channel nobody is watching. (Checked against the editor this repository's
+ * host lane downloads: `FileDecoration.validate` in
+ * `resources/app/out/vs/workbench/api/node/extensionHostProcess.js`, 1.134.0.)
+ * The words this used to return -- "core" and "remote" -- were four and six.
+ *
+ * So the badge is a MARK, and the tooltip is the sentence. `C` and `R` here,
+ * `L` for the not-this-checkout hint the marker adds; three letters that differ
+ * at a glance, each explained on hover.
+ */
 export function reasonBadge(reason: ReadonlyReason): string {
-  return reason === "coreSealed" ? "core" : "remote";
+  return reason === "coreSealed" ? "C" : "R";
 }
 
 /** What the hover says. The badge is a hint; this is the sentence. */
@@ -103,7 +121,8 @@ export function reasonTooltip(reason: ReadonlyReason, clusterName: string): stri
   return (
     `This is a product bundle, and ${clusterName} is not local -- read-only. ` +
     "A remote cluster loads its bundle from its own image, so editing this checkout " +
-    "changes nothing there. Select the local cluster and open its checkout to edit it."
+    "changes nothing there. Select the local cluster to edit it, and work in the " +
+    "checkout that cluster rebuilds from for the edit to reach it."
   );
 }
 
@@ -137,12 +156,13 @@ export interface ReadonlyInput {
    * Whether some workspace folder IS the selected cluster's recorded checkout.
    * Absent means no.
    *
-   * THE SECOND HALF OF LOCALITY, and it is a separate input rather than a
-   * refinement of `clusterLocal` because the two are answered by different
-   * sources: the cluster registry says local, the install receipt says which
-   * directory the cluster is rebuilt from. Folding them into one boolean would
-   * make the caller do the comparison, which is where a caller that forgot it
-   * would be indistinguishable from one that did it and got true.
+   * READ BY `showsCheckoutHint` AND DELIBERATELY NOT BY `readonlyVerdict`. The
+   * two facts come from different sources -- the cluster registry says local,
+   * the install receipt says which directory the cluster is rebuilt from -- and
+   * they answer different questions: the first decides whether a file can be
+   * locked at all, the second only whether the developer is told this is not
+   * the folder the cluster builds from. A verdict that consulted it would lock
+   * a second clone, which is the outcome the header rejects.
    */
   workspaceIsClusterCheckout?: boolean;
 }
@@ -163,17 +183,17 @@ export function readonlyVerdict(input: ReadonlyInput): ReadonlyVerdict {
   const constructs = catalog.get(catalogKeyFor(input.path));
   if (constructs === undefined || constructs.length === 0) return EDITABLE;
 
-  // THE TWO FACTS, tested together and BEFORE either origin. On a local cluster
-  // this workspace is the checkout of, every origin is live: the next rebuild
-  // loads these bytes, core included. Testing them after `core` would seal the
-  // very tree the rebuild is going to compile.
-  if (input.clusterLocal === true && input.workspaceIsClusterCheckout === true) return EDITABLE;
+  // LOCAL, AND THEREFORE EDITABLE -- before either origin is looked at, and
+  // whatever `workspaceIsClusterCheckout` says. A local cluster is rebuilt from
+  // a checkout on this machine, so a file it loaded is one an edit can reach;
+  // testing origins first would seal the very tree the next rebuild compiles.
+  if (input.clusterLocal === true) return EDITABLE;
 
   // A file holds many constructs and they share an origin -- one file comes
   // from one tree. `some` rather than `every` anyway, because a file that
   // somehow mixed them contains a core construct, and the core reason carries
   // the extra constraint the bundle one does not: a core name cannot be
-  // promoted over at all, whichever cluster is selected.
+  // promoted over, on any cluster.
   if (constructs.some((c) => c.origin === "core")) {
     return { readonly: true, reason: "coreSealed" };
   }
@@ -224,22 +244,20 @@ export function constructsByPath(
  * last cluster's answer in place. A stale read-only marking outlives the
  * connection that justified it otherwise, and workspace settings persist across
  * restarts -- so the stale one would look permanent.
+ *
+ * Empty on a LOCAL cluster too, for the reason the header gives: a local
+ * cluster locks nothing. It takes no `workspaceIsClusterCheckout` because no
+ * answer to that question can put a file in this list.
  */
 export function readonlyPatterns(input: {
   catalog?: ReadonlyMap<string, OriginatedConstruct[]>;
   clusterLocal?: boolean;
-  workspaceIsClusterCheckout?: boolean;
 }): string[] {
   const { catalog } = input;
   if (catalog === undefined) return [];
   const out: string[] = [];
   for (const key of catalog.keys()) {
-    const verdict = readonlyVerdict({
-      path: key,
-      catalog,
-      clusterLocal: input.clusterLocal,
-      workspaceIsClusterCheckout: input.workspaceIsClusterCheckout,
-    });
+    const verdict = readonlyVerdict({ path: key, catalog, clusterLocal: input.clusterLocal });
     // BOTH SPELLINGS. `files.readonlyInclude` matches the path VS Code sees,
     // which is workspace-relative: a repo checkout holds the file at
     // `dsl/cognition/queries.memql` while a bare DSL tree holds it at
@@ -252,6 +270,33 @@ export function readonlyPatterns(input: {
   // Sorted so the written setting is stable: an unordered rewrite churns the
   // workspace settings file on every reconnect and shows up as a diff.
   return out.sort();
+}
+
+/**
+ * Whether this file should carry the "not the checkout" hint.
+ *
+ * THE DECISION LIVES HERE, not in the decoration adapter, for the reason that
+ * adapter's header gives: it converts a Uri to a path and a verdict to a
+ * FileDecoration, and decides nothing. Three facts, and each one drops a case
+ * that would otherwise be told something false:
+ *
+ *   the cluster is LOCAL     -- a remote cluster is not rebuilt from anything
+ *                               this developer has, and its own read-only
+ *                               tooltip already says so;
+ *   this is NOT its checkout -- when it is, the developer is in the right
+ *                               folder and there is nothing to say;
+ *   the catalog KNOWS the file -- a file the cluster never loaded is a new one,
+ *                               and a new file reaches the cluster by being
+ *                               promoted rather than by sitting in a directory.
+ *
+ * A caller that has no checkout PATH to name must not render the sentence
+ * either; that is the caller's own fact (`checkoutHint` takes it as an
+ * argument) and it is not knowable from this input.
+ */
+export function showsCheckoutHint(input: ReadonlyInput): boolean {
+  if (input.clusterLocal !== true) return false;
+  if (input.workspaceIsClusterCheckout === true) return false;
+  return input.catalog?.has(catalogKeyFor(input.path)) === true;
 }
 
 /**

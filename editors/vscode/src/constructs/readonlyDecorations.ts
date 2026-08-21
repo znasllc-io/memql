@@ -15,12 +15,14 @@
 //       read-only for a reason the operator cannot see, which reads as the
 //       editor being broken rather than as a rule being applied.
 //
-// AND ONE THING THAT IS NOT A LOCK (memql#4244). A local cluster rebuilds from
-// ONE checkout, so a second clone of the same repository is editable -- it is
-// the developer's file -- and yet nothing they write in it reaches that
-// cluster. The decoration provider carries that as a HOVER on an otherwise
-// untouched file; `files.readonlyInclude` is not involved, because there is
-// nothing here to forbid.
+// A LOCAL CLUSTER LOCKS NOTHING (memql#4244), so on one this file writes no
+// patterns at all and every buffer stays open. What the CHECKOUT MATCH decides
+// is the HINT: a local cluster is rebuilt from one directory, and a developer
+// typing in a second clone of the same repository is editing a file that
+// reaches nothing. That is a hover on an otherwise untouched file --
+// `files.readonlyInclude` is not involved, because there is nothing to forbid --
+// and the same fact is what the lens's "applies on the next Rebuild from
+// checkout" wording keys on.
 //
 // IT WRITES INTO SOMEBODY'S REPOSITORY, so it is careful about what it owns.
 // `files.readonlyInclude` is a shared object and an operator may have their own
@@ -41,13 +43,13 @@ import * as vscode from "vscode";
 
 import { CLUSTER_DOCUMENT_SCHEME, safeDecode } from "./clusterDocument.js";
 import {
-  catalogKeyFor,
   checkoutHint,
   constructsByPath,
   readonlyPatterns,
   readonlyVerdict,
   reasonBadge,
   reasonTooltip,
+  showsCheckoutHint,
   type OriginatedConstruct,
 } from "./readonly.js";
 
@@ -124,44 +126,45 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
       workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
     });
     if (!verdict.readonly || verdict.reason === undefined) return this.checkoutHintFor(filePath);
-    const decoration = new vscode.FileDecoration(
-      undefined,
+    // POSITIONAL, and the order is (badge, tooltip, color). It used to pass
+    // `undefined` first and the badge into the tooltip slot, then overwrite the
+    // tooltip on the next line -- so a read-only file has never carried a badge
+    // and `reasonBadge` reached nothing but its own test (memql#4244).
+    return new vscode.FileDecoration(
       reasonBadge(verdict.reason),
+      reasonTooltip(verdict.reason, this.clusterName),
       new vscode.ThemeColor("disabledForeground"),
     );
-    decoration.tooltip = reasonTooltip(verdict.reason, this.clusterName);
-    return decoration;
   }
 
   /**
-   * The hover for an editable file in the WRONG clone, or undefined.
+   * The hover for a file in a clone the cluster does not build from, or
+   * undefined.
    *
-   * Four conditions on top of the editable verdict that got here, and each one
-   * drops a case that would otherwise be told something false: the cluster must
-   * be local (a remote one rebuilds from nothing this developer has), this
-   * workspace must NOT be its checkout, the checkout must be known at all, and
-   * the file must be one the cluster actually loaded -- a file the catalog has
-   * never heard of is a new one, and a new file reaches the cluster by being
-   * promoted rather than by sitting in the right directory.
+   * WHICH FILES QUALIFY IS `showsCheckoutHint`'s ANSWER, not this method's --
+   * the module header's rule about where decisions live. What is added here is
+   * the one fact that module cannot know: whether there is a checkout PATH to
+   * name. Without it the sentence would have an empty pair of brackets where
+   * the directory goes, which is worse than saying nothing.
    *
-   * WHICH LEAVES IT NARROW TODAY, and worth saying so nobody reads its absence
-   * as a defect: every catalog entry that carries a path is `core` or `bundle`
-   * (promoted and staged constructs live in the database and report no file),
-   * and in the wrong clone both of those are read-only -- so what a developer
-   * there actually sees is `reasonTooltip`, which says the same thing about the
-   * same folder. This is the branch for an editable file the cluster knows, and
-   * it stays because the alternative is a surface that silently says nothing
-   * the first time an origin does carry a path.
+   * NO DECORATION WHEN THIS IS THE CHECKOUT. A developer in the right folder is
+   * in the ordinary case, and a badge on every construct file would be a
+   * permanent mark that stops being read -- the same argument the status bar
+   * makes for staying silent when nothing needs attention. That the edit
+   * applies on the next rebuild is said where a developer is looking at a
+   * changed construct: the `edited` lens.
    */
   private checkoutHintFor(filePath: string): vscode.FileDecoration | undefined {
-    if (!this.clusterLocal || this.workspaceIsClusterCheckout || this.checkout === "") {
-      return undefined;
-    }
-    if (this.catalog?.has(catalogKeyFor(filePath)) !== true) return undefined;
-    // ONE LETTER, which is what VS Code's explorer has room for. It is a marker
-    // the hover explains rather than an abbreviation to decode -- and it is
-    // deliberately not styled like the read-only badges, because nothing here
-    // is read-only.
+    if (this.checkout === "") return undefined;
+    const shows = showsCheckoutHint({
+      path: filePath,
+      catalog: this.catalog,
+      clusterLocal: this.clusterLocal,
+      workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
+    });
+    if (!shows) return undefined;
+    // ONE LETTER, for the reason `reasonBadge` states at length: a longer badge
+    // is refused by the editor and takes the hover down with it.
     const decoration = new vscode.FileDecoration("L", checkoutHint(this.clusterName, this.checkout));
     // A hint about ONE file. Propagating it up the tree would put the mark on
     // every ancestor folder of a checkout that is, itself, perfectly fine.
@@ -192,11 +195,7 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
       // operator added by hand that happens to name a construct file.
       if (!owned.includes(key)) next[key] = value;
     }
-    const mine = readonlyPatterns({
-      catalog: this.catalog,
-      clusterLocal: this.clusterLocal,
-      workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
-    });
+    const mine = readonlyPatterns({ catalog: this.catalog, clusterLocal: this.clusterLocal });
     for (const key of mine) next[key] = true;
 
     await config.update("readonlyInclude", next, vscode.ConfigurationTarget.Workspace);
