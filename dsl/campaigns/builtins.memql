@@ -66,14 +66,31 @@
 // owner, the audience, the template -- is copied off THAT row rather than
 // taken from an argument, so a caller can only ever start a send as a
 // user they could already act as.
+//
+// WHICH OF THESE ARE @sdk, AND WHY (memql#4239). @sdk is a statement about the
+// PUBLIC CLIENT SURFACE -- `make sdk-gen` emits a typed Go + TypeScript method
+// only for a builtin that carries it -- and nothing else: it has no engine
+// effect, and every builtin here is reachable on the wire by name with or
+// without it. The four campaign-scoped actions carry it. They are the
+// operator's own verbs on their own campaign, the portal's buttons already
+// drive them, and their authorization is the owned-tier read above, so a
+// typed method advertises nothing a caller could not already do to a row
+// they own. The other three do not carry it, for two different reasons:
+// suppress and recordFeedback are admin-gated writes to the cluster-wide
+// list that no client drives yet (marking them is a one-line decision for
+// whoever adds the first caller, not a statement that they are internal);
+// ingestFeedback is the automation's door, and its argument is a staged
+// inbound row id no client holds.
 
 @description("Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through.")
+@sdk
 @executor("integration.campaigns.startSend")
 builtin campaignStartSend {
   campaignId  string!  @description("The campaign to send. The caller must own it.")
 }
 
 @description("Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand.")
+@sdk
 @executor("integration.campaigns.scheduleSend")
 builtin campaignScheduleSend {
   campaignId   string!  @description("The campaign to schedule. The caller must own it.")
@@ -81,12 +98,14 @@ builtin campaignScheduleSend {
 }
 
 @description("Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.")
+@sdk
 @executor("integration.campaigns.pauseSend")
 builtin campaignPauseSend {
   campaignId  string!  @description("The campaign to pause. The caller must own it.")
 }
 
 @description("Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal.")
+@sdk
 @executor("integration.campaigns.resumeSend")
 builtin campaignResumeSend {
   campaignId  string!  @description("The campaign to resume. The caller must own it.")
