@@ -1102,6 +1102,8 @@ func convertComparisonOperator(op languageParser.ComparisonOperator) ComparisonO
 		return OpMissing
 	case languageParser.OpNotMissing:
 		return OpNotMissing
+	case languageParser.OpStartsWith:
+		return OpStartsWith
 	default:
 		return OpEq
 	}

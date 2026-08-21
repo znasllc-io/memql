@@ -506,6 +506,16 @@ func compareValues(left any, op ComparisonOperator, right any) (bool, error) {
 		return !valueInList(left, right), nil
 	case OpHas:
 		return valueInList(right, left), nil
+	case OpStartsWith:
+		prefixes, err := normalizePrefixValues(right)
+		if err != nil {
+			return false, err
+		}
+		str, ok := payloadText(left)
+		if !ok {
+			return false, nil
+		}
+		return startsWithAny(str, prefixes), nil
 	case OpGt, OpGe, OpLt, OpLe:
 		return compareOrdered(left, op, right)
 	default:

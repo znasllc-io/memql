@@ -639,7 +639,10 @@ func (e *MemQLEngine) canonicalizeRelationshipComparisons(ctx context.Context, e
 			return &rewritten
 		}
 		// payload.<field> == <value>  -- the only other shape we rewrite.
-		if len(n.Field.Parts) != 2 {
+		// A `startsWith` over a relationship field is NOT one: its value is a
+		// prefix, and composing a prefix against the target concept would
+		// manufacture an id that matches nothing (memql#4208).
+		if n.Operator == OpStartsWith || len(n.Field.Parts) != 2 {
 			return expr
 		}
 		if !strings.EqualFold(strings.TrimSpace(n.Field.Parts[0]), "payload") {
@@ -1503,6 +1506,29 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		default:
 			return compiledExpression{}, fmt.Errorf("unsupported payload collection type")
 		}
+	case OpStartsWith:
+		// `<field> startsWith <prefix>` (memql#4208). One bound text[]
+		// parameter whatever the right-hand shape was -- a single prefix is a
+		// one-element array -- compared with `^@ ANY(...)`: `^@` is
+		// starts_with() as an operator, a byte-prefix test with no pattern
+		// language, so a `%` or `_` in a prefix is literal and nothing here
+		// needs escaping. ANY over an empty array is FALSE; the constant is
+		// emitted instead so the emitted SQL says what it means and binds no
+		// parameter for it.
+		//
+		// NULL (field absent / not a string) yields NULL and is never
+		// admitted, which matches the in-process evaluator.
+		prefixes, err := normalizePrefixValues(value)
+		if err != nil {
+			return compiledExpression{}, err
+		}
+		if len(prefixes) == 0 {
+			return compiledExpression{sql: "FALSE"}, nil
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("((%s) ^@ ANY(?::text[]))", jsonExpr),
+			args: []any{pq.Array(prefixes)},
+		}, nil
 	case OpHas:
 		// has checks if a JSONB array field contains a scalar value.
 		// Uses the @> containment operator: payload->'field' @> to_jsonb('value'::text)
@@ -1659,6 +1685,59 @@ func normalizeScalarValue(value any) (valueKind, any, error) {
 	default:
 		return 0, nil, fmt.Errorf("unsupported literal type %T", value)
 	}
+}
+
+// normalizePrefixValues turns the right-hand side of a `startsWith`
+// comparison into the prefix list both evaluators test against: a string, a
+// []string, or a []any of strings (the call-site parser's list shape).
+//
+// Blank prefixes are DROPPED. strings.HasPrefix(s, "") and Postgres
+// starts_with(s, ”) are both true for every s, and a selection that admits
+// every row on a blank input is the fail-open shape this codebase keeps
+// filing issues about (`!= ""` as the is-set idiom, `??` blank-coalescing).
+// `codeReference startsWith args.prefixes` is safe to hand whatever list the
+// caller holds precisely because neither an empty list nor a list of blanks
+// can widen it: both match nothing. An author who wants "no constraint when
+// the arg is absent" has `when(args.x) { ... }` for that; a blank is a value,
+// and as a prefix it is not one.
+func normalizePrefixValues(value any) ([]string, error) {
+	var raw []string
+	switch v := value.(type) {
+	case string:
+		raw = []string{v}
+	case []string:
+		raw = v
+	case []any:
+		raw = make([]string, 0, len(v))
+		for _, item := range v {
+			str, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("startsWith requires string prefixes, got %T in the list", item)
+			}
+			raw = append(raw, str)
+		}
+	default:
+		return nil, fmt.Errorf("startsWith requires a string or a list of strings, got %T", value)
+	}
+	out := make([]string, 0, len(raw))
+	for _, prefix := range raw {
+		if strings.TrimSpace(prefix) == "" {
+			continue
+		}
+		out = append(out, prefix)
+	}
+	return out, nil
+}
+
+// startsWithAny reports whether s begins with any of the (already
+// normalized, non-blank) prefixes. An empty list matches nothing.
+func startsWithAny(s string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeCollectionValues(value any) (*normalizedCollection, error) {
@@ -1981,6 +2060,20 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 			return inSet, nil
 		}
 		return !inSet, nil
+	case OpStartsWith:
+		// The in-process mirror of the `^@ ANY` SQL above: every candidate
+		// the SQL scan returns is re-evaluated here by
+		// executeCombinedFilterQuery, so the two must agree on every case
+		// (empty list, blank prefix, absent field, non-string field).
+		prefixes, err := normalizePrefixValues(expected)
+		if err != nil {
+			return false, err
+		}
+		actualStr, ok := payloadText(actual)
+		if !ok {
+			return false, nil
+		}
+		return startsWithAny(actualStr, prefixes), nil
 	case OpHas:
 		// OpHas tests array containment: does the array field `actual`
 		// contain the scalar `expected`. The parser desugars the
