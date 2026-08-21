@@ -6,24 +6,33 @@ import { ErrorMessage } from "../components/StatusMessage";
 import { Band, DataText, EmptyState, Skeleton } from "../ui";
 import { useConcepts } from "../cluster/useConcepts";
 import { ViewElement } from "../views/ViewElement";
-import { summarize, useModuleObservability, type MetricWindow } from "./useModuleObservability";
+import {
+  isJoinable,
+  joinKeysOf,
+  summarize,
+  useModuleObservability,
+  type Bucket,
+  type MetricWindow,
+} from "./useModuleObservability";
 
-// The observability drill-in on a module's detail (memql#4192): the three
-// headline numbers, a call-volume trendline through view-kit (its
+// The observability drill-in on a module's detail (memql#4192, memql#4208):
+// the three headline numbers, a call-volume trendline through view-kit (its
 // CVD-validated palette untouched), and the most recent raw invocations.
 //
-// The section is honest about its own reach. The data comes from a capped,
-// newest-first walk over the codeMetric aggregates filtered by the module's
-// join keys, and the footer states how much history that covered. A module
-// with no join keys (components, v1) gets the statement of that fact -- a
-// chart with nothing behind it would be the fake this issue forbids.
+// The metric windows are the engine's answer to ONE prefix-scoped query
+// over the codeMetric aggregates for the selected bucket and window, walked
+// to exhaustion -- so the section shows the whole selected window and
+// states which window that is. A module with no join keys (components, v1)
+// gets the statement of that fact instead of a query that would select
+// nothing by construction.
 
 const CODE_METRIC_CONCEPT = "v1:observability:codeMetric";
 const INVOCATION_CONCEPT = "v1:observability:invocation";
 
 export function ObservabilitySection({ module }: { module: Module }): ReactNode {
-  const [bucket, setBucket] = useState<"1m" | "1h">("1h");
-  const joinable = module.fqnPrefixes.length > 0 || module.codeReference !== "";
+  const [bucket, setBucket] = useState<Bucket>("1h");
+  const keys = joinKeysOf(module.fqnPrefixes, module.codeReference);
+  const joinable = isJoinable(keys);
   const obs = useModuleObservability(
     module.fqnPrefixes,
     module.codeReference,
@@ -38,9 +47,9 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
     return (
       <Band title="Observability">
         <p className="text-sm text-muted">
-          No invocation mapping exists for this module yet: components carry no codeReference
-          prefix the metrics could be joined on (module-registry design, section 7). Nothing is
-          charted because nothing can honestly be attributed.
+          No code reference mapped for this module: components carry no codeReference prefix
+          the metrics could be joined on (module-registry design, section 7). Nothing is read
+          and nothing is charted, because nothing can honestly be attributed.
         </p>
       </Band>
     );
@@ -52,7 +61,10 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
     <Band
       title="Observability"
       meta={
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-3">
+          <span className="text-xs text-muted">
+            {obs.window.label}, {bucket} buckets
+          </span>
           <BucketSwitch bucket={bucket} onChange={setBucket} />
         </span>
       }
@@ -65,8 +77,8 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
         <EmptyState
           statement={
             <>
-              No invocations recorded for this module in the {bucket} aggregates the walk
-              covered. Recording follows the observe level — raise MEMQL_OBSERVE_LEVEL (or a
+              No invocations recorded for this module in {obs.window.label} of {bucket}{" "}
+              aggregates. Recording follows the observe level — raise MEMQL_OBSERVE_LEVEL (or a
               per-FQN codeProfile) and traffic will land here.
             </>
           }
@@ -102,16 +114,17 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
                 concept={invocationConcept}
                 options={{ sort: { field: "occurredAt", direction: "desc" } }}
               />
+              <p className="mt-2 text-xs text-subtle">
+                The newest 100 invocations cluster-wide, filtered to this module — a forensic
+                sample, not a complete list.
+              </p>
             </div>
           ) : null}
         </div>
       )}
       <p className="mt-3 text-xs text-subtle">
-        {obs.truncated
-          ? `Read the newest ${obs.scannedRows} aggregate rows cluster-wide and matched this module inside them — older history exists beyond the cap.`
-          : `Read all ${obs.scannedRows} aggregate rows the cluster holds.`}{" "}
         Join keys:{" "}
-        {[...module.fqnPrefixes, module.codeReference]
+        {[...keys.prefixes, keys.codeReference]
           .filter((k) => k !== "")
           .map((k, i) => (
             <span key={k}>
@@ -129,8 +142,8 @@ function BucketSwitch({
   bucket,
   onChange,
 }: {
-  bucket: "1m" | "1h";
-  onChange: (next: "1m" | "1h") => void;
+  bucket: Bucket;
+  onChange: (next: Bucket) => void;
 }): ReactNode {
   return (
     <span role="group" aria-label="Aggregate window" className="flex overflow-hidden rounded border border-line">
@@ -163,23 +176,20 @@ function Reading({ label, value }: { label: string; value: string }): ReactNode 
   );
 }
 
-// Re-wrap the filtered windows in the wire row shape ViewElement's flatten
-// expects, so the chart reads the same nested form real rows carry.
+// Re-wrap the windows in the wire row shape ViewElement's flatten expects,
+// so the chart reads the same nested form real rows carry.
 function windowRows(windows: readonly MetricWindow[]) {
-  return windows
-    .slice()
-    .reverse()
-    .map((w, index) => ({
-      id: `${w.codeReference}:${w.windowStart}:${index}`,
-      concept: CODE_METRIC_CONCEPT,
-      createdAt: w.windowStart,
-      payload: {
-        codeReference: w.codeReference,
-        windowStart: w.windowStart,
-        bucket: w.bucket,
-        callCount: w.callCount,
-        errorCount: w.errorCount,
-        p95DurationNs: w.p95DurationNs,
-      },
-    })) as unknown as Parameters<typeof ViewElement>[0]["rows"];
+  return windows.map((w, index) => ({
+    id: `${w.codeReference}:${w.windowStart}:${index}`,
+    concept: CODE_METRIC_CONCEPT,
+    createdAt: w.windowStart,
+    payload: {
+      codeReference: w.codeReference,
+      windowStart: w.windowStart,
+      bucket: w.bucket,
+      callCount: w.callCount,
+      errorCount: w.errorCount,
+      p95DurationNs: w.p95DurationNs,
+    },
+  })) as unknown as Parameters<typeof ViewElement>[0]["rows"];
 }
