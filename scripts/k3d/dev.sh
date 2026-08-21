@@ -86,7 +86,13 @@
 #
 # An install, upgrade or repair rewrites those overrides, so it returns the
 # cluster to released images. Reaching --app-name is how a cluster whose
-# Application is not the default `memql-local` is addressed.
+# Application is not the default `memql-local` is addressed -- and a name no
+# Application answers to is REFUSED (exit 4) rather than read as "there was
+# nothing to patch".
+#
+# The run then proves the patch reached the pods: `Synced` is ArgoCD's own
+# bookkeeping and can be a stale read, so the gate that actually has to hold is
+# every Deployment naming memql-<node>:local (exit 5 when it never does).
 #
 # Usage
 # -----
@@ -104,9 +110,10 @@
 #
 # Exit codes: 0 ok | 2 bad param (unknown node type, unknown image-source) |
 #             4 prerequisite missing (docker/k3d/kubectl absent, cluster not
-#             running, carrier repo or repo-root missing) | 5 operation failed
-#             (an image build, an import, an Application patch, or a sync that
-#             never converged)
+#             running, carrier repo or repo-root missing, no such ArgoCD
+#             Application) | 5 operation failed (an image build, an import, an
+#             Application patch, a sync that never converged, or pods that never
+#             came to name the locally built images)
 #
 # Refs: #2066 #2061 #2221 #4245
 
@@ -623,6 +630,17 @@ function filter_node_image_overrides() {
 # Call AFTER the images are imported: the sync this triggers rolls the pods.
 function point_application_at_local_images() {
     section "Pointing Application '${APP_NAME}' at the locally built images"
+    # EXISTENCE FIRST, and it is not a formality. The read below is
+    # `|| true`-guarded, so "no such Application" and "an Application with no
+    # image overrides" both arrive as the empty string -- and the second is a
+    # legitimate pass-through. Without this probe a typo'd --app-name logs
+    # "the overlay's :local images already apply", returns 0, and the run
+    # reports imageSource=checkout while the pods stay on the released images
+    # this exists to replace. That satisfies the graph's verify, which is the
+    # worst shape a failure can take.
+    if ! kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o name >/dev/null 2>&1; then
+        cap_fail 4 "ArgoCD Application ${APP_NAME} not found in namespace ${ARGOCD_NAMESPACE} -- pass --app-name=<name> (k3d.up registers it as \${MEMQL_K3D_APP_NAME:-memql-local})"
+    fi
     local current filtered
     current="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o 'jsonpath={.spec.source.kustomize.images}' 2>/dev/null || true)"
     if [[ -z "$current" || "$current" == "[]" ]]; then
@@ -659,6 +677,66 @@ function wait_for_application_synced() {
         (( (deadline - SECONDS) % 15 == 0 )) && info "  still ${sync:-unknown} ..."
     done
     cap_fail 5 "${APP_NAME} did not reach Synced within ${timeout}s (last: ${sync:-unknown}); inspect: kubectl -n ${ARGOCD_NAMESPACE} get application ${APP_NAME}"
+}
+
+# every_image_is <space-separated-images> <want> -- true when the list is
+# non-empty and every entry is exactly <want>.
+#
+# The emptiness check is the load-bearing half. The jsonpath read that feeds
+# this is `|| true`-guarded, so a kubectl that failed hands back "", and a
+# vacuous "every element matches" would end the wait below on the strength of a
+# read that never happened.
+function every_image_is() {
+    local images="$1" want="$2" image
+    [[ -n "$images" ]] || return 1
+    for image in $images; do
+        [[ "$image" == "$want" ]] || return 1
+    done
+    return 0
+}
+
+# wait_for_local_images <node...> -- the patch has actually reached the pods:
+# every container of each node's Deployment names memql-<node>:local.
+#
+# WHY THIS EXISTS ON TOP OF `Synced`. `.status.sync.status` is ArgoCD's
+# bookkeeping about a comparison it has ALREADY made, so a Synced read taken
+# moments after the patch can be the previous answer -- the refresh has not
+# landed, nothing has been re-compared, and the wait returns on a status that
+# predates the change it is meant to prove. The Deployment's image refs are the
+# thing the patch exists to change, so they are what is waited on. Synced stays
+# the first gate; this is the one that cannot be satisfied by a stale read.
+function wait_for_local_images() {
+    local nodes=("$@")
+    local timeout="${MEMQL_K3D_SYNC_TIMEOUT:-300}"
+
+    section "Waiting for the Deployments to name the locally built images"
+
+    local node deployment want deadline images matched
+    for node in "${nodes[@]}"; do
+        deployment="$(deployment_name_for_node "$node")"
+        if ! kubectl get deployment "${deployment}" -n "${NAMESPACE}" &>/dev/null; then
+            info "Deployment '${deployment}' not present in namespace '${NAMESPACE}' -- nothing to wait for."
+            continue
+        fi
+        want="$(image_name_for_node "$node")"
+        deadline=$((SECONDS + timeout))
+        matched=false
+        images=""
+        info "Waiting for ${deployment} to name ${want} (up to ${timeout}s)..."
+        while ((SECONDS < deadline)); do
+            images="$(kubectl -n "${NAMESPACE}" get deployment "${deployment}" -o 'jsonpath={.spec.template.spec.containers[*].image}' 2>/dev/null || true)"
+            if every_image_is "$images" "$want"; then
+                matched=true
+                break
+            fi
+            sleep 5
+            (( (deadline - SECONDS) % 15 == 0 )) && info "  still ${images:-unknown} ..."
+        done
+        if [[ "$matched" != true ]]; then
+            cap_fail 5 "${deployment} still names '${images:-unknown}' rather than ${want} after ${timeout}s; inspect: kubectl -n ${NAMESPACE} get deployment ${deployment} -o jsonpath='{.spec.template.spec.containers[*].image}'"
+        fi
+        info "${deployment} names ${want}."
+    done
 }
 
 #=============================================================================
@@ -763,11 +841,15 @@ function main() {
 
         if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
             point_application_at_local_images
-            # Nothing was patched: the Application already pointed at the
-            # overlay's own :local references, so the image REFS are unchanged
-            # and only their CONTENT moved -- which ArgoCD cannot see and a
-            # restart is what rolls.
-            if [[ "$OVERRIDES_PATCHED" != true ]]; then
+            if [[ "$OVERRIDES_PATCHED" == true ]]; then
+                # Synced is ArgoCD's own bookkeeping and can be a stale read;
+                # the pods' image refs are the fact the patch was for.
+                wait_for_local_images "${nodes_to_build[@]}"
+            else
+                # Nothing was patched: the Application already pointed at the
+                # overlay's own :local references, so the image REFS are
+                # unchanged and only their CONTENT moved -- which ArgoCD cannot
+                # see and a restart is what rolls.
                 for node in "${nodes_to_build[@]}"; do
                     restart_deployment "$node"
                 done

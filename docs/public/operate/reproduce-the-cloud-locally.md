@@ -340,6 +340,13 @@ versioned on the PostgreSQL axis, and CloudNativePG refuses an `imageName` whose
 tag it cannot parse (memql#4063), so the rebuild leaves it pinned and skips
 building it.
 
+**It fails rather than flattering you.** An `--app-name` no Application answers
+to is refused (exit 4) instead of being read as "there were no overrides to
+drop", and after patching, the run waits for every Deployment to actually name
+`memql-<node>:local` (exit 5 if it never does) -- because ArgoCD's `Synced` is
+bookkeeping about a comparison it has already made, and can be a stale read
+taken before the refresh landed.
+
 The change is not permanent. An install, upgrade or repair rewrites those
 overrides, which returns the cluster to released images -- rebuild again to go
 back to the checkout's. Without `--image-source=checkout` nothing is patched, so
