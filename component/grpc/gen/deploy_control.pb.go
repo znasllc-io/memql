@@ -349,6 +349,47 @@ func (x *RollbackDeploymentRequest) GetToDeploymentId() string {
 	return ""
 }
 
+// RepairRequest is deliberately empty: a repair operates on THIS installation
+// (there is nothing to select) and carries no version -- a repair that
+// installs a different version is an upgrade wearing a repair's name
+// (memql#3605). Field 1 is reserved as on every other request here (epic
+// memql#3943).
+type RepairRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RepairRequest) Reset() {
+	*x = RepairRequest{}
+	mi := &file_deploy_control_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RepairRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RepairRequest) ProtoMessage() {}
+
+func (x *RepairRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deploy_control_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RepairRequest.ProtoReflect.Descriptor instead.
+func (*RepairRequest) Descriptor() ([]byte, []int) {
+	return file_deploy_control_proto_rawDescGZIP(), []int{7}
+}
+
 // DeploymentStatus is the aggregate view surfaced by the console's dashboard.
 type DeploymentStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -376,7 +417,7 @@ type DeploymentStatus struct {
 
 func (x *DeploymentStatus) Reset() {
 	*x = DeploymentStatus{}
-	mi := &file_deploy_control_proto_msgTypes[7]
+	mi := &file_deploy_control_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +429,7 @@ func (x *DeploymentStatus) String() string {
 func (*DeploymentStatus) ProtoMessage() {}
 
 func (x *DeploymentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[7]
+	mi := &file_deploy_control_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +442,7 @@ func (x *DeploymentStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeploymentStatus.ProtoReflect.Descriptor instead.
 func (*DeploymentStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{7}
+	return file_deploy_control_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeploymentStatus) GetVersion() string {
@@ -477,7 +518,7 @@ type ComponentDigest struct {
 
 func (x *ComponentDigest) Reset() {
 	*x = ComponentDigest{}
-	mi := &file_deploy_control_proto_msgTypes[8]
+	mi := &file_deploy_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +530,7 @@ func (x *ComponentDigest) String() string {
 func (*ComponentDigest) ProtoMessage() {}
 
 func (x *ComponentDigest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[8]
+	mi := &file_deploy_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +543,7 @@ func (x *ComponentDigest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentDigest.ProtoReflect.Descriptor instead.
 func (*ComponentDigest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{8}
+	return file_deploy_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ComponentDigest) GetName() string {
@@ -546,7 +587,7 @@ type ArgoStatus struct {
 
 func (x *ArgoStatus) Reset() {
 	*x = ArgoStatus{}
-	mi := &file_deploy_control_proto_msgTypes[9]
+	mi := &file_deploy_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -558,7 +599,7 @@ func (x *ArgoStatus) String() string {
 func (*ArgoStatus) ProtoMessage() {}
 
 func (x *ArgoStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[9]
+	mi := &file_deploy_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -571,7 +612,7 @@ func (x *ArgoStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArgoStatus.ProtoReflect.Descriptor instead.
 func (*ArgoStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{9}
+	return file_deploy_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ArgoStatus) GetSyncStatus() string {
@@ -637,7 +678,7 @@ type RolloutStatus struct {
 
 func (x *RolloutStatus) Reset() {
 	*x = RolloutStatus{}
-	mi := &file_deploy_control_proto_msgTypes[10]
+	mi := &file_deploy_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -649,7 +690,7 @@ func (x *RolloutStatus) String() string {
 func (*RolloutStatus) ProtoMessage() {}
 
 func (x *RolloutStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[10]
+	mi := &file_deploy_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -662,7 +703,7 @@ func (x *RolloutStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RolloutStatus.ProtoReflect.Descriptor instead.
 func (*RolloutStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{10}
+	return file_deploy_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RolloutStatus) GetName() string {
@@ -736,7 +777,7 @@ type GateResult struct {
 
 func (x *GateResult) Reset() {
 	*x = GateResult{}
-	mi := &file_deploy_control_proto_msgTypes[11]
+	mi := &file_deploy_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +789,7 @@ func (x *GateResult) String() string {
 func (*GateResult) ProtoMessage() {}
 
 func (x *GateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[11]
+	mi := &file_deploy_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +802,7 @@ func (x *GateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateResult.ProtoReflect.Descriptor instead.
 func (*GateResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{11}
+	return file_deploy_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GateResult) GetResult() string {
@@ -800,7 +841,7 @@ type GateLeg struct {
 
 func (x *GateLeg) Reset() {
 	*x = GateLeg{}
-	mi := &file_deploy_control_proto_msgTypes[12]
+	mi := &file_deploy_control_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -812,7 +853,7 @@ func (x *GateLeg) String() string {
 func (*GateLeg) ProtoMessage() {}
 
 func (x *GateLeg) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[12]
+	mi := &file_deploy_control_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -825,7 +866,7 @@ func (x *GateLeg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateLeg.ProtoReflect.Descriptor instead.
 func (*GateLeg) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{12}
+	return file_deploy_control_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GateLeg) GetName() string {
@@ -873,7 +914,7 @@ type SuggestNextVersionResult struct {
 
 func (x *SuggestNextVersionResult) Reset() {
 	*x = SuggestNextVersionResult{}
-	mi := &file_deploy_control_proto_msgTypes[13]
+	mi := &file_deploy_control_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -885,7 +926,7 @@ func (x *SuggestNextVersionResult) String() string {
 func (*SuggestNextVersionResult) ProtoMessage() {}
 
 func (x *SuggestNextVersionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[13]
+	mi := &file_deploy_control_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -898,7 +939,7 @@ func (x *SuggestNextVersionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuggestNextVersionResult.ProtoReflect.Descriptor instead.
 func (*SuggestNextVersionResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{13}
+	return file_deploy_control_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SuggestNextVersionResult) GetCurrentVersion() string {
@@ -955,7 +996,7 @@ type ActionResult struct {
 
 func (x *ActionResult) Reset() {
 	*x = ActionResult{}
-	mi := &file_deploy_control_proto_msgTypes[14]
+	mi := &file_deploy_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +1008,7 @@ func (x *ActionResult) String() string {
 func (*ActionResult) ProtoMessage() {}
 
 func (x *ActionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[14]
+	mi := &file_deploy_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +1021,7 @@ func (x *ActionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionResult.ProtoReflect.Descriptor instead.
 func (*ActionResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{14}
+	return file_deploy_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ActionResult) GetOk() bool {
@@ -1053,7 +1094,7 @@ type RefusalInfo struct {
 
 func (x *RefusalInfo) Reset() {
 	*x = RefusalInfo{}
-	mi := &file_deploy_control_proto_msgTypes[15]
+	mi := &file_deploy_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1106,7 @@ func (x *RefusalInfo) String() string {
 func (*RefusalInfo) ProtoMessage() {}
 
 func (x *RefusalInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[15]
+	mi := &file_deploy_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1119,7 @@ func (x *RefusalInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefusalInfo.ProtoReflect.Descriptor instead.
 func (*RefusalInfo) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{15}
+	return file_deploy_control_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RefusalInfo) GetAuditEventId() string {
@@ -1107,7 +1148,8 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\rDeployRequest\x12#\n" +
 	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\"E\n" +
 	"\x19RollbackDeploymentRequest\x12(\n" +
-	"\x10to_deployment_id\x18\x01 \x01(\tR\x0etoDeploymentId\"\xc2\x03\n" +
+	"\x10to_deployment_id\x18\x01 \x01(\tR\x0etoDeploymentId\"\x1a\n" +
+	"\rRepairRequestJ\x04\b\x01\x10\x02R\x03env\"\xc2\x03\n" +
 	"\x10DeploymentStatus\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
 	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\x12!\n" +
@@ -1170,7 +1212,7 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"3\n" +
 	"\vRefusalInfo\x12$\n" +
-	"\x0eaudit_event_id\x18\x01 \x01(\tR\fauditEventId2\xdd\x06\n" +
+	"\x0eaudit_event_id\x18\x01 \x01(\tR\fauditEventId2\xc4\a\n" +
 	"\x14DeployControlService\x12\x83\x01\n" +
 	"\x13GetDeploymentStatus\x12:.znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest\x1a0.znasllc.memql.deploycontrol.v1.DeploymentStatus\x12i\n" +
 	"\bRollback\x12/.znasllc.memql.deploycontrol.v1.RollbackRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12s\n" +
@@ -1179,7 +1221,8 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\n" +
 	"CutVersion\x121.znasllc.memql.deploycontrol.v1.CutVersionRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12e\n" +
 	"\x06Deploy\x12-.znasllc.memql.deploycontrol.v1.DeployRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12}\n" +
-	"\x12RollbackDeployment\x129.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResultB8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
+	"\x12RollbackDeployment\x129.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12e\n" +
+	"\x06Repair\x12-.znasllc.memql.deploycontrol.v1.RepairRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResultB8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
 var (
 	file_deploy_control_proto_rawDescOnce sync.Once
@@ -1193,7 +1236,7 @@ func file_deploy_control_proto_rawDescGZIP() []byte {
 	return file_deploy_control_proto_rawDescData
 }
 
-var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_deploy_control_proto_goTypes = []any{
 	(*GetDeploymentStatusRequest)(nil), // 0: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	(*RollbackRequest)(nil),            // 1: znasllc.memql.deploycontrol.v1.RollbackRequest
@@ -1202,24 +1245,25 @@ var file_deploy_control_proto_goTypes = []any{
 	(*CutVersionRequest)(nil),          // 4: znasllc.memql.deploycontrol.v1.CutVersionRequest
 	(*DeployRequest)(nil),              // 5: znasllc.memql.deploycontrol.v1.DeployRequest
 	(*RollbackDeploymentRequest)(nil),  // 6: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	(*DeploymentStatus)(nil),           // 7: znasllc.memql.deploycontrol.v1.DeploymentStatus
-	(*ComponentDigest)(nil),            // 8: znasllc.memql.deploycontrol.v1.ComponentDigest
-	(*ArgoStatus)(nil),                 // 9: znasllc.memql.deploycontrol.v1.ArgoStatus
-	(*RolloutStatus)(nil),              // 10: znasllc.memql.deploycontrol.v1.RolloutStatus
-	(*GateResult)(nil),                 // 11: znasllc.memql.deploycontrol.v1.GateResult
-	(*GateLeg)(nil),                    // 12: znasllc.memql.deploycontrol.v1.GateLeg
-	(*SuggestNextVersionResult)(nil),   // 13: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	(*ActionResult)(nil),               // 14: znasllc.memql.deploycontrol.v1.ActionResult
-	(*RefusalInfo)(nil),                // 15: znasllc.memql.deploycontrol.v1.RefusalInfo
-	nil,                                // 16: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	(*RepairRequest)(nil),              // 7: znasllc.memql.deploycontrol.v1.RepairRequest
+	(*DeploymentStatus)(nil),           // 8: znasllc.memql.deploycontrol.v1.DeploymentStatus
+	(*ComponentDigest)(nil),            // 9: znasllc.memql.deploycontrol.v1.ComponentDigest
+	(*ArgoStatus)(nil),                 // 10: znasllc.memql.deploycontrol.v1.ArgoStatus
+	(*RolloutStatus)(nil),              // 11: znasllc.memql.deploycontrol.v1.RolloutStatus
+	(*GateResult)(nil),                 // 12: znasllc.memql.deploycontrol.v1.GateResult
+	(*GateLeg)(nil),                    // 13: znasllc.memql.deploycontrol.v1.GateLeg
+	(*SuggestNextVersionResult)(nil),   // 14: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	(*ActionResult)(nil),               // 15: znasllc.memql.deploycontrol.v1.ActionResult
+	(*RefusalInfo)(nil),                // 16: znasllc.memql.deploycontrol.v1.RefusalInfo
+	nil,                                // 17: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 }
 var file_deploy_control_proto_depIdxs = []int32{
-	8,  // 0: znasllc.memql.deploycontrol.v1.DeploymentStatus.components:type_name -> znasllc.memql.deploycontrol.v1.ComponentDigest
-	9,  // 1: znasllc.memql.deploycontrol.v1.DeploymentStatus.argocd:type_name -> znasllc.memql.deploycontrol.v1.ArgoStatus
-	10, // 2: znasllc.memql.deploycontrol.v1.DeploymentStatus.rollouts:type_name -> znasllc.memql.deploycontrol.v1.RolloutStatus
-	11, // 3: znasllc.memql.deploycontrol.v1.DeploymentStatus.gate_result:type_name -> znasllc.memql.deploycontrol.v1.GateResult
-	12, // 4: znasllc.memql.deploycontrol.v1.GateResult.legs:type_name -> znasllc.memql.deploycontrol.v1.GateLeg
-	16, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	9,  // 0: znasllc.memql.deploycontrol.v1.DeploymentStatus.components:type_name -> znasllc.memql.deploycontrol.v1.ComponentDigest
+	10, // 1: znasllc.memql.deploycontrol.v1.DeploymentStatus.argocd:type_name -> znasllc.memql.deploycontrol.v1.ArgoStatus
+	11, // 2: znasllc.memql.deploycontrol.v1.DeploymentStatus.rollouts:type_name -> znasllc.memql.deploycontrol.v1.RolloutStatus
+	12, // 3: znasllc.memql.deploycontrol.v1.DeploymentStatus.gate_result:type_name -> znasllc.memql.deploycontrol.v1.GateResult
+	13, // 4: znasllc.memql.deploycontrol.v1.GateResult.legs:type_name -> znasllc.memql.deploycontrol.v1.GateLeg
+	17, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 	0,  // 6: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:input_type -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	1,  // 7: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:input_type -> znasllc.memql.deploycontrol.v1.RollbackRequest
 	2,  // 8: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:input_type -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
@@ -1227,15 +1271,17 @@ var file_deploy_control_proto_depIdxs = []int32{
 	4,  // 10: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:input_type -> znasllc.memql.deploycontrol.v1.CutVersionRequest
 	5,  // 11: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:input_type -> znasllc.memql.deploycontrol.v1.DeployRequest
 	6,  // 12: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:input_type -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	7,  // 13: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:output_type -> znasllc.memql.deploycontrol.v1.DeploymentStatus
-	14, // 14: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	14, // 15: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	13, // 16: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:output_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	14, // 17: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	14, // 18: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	14, // 19: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	13, // [13:20] is the sub-list for method output_type
-	6,  // [6:13] is the sub-list for method input_type
+	7,  // 13: znasllc.memql.deploycontrol.v1.DeployControlService.Repair:input_type -> znasllc.memql.deploycontrol.v1.RepairRequest
+	8,  // 14: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:output_type -> znasllc.memql.deploycontrol.v1.DeploymentStatus
+	15, // 15: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	15, // 16: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	14, // 17: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:output_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	15, // 18: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	15, // 19: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	15, // 20: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	15, // 21: znasllc.memql.deploycontrol.v1.DeployControlService.Repair:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	14, // [14:22] is the sub-list for method output_type
+	6,  // [6:14] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1252,7 +1298,7 @@ func file_deploy_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deploy_control_proto_rawDesc), len(file_deploy_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
