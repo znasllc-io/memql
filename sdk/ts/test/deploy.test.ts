@@ -158,6 +158,12 @@ const envelopeCases: Array<{
     field: "rollbackDeployment",
     args: { toDeploymentId: "dep-9" },
   },
+  {
+    name: "repair",
+    call: (c) => c.repair(),
+    field: "repair",
+    args: {},
+  },
 ];
 
 for (const c of envelopeCases) {
@@ -289,6 +295,52 @@ test("deployControl -- an action that RAN and FAILED resolves with ok=false", as
   assert.equal(res.ok, false);
   assert.equal(res.auditEventId, "aud-9", "a failed action is still audited");
   assert.match(res.message, /exit 1/);
+});
+
+test("deployControl -- repair acknowledges the kick-off and names the record to poll", async () => {
+  // memql#4209: ok is "accepted + kicked off", and the repair record carries
+  // the terminal state. The consumer needs the id to poll it.
+  const { mock, client } = newClient();
+  const pending = client.repair();
+  mock.reply(
+    okReply({
+      action: {
+        ok: true,
+        message: "repair kicked off",
+        auditEventId: "aud-r1",
+        details: { deploymentId: "rep-1", status: "in_progress", async: "true", provider: "docker-local" },
+      },
+    }),
+  );
+
+  const res = await pending;
+  assert.equal(res.ok, true);
+  assert.equal(res.auditEventId, "aud-r1");
+  assert.equal(res.details.deploymentId, "rep-1");
+  assert.equal(res.details.status, "in_progress");
+});
+
+test("deployControl -- a repair refused for its provider resolves ok=false with its audit id", async () => {
+  // A provider with no defined repair is refused INSIDE the result, audited
+  // as a failure -- not a gate refusal, so it does not throw.
+  const { mock, client } = newClient();
+  const pending = client.repair();
+  mock.reply(
+    okReply({
+      action: {
+        ok: false,
+        message: "repair is not defined for this provider",
+        auditEventId: "aud-r2",
+        details: { reason: "repair_undefined_for_provider", provider: "gcp" },
+      },
+    }),
+  );
+
+  const res = await pending;
+  assert.equal(res.ok, false);
+  assert.equal(res.auditEventId, "aud-r2", "a refused provider is audited, and the caller can quote it");
+  assert.equal(res.details.reason, "repair_undefined_for_provider");
+  assert.match(res.message, /not defined for this provider/);
 });
 
 // -----------------------------------------------------------------------------

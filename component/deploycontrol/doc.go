@@ -23,6 +23,11 @@
 //     result off stdout.
 //   - role_gate.go / status.go -- the Go auth gates + status reads the deploy
 //     RPCs and the deploy pack share.
+//   - repair.go -- the Repair verb (memql#4209): an owner-only, observed
+//     re-sync of the installation's ArgoCD Application through the Executor,
+//     recorded on the deployment timeline. Its file comment says what a
+//     cluster-side repair is and is not, and why its watcher lives here
+//     rather than in the deploy pack's automations.
 //
 // # The orchestration entrypoints are DEMOTED, not orchestrating
 //

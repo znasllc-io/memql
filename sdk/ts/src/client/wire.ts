@@ -215,7 +215,11 @@ export type DeployControlRequestPayload =
   | { rolloutAction: DeployControlRolloutActionPayload }
   | { cutVersion: DeployControlCutVersionPayload }
   | { deploy: DeployControlDeployPayload }
-  | { rollbackDeployment: DeployControlRollbackDeploymentPayload };
+  | { rollbackDeployment: DeployControlRollbackDeploymentPayload }
+  // Repair (memql#4209) takes no argument either: it operates on THIS
+  // installation and names no version (a repair that installs a different
+  // version is an upgrade wearing a repair's name).
+  | { repair: DeployControlEmptyPayload };
 
 export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
 
