@@ -897,7 +897,7 @@ Everything below lives on `MemqlService.Stream`; cross-node proxying rides
 | **AI service-to-service** | `AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg` (space / group / agent) | `ai_handlers.go` |
 | **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Voice via `AiForwardRouter.ForwardContinuation` |
 | **Polyphon internal** | `PolyphonRoomTokenMsg`, `PolyphonStatusMsg`, `PolyphonUtteranceMsg` | `polyphon_handlers.go` |
-| **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` | `concepts_handlers.go` |
+| **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` (+ `follow=true` -> `ConceptsRegistryDelta` stream, memql#4238) | `concepts_handlers.go` |
 | **Guest invites** | `SendGuestInviteMsg`, `ResolveGuestInviteMsg`, `ResendGuestInviteEmailMsg`, `CancelGuestInviteMsg` | `guest_handlers.go` |
 
 ### For AI Agents and Developers
