@@ -7,8 +7,8 @@
 // at the method boundary, because the wire is sdk/ts's business and is tested
 // there.
 
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Concept, Connection} from "@znasllc-io/memql-sdk-core/client";
 
@@ -122,5 +122,180 @@ describe("the portal shell", () => {
     const dial = vi.fn(async () => fakeConnection()) as unknown as typeof Connection.dial;
     renderApp(dial, "/");
     await waitFor(() => expect(screen.getByText("Concepts")).toBeTruthy());
+  });
+});
+
+const AUTH_ENABLED_CLUSTER = {
+  identityUrl: "https://identity.example.com",
+  identityApiBaseUrl: "https://identity.example.com",
+  oauthClientId: "portal",
+  authEnabled: true,
+};
+
+function renderSignedIn(dial: typeof Connection.dial, path = "/concepts") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AuthProvider
+        config={AUTH_ENABLED_CLUSTER}
+        fetchImpl={async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "AT-1", expires_in: 900 }),
+          }) as unknown as Response
+        }
+        storage={null}
+        navigate={() => {}}
+        redirectUri="https://api.example.com/portal/auth/callback"
+      >
+        <ClusterProvider dial={dial}>
+          <AppRoutes />
+        </ClusterProvider>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+}
+
+function header(): HTMLElement {
+  // ConceptsPage (and other surfaces) also render a <header>, so the
+  // implicit banner role is not unique. The chrome header is the one
+  // that names the cluster.
+  const cluster = screen.getByText("Cluster");
+  const el = cluster.closest("header");
+  if (el === null) throw new Error("portal chrome header not found");
+  return el;
+}
+
+function rail(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Portal sections" });
+}
+
+function connectionTone(): string | null {
+  return document.querySelector("[data-connection-tone]")?.getAttribute("data-connection-tone") ?? null;
+}
+
+describe("the rail profile (memql#4240)", () => {
+  afterEach(() => {
+    globalThis.localStorage?.removeItem("memql-portal-rail");
+  });
+
+  it("shows engineVersion and the peer in the rail, not the wire version in the header", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("v0.19.5")).toBeTruthy());
+    expect(within(rail()).getByText("bff-test")).toBeTruthy();
+    expect(within(rail()).queryByText("0.0.0-test")).toBeNull();
+    expect(within(header()).queryByText("0.0.0-test")).toBeNull();
+    expect(within(header()).queryByText("v1")).toBeNull();
+    expect(within(header()).queryByText("bff-test")).toBeNull();
+    expect(within(header()).queryByText("Connected")).toBeNull();
+  });
+
+  it("renders dev when engineVersion is empty", async () => {
+    const dial = vi.fn(async () => fakeConnection()) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("dev")).toBeTruthy());
+    expect(within(rail()).queryByText("0.0.0-test")).toBeNull();
+  });
+
+  it("is green only when connected; connecting and error are red", async () => {
+    let release!: (conn: Connection) => void;
+    const held = new Promise<Connection>((resolve) => {
+      release = resolve;
+    });
+    const dial = vi.fn(async () => held) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(screen.getByText("MemQL Portal")).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toBe("Connecting");
+    expect(connectionTone()).toBe("danger");
+
+    release(fakeConnection({ engineVersion: "v0.19.5" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Connected"));
+    expect(connectionTone()).toBe("ok");
+  });
+
+  it("offers Retry on error and closed, and Retry redials", async () => {
+    const dial = vi.fn(async () => {
+      throw new Error("websocket closed before open: code=1006");
+    });
+    renderApp(dial as unknown as typeof Connection.dial);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+    expect(connectionTone()).toBe("danger");
+    const before = dial.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(dial.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("offers Retry after the stream closes", async () => {
+    let settle!: () => void;
+    const dial = vi.fn(async () =>
+      fakeConnection({
+        engineVersion: "v0.19.5",
+        done: vi.fn(() => new Promise<void>((resolve) => { settle = resolve; })),
+      }),
+    ) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Connected"));
+    settle();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Disconnected"));
+    expect(connectionTone()).toBe("danger");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps Authentication disabled in the rail, not the header", async () => {
+    const dial = vi.fn(async () => fakeConnection()) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(screen.getByText("Authentication disabled")).toBeTruthy());
+    expect(within(rail()).getByText("Authentication disabled")).toBeTruthy();
+    expect(within(header()).queryByText("Authentication disabled")).toBeNull();
+  });
+
+  it("puts email, role, and Sign out in the rail footer, not the header", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("op@example.test")).toBeTruthy());
+    expect(within(rail()).getByText("admin")).toBeTruthy();
+    expect(within(rail()).getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(within(header()).queryByText("op@example.test")).toBeNull();
+    expect(within(header()).queryByText("admin")).toBeNull();
+    expect(within(header()).queryByRole("button", { name: "Sign out" })).toBeNull();
+  });
+
+  it("collapses from a quiet brand-row control and persists the preference", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("op@example.test")).toBeTruthy());
+    const collapse = within(rail()).getByRole("button", { name: "Collapse the navigation rail" });
+    expect(collapse.getAttribute("aria-expanded")).toBe("true");
+    expect(collapse.className).not.toMatch(/\bborder\b/);
+    expect(rail().firstElementChild?.contains(collapse)).toBe(true);
+    expect(within(rail()).getAllByRole("button", { name: /navigation rail/ })).toHaveLength(1);
+
+    fireEvent.click(collapse);
+    expect(globalThis.localStorage.getItem("memql-portal-rail")).toBe("collapsed");
+    expect(within(rail()).getByRole("button", { name: "Expand the navigation rail" })).toBeTruthy();
+    expect(within(rail()).queryByText("v0.19.5")).toBeNull();
+    expect(within(rail()).queryByText("bff-test")).toBeNull();
+    expect(within(rail()).queryByText("op@example.test")).toBeNull();
+    expect(within(rail()).queryByText("admin")).toBeNull();
+    expect(within(rail()).getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(connectionTone()).toBe("ok");
+    expect(screen.getByTitle(/bff-test/)).toBeTruthy();
+    expect(screen.getByTitle(/v0.19.5/)).toBeTruthy();
+    expect(screen.getByTitle(/op@example.test/)).toBeTruthy();
   });
 });

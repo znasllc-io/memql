@@ -6,8 +6,8 @@
 // second handshake, a second auth rotation timer, and two answers to "are we
 // connected?".
 //
-// Connection state is a first-class thing the UI renders (the header's
-// indicator), not an implementation detail -- an operations console whose
+// Connection state is a first-class thing the UI renders (the rail
+// profile), not an implementation detail -- an operations console whose
 // data silently stops updating is worse than one that says it is
 // disconnected.
 
@@ -94,10 +94,15 @@ export interface ClusterState {
   // The connection-scoped typed clients (see ClusterClients above). null
   // exactly when `query` is null.
   clients: ClusterClients | null;
-  // Server identity from the ServerHello, for the header. Empty until
+  // Server identity from the ServerHello, for the rail profile. Empty until
   // connected.
   nodeId: string;
   serverVersion: string;
+  // The release the node's binary was cut from (ServerHello.engine_version).
+  // Empty when the node predates the field or the binary was not cut -- the
+  // profile renders that as "dev". Not ServerHello.version (the wire
+  // protocol, "v1").
+  engineVersion: string;
   // Human-readable failure, empty unless status === "error".
   error: string;
   // Redial. Safe to call in any state; tears down whatever is live first.
@@ -130,6 +135,7 @@ export function ClusterProvider({
   const [clients, setClients] = useState<ClusterClients | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
+  const [engineVersion, setEngineVersion] = useState("");
   const [error, setError] = useState("");
   // Bumping this re-runs the dial effect. A counter rather than a boolean so
   // repeated reconnects while already in "error" each start a fresh attempt.
@@ -205,6 +211,7 @@ export function ClusterProvider({
         );
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
+        setEngineVersion(conn.engineVersion ?? "");
         setStatus("connected");
 
         // The stream can end without anyone calling close() -- the node rolls,
@@ -243,10 +250,11 @@ export function ClusterProvider({
       clients,
       nodeId,
       serverVersion,
+      engineVersion,
       error,
       reconnect,
     }),
-    [status, query, subscriptions, clients, nodeId, serverVersion, error, reconnect],
+    [status, query, subscriptions, clients, nodeId, serverVersion, engineVersion, error, reconnect],
   );
 
   return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;
