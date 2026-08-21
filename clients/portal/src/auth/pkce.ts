@@ -13,8 +13,9 @@
 // header, a proxy log -- cannot be redeemed by whoever intercepted it.
 //
 // The verifier is the one secret this module produces. It lives in
-// sessionStorage across the redirect (see pending.ts, which explains why that
-// is acceptable) and is destroyed the moment the code is exchanged.
+// localStorage across the redirect so a magic-link new tab can finish the
+// exchange (see pending.ts, memql#4228) and is destroyed the moment the
+// code is exchanged.
 
 // VERIFIER_BYTES is 32 random bytes -> 43 base64url characters, comfortably
 // inside RFC 7636's 43..128 range. The RFC's minimum is 43 characters
