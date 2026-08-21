@@ -76,6 +76,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 function renderApp(dial: typeof Connection.dial, path = "/concepts/v1%3Acluster%3Anode") {

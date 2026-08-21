@@ -83,6 +83,7 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 		IdentityAPIBaseURL: "",
 		OAuthClientID:      "shop",
 		AuthEnabled:        true,
+		Domain:             "",
 	}
 	if got != want {
 		t.Errorf("runtimeConfigForSite = %+v, want %+v", got, want)
@@ -198,5 +199,38 @@ func TestServeRuntimeConfig_RefusesNonGET(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST %s = %d, want 405", runtimeConfigPath, rec.Code)
+	}
+}
+
+func TestRuntimeConfigForSite_CarriesTheDomain(t *testing.T) {
+	env := fakeEnv(map[string]string{
+		"MEMQL_DOMAIN":            "  acme.example.com ",
+		"MEMQL_IDENTITY_BASE_URL": "https://identity.acme.example.com",
+	})
+	got := runtimeConfigForSite(&Site{ID: "s1", Hostname: "shop.acme.example.com"}, env, true)
+	if got.Domain != "acme.example.com" {
+		t.Errorf("Domain = %q, want the trimmed MEMQL_DOMAIN", got.Domain)
+	}
+}
+
+// An unset MEMQL_DOMAIN is served as an empty string, never omitted: a reader
+// can then tell "this node predates the field" (key absent) from "this node
+// has no domain" (key present, empty).
+func TestServeRuntimeConfig_DomainKeyIsAlwaysPresent(t *testing.T) {
+	doc := runtimeConfigForSite(&Site{ID: "s1", Hostname: "x"}, fakeEnv(map[string]string{}), false)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	v, present := m["domain"]
+	if !present {
+		t.Fatalf("domain key missing from %s", raw)
+	}
+	if v != "" {
+		t.Errorf("domain = %v, want empty string", v)
 	}
 }

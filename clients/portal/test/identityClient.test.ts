@@ -25,6 +25,7 @@ const CROSS_ORIGIN: PortalRuntimeConfig = {
   identityApiBaseUrl: "https://identity.example.com",
   oauthClientId: "portal",
   authEnabled: true,
+  domain: "",
 };
 
 const PROXIED: PortalRuntimeConfig = {

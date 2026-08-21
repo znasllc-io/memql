@@ -150,6 +150,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 function renderAt(path: string, campaignStatus = "draft") {

@@ -197,6 +197,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 function renderBrowser(h: Harness, path: string) {

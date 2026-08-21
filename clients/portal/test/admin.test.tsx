@@ -190,6 +190,7 @@ const CLUSTER_CONFIG = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 interface Harness {
