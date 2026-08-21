@@ -5437,6 +5437,77 @@ func scalarMembershipValue(name string) any {
 	return name
 }
 
+// parseStartsWithComparison parses the right-hand side of
+// `<field> startsWith <prefix>` (memql#4208) with the `startsWith` keyword as
+// the current token, and returns the OpStartsWith comparison.
+//
+// The left-hand side must be a ROW FIELD. `args.<x>` on the left is refused
+// here rather than left to the expression level, where the early-returning
+// ArgRefExpr would surface it as an unrelated "unexpected token" at the caller.
+func (p *Parser) parseStartsWithComparison(field string) (ExpressionNode, error) {
+	if strings.HasPrefix(field, "args.") || strings.HasPrefix(field, "ctx.") {
+		return nil, newParseErrorf(&p.current,
+			"startsWith requires a row field on the left-hand side, got %q -- write `<field> startsWith args.<prefix>`", field)
+	}
+	p.advance() // consume 'startsWith'
+	value, err := p.parseStartsWithPrefix()
+	if err != nil {
+		return nil, err
+	}
+	return &ComparisonExpr{
+		Field:    FieldReference{Raw: field, Parts: strings.Split(field, ".")},
+		Operator: OpStartsWith,
+		Value:    value,
+	}, nil
+}
+
+// parseStartsWithPrefix accepts exactly three right-hand forms: a string
+// literal, a list literal whose every element is a string literal, or an
+// `args.<field>` reference (a string or a list of strings at call time).
+//
+// It deliberately does NOT route through parseValue. parseValue returns a bare
+// identifier as its own text, so `codeReference startsWith other` would
+// silently compile to the literal prefix "other" and never match -- the
+// silent-acceptance class memql#2383 exists to refuse.
+func (p *Parser) parseStartsWithPrefix() (any, error) {
+	const want = "startsWith requires a string literal, a list of string literals, or an args.<field> reference on the right-hand side"
+	switch {
+	case p.check(TokenString):
+		lit := p.current.Literal
+		p.advance()
+		return lit, nil
+	case p.check(TokenBracketOpen):
+		openTok := p.current
+		arr, err := p.parseArray()
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range arr {
+			if _, ok := item.(string); !ok {
+				return nil, newParseErrorf(&openTok,
+					"startsWith list elements must be string literals, got %T", item)
+			}
+		}
+		return arr, nil
+	case p.check(TokenIdentifier):
+		lit := p.current.Literal
+		if rest, ok := strings.CutPrefix(lit, "args."); ok && rest != "" {
+			p.advance()
+			return &ArgRefExpr{Path: rest}, nil
+		}
+		return nil, newParseErrorf(&p.current, "%s, got %q", want, lit)
+	default:
+		return nil, newParseErrorf(&p.current, "%s, got %q", want, p.current.Literal)
+	}
+}
+
+// errNotStartsWith names the one negated form an author might reach for.
+// There is no `not startsWith`: the predicate is a positive selection, and
+// the DSL's negation story is the `!=` comparison form (memql#3630).
+func errNotStartsWith(tok *Token) error {
+	return newParseErrorf(tok, "`not startsWith` is not a form -- startsWith is a positive selection; the DSL has no negated prefix predicate")
+}
+
 // parseWhenGuard parses the `when(args.<field>) { <expr> }` arg-conditional
 // guard (#975). Semantics: a syntactic drop -- if the guard arg is absent at
 // query time the guarded block AND its connective are removed as if never
@@ -5537,6 +5608,9 @@ func (p *Parser) parseComparison() (ExpressionNode, error) {
 			Value:    value,
 		}, nil
 	}
+	if p.check(TokenKeywordStartsWith) {
+		return p.parseStartsWithComparison(field)
+	}
 	if p.check(TokenKeywordHas) {
 		p.advance()
 		value, err := p.parseValue()
@@ -5551,6 +5625,9 @@ func (p *Parser) parseComparison() (ExpressionNode, error) {
 	}
 	if p.check(TokenKeywordNot) {
 		p.advance()
+		if p.check(TokenKeywordStartsWith) {
+			return nil, errNotStartsWith(&p.current)
+		}
 		if !p.check(TokenKeywordIn) {
 			return nil, newParseErrorf(&p.current, "expected 'in' after 'not'")
 		}
@@ -5738,7 +5815,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// caller arg instead of leaking through as a bare identifier.
 	if strings.HasPrefix(name, "args.") {
 		argPath := strings.TrimPrefix(name, "args.")
-		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
+		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) && !p.check(TokenKeywordStartsWith) {
 			return &ArgRefExpr{Path: argPath}, nil
 		}
 		// `args.X` immediately followed by an arithmetic operator (#2316) is
@@ -5757,7 +5834,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 				return &ArgRefExpr{Path: argPath}, nil
 			}
 		}
-		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
+		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) && !p.check(TokenKeywordStartsWith) {
 			switch argPath {
 			case "input", "output", "actor", "partition", "now", "config", "error", "trace":
 				// Reserved envelope fields -- leave for downstream
@@ -5853,6 +5930,9 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 			Value:    value,
 		}, nil
 	}
+	if p.check(TokenKeywordStartsWith) {
+		return p.parseStartsWithComparison(name)
+	}
 	if p.check(TokenKeywordHas) {
 		p.advance()
 		value, err := p.parseValue()
@@ -5867,6 +5947,9 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	}
 	if p.check(TokenKeywordNot) {
 		p.advance()
+		if p.check(TokenKeywordStartsWith) {
+			return nil, errNotStartsWith(&p.current)
+		}
 		if !p.check(TokenKeywordIn) {
 			return nil, newParseErrorf(&p.current, "expected 'in' after 'not' (did you mean 'not in'?)")
 		}
