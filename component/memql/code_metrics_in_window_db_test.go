@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // code_metrics_in_window_db_test.go -- the codeMetricsInWindow read
@@ -46,9 +48,13 @@ func seedCodeMetric(t *testing.T, eng *MemQLEngine, ctx context.Context, id, cod
 		}
 		windowEnd = ts.Add(span).UTC().Format(time.RFC3339)
 	}
+	// langparser.QuoteString, never Go's own quoting: the Go escape grammar
+	// is not the MemQL lexer's (memql#3192), and the root-package gate
+	// refuses the spelling.
+	q := langparser.QuoteString
 	expr := fmt.Sprintf(
-		`insert("v1:observability:codeMetric", id=%q, payload={"codeReference":%q,"windowStart":%q,"windowEnd":%q,"bucket":%q,"callCount":3,"errorCount":1,"errorRate":0.33,"p50DurationNs":1000,"p95DurationNs":5000,"p99DurationNs":9000,"totalDurationNs":12000})`,
-		id, codeReference, windowStart, windowEnd, bucket)
+		`insert("v1:observability:codeMetric", id=%s, payload={"codeReference":%s,"windowStart":%s,"windowEnd":%s,"bucket":%s,"callCount":3,"errorCount":1,"errorRate":0.33,"p50DurationNs":1000,"p95DurationNs":5000,"p99DurationNs":9000,"totalDurationNs":12000})`,
+		q(id), q(codeReference), q(windowStart), q(windowEnd), q(bucket))
 	if _, err := eng.Execute(ctx, expr); err != nil {
 		t.Fatalf("seed codeMetric %s: %v", id, err)
 	}
@@ -93,12 +99,13 @@ func TestCodeMetricsInWindow_SelectsByPrefixBucketAndWindow(t *testing.T) {
 		t.Helper()
 		quoted := make([]string, 0, len(prefixes))
 		for _, p := range prefixes {
-			quoted = append(quoted, fmt.Sprintf("%q", p))
+			quoted = append(quoted, langparser.QuoteString(p))
 		}
-		args := fmt.Sprintf(`prefixes: [%s], bucket: "1h", windowStart: %q, windowEnd: %q`,
-			strings.Join(quoted, ", "), codeMetricInWindowStart, codeMetricInWindowEnd)
+		args := fmt.Sprintf(`prefixes: [%s], bucket: "1h", windowStart: %s, windowEnd: %s`,
+			strings.Join(quoted, ", "),
+			langparser.QuoteString(codeMetricInWindowStart), langparser.QuoteString(codeMetricInWindowEnd))
 		if codeReference != "" {
-			args += fmt.Sprintf(`, codeReference: %q`, codeReference)
+			args += fmt.Sprintf(`, codeReference: %s`, langparser.QuoteString(codeReference))
 		}
 		res, err := eng.Execute(ctx, "query codeMetricsInWindow("+args+")")
 		require.NoError(t, err, "codeMetricsInWindow(%s)", args)
@@ -138,8 +145,8 @@ func TestCodeMetricsInWindow_SelectsByPrefixBucketAndWindow(t *testing.T) {
 func TestCodeMetricsInWindow_RefusesAnAbsentPrefixList(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
 	_, err := eng.Execute(ctx, fmt.Sprintf(
-		`query codeMetricsInWindow(bucket: "1h", windowStart: %q, windowEnd: %q)`,
-		codeMetricInWindowStart, codeMetricInWindowEnd))
+		`query codeMetricsInWindow(bucket: "1h", windowStart: %s, windowEnd: %s)`,
+		langparser.QuoteString(codeMetricInWindowStart), langparser.QuoteString(codeMetricInWindowEnd)))
 	require.Error(t, err, "an absent prefixes list must be refused, never read as unconstrained")
 	require.Contains(t, err.Error(), "prefixes")
 }
@@ -147,8 +154,8 @@ func TestCodeMetricsInWindow_RefusesAnAbsentPrefixList(t *testing.T) {
 func TestCodeMetricsInWindow_RefusesAnUnknownBucket(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
 	_, err := eng.Execute(ctx, fmt.Sprintf(
-		`query codeMetricsInWindow(prefixes: ["integration."], bucket: "5m", windowStart: %q, windowEnd: %q)`,
-		codeMetricInWindowStart, codeMetricInWindowEnd))
+		`query codeMetricsInWindow(prefixes: ["integration."], bucket: "5m", windowStart: %s, windowEnd: %s)`,
+		langparser.QuoteString(codeMetricInWindowStart), langparser.QuoteString(codeMetricInWindowEnd)))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bucket")
 }
