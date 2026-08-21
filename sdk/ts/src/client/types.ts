@@ -87,6 +87,15 @@ export interface Event {
 // actions, so the client never writes a topic string.
 export type GraphAction = "created" | "updated" | "deleted";
 
+// One domain's CDC subscription filters, from the engine's catalog
+// (ConceptsSubscribeMsg). Filters are the node.<action>.<concept> form the
+// backend prefixes per subscription kind -- hand one to
+// SubscriptionManager rather than composing topic strings by hand.
+export interface DomainSubscription {
+  domain: string;
+  filters: string[];
+}
+
 // Row is the shape-flattened form every query / mutation returns. Keys
 // depend on the construct's bound shape; field-access helpers below
 // pluck typed values so consumers don't have to type-switch the map.

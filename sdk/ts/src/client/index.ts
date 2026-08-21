@@ -46,6 +46,7 @@ export {
   rowString,
   type AccessSummary,
   type Concept,
+  type DomainSubscription,
   type Event,
   type GraphAction,
   type Role,

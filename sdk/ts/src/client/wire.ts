@@ -510,6 +510,7 @@ type ClientPayload =
   | { unsubscribe: UnsubscribePayload }
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
+  | { conceptsSubscribe: ConceptsSubscribePayload }
   | { myAccess: MyAccessPayload }
   | { modulesList: ModulesListPayload }
   | { moduleDetail: ModuleDetailPayload }
@@ -589,6 +590,28 @@ export interface ConceptsListResultPayload {
   concepts?: ConceptInfoWire[];
   baseTopics?: string[];
   systemTopics?: string[];
+}
+
+// ConceptsSubscribeMsg is the CDC-filter CATALOG, not a registry stream: the
+// engine answers ONE reply grouping node.created.<concept> filters by domain
+// (component/grpc/concepts_handlers.go). A client uses it to discover the
+// per-domain filters it can hand to SubscriptionManager instead of composing
+// topic strings itself. It does NOT deliver registry deltas -- there is no
+// engine-side concept-registry change stream (memql#4233 records the gap).
+export interface ConceptsSubscribePayload {
+  requestId?: string;
+  // Optional: restrict the catalog to these domains.
+  domains?: string[];
+}
+
+export interface DomainSubscriptionWire {
+  domain?: string;
+  filters?: string[];
+}
+
+export interface ConceptsSubscribeResultPayload {
+  requestId?: string;
+  domains?: DomainSubscriptionWire[];
 }
 
 export interface DisplayCardWire {
@@ -1334,6 +1357,7 @@ type ServerPayload =
   | { event: EventPayload }
   | { heartbeat: HeartbeatPayload }
   | { conceptsListResult: ConceptsListResultPayload }
+  | { conceptsSubscribeResult: ConceptsSubscribeResultPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { modulesListResult: ModulesListResultPayload }
   | { moduleDetailResult: ModuleDetailResultPayload }
@@ -1381,6 +1405,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "event"; value: EventPayload }
   | { kind: "heartbeat"; value: HeartbeatPayload }
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
+  | { kind: "conceptsSubscribeResult"; value: ConceptsSubscribeResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "modulesListResult"; value: ModulesListResultPayload }
   | { kind: "moduleDetailResult"; value: ModuleDetailResultPayload }
@@ -1426,6 +1451,11 @@ export function readServerPayload(msg: ServerMessage):
   if (m.heartbeat) return { kind: "heartbeat", value: m.heartbeat as HeartbeatPayload };
   if (m.conceptsListResult)
     return { kind: "conceptsListResult", value: m.conceptsListResult as ConceptsListResultPayload };
+  if (m.conceptsSubscribeResult)
+    return {
+      kind: "conceptsSubscribeResult",
+      value: m.conceptsSubscribeResult as ConceptsSubscribeResultPayload,
+    };
   if (m.myAccessResult)
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
   if (m.modulesListResult)

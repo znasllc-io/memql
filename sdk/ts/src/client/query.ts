@@ -17,6 +17,7 @@ import {
   resultFromQueryPayload,
   type AccessSummary,
   type Concept,
+  type DomainSubscription,
 } from "./types.js";
 import { newShortId } from "./id.js";
 import { readServerPayload } from "./wire.js";
@@ -106,6 +107,40 @@ export class QueryClient {
       return conceptsFromWire(payload.value.concepts);
     }
     return [];
+  }
+
+  // subscriptionCatalog asks the engine which CDC filters exist, grouped by
+  // domain (ConceptsSubscribeMsg). This is a one-shot CATALOG read -- the
+  // engine's reply model has no registry-delta stream (memql#4233) -- so a
+  // client discovers per-domain filters here and subscribes to row-level CDC
+  // with SubscriptionManager; it does NOT get told when the registry itself
+  // changes.
+  async subscriptionCatalog(
+    domains: string[] = [],
+    opts: QueryCallOptions = {},
+  ): Promise<DomainSubscription[]> {
+    const resp = await this.dispatcher.sendAndWait(
+      { conceptsSubscribe: domains.length > 0 ? { domains } : {} },
+      opts.signal,
+    );
+    const payload = readServerPayload(resp);
+    if (payload?.kind === "queryError") {
+      throw new Error(
+        `subscriptionCatalog: ${payload.value.error?.message ?? "(no message)"}`,
+      );
+    }
+    if (payload?.kind !== "conceptsSubscribeResult") {
+      return [];
+    }
+    const out: DomainSubscription[] = [];
+    for (const d of payload.value.domains ?? []) {
+      if (typeof d.domain !== "string" || d.domain === "") continue;
+      out.push({
+        domain: d.domain,
+        filters: (d.filters ?? []).filter((f): f is string => typeof f === "string"),
+      });
+    }
+    return out;
   }
 
   async getMyAccess(opts: QueryCallOptions = {}): Promise<AccessSummary | null> {
