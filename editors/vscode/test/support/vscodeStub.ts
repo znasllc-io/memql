@@ -423,7 +423,17 @@ export const DiagnosticSeverity = {
 /** What `getConfiguration(section).update(key, value)` wrote, by `section.key`. */
 const written = new Map<string, unknown>();
 
-/** Read a written setting back, or clear the store between cases. */
+/**
+ * Every `update` call, in order -- INCLUDING the ones that remove a key.
+ *
+ * Kept separately from the values because "wrote nothing" and "wrote the same
+ * thing again" are different facts about somebody's `.vscode/settings.json`,
+ * and a store that only remembers the last value cannot tell them apart. The
+ * second is a modified tracked file (memql#4244).
+ */
+const writes: { sectionKey: string; value: unknown }[] = [];
+
+/** Read a written setting back, count the writes, or clear both between cases. */
 export const writtenSettings = {
   get(sectionKey: string): unknown {
     return written.get(sectionKey);
@@ -431,8 +441,13 @@ export const writtenSettings = {
   set(sectionKey: string, value: unknown): void {
     written.set(sectionKey, value);
   },
+  /** Every update call so far, oldest first. A removal has `value: undefined`. */
+  writes(): readonly { sectionKey: string; value: unknown }[] {
+    return writes;
+  },
   clear(): void {
     written.clear();
+    writes.length = 0;
   },
 };
 
@@ -463,8 +478,13 @@ export const workspace = {
       get(key: string): unknown {
         return written.get(`${section}.${key}`);
       },
+      // `undefined` REMOVES the setting, as the real one does -- so a case can
+      // tell "we deleted our key" from "we never wrote".
       update(key: string, value: unknown): Promise<void> {
-        written.set(`${section}.${key}`, value);
+        const sectionKey = `${section}.${key}`;
+        writes.push({ sectionKey, value });
+        if (value === undefined) written.delete(sectionKey);
+        else written.set(sectionKey, value);
         return Promise.resolve();
       },
     };

@@ -87,12 +87,6 @@ test("a bundle file is read-only only on a remote cluster", () => {
   }
 });
 
-test("a product bundle is read-only against a remote cluster", () => {
-  const v = readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: false });
-  assert.equal(v.readonly, true);
-  assert.equal(v.reason, "remoteCluster");
-});
-
 test("an absent local flag means NOT local, matching ClusterConfig", () => {
   // Every cluster already in an operator's clusters.yaml predates the field, so
   // an absent flag reading as "local" would make a staging bundle editable --

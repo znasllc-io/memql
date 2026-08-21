@@ -11,11 +11,20 @@
 // and promotion is a strictly larger commitment than a run, so the
 // no-run-on-save line this extension already holds matters more here, not less.
 //
-// THE SIXTH COMMAND IS NOT ONE OF THE FOUR. `edited` offers Rebuild from
-// checkout (memql#4244), which is `memql.deployments.rebuildFromCheckout` --
-// registered by the Deployments surface, not by `src/training/actions.ts`, and
-// offered only when the selected cluster is local. Same rule as above applies
-// to it: the lens must not be able to post to it before it exists.
+// THE SIXTH COMMAND IS NOT ONE OF THE FOUR, AND AT THIS COMMIT NOTHING HAS
+// REGISTERED IT. `edited` offers Rebuild from checkout (memql#4244), which is
+// `memql.deployments.rebuildFromCheckout` -- the Deployments surface's command,
+// not `src/training/actions.ts`'s, contributed and registered by TASK 5 of the
+// locality plan. It is offered only when the selected cluster is local.
+//
+// So the rule stated below is deliberately BENT here, within this branch: the
+// lens is live ahead of the command, and a click lands on "command not found"
+// until Task 5 merges. That is a property of the branch and not of a release --
+// the two land in one PR -- and what has to hold it afterwards is
+// `surfaceGuards.test.ts`, whose four-actions gate spells out each id it covers
+// and must gain this one when the registration arrives. Do not register it from
+// here: a training module registering a Deployments command is how an id ends
+// up with two owners.
 //
 // THE ACTION LENSES ARE ON, as of #3763 -- which is the change that registers
 // the four commands they post to, and they were switched on in it for that

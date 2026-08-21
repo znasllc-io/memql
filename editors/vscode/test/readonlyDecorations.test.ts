@@ -17,6 +17,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+// TYPE-ONLY, so nothing here resolves the editor-injected module at runtime --
+// it is erased before esbuild sees it. What it buys is a memento fake the
+// compiler checks against the real interface rather than one cast to `never`.
+import type * as vscode from "vscode";
+
 import { ReadonlyMarker } from "../src/constructs/readonlyDecorations.js";
 import type { CatalogConstruct } from "../src/state/constructCatalog.js";
 import { Uri, workspace, writtenSettings } from "./support/vscodeStub.js";
@@ -44,7 +49,7 @@ function construct(over: Partial<CatalogConstruct> = {}): CatalogConstruct {
 const CATALOG = [construct(), construct({ name: "orders", origin: "bundle", originPath: "shop/queries.memql" })];
 
 /** The workspaceState the marker records its own settings keys in. */
-function fakeMemento(): never {
+function fakeMemento(): vscode.Memento {
   const store = new Map<string, unknown>();
   return {
     get: (key: string, fallback?: unknown) => store.get(key) ?? fallback,
@@ -53,7 +58,7 @@ function fakeMemento(): never {
       return Promise.resolve();
     },
     keys: () => [...store.keys()],
-  } as never;
+  } as unknown as vscode.Memento;
 }
 
 /**
@@ -118,9 +123,13 @@ test("a local cluster locks nothing, and says so on the file rather than in the 
   assert.equal(core?.badge, "L");
   assert.match(String(core?.tooltip), /not the checkout local rebuilds from \(\/home\/me\/\.memql\/src\)/);
   assert.equal(core?.propagate, false);
-  // Nothing written: the hint is a hover, and `files.readonlyInclude` is for
-  // files this editor is actually marking read-only.
-  assert.deepEqual(writtenSettings.get("files.readonlyInclude"), {});
+  // NOT ONE WRITE. The hint is a hover, and `files.readonlyInclude` is for files
+  // this editor is actually marking read-only -- so on a local cluster, which
+  // marks none, the setting is not touched. Writing `{}` here put a line in
+  // `.vscode/settings.json`, which in a checkout is a TRACKED FILE, on every
+  // catalog load (memql#4244).
+  assert.deepEqual(writtenSettings.writes(), []);
+  assert.equal(writtenSettings.get("files.readonlyInclude"), undefined);
 });
 
 test("in the cluster's own checkout there is no decoration at all", async () => {
@@ -129,7 +138,7 @@ test("in the cluster's own checkout there is no decoration at all", async () => 
   const marker = await markerIn(CHECKOUT, { name: "local", local: true, checkout: CHECKOUT }, CATALOG);
   assert.equal(decorationFor(marker, CHECKOUT, "dsl/cognition/queries.memql"), undefined);
   assert.equal(decorationFor(marker, CHECKOUT, "dsl/shop/queries.memql"), undefined);
-  assert.deepEqual(writtenSettings.get("files.readonlyInclude"), {});
+  assert.deepEqual(writtenSettings.writes(), []);
 });
 
 test("a file the cluster never loaded is untouched, in either clone", async () => {
@@ -149,7 +158,7 @@ test("with no cluster, nothing is decorated and the settings are cleared", async
   // that did not answer.
   const marker = await markerIn(OTHER_CLONE, undefined, undefined);
   assert.equal(decorationFor(marker, OTHER_CLONE, "dsl/cognition/queries.memql"), undefined);
-  assert.deepEqual(writtenSettings.get("files.readonlyInclude"), {});
+  assert.deepEqual(writtenSettings.writes(), []);
 });
 
 test("a remote cluster writes both spellings of every read-only path", async () => {
@@ -179,5 +188,40 @@ test("a key the operator added by hand survives a rewrite", async () => {
 
   // ...and selecting the local cluster withdraws ours, keeping theirs.
   await marker.update(CATALOG, { name: "local", local: true, checkout: CHECKOUT });
+  assert.deepEqual(writtenSettings.get("files.readonlyInclude"), { "notes/**": true });
+});
+
+test("withdrawing the last of our keys REMOVES the setting rather than emptying it", async () => {
+  // `undefined` is how the configuration API deletes a key. Writing `{}` would
+  // leave a line that means exactly what its absence means, in somebody's
+  // repository, forever.
+  const marker = await markerIn(OTHER_CLONE, { name: "staging", local: false }, CATALOG);
+  assert.equal(writtenSettings.writes().length, 1, "the remote cluster's patterns are one write");
+
+  await marker.update(CATALOG, { name: "local", local: true, checkout: CHECKOUT });
+  assert.deepEqual(writtenSettings.writes().at(-1), {
+    sectionKey: "files.readonlyInclude",
+    value: undefined,
+  });
+  assert.equal(writtenSettings.get("files.readonlyInclude"), undefined);
+
+  // ...and staying on that cluster writes nothing further: there is nothing
+  // left to remove, and a second removal is still a modified tracked file.
+  await marker.update(CATALOG, { name: "local", local: true, checkout: CHECKOUT });
+  assert.equal(writtenSettings.writes().length, 2);
+});
+
+test("an operator's own entries survive untouched when ours go to empty", async () => {
+  // Their key is the whole value, and our contribution is nothing -- so the
+  // computed value already equals what is on disk and the correct number of
+  // writes is zero. The withdrawal must not become a rewrite of somebody
+  // else's setting to itself.
+  writtenSettings.clear();
+  writtenSettings.set("files.readonlyInclude", { "notes/**": true });
+  workspace.workspaceFolders = [{ uri: Uri.file(OTHER_CLONE) }];
+  const marker = new ReadonlyMarker(fakeMemento());
+
+  await marker.update(CATALOG, { name: "local", local: true, checkout: CHECKOUT });
+  assert.deepEqual(writtenSettings.writes(), []);
   assert.deepEqual(writtenSettings.get("files.readonlyInclude"), { "notes/**": true });
 });

@@ -28,7 +28,10 @@
 // `files.readonlyInclude` is a shared object and an operator may have their own
 // entries in it; this removes exactly the keys it wrote last time (recorded in
 // workspaceState) and preserves every other key untouched. Clobbering the whole
-// value would be a silent edit to a tracked file in their working tree.
+// value would be a silent edit to a tracked file in their working tree -- and so
+// is rewriting it to what it already said, which is why `writeSetting` does not
+// write at all when nothing changed, and removes the key rather than leaving
+// `{}` behind when nothing is marked.
 //
 // AND IT IS A COURTESY, NOT THE CONTROL. The setting is overridable and this
 // module does nothing to stop that -- what refuses a bad promotion is
@@ -181,6 +184,23 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
    *
    * No-op with no workspace folder: the setting target is the workspace, and
    * there is nothing to classify against in a bare window anyway.
+   *
+   * NO WRITE WHEN NOTHING CHANGED, and this is not an optimisation. The target
+   * is `.vscode/settings.json`, which in the checkout a local cluster is
+   * rebuilt from is a TRACKED FILE -- so a write that changes nothing still
+   * shows up as a modified file in the developer's `git status`, and the header
+   * above promises this module does not silently edit one. A local cluster
+   * marks nothing (memql#4244), which is the ordinary state and used to
+   * materialise `"files.readonlyInclude": {}` on every catalog load.
+   *
+   * AND AN EMPTY RESULT REMOVES THE KEY rather than writing `{}`. `undefined`
+   * is how the configuration API deletes a setting; writing an empty object
+   * would leave behind a line that means exactly what its absence means, in
+   * somebody's repository, forever.
+   *
+   * The memento is updated either way. It records which keys are OURS to
+   * withdraw next time, and that set changes when the cluster does even in the
+   * runs where the file on disk does not.
    */
   private async writeSetting(): Promise<void> {
     if ((vscode.workspace.workspaceFolders ?? []).length === 0) return;
@@ -198,7 +218,13 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
     const mine = readonlyPatterns({ catalog: this.catalog, clusterLocal: this.clusterLocal });
     for (const key of mine) next[key] = true;
 
-    await config.update("readonlyInclude", next, vscode.ConfigurationTarget.Workspace);
+    if (!sameSetting(current, next)) {
+      await config.update(
+        "readonlyInclude",
+        Object.keys(next).length === 0 ? undefined : next,
+        vscode.ConfigurationTarget.Workspace,
+      );
+    }
     await this.memento.update(OWNED_KEYS, mine);
   }
 }
@@ -238,4 +264,17 @@ function samePath(a: string, b: string): boolean {
   return process.platform === "win32"
     ? left.toLowerCase() === right.toLowerCase()
     : left === right;
+}
+
+/**
+ * Whether two `files.readonlyInclude` values say the same thing.
+ *
+ * Shallow on purpose: the value is a flat map of pattern to boolean, and a
+ * deep walk would be modelling a shape this setting does not have. What it is
+ * for is the write that is not made -- see `writeSetting`.
+ */
+function sameSetting(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key]);
 }
