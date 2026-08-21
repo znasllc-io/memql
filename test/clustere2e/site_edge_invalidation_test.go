@@ -229,6 +229,11 @@ func siteStatusCode(t *testing.T, pf *podForward, hostname string) int {
 }
 
 func TestSiteEdgeInvalidation_CrossReplica(t *testing.T) {
+	// memql#4212: a parity-cluster run failed this test after the negative-cache
+	// prime. That is NOT the retired-contract class (createSite / updateSiteStatus
+	// still exist on the engine SDK; nothing here calls mutationCreateSpace).
+	// Do not invent a new product behavior to make the prime succeed -- the
+	// create + invalidate path needs a live-cluster re-triage.
 	tok := token(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()

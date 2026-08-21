@@ -47,7 +47,7 @@ concept auditEvent {
   actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / developer / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
-  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "")  @default("")  @description("Concept type of the target row, if any.")
+  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "passkeyIdentity", "")  @default("")  @description("Concept type of the target row, if any.")
   targetId        string  @description("Identifier of the target row when targetType is set.")
   targetEmail     string  @description("Email associated with the target, if applicable. Useful for filtering audit history by user without needing a join.")
 
