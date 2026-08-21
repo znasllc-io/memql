@@ -26,10 +26,11 @@
 // `PromoteAuthoredConstruct`, on the engine. The editor explains; the engine
 // enforces.
 //
-// Refs: #3762 #3745
+// Refs: #4248 #3762 #3745
 
 import * as vscode from "vscode";
 
+import { CLUSTER_DOCUMENT_SCHEME } from "./clusterDocument.js";
 import {
   constructsByPath,
   readonlyPatterns,
@@ -73,6 +74,19 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    // A CLUSTER DOCUMENT IS READ-ONLY BY CONSTRUCTION (memql#4248), not by the
+    // catalog rule below: there is no file on this machine to write back to, so
+    // the answer does not depend on a catalog and must not wait for one. Ahead
+    // of the path logic because `relativePath` answers undefined for any uri
+    // outside a workspace folder, which every cluster document is -- the badge
+    // would simply never appear.
+    if (uri.scheme === CLUSTER_DOCUMENT_SCHEME) {
+      return {
+        badge: "RO",
+        tooltip: `Served from ${decodeURIComponent(uri.authority)} -- read-only. The file is not on this machine; this is the source the cluster loaded.`,
+        propagate: false,
+      };
+    }
     const path = relativePath(uri);
     if (path === undefined) return undefined;
     const verdict = readonlyVerdict({

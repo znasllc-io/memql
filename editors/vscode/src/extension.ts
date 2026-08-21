@@ -177,8 +177,19 @@ import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
 import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
-import { ConstructPanel } from './webview/constructPanel.js';
-import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
+import { CLUSTER_DOCUMENT_SCHEME } from './constructs/clusterDocument.js';
+import {
+  ClusterDocumentLens,
+  ClusterDocumentProvider,
+  openClusterDocument,
+} from './constructs/clusterDocuments.js';
+import { ConstructPanel, type ConstructPanelDeps } from './webview/constructPanel.js';
+import {
+  catalogFrom,
+  classifyCatalogFailure,
+  toCatalogConstruct,
+  type CatalogState,
+} from './state/constructCatalog.js';
 import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
@@ -314,7 +325,9 @@ function startLanguageClient(context: ExtensionContext): void {
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ language: 'memql' }],
+    // `scheme: 'file'` (memql#4248): cluster documents (`memql-cluster:`) must
+    // not receive import-resolution diagnostics for files that are not on disk.
+    documentSelector: [{ language: 'memql', scheme: 'file' }],
     synchronize: {
       // The server rebuilds its registry on watched .memql changes so a concept
       // added in one file becomes visible to completion/hover in the others.
@@ -738,9 +751,49 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
     },
   });
+  // Cluster documents (memql#4248): a construct's file, served read-only from
+  // the cluster that loaded it, for the ordinary case where the catalog's path
+  // names a tree this machine does not have. Every decision is in
+  // constructs/clusterDocument.ts; this is where the provider meets the live
+  // connection it fetches over.
+  const clusterDocuments = new ClusterDocumentProvider({ connections });
+  // ONE FACTORY, TWO CALL SITES: both commands open the same singleton panel
+  // and must hand it the same behaviour. The closure reads `connections` when
+  // the BUTTON IS PRESSED rather than when the panel was opened, which is the
+  // only reading that can be right -- the panel outlives any one cluster.
+  const constructPanelDeps = (): ConstructPanelDeps => ({
+    viewSourceFromCluster: async (construct) => {
+      const state = connections?.state;
+      if (state?.status !== 'connected') {
+        void window.showInformationMessage('MemQL: connect to a cluster to read its source.');
+        return;
+      }
+      try {
+        await openClusterDocument({
+          cluster: state.clusterName,
+          originPath: construct.originPath,
+          kind: construct.kind,
+          name: construct.name,
+        });
+      } catch (err) {
+        // The information policy (memql#4194): the raw text goes to the
+        // channel, never into the document and never into the toast.
+        const detail = err instanceof Error ? err.message : String(err);
+        noteDiagnostic(connectionOutput, `reading ${construct.originPath} from "${state.clusterName}" failed`, detail);
+        void offerDetails('error', connectionOutput, `MemQL: ${state.clusterName} could not serve that file.`);
+      }
+    },
+  });
+
   context.subscriptions.push(
     readonlyMarker,
+    clusterDocuments,
     window.registerFileDecorationProvider(readonlyMarker),
+    workspace.registerTextDocumentContentProvider(CLUSTER_DOCUMENT_SCHEME, clusterDocuments),
+    languages.registerCodeLensProvider(
+      { scheme: CLUSTER_DOCUMENT_SCHEME, language: 'memql' },
+      new ClusterDocumentLens()
+    ),
     window.registerTreeDataProvider('memqlConstructs', constructsTree),
     commands.registerCommand('memql.constructs.refresh', () => constructsTree.refresh()),
     // Not palette-invokable ("when": "false"): it needs the construct the tree
@@ -750,7 +803,40 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (node?.kind !== 'construct') {
         return;
       }
-      ConstructPanel.open(context, node.construct);
+      ConstructPanel.open(context, node.construct, constructPanelDeps());
+    }),
+    // The cluster document's lens posts this: the way BACK from source to the
+    // detail page. Palette-hidden for the same reason as `open` -- it takes a
+    // {kind, name} the palette cannot supply. The construct is re-read from the
+    // cluster rather than carried in the uri, because the uri holds an address
+    // and the page needs the record.
+    commands.registerCommand('memql.constructs.showDetails', async (key?: { kind?: string; name?: string }) => {
+      // No argument is unreachable through the lens and is not worth a message:
+      // there is nothing to name in one.
+      if (key?.kind === undefined || key?.name === undefined) {
+        return;
+      }
+      const dispatcher = connections?.dispatcher;
+      if (dispatcher === undefined) {
+        // The lens outlives the connection -- a cluster document stays open
+        // after a disconnect -- so this is reachable, and a click that does
+        // nothing would read as the extension being broken.
+        void window.showInformationMessage('MemQL: connect to a cluster to read its constructs.');
+        return;
+      }
+      try {
+        const result = await new ConstructsClient(dispatcher).listConstructs();
+        const found = result.constructs.find((c) => c.kind === key.kind && c.name === key.name);
+        if (found === undefined) {
+          void window.showInformationMessage(`MemQL: the cluster has no ${key.kind} ${key.name} loaded.`);
+          return;
+        }
+        ConstructPanel.open(context, toCatalogConstruct(found), constructPanelDeps());
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        noteDiagnostic(connectionOutput, `listing constructs for ${key.kind} ${key.name} failed`, detail);
+        void offerDetails('error', connectionOutput, 'MemQL: the cluster could not list its constructs.');
+      }
     })
   );
 

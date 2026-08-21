@@ -60,6 +60,8 @@ export const recorded = {
   treeViews: [] as string[],
   /** How many times window.registerFileDecorationProvider was called. */
   fileDecorationProviders: 0,
+  /** Uri schemes passed to workspace.registerTextDocumentContentProvider. */
+  contentProviderSchemes: [] as string[],
   /** Command ids passed to commands.registerCommand. */
   commands: [] as string[],
   /** File-system watcher globs, as `<base>/<pattern>`. */
@@ -415,6 +417,14 @@ export const workspace = {
       onDidDelete: noop,
       dispose: () => undefined,
     };
+  },
+
+  // Registration only, and the SCHEME is what is recorded: nothing in this lane
+  // opens a document, so the provider is never asked for content -- what a unit
+  // test can see about it is that activation claimed the scheme at all.
+  registerTextDocumentContentProvider(scheme: string, _provider: unknown): StubDisposable {
+    recorded.contentProviderSchemes.push(scheme);
+    return { dispose: () => undefined };
   },
 
   onDidGrantWorkspaceTrust(listener: () => void): StubDisposable {

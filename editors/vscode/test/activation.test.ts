@@ -94,6 +94,15 @@ test('the runtime commands are registered, so a cluster can be selected and conn
   }
 });
 
+test('the memql-cluster scheme is claimed, so a cluster document has something to open with', () => {
+  // memql#4248. A `memql-cluster:` uri with no registered content provider does
+  // not fail loudly -- openTextDocument rejects with "cannot open", which reads
+  // as the DOCUMENT being broken rather than as the registration being absent.
+  // The host lane opens one for real, but that lane does not run in CI, so this
+  // is the guard that travels with every pull request.
+  assert.deepEqual(recorded.contentProviderSchemes, ['memql-cluster']);
+});
+
 test('every file the trees read is watched, so an external edit refreshes them', () => {
   // clusters.yaml appears TWICE, and that is the design rather than a slip:
   // the Clusters tree and the Deployments tree read the same registry and

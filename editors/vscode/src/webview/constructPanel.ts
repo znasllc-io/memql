@@ -8,10 +8,12 @@
 // JUMP-TO-SOURCE HAS THREE OUTCOMES, and each is a different sentence:
 //
 //   the file is in this workspace  -> open it, revealed at the signature
-//   the file is NOT in this workspace -> say so, naming the path. The catalog
-//       reports a path relative to the CLUSTER's tree, and the cluster is not
-//       obliged to be the checkout this editor has open -- a remote cluster
-//       usually is not.
+//   the file is NOT in this workspace -> say so, naming the path, AND offer to
+//       read it from the cluster (memql#4248). The catalog reports a path
+//       relative to the CLUSTER's tree, and the cluster is not obliged to be
+//       the checkout this editor has open -- a remote cluster usually is not.
+//       This used to be the end of the road; it is not, because the cluster
+//       that loaded the construct serves the file too.
 //   there is no file at all -> the construct is PROMOTED. Its source is in the
 //       page already, rendered from what the cluster holds, and labelled as
 //       living in the database. That is the honest rendering, and it is where
@@ -28,7 +30,7 @@
 // state/constructCatalog.ts and webview/constructScreens.ts, under bare
 // `node --test`.
 //
-// Refs: #3752 #3747
+// Refs: #4248 #3752 #3747
 
 import { randomBytes } from "node:crypto";
 
@@ -49,30 +51,56 @@ import {
 import { COMMAND_RUN, COMMAND_RUN_AUTOMATION, COMMAND_RUN_WITH } from "../constructs/runnable.js";
 import { signatureLine } from "../constructs/signature.js";
 
+/**
+ * What the page needs from the host that it cannot reach itself.
+ *
+ * Exactly one entry, and it is INJECTED rather than imported because the fetch
+ * needs the live connection -- which lives in extension.ts and which a webview
+ * module has no business reading. The panel posts an intent; the host decides
+ * whether there is a cluster to serve it.
+ */
+export interface ConstructPanelDeps {
+  viewSourceFromCluster: (construct: CatalogConstruct) => Promise<void>;
+}
+
 export class ConstructPanel {
   private static open_: ConstructPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private construct: CatalogConstruct;
+  private deps: ConstructPanelDeps;
   private fileUri: vscode.Uri | undefined;
   private error = "";
   private disposed = false;
 
-  static open(context: vscode.ExtensionContext, construct: CatalogConstruct): ConstructPanel {
+  static open(
+    context: vscode.ExtensionContext,
+    construct: CatalogConstruct,
+    deps: ConstructPanelDeps,
+  ): ConstructPanel {
     const existing = ConstructPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
+      // Re-pointed along with the construct. The panel is a SINGLETON reused
+      // across opens, so what it holds must be what THIS opener supplied,
+      // rather than whatever the first one happened to hand over.
+      existing.deps = deps;
       existing.pointAt(construct);
       return existing;
     }
-    const panel = new ConstructPanel(context, construct);
+    const panel = new ConstructPanel(context, construct, deps);
     ConstructPanel.open_ = panel;
     return panel;
   }
 
-  private constructor(_context: vscode.ExtensionContext, construct: CatalogConstruct) {
+  private constructor(
+    _context: vscode.ExtensionContext,
+    construct: CatalogConstruct,
+    deps: ConstructPanelDeps,
+  ) {
     this.construct = construct;
+    this.deps = deps;
     this.panel = vscode.window.createWebviewPanel(
       "memqlConstruct",
       `Construct: ${construct.name}`,
@@ -134,6 +162,10 @@ export class ConstructPanel {
       await this.run(type === "runWith");
       return;
     }
+    if (type === "viewSourceFromCluster") {
+      await this.deps.viewSourceFromCluster(this.construct);
+      return;
+    }
     if (type !== "openFile") return;
     await this.openFile();
   }
@@ -171,6 +203,14 @@ export class ConstructPanel {
     await vscode.commands.executeCommand(withArguments ? COMMAND_RUN_WITH : COMMAND_RUN, target);
   }
 
+  /**
+   * Opens the file from disk, or says why it could not.
+   *
+   * The not-in-workspace sentence is UNCHANGED and still true -- what changed
+   * is that it is no longer the end of the conversation: the page draws the
+   * cluster-source button beside it (memql#4248), so the reader is told what
+   * happened and offered the other route in the same breath.
+   */
   private async openFile(): Promise<void> {
     const uri = this.fileUri;
     if (uri === undefined) {
@@ -202,6 +242,10 @@ export class ConstructPanel {
       fileInWorkspace: this.fileUri !== undefined,
       offerRun: offersRun(this.construct),
       automationRun: isAutomationRun(this.construct),
+      // There IS a file and it is not here -- the one situation the cluster can
+      // answer. Whether a cluster is actually connected is the host's question,
+      // asked when the button is pressed rather than guessed at render time.
+      offerClusterSource: this.construct.originPath !== "" && this.fileUri === undefined,
       error: this.error,
     });
     this.panel.webview.html = `<!DOCTYPE html>

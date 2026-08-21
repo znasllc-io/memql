@@ -43,6 +43,19 @@ export interface ConstructPageInput {
    * re-derived from `kind` here, so one module owns the branch.
    */
   automationRun?: boolean;
+  /**
+   * Whether this host can offer to read the source from the CLUSTER instead
+   * (memql#4248).
+   *
+   * The catalog reports a path relative to the cluster's own tree, which is
+   * usually not this checkout -- so "not in this workspace" used to be the end
+   * of the road. It is not: the cluster that loaded the construct also serves
+   * the file, over the pack browser. Decided by the caller, which is the only
+   * side that can see the workspace at all, and REQUIRED rather than optional
+   * so that a new caller has to answer it instead of defaulting quietly back
+   * to the dead end.
+   */
+  offerClusterSource: boolean;
   /** A failure this page produced, or "". */
   error: string;
 }
@@ -138,6 +151,14 @@ function actionsHtml(input: ConstructPageInput): string {
   }
   if (input.construct.originPath !== "" && input.fileInWorkspace) {
     buttons.push(`<button class="secondary" type="button" data-act="openFile">Open the .memql file</button>`);
+  }
+  // The other side of that branch, and only when there IS a file: a promoted
+  // construct's source is already rendered below, so a fetch would ask the
+  // cluster for something the catalog has already said does not exist.
+  if (input.construct.originPath !== "" && !input.fileInWorkspace && input.offerClusterSource) {
+    buttons.push(
+      `<button class="secondary" type="button" data-act="viewSourceFromCluster">View source from cluster</button>`,
+    );
   }
   if (buttons.length === 0) return "";
   return `<div class="actions">${buttons.join("")}</div>`;
