@@ -84,7 +84,9 @@ Everything after that is application code.
 ## 1. A typed client from the cluster's DSL
 
 `scripts/sdk-gen` walks one or more DSL trees and emits typed methods on
-`QueryClient` for every query, mutation and logic declared in `**/*.memql`. The
+`QueryClient` for every query, mutation and logic declared in `**/*.memql`,
+plus every builtin marked `@sdk` — most builtins are engine-internal and stay
+off the client surface, so the marker is the opt-in (memql#4239). The
 generator itself is the importable `sdk/gen` package; the script is a thin CLI
 over it.
 
@@ -104,14 +106,17 @@ go run ./scripts/sdk-gen \
 | `--ts-import-from` | Module the generated TS imports `QueryClient` from and augments via `declare module` |
 | `--check` | Exit non-zero if regenerating would change anything — the CI gate shape |
 
-> **INFO: `make sdk-gen` in this repo passes `--ts-out=` deliberately.** The
-> engine emits no TypeScript for itself, because `@znasllc-io/memql-sdk-core` is
-> client-agnostic on purpose. A customer's typed TS surface is generated from
-> **core DSL ∪ their own bundle** — which is what the composed `--dsl` above
-> does. The emitters are `sdk/gen/emit_ts.go` (methods, via TypeScript
-> declaration merging) and `sdk/gen/emit_concepts.go` (concept ids and CDC
-> topic/filter constants, so nothing hand-writes a
-> `graph.node.<action>.<concept>` string).
+> **INFO: `make sdk-gen` in this repo emits both targets.** The engine's own
+> typed surface — `dsl/`'s queries, mutations and logics plus its `@sdk`
+> builtins — is generated into `sdk/go/client` and `sdk/ts/src/client` and
+> ships inside `@znasllc-io/memql-sdk-core`; the portal consumes it that way
+> (memql#4232), and `make sdk-gen-check` fails CI on drift. A customer's typed
+> TS surface is generated from **core DSL ∪ their own bundle** — which is what
+> the composed `--dsl` above does — with `--ts-import-from` aiming the emitted
+> `declare module` augmentation at the published package. The emitters are
+> `sdk/gen/emit_ts.go` (methods, via TypeScript declaration merging) and
+> `sdk/gen/emit_concepts.go` (concept ids and CDC topic/filter constants, so
+> nothing hand-writes a `graph.node.<action>.<concept>` string).
 
 Wire the generated methods onto a connection, exactly as any other client does:
 
