@@ -140,7 +140,7 @@ func newTestService(t *testing.T, exec Executor, audit identity.AuditLogger) *Se
 // synchronously in repair_test.go.
 func stubRepairWatch(svc *Service) *[]string {
 	var started []string
-	svc.startRepairWatch = func(id string) {
+	svc.startRepairWatch = func(_ context.Context, id string) {
 		started = append(started, id)
 		svc.releaseRepair()
 	}

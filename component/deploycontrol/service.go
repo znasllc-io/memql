@@ -121,9 +121,11 @@ type Service struct {
 	repairActive  string
 	// startRepairWatch owns the repair record after a successful kick-off:
 	// it observes the Application until the record can be resolved, then
-	// releases the guard. Defaults to goWatchRepair; a test substitutes a
-	// recorder so the RPC's own contract is asserted without a goroutine.
-	startRepairWatch func(deploymentID string)
+	// releases the guard. It receives the RPC's context for its values (the
+	// caller's identity), never for its lifetime. Defaults to goWatchRepair;
+	// a test substitutes a recorder so the RPC's own contract is asserted
+	// without a goroutine.
+	startRepairWatch func(rpcCtx context.Context, deploymentID string)
 	// onRepairResolved, when set, is called after the watcher has written the
 	// record's terminal status -- a test seam for the asynchronous path.
 	onRepairResolved func(deploymentID, status, reason string)

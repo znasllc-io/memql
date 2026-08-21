@@ -411,7 +411,7 @@ func TestRepairRefusesWhileASyncIsAlreadyRunning(t *testing.T) {
 func TestRepairRefusesASecondRepairWhileOneIsInFlight(t *testing.T) {
 	svc, exec, _, _, _ := repairFixture(t)
 	// A watcher that never finishes: the guard stays held.
-	svc.startRepairWatch = func(string) {}
+	svc.startRepairWatch = func(context.Context, string) {}
 
 	first, err := svc.Repair(ctxWithRole(auth.RoleOwner), &memqlv1.RepairRequest{})
 	if err != nil || !first.GetOk() {
@@ -659,22 +659,49 @@ func TestWatchRepairResolvesFailedAtTheCeiling(t *testing.T) {
 	}
 }
 
+// actorRecordingEngine wraps fakeEngine and records, per write, the actor
+// the engine's own mutation-actor check would read (auth.ActorFromContext)
+// and whether the context was still live. The watcher's terminal write must
+// arrive with the initiating caller's identity and on a context the RPC's
+// completion did not cancel -- a bare context.Background would have been
+// refused by the engine and stranded the record.
+type actorRecordingEngine struct {
+	fakeEngine
+	writeActors []string
+	writeLive   []bool
+}
+
+func (e *actorRecordingEngine) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	if strings.HasPrefix(query, "updateDeploymentStatus(") {
+		e.writeActors = append(e.writeActors, auth.ActorFromContext(ctx))
+		e.writeLive = append(e.writeLive, ctx.Err() == nil)
+	}
+	return e.fakeEngine.Execute(ctx, query)
+}
+
 // The asynchronous path end to end: the goroutine watcher writes the
-// terminal status on the record, reports it, and releases the guard.
+// terminal status on the record -- as the caller, on a context that
+// outlives the RPC -- reports it, and releases the guard.
 func TestGoWatchRepairWritesTheTerminalStatusAndReleasesTheGuard(t *testing.T) {
 	exec := &fakeExecutor{argoJSONSeq: [][]byte{
 		argoApp("Running", "OutOfSync", "Progressing", "rec-6"),
 		argoApp("Succeeded", "Synced", "Healthy", "rec-6"),
 	}}
-	eng := &fakeEngine{}
+	eng := &actorRecordingEngine{}
 	svc := watcherService(t, exec, eng, 2*time.Second)
 	resolved := make(chan [3]string, 1)
 	svc.onRepairResolved = func(id, status, reason string) { resolved <- [3]string{id, status, reason} }
 
+	// The RPC's context: carries the caller's token (what the engine's actor
+	// check reads) and is CANCELLED the moment the RPC has answered.
+	rpcCtx, finishRPC := context.WithCancel(auth.ContextWithToken(ctxWithRole(auth.RoleOwner),
+		&auth.TokenInfo{Subject: "v1:identity:user.u1"}))
+
 	if !svc.acquireRepair() {
 		t.Fatal("guard unexpectedly held")
 	}
-	svc.goWatchRepair("rec-6")
+	svc.goWatchRepair(rpcCtx, "rec-6")
+	finishRPC()
 
 	select {
 	case got := <-resolved:
@@ -686,6 +713,12 @@ func TestGoWatchRepairWritesTheTerminalStatusAndReleasesTheGuard(t *testing.T) {
 	}
 	if countContaining(eng.queries, "updateDeploymentStatus(", `deploymentId: "rec-6"`, `status: "succeeded"`) != 1 {
 		t.Errorf("terminal status not written: %v", eng.queries)
+	}
+	if len(eng.writeActors) != 1 || eng.writeActors[0] != "v1:identity:user.u1" {
+		t.Errorf("terminal write actor = %v, want the initiating caller (the engine refuses a write with none)", eng.writeActors)
+	}
+	if len(eng.writeLive) != 1 || !eng.writeLive[0] {
+		t.Errorf("terminal write ran on a cancelled context %v; the RPC's lifetime must not bound the watcher", eng.writeLive)
 	}
 	// The guard is released once the goroutine returns; give the deferred
 	// release a moment after the seam fired.

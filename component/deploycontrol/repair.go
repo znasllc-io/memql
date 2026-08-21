@@ -261,8 +261,10 @@ func (s *Service) Repair(ctx context.Context, _ *memqlv1.RepairRequest) (*memqlv
 		}), nil
 	}
 
-	// From here the watcher owns the record and the guard.
-	s.startRepairWatch(deploymentID)
+	// From here the watcher owns the record and the guard. It is handed the
+	// RPC's context for its VALUES -- the caller's identity -- not its
+	// lifetime; see goWatchRepair.
+	s.startRepairWatch(ctx, deploymentID)
 
 	return s.finishWrite(ctx, "repair", act, detail, asyncRepairAck(deploymentID), nil, map[string]string{
 		"deploymentId": deploymentID,
@@ -548,19 +550,31 @@ func (s *Service) observeRepair(ctx context.Context) (repairObservation, error) 
 // -----------------------------------------------------------------------------
 
 // goWatchRepair is the default startRepairWatch: it runs watchRepair on a
-// goroutine detached from the RPC's context (the caller has already been
-// answered), writes the terminal status, notifies the test seam, and releases
+// goroutine, writes the terminal status, notifies the test seam, and releases
 // the guard.
-func (s *Service) goWatchRepair(deploymentID string) {
+//
+// The goroutine runs on context.WithoutCancel(rpcCtx), and that choice is
+// load-bearing. The RPC has already been answered, so its LIFETIME must not
+// bound the watch (a stream context ends with the browser session, a unary
+// one with the reply); but its VALUES must travel -- they carry the caller's
+// identity, and the engine refuses a mutation that arrives with no actor
+// (component/memql/executor.go mutationActor). A watcher on a bare
+// context.Background would have had its terminal write refused and left every
+// repair record stranded at in_progress, which is precisely the invented
+// progress this verb exists not to produce. Carrying the initiating owner's
+// identity is also the honest attribution: the terminal transition is the
+// outcome of the repair that owner asked for.
+func (s *Service) goWatchRepair(rpcCtx context.Context, deploymentID string) {
+	base := context.WithoutCancel(rpcCtx)
 	go func() {
 		defer s.releaseRepair()
-		ctx, cancel := context.WithTimeout(context.Background(), s.repairCeiling)
+		ctx, cancel := context.WithTimeout(base, s.repairCeiling)
 		defer cancel()
 		status, reason := s.watchRepair(ctx, deploymentID)
 
 		// The write gets its own budget: the watch context may have expired,
 		// and an expired context is no reason to leave the record stranded.
-		writeCtx, writeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		writeCtx, writeCancel := context.WithTimeout(base, 30*time.Second)
 		defer writeCancel()
 		s.transitionDeployment(writeCtx, deploymentID, status)
 		if s.logger != nil {
