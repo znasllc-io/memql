@@ -13,11 +13,17 @@ package clustere2e
 // B must be evicted when a write to its concept happens on replica A,
 // with ZERO per-concept routing rules.
 //
-// queryActiveSpaces carries NO @cache annotation, so it is cached purely
-// by the 5.6 default. Its concept (v1:cognition:space) is NOT denylisted
-// and it is owner-scoped (payload.ownerUserId == actor.userId), so this
-// also exercises the actor-folded cache key (a stale read here would be
-// BOTH a default-on regression AND a cross-user-collision regression).
+// notes carries NO @cache annotation, so it is cached purely by the 5.6
+// default. Its concept (v1:notes:note) is NOT denylisted, has NO per-concept
+// routing rule in component/node/routing.go (v1:cognition:* is forwarded
+// wholesale, which is why a space-keyed read could not prove this), and the
+// query is owner-scoped (ownerUserId == actor.userId), so this also exercises
+// the actor-folded cache key (a stale read here would be BOTH a default-on
+// regression AND a cross-user-collision regression).
+//
+// The read used to be the product pack's queryActiveSpaces, which the engine
+// tree does not declare and the parity cluster does not load (memql#4212);
+// notes is the engine-owned owner-scoped read with the same shape.
 //
 // The deterministic, always-in-CI proof of the same wired path -- two
 // engines, two buses, the real EventBridge forward + inbound republish
@@ -62,56 +68,61 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 	qcA := memqlclient.NewQueryClient(connA.Dispatcher())
 	qcB := memqlclient.NewQueryClient(connB.Dispatcher())
 
-	createSpace := func(name string) string {
-		spaceID := "v1:cognition:space:" + id.NewShortId()
-		if _, err := qcA.ExecuteNamed(ctx, "createSpace", buildCreateSpace(spaceID, name, "")); err != nil {
-			t.Fatalf("create space: %v", err)
+	createNote := func(title string) string {
+		noteID := "v1:notes:note:" + id.NewShortId()
+		if _, err := qcA.CreateNote(ctx, memqlclient.CreateNoteArgs{
+			NoteId: noteID,
+			Title:  title,
+			Body:   "clustere2e default-on cache probe",
+		}); err != nil {
+			t.Fatalf("create note: %v", err)
 		}
-		return spaceID
+		return noteID
 	}
 
-	// Seed a couple of active spaces so the read returns a stable first page.
+	// Seed a couple of notes so the read returns a stable first page.
 	const seed = 2
 	for i := 0; i < seed; i++ {
-		createSpace(fmt.Sprintf("default-on cache seed %02d", i))
+		createNote(fmt.Sprintf("default-on cache seed %02d", i))
 		time.Sleep(15 * time.Millisecond)
 	}
 
-	activeSpaceCount := func(qc *memqlclient.QueryClient) int {
-		res, err := qc.ExecuteNamed(ctx, "queryActiveSpaces", buildQueryActiveSpaces())
+	noteCount := func(qc *memqlclient.QueryClient) int {
+		res, err := qc.Notes(ctx, memqlclient.NotesArgs{})
 		if err != nil {
-			t.Fatalf("queryActiveSpaces: %v", err)
+			t.Fatalf("notes: %v", err)
 		}
 		return len(res.Rows())
 	}
 
 	// Warm the DEFAULT cache on connB: two reads so the second is a HIT on
-	// the serving replica(s). queryActiveSpaces has NO @cache annotation --
-	// it is cached only because of the 5.6 default-on policy.
-	warm1 := activeSpaceCount(qcB)
+	// the serving replica(s). notes has NO @cache annotation -- it is cached
+	// only because of the 5.6 default-on policy.
+	warm1 := noteCount(qcB)
 	if warm1 < seed {
-		t.Fatalf("warm read 1 returned %d active spaces, want >= %d seeded", warm1, seed)
+		t.Fatalf("warm read 1 returned %d notes, want >= %d seeded", warm1, seed)
 	}
-	_ = activeSpaceCount(qcB) // second read -> default-cache HIT (warms only).
+	_ = noteCount(qcB) // second read -> default-cache HIT (warms only).
 
-	// WRITE a new space on connA (typically a different replica than connB).
-	// This is graph.node.created.v1:cognition:space -> it ALSO emits
-	// cache.invalidate.v1:cognition:space, forwarded cross-node by the
-	// SINGLE cache.invalidate.* broadcast rule (no per-concept rule for
-	// v1:cognition:space exists), so connB's evictor fires and drops the
-	// default-cached queryActiveSpaces result.
-	newID := createSpace("default-on cache POST-WRITE space")
+	// WRITE a new note on connA (typically a different replica than connB).
+	// This is graph.node.created.v1:notes:note -> it ALSO emits
+	// cache.invalidate.v1:notes:note, forwarded cross-node by the SINGLE
+	// cache.invalidate.* broadcast rule (no per-concept rule for
+	// v1:notes:note exists), so connB's evictor fires and drops the
+	// default-cached notes result.
+	newID := createNote("default-on cache POST-WRITE note")
 
-	// The post-write read on connB MUST reflect the new space. If
+	// The post-write read on connB MUST reflect the new note. If
 	// invalidation did not evict the default cache cross-node, connB would
 	// serve the stale page and miss newID -- a silent cross-node stale read.
 	// We poll only a few seconds, far under the 60s default TTL, so a pass
-	// proves eviction (not TTL lapse).
+	// proves eviction (not TTL lapse). notes sorts newest-first, so the new
+	// row is on the first page whatever else the user owns.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		res, err := qcB.ExecuteNamed(ctx, "queryActiveSpaces", buildQueryActiveSpaces())
+		res, err := qcB.Notes(ctx, memqlclient.NotesArgs{})
 		if err != nil {
-			t.Fatalf("post-write queryActiveSpaces: %v", err)
+			t.Fatalf("post-write notes: %v", err)
 		}
 		found := false
 		for _, row := range res.Rows() {
@@ -122,14 +133,14 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 		}
 		if found {
 			if len(res.Rows()) < seed+1 {
-				t.Fatalf("post-write read shows the new space but only %d total, want >= %d", len(res.Rows()), seed+1)
+				t.Fatalf("post-write read shows the new note but only %d total, want >= %d", len(res.Rows()), seed+1)
 			}
 			return // SUCCESS: default cache evicted cross-node via the broadcast channel.
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("post-write read on connB never reflected new space %s within 5s "+
+			t.Fatalf("post-write read on connB never reflected new note %s within 5s "+
 				"(well under the 60s default TTL) -- cross-node DEFAULT-ON cache invalidation did not "+
-				"evict the stale queryActiveSpaces result on the sibling replica via the cache.invalidate.* "+
+				"evict the stale notes result on the sibling replica via the cache.invalidate.* "+
 				"broadcast channel (with zero per-concept routing rules)", newID)
 		}
 		time.Sleep(200 * time.Millisecond)
