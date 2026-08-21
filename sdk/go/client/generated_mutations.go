@@ -1026,7 +1026,7 @@ type CloseCallArgs struct {
 	DurationSeconds int
 	// Enum: completed | no_answer | busy | failed | canceled
 	Disposition  string
-	CostEstimate any
+	CostEstimate float64
 }
 
 // CloseCall calls the engine mutation closeCall.
@@ -4135,7 +4135,7 @@ type CreateHarnessSemanticMemoryArgs struct {
 	Kind           string
 	Content        string
 	SourceEpisodes []string
-	Confidence     any
+	Confidence     float64
 	LastReinforced string
 }
 
@@ -6866,7 +6866,7 @@ func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 // Bound concept: v1:actions:action (machine-readable: BoundConcepts["decayAction"] in generated_concepts.go).
 type DecayActionArgs struct {
 	ActionId    string
-	Reliability any
+	Reliability float64
 }
 
 // DecayAction calls the engine mutation decayAction.
@@ -6894,7 +6894,7 @@ func DecayActionBuild(args DecayActionArgs) string {
 // Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["decayHarnessSemanticMemory"] in generated_concepts.go).
 type DecayHarnessSemanticMemoryArgs struct {
 	MemoryId   string
-	Confidence any
+	Confidence float64
 }
 
 // DecayHarnessSemanticMemory calls the engine mutation decayHarnessSemanticMemory.
@@ -7464,16 +7464,16 @@ func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersAr
 // Bound concept: v1:safety:outputScreening (machine-readable: BoundConcepts["insertOutputScreening"] in generated_concepts.go).
 type InsertOutputScreeningArgs struct {
 	ContentType    string
-	ContentLength  any
+	ContentLength  float64
 	RedactedSample string
 	Tier           string
 	Categories     string
 	Verdict        string
 	Screener       string
 	RuleId         string
-	Confidence     any
+	Confidence     float64
 	Reason         string
-	LatencyMs      any
+	LatencyMs      float64
 	AgentId        string
 	OwnerUserId    string
 	PlanId         string
@@ -7599,9 +7599,9 @@ type InsertSafetyClassificationArgs struct {
 	Decision      string
 	Source        string
 	RuleId        string
-	Confidence    any
+	Confidence    float64
 	Reason        string
-	LatencyMs     any
+	LatencyMs     float64
 	AgentId       string
 	OwnerUserId   string
 	PlanId        string
@@ -8666,7 +8666,7 @@ type RecordCallArgs struct {
 	DurationSeconds int
 	// Enum: in_progress | completed | no_answer | busy | failed | canceled
 	Disposition  string
-	CostEstimate any
+	CostEstimate float64
 }
 
 // RecordCall calls the engine mutation recordCall.
@@ -9313,7 +9313,7 @@ type RecordNumberArgs struct {
 	ProviderId string
 	// Enum: local | tollfree | mobile
 	NumberType  string
-	MonthlyCost any
+	MonthlyCost float64
 }
 
 // RecordNumber calls the engine mutation recordNumber.
@@ -9674,15 +9674,15 @@ type RecordRouterCallArgs struct {
 	CachedInputTokens    int
 	TokensEstimated      bool
 	TokensEstimatedSet   bool // set true to send tokensEstimated; required because zero-value bool is ambiguous
-	InputCost            any
-	OutputCost           any
-	CachedInputCost      any
-	TotalCost            any
+	InputCost            float64
+	OutputCost           float64
+	CachedInputCost      float64
+	TotalCost            float64
 	PricingConfigured    bool
 	PricingConfiguredSet bool // set true to send pricingConfigured; required because zero-value bool is ambiguous
 	TimeToFirstTokenMs   int
 	TotalDurationMs      int
-	TokensPerSec         any
+	TokensPerSec         float64
 	Streaming            bool
 	StreamingSet         bool // set true to send streaming; required because zero-value bool is ambiguous
 	Outcome              string
@@ -10286,7 +10286,7 @@ func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 // Bound concept: v1:actions:action (machine-readable: BoundConcepts["reinforceAction"] in generated_concepts.go).
 type ReinforceActionArgs struct {
 	ActionId       string
-	Reliability    any
+	Reliability    float64
 	ReinforceCount int
 }
 
@@ -10320,7 +10320,7 @@ func ReinforceActionBuild(args ReinforceActionArgs) string {
 // Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["reinforceHarnessSemanticMemory"] in generated_concepts.go).
 type ReinforceHarnessSemanticMemoryArgs struct {
 	MemoryId       string
-	Confidence     any
+	Confidence     float64
 	ReinforceCount int
 	SourceEpisodes []string
 }
@@ -11795,7 +11795,7 @@ type SetBudgetArgs struct {
 	Scope             string
 	ScopeId           string
 	PeriodType        string
-	LimitUSD          any
+	LimitUSD          float64
 	AlertThresholdPct int
 	ResetAt           string
 	Active            bool

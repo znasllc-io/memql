@@ -14,10 +14,14 @@ import (
 // shows up on QueryClient (matching the Go SDK's `qc.QueryActiveSpaces`
 // receiver-method shape).
 //
-// MemQL core no longer emits TS for itself (the runtime core,
-// @znasllc-io/memql-sdk-core, is client-agnostic). Each product BFF
-// imports this package and emits the TS typed surface from
-// `core DSL ∪ its own DSL`, so this emitter must stay.
+// MemQL core emits TS for itself again since memql#4232: the generated
+// core surface lands in sdk/ts/src/client (the emitter's in-package
+// default), so first-party clients -- the portal, the VS Code
+// extension -- get the same typecheck-enforced construct contract the
+// Go SDK always had, instead of hand-rolled shapes around string
+// names. A product BFF still imports this package and emits its OWN
+// surface from `core DSL ∪ its own DSL`, routed through a single
+// package specifier via importFrom.
 // =============================================================================
 
 func emitTSMethods(constructs []Construct, kindLabel, importFrom string) []byte {
@@ -147,7 +151,7 @@ func tsType(a ArgField) string {
 		return "string"
 	case "bool", "boolean":
 		return "boolean"
-	case "number", "int", "integer":
+	case "number", "int", "integer", "float":
 		return "number"
 	case "object":
 		return "Record<string, unknown>"
