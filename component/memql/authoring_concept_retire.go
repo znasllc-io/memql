@@ -366,6 +366,14 @@ func (e *MemQLEngine) removeConceptFromLiveRegistry(registry *memoryNodes.Memory
 		return fmt.Errorf("authoring: demote concept %q: rebuild schema index: %w", conceptId, err)
 	}
 	e.setSchemaIndex(schemaIdx)
+
+	// Registry-change delta (memql#4238). Only the REMOVE branch of a demote
+	// changes the registry SET, so only it broadcasts -- a retire leaves the
+	// concept registered and readable, so ConceptsListMsg still returns it and
+	// there is nothing for a set-shaped delta to say. Fired here (not in the
+	// early not-registered return) so a node that never held the concept, which
+	// the cross-node demote subscriber also runs this on, emits nothing.
+	e.broadcastConceptRemoved(conceptId)
 	return nil
 }
 

@@ -196,5 +196,13 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 		e.Logger.Info("authored concept merged into the live concept registry",
 			"component", "memql.engine", "concept", id, "name", c.Name, "owner", c.OwnerUserId)
 	}
+
+	// Registry-change delta (memql#4238). Fired here, at the shared-registry
+	// merge, so BOTH the local promote and a peer node's re-hydration
+	// (rehydratePromotedBundleNow, which funnels through this same function)
+	// notify the clients connected to THAT node -- which is what makes a promote
+	// on replica A visible to a client on replica B without a reconnect. An add
+	// and a re-promote both ride Added; the client upserts by id.
+	e.broadcastConceptAdded(built)
 	return nil
 }

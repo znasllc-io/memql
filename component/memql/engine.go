@@ -36,18 +36,24 @@ type MemQLEngine struct {
 	// goroutine that owns the promote, and from the authoring-promote bus
 	// subscriber when a peer node broadcasts one -- while request goroutines are
 	// reading them.
-	conceptStateMu   sync.RWMutex
-	relationships    relationshipRegistry
-	concepts         concept.Registry
-	specs            *SpecRegistry
-	functions        *FunctionRegistry
-	tools            *ToolRegistry
-	prompts          *PromptRegistry
-	agents           *AgentRegistry
-	seeds            *SeedRegistry
-	seedMaterializer *SeedMaterializer
-	providers        *ProviderRegistry
-	policies         *PolicyRegistry
+	conceptStateMu sync.RWMutex
+	relationships  relationshipRegistry
+	concepts       concept.Registry
+	// conceptRegBroadcast fans registry-change deltas (concept add / remove) to
+	// connected clients so a promote/demote is visible without a reconnect
+	// (memql#4238). Lazily allocated via conceptRegBroadcaster() so a
+	// hand-built test engine still broadcasts; see concept_registry_broadcast.go.
+	conceptRegBroadcast     *conceptRegistryBroadcaster
+	conceptRegBroadcastOnce sync.Once
+	specs                   *SpecRegistry
+	functions               *FunctionRegistry
+	tools                   *ToolRegistry
+	prompts                 *PromptRegistry
+	agents                  *AgentRegistry
+	seeds                   *SeedRegistry
+	seedMaterializer        *SeedMaterializer
+	providers               *ProviderRegistry
+	policies                *PolicyRegistry
 	// configSnapshot is the bus-distributed ConfigSnapshot that
 	// backs ctx.config.* inside spec bodies. Optional; nil
 	// resolves every allow-listed key to its zero value (sensitive
