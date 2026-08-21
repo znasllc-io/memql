@@ -49,33 +49,34 @@ Voice-off is first-class replicas 0 on `voice`, `voice-agent`,
 
 The committed default in the overlay is `memql.localhost`. No file
 under `deploy/` names a real domain (memql#3593). An install patches
-`MEMQL_DOMAIN=memql.znas.io` and the Ingress / certificate hosts
-through the ArgoCD Application's `spec.source.kustomize.patches`.
-`.localhost` is unroutable externally, so a cluster reconciled before
-its domain is set fails visibly instead of half-working.
+`MEMQL_DOMAIN` and the Ingress / certificate hosts through the ArgoCD
+Application's `spec.source.kustomize.patches`. `.localhost` is
+unroutable externally, so a cluster reconciled before its domain is
+set fails visibly instead of half-working.
 
-Apex `znas.io` is the existing company site. **Do not point it at
-AKS.** The cluster domain is `memql.znas.io`:
+The company apex site is not the cluster domain. **Do not point the
+company apex at AKS.** The cluster domain is the install's
+`MEMQL_DOMAIN` (the value lives on the install, not in this repo):
 
 | Role | Host | Notes |
 |---|---|---|
-| identity | `identity.memql.znas.io` | sign-in |
-| api | `api.memql.znas.io` | gRPC + HTTP edge |
-| sites (wildcard) | `*.memql.znas.io` | portal is a site on this rule |
-| sites (apex) | `memql.znas.io` | same edge Service |
-| mcp | `mcp.memql.znas.io` | exists in the generator; **leave it dark** |
+| identity | `identity.$MEMQL_DOMAIN` | sign-in; first-run wizard at `/setup` |
+| api | `api.$MEMQL_DOMAIN` | gRPC + HTTP edge |
+| sites (wildcard) | `*.$MEMQL_DOMAIN` | portal is a site on this rule |
+| sites (apex) | `$MEMQL_DOMAIN` | same edge Service |
+| mcp | `mcp.$MEMQL_DOMAIN` | exists in the generator; **leave it dark** |
 
 The MCP host is part of the closed role set. Voice-off already sets
 `mcp` replicas to 0. Do not publish it, do not send clients there.
 
 ## DNS and certificates
 
-Waiting at GoDaddy, then off nip.io:
+Point DNS at the cluster ingress, then wait for the certificate:
 
 | Name | Type | Value |
 |---|---|---|
-| `memql.znas.io` | A | `4.255.64.83` |
-| `*.memql.znas.io` | A | `4.255.64.83` |
+| `$MEMQL_DOMAIN` | A | cluster ingress IP |
+| `*.$MEMQL_DOMAIN` | A | same cluster ingress IP |
 
 The front-door certificate (`memql-front-door-tls`) requests two SANs:
 `*.<domain>` and the apex. A TLS wildcard matches exactly one label, so
@@ -91,12 +92,12 @@ default cert.
 with the committed default. Install-time patches repoint every host
 the generator emitted, plus the `memql-domain` ConfigMap:
 
-- Certificate `memql-front-door-tls` `spec.dnsNames` → `*.memql.znas.io`, `memql.znas.io`
-- Ingress `api-front-door` and `api-front-door-grpc` → `api.memql.znas.io`
-- Ingress `identity-front-door` → `identity.memql.znas.io`
-- Ingress `mcp-front-door` → `mcp.memql.znas.io` (dark; still patch the name so it cannot drift)
-- Ingress `edge-front-door` → `*.memql.znas.io` and `memql.znas.io`
-- ConfigMap `memql-domain` key `MEMQL_DOMAIN` → `memql.znas.io`
+- Certificate `memql-front-door-tls` `spec.dnsNames` → `*.$MEMQL_DOMAIN`, `$MEMQL_DOMAIN`
+- Ingress `api-front-door` and `api-front-door-grpc` → `api.$MEMQL_DOMAIN`
+- Ingress `identity-front-door` → `identity.$MEMQL_DOMAIN`
+- Ingress `mcp-front-door` → `mcp.$MEMQL_DOMAIN` (dark; still patch the name so it cannot drift)
+- Ingress `edge-front-door` → `*.$MEMQL_DOMAIN` and `$MEMQL_DOMAIN`
+- ConfigMap `memql-domain` key `MEMQL_DOMAIN` → the install domain
 
 The same derivation feeds both sides: `cmd/frontdoorhosts` composes
 the Ingress hosts, and `component/envregistry/domain.go` composes the
@@ -117,12 +118,14 @@ kustomize refuses a sibling path (load restrictor).
    `deploy/k8s/overlays/cloud-entry`, and the host-patches above.
    Do not retarget `deploy/argocd/apps/memql.yaml`.
 3. Seed secrets the way a cloud install already does (External Secrets
-   + Key Vault). Seed `memql-domain` with `MEMQL_DOMAIN=memql.znas.io`.
+   + Key Vault). Seed `memql-domain` with the install's `MEMQL_DOMAIN`.
 4. Wait for DNS, then wait for the certificate to become Ready.
-5. Verify:
+5. Open `https://identity.$MEMQL_DOMAIN/setup`. The domain field
+   prefills from `MEMQL_DOMAIN` (memql#4216).
+6. Verify:
 
 ```bash
-scripts/install/verify-frontdoor.sh --hosts api.memql.znas.io,identity.memql.znas.io
+scripts/install/verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN
 ```
 
 That script establishes dns / tls / grpc / precedence for `api.` and

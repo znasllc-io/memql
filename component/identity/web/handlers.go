@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -470,6 +471,22 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 	s.render(w, r, "error", webtempl.Error(data))
 }
 
+// setupPrefillDomain is the /setup domain input (memql#4216).
+//
+// MEMQL_DOMAIN is the running install's public hostname suffix (envFrom
+// the memql-domain ConfigMap). The base manifest still pins
+// MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=example.com as a fail-closed
+// placeholder; envregistry derivation is set-if-absent, so that pin
+// wins and Bootstrap.Domain is the placeholder, not the install.
+// Prefer the install domain when it is set. An explicit bootstrap
+// domain still fills the box when MEMQL_DOMAIN is empty.
+func setupPrefillDomain(cfg identity.Config) string {
+	if d := strings.TrimSpace(os.Getenv("MEMQL_DOMAIN")); d != "" {
+		return d
+	}
+	return strings.TrimSpace(cfg.Bootstrap.Domain)
+}
+
 // handleSetupGet renders the first-run wizard. 404s unless the cluster
 // is provably unclaimed -- see setupSealed (memql#3415).
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
@@ -514,7 +531,7 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 	}
 	data := webtempl.SetupWizardData{
 		Layout:                     s.LayoutData(r, "Set up your cluster", false, nil, extra),
-		PrefillDomain:              strings.TrimSpace(bs.Domain),
+		PrefillDomain:              setupPrefillDomain(s.Cfg),
 		PrefillOwnerEmail:          strings.TrimSpace(bs.OwnerEmail),
 		PrefillOwnerFirstName:      strings.TrimSpace(bs.OwnerFirstName),
 		PrefillOwnerLastName:       strings.TrimSpace(bs.OwnerLastName),

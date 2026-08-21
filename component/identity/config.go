@@ -225,7 +225,7 @@ type BootstrapConfig struct {
 	// Domain is the cluster's deployment domain. Used as the suffix
 	// for every public hostname: app.<Domain>, identity.<Domain>,
 	// bff.<Domain>, agent.<Domain>. Examples:
-	//   local.znas.io        (maintainer's local dev cluster)
+	//   memql.localhost      (maintainer's local dev cluster)
 	//   staging.acme.com     (a customer's staging deployment)
 	//   acme.com             (the customer's production deployment)
 	// Env: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
@@ -1017,7 +1017,7 @@ func emailDomain(email string) string {
 //  1. Literal loopback: localhost, 127.0.0.1, ::1, 0.0.0.0.
 //  2. RFC 6761 .localhost TLD: anything.localhost.
 //  3. The dev wildcard convention this repo locks in: any
-//     *.local.<domain> shape (e.g. identity.local.znas.io,
+//     *.local.<domain> shape (e.g. identity.local.acme.com,
 //     bff.local.acme.test). The second-level label `local` is the
 //     dev marker -- it pairs with the wildcard DNS record
 //     `*.local.<domain>` -> 127.0.0.1 and the matching

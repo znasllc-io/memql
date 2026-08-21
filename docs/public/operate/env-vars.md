@@ -489,7 +489,7 @@ Stored in `v1:platform:globalVariable`.
 | `MEMQL_IDENTITY_VERIFIER_BASE_URL`  | matches `MEMQL_IDENTITY_BASE_URL`          | Override only when internal-mesh routing differs from the public origin.                                                               |
 | `MEMQL_EMAIL_AZURE_TENANT_ID`       | none                                 | Azure AD tenant id used by the **email integration**'s GraphSender. Legacy name `AZURE_TENANT_ID` still accepted (fallback).           |
 | `MEMQL_EMAIL_AZURE_CLIENT_ID`       | none                                 | Azure AD application id used by the email integration's GraphSender. Legacy name `AZURE_CLIENT_ID` still accepted.                     |
-| `MEMQL_EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@znas.io`). Legacy name `MAIL_SENDER` still accepted.                             |
+| `MEMQL_EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@acme.com`). Legacy name `MAIL_SENDER` still accepted.                             |
 | `MEMQL_EMAIL_FROM_NAME`             | `MemQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
 
 ### Variables consumed by the product frontend

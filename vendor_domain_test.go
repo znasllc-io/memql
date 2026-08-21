@@ -21,15 +21,17 @@ import (
 // passing run as proof that no vendor hostname is baked in anywhere.
 //
 // SCOPE: the artifacts that BUILD AND ADDRESS a cluster -- the manifests ArgoCD
-// renders, the scripts that seed and verify it, and the installer that drives
-// them. Those are the places where a hostname is configuration, and where one
-// baked in is the bug this issue was opened about.
+// renders, the scripts that seed and verify it, the installer that drives
+// them, and the public operate docs that read as the product contract
+// (docs/public/operate, memql#4217). Those are the places where a hostname is
+// configuration, and where one baked in is the bug this issue was opened about.
 //
 // TWO ROOTS ARE DELIBERATELY OUT.
 //
-//   - docs/ records what the tree used to do. Prior specs and design documents
-//     describe the old default by name, and rewriting history to satisfy a
-//     linter would make them lie.
+//   - docs/ outside docs/public/operate records what the tree used to do.
+//     Prior specs, design documents and superpowers notes describe the old
+//     default by name, and rewriting history to satisfy a linter would make
+//     them lie.
 //
 //   - component/ carries ~40 mentions, and every one is an EXAMPLE rather than
 //     configuration: test fixtures picking a plausible hostname, and doc
@@ -41,7 +43,7 @@ import (
 func TestNoVendorDomainLiterals(t *testing.T) {
 	const banned = "znas.io"
 
-	roots := []string{"deploy/", "scripts/", "editors/"}
+	roots := []string{"deploy/", "scripts/", "editors/", "docs/public/operate/"}
 
 	skipDirs := map[string]bool{
 		"node_modules": true,
