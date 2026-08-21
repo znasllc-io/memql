@@ -52,7 +52,7 @@ const conn = await Connection.dial({
   auth: { bearer: jwt }, // or { guestToken } / { workerToken }
 });
 
-// conn.query         : QueryClient          (executeNamed / executeRaw / listConcepts / getMyAccess)
+// conn.query         : QueryClient          (executeNamed / executeRaw / listConcepts / subscriptionCatalog / subscribeConceptRegistry / getMyAccess)
 // conn.subscriptions : SubscriptionManager  (subscribe(pattern, handler) -> unsubscribe)
 // conn.dispatcher    : Dispatcher           (low-level multiplexed stream)
 // conn.rotateAuth(jwt)                       (swap the bearer on a live stream)

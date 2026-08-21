@@ -12,15 +12,26 @@
 import type { Dispatcher } from "./dispatcher.js";
 import {
   accessSummaryFromWire,
+  conceptRegistryDeltaFromWire,
   conceptsFromWire,
   Result,
   resultFromQueryPayload,
   type AccessSummary,
   type Concept,
+  type ConceptRegistryDelta,
   type DomainSubscription,
 } from "./types.js";
 import { newShortId } from "./id.js";
 import { readServerPayload } from "./wire.js";
+
+// ConceptRegistryFollow is the handle returned by subscribeConceptRegistry: call
+// unsubscribe to stop delivery (removes the local listener and, if the snapshot
+// arrived, sends an UnsubscribeMsg for its subscription id). Closing the
+// connection also stops delivery, so a caller that tears the connection down
+// need not call this.
+export interface ConceptRegistryFollow {
+  unsubscribe: () => void;
+}
 
 export interface QueryCallOptions {
   signal?: AbortSignal;
@@ -141,6 +152,59 @@ export class QueryClient {
       });
     }
     return out;
+  }
+
+  // subscribeConceptRegistry opens a follow-mode concept subscription
+  // (memql#4238): the engine sends a snapshot (reset=true, the whole registry)
+  // and then live add/remove deltas, so a client's concept registry stays
+  // current without a reconnect. onDelta is called for EVERY delta, snapshot
+  // included -- apply a reset by replacing the registry, and an incremental by
+  // upserting `added` (by id) and dropping `removed`. Track `generation`: a gap
+  // means a delta was missed (a slow consumer dropped one), so unsubscribe and
+  // re-subscribe to re-snapshot.
+  //
+  // Unlike the catalog read this is not request/response -- deltas arrive on the
+  // shared event fanout, matched to this subscription by the request id -- so it
+  // returns a handle rather than a Promise.
+  subscribeConceptRegistry(
+    onDelta: (delta: ConceptRegistryDelta) => void,
+    opts: { signal?: AbortSignal } = {},
+  ): ConceptRegistryFollow {
+    const reqId = newShortId();
+    let subscriptionId = "";
+    let closed = false;
+
+    const remove = this.dispatcher.addEventListener((msg) => {
+      const payload = readServerPayload(msg);
+      if (payload?.kind !== "conceptsRegistryDelta") return;
+      const v = payload.value;
+      if (v.requestId !== reqId) return;
+      if (typeof v.subscriptionId === "string" && v.subscriptionId !== "") {
+        subscriptionId = v.subscriptionId;
+      }
+      onDelta(conceptRegistryDeltaFromWire(v));
+    });
+
+    this.dispatcher.send({ conceptsSubscribe: { requestId: reqId, follow: true } });
+
+    const unsubscribe = (): void => {
+      if (closed) return;
+      closed = true;
+      remove();
+      // Only after the snapshot did the server tell us the subscription id; if
+      // we tear down before it arrives, closing the connection is what stops
+      // the (not-yet-started) delivery.
+      if (subscriptionId !== "") {
+        this.dispatcher.send({ unsubscribe: { subscriptionId } });
+      }
+    };
+
+    if (opts.signal) {
+      if (opts.signal.aborted) unsubscribe();
+      else opts.signal.addEventListener("abort", unsubscribe, { once: true });
+    }
+
+    return { unsubscribe };
   }
 
   async getMyAccess(opts: QueryCallOptions = {}): Promise<AccessSummary | null> {

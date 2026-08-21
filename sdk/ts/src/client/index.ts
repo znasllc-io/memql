@@ -13,7 +13,7 @@ export {
   type AttachmentRef,
 } from "./attachments.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
-export { QueryClient, type QueryCallOptions } from "./query.js";
+export { QueryClient, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
 export {
   ModulesClient,
   type Module,
@@ -46,6 +46,7 @@ export {
   rowString,
   type AccessSummary,
   type Concept,
+  type ConceptRegistryDelta,
   type DomainSubscription,
   type Event,
   type GraphAction,
