@@ -239,6 +239,7 @@ export const BoundConcepts = {
   clusterNodes: "v1:cluster:node",
   clusterSettingsCurrent: "v1:identity:clusterSettings",
   clusterSpawnEvents: "v1:cluster:spawnEvent",
+  codeMetricsInWindow: "v1:observability:codeMetric",
   completeHarnessStep: "v1:harness:step",
   completeTodo: "v1:todos:todo",
   completeToolInvocation: "v1:planner:task",

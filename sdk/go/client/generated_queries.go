@@ -1714,6 +1714,60 @@ func ClusterSpawnEventsBuild(args ClusterSpawnEventsArgs) string {
 	return "query clusterSpawnEvents()"
 }
 
+// CodeMetricsInWindow -- codeMetric rows for one bucket inside [windowStart, windowEnd), selected by codeReference prefix (ANY of prefixes) or by the exact codeReference. An empty prefixes list with no codeReference returns nothing. Keyset-paged in row.createdAt order; order by windowStart client-side.
+//
+// Bound concept: v1:observability:codeMetric (machine-readable: BoundConcepts["codeMetricsInWindow"] in generated_concepts.go).
+type CodeMetricsInWindowArgs struct {
+	// codeReference prefixes to match (a module's fqnPrefixes). Required so an absent list is refused; an empty list matches nothing.
+	Prefixes []string
+	// Optional exact codeReference, matched in addition to the prefixes.
+	CodeReference string
+	// Which continuous aggregate the rows came from.
+	// Enum: 1m | 1h
+	Bucket string
+	// Inclusive window start, aligned to the bucket by the caller.
+	WindowStart string
+	// Exclusive window end, aligned to the bucket by the caller.
+	WindowEnd string
+}
+
+// CodeMetricsInWindow calls the engine query codeMetricsInWindow.
+func (qc *QueryClient) CodeMetricsInWindow(ctx context.Context, args CodeMetricsInWindowArgs) (*Result, error) {
+	call := CodeMetricsInWindowBuild(args)
+	return qc.executeNamed(ctx, "codeMetricsInWindow", call)
+}
+
+func CodeMetricsInWindowBuild(args CodeMetricsInWindowArgs) string {
+	var b strings.Builder
+	b.WriteString("query codeMetricsInWindow(")
+	b.WriteString("prefixes: ")
+	b.WriteString(renderMemQLValue(args.Prefixes))
+	if args.CodeReference != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeReference: ")
+		b.WriteString(quoteMemQL(args.CodeReference))
+	}
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bucket: ")
+	b.WriteString(quoteMemQL(args.Bucket))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowStart: ")
+	b.WriteString(quoteMemQL(args.WindowStart))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowEnd: ")
+	b.WriteString(quoteMemQL(args.WindowEnd))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComposedViewById -- Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.go).
