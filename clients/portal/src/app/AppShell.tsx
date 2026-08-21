@@ -2,9 +2,8 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { ClusterBadge } from "../components/ClusterBadge";
-import { ConnectionIndicator } from "../components/ConnectionIndicator";
-import { IdentityBadge } from "../components/IdentityBadge";
 import { RailMark } from "../components/RailMark";
+import { SidebarProfile } from "../components/SidebarProfile";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { CONCEPTS_ROOT } from "../concepts/urls";
 import {
@@ -31,10 +30,11 @@ import { viewPath } from "../views/urls";
 //
 // THE BRAND LIVES IN THE RAIL. The mark at its head doubles as the
 // connection indicator (memql#4180 drives its animation states), and the
-// wordmark beside it is the display face's one chrome appearance. The topbar
-// answers the operations console's two standing questions -- WHICH cluster
-// (ClusterBadge: the origin host) and WHO am I acting as (IdentityBadge) --
-// in one quiet control language on one row.
+// wordmark beside it is the display face's one chrome appearance. The
+// collapse control sits on that same brand row -- quiet, icon-only -- so
+// the rail footer can own the session block (memql#4240): transport,
+// engine version, identity, sign-out. The topbar keeps the cluster host
+// (ClusterBadge) and the theme toggle.
 //
 // THE NAV IS GROUPED, and the grouping is a real distinction rather than
 // tidying. The predefined views are SURFACES an operator works in; the
@@ -195,8 +195,6 @@ export function AppShell(): ReactNode {
       <header className="flex h-12 items-center gap-4 border-b border-line bg-surface px-4">
         <ClusterBadge />
         <div className="ml-auto flex items-center gap-2">
-          <ConnectionIndicator />
-          <IdentityBadge />
           <ThemeToggle />
         </div>
       </header>
@@ -214,7 +212,9 @@ export function AppShell(): ReactNode {
               wordmark is Squada One's one appearance in the chrome. */}
           <div
             className={
-              "flex items-center gap-2.5 px-1.5 pt-1 " + (collapsed ? "justify-center" : "")
+              collapsed
+                ? "flex flex-col items-center gap-1 px-1.5 pt-1"
+                : "flex items-center gap-2.5 px-1.5 pt-1"
             }
           >
             <RailMark size={24} />
@@ -223,6 +223,22 @@ export function AppShell(): ReactNode {
                 MemQL Portal
               </span>
             )}
+            <button
+              type="button"
+              onClick={toggleRail}
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? "Expand the navigation rail" : "Collapse the navigation rail"}
+              className={
+                "rounded p-0.5 text-muted hover:bg-raised hover:text-fg " +
+                (collapsed ? "" : "ml-auto")
+              }
+            >
+              {collapsed ? (
+                <ChevronsRight size={14} aria-hidden="true" />
+              ) : (
+                <ChevronsLeft size={14} aria-hidden="true" />
+              )}
+            </button>
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -232,19 +248,7 @@ export function AppShell(): ReactNode {
             <NavGroup label="Administer" items={administer} collapsed={collapsed} />
           </div>
 
-          <button
-            type="button"
-            onClick={toggleRail}
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? "Expand the navigation rail" : "Collapse the navigation rail"}
-            className="flex items-center justify-center rounded border border-line py-1 text-muted hover:bg-raised hover:text-fg"
-          >
-            {collapsed ? (
-              <ChevronsRight size={14} aria-hidden="true" />
-            ) : (
-              <ChevronsLeft size={14} aria-hidden="true" />
-            )}
-          </button>
+          <SidebarProfile collapsed={collapsed} />
         </nav>
 
         {/* min-h-0 on both axes so a long row list scrolls inside the main

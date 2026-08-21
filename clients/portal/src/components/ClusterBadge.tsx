@@ -13,8 +13,8 @@ import { clusterLabelFor } from "../cluster/endpoint";
 //
 // The BRAND (mark + wordmark) lives in the rail since memql#4179; this badge
 // is purely the cluster fact. The individual replica serving this stream is
-// a different fact again, and it lives on the ConnectionIndicator (the node
-// id from the ServerHello).
+// a different fact again, and it lives on the rail profile (the node id
+// from the ServerHello, memql#4240).
 
 export function ClusterBadge(): ReactNode {
   const cluster = clusterLabelFor(globalThis.location);
