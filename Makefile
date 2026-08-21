@@ -516,8 +516,8 @@ arch-model-check:
 ## regeneration never blanks it.
 frontdoor: frontdoor-hosts frontdoor-paths
 
-## Regenerate the cloud overlay's front door from the closed role set
-## (memql#3767).
+## Regenerate every instance overlay's front door from the closed role set
+## (memql#3767, memql#4204).
 ##
 ## The host set is DERIVED, not listed: three roles plus the sites wildcard plus
 ## the apex, written into ~390 lines of Ingress and Certificate. Hand-maintaining
@@ -538,12 +538,13 @@ frontdoor-hosts-check:
 ## and every HTTP path needs its own Ingress rule. Hand-maintaining that list
 ## left /inbound/{source} and /unsubscribe routed by no overlay at all.
 ##
-## BOTH overlays, not just local: a path routed in local and not in the cloud is
-## the same missing rule, discovered later and only by whoever happens to dial
-## it there.
+## Local plus every instance overlay, not just one: a path routed in local
+## and not in cloud / cloud-entry is the same missing rule, discovered later
+## and only by whoever happens to dial it there.
 frontdoor-paths:
 	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/local/api-front-door.yaml
 	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/cloud/front-door.generated.yaml
+	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/cloud-entry/front-door.generated.yaml
 
 ## CI gate: fail when a front door's generated path block is stale. The
 ## drift this catches is a new public HTTP path that nothing routes -- which

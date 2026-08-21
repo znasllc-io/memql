@@ -11,7 +11,7 @@ import (
 
 // apiFrontDoors is every file carrying a generated bff HTTP path block.
 //
-// TWO FILES, not one. This gate used to live in the local package and check
+// THREE FILES, not two. This gate used to live in the local package and check
 // only that overlay, which was correct while local was the only overlay with a
 // front door. It is not any more: a path routed in local and not in the cloud
 // is the same missing rule as a path routed nowhere, discovered later and only
@@ -24,6 +24,7 @@ import (
 var apiFrontDoors = []string{
 	filepath.Join("local", "api-front-door.yaml"),
 	filepath.Join(cloudOverlay, "front-door.generated.yaml"),
+	filepath.Join(entryOverlay, "front-door.generated.yaml"),
 }
 
 // TestFrontDoorPathsAreNotStale asserts each checked-in path block equals what
