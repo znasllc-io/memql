@@ -71,7 +71,7 @@ templ SetupWizard(data SetupWizardData) {
 				<h2>Cluster domain <span class="text-danger">*</span></h2>
 				<div class="form-row">
 					<label for="domain">Domain</label>
-					<input id="domain" name="domain" type="text" required maxlength="255" autocomplete="off" value={ data.PrefillDomain } placeholder="e.g. acme.com, staging.acme.com, local.znas.io"/>
+					<input id="domain" name="domain" type="text" required maxlength="255" autocomplete="off" value={ data.PrefillDomain } placeholder="e.g. acme.com, staging.acme.com, memql.localhost"/>
 					<span class="help">
 						The cluster's public hostname suffix. Every service runs at a subdomain: app.&lt;domain&gt; for the SPA, identity.&lt;domain&gt; for sign-in, bff.&lt;domain&gt; for the API, agent.&lt;domain&gt; for worker registration. Use local.&lt;your-domain&gt; on a developer machine, staging.&lt;your-domain&gt; for staging, or just &lt;your-domain&gt; in production.
 					</span>

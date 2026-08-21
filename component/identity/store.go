@@ -1603,7 +1603,7 @@ func NewRequestId() string {
 type ClusterSettingsRow struct {
 	// ClusterDomain is the deployment-wide hostname suffix the
 	// operator entered in the /setup wizard (or set via
-	// MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io,
+	// MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: memql.localhost,
 	// staging.acme.com, acme.com. Every public service URL the
 	// cluster builds derives from it (app.<domain>, identity.
 	// <domain>, etc.). Required at bootstrap time.
