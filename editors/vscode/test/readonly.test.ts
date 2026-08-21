@@ -5,12 +5,18 @@
 // including the two cases the table does not have a row for -- not connected,
 // and a file the cluster has never heard of -- because both are where a wrong
 // answer locks somebody out of their own checkout.
+//
+// LOCALITY IS TWO FACTS (memql#4244): the cluster is local, AND this workspace
+// is the checkout the install recorded. Rebuild from checkout is what makes an
+// edit here reach that cluster, and it builds from one directory -- so a second
+// clone of the same repository is a file the cluster will never read.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { CatalogConstruct } from "../src/state/constructCatalog.js";
 import {
+  checkoutHint,
   constructsByPath,
   readonlyPatterns,
   readonlyVerdict,
@@ -54,18 +60,20 @@ const catalog = constructsByPath([CORE, BUNDLE, PROMOTED]);
 // the table
 // -----------------------------------------------------------------------------
 
-test("core engine DSL is read-only against any cluster", () => {
+test("core engine DSL is read-only against every cluster except a local one whose checkout this is", () => {
   for (const clusterLocal of [true, false, undefined]) {
     const v = readonlyVerdict({ path: CORE.originPath, catalog, clusterLocal });
-    assert.equal(v.readonly, true, `local=${String(clusterLocal)}`);
+    assert.equal(v.readonly, true, `local=${String(clusterLocal)} without the checkout`);
     assert.equal(v.reason, "coreSealed");
   }
+  const local = readonlyVerdict({ path: CORE.originPath, catalog, clusterLocal: true, workspaceIsClusterCheckout: true });
+  assert.deepEqual(local, { readonly: false });
 });
 
-test("a product bundle is editable against a local cluster", () => {
-  const v = readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: true });
-  assert.equal(v.readonly, false);
-  assert.equal(v.reason, undefined);
+test("a bundle file unlocks only on a local cluster whose checkout this is", () => {
+  assert.equal(readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: true, workspaceIsClusterCheckout: true }).readonly, false);
+  assert.equal(readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: true }).reason, "remoteCluster");
+  assert.equal(readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: false, workspaceIsClusterCheckout: true }).reason, "remoteCluster");
 });
 
 test("a product bundle is read-only against a remote cluster", () => {
@@ -86,10 +94,14 @@ test("an absent local flag means NOT local, matching ClusterConfig", () => {
 test("switching cluster flips a bundle file, and back", () => {
   // The acceptance criterion, stated as the round trip rather than one
   // direction: a verdict that latches would pass a one-way test.
+  // Written as inline literals rather than a shared `const`: TypeScript checks
+  // an argument literal for unknown properties and does not check a variable,
+  // so a misspelled input name would go unnoticed in the form that reads
+  // tidier.
   const path = BUNDLE.originPath;
-  assert.equal(readonlyVerdict({ path, catalog, clusterLocal: true }).readonly, false);
+  assert.equal(readonlyVerdict({ path, catalog, clusterLocal: true, workspaceIsClusterCheckout: true }).readonly, false);
   assert.equal(readonlyVerdict({ path, catalog, clusterLocal: false }).readonly, true);
-  assert.equal(readonlyVerdict({ path, catalog, clusterLocal: true }).readonly, false);
+  assert.equal(readonlyVerdict({ path, catalog, clusterLocal: true, workspaceIsClusterCheckout: true }).readonly, false);
 });
 
 // -----------------------------------------------------------------------------
@@ -133,8 +145,11 @@ test("the verdict comes from the catalog's origin, not from the path", () => {
   // Both files live under `dsl/`, which is the convention for a product bundle
   // as well as for the engine's own tree -- so a path-shaped rule gets this
   // pair wrong on the first product that follows the convention.
+  // Read as the two REASONS rather than as locked-versus-not, because on a
+  // local cluster this is not a checkout of, both files are read-only -- and
+  // the reasons still differ, which is the whole claim.
   assert.equal(readonlyVerdict({ path: CORE.originPath, catalog, clusterLocal: true }).reason, "coreSealed");
-  assert.equal(readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: true }).readonly, false);
+  assert.equal(readonlyVerdict({ path: BUNDLE.originPath, catalog, clusterLocal: true }).reason, "remoteCluster");
 });
 
 test("a file holding both core and bundle constructs reads as core", () => {
@@ -159,16 +174,38 @@ test("a leading ./ and back-slashes land on the same key", () => {
   }
 });
 
+test("the catalog path and the workspace path agree with or without the dsl/ prefix", () => {
+  const bare = constructsByPath([construct({ originPath: "cognition/queries.memql" })]);
+  assert.equal(readonlyVerdict({ path: "dsl/cognition/queries.memql", catalog: bare }).readonly, true);
+  assert.equal(readonlyVerdict({ path: "cognition/queries.memql", catalog: bare }).readonly, true);
+  const patterns = readonlyPatterns({ catalog: bare, clusterLocal: false });
+  assert.deepEqual(patterns, ["cognition/queries.memql", "dsl/cognition/queries.memql"]);
+});
+
 // -----------------------------------------------------------------------------
 // the patterns written to workspace settings
 // -----------------------------------------------------------------------------
 
-test("the patterns are exactly the read-only files, sorted", () => {
+test("the patterns are exactly the read-only files, in both spellings, sorted", () => {
+  // BOTH SPELLINGS, because the catalog's key is relative to the DSL tree root
+  // (`cognition/queries.memql`) while a repo checkout holds the same file at
+  // `dsl/cognition/queries.memql`. A pattern naming a path that does not exist
+  // is inert in `files.readonlyInclude`; a missing one leaves a file unmarked.
   const remote = readonlyPatterns({ catalog, clusterLocal: false });
-  assert.deepEqual(remote, ["dsl/cognition/queries.memql", "dsl/shop/queries.memql"]);
+  assert.deepEqual(remote, [
+    "cognition/queries.memql",
+    "dsl/cognition/queries.memql",
+    "dsl/shop/queries.memql",
+    "shop/queries.memql",
+  ]);
 
-  const local = readonlyPatterns({ catalog, clusterLocal: true });
-  assert.deepEqual(local, ["dsl/cognition/queries.memql"]);
+  // Local, but a DIFFERENT clone: the cluster rebuilds from somewhere else, so
+  // nothing here is live and the marking is the same one a remote cluster gets.
+  assert.deepEqual(readonlyPatterns({ catalog, clusterLocal: true }), remote);
+
+  // Local, and this IS its checkout: nothing is marked at all, core included.
+  const live = readonlyPatterns({ catalog, clusterLocal: true, workspaceIsClusterCheckout: true });
+  assert.deepEqual(live, []);
 });
 
 test("sorted, so a reconnect does not churn the settings file", () => {
@@ -178,9 +215,12 @@ test("sorted, so a reconnect does not churn the settings file", () => {
     construct({ originPath: "dsl/m/queries.memql", name: "m" }),
   ]);
   assert.deepEqual(readonlyPatterns({ catalog: shuffled, clusterLocal: true }), [
+    "a/queries.memql",
     "dsl/a/queries.memql",
     "dsl/m/queries.memql",
     "dsl/z/queries.memql",
+    "m/queries.memql",
+    "z/queries.memql",
   ]);
 });
 
@@ -206,5 +246,15 @@ test("the two reasons read differently, and each names its way out", () => {
   // an operator with no next step in either case.
   assert.match(core, /new file/);
   assert.match(remote, /Select the local cluster/);
+  // ...and OPEN ITS CHECKOUT, which is the half a developer sitting in a second
+  // clone of the same repository would otherwise have no way to guess.
+  assert.match(remote, /checkout/);
   assert.match(remote, /staging/);
+});
+
+test("a local cluster whose checkout is elsewhere gets a hint, not a lock", () => {
+  const hint = checkoutHint("local", "/home/me/.memql/src");
+  assert.match(hint, /not the checkout/);
+  assert.match(hint, /\/home\/me\/\.memql\/src/);
+  assert.match(hint, /local/);
 });

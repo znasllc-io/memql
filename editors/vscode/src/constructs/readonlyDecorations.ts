@@ -15,6 +15,13 @@
 //       read-only for a reason the operator cannot see, which reads as the
 //       editor being broken rather than as a rule being applied.
 //
+// AND ONE THING THAT IS NOT A LOCK (memql#4244). A local cluster rebuilds from
+// ONE checkout, so a second clone of the same repository is editable -- it is
+// the developer's file -- and yet nothing they write in it reaches that
+// cluster. The decoration provider carries that as a HOVER on an otherwise
+// untouched file; `files.readonlyInclude` is not involved, because there is
+// nothing here to forbid.
+//
 // IT WRITES INTO SOMEBODY'S REPOSITORY, so it is careful about what it owns.
 // `files.readonlyInclude` is a shared object and an operator may have their own
 // entries in it; this removes exactly the keys it wrote last time (recorded in
@@ -28,10 +35,14 @@
 //
 // Refs: #4248 #3762 #3745
 
+import * as path from "node:path";
+
 import * as vscode from "vscode";
 
 import { CLUSTER_DOCUMENT_SCHEME, safeDecode } from "./clusterDocument.js";
 import {
+  catalogKeyFor,
+  checkoutHint,
   constructsByPath,
   readonlyPatterns,
   readonlyVerdict,
@@ -50,6 +61,10 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
   private catalog: ReadonlyMap<string, OriginatedConstruct[]> | undefined;
   private clusterLocal = false;
   private clusterName = "the selected cluster";
+  /** The directory the selected cluster is rebuilt from, or "" when unknown. */
+  private checkout = "";
+  /** Whether a workspace folder IS that directory. Computed once per update. */
+  private workspaceIsClusterCheckout = false;
 
   constructor(private readonly memento: vscode.Memento) {}
 
@@ -61,11 +76,21 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
    */
   async update(
     constructs: readonly OriginatedConstruct[] | undefined,
-    cluster: { name: string; local?: boolean } | undefined,
+    cluster: { name: string; local?: boolean; checkout?: string } | undefined,
   ): Promise<void> {
     this.catalog = constructs === undefined ? undefined : constructsByPath(constructs);
     this.clusterLocal = cluster?.local === true;
     this.clusterName = cluster?.name ?? "the selected cluster";
+    this.checkout = cluster?.checkout ?? "";
+    // HERE, not in provideFileDecoration: the answer is per-cluster, and the
+    // decoration provider is asked once per file in view and again on every
+    // repaint. The empty-checkout guard is load-bearing rather than tidy --
+    // `path.resolve("")` is the process's working directory, so comparing
+    // against "" could match a folder and unlock every file on the strength of
+    // a receipt that records no checkout at all.
+    this.workspaceIsClusterCheckout =
+      this.checkout !== "" &&
+      (vscode.workspace.workspaceFolders ?? []).some((f) => samePath(f.uri.fsPath, this.checkout));
     await this.writeSetting();
     // undefined = "all of them". Which files changed depends on the cluster as
     // well as the catalog, so enumerating would mean diffing two verdict sets
@@ -90,20 +115,57 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
         propagate: false,
       };
     }
-    const path = relativePath(uri);
-    if (path === undefined) return undefined;
+    const filePath = relativePath(uri);
+    if (filePath === undefined) return undefined;
     const verdict = readonlyVerdict({
-      path,
+      path: filePath,
       catalog: this.catalog,
       clusterLocal: this.clusterLocal,
+      workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
     });
-    if (!verdict.readonly || verdict.reason === undefined) return undefined;
+    if (!verdict.readonly || verdict.reason === undefined) return this.checkoutHintFor(filePath);
     const decoration = new vscode.FileDecoration(
       undefined,
       reasonBadge(verdict.reason),
       new vscode.ThemeColor("disabledForeground"),
     );
     decoration.tooltip = reasonTooltip(verdict.reason, this.clusterName);
+    return decoration;
+  }
+
+  /**
+   * The hover for an editable file in the WRONG clone, or undefined.
+   *
+   * Four conditions on top of the editable verdict that got here, and each one
+   * drops a case that would otherwise be told something false: the cluster must
+   * be local (a remote one rebuilds from nothing this developer has), this
+   * workspace must NOT be its checkout, the checkout must be known at all, and
+   * the file must be one the cluster actually loaded -- a file the catalog has
+   * never heard of is a new one, and a new file reaches the cluster by being
+   * promoted rather than by sitting in the right directory.
+   *
+   * WHICH LEAVES IT NARROW TODAY, and worth saying so nobody reads its absence
+   * as a defect: every catalog entry that carries a path is `core` or `bundle`
+   * (promoted and staged constructs live in the database and report no file),
+   * and in the wrong clone both of those are read-only -- so what a developer
+   * there actually sees is `reasonTooltip`, which says the same thing about the
+   * same folder. This is the branch for an editable file the cluster knows, and
+   * it stays because the alternative is a surface that silently says nothing
+   * the first time an origin does carry a path.
+   */
+  private checkoutHintFor(filePath: string): vscode.FileDecoration | undefined {
+    if (!this.clusterLocal || this.workspaceIsClusterCheckout || this.checkout === "") {
+      return undefined;
+    }
+    if (this.catalog?.has(catalogKeyFor(filePath)) !== true) return undefined;
+    // ONE LETTER, which is what VS Code's explorer has room for. It is a marker
+    // the hover explains rather than an abbreviation to decode -- and it is
+    // deliberately not styled like the read-only badges, because nothing here
+    // is read-only.
+    const decoration = new vscode.FileDecoration("L", checkoutHint(this.clusterName, this.checkout));
+    // A hint about ONE file. Propagating it up the tree would put the mark on
+    // every ancestor folder of a checkout that is, itself, perfectly fine.
+    decoration.propagate = false;
     return decoration;
   }
 
@@ -130,7 +192,11 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
       // operator added by hand that happens to name a construct file.
       if (!owned.includes(key)) next[key] = value;
     }
-    const mine = readonlyPatterns({ catalog: this.catalog, clusterLocal: this.clusterLocal });
+    const mine = readonlyPatterns({
+      catalog: this.catalog,
+      clusterLocal: this.clusterLocal,
+      workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
+    });
     for (const key of mine) next[key] = true;
 
     await config.update("readonlyInclude", next, vscode.ConfigurationTarget.Workspace);
@@ -150,4 +216,27 @@ function relativePath(uri: vscode.Uri): string | undefined {
   const folder = vscode.workspace.getWorkspaceFolder(uri);
   if (folder === undefined) return undefined;
   return vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/");
+}
+
+/**
+ * Whether two paths name the same directory.
+ *
+ * `path.resolve` on both sides, so a trailing separator or a relative segment
+ * in the receipt's `--dest` does not read as a different directory from the
+ * folder VS Code reports. Case-insensitive on win32 only: the same two strings
+ * differing in case are one directory there and two on Linux, and getting that
+ * backwards either unlocks a checkout that is not the cluster's or fails to
+ * unlock the one that is.
+ *
+ * Symlinks are NOT resolved. Doing so needs IO, and this runs inside an update
+ * that must not block the editor; the honest failure -- a symlinked checkout
+ * showing the hint -- is a sentence on a hover, which is recoverable, whereas
+ * a blocking stat on every update is not.
+ */
+function samePath(a: string, b: string): boolean {
+  const left = path.resolve(a);
+  const right = path.resolve(b);
+  return process.platform === "win32"
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
 }

@@ -29,6 +29,7 @@ import {
   parseReceipt,
   readReceipt,
   recordedOwner,
+  recordedStackDir,
   removalParams,
   serializeReceipt,
   type Receipt,
@@ -589,4 +590,21 @@ test("a repair collects every value seedBootstrap refuses to run without", () =>
     assert.ok(repair.includes(field), `a repair must collect ${field}`);
   }
   assert.ok(repair.includes("domain"), "and the domain it already collected");
+});
+
+// -----------------------------------------------------------------------------
+// WHERE the checkout landed (memql#4244)
+//
+// A local cluster rebuilds from ONE directory, and the receipt is the only
+// record of which -- $HOME/.memql/src on one machine, a --dest override on
+// another. Reading it back is what lets the editor tell a developer sitting in
+// a second clone of the same repository that their edits reach nothing.
+// -----------------------------------------------------------------------------
+
+test("recordedStackDir reads the checkout directory the clone step reported", () => {
+  const r = emptyReceipt("install");
+  r.entries.push(entry({ stepId: "stackCheckout", script: "install.cloneStack", receipt: "checkout", params: { tag: "v0.17.0", dest: "/home/me/.memql/src" }, result: { dest: "/home/me/.memql/src", commit: "abc" } }));
+  assert.equal(recordedStackDir(r), "/home/me/.memql/src");
+  assert.equal(recordedStackDir(null), "");
+  assert.equal(recordedStackDir(emptyReceipt("install")), "");
 });

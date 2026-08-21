@@ -6,11 +6,21 @@
 //   a file is read-only exactly when editing it CANNOT CHANGE WHAT THE
 //   CLUSTER RUNS.
 //
-// Core constructs are sealed by the engine's core-first invariant, so an edit
-// to one changes nothing on any cluster. A remote cluster loads its bundle from
-// its own image, so an edit to a local checkout of that bundle changes nothing
-// THERE -- the same file against a local cluster is live, which is why the
-// verdict moves when the selected cluster does.
+// A remote cluster loads its bundle from its own image, so an edit to a local
+// checkout of that bundle changes nothing THERE, and the engine's core-first
+// invariant seals core constructs against promotion anywhere.
+//
+// ON A LOCAL CLUSTER WHOSE WORKSPACE IS THE CHECKOUT THE INSTALL RECORDED, an
+// edit to ANY file -- core included -- changes what the cluster runs the next
+// time it is rebuilt from that checkout (Deployments: Rebuild from checkout).
+// So locality is TWO FACTS, not one: the cluster is local, AND this workspace
+// is its checkout. A different clone stays editable (it is the developer's
+// file) but is told it is not the one the cluster builds from.
+//
+// The second fact is the one that is easy to drop, and dropping it is not a
+// near miss: a developer with the engine cloned twice would have both copies
+// unlocked on the strength of one of them being wired to the cluster, and the
+// edits they made in the other would reach nothing while looking live.
 //
 // THE MARKING IS A COURTESY, NOT THE CONTROL. Same doctrine `deploy/actions.ts`
 // states for role tiers: a user can override `files.readonlyInclude`, and what
@@ -56,9 +66,14 @@ export interface OriginatedConstruct {
 
 /**
  * Why a file is read-only. Distinct values because they are distinct
- * situations with distinct ways out: a core file is sealed for everyone
- * forever, while a bundle file becomes editable the moment you select the
- * local cluster.
+ * situations with distinct ways out: a bundle file becomes editable as soon as
+ * the selected cluster is a local one this workspace is the checkout of, while
+ * a core file needs that AND is otherwise sealed against promotion for
+ * everyone, forever.
+ *
+ * NO THIRD VALUE for "a local cluster that builds from somewhere else". That
+ * case is not read-only at all -- the file is the developer's and editing it is
+ * legitimate -- so it is a hint (`checkoutHint`), not a lock.
  */
 export type ReadonlyReason = "coreSealed" | "remoteCluster";
 
@@ -80,24 +95,25 @@ export function reasonTooltip(reason: ReadonlyReason, clusterName: string): stri
   if (reason === "coreSealed") {
     return (
       "Core engine DSL -- read-only. The engine's core-first invariant seals these " +
-      "constructs, so an edit here changes nothing on any cluster. Training a new " +
+      `constructs against promotion, and ${clusterName} does not build its core tree ` +
+      "from this folder -- so an edit here changes nothing it runs. Training a new " +
       "construct means a new file, not an edit to this one."
     );
   }
   return (
     `This is a product bundle, and ${clusterName} is not local -- read-only. ` +
     "A remote cluster loads its bundle from its own image, so editing this checkout " +
-    "changes nothing there. Select the local cluster to edit it."
+    "changes nothing there. Select the local cluster and open its checkout to edit it."
   );
 }
 
 export interface ReadonlyInput {
   /**
    * The file, as a workspace-relative POSIX path. Compared against the
-   * catalog's `originPath`, which is relative to the CLUSTER's tree -- so the
-   * two agree only when the workspace IS that checkout. When they do not agree
-   * nothing matches and the file stays editable, which is the safe direction:
-   * see the note on `constructsByPath`.
+   * catalog's `originPath` through `catalogKeyFor`, which reconciles the one
+   * shape difference between the two (a checkout's `dsl/` prefix). When they
+   * still do not agree nothing matches and the file stays editable, which is
+   * the safe direction: see the note on `constructsByPath`.
    */
   path: string;
   /**
@@ -117,6 +133,18 @@ export interface ReadonlyInput {
   catalog?: ReadonlyMap<string, OriginatedConstruct[]>;
   /** Whether the selected cluster is local. Absent means NOT local. */
   clusterLocal?: boolean;
+  /**
+   * Whether some workspace folder IS the selected cluster's recorded checkout.
+   * Absent means no.
+   *
+   * THE SECOND HALF OF LOCALITY, and it is a separate input rather than a
+   * refinement of `clusterLocal` because the two are answered by different
+   * sources: the cluster registry says local, the install receipt says which
+   * directory the cluster is rebuilt from. Folding them into one boolean would
+   * make the caller do the comparison, which is where a caller that forgot it
+   * would be indistinguishable from one that did it and got true.
+   */
+  workspaceIsClusterCheckout?: boolean;
 }
 
 /**
@@ -132,17 +160,24 @@ export function readonlyVerdict(input: ReadonlyInput): ReadonlyVerdict {
   const { catalog } = input;
   if (catalog === undefined) return EDITABLE;
 
-  const constructs = catalog.get(normalizePath(input.path));
+  const constructs = catalog.get(catalogKeyFor(input.path));
   if (constructs === undefined || constructs.length === 0) return EDITABLE;
+
+  // THE TWO FACTS, tested together and BEFORE either origin. On a local cluster
+  // this workspace is the checkout of, every origin is live: the next rebuild
+  // loads these bytes, core included. Testing them after `core` would seal the
+  // very tree the rebuild is going to compile.
+  if (input.clusterLocal === true && input.workspaceIsClusterCheckout === true) return EDITABLE;
 
   // A file holds many constructs and they share an origin -- one file comes
   // from one tree. `some` rather than `every` anyway, because a file that
-  // somehow mixed them contains a core construct, and the core reason is the
-  // one that cannot be resolved by selecting a different cluster.
+  // somehow mixed them contains a core construct, and the core reason carries
+  // the extra constraint the bundle one does not: a core name cannot be
+  // promoted over at all, whichever cluster is selected.
   if (constructs.some((c) => c.origin === "core")) {
     return { readonly: true, reason: "coreSealed" };
   }
-  if (constructs.some((c) => c.origin === "bundle") && input.clusterLocal !== true) {
+  if (constructs.some((c) => c.origin === "bundle")) {
     return { readonly: true, reason: "remoteCluster" };
   }
   // `promoted` and `staged` both fall through to EDITABLE, which is the answer
@@ -168,7 +203,7 @@ export function constructsByPath(
   const byPath = new Map<string, OriginatedConstruct[]>();
   for (const construct of constructs) {
     if (construct.originPath === "") continue;
-    const key = normalizePath(construct.originPath);
+    const key = catalogKeyFor(construct.originPath);
     const bucket = byPath.get(key);
     if (bucket === undefined) byPath.set(key, [construct]);
     else bucket.push(construct);
@@ -193,17 +228,60 @@ export function constructsByPath(
 export function readonlyPatterns(input: {
   catalog?: ReadonlyMap<string, OriginatedConstruct[]>;
   clusterLocal?: boolean;
+  workspaceIsClusterCheckout?: boolean;
 }): string[] {
   const { catalog } = input;
   if (catalog === undefined) return [];
   const out: string[] = [];
-  for (const path of catalog.keys()) {
-    const verdict = readonlyVerdict({ path, catalog, clusterLocal: input.clusterLocal });
-    if (verdict.readonly) out.push(path);
+  for (const key of catalog.keys()) {
+    const verdict = readonlyVerdict({
+      path: key,
+      catalog,
+      clusterLocal: input.clusterLocal,
+      workspaceIsClusterCheckout: input.workspaceIsClusterCheckout,
+    });
+    // BOTH SPELLINGS. `files.readonlyInclude` matches the path VS Code sees,
+    // which is workspace-relative: a repo checkout holds the file at
+    // `dsl/cognition/queries.memql` while a bare DSL tree holds it at
+    // `cognition/queries.memql`, and this module cannot see which shape the
+    // workspace has. Emitting the one that does not exist costs nothing (a
+    // pattern matching no file is inert); omitting the one that does leaves the
+    // buffer editable with a badge beside it saying otherwise.
+    if (verdict.readonly) out.push(key, `dsl/${key}`);
   }
   // Sorted so the written setting is stable: an unordered rewrite churns the
   // workspace settings file on every reconnect and shows up as a diff.
   return out.sort();
+}
+
+/**
+ * What a developer editing the wrong clone is told.
+ *
+ * A HINT, NOT A LOCK, and the distinction is the design: the file is theirs and
+ * editing it is legitimate -- what is not true is that the cluster will see it.
+ * Marking it read-only would be this editor claiming ownership of a repository
+ * it merely happens to have open.
+ */
+export function checkoutHint(clusterName: string, checkout: string): string {
+  return `This folder is not the checkout ${clusterName} rebuilds from (${checkout}). Edits here do not reach ${clusterName}; open that checkout to change what it runs.`;
+}
+
+/**
+ * The catalog key for a path, with or without the checkout's `dsl/` prefix.
+ *
+ * The catalog's `originPath` is relative to the DSL TREE ROOT
+ * (`cognition/queries.memql` -- see `construct_catalog.go`), while a repo
+ * checkout holds the same file one level down, at `dsl/cognition/queries.memql`.
+ * Stripping the prefix on BOTH sides is what makes the two agree; without it
+ * every file in an engine checkout reads as one the cluster has never heard of,
+ * which is silently editable -- the failure that looks like nothing is wrong.
+ *
+ * A product bundle whose own tree happens to contain a `dsl/` directory loses
+ * that segment too. Harmless: the key only has to be derived the same way on
+ * both sides, and it is.
+ */
+export function catalogKeyFor(path: string): string {
+  return normalizePath(path).replace(/^dsl\//, "");
 }
 
 /**

@@ -1262,6 +1262,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       try {
         const result = await new ConstructsClient(dispatcher).listConstructs();
+        // The receipt read that answers "which checkout does this cluster
+        // rebuild from" happens HERE -- once per catalog fetch, which is also
+        // the only moment the marking is recomputed. Not in the decoration
+        // provider, which is asked once per file in the explorer and again on
+        // every repaint.
+        await refreshRecordedCheckout();
         // `currentRunCluster` deliberately, not a second read of clusters.yaml:
         // it is what the run path's write confirmation consults, so "may I edit
         // this file" and "will this write ask first" cannot disagree about
@@ -2187,8 +2193,10 @@ function registerRunSurface(
     publishDiagnostics: (mapped) => publishRunDiagnostics(runDiagnostics, mapped),
   });
   runOrchestrator = orchestrator;
-  // Warm the name -> config cache the synchronous cluster() read depends on.
+  // Warm the name -> config cache the synchronous cluster() read depends on,
+  // and the receipt read the checkout half of a cluster's identity comes from.
   void refreshClusterCache(clustersPath);
+  void refreshRecordedCheckout();
 
   // ---------------------------------------------------------------------------
   // The four training actions (memql#3763)
@@ -2501,6 +2509,16 @@ function registerRunSurface(
 
     const trainingLens = new TrainingCodeLensProvider();
     trainingLens.setClient(lspBridge);
+    // The `edited` lens is locality-aware (memql#4244): Rebuild from checkout on
+    // a local cluster, and on a remote one the sentence about rollouts and no
+    // button. Pushed on every connection change for the same reason the catalog
+    // is -- VS Code re-asks a lens provider when the DOCUMENT changes, and the
+    // selected cluster is not part of the document.
+    trainingLens.setCluster(currentRunCluster(clustersPath, conns));
+    const unsubscribeLensCluster = conns.onDidChangeState(() => {
+      trainingLens.setCluster(currentRunCluster(clustersPath, conns));
+    });
+    context.subscriptions.push({ dispose: unsubscribeLensCluster });
     const trainingDecorations = new TrainingDecorations();
     trainingDecorations.setClient(lspBridge);
     trainingDecorations.activate();
@@ -2697,6 +2715,13 @@ let runOrchestrator: RunOrchestrator | undefined;
 // the same reason the others are -- it is a release tag, not a credential --
 // and it is what lets a severed session say the cluster is older than the
 // extension instead of only "stream closed".
+//
+// The recorded CHECKOUT joined it in memql#4244, and it is a fact about THIS
+// MACHINE rather than about the cluster: the install receipt records one
+// directory, and a caller only learns something from it in combination with
+// `local`. That pairing is the whole of the locality rule
+// (`constructs/readonly.ts`), which is why the two travel together here rather
+// than being resolved separately by each surface that needs them.
 function currentRunCluster(
   clustersPath: string,
   conns: ConnectionManager
@@ -2719,7 +2744,26 @@ function currentRunCluster(
     // is older than the extension (memql#4000). Undefined stays undefined -- an
     // unlearned version produces no hint rather than a guess.
     version: cluster.version,
+    // Where the installer put the checkout, from the cached receipt read. "" is
+    // UNKNOWN, never "somewhere else": a surface that read it as a mismatch
+    // would tell every developer their folder is the wrong one.
+    checkout: recordedCheckoutDir,
   };
+}
+
+// The checkout directory the install receipt records, cached at module scope
+// beside the cluster configs above and for the same reason: `currentRunCluster`
+// is SYNCHRONOUS (RunDeps.cluster() is on the run path and must not do file IO)
+// while reading a receipt is not.
+//
+// Refreshed where the answer is USED -- the Constructs tree's catalog load,
+// which is the one place the read-only marking is recomputed -- and warmed once
+// when the run surface comes up so nothing else that asks earlier sees a blank.
+let recordedCheckoutDir = '';
+
+async function refreshRecordedCheckout(): Promise<void> {
+  const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+  recordedCheckoutDir = recordedStackDir(receipt);
 }
 
 // A tiny name -> config cache so the synchronous RunDeps.cluster() does not

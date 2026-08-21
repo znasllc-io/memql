@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 
 import {
   COMMAND_PROMOTE,
+  COMMAND_REBUILD,
   TRAINING_STATES,
   countStates,
   gutterMarkFor,
@@ -206,8 +207,10 @@ test("with actions on, each state offers exactly what the design's table says", 
   // Not a disabled control: absent. A seeded construct needs a rollout, which
   // is not something this editor can offer.
   assert.deepEqual(of("seeded"), []);
-  // No action here: locality decides the action (Task 3 of the plan), and the
-  // lens is where it is said.
+  // With no cluster in the options, locality is UNKNOWN -- and an unknown
+  // locality offers nothing, because Rebuild from checkout is meaningless
+  // against a cluster this editor cannot say is local. The two locality cases
+  // are the next test.
   assert.deepEqual(of("edited"), []);
   // Staged is the only state with a Train, and Train is COMMAND_PROMOTE under a
   // title that names the consequence -- on the wire it IS a promote.
@@ -216,6 +219,16 @@ test("with actions on, each state offers exactly what the design's table says", 
     "Train (make it live for everyone)",
     "Demote",
   ]);
+});
+
+test("edited offers Rebuild on a local cluster and only words on a remote one", () => {
+  const local = trainingLensPlans([construct("edited")], { offerActions: true, cluster: { name: "local", local: true } })[0]!;
+  assert.deepEqual(local.actions.map((a) => [a.title, a.command]), [["Rebuild from checkout", COMMAND_REBUILD]]);
+  assert.match(local.detail, /Rebuild from checkout/);
+  const remote = trainingLensPlans([construct("edited")], { offerActions: true, cluster: { name: "staging", local: false } })[0]!;
+  assert.deepEqual(remote.actions, []);
+  assert.match(remote.detail, /differs from what staging runs/);
+  assert.match(remote.detail, /rollout/);
 });
 
 test("staged trains through the promote command, not a command of its own", () => {
@@ -268,6 +281,19 @@ test("the status bar reports only what needs attention", () => {
   assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1, edited: 0, staged: 1 });
   // The design's example, exactly.
   assert.equal(statusBarText(counts), "3 untrained · 1 drifted");
+});
+
+test("an edited construct needs attention, so the bar says so beside the other two", () => {
+  // A seeded construct whose source has been changed is exactly the "I edited
+  // this and nothing happened" case the bar exists for -- the difference from
+  // `drifted` is only which act applies it (a rebuild, not a promote), which is
+  // the lens's business rather than the count's. Counting it in the list and
+  // not in the bar would make the number disagree with the rows it clicks
+  // through to.
+  const counts = countStates([construct("edited", "a"), construct("edited", "b"), construct("drifted", "c")]);
+  assert.equal(statusBarText(counts), "1 drifted · 2 edited");
+  assert.match(statusBarTooltip(counts), /2 construct\(s\)/);
+  assert.equal(statusBarText(countStates([construct("edited", "a")])), "1 edited");
 });
 
 test("an all-trained file says nothing", () => {
@@ -444,15 +470,16 @@ test("the list carries exactly the constructs the status bar counts", () => {
     construct("seeded", "c"),
     construct("drifted", "d"),
     construct("unknown", "e"),
+    construct("edited", "f"),
   ];
   const counts = countStates(constructs);
   const entries = trainingListEntries(constructs);
 
-  assert.equal(entries.length, counts.untrained + counts.drifted);
-  assert.equal(statusBarText(counts), "1 untrained · 1 drifted");
+  assert.equal(entries.length, counts.untrained + counts.drifted + counts.edited);
+  assert.equal(statusBarText(counts), "1 untrained · 1 drifted · 1 edited");
   assert.deepEqual(
     entries.map((e) => e.construct.name),
-    ["b", "d"],
+    ["b", "d", "f"],
   );
 });
 

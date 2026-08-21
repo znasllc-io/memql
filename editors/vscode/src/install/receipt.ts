@@ -576,6 +576,33 @@ export function recordedStackCommit(receipt: Receipt | null): string {
 }
 
 /**
+ * WHERE a previous run put the checkout (memql#4244).
+ *
+ * The fourth reader over the same `stackCheckout` entry, and the one that
+ * answers a different KIND of question from the three above it. Those say what
+ * a repair must replay; this says which directory on this machine the local
+ * cluster is rebuilt FROM -- which is what lets the editor tell a developer
+ * that the clone they are typing in is not that directory.
+ *
+ * The RESULT first, the param second. clone-stack.sh sets `result.dest` on
+ * every run that completes, so that is where the tree demonstrably IS; the
+ * param is the fallback for a run that died before reporting one, where the
+ * directory it was pointed at is the best evidence available and the one a
+ * repair will use.
+ *
+ * Empty means the receipt records no checkout -- an install that never reached
+ * the clone step, or a cluster somebody registered by hand. The caller must
+ * treat that as "unknown", never as "somewhere else": an editor that read it as
+ * a mismatch would tell every developer their checkout is the wrong one.
+ */
+export function recordedStackDir(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "stackCheckout");
+  const dest = entry?.result?.dest ?? entry?.params?.dest;
+  return typeof dest === "string" ? dest.trim() : "";
+}
+
+/**
  * What KIND of ref a previous run was asked for: "tag", "branch", "commit", or
  * "" when the receipt predates memql#3901 or records no checkout.
  *

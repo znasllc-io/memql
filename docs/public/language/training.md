@@ -531,15 +531,25 @@ of it:
 
 | File | Connected cluster | Editable |
 |---|---|---|
-| core engine `dsl/` | any | no |
-| product bundle `dsl/` | local | yes |
-| product bundle `dsl/` | remote | no |
+| any origin | local, **and this workspace is its recorded checkout** | yes |
+| core engine `dsl/` | anything else | no |
+| product bundle `dsl/` | anything else | no |
+| promoted or staged | any | yes — it lives in the database, not in a tree |
 | a new file | any | yes — this is the training path |
 
-Core constructs are sealed by the engine's core-first invariant, so an edit to
-one changes nothing on any cluster. A remote cluster loads its bundle from its
-own image, so editing a local checkout of that bundle changes nothing *there*
-— which is why the verdict moves when you select a different cluster.
+**Locality is two facts, not one:** the cluster is local, *and* this workspace
+is the checkout the install recorded. A local cluster is rebuilt from exactly
+one directory — **Rebuild from checkout**, in the Deployments view — so an edit
+made there changes what it runs the next time it is rebuilt, core included. An
+edit made in a second clone of the same repository reaches nothing, which is
+why the second fact has to be checked and not assumed from the first.
+
+Everywhere else the file is read-only for one of two reasons, and they have
+different ways out. A remote cluster loads its bundle from its own image, so
+editing a local checkout of that bundle changes nothing *there* — select the
+local cluster and open its checkout. Core constructs are additionally sealed
+against promotion by the engine's core-first invariant, so on any cluster that
+is not rebuilt from this folder, an edit to one changes nothing it runs.
 
 A **new file is never blocked**. Adding one is how training starts.
 

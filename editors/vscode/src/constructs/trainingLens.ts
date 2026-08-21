@@ -11,6 +11,12 @@
 // and promotion is a strictly larger commitment than a run, so the
 // no-run-on-save line this extension already holds matters more here, not less.
 //
+// THE SIXTH COMMAND IS NOT ONE OF THE FOUR. `edited` offers Rebuild from
+// checkout (memql#4244), which is `memql.deployments.rebuildFromCheckout` --
+// registered by the Deployments surface, not by `src/training/actions.ts`, and
+// offered only when the selected cluster is local. Same rule as above applies
+// to it: the lens must not be able to post to it before it exists.
+//
 // THE ACTION LENSES ARE ON, as of #3763 -- which is the change that registers
 // the four commands they post to, and they were switched on in it for that
 // reason and no other. A Promote lens posting to an unregistered command fails
@@ -35,10 +41,26 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
   readonly onDidChangeCodeLenses = this.changed.event;
 
   private client: TrainingStateClient | undefined;
+  private cluster: { name: string; local: boolean } | undefined;
 
   /** Point at a language client, or at nothing. Refreshes either way. */
   setClient(client: TrainingStateClient | undefined): void {
     this.client = client;
+    this.changed.fire();
+  }
+
+  /**
+   * Point at a cluster, or at nothing. Refreshes either way.
+   *
+   * PUSHED, and it must be: `edited` renders a different sentence and a
+   * different action per locality (memql#4244), and VS Code does not re-ask a
+   * lens provider because something outside the document changed. Without the
+   * refresh, selecting the local cluster would leave "seeded constructs change
+   * by rollout" on screen beside a cluster that rebuilds on request -- until
+   * the developer happened to type in the file.
+   */
+  setCluster(cluster: { name: string; local: boolean } | undefined): void {
+    this.cluster = cluster;
     this.changed.fire();
   }
 
@@ -66,7 +88,11 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
     }
 
     const lenses: vscode.CodeLens[] = [];
-    for (const plan of trainingLensPlans(parseTrainingConstructs(raw), { offerActions: true })) {
+    const plans = trainingLensPlans(parseTrainingConstructs(raw), {
+      offerActions: true,
+      cluster: this.cluster,
+    });
+    for (const plan of plans) {
       const range = toRange(plan.construct.signatureRange);
       // The state label is NOT a command. It is a fact about the construct, and
       // giving it a command would make a developer wonder what clicking it does.
