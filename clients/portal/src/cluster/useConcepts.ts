@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import type { Concept } from "@znasllc-io/memql-sdk-core/client";
+import { useEffect, useRef, useState } from "react";
+import type { Concept, ConceptRegistryFollow } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "./ClusterProvider";
+import { EMPTY_REGISTRY, applyRegistryDelta, type RegistryState } from "../concepts/registryDelta";
 
 export interface ConceptsState {
   concepts: Concept[];
@@ -9,52 +10,71 @@ export interface ConceptsState {
   error: string;
 }
 
-// useConcepts reads the cluster's concept registry (ConceptsListMsg).
+// useConcepts reads the cluster's concept registry and keeps it LIVE (memql#4238).
 //
-// Re-fetched whenever the QueryClient identity changes, which is exactly once
-// per successful dial -- so a reconnect refreshes the registry and a
-// disconnect empties it rather than leaving a stale list on screen looking
-// live.
+// It opens a follow-mode subscription (QueryClient.subscribeConceptRegistry):
+// the engine sends a snapshot then add/remove deltas, so a concept promoted,
+// retired or removed into the running cluster appears WITHOUT a reconnect. The
+// deltas are folded in place by applyRegistryDelta, preserving the sorted-by-id
+// invariant; a generation gap (a dropped delta) triggers a re-snapshot rather
+// than a corrupted list.
+//
+// Re-subscribed whenever the QueryClient identity changes (once per dial); a
+// disconnect empties it rather than leaving a stale list on screen looking live.
 export function useConcepts(): ConceptsState {
   const { query } = useCluster();
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // The reduced registry state lives in a ref, not React state: the delta
+  // handler must read the CURRENT state to fold onto (and to detect a gap)
+  // without re-running the subscribe effect on every delta.
+  const stateRef = useRef<RegistryState>(EMPTY_REGISTRY);
 
   useEffect(() => {
     if (query === null) {
+      stateRef.current = EMPTY_REGISTRY;
       setConcepts([]);
       setLoading(false);
       setError("");
       return;
     }
 
-    // Dropped rather than aborted on unmount: the SDK's QueryCallOptions do
-    // take an AbortSignal, but the reply still has to be read off the shared
-    // stream, and a settle that lands after unmount must not write state.
     let live = true;
+    let follow: ConceptRegistryFollow | null = null;
     setLoading(true);
     setError("");
+    stateRef.current = EMPTY_REGISTRY;
 
-    void query
-      .listConcepts()
-      .then((list) => {
-        if (!live) return;
-        // Sorted here rather than at each render site: the wire order is the
-        // registry's iteration order, which is stable but arbitrary, and two
-        // screens listing the same registry differently is its own small bug.
-        setConcepts([...list].sort((a, b) => a.id.localeCompare(b.id)));
-      })
-      .catch((err: unknown) => {
+    // subscribe (re-)opens the follow stream. A generation gap re-runs exactly
+    // this, after tearing the previous stream down and resetting the
+    // accumulator -- the honest response to "you missed a delta".
+    const subscribe = (): void => {
+      try {
+        follow = query.subscribeConceptRegistry((delta) => {
+          if (!live) return;
+          const { state: next, gap } = applyRegistryDelta(stateRef.current, delta);
+          if (gap) {
+            follow?.unsubscribe();
+            stateRef.current = EMPTY_REGISTRY;
+            subscribe();
+            return;
+          }
+          stateRef.current = next;
+          setConcepts(next.concepts);
+          setLoading(false);
+        });
+      } catch (err: unknown) {
         if (!live) return;
         setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
+        setLoading(false);
+      }
+    };
+    subscribe();
 
     return () => {
       live = false;
+      follow?.unsubscribe();
     };
   }, [query]);
 
