@@ -47,7 +47,7 @@ concept auditEvent {
   actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / developer / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
-  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "passkeyIdentity", "")  @default("")  @description("Concept type of the target row, if any.")
+  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "")  @default("")  @description("Concept type of the target row, if any. passkeyIdentity and badgeIdentity name the v1:identity:identity VARIANT rather than the concept, so a credential whose lifecycle is audited on its own (passkey register / login / rename / revoke, badge grant) stays distinguishable in the trail without parsing `action`. Every value here must also be accepted by createAuditEvent, and every value a Go writer emits must be here -- test/dslconformance/identity_audit_enum_contract_test.go walks the writers (memql#4213).")
   targetId        string  @description("Identifier of the target row when targetType is set.")
   targetEmail     string  @description("Email associated with the target, if applicable. Useful for filtering audit history by user without needing a join.")
 

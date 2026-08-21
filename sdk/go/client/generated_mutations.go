@@ -2225,7 +2225,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | passkeyIdentity
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
