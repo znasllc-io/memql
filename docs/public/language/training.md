@@ -112,10 +112,10 @@ needs attention: a file whose constructs are all trained shows nothing.
 
 ---
 
-## The six states
+## The seven states
 
-A construct in a file you are editing is in one of six states with respect to
-the cluster you are connected to.
+A construct in a file you are editing is in one of seven states with respect
+to the cluster you are connected to.
 
 | State | Meaning |
 |---|---|
@@ -124,6 +124,7 @@ the cluster you are connected to.
 | **trained** | promoted, persisted, and live for everyone |
 | **staged** | persisted and live **for you**. The cluster has it and no other caller can reach it |
 | **seeded** | loaded from disk at boot. The cluster has it, but it was never promoted, and it cannot be changed without a rollout |
+| **edited** | loaded from disk at boot, and your source no longer matches what the cluster loaded. Not drifted -- nothing was promoted. A rollout applies it: on a local cluster, **Rebuild from checkout** in the Deployments view |
 | **unknown** | there is no connected cluster, so the question has no answer |
 
 `seeded` is distinct from `trained` and the distinction is the point: there is
@@ -134,10 +135,11 @@ with a **Train** action, and collapsing it into `trained` would claim the
 cluster runs something only one person can call.
 
 A staged construct you have edited stays `staged` rather than becoming
-`drifted`, and that is deliberate. Drift is defined against a **promotion**, and
-a staged construct has no promoted version to have drifted from — the same
-argument that keeps an edited seeded construct `seeded`. Re-staging is how you
-update it.
+`drifted`, and that is deliberate: drift is defined against a **promotion**,
+and a staged construct has no promoted version to have drifted from.
+Re-staging is how you update it. An edited **seeded** construct is `edited`
+for the mirror reason -- there is nothing to promote over, and the editor
+says so rather than reporting it current.
 
 `unknown` is distinct from `untrained` for a blunter reason. A disconnected
 editor must never report that the cluster does not have your work — it does not

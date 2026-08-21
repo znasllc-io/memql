@@ -1,7 +1,7 @@
 package main
 
 // training_acceptance_test.go is memql#3759's first acceptance criterion taken
-// literally: ALL FIVE STATES, FROM A REAL DOCUMENT AGAINST A REAL CATALOG.
+// literally: EVERY STATE, FROM A REAL DOCUMENT AGAINST A REAL CATALOG.
 //
 // "Real" is doing work in both halves, and the point of a separate file is that
 // neither half is a fixture:
@@ -183,9 +183,9 @@ func insertDocLine(t *testing.T, doc, name, line string) string {
 	return ""
 }
 
-// TestTrainingState_AllFiveStatesAgainstTheRealEngineCatalog is the acceptance
-// criterion. One real document, one real catalog, five states.
-func TestTrainingState_AllFiveStatesAgainstTheRealEngineCatalog(t *testing.T) {
+// TestTrainingState_AllStatesAgainstTheRealEngineCatalog is the acceptance
+// criterion. One real document, one real catalog, every state.
+func TestTrainingState_AllStatesAgainstTheRealEngineCatalog(t *testing.T) {
 	source, err := os.ReadFile(realCatalogDocPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", realCatalogDocPath, err)
@@ -228,6 +228,20 @@ func TestTrainingState_AllFiveStatesAgainstTheRealEngineCatalog(t *testing.T) {
 	if seeded == 0 {
 		t.Fatal("no construct reported seeded; the loop above asserted nothing")
 	}
+
+	// --- edited ---------------------------------------------------------------
+	//
+	// The same unsaved edit the `drifted` case below makes, against the
+	// UNTOUCHED catalog: origin is still `core`, so the mismatch reads as
+	// `edited`, not `drifted` -- drift is defined against a promotion, and this
+	// construct has none.
+	openDoc(t, s, realCatalogDocURI, insertDocLine(t, doc, target, "/// an unsaved edit"))
+	pushRealCatalog(t, h, catalog)
+	if got := statesByName(decodeTraining(t, h, realCatalogDocURI))[target]; got != trainingStateEdited {
+		t.Errorf("query %s = %q after an unsaved edit against an untouched (core) catalog; want %q",
+			target, got, trainingStateEdited)
+	}
+	openDoc(t, s, realCatalogDocURI, doc)
 
 	// --- trained ------------------------------------------------------------
 	//
@@ -310,6 +324,7 @@ var trainingWireNames = map[string]string{
 	trainingStateDrifted:    "TRAINING_STATES",
 	trainingStateTrained:    "TRAINING_STATES",
 	trainingStateSeeded:     "TRAINING_STATES",
+	trainingStateEdited:     "TRAINING_STATES",
 	trainingStateUnknown:    "TRAINING_STATES",
 	trainingStateStaged:     "TRAINING_STATES",
 }

@@ -32,12 +32,16 @@ import type { LspRange } from "../constructs/runnable.js";
 // -----------------------------------------------------------------------------
 
 /**
- * The six states, from design §2 plus memql#3928.
+ * The seven states, from design §2 plus memql#3928.
  *
  * `seeded` is distinct from `trained` and the distinction is the point: a
  * seeded construct was loaded from disk at boot, so the cluster HAS it but it
  * was never promoted -- and it cannot be, short of a rollout. Collapsing the
  * two would offer a Demote on something there is nothing to demote.
+ *
+ * `edited` is seeded, and the buffer no longer matches what the cluster
+ * loaded. Not `drifted`: drift is defined against a promotion. A rollout
+ * applies it -- locally, Rebuild from checkout.
  *
  * `staged` is distinct from `trained` on the same kind of argument: it is
  * durable on the cluster and callable BY ITS AUTHOR ALONE, and it is the only
@@ -45,12 +49,20 @@ import type { LspRange } from "../constructs/runnable.js";
  * cluster runs something only one person can call; collapsing it into
  * `untrained` would deny that the cluster has it at all, and offer a Promote
  * that is really a Train.
+ *
+ * NO COMMENT WITH A COMMA INSIDE THIS ARRAY LITERAL. The acceptance gate
+ * (`TestTrainingWireNamesMatchTheExtension` in
+ * cmd/memql-lsp/training_acceptance_test.go) reads this array as TEXT and
+ * splits its bracket contents on `,` without stripping comments first, so a
+ * comma inside an in-array comment is indistinguishable to it from an element
+ * separator. Explanations for a state belong up here, in the doc comment.
  */
 export const TRAINING_STATES = [
   "untrained",
   "drifted",
   "trained",
   "seeded",
+  "edited",
   "staged",
   "unknown",
 ] as const;
@@ -173,6 +185,11 @@ export function gutterMarkFor(state: TrainingState): GutterMark | undefined {
       return "untrained";
     case "drifted":
       return "drifted";
+    // The gutter's one question is answered "no", and that is the drifted
+    // mark. HOW it gets applied -- rollout, not promote -- is the lens's
+    // business.
+    case "edited":
+      return "drifted";
     case "trained":
     case "seeded":
     // `staged` is LIVE, and no fourth mark. The gutter answers one question --
@@ -275,6 +292,8 @@ function detailFor(state: TrainingState): string {
     case "seeded":
       // The one state whose whole content is why there is nothing to do.
       return "Loaded from disk when the cluster booted, rather than promoted -- so there is nothing here to demote, and changing it needs a rollout.";
+    case "edited":
+      return "Loaded from disk when the cluster booted, and your source no longer matches what it loaded. Nothing here can be promoted -- a seeded construct changes by rollout.";
     case "staged":
       return "Staged on this cluster: persisted and replayed at boot, and callable by you and by nobody else. Train it to make it live for everyone.";
     case "unknown":
@@ -319,6 +338,13 @@ function actionsFor(state: TrainingState): TrainingAction[] {
         { title: "Train (make it live for everyone)", command: COMMAND_PROMOTE },
         { title: "Demote", command: COMMAND_DEMOTE },
       ];
+    case "edited":
+      // No action here: locality decides the action (Task 3 of the plan --
+      // Rebuild from checkout on a local cluster), and the lens is where it
+      // is said. Its own case label rather than a fallthrough into `seeded`
+      // below, because the reason is different even though the answer is
+      // the same today.
+      return [];
     case "seeded":
     case "unknown":
       // NO ACTION, and rendered as the absence of one rather than as a disabled
@@ -346,11 +372,19 @@ export interface TrainingCounts {
   drifted: number;
   trained: number;
   seeded: number;
+  edited: number;
   staged: number;
 }
 
 export function countStates(constructs: readonly TrainingConstruct[]): TrainingCounts {
-  const counts: TrainingCounts = { untrained: 0, drifted: 0, trained: 0, seeded: 0, staged: 0 };
+  const counts: TrainingCounts = {
+    untrained: 0,
+    drifted: 0,
+    trained: 0,
+    seeded: 0,
+    edited: 0,
+    staged: 0,
+  };
   for (const c of constructs) {
     if (c.state !== "unknown") counts[c.state] += 1;
   }
@@ -432,7 +466,12 @@ export function trainingListEntries(
 ): TrainingListEntry[] {
   const out: TrainingListEntry[] = [];
   for (const construct of constructs) {
-    if (construct.state !== "untrained" && construct.state !== "drifted") continue;
+    if (
+      construct.state !== "untrained" &&
+      construct.state !== "drifted" &&
+      construct.state !== "edited"
+    )
+      continue;
     out.push({
       construct,
       label: `${construct.kind} ${construct.name}`,

@@ -50,7 +50,7 @@ function wire(entries: unknown[]): unknown {
 // the gutter's three answers
 // -----------------------------------------------------------------------------
 
-test("the gutter has three marks for five states, and trained shares with seeded", () => {
+test("the gutter has three marks for seven states, and trained shares with seeded", () => {
   // The gutter answers one question -- does what I am looking at match what
   // runs -- and that has three answers. `trained` and `seeded` are the same
   // answer to it; they differ in ACTIONS, which is the lens's job.
@@ -58,6 +58,7 @@ test("the gutter has three marks for five states, and trained shares with seeded
   assert.equal(gutterMarkFor("drifted"), "drifted");
   assert.equal(gutterMarkFor("trained"), "live");
   assert.equal(gutterMarkFor("seeded"), "live");
+  assert.equal(gutterMarkFor("edited"), "drifted");
 });
 
 test("unknown gets NO mark -- not a grey one", () => {
@@ -182,7 +183,7 @@ test("a mixed file shows all three simultaneously, in document order", () => {
 test("the actions are OFF by default, because #3763 registers the commands", () => {
   // A lens posting to an unregistered command fails with "command not found",
   // and a click that does nothing teaches a developer the extension is broken.
-  for (const state of ["untrained", "drifted", "trained", "seeded", "staged"] as const) {
+  for (const state of ["untrained", "drifted", "trained", "seeded", "edited", "staged"] as const) {
     assert.deepEqual(trainingLensPlans([construct(state)])[0]?.actions, [], state);
   }
 });
@@ -205,6 +206,9 @@ test("with actions on, each state offers exactly what the design's table says", 
   // Not a disabled control: absent. A seeded construct needs a rollout, which
   // is not something this editor can offer.
   assert.deepEqual(of("seeded"), []);
+  // No action here: locality decides the action (Task 3 of the plan), and the
+  // lens is where it is said.
+  assert.deepEqual(of("edited"), []);
   // Staged is the only state with a Train, and Train is COMMAND_PROMOTE under a
   // title that names the consequence -- on the wire it IS a promote.
   assert.deepEqual(of("staged"), [
@@ -261,7 +265,7 @@ test("the status bar reports only what needs attention", () => {
     construct("seeded", "f"),
     construct("staged", "g"),
   ]);
-  assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1, staged: 1 });
+  assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1, edited: 0, staged: 1 });
   // The design's example, exactly.
   assert.equal(statusBarText(counts), "3 untrained · 1 drifted");
 });
@@ -287,7 +291,7 @@ test("a zero count is omitted rather than shown as `0 drifted`", () => {
 
 test("unknown counts toward nothing", () => {
   const counts = countStates([construct("unknown", "a"), construct("unknown", "b")]);
-  assert.deepEqual(counts, { untrained: 0, drifted: 0, trained: 0, seeded: 0, staged: 0 });
+  assert.deepEqual(counts, { untrained: 0, drifted: 0, trained: 0, seeded: 0, edited: 0, staged: 0 });
   assert.equal(statusBarText(counts), "");
 });
 
@@ -502,4 +506,10 @@ test("an unknown construct is never listed -- a disconnection is not a to-do lis
   // row offering to navigate to "something you have not promoted" would be a
   // claim about a cluster nobody asked.
   assert.deepEqual(trainingListEntries([construct("unknown", "a")]), []);
+});
+
+test("edited joins the attention list beside untrained and drifted", () => {
+  const entries = trainingListEntries([construct("edited", "coreQuery"), construct("seeded", "plain")]);
+  assert.deepEqual(entries.map((e) => e.construct.name), ["coreQuery"]);
+  assert.match(entries[0]!.detail, /rollout|Rebuild/);
 });
