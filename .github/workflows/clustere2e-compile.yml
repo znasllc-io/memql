@@ -4,9 +4,6 @@
 # in CI built it. This workflow compiles and vets under the clustere2e
 # tag so that class of rot cannot recur. Not a provisioned cluster:
 # `go test -c` plus `go vet` only.
-#
-# Sibling of ci.yml because the git OAuth token lacks `workflow` scope
-# to edit the 100KB ci.yml; this file is the smallest compile/vet job.
 name: clustere2e-compile
 
 on:
