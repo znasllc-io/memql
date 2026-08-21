@@ -51,6 +51,10 @@ func (f *fakeExecutor) RunRolloutAction(_ context.Context, _, _ string) (string,
 	return "", nil
 }
 
+// RunRepair (memql#4209) is the deploy console's repair effect; the pack does
+// not drive it, so the fake only satisfies the boundary.
+func (f *fakeExecutor) RunRepair(_ context.Context, _ string) (string, error) { return "", nil }
+
 // kubectlJSON, when set, is returned by KubectlJSON (fixture Argo app JSON for
 // the observe read leg). kubectlArgs records the args observe passed.
 func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, error) {
