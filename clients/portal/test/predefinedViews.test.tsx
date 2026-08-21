@@ -13,7 +13,7 @@
 // own markup contract (the vk- classes) rather than something this repo drew.
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
   Result,
@@ -312,12 +312,14 @@ describe("the People view", () => {
     expect(screen.queryByText(/revocationEpoch/)).toBeNull();
   });
 
-  it("opens a row's detail beside the population, from the URL", async () => {
+  it("opens a row's detail in a dialog, from the URL", async () => {
     renderView({}, "/views/people/rows/user-1");
-    await waitFor(() => expect(screen.getByText("Row detail")).toBeTruthy());
-    // The detail pane preserves the wire's nesting, exactly as the concept
-    // browser's does -- it is literally the same component.
-    await waitFor(() => expect(screen.getByText("payload")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    // The dialog preserves the wire's nesting, exactly as the concept
+    // browser's pane does -- it is literally the same RowDetail.
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByText("payload")).toBeTruthy());
+    expect(screen.getByRole("dialog").className).toContain("max-w-2xl");
+    expect(screen.queryByRole("complementary")).toBeNull();
   });
 });
 
@@ -335,6 +337,24 @@ describe("the Agents view", () => {
 
     // The rail divides the fleet by kind.
     expect(screen.getByText("assistant 1 (50%)")).toBeTruthy();
+  });
+
+  it("opens RowDetail in a dialog on row select and does not stack an aside", async () => {
+    const { container } = renderView({}, "/views/agents");
+    await waitFor(() => expect(screen.getByText("Sofia")).toBeTruthy());
+    const row = container.querySelector('[data-row-id="agent-1"]');
+    expect(row).toBeTruthy();
+    fireEvent.click(row!);
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    const dialog = screen.getByRole("dialog");
+    await waitFor(() => expect(within(dialog).getByText("payload")).toBeTruthy());
+    expect(dialog.className).toContain("max-w-2xl");
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Row detail" })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("Sofia")).toBeTruthy();
+    expect(screen.queryByRole("complementary")).toBeNull();
   });
 });
 
@@ -420,6 +440,29 @@ describe("the Deployments view", () => {
   it("says the read failed rather than showing a stale-looking blank", async () => {
     renderView({ role: "owner", deployFails: true }, "/views/deployments");
     await waitFor(() => expect(screen.getByText(/Could not read the deployment/)).toBeTruthy());
+  });
+
+  it("keeps deploy selection on history click and opens the row dialog from View", async () => {
+    const { container } = renderView({ role: "owner" }, "/views/deployments");
+    await waitFor(() => expect(screen.getByText("2026.8.1")).toBeTruthy());
+    const entry = container.querySelector('.vk-timeline-entry[data-row-id="deploy-1"]');
+    expect(entry).toBeTruthy();
+    fireEvent.click(entry!);
+    await waitFor(() =>
+      expect(container.querySelector('.vk-timeline-entry[data-row-id="deploy-1"][data-selected="true"]')).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "Deploy the selected version" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    const view = container.querySelector('[data-vk-row-action="view"][data-vk-action-row-id="deploy-1"]');
+    expect(view).toBeTruthy();
+    fireEvent.click(view!);
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    expect(screen.getByRole("dialog").className).toContain("max-w-2xl");
+    expect(container.querySelector('.vk-timeline-entry[data-row-id="deploy-1"][data-selected="true"]')).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: "Deploy the selected version" }).hasAttribute("disabled")).toBe(false);
   });
 });
 

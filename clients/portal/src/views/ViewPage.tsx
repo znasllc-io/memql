@@ -2,7 +2,9 @@ import { useCallback, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
+import { RowDetailDialog } from "../components/RowDetailDialog";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
@@ -12,8 +14,8 @@ import { CustomersView } from "./CustomersView";
 import { DeploymentsView } from "./DeploymentsView";
 import { PeopleView } from "./PeopleView";
 import { viewById, type ViewDefinition } from "./registry";
-import { PopulationMeta, RowAside, ViewFrame, type ViewProps } from "./ViewLayout";
-import { viewRowPath } from "./urls";
+import { PopulationMeta, ViewFrame, type ViewProps } from "./ViewLayout";
+import { viewPath, viewRowPath } from "./urls";
 
 // The route element behind /views/:viewId -- resolve the slug, own the walk,
 // and hand the body a population.
@@ -51,6 +53,12 @@ export function ViewPage(): ReactNode {
     (id: string) => navigate(viewRowPath(viewId, id)),
     [navigate, viewId],
   );
+  const onCloseRow = useCallback(() => navigate(viewPath(viewId)), [navigate, viewId]);
+  // Deployments spends rowId on deploy/rollback. That view hosts its own
+  // Dialog from a trailing View control; do not open one just because the
+  // URL carries a selection.
+  const rowDialog = view?.id !== "deployments" ? rowId : "";
+  const detail = useRowDetail(view?.conceptId ?? "", rowDialog);
 
   if (view === undefined) {
     return (
@@ -100,9 +108,6 @@ export function ViewPage(): ReactNode {
           onRetry={data.retry}
         />
       }
-      aside={
-        rowId ? <RowAside view={view} conceptId={view.conceptId} rowId={rowId} /> : undefined
-      }
     >
       <Body
         view={view}
@@ -110,6 +115,15 @@ export function ViewPage(): ReactNode {
         rows={data.rows}
         selectedRowId={rowId}
         onSelect={onSelect}
+      />
+      <RowDetailDialog
+        open={rowDialog !== ""}
+        onClose={onCloseRow}
+        rowId={rowDialog}
+        row={detail.row}
+        loading={detail.loading}
+        error={detail.error}
+        missing={detail.missing}
       />
     </ViewFrame>
   );

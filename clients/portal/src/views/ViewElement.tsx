@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   explainFit,
   fitElement,
@@ -49,6 +49,10 @@ export interface ViewElementProps {
   // Called with the clicked row's id. Omit for an element that is a reading
   // rather than a list -- a stat strip has no rows to open.
   onSelect?: (rowId: string) => void;
+  // A control view-kit marked with data-vk-row-action. Must not count as
+  // row select -- the handler stopPropagation so a host that spends onSelect
+  // on something else (deploy/rollback) can open the full-row read from here.
+  onRowAction?: (action: string, rowId: string) => void;
 }
 
 export function ViewElement({
@@ -57,6 +61,7 @@ export function ViewElement({
   concept,
   options,
   onSelect,
+  onRowAction,
 }: ViewElementProps): ReactNode {
   // view-kit ships its sheet as a string; installing it in an effect keeps it
   // out of render and idempotent (src/viewkit/styles.ts).
@@ -71,6 +76,22 @@ export function ViewElement({
   // timeline entry and a list item.
   const enhance = useCallback(
     (attrs: Readonly<Record<string, string>>) => {
+      const action = attrs["data-vk-row-action"];
+      const actionRowId = attrs["data-vk-action-row-id"];
+      if (action && actionRowId && onRowAction) {
+        return {
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation();
+            onRowAction(action, actionRowId);
+          },
+          onKeyDown: (event: KeyboardEvent) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            onRowAction(action, actionRowId);
+          },
+        };
+      }
       const rowId = attrs["data-row-id"];
       if (!rowId || !onSelect) return undefined;
       return {
@@ -84,7 +105,7 @@ export function ViewElement({
         },
       };
     },
-    [onSelect],
+    [onSelect, onRowAction],
   );
 
   // The chart palette is the one thing view-kit cannot resolve from CSS alone:

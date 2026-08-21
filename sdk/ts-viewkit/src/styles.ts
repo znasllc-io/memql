@@ -490,7 +490,19 @@ const coreStyles = `
 const elementStyles = `
 /* ---- table ------------------------------------------------------------- */
 
-.vk-table { width: 100%; border-collapse: collapse; color: var(--vk-fg, inherit); }
+/* Overflow is a fallback only: short columns nowrap at a readable size and
+   a long column takes leftover width. The wrap appears when those mins
+   exceed the band. */
+.vk-table-wrap { overflow-x: auto; }
+
+.vk-table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+  color: var(--vk-fg, inherit);
+  font-size: max(12px, 0.8125rem);
+  line-height: 1.25;
+}
 
 /* A header is a sort control. The cursor and the arrow slot are present on
    every column, not only the active one, so nothing shifts when the sort
@@ -517,9 +529,44 @@ const elementStyles = `
 .vk-table-cell {
   padding: 3px 8px;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
   border-bottom: 1px solid var(--vk-border, currentColor);
 }
+
+/* The last data row: the container/header border is enough. tr:last-child
+   is the actual last row, including a one-row table. */
+.vk-table tbody tr:last-child .vk-table-cell { border-bottom: none; }
+
+/* Long columns still ellipsis on one line, but they take leftover width
+   rather than a short-column max. */
+.vk-table-cell[data-vk-cell="long"] {
+  min-width: 8rem;
+  max-width: none;
+  width: 100%;
+}
+
+.vk-table-action-head {
+  width: 1%;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vk-border, currentColor);
+}
+.vk-table-action { width: 1%; text-align: right; max-width: none; }
+
+.vk-row-action {
+  font: inherit;
+  font-size: inherit;
+  color: var(--vk-muted-fg, inherit);
+  background: none;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+  padding: 0 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vk-row-action:hover { color: var(--vk-fg, inherit); }
 
 /* ---- calendar ---------------------------------------------------------- */
 

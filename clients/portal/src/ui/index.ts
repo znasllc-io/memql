@@ -9,7 +9,7 @@ export { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 export { Button, type ButtonSize, type ButtonTone } from "./Button";
 export { Container } from "./Container";
 export { DataText, type DataKind } from "./DataText";
-export { ConfirmDialog, Dialog } from "./Dialog";
+export { ConfirmDialog, Dialog, type DialogSize } from "./Dialog";
 export { EmptyState } from "./EmptyState";
 export { Field, Select, TextInput, Textarea } from "./Field";
 export { PageHeader } from "./PageHeader";

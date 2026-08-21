@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import {
   CHECKLIST_ELEMENT,
   PROPORTION_BAR_ELEMENT,
@@ -16,6 +17,8 @@ import {
   rolloutRows,
 } from "../deploy/rows";
 import { useDeployConsole } from "../deploy/useDeployConsole";
+import { useRowDetail } from "../cluster/useConceptRows";
+import { RowDetailDialog } from "../components/RowDetailDialog";
 import { ErrorMessage } from "../components/StatusMessage";
 import { DataText } from "../ui";
 import { ViewElement } from "./ViewElement";
@@ -60,6 +63,17 @@ export function DeploymentsView({
   const legs = gateLegRows(status);
   const images = componentRows(status);
   const rollouts = rolloutRows(status);
+
+  // Full-row read is a separate gesture from deploy/rollback selection.
+  const [viewRowId, setViewRowId] = useState("");
+  const onRowAction = useCallback((_action: string, id: string) => setViewRowId(id), []);
+  const onLocalSelect = useCallback((id: string) => setViewRowId(id), []);
+  const onCloseView = useCallback(() => setViewRowId(""), []);
+  const historyDetail = useRowDetail(concept.id, viewRowId);
+  const imageRow = images.find((row) => row.id === viewRowId);
+  const rolloutRow = rollouts.find((row) => row.id === viewRowId);
+  const historyHit = viewRowId !== "" && rows.some((row) => row.id === viewRowId);
+  const localRow = (imageRow ?? rolloutRow) as Row | undefined;
 
   return (
     <>
@@ -171,13 +185,23 @@ export function DeploymentsView({
 
       {permissions.canView && images.length > 0 ? (
         <Band title="Images in force" meta="the cloud overlay, resolved digests" panel>
-          <ViewElement element={TABLE_ELEMENT} rows={images} concept={COMPONENT_CONCEPT} />
+          <ViewElement
+            element={TABLE_ELEMENT}
+            rows={images}
+            concept={COMPONENT_CONCEPT}
+            onSelect={onLocalSelect}
+          />
         </Band>
       ) : null}
 
       {permissions.canView && rollouts.length > 0 ? (
         <Band title="Rollouts in flight" panel>
-          <ViewElement element={TABLE_ELEMENT} rows={rollouts} concept={ROLLOUT_CONCEPT} />
+          <ViewElement
+            element={TABLE_ELEMENT}
+            rows={rollouts}
+            concept={ROLLOUT_CONCEPT}
+            onSelect={onLocalSelect}
+          />
         </Band>
       ) : null}
 
@@ -199,6 +223,7 @@ export function DeploymentsView({
           concept={concept}
           options={{
             ...selection,
+            rowAction: "view",
             bindings: {
               at: "updatedAt",
               label: "version",
@@ -207,8 +232,18 @@ export function DeploymentsView({
             },
           }}
           onSelect={onSelect}
+          onRowAction={onRowAction}
         />
       </Band>
+      <RowDetailDialog
+        open={viewRowId !== ""}
+        onClose={onCloseView}
+        rowId={viewRowId}
+        row={historyHit ? historyDetail.row : (localRow ?? null)}
+        loading={historyHit ? historyDetail.loading : false}
+        error={historyHit ? historyDetail.error : ""}
+        missing={historyHit ? historyDetail.missing : viewRowId !== "" && localRow === undefined}
+      />
     </>
   );
 }

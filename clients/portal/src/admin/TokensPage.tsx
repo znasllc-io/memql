@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, DataText } from "../ui";
 import { ViewElement } from "../views/ViewElement";
@@ -39,6 +41,8 @@ export function TokensPage(): ReactNode {
   const console_ = useTokenConsole(canAdminister);
   const nodes = useNodeTokenConsole(canAdminister);
   const writes = useAdminWrites();
+  const dialog = useLocalRowId();
+  const dialogRow = rowWithId(console_.tokens, dialog.rowId) ?? rowWithId(nodes.tokens, dialog.rowId);
 
   if (surface === undefined) return null;
   if (!canAdminister) {
@@ -138,6 +142,7 @@ export function TokensPage(): ReactNode {
               },
               sort: { field: "createdAt", direction: "desc" },
             }}
+            onSelect={dialog.onSelect}
           />
         )}
       </Band>
@@ -187,6 +192,7 @@ export function TokensPage(): ReactNode {
               },
               sort: { field: "createdAt", direction: "desc" },
             }}
+            onSelect={dialog.onSelect}
           />
         )}
       </Band>
@@ -215,7 +221,12 @@ export function TokensPage(): ReactNode {
           }
         />
       </Band>
-
+      <RowDetailDialog
+        open={dialog.open}
+        onClose={dialog.onClose}
+        rowId={dialog.rowId}
+        row={dialogRow ?? null}
+      />
     </AdminFrame>
   );
 }

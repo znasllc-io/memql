@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   explainFit,
   fitElement,
@@ -42,6 +42,7 @@ export interface ComposeElementProps {
   concept: ConceptLike;
   options?: ElementOptions;
   onSelect?: (rowId: string) => void;
+  onRowAction?: (action: string, rowId: string) => void;
 }
 
 export function ComposeElement({
@@ -50,6 +51,7 @@ export function ComposeElement({
   concept,
   options,
   onSelect,
+  onRowAction,
 }: ComposeElementProps): ReactNode {
   useEffect(() => {
     ensureViewKitStyles();
@@ -62,6 +64,22 @@ export function ComposeElement({
   // -- including elements added to the library after this file was written.
   const enhance = useCallback(
     (attrs: Readonly<Record<string, string>>) => {
+      const action = attrs["data-vk-row-action"];
+      const actionRowId = attrs["data-vk-action-row-id"];
+      if (action && actionRowId && onRowAction) {
+        return {
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation();
+            onRowAction(action, actionRowId);
+          },
+          onKeyDown: (event: KeyboardEvent) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            onRowAction(action, actionRowId);
+          },
+        };
+      }
       const rowId = attrs["data-row-id"];
       if (!rowId || !onSelect) return undefined;
       return {
@@ -75,7 +93,7 @@ export function ComposeElement({
         },
       };
     },
-    [onSelect],
+    [onSelect, onRowAction],
   );
 
   // The chart palette is the one thing view-kit cannot resolve from CSS alone.

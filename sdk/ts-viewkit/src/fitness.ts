@@ -338,6 +338,10 @@ export interface ElementOptions {
   // Calendar month to render, "YYYY-MM". Omitted picks the month of the
   // earliest event.
   readonly month?: string;
+  // A trailing per-row control that is NOT row select. "view" is the one
+  // value today: a host that already spends row-click on something else
+  // (deploy/rollback) opens the full-row read from this control instead.
+  readonly rowAction?: "view";
 }
 
 export interface ElementRenderInput {
