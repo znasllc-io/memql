@@ -23,11 +23,19 @@ type fakeExecutor struct {
 	rollbackCalls []string    // sha
 	rollbackErr   error       // when set, RunRollback returns it
 	rolloutCalls  [][2]string // (rollout, action)
+	repairCalls   []string    // the marker (repair record id) per RunRepair
+	repairErr     error       // when set, RunRepair returns it
 
 	argoJSON     []byte
 	rolloutsJSON []byte
 	analysisJSON []byte
 	kubectlErr   error
+	// argoJSONSeq, when set, is what successive Application reads return, in
+	// order, the last entry repeating -- so a watcher test can script the
+	// controller's progress (previous operation -> ours Running -> ours
+	// Succeeded) without a clock. Takes precedence over argoJSON.
+	argoJSONSeq [][]byte
+	argoReads   int
 
 	// kubectlCalls records the full argv of every read, so a test can assert
 	// WHICH namespace / Application was addressed. A wrong address does not
@@ -50,6 +58,14 @@ func (f *fakeExecutor) RunRolloutAction(_ context.Context, rollout, action strin
 	return action + " " + rollout, nil
 }
 
+func (f *fakeExecutor) RunRepair(_ context.Context, marker string) (string, error) {
+	f.repairCalls = append(f.repairCalls, marker)
+	if f.repairErr != nil {
+		return "", f.repairErr
+	}
+	return "application/memql annotated\napplication.argoproj.io/memql patched", nil
+}
+
 func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, error) {
 	f.kubectlCalls = append(f.kubectlCalls, append([]string(nil), args...))
 	if f.kubectlErr != nil {
@@ -59,6 +75,14 @@ func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, e
 	for _, a := range args {
 		switch a {
 		case "app":
+			if len(f.argoJSONSeq) > 0 {
+				idx := f.argoReads
+				if idx >= len(f.argoJSONSeq) {
+					idx = len(f.argoJSONSeq) - 1
+				}
+				f.argoReads++
+				return f.argoJSONSeq[idx], nil
+			}
 			return f.argoJSON, nil
 		case "rollout":
 			return f.rolloutsJSON, nil
@@ -104,7 +128,23 @@ func newTestService(t *testing.T, exec Executor, audit identity.AuditLogger) *Se
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
+	stubRepairWatch(svc)
 	return svc
+}
+
+// stubRepairWatch replaces the repair watcher goroutine (memql#4209) with a
+// recorder that releases the one-repair-at-a-time guard immediately, and
+// returns the ids it was handed. Every test helper installs it so an
+// admitted Repair in an unrelated suite never leaves a goroutine polling a
+// fake executor across test boundaries; the watcher itself is exercised
+// synchronously in repair_test.go.
+func stubRepairWatch(svc *Service) *[]string {
+	var started []string
+	svc.startRepairWatch = func(id string) {
+		started = append(started, id)
+		svc.releaseRepair()
+	}
+	return &started
 }
 
 // --- (a) owner + admin admitted -------------------------------------------

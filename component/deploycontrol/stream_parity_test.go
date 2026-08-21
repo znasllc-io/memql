@@ -32,7 +32,7 @@ import (
 //	suggest / cut_version / deploy       -> owner, admin, developer  (authorizeDeploy)
 //	get_status / deploy_staging /
 //	  promote / rollback / rollout_action -> owner, admin            (authorize)
-//	rollback_deployment                  -> owner ONLY, not even admin (authorizeOwner)
+//	rollback_deployment / repair         -> owner ONLY, not even admin (authorizeOwner)
 //
 // Note the "get_status" row. Earlier summary tables (issues #3311 / #3312 and
 // deployment-console.md) said any role may view; the SHIPPED unary gate on
@@ -279,6 +279,26 @@ func parityCases() []parityCase {
 				_, err := svc.RollbackDeployment(ctx, &memqlv1.RollbackDeploymentRequest{})
 				return err
 			},
+		},
+		{
+			rpc: "Repair",
+			stream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Repair{
+					Repair: &memqlv1.RepairRequest{},
+				}}
+			},
+			unary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.Repair(ctx, &memqlv1.RepairRequest{})
+				return err
+			},
+			// Owner only, the RollbackDeployment floor (memql#4209): a repair
+			// mutates a running cluster with no Git revert trail.
+			allowed:   ownerOnly,
+			auditVerb: "repair",
+			action:    true,
+			// No invalid pair: the request is empty. A repair operates on THIS
+			// installation and names no version, so there is no argument a
+			// caller can get wrong -- the gate is the only thing it answers to.
 		},
 	}
 }
@@ -641,6 +661,9 @@ func TestBelowFloorInvalidArgumentCoverage(t *testing.T) {
 	noRejectableArgument := map[string]bool{
 		"GetDeploymentStatus": true,
 		"SuggestNextVersion":  true,
+		// RepairRequest is empty by design (memql#4209): a repair operates on
+		// this installation and carries no version.
+		"Repair": true,
 	}
 	want := map[string]bool{}
 	for _, rpc := range deployControlRpcNames(t) {
@@ -779,6 +802,11 @@ func (r *recordingServer) Deploy(context.Context, *memqlv1.DeployRequest) (*memq
 
 func (r *recordingServer) RollbackDeployment(context.Context, *memqlv1.RollbackDeploymentRequest) (*memqlv1.ActionResult, error) {
 	r.called = append(r.called, "RollbackDeployment")
+	return &memqlv1.ActionResult{}, nil
+}
+
+func (r *recordingServer) Repair(context.Context, *memqlv1.RepairRequest) (*memqlv1.ActionResult, error) {
+	r.called = append(r.called, "Repair")
 	return &memqlv1.ActionResult{}, nil
 }
 
