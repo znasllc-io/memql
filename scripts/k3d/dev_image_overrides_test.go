@@ -11,6 +11,12 @@ import (
 // filter_node_image_overrides keeps the database operand's override and drops
 // every node override, because under --image-source=checkout the nodes must
 // resolve to the overlay's own :local images while the operand must not roll.
+//
+// ITS INPUT IS ONE ENTRY PER LINE -- kubectl's `{range ...}{@}{"\n"}{end}`
+// rendering, which every kubectl version produces identically. It used to be
+// the bare array node, whose rendering is version-dependent (JSON on 1.36, Go's
+// `[a b]` on older ones); the tests below pin the line form and pin that the
+// old form is REFUSED rather than mis-split.
 func runFilter(t *testing.T, input string) string {
 	t.Helper()
 	root := repoRoot(t)
@@ -28,23 +34,36 @@ func runFilter(t *testing.T, input string) string {
 	return strings.TrimSpace(string(out))
 }
 
+const operandOverride = "memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1"
+
 func TestFilterNodeImageOverridesKeepsTheOperandOnly(t *testing.T) {
-	in := `["memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0","memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1","memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0"]`
-	if got, want := runFilter(t, in), `["memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1"]`; got != want {
+	in := "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" +
+		operandOverride + "\n" +
+		"memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n"
+	if got, want := runFilter(t, in), `["`+operandOverride+`"]`; got != want {
+		t.Errorf("filter = %s, want %s", got, want)
+	}
+}
+
+// The operand is matched on the image BASENAME, so a registry-qualified
+// override name is protected too -- that is the form an install writes.
+func TestFilterNodeImageOverridesKeepsARegistryQualifiedOperand(t *testing.T) {
+	const qualified = "ghcr.io/znasllc-io/memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1"
+	in := "ghcr.io/znasllc-io/memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" + qualified + "\n"
+	if got, want := runFilter(t, in), `["`+qualified+`"]`; got != want {
 		t.Errorf("filter = %s, want %s", got, want)
 	}
 }
 
 func TestFilterNodeImageOverridesIsIdempotent(t *testing.T) {
-	in := `["memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1"]`
-	if got := runFilter(t, in); got != in {
-		t.Errorf("filter changed an already-filtered list: %s", got)
-	}
-	if got := runFilter(t, "[]"); got != "[]" {
-		t.Errorf("filter of an empty list = %s", got)
+	if got, want := runFilter(t, operandOverride+"\n"), `["`+operandOverride+`"]`; got != want {
+		t.Errorf("filter changed an already-filtered list: %s, want %s", got, want)
 	}
 	if got := runFilter(t, ""); got != "[]" {
 		t.Errorf("filter of no list = %s", got)
+	}
+	if got := runFilter(t, "\n"); got != "[]" {
+		t.Errorf("filter of a blank line = %s", got)
 	}
 }
 
@@ -64,32 +83,55 @@ func TestDevPrintSpecDeclaresTheRebuildFlags(t *testing.T) {
 // the Application must EXIST before its overrides are read
 // --------------------------------------------------------------------------
 
-// fakeKubectlApplication answers the two reads point_application_at_local_images
-// makes. $FAKE_APP_EXISTS=0 makes the existence probe fail the way kubectl does
-// for an Application that is not there; $FAKE_IMAGES is the override list the
-// jsonpath read returns.
+// fakeKubectlApplication answers every read point_application_at_local_images
+// makes, each one separately -- which is the point. A fake that served one
+// canned answer to every `get application` handed the image list to the
+// sync-status read too, so the patch -> annotate -> Synced path could never
+// complete and was never exercised.
+//
+// THE OVERRIDE LIST IS RENDERED THE WAY `-o jsonpath={range ...}{@}{"\n"}{end}`
+// RENDERS IT: one entry per line, no brackets, no quotes. Encoding the real
+// rendering here is what makes these tests evidence about kubectl rather than
+// about a shape we invented.
 const fakeKubectlApplication = `#!/usr/bin/env bash
 case "$*" in
   *"get application"*"-o name"*)
     [ "${FAKE_APP_EXISTS:-1}" = "1" ] || exit 1
     printf 'application.argoproj.io/memql-local\n'
     exit 0 ;;
-  *"get application"*)
-    printf '%s' "${FAKE_IMAGES:-[]}"
+  *"get application"*kustomize.images*)
+    [ "${FAKE_IMAGES_READ_FAILS:-0}" = "1" ] && exit 1
+    [ -n "${FAKE_IMAGES:-}" ] && printf '%s\n' "$FAKE_IMAGES"
+    exit 0 ;;
+  *"get application"*status.sync.status*)
+    printf '%s' "${FAKE_SYNC_STATUS:-Synced}"
+    exit 0 ;;
+  *"patch application"*)
+    printf '%s\n' "$*" >> "$FAKE_PATCH_LOG"
     exit 0 ;;
 esac
 exit 0
 `
 
+// pointAppFake drives fakeKubectlApplication.
+type pointAppFake struct {
+	appExists bool
+	images    string // newline-separated, as kubectl's range form renders
+	readFails bool   // the override-list read itself fails
+	syncod    string // .status.sync.status (default "Synced")
+}
+
 // runPointApplication sources dev.sh and calls point_application_at_local_images
-// against a fake kubectl, returning the combined output and the exit code.
-func runPointApplication(t *testing.T, appExists bool, images string) (string, int) {
+// against the fake, returning the combined output, the exit code, and every
+// `kubectl patch` argv the run issued (empty when it never patched).
+func runPointApplication(t *testing.T, f pointAppFake) (string, int, []string) {
 	t.Helper()
 	root := repoRoot(t)
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "kubectl"), []byte(fakeKubectlApplication), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	patchLog := filepath.Join(tmp, "patches")
 	harness := filepath.Join(tmp, "harness.sh")
 	body := "set -euo pipefail\n" +
 		"source \"" + filepath.Join(root, "scripts", "k3d", "dev.sh") + "\"\n" +
@@ -98,19 +140,26 @@ func runPointApplication(t *testing.T, appExists bool, images string) (string, i
 		// fake that never answers "Synced" the real 300s budget would stall the
 		// package for five minutes and report a timeout naming nothing.
 		"function sleep() { :; }\n" +
-		"point_application_at_local_images\n"
+		"point_application_at_local_images\n" +
+		"echo \"OVERRIDES_PATCHED=$OVERRIDES_PATCHED\"\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	exists := "0"
-	if appExists {
+	exists, readFails := "0", "0"
+	if f.appExists {
 		exists = "1"
+	}
+	if f.readFails {
+		readFails = "1"
 	}
 	cmd := exec.Command("bash", harness)
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_APP_EXISTS="+exists,
-		"FAKE_IMAGES="+images,
+		"FAKE_IMAGES="+f.images,
+		"FAKE_IMAGES_READ_FAILS="+readFails,
+		"FAKE_SYNC_STATUS="+f.syncod,
+		"FAKE_PATCH_LOG="+patchLog,
 		"MEMQL_K3D_SYNC_TIMEOUT=1",
 	)
 	out, err := cmd.CombinedOutput()
@@ -120,7 +169,15 @@ func runPointApplication(t *testing.T, appExists bool, images string) (string, i
 	} else if err != nil {
 		t.Fatalf("harness failed: %v\n%s", err, out)
 	}
-	return string(out), code
+	var patches []string
+	if raw, rerr := os.ReadFile(patchLog); rerr == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if line != "" {
+				patches = append(patches, line)
+			}
+		}
+	}
+	return string(out), code, patches
 }
 
 // THE SILENT FAILURE THIS CLOSES. `kubectl get application` on an Application
@@ -130,7 +187,7 @@ func runPointApplication(t *testing.T, appExists bool, images string) (string, i
 // imageSource=checkout. That satisfies the graph's verify while the pods stay on
 // the released images the rebuild existed to replace.
 func TestPointApplicationRefusesAMissingApplication(t *testing.T) {
-	out, code := runPointApplication(t, false, `["memql-bff=ghcr.io/x/memql-bff:v1"]`)
+	out, code, patches := runPointApplication(t, pointAppFake{images: "memql-bff=ghcr.io/x/memql-bff:v1"})
 	if code != 4 {
 		t.Errorf("exit = %d, want 4 (prerequisite missing):\n%s", code, out)
 	}
@@ -139,18 +196,91 @@ func TestPointApplicationRefusesAMissingApplication(t *testing.T) {
 			t.Errorf("the refusal does not mention %q -- an operator has to guess which name was wrong:\n%s", want, out)
 		}
 	}
+	if len(patches) != 0 {
+		t.Errorf("patched an Application that does not exist: %v", patches)
+	}
 }
 
 // The other direction, so the probe is not simply refusing everything: an
 // Application that EXISTS and carries no overrides is the ordinary `make up`
 // cluster, and it must pass straight through.
 func TestPointApplicationAcceptsAnApplicationWithNoOverrides(t *testing.T) {
-	out, code := runPointApplication(t, true, "[]")
+	out, code, patches := runPointApplication(t, pointAppFake{appExists: true})
 	if code != 0 {
 		t.Errorf("exit = %d, want 0:\n%s", code, out)
 	}
 	if !strings.Contains(out, "No image overrides") {
 		t.Errorf("output does not report the no-override case:\n%s", out)
+	}
+	if len(patches) != 0 {
+		t.Errorf("patched an Application that had nothing to patch: %v", patches)
+	}
+}
+
+// THE WHOLE POINT OF THE CAPABILITY, end to end through the function: a
+// wizard-installed Application pinned to released images is patched to exactly
+// the operand-only list, annotated, and waited to Synced.
+func TestPointApplicationPatchesAReleasedApplicationToTheOperandOnly(t *testing.T) {
+	images := "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" +
+		"memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n" +
+		operandOverride
+	out, code, patches := runPointApplication(t, pointAppFake{appExists: true, images: images})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0:\n%s", code, out)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("want exactly one patch, got %d: %v\n%s", len(patches), patches, out)
+	}
+	want := `{"spec":{"source":{"kustomize":{"images":["` + operandOverride + `"]}}}}`
+	if !strings.Contains(patches[0], want) {
+		t.Errorf("patch payload = %s\nwant it to carry %s", patches[0], want)
+	}
+	for _, gone := range []string{"memql-bff", "memql-agent"} {
+		if strings.Contains(patches[0], gone) {
+			t.Errorf("the patch still carries the %s node override: %s", gone, patches[0])
+		}
+	}
+	if !strings.Contains(out, "OVERRIDES_PATCHED=true") {
+		t.Errorf("the run did not record that it patched:\n%s", out)
+	}
+	if !strings.Contains(out, "is Synced") {
+		t.Errorf("the run did not reach the Synced gate -- the patch -> annotate -> Synced path was not exercised:\n%s", out)
+	}
+}
+
+// THE DESTRUCTIVE FAILURE THIS EXISTS FOR. An older kubectl renders a bare
+// string array as Go's `[a b]` rather than JSON. The previous reader
+// comma-split that text, so the whole rendering became ONE entry, nothing
+// matched the operand, the filtered list came out empty -- and the patch would
+// have removed the DATABASE OPERAND override along with the nodes (memql#4063),
+// reporting exit 0. An unrecognised shape must never become a patch.
+func TestPointApplicationRefusesTheGoArrayRenderingRatherThanMisSplittingIt(t *testing.T) {
+	goArray := "[memql-bff=ghcr.io/x/memql-bff:v1 " + operandOverride + "]"
+	out, code, patches := runPointApplication(t, pointAppFake{appExists: true, images: goArray})
+	if code != 5 {
+		t.Errorf("exit = %d, want 5 (operation failed):\n%s", code, out)
+	}
+	if len(patches) != 0 {
+		t.Fatalf("PATCHED on an unparseable list -- this is the destructive case: %v\n%s", patches, out)
+	}
+	if !strings.Contains(out, goArray) {
+		t.Errorf("the refusal does not quote the text it could not parse:\n%s", out)
+	}
+}
+
+// A FAILED read is not an empty list. `|| true` on the read turned a kubectl
+// that errored into "no overrides -- the overlay's :local images already
+// apply", i.e. a success envelope over a cluster nobody looked at.
+func TestPointApplicationRefusesAFailedOverrideRead(t *testing.T) {
+	out, code, patches := runPointApplication(t, pointAppFake{appExists: true, readFails: true})
+	if code != 5 {
+		t.Errorf("exit = %d, want 5:\n%s", code, out)
+	}
+	if !strings.Contains(out, "could not read the image overrides") {
+		t.Errorf("the failure does not say the read failed:\n%s", out)
+	}
+	if len(patches) != 0 {
+		t.Errorf("patched after a failed read: %v", patches)
 	}
 }
 

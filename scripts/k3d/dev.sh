@@ -112,8 +112,9 @@
 #             4 prerequisite missing (docker/k3d/kubectl absent, cluster not
 #             running, carrier repo or repo-root missing, no such ArgoCD
 #             Application) | 5 operation failed (an image build, an import, an
-#             Application patch, a sync that never converged, or pods that never
-#             came to name the locally built images)
+#             override list that could not be read or parsed, an Application
+#             patch, a sync that never converged, or pods that never came to
+#             name the locally built images)
 #
 # Refs: #2066 #2061 #2221 #4245
 
@@ -604,24 +605,74 @@ function checkout_facts() {
     CHECKOUT_DIRTY="$(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ' || true)"
 }
 
-# filter_node_image_overrides <json-string-array> -- the same list with every
-# node override removed and the database operand's kept. The argument is the
-# jsonpath rendering of spec.source.kustomize.images (a JSON array of
-# "name=image:tag" strings); the output is a JSON array, "[]" for nothing.
-function filter_node_image_overrides() {
-    local raw="${1:-}"
-    raw="${raw#[}"; raw="${raw%]}"
-    local out="" entry name base
-    local IFS=','
-    for entry in $raw; do
-        entry="${entry#\"}"; entry="${entry%\"}"
-        [[ -z "$entry" ]] && continue
-        name="${entry%%=*}"
-        base="$(basename "$name")"
-        if [[ "$base" == "memql-db" ]]; then
-            out+="${out:+,}\"${entry}\""
+# OVERRIDE_ENTRY_RE -- the shape a kustomize image override takes on the
+# Application: `<name>=<image>`, no whitespace anywhere. Anything else is
+# REFUSED rather than guessed at, because the patch below replaces the whole
+# list: an entry this does not understand would be silently deleted.
+readonly OVERRIDE_ENTRY_RE='^[A-Za-z0-9._/-]+=[^[:space:]]+$'
+
+# override_entry_is_operand <entry> -- true when the entry overrides the
+# DATABASE OPERAND image. Keyed off DB_IMAGE rather than a second `memql-db`
+# literal, so the guard is tied to the operand it protects. Matched on the
+# BASENAME, since an install writes registry-qualified names.
+function override_entry_is_operand() {
+    local entry="$1" name
+    name="${entry%%=*}"
+    [[ "$(basename "$name")" == "${DB_IMAGE%%:*}" ]]
+}
+
+# first_unparseable_override_entry <entries> -- the first line that is not a
+# <name>=<image> override, or nothing when every line parses.
+#
+# WHY THIS IS A GATE AND NOT A SKIP. The reader below used to take kubectl's
+# rendering of the BARE array node and comma-split it. That rendering is
+# VERSION-DEPENDENT: kubectl 1.36 prints JSON (["a","b"]), older ones print Go's
+# array form ([a b]). Under the space form the comma split yields ONE entry, it
+# matches nothing, the filtered list comes out empty -- and the patch removes
+# the DATABASE OPERAND override along with the nodes, which is memql#4063 again,
+# reported as exit 0. The read is now the {range} form, which every kubectl
+# renders identically; this refuses anything that still does not look like it.
+function first_unparseable_override_entry() {
+    local raw="${1:-}" entry
+    while IFS= read -r entry; do
+        entry="${entry%$'\r'}"
+        [[ -z "${entry//[[:space:]]/}" ]] && continue
+        if [[ ! "$entry" =~ $OVERRIDE_ENTRY_RE ]]; then
+            printf '%s\n' "$entry"
+            return 0
         fi
-    done
+    done <<< "$raw"
+}
+
+# has_node_override <entries> -- true when at least one entry overrides a NODE
+# image, i.e. there is something for the patch to remove.
+function has_node_override() {
+    local raw="${1:-}" entry
+    while IFS= read -r entry; do
+        entry="${entry%$'\r'}"
+        [[ -z "${entry//[[:space:]]/}" ]] && continue
+        override_entry_is_operand "$entry" || return 0
+    done <<< "$raw"
+    return 1
+}
+
+# filter_node_image_overrides <entries> -- the same list with every node
+# override removed and the database operand's kept, as a JSON array ("[]" for
+# nothing).
+#
+# THE INPUT IS ONE ENTRY PER LINE -- kubectl's
+# `{range .spec.source.kustomize.images[*]}{@}{"\n"}{end}` rendering, which no
+# kubectl version varies. Entries contain no newlines, so a line IS an entry.
+# Values are quoted through cap_json_escape rather than by hand.
+function filter_node_image_overrides() {
+    local raw="${1:-}" out="" entry
+    while IFS= read -r entry; do
+        entry="${entry%$'\r'}"
+        [[ -z "${entry//[[:space:]]/}" ]] && continue
+        if override_entry_is_operand "$entry"; then
+            out+="${out:+,}\"$(cap_json_escape "$entry")\""
+        fi
+    done <<< "$raw"
     printf '[%s]\n' "$out"
 }
 
@@ -641,17 +692,30 @@ function point_application_at_local_images() {
     if ! kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o name >/dev/null 2>&1; then
         cap_fail 4 "ArgoCD Application ${APP_NAME} not found in namespace ${ARGOCD_NAMESPACE} -- pass --app-name=<name> (k3d.up registers it as \${MEMQL_K3D_APP_NAME:-memql-local})"
     fi
-    local current filtered
-    current="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o 'jsonpath={.spec.source.kustomize.images}' 2>/dev/null || true)"
-    if [[ -z "$current" || "$current" == "[]" ]]; then
+    # ONE ENTRY PER LINE, and the read's EXIT STATUS is checked. Reading the bare
+    # array node left the parse at the mercy of the kubectl version (see
+    # first_unparseable_override_entry); `|| true` on the read turned a kubectl
+    # that FAILED into "no overrides -- already apply", i.e. a success envelope
+    # over a cluster nobody managed to look at. The existence probe above has
+    # already passed here, so a failed read is a real failure.
+    local current filtered unparseable
+    if ! current="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" \
+        -o 'jsonpath={range .spec.source.kustomize.images[*]}{@}{"\n"}{end}' 2>/dev/null)"; then
+        cap_fail 5 "could not read the image overrides of ${APP_NAME}; inspect: kubectl -n ${ARGOCD_NAMESPACE} get application ${APP_NAME} -o yaml"
+    fi
+    if [[ -z "${current//[[:space:]]/}" ]]; then
         info "No image overrides on ${APP_NAME} -- the overlay's :local images already apply."
         return 0
     fi
-    filtered="$(filter_node_image_overrides "$current")"
-    if [[ "$filtered" == "$current" ]]; then
+    unparseable="$(first_unparseable_override_entry "$current")"
+    if [[ -n "$unparseable" ]]; then
+        cap_fail 5 "cannot parse the image overrides of ${APP_NAME}: expected one <name>=<image> per line, got '${unparseable}' -- refusing to patch a list this does not understand, because the patch replaces the whole list and would drop it"
+    fi
+    if ! has_node_override "$current"; then
         info "Only the database operand is overridden on ${APP_NAME} -- nothing to patch."
         return 0
     fi
+    filtered="$(filter_node_image_overrides "$current")"
     info "Removing the node image overrides (keeping the database operand's)..."
     kubectl -n "${ARGOCD_NAMESPACE}" patch application "${APP_NAME}" --type=merge \
         -p "{\"spec\":{\"source\":{\"kustomize\":{\"images\":${filtered}}}}}" >&2 \
