@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Role } from "@znasllc-io/memql-sdk-core/client";
-import {
-  DeployControlClient,
-  DeployControlError,
-  type DeploymentStatus,
-} from "@znasllc-io/memql-sdk-core/deploy";
+import { DeployControlError, type DeploymentStatus } from "@znasllc-io/memql-sdk-core/deploy";
 
 // The vocabulary this console speaks, declared here because the SDK takes it
 // as a plain string. Narrowing it locally keeps a typo out of a call the
@@ -138,7 +134,7 @@ export function deployErrorAuditEventId(err: unknown): string {
 }
 
 export function useDeployConsole(): DeployConsoleState {
-  const { dispatcher } = useCluster();
+  const { clients } = useCluster();
   const { access } = useMyAccess();
   const role: Role = access?.clusterRole ?? "";
 
@@ -161,7 +157,7 @@ export function useDeployConsole(): DeployConsoleState {
   const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
-    if (dispatcher === null || !permissions.canView) {
+    if (clients === null || !permissions.canView) {
       setStatus(null);
       setLoading(false);
       setError("");
@@ -172,7 +168,7 @@ export function useDeployConsole(): DeployConsoleState {
     setLoading(true);
     setError("");
 
-    void new DeployControlClient(dispatcher)
+    void clients.deployControl
       .getDeploymentStatus({ signal: controller.signal })
       .then((next) => {
         if (live) setStatus(next);
@@ -191,7 +187,7 @@ export function useDeployConsole(): DeployConsoleState {
     // `permissions` is rebuilt every render, so it is deliberately NOT a
     // dependency -- the boolean inside it is, and a boolean is stable.
     // Depending on the object would re-read the status on every render.
-  }, [dispatcher, epoch, permissions.canView]);
+  }, [clients, epoch, permissions.canView]);
 
   // run funnels every action through one place so the busy flag, the message
   // handling and the follow-up refresh cannot be forgotten on the third one.
@@ -223,24 +219,20 @@ export function useDeployConsole(): DeployConsoleState {
 
   const cut = useCallback(
     (bump: SemverBump) =>
-      run(dispatcher ? new DeployControlClient(dispatcher).cutVersion(bump) : null),
-    [dispatcher, run],
+      run(clients ? clients.deployControl.cutVersion(bump) : null),
+    [clients, run],
   );
 
   const ship = useCallback(
     (deploymentId: string) =>
-      run(dispatcher ? new DeployControlClient(dispatcher).deploy(deploymentId) : null),
-    [dispatcher, run],
+      run(clients ? clients.deployControl.deploy(deploymentId) : null),
+    [clients, run],
   );
 
   const rollBack = useCallback(
     (toDeploymentId: string) =>
-      run(
-        dispatcher
-          ? new DeployControlClient(dispatcher).rollbackDeployment(toDeploymentId)
-          : null,
-      ),
-    [dispatcher, run],
+      run(clients ? clients.deployControl.rollbackDeployment(toDeploymentId) : null),
+    [clients, run],
   );
 
   return {

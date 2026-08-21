@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { ai, type Dispatcher } from "@znasllc-io/memql-sdk-core";
+import type { ClusterClients } from "../cluster/ClusterProvider";
 import {
   arrangementRequest,
   readArrangement,
@@ -7,6 +7,9 @@ import {
   type ArrangementProblem,
   type ConceptProfile,
 } from "@znasllc-io/memql-view-kit";
+
+// The provider-bound suggest function -- ClusterClients.suggest by type.
+export type ClusterSuggest = ClusterClients["suggest"];
 
 // The optional half of the composer: asking a model to arrange a view.
 //
@@ -58,11 +61,12 @@ export type ArrangementSuggester = (
 export const ARRANGEMENT_SUGGEST_DOMAIN = "viewArrangement";
 
 // clusterSuggester is the real one: the structured-output call, over the
-// connection the portal already has.
-export function clusterSuggester(dispatcher: Dispatcher): ArrangementSuggester {
+// connection the portal already has. It takes the provider's BOUND suggest
+// function (ClusterClients.suggest, memql#4234) rather than a transport
+// handle -- the Dispatcher never leaves the provider.
+export function clusterSuggester(suggest: ClusterSuggest): ArrangementSuggester {
   return async (request, signal) => {
-    const reply = await ai.aiSuggest(
-      dispatcher,
+    const reply = await suggest(
       ARRANGEMENT_SUGGEST_DOMAIN,
       // Cast because the wire payload is a plain record; the request is a
       // structurally-compatible object of scalars, arrays and records, which

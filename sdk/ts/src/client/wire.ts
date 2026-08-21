@@ -141,6 +141,21 @@ export interface RevokeWorkerTokenPayload {
   identityId: string;
 }
 
+// Account tokens (memql#3322): a credential an operator mints against a
+// managed customer account. Same custody rule as worker tokens -- the
+// plaintext exists in exactly one place, the mint reply.
+export interface CreateAccountTokenPayload {
+  requestId: string;
+  accountId: string;
+  label: string;
+  expiresAt?: string; // ISO8601, empty = no auto-expiry
+}
+
+export interface RevokeAccountTokenPayload {
+  requestId: string;
+  identityId: string;
+}
+
 // Badge registration lifecycle (memql#2513). The GRANT exchange is
 // identity-HTTP (POST /auth/badge/grant), not a stream message; these
 // register / revoke the badge credential itself.
@@ -530,6 +545,8 @@ type ClientPayload =
   | { revokeCurrentSession: RevokeCurrentSessionPayload }
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
+  | { createAccountToken: CreateAccountTokenPayload }
+  | { revokeAccountToken: RevokeAccountTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
@@ -775,6 +792,29 @@ export interface CreateWorkerTokenResultPayload {
   plainToken?: string; // shown once; never persisted server-side
   identityId?: string;
   ownerUserId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface CreateAccountTokenResultPayload {
+  requestId?: string;
+  success?: boolean;
+  // "mql_acct_<43 base64url>". Present only on the mint reply, only once.
+  plainToken?: string;
+  identityId?: string;
+  accountId?: string;
+  // The credential's authenticated SUBJECT: the operator user, never the
+  // account -- nothing authenticates as an account.
+  subjectUserId?: string;
+  auditEventId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeAccountTokenResultPayload {
+  requestId?: string;
+  success?: boolean;
+  auditEventId?: string;
   errorCode?: string;
   errorMessage?: string;
 }
@@ -1378,6 +1418,8 @@ type ServerPayload =
   | { revokeCurrentSessionResult: RevokeCurrentSessionResultPayload }
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
+  | { createAccountTokenResult: CreateAccountTokenResultPayload }
+  | { revokeAccountTokenResult: RevokeAccountTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
@@ -1426,6 +1468,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeCurrentSessionResult"; value: RevokeCurrentSessionResultPayload }
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
+  | { kind: "createAccountTokenResult"; value: CreateAccountTokenResultPayload }
+  | { kind: "revokeAccountTokenResult"; value: RevokeAccountTokenResultPayload }
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
@@ -1508,6 +1552,16 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "revokeAllSessionsResult", value: m.revokeAllSessionsResult as RevokeAllSessionsResultPayload };
   if (m.createWorkerTokenResult)
     return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
+  if (m.createAccountTokenResult)
+    return {
+      kind: "createAccountTokenResult",
+      value: m.createAccountTokenResult as CreateAccountTokenResultPayload,
+    };
+  if (m.revokeAccountTokenResult)
+    return {
+      kind: "revokeAccountTokenResult",
+      value: m.revokeAccountTokenResult as RevokeAccountTokenResultPayload,
+    };
   if (m.revokeWorkerTokenResult)
     return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
   if (m.createBadgeResult)

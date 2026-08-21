@@ -89,7 +89,7 @@ function Composer({
   mode: "create" | "update";
 }): ReactNode {
   const navigate = useNavigate();
-  const { dispatcher } = useCluster();
+  const { clients } = useCluster();
   const [draft, dispatch] = useReducer(composerReducer, initial);
   const { saving, error: saveError, save } = useSaveView();
   const [saveFailed, setSaveFailed] = useState("");
@@ -99,8 +99,8 @@ function Composer({
   // built here rather than inside the section so all sections share one, and
   // so a test can drive the whole page with a suggester that throws.
   const suggester = useMemo<ArrangementSuggester | undefined>(
-    () => (dispatcher === null ? undefined : clusterSuggester(dispatcher)),
-    [dispatcher],
+    () => (clients === null ? undefined : clusterSuggester(clients.suggest)),
+    [clients],
   );
 
   const onSave = useCallback(() => {

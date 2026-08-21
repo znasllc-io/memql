@@ -11,12 +11,9 @@ import {
   type AccountTokenView,
   type SelectedAccount,
 } from "./rows";
-import {
-  mintAccountToken,
-  newAccountId,
-  revokeAccountToken,
-  type AccountTokenMintResult,
-} from "./wire";
+import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity";
+
+import { newAccountId } from "./rows";
 
 // The customer-management console: account CRUD plus the per-account credential
 // list, wired to the stream.
@@ -111,7 +108,7 @@ export function useAccountConsole(
   rows: readonly Row[],
   selectedRowId: string,
 ): AccountConsoleState {
-  const { query, dispatcher } = useCluster();
+  const { query, clients } = useCluster();
   const { access } = useMyAccess();
   const role: Role = access?.clusterRole ?? "";
   const canManage = CAN_MANAGE.includes(role);
@@ -270,7 +267,7 @@ export function useAccountConsole(
 
   const mint = useCallback(
     (label: string) => {
-      if (dispatcher === null || selectedId === "") return;
+      if (clients === null || selectedId === "") return;
       const trimmed = label.trim();
       if (trimmed === "") {
         setError("Name the credential after the system that will hold it.");
@@ -278,7 +275,7 @@ export function useAccountConsole(
       }
       run(
         () =>
-          mintAccountToken(dispatcher, { accountId: selectedId, label: trimmed }).then(
+          clients.mintAccountToken({ accountId: selectedId, label: trimmed }).then(
             (result) => {
               if (!result.success) {
                 throw new Error(
@@ -292,15 +289,15 @@ export function useAccountConsole(
         () => setTokenEpoch((n) => n + 1),
       );
     },
-    [dispatcher, selectedId, run],
+    [clients, selectedId, run],
   );
 
   const revoke = useCallback(
     (identityId: string) => {
-      if (dispatcher === null || identityId === "") return;
+      if (clients === null || identityId === "") return;
       run(
         () =>
-          revokeAccountToken(dispatcher, identityId).then((result) => {
+          clients.revokeAccountToken(identityId).then((result) => {
             if (!result.success) {
               throw new Error(
                 result.errorMessage || result.errorCode || "the cluster refused the revoke",
@@ -311,7 +308,7 @@ export function useAccountConsole(
         () => setTokenEpoch((n) => n + 1),
       );
     },
-    [dispatcher, run],
+    [clients, run],
   );
 
   const dismissMinted = useCallback(() => setMinted(null), []);

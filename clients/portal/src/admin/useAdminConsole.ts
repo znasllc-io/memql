@@ -436,7 +436,7 @@ export interface WriteState {
 }
 
 export function useAdminWrites(): WriteState {
-  const { dispatcher } = useCluster();
+  const { clients } = useCluster();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -452,7 +452,7 @@ export function useAdminWrites(): WriteState {
 
   const run = useCallback<WriteState["run"]>(
     (write, onDone) => {
-      if (dispatcher === null) {
+      if (clients === null) {
         setError("The connection to the cluster is not up.");
         return;
       }
@@ -460,7 +460,7 @@ export function useAdminWrites(): WriteState {
       setMessage("");
       setError("");
       setAuditEventId("");
-      void write(new IdentityAdminClient(dispatcher))
+      void write(clients.identityAdmin)
         .then((result) => {
           if (!live.current) return;
           setMessage(result.message);
@@ -476,7 +476,7 @@ export function useAdminWrites(): WriteState {
           if (live.current) setBusy(false);
         });
     },
-    [dispatcher],
+    [clients],
   );
 
   return { busy, message, error, auditEventId, run };

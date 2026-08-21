@@ -15,6 +15,7 @@ import {
 } from "../src/identity/guest.js";
 import { revokeCurrentSession, revokeAllSessions } from "../src/identity/session.js";
 import { createWorkerToken, revokeWorkerToken } from "../src/identity/workerToken.js";
+import { mintAccountToken, revokeAccountToken } from "../src/identity/accountToken.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
@@ -410,5 +411,70 @@ test("revokeWorkerToken -- happy path", async () => {
   });
   const r = await promise;
   assert.equal(r.success, true);
+});
+
+// ---------------------------------------------------------------------------
+// Account tokens (memql#3322 wire; typed home added by memql#4234 -- the
+// module the portal's accounts/wire.ts cast used to stand in for).
+// ---------------------------------------------------------------------------
+
+test("mintAccountToken -- returns plain token and subject (one-shot)", async () => {
+  // Runtime-composed bearer for the same gitleaks reason as the worker
+  // token above.
+  const mockBearer = ["mql", "acct", "redacted-for-test"].join("_");
+  const mock = new MockDispatcher();
+  const promise = mintAccountToken(mock.asDispatcher(), {
+    accountId: "acct-1",
+    label: "Nightly export job",
+  });
+  const sent = mock.lastSent() as unknown as {
+    createAccountToken?: { accountId?: string; label?: string; expiresAt?: string };
+  };
+  assert.equal(sent.createAccountToken?.accountId, "acct-1");
+  assert.equal(sent.createAccountToken?.label, "Nightly export job");
+  assert.equal(sent.createAccountToken?.expiresAt, undefined);
+
+  mock.reply({
+    createAccountTokenResult: {
+      requestId: mock.lastRequestId(),
+      success: true,
+      plainToken: mockBearer,
+      identityId: "v1:identity:identity:acct_1",
+      accountId: "acct-1",
+      subjectUserId: "user-1",
+      auditEventId: "audit-1",
+    },
+  });
+  const r = await promise;
+  assert.equal(r.plainToken, mockBearer);
+  assert.equal(r.subjectUserId, "user-1");
+  assert.equal(r.auditEventId, "audit-1");
+});
+
+test("mintAccountToken -- rejects missing required args", async () => {
+  const mock = new MockDispatcher();
+  await assert.rejects(
+    mintAccountToken(mock.asDispatcher(), { accountId: "", label: "x" }),
+    /accountId is required/,
+  );
+  await assert.rejects(
+    mintAccountToken(mock.asDispatcher(), { accountId: "acct-1", label: "" }),
+    /label is required/,
+  );
+});
+
+test("revokeAccountToken -- happy path carries the audit id", async () => {
+  const mock = new MockDispatcher();
+  const promise = revokeAccountToken(mock.asDispatcher(), "v1:identity:identity:acct_1");
+  mock.reply({
+    revokeAccountTokenResult: {
+      requestId: mock.lastRequestId(),
+      success: true,
+      auditEventId: "audit-2",
+    },
+  });
+  const r = await promise;
+  assert.equal(r.success, true);
+  assert.equal(r.auditEventId, "audit-2");
 });
 
