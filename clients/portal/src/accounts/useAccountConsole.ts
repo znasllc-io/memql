@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Role, Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
 import { flattenForList } from "../viewkit/rows";
@@ -12,7 +13,6 @@ import {
 } from "./rows";
 import {
   mintAccountToken,
-  namedCall,
   newAccountId,
   revokeAccountToken,
   type AccountTokenMintResult,
@@ -151,10 +151,7 @@ export function useAccountConsole(
     setTokensError("");
 
     void query
-      .executeNamed(
-        "accountTokensForAccount",
-        namedCall("query", "accountTokensForAccount", { accountId: selectedId }),
-      )
+      .accountTokensForAccount({ accountId: selectedId })
       .then((result) => {
         if (live) setTokens(accountTokenViews(result.rows()));
       })
@@ -177,7 +174,7 @@ export function useAccountConsole(
   const refetchAccounts = useCallback(() => {
     if (query === null) return;
     void query
-      .executeNamed("accounts", namedCall("query", "accounts", {}))
+      .accounts({})
       .then((result) => setRefreshedRows(result.rows().map(flattenForList)))
       .catch(() => {
         // A failed re-read is not a failed write. Leave whatever the view is
@@ -218,17 +215,14 @@ export function useAccountConsole(
       run(
         () =>
           query
-            .executeNamed(
-              "createAccount",
-              namedCall("mutation", "createAccount", {
-                accountId,
-                name,
-                description: draft.description.trim(),
-                primaryContactName: draft.primaryContactName.trim(),
-                primaryContactEmail: draft.primaryContactEmail.trim(),
-                externalRef: draft.externalRef.trim(),
-              }),
-            )
+            .createAccount({
+              accountId,
+              name,
+              description: omitBlank(draft.description.trim()),
+              primaryContactName: omitBlank(draft.primaryContactName.trim()),
+              primaryContactEmail: omitBlank(draft.primaryContactEmail.trim()),
+              externalRef: omitBlank(draft.externalRef.trim()),
+            })
             .then(() => `Added ${name}.`),
         refetchAccounts,
       );
@@ -242,20 +236,17 @@ export function useAccountConsole(
       run(
         () =>
           query
-            .executeNamed(
-              "updateAccount",
-              // Empty fields are DROPPED by namedCall rather than sent as "".
-              // updateAccount is a partial read-merge, so an omitted field
-              // keeps its value while an empty string would blank it.
-              namedCall("mutation", "updateAccount", {
-                accountId: selectedId,
-                name: draft.name.trim(),
-                description: draft.description.trim(),
-                primaryContactName: draft.primaryContactName.trim(),
-                primaryContactEmail: draft.primaryContactEmail.trim(),
-                externalRef: draft.externalRef.trim(),
-              }),
-            )
+            // Empty fields are OMITTED (omitBlank) rather than sent as "".
+            // updateAccount is a partial read-merge, so an omitted field
+            // keeps its value while an empty string would blank it.
+            .updateAccount({
+              accountId: selectedId,
+              name: omitBlank(draft.name.trim()),
+              description: omitBlank(draft.description.trim()),
+              primaryContactName: omitBlank(draft.primaryContactName.trim()),
+              primaryContactEmail: omitBlank(draft.primaryContactEmail.trim()),
+              externalRef: omitBlank(draft.externalRef.trim()),
+            })
             .then(() => "Saved."),
         refetchAccounts,
       );
@@ -268,10 +259,7 @@ export function useAccountConsole(
     run(
       () =>
         query
-          .executeNamed(
-            "archiveAccount",
-            namedCall("mutation", "archiveAccount", { accountId: selectedId }),
-          )
+          .archiveAccount({ accountId: selectedId })
           .then(
             () =>
               "Archived. The record is kept in full -- MemQL has no hard delete.",

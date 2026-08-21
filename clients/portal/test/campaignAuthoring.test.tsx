@@ -31,14 +31,16 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
-import { buildCall } from "../src/integrations/calls";
+import { buildCampaigns, buildUpdateCampaign } from "@znasllc-io/memql-sdk-core/client";
+
+import { omitBlank } from "../src/cluster/args";
+import { asQueryClient } from "./support/queryFake";
 
 const CAMPAIGN = "v1:campaigns:campaign";
 const AUDIENCE = "v1:campaigns:audience";
@@ -174,11 +176,11 @@ function renderAt(path: string, campaignStatus = "draft") {
     }
   });
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => access),
     executeNamed,
-  } as unknown as QueryClient;
+  });
 
   const dial = vi.fn(
     async () =>
@@ -310,13 +312,14 @@ describe("the campaign editor", () => {
   // single-line <input>, and HTML value sanitization strips CR/LF before the
   // value ever reaches a change handler. Asserting it through the UI would be
   // asserting the platform's stripping, not this repo's escaping -- so it is
-  // asserted where the escaping actually happens. Every authoring call in the
-  // surface is built by this one function (src/integrations/calls.ts), which is
-  // the whole reason the quoting decision was centralised there.
+  // asserted where the escaping actually happens: the GENERATED builder
+  // (memql#4232), whose every value goes through the SDK's renderMemQLValue.
   it("escapes a newline in a call argument, wherever the value came from", () => {
-    const call = buildCall("mutation", "updateCampaign", {
+    const call = buildUpdateCampaign({
       campaignId: "camp-1",
       name: 'The "big" one\nline two',
+      audienceId: "aud-1",
+      templateId: "tpl-1",
     });
     expect(call).toContain('name: "The \\"big\\" one\\nline two"');
     // A raw newline in the statement would mean the escaping did not happen.
@@ -326,9 +329,11 @@ describe("the campaign editor", () => {
   // Omission is load-bearing, not tidiness: a `when(args.x)` guard is dropped
   // when its argument is ABSENT, while an empty string is present -- so sending
   // status: "" filters for rows whose status is the empty string, i.e. none.
-  it("omits an empty argument rather than sending an empty string", () => {
-    const call = buildCall("query", "campaigns", { status: "", audienceId: "aud-1" });
-    expect(call).toBe('query campaigns(audienceId: "aud-1")');
+  // The generated builders omit UNDEFINED; blank form state maps through
+  // omitBlank at every migrated call site, and this pins the pair end to end.
+  it("omits a blank optional argument rather than sending an empty string", () => {
+    expect(buildCampaigns({ status: omitBlank("") })).toBe("query campaigns()");
+    expect(buildCampaigns({ status: omitBlank("draft") })).toBe('query campaigns(status: "draft")');
   });
 
   it("commits a schedule through the builtin that actually fires it", async () => {

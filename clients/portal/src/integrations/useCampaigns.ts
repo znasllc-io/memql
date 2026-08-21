@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
-import { runBuiltin, runMutation, runQuery } from "./calls";
+import { runBuiltin } from "./calls";
 
 // Campaign authoring against the cluster (memql#3323).
 //
@@ -98,16 +99,17 @@ export function useCampaigns(): CampaignsState {
     // pickers populated before it can render a campaign, so three staggered
     // arrivals would mean three renders with progressively fewer empty
     // dropdowns.
-    void Promise.all([
-      runQuery(query, "campaigns"),
-      runQuery(query, "audiences"),
-      runQuery(query, "templates"),
-    ])
+    // The generated typed methods (memql#4232): the constructs are the
+    // same three named queries as ever, but the names and argument
+    // shapes now come off the DSL via `make sdk-gen`, so a renamed
+    // construct fails this file's typecheck instead of this hook's
+    // runtime.
+    void Promise.all([query.campaigns({}), query.audiences({}), query.templates({})])
       .then(([nextCampaigns, nextAudiences, nextTemplates]) => {
         if (!live) return;
-        setCampaigns(nextCampaigns);
-        setAudiences(nextAudiences);
-        setTemplates(nextTemplates);
+        setCampaigns(nextCampaigns.rows());
+        setAudiences(nextAudiences.rows());
+        setTemplates(nextTemplates.rows());
       })
       .catch((err: unknown) => {
         if (live) setError(describe(err));
@@ -123,7 +125,9 @@ export function useCampaigns(): CampaignsState {
 
   // run funnels every write through one place so the busy flag, the message
   // handling and the follow-up re-read cannot be forgotten on the fifth one.
-  const run = useCallback((what: Promise<void> | null, done: string) => {
+  // Promise<unknown>: a generated mutation resolves to a Result this hook has
+  // no use for -- the success signal is the resolution itself.
+  const run = useCallback((what: Promise<unknown> | null, done: string) => {
     if (what === null) return;
     setBusy(true);
     setActionMessage("");
@@ -143,10 +147,10 @@ export function useCampaigns(): CampaignsState {
     (input: { name: string; description: string }) =>
       run(
         query
-          ? runMutation(query, "createAudience", {
+          ? query.createAudience({
               audienceId: newShortId(),
               name: input.name,
-              description: input.description,
+              description: omitBlank(input.description),
             })
           : null,
         `Audience "${input.name}" created.`,
@@ -158,12 +162,12 @@ export function useCampaigns(): CampaignsState {
     (input: { name: string; subject: string; textBody: string; htmlBody: string }) =>
       run(
         query
-          ? runMutation(query, "createTemplate", {
+          ? query.createTemplate({
               templateId: newShortId(),
               name: input.name,
               subject: input.subject,
               textBody: input.textBody,
-              htmlBody: input.htmlBody,
+              htmlBody: omitBlank(input.htmlBody),
             })
           : null,
         `Template "${input.name}" created as a draft.`,
@@ -181,12 +185,12 @@ export function useCampaigns(): CampaignsState {
         name: input.name,
         audienceId: input.audienceId,
         templateId: input.templateId,
-        fromName: input.fromName,
-        replyTo: input.replyTo,
-        scheduledAt: input.scheduledAt,
+        fromName: omitBlank(input.fromName),
+        replyTo: omitBlank(input.replyTo),
+        scheduledAt: omitBlank(input.scheduledAt),
       };
       run(
-        runMutation(query, creating ? "createCampaign" : "updateCampaign", args),
+        creating ? query.createCampaign(args) : query.updateCampaign(args),
         creating ? `Campaign "${input.name}" created as a draft.` : `Campaign "${input.name}" saved.`,
       );
     },
@@ -214,7 +218,7 @@ export function useCampaigns(): CampaignsState {
 
   const cancelCampaign = useCallback(
     (campaignId: string) =>
-      run(query ? runMutation(query, "cancelCampaign", { campaignId }) : null, "Campaign cancelled."),
+      run(query ? query.cancelCampaign({ campaignId }) : null, "Campaign cancelled."),
     [query, run],
   );
 
@@ -308,10 +312,12 @@ export function useCampaignDetail(campaignId: string, audienceId: string): Campa
     setError("");
 
     void Promise.all([
-      campaignId === "" ? Promise.resolve([]) : runQuery(query, "deliveriesForCampaign", { campaignId }),
+      campaignId === ""
+        ? Promise.resolve([])
+        : query.deliveriesForCampaign({ campaignId }).then((r) => r.rows()),
       audienceId === ""
         ? Promise.resolve([])
-        : runQuery(query, "sendableRecipientsForAudience", { audienceId }),
+        : query.sendableRecipientsForAudience({ audienceId }).then((r) => r.rows()),
     ])
       .then(([nextDeliveries, sendable]) => {
         if (!live) return;

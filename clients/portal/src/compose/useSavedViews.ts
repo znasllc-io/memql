@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { runMutation, runQuery } from "./calls";
 import { parseSavedView, parseSavedViews, savedViewArgs, type SavedView, type SavedViewInput } from "./savedViews";
 
 // Reading and writing composed views against the cluster.
@@ -39,10 +38,11 @@ export function useSavedViews(): SavedViewsState {
     setLoading(true);
     setError("");
 
-    void runQuery(query, "composedViews", { status: "active" })
-      .then((rows) => {
+    void query
+      .composedViews({ status: "active" })
+      .then((result) => {
         if (!live) return;
-        setViews(parseSavedViews(rows));
+        setViews(parseSavedViews(result.rows()));
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -87,10 +87,11 @@ export function useSavedView(viewId: string): SavedViewState {
     let live = true;
     setState({ view: null, loading: true, error: "", missing: false });
 
-    void runQuery(query, "composedViewById", { viewId })
-      .then((rows) => {
+    void query
+      .composedViewById({ viewId })
+      .then((result) => {
         if (!live) return;
-        const first = rows[0];
+        const first = result.rows()[0];
         const view = first === undefined ? undefined : parseSavedView(first);
         setState({
           view: view ?? null,
@@ -137,11 +138,8 @@ export function useSaveView(): SaveViewState {
       setSaving(true);
       setError("");
       try {
-        await runMutation(
-          query,
-          mode === "create" ? "createComposedView" : "updateComposedView",
-          savedViewArgs(input),
-        );
+        const args = savedViewArgs(input);
+        await (mode === "create" ? query.createComposedView(args) : query.updateComposedView(args));
         return input.viewId;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -160,7 +158,7 @@ export function useSaveView(): SaveViewState {
       setSaving(true);
       setError("");
       try {
-        await runMutation(query, "archiveComposedView", { viewId });
+        await query.archiveComposedView({ viewId });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         setError(message);

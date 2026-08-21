@@ -1,5 +1,6 @@
 import type { QueryClient, Row } from "@znasllc-io/memql-sdk-core/client";
-import { renderMemQLValue } from "@znasllc-io/memql-sdk-core/client";
+
+import { omitBlank } from "../cluster/args";
 
 // The admin console's reads and writes, and the one place that decides HOW
 // this surface reaches the cluster.
@@ -60,35 +61,14 @@ import { renderMemQLValue } from "@znasllc-io/memql-sdk-core/client";
 //                            RotationSupported() is false and rotation is a
 //                            re-seal + roll rather than a button.
 
-// namedCall composes a MemQL named-primitive invocation.
-//
-// renderMemQLValue is the SDK's own literal renderer, so quoting and escaping
-// are not reimplemented here. An absent or empty arg is DROPPED rather than
-// sent as "": a `when(args.x)` guard is dropped when the arg is absent but
-// satisfied by an empty string, so passing "" turns "no filter" into "match
-// the empty string" and silently empties the page.
-export function namedCall(
-  kind: "query" | "mutation",
-  name: string,
-  args: Record<string, string | undefined> = {},
-): string {
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(args)) {
-    if (value === undefined || value === "") continue;
-    parts.push(`${key}: ${renderMemQLValue(value)}`);
-  }
-  return `${kind} ${name}(${parts.join(", ")})`;
-}
-
-async function run(
-  query: QueryClient,
-  name: string,
-  call: string,
-  signal?: AbortSignal,
-): Promise<Row[]> {
-  const result = await query.executeNamed(name, call, signal ? { signal } : {});
-  return result.rows();
-}
+// The reads below go through the GENERATED typed methods (memql#4232) --
+// `make sdk-gen` emits one per named query off the DSL, so a renamed
+// construct or changed arg schema fails this module's typecheck instead
+// of its runtime. Argument quoting lives in the generated builders (the
+// SDK's renderMemQLValue), and the empty-string rule moved with it: a
+// `when(args.x)` guard is dropped when the arg is ABSENT but satisfied
+// by "", so optional filters map through omitBlank at the call site
+// rather than being silently dropped by a helper here.
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -117,25 +97,25 @@ async function run(
 // searchUsers -- the searchUsers MCP tool already wraps it in an OUTER
 // paginate, and two nested paginate directives are rejected by the engine
 // (dsl/identity/queries.memql documents the regression that caused).
-export function readPeople(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
-  return run(query, "searchUsers", namedCall("query", "searchUsers"), signal);
+export async function readPeople(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
+  const result = await query.searchUsers({}, signal ? { signal } : {});
+  return result.rows();
 }
 
 // The audit trail, newest first. `category` is optional and pushes the filter
 // into SQL rather than narrowing a page in the browser -- which matters,
 // because the query pages at 50 and a client-side filter over one page would
 // quietly claim "no configuration events" whenever the last 50 were all auth.
-export function readAuditEvents(
+export async function readAuditEvents(
   query: QueryClient,
   category: string,
   signal?: AbortSignal,
 ): Promise<Row[]> {
-  return run(
-    query,
-    "recentAuditEvents",
-    namedCall("query", "recentAuditEvents", { category }),
-    signal,
+  const result = await query.recentAuditEvents(
+    { category: omitBlank(category) },
+    signal ? { signal } : {},
   );
+  return result.rows();
 }
 
 // The singleton runtime settings row (id="cluster").
@@ -143,13 +123,8 @@ export async function readClusterSettings(
   query: QueryClient,
   signal?: AbortSignal,
 ): Promise<Row | null> {
-  const rows = await run(
-    query,
-    "clusterSettingsCurrent",
-    namedCall("query", "clusterSettingsCurrent"),
-    signal,
-  );
-  return rows[0] ?? null;
+  const result = await query.clusterSettingsCurrent({}, signal ? { signal } : {});
+  return result.rows()[0] ?? null;
 }
 
 // One person's personal access tokens, revoked ones included, in the
@@ -159,17 +134,13 @@ export async function readClusterSettings(
 // publishes: `patIdentitiesForUser` takes a required userId. There is no
 // `patIdentities()`. The console therefore fans out across the people it just
 // read, which useTokenConsole does with a bounded window; see its note.
-export function readTokensForUser(
+export async function readTokensForUser(
   query: QueryClient,
   userId: string,
   signal?: AbortSignal,
 ): Promise<Row[]> {
-  return run(
-    query,
-    "patIdentitiesForUser",
-    namedCall("query", "patIdentitiesForUser", { userId }),
-    signal,
-  );
+  const result = await query.patIdentitiesForUser({ userId }, signal ? { signal } : {});
+  return result.rows();
 }
 
 // The cluster's node credentials -- one row per node that has bootstrapped.
@@ -181,13 +152,9 @@ export function readTokensForUser(
 // so the row that reaches a browser cannot carry a secret whatever the
 // caller's role. The @serverOnly original stays for the verifier, which
 // genuinely needs the hash.
-export function readNodeTokens(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
-  return run(
-    query,
-    "nodeTokenIdentitiesAdmin",
-    namedCall("query", "nodeTokenIdentitiesAdmin"),
-    signal,
-  );
+export async function readNodeTokens(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
+  const result = await query.nodeTokenIdentitiesAdmin({}, signal ? { signal } : {});
+  return result.rows();
 }
 
 // Revocation is NOT here, and its absence from this module is deliberate

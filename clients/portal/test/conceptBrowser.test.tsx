@@ -26,6 +26,7 @@ import {
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const NODE = "v1:cluster:node";
 const SPACE = "v1:cognition:space";
@@ -124,7 +125,7 @@ function harness(
   const failed = new Set<string>();
   let handler: ((event: Event) => void) | null = null;
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => null),
     executeNamed: vi.fn(
@@ -164,7 +165,7 @@ function harness(
         });
       },
     ),
-  } as unknown as QueryClient;
+  });
 
   const subscriptions = {
     subscribeGraph: (fn: (event: Event) => void) => {

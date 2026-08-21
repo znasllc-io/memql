@@ -9,7 +9,7 @@ import { webcrypto } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import type { Connection} from "@znasllc-io/memql-sdk-core/client";
 
 import { AuthenticatedCluster } from "../src/app/App";
 import { AppRoutes } from "../src/app/routes";
@@ -17,6 +17,7 @@ import { AuthProvider } from "../src/auth/AuthProvider";
 import type { CryptoLike } from "../src/auth/pkce";
 import type { StorageLike } from "../src/auth/pending";
 import type { PortalRuntimeConfig } from "../src/cluster/config";
+import { asQueryClient } from "./support/queryFake";
 
 const nodeCrypto = webcrypto as unknown as CryptoLike;
 
@@ -51,7 +52,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 // fakeDial stands in for the SDK's dial. The cluster wire is sdk/ts's business
 // and is tested there; here it only needs to answer "connected".
 function fakeDial(): typeof Connection.dial {
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => []),
     getMyAccess: vi.fn(async () => ({
       requestId: "r1",
@@ -59,7 +60,7 @@ function fakeDial(): typeof Connection.dial {
       primaryEmail: "ops@example.com",
       clusterRole: "owner" as const,
     })),
-  } as unknown as QueryClient;
+  });
   return vi.fn(
     async () =>
       ({

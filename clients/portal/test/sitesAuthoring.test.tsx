@@ -43,6 +43,7 @@ import {
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const SITE = "v1:platform:site";
 
@@ -206,11 +207,11 @@ function harness(overrides: { role?: Role } = {}): Harness {
     return new Result({ bundle: { nodes: [] }, meta: { cursor: "" } });
   });
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => access),
     executeNamed,
-  } as unknown as QueryClient;
+  });
 
   const subscriptions = {
     subscribeGraph: (fn: (event: Event) => void) => {

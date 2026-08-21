@@ -28,7 +28,6 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
@@ -36,6 +35,7 @@ import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
 import { VIEW_CONCEPT_ID } from "../src/compose/savedViews";
+import { asQueryClient } from "./support/queryFake";
 
 // ---------------------------------------------------------------------------
 // A concept nothing in this repository declares
@@ -191,11 +191,11 @@ function renderCompose(path: string, harness: Harness = {}) {
     return new Result({ bundle: { nodes: [] }, meta: { cursor: "" } });
   });
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => access),
     executeNamed,
-  } as unknown as QueryClient;
+  });
 
   const dispatcher = {
     sendAndWait: vi.fn(async (msg: Record<string, unknown>) => {

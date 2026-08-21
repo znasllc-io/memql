@@ -25,7 +25,6 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Role,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -33,6 +32,7 @@ import {
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const USER = "v1:identity:user";
 const AUDIT = "v1:identity:auditEvent";
@@ -233,7 +233,7 @@ function renderAdmin(
     clusterRole: role,
   };
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => access),
     executeNamed: vi.fn(async (name: string, call: string) => {
@@ -261,7 +261,7 @@ function renderAdmin(
       }
       throw new Error(`the admin console called an unexpected query: ${name}`);
     }),
-  } as unknown as QueryClient;
+  });
 
   const sendAndWait = vi.fn(async (msg: Record<string, unknown>) => {
     sent.push(msg);

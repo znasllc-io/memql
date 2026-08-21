@@ -9,17 +9,19 @@ import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-
 // and none is needed: the engine already routes a named call over
 // MemqlService.Stream.
 //
-// WHY THE CALL STRINGS ARE HAND-BUILT HERE. `make sdk-gen` emits typed builders
-// for Go only -- the Makefile passes an empty `--ts-out` -- so there is no
-// generated TypeScript counterpart to import. The alternative to this module is
-// call strings scattered through six components, which is worse in the one way
-// that matters: argument quoting. Every value goes through the SDK's
-// renderMemQLValue, which mirrors the engine's own literal grammar (and, on the
-// Go side, the lexer-exact QuoteString), so a campaign name containing a quote
-// or a newline cannot break the statement around it. That escaping decision
-// lives in ONE file, here.
-//
-// If a TypeScript emitter lands later, this module is what it replaces.
+// WHAT REMAINS HERE, AND WHY (memql#4232). The TypeScript emitter this
+// module's earlier header anticipated has landed: `make sdk-gen` now emits
+// typed builders + QueryClient methods for every query and mutation, and the
+// call sites that used runQuery/runMutation compose those instead -- so both
+// helpers are gone. What stays is the BUILTIN path: the generator emits only
+// builtins marked @sdk (most builtins are internal), and the campaign send
+// actions -- campaignStartSend / campaignPauseSend / campaignResumeSend /
+// campaignScheduleSend -- plus integrationStatus are not yet marked. Until
+// they are (a one-line dsl/ annotation each, tracked in the memql#4232
+// adoption notes), this file keeps the one hand-built form they need, with
+// the same quoting rule as ever: every value goes through the SDK's
+// renderMemQLValue, so a name containing a quote or newline cannot break the
+// statement around it.
 
 // callArgs renders `k: v, k: v` from a record, dropping undefined and empty
 // entries so an optional argument is OMITTED rather than sent as "".
@@ -40,36 +42,14 @@ function callArgs(args: Record<string, unknown>): string {
 }
 
 export function buildCall(
-  kind: "query" | "mutation" | "builtin",
+  kind: "builtin",
   name: string,
   args: Record<string, unknown> = {},
 ): string {
   return `${kind} ${name}(${callArgs(args)})`;
 }
 
-// runQuery / runMutation / runBuiltin are the three verbs this surface uses.
-// Split by kind rather than folded into one because the kind keyword is part
-// of the wire form the engine's parser dispatches on, and a caller that had to
-// remember which keyword a construct needs would eventually get it wrong.
-
-export async function runQuery(
-  query: QueryClient,
-  name: string,
-  args: Record<string, unknown> = {},
-): Promise<Row[]> {
-  const result = await query.executeNamed(name, buildCall("query", name, args));
-  return result.rows();
-}
-
-export async function runMutation(
-  query: QueryClient,
-  name: string,
-  args: Record<string, unknown> = {},
-): Promise<void> {
-  await query.executeNamed(name, buildCall("mutation", name, args));
-}
-
-// runBuiltin is the third verb the comment above has always named. It landed
+// runBuiltin is the one verb left on this surface. It landed
 // with campaign sending (memql#3348), where the operator actions are builtins
 // rather than mutations -- starting a send is a preflight across several rows
 // plus two writes, and neither is expressible in a mutation body.

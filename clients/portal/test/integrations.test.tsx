@@ -19,13 +19,13 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Role,
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const AUTH_DISABLED_CLUSTER = {
   identityUrl: "",
@@ -130,11 +130,11 @@ function renderIntegrations({ role = "owner", hostile = false }: Partial<Harness
     return new Result({ bundle: { nodes: [] }, meta: { cursor: "" } });
   });
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async (): Promise<Concept[]> => []),
     getMyAccess: vi.fn(async () => access),
     executeNamed,
-  } as unknown as QueryClient;
+  });
 
   const dial = vi.fn(
     async () =>

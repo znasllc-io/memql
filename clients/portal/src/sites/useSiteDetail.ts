@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { runMutation, runQuery } from "../integrations/calls";
 
 // One site's detail + the four row-level actions the brief scopes: publish
 // / roll back (both are updateSiteBundle -- ruling 1: "publish" IS the row
@@ -59,9 +58,10 @@ export function useSiteDetail(siteId: string): SiteDetailState {
     setLoading(true);
     setError("");
 
-    void runQuery(query, "siteById", { siteId })
-      .then((rows) => {
-        if (live) setSite(rows[0] ?? null);
+    void query
+      .siteById({ siteId })
+      .then((result) => {
+        if (live) setSite(result.rows()[0] ?? null);
       })
       .catch((err: unknown) => {
         if (live) setError(describe(err));
@@ -81,7 +81,7 @@ export function useSiteDetail(siteId: string): SiteDetailState {
   // one place so busy/message handling and the follow-up re-read cannot be
   // forgotten on the second one. remove() is deliberately NOT run through
   // this -- a successful delete has no row left to reload.
-  const run = useCallback((what: Promise<void> | null, done: string) => {
+  const run = useCallback((what: Promise<unknown> | null, done: string) => {
     if (what === null) return;
     setBusy(true);
     setActionMessage("");
@@ -98,7 +98,7 @@ export function useSiteDetail(siteId: string): SiteDetailState {
   const publish = useCallback(
     (bundleRef: string) =>
       run(
-        query ? runMutation(query, "updateSiteBundle", { siteId, bundleRef }) : null,
+        query ? query.updateSiteBundle({ siteId, bundleRef }) : null,
         "Published. The edge resolves the new bundle on its next cache miss for this hostname.",
       ),
     [query, run, siteId],
@@ -107,7 +107,7 @@ export function useSiteDetail(siteId: string): SiteDetailState {
   const setStatus = useCallback(
     (status: string) =>
       run(
-        query ? runMutation(query, "updateSiteStatus", { siteId, status }) : null,
+        query ? query.updateSiteStatus({ siteId, status }) : null,
         `Status set to ${status}.`,
       ),
     [query, run, siteId],
@@ -118,7 +118,8 @@ export function useSiteDetail(siteId: string): SiteDetailState {
     setBusy(true);
     setActionMessage("");
     setActionError("");
-    void runMutation(query, "deleteSite", { siteId })
+    void query
+      .deleteSite({ siteId })
       .then(() => {
         setActionMessage("Site deleted.");
         setDeleted(true);

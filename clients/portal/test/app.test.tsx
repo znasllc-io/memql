@@ -10,11 +10,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Concept, Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import type { Concept, Connection} from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const CONCEPTS: Concept[] = [
   {
@@ -33,7 +34,7 @@ const CONCEPTS: Concept[] = [
 // fake every time an unrelated method is added to Connection would make this
 // test a maintenance tax with no extra coverage.
 function fakeConnection(overrides: Partial<Connection> = {}): Connection {
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     // The shell reads the caller's access to decide what the rail offers
     // (the Modules item is owner/admin-only, memql#4191).
@@ -42,7 +43,7 @@ function fakeConnection(overrides: Partial<Connection> = {}): Connection {
       primaryEmail: "op@example.test",
       clusterRole: "admin",
     })),
-  } as unknown as QueryClient;
+  });
   return {
     nodeId: "bff-test",
     serverVersion: "0.0.0-test",

@@ -9,11 +9,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Concept, Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import type { Concept, Connection} from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const CONCEPTS: Concept[] = [
   {
@@ -38,7 +39,7 @@ function fakeConnection({
   // Receives the subscribed graph handler so a test can push CDC events.
   captureGraph?: (handler: GraphHandler) => void;
 } = {}): Connection {
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     // The shell reads the caller's access to decide what the rail offers
     // (the Modules item is owner/admin-only, memql#4191).
@@ -50,7 +51,7 @@ function fakeConnection({
     browseConceptPage: vi.fn(
       browse ?? (async () => ({ rows: [], cursor: "", hasMore: false })),
     ),
-  } as unknown as QueryClient;
+  });
   const subscriptions =
     captureGraph === undefined
       ? null

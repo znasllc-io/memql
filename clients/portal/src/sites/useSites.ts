@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
 import { newShortId, type Role } from "@znasllc-io/memql-sdk-core/client";
 
+import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useConceptRows, type ConceptRowsState } from "../cluster/useConceptRows";
 import { useMyAccess } from "../cluster/useMyAccess";
-import { runMutation } from "../integrations/calls";
 import { SITE_CONCEPT_ID } from "./concepts";
 
 // The sites LIST screen's state: the live row walk plus the create action.
@@ -58,12 +58,13 @@ export function useSites(): SitesState {
       if (query === null) return;
       setCreateBusy(true);
       setCreateError("");
-      void runMutation(query, "createSite", {
-        siteId: newShortId(),
-        hostname: input.hostname,
-        kind: input.kind,
-        bundleRef: input.bundleRef,
-      })
+      void query
+        .createSite({
+          siteId: newShortId(),
+          hostname: input.hostname,
+          kind: omitBlank(input.kind),
+          bundleRef: input.bundleRef,
+        })
         .catch((err: unknown) => setCreateError(describe(err)))
         .finally(() => setCreateBusy(false));
     },

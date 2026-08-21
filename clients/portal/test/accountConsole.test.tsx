@@ -24,13 +24,13 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { AccountConsole } from "../src/accounts/AccountConsole";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const ACCOUNT = "v1:identity:account";
 
@@ -134,11 +134,11 @@ function renderConsole(opts: { mintFails?: boolean } = {}) {
     return { revokeAccountTokenResult: { success: true, auditEventId: "audit-10" } };
   });
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => [ACCOUNT_CONCEPT]),
     getMyAccess: vi.fn(async () => access),
     executeNamed,
-  } as unknown as QueryClient;
+  });
 
   const dial = vi.fn(
     async () =>
@@ -320,13 +320,13 @@ describe("the account console", () => {
       clusterRole: "reader",
     } as unknown as AccessSummary;
 
-    const query = {
+    const query = asQueryClient({
       listConcepts: vi.fn(async () => [ACCOUNT_CONCEPT]),
       getMyAccess: vi.fn(async () => access),
       executeNamed: vi.fn(
         async () => new Result({ bundle: { nodes: [] }, meta: { cursor: "" } }),
       ),
-    } as unknown as QueryClient;
+    });
 
     const dial = vi.fn(
       async () =>

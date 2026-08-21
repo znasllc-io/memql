@@ -1,6 +1,5 @@
 import { rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { runQuery } from "../integrations/calls";
 import { fetchSiteAsOf } from "./calls";
 
 // The rollback picker's version list (memql#3717, ruling 2). "The graph's
@@ -66,8 +65,8 @@ export async function fetchSiteVersionHistory(
   const versions: SiteVersion[] = [];
   if (siteId === "" || limit <= 0) return versions;
 
-  const current = await runQuery(query, "siteById", { siteId });
-  const first = current[0];
+  const current = await query.siteById({ siteId });
+  const first = current.rows()[0];
   if (first === undefined) return versions;
   versions.push(toVersion(first));
   let cursor = rowString(first, "createdAt");
