@@ -205,7 +205,7 @@ func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 		parser.TokenKeywordNil, parser.TokenKeywordRetry, parser.TokenKeywordWhen,
 		parser.TokenKeywordAs, parser.TokenKeywordWhere, parser.TokenKeywordUse,
 		parser.TokenKeywordConcept,
-		parser.TokenKeywordIn, parser.TokenKeywordNot,
+		parser.TokenKeywordIn, parser.TokenKeywordNot, parser.TokenKeywordStartsWith,
 		parser.TokenKeywordQuery, parser.TokenKeywordMutation,
 		parser.TokenKeywordAutomation, parser.TokenKeywordSpec,
 		parser.TokenKeywordTool, parser.TokenKeywordBuiltin:
