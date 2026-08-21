@@ -329,6 +329,31 @@ action bringUpLocalCluster {
   )
 }
 
+// Backend: scripts/k3d/dev.sh -- the SAME script `make dev` runs. The
+// extension's "Rebuild from checkout" reaches it through the rebuild graph
+// (scripts/install/graph/rebuild.json) with --image-source=checkout, which
+// points a wizard-installed Application at the images this builds.
+/// Build the node images from a checkout, import them into k3d, and roll the local cluster onto them.
+action rebuildLocalClusterFromCheckout {
+  args {
+    cluster     string
+    namespace   string
+    appName     string
+    repoRoot    string
+    node        string
+    imageSource string
+  }
+  capability script(
+    script: "k3d.dev",
+    cluster: args.cluster,
+    namespace: args.namespace,
+    app-name: args.appName,
+    repo-root: args.repoRoot,
+    node: args.node,
+    image-source: args.imageSource
+  )
+}
+
 // Backend: scripts/install/seed-bootstrap.sh. The key travels as a FILE PATH,
 // never a value -- argv is world-readable, and a key on a command line is a key
 // leaked to every process on the machine.

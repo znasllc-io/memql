@@ -368,7 +368,7 @@ func TestTopoOrderReturnsWaves(t *testing.T) {
 }
 
 func TestTopoOrderCoversEveryStepExactlyOnce(t *testing.T) {
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
 		waves, err := g.TopoOrder()
 		if err != nil {
 			t.Fatalf("%s: TopoOrder: %v", g.Name, err)
@@ -418,6 +418,16 @@ func TestShippedGraphsLoad(t *testing.T) {
 	if len(un.Steps) == 0 {
 		t.Error("uninstall.json has no steps")
 	}
+	// Install-shaped, deliberately: a rebuild IS an install of images the
+	// operator built, so it declares forward steps and a receipt rather than
+	// becoming a third Kind the loader would have to learn.
+	rb := mustLoadEmbedded(t, Rebuild)
+	if rb.Kind != KindInstall {
+		t.Errorf("rebuild.json kind = %q", rb.Kind)
+	}
+	if len(rb.Steps) == 0 {
+		t.Error("rebuild.json has no steps")
+	}
 }
 
 // The graph's params are the graph's half of a contract whose other half is a
@@ -457,7 +467,7 @@ func TestShippedGraphParamsAreDeclaredFlags(t *testing.T) {
 		return set
 	}
 
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			flags := declared(s.Script)

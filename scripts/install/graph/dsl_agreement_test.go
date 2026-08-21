@@ -88,7 +88,7 @@ func actionScript(t *testing.T, a *actions.Action) string {
 func graphScripts(t *testing.T) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			out[s.Script] = append(out[s.Script], g.Name+"/"+s.ID)

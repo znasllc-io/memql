@@ -266,6 +266,9 @@ var installJSON []byte
 //go:embed uninstall.json
 var uninstallJSON []byte
 
+//go:embed rebuild.json
+var rebuildJSON []byte
+
 var (
 	installOnce sync.Once
 	installG    *Graph
@@ -274,6 +277,10 @@ var (
 	uninstallOnce sync.Once
 	uninstallG    *Graph
 	uninstallErr  error
+
+	rebuildOnce sync.Once
+	rebuildG    *Graph
+	rebuildErr  error
 )
 
 // Install returns the shipped install graph.
@@ -286,6 +293,15 @@ func Install() (*Graph, error) {
 func Uninstall() (*Graph, error) {
 	uninstallOnce.Do(func() { uninstallG, uninstallErr = Load(uninstallJSON, "uninstall.json") })
 	return uninstallG, uninstallErr
+}
+
+// Rebuild is the one-step graph the extension's "Rebuild from checkout" runs:
+// k3d.dev over the recorded checkout with --image-source=checkout. Install-
+// shaped (forward steps, a receipt) rather than a third kind, because a
+// rebuild IS an install of images the operator built.
+func Rebuild() (*Graph, error) {
+	rebuildOnce.Do(func() { rebuildG, rebuildErr = Load(rebuildJSON, "rebuild.json") })
+	return rebuildG, rebuildErr
 }
 
 // Load parses and fully validates a graph document. It refuses anything an

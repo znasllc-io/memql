@@ -317,6 +317,34 @@ make dev PULL_INFRA=1
 The inner loop is **pure-Argo**: no manifest files are applied directly. The
 pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 
+### Rebuilding a wizard-installed cluster
+
+A cluster the install wizard created runs RELEASED images: `k3d.up
+--image-registry/--image-tag` writes `spec.source.kustomize.images` overrides
+onto the ArgoCD Application, pinning every node to a registry tag. So a plain
+rebuild there builds and imports images nothing references, and the checkout
+the install cloned stays inert. Two params on the same `k3d.dev` capability
+close that gap:
+
+| Flag | What it names |
+|---|---|
+| `--repo-root=<checkout>` | the checkout the images are **built from**. Mirrors `k3d.up --repo-root`, and exists for the same reason: the packaged editor extension runs a staged copy of `scripts/` with no Go source beside it, so "this script's own repository" is not a MemQL tree there. |
+| `--image-source=checkout` | after the images are imported, **remove the Application's node-image overrides** so the overlay's own `:local` references apply. ArgoCD's resulting sync is what rolls the pods. |
+
+The extension's **Rebuild from checkout** is exactly
+`k3d.dev --repo-root=<checkout> --image-source=checkout`, driven by the one-step
+graph `scripts/install/graph/rebuild.json`.
+
+The **database operand's override is kept**. `memql-db` is not a node: it is
+versioned on the PostgreSQL axis, and CloudNativePG refuses an `imageName` whose
+tag it cannot parse (memql#4063), so the rebuild leaves it pinned and skips
+building it.
+
+The change is not permanent. An install, upgrade or repair rewrites those
+overrides, which returns the cluster to released images -- rebuild again to go
+back to the checkout's. Without `--image-source=checkout` nothing is patched, so
+`make dev` behaves exactly as it always has.
+
 ## Multi-node mesh testing
 
 ```bash

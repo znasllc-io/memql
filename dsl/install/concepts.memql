@@ -27,7 +27,7 @@
 @displayCard(primary="graph", secondary="status", tertiary="runId", status="status")
 concept installRun {
   runId          string! @description("Stable id for this run; also the concept row id, so every step transition appends to one timeline.")
-  graph          enum("install", "uninstall") @description("Which step-graph document this run executes (scripts/install/graph/install.json or uninstall.json).")
+  graph          enum("install", "uninstall", "rebuild") @description("Which step-graph document this run executes (scripts/install/graph/install.json, uninstall.json or rebuild.json).")
   status         enum("running", "succeeded", "failed", "cancelled") @description("Run lifecycle. running -> succeeded | failed; cancelled when the operator stops it.")
   currentStep    string  @description("Step id currently executing, or the step the run stopped on. Empty once the run reaches a terminal status.")
   completedSteps []string @description("Step ids that have run AND passed their verify predicate, in completion order. A step that ran but failed verification is not here -- passing verification is what 'completed' means.")

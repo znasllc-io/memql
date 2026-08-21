@@ -58,6 +58,36 @@
 #                 ErrImagePull rather than a slow first start. Refresh it with
 #                 `make dev PULL_INFRA=1` or `make db-image IMPORT=1`.
 #
+# Rebuilding a wizard-installed cluster
+# ------------------------------------
+# Two params exist for the rebuild the editor extension drives, and both name
+# something this script used to assume:
+#
+#   --repo-root=DIR      the checkout the images are BUILT FROM. The packaged
+#                        extension runs a STAGED copy of scripts/ with no Go
+#                        source beside it, so "this script's own repository" is
+#                        not a MemQL tree there; the build has to be pointed at
+#                        the checkout the install cloned. Mirrors k3d.up's
+#                        --repo-root, and defaults the same way.
+#   --image-source=checkout
+#                        a WIZARD install pins the Application's node images to
+#                        a released registry tag
+#                        (spec.source.kustomize.images, written by
+#                        `k3d.up --image-registry/--image-tag`), so a bare
+#                        rebuild imports images nothing references. Under this
+#                        flag the node overrides are removed AFTER the images
+#                        are imported, which lets the overlay's own ':local'
+#                        references apply, and ArgoCD's resulting sync rolls
+#                        the pods. The DATABASE OPERAND's override is KEPT: it
+#                        is not a node, it is versioned on the PostgreSQL axis,
+#                        and CNPG refuses an imageName whose tag it cannot
+#                        parse (memql#4063). Nothing is patched without the
+#                        flag, so `make dev` is unchanged.
+#
+# An install, upgrade or repair rewrites those overrides, so it returns the
+# cluster to released images. Reaching --app-name is how a cluster whose
+# Application is not the default `memql-local` is addressed.
+#
 # Usage
 # -----
 #   make dev                          # rebuild + restart all app nodes
@@ -72,11 +102,13 @@
 # Idempotent: each invocation rebuilds + re-imports the requested images and
 # rolls the Deployments; safe to re-run.
 #
-# Exit codes: 0 ok | 2 bad param (unknown node type) | 4 prerequisite missing
-#             (docker/k3d/kubectl absent, cluster not running, carrier repo
-#             missing)
+# Exit codes: 0 ok | 2 bad param (unknown node type, unknown image-source) |
+#             4 prerequisite missing (docker/k3d/kubectl absent, cluster not
+#             running, carrier repo or repo-root missing) | 5 operation failed
+#             (an image build, an import, an Application patch, or a sync that
+#             never converged)
 #
-# Refs: #2066 #2061 #2221
+# Refs: #2066 #2061 #2221 #4245
 
 set -euo pipefail
 
@@ -88,6 +120,9 @@ source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 
 cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart Deployments."
 cap_spec_param "node"            "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
+cap_spec_param "repo-root"       "the MemQL checkout to build from (default: this script's own repository)"
+cap_spec_param "app-name"        "ArgoCD Application name (default: \$MEMQL_K3D_APP_NAME or memql-local)"
+cap_spec_param "image-source"    "checkout: point the Application's node images at the locally built :local images, keeping the database operand override (default: leave the overrides as they are)" ""
 cap_spec_param "pull-infra"      "pull + import infra images (flag)"                                 ""
 cap_spec_param "cluster"         "k3d cluster name"
 cap_spec_param "namespace"       "k8s namespace"
@@ -105,6 +140,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 LOCAL_TAG="local"
+
+# The ArgoCD Application this cluster is reconciled by, and the namespace ArgoCD
+# itself runs in -- the literal "argocd", exactly as up.sh has it. Both are read
+# only under --image-source=checkout; a plain `make dev` never touches the
+# Application. Resolved from params in main().
+ARGOCD_NAMESPACE="argocd"
+APP_NAME=""
+IMAGE_SOURCE=""
 
 # App node types buildable from this repo's Dockerfile. The default `make dev`
 # set matches the Deployments in deploy/k8s/overlays/local.
@@ -143,6 +186,13 @@ REBUILT_COUNT=0
 RESTARTED=false
 INFRA_PULLED=false
 DB_IMAGE_IMPORTED=false
+OVERRIDES_PATCHED=false
+# What was BUILT, for the envelope. A caller that asked for a rebuild of a
+# checkout it named has no other way to learn which commit it got -- and a
+# dirty tree is exactly the case where the ref alone is not the answer.
+CHECKOUT_COMMIT=""
+CHECKOUT_REF=""
+CHECKOUT_DIRTY=0
 # Set from the --pull-infra flag in main(); read by ensure_db_image, which runs
 # unconditionally and so cannot take the flag from main's local.
 PULL_INFRA=false
@@ -406,7 +456,13 @@ function process_node() {
         build_engine_node "$node"
     fi
     import_image "$(image_name_for_node "$node")"
-    restart_deployment "$node"
+    # Under --image-source=checkout the Application's node overrides are dropped
+    # once every image is imported, and the sync that follows rolls the pods --
+    # so restarting here would roll them onto the images they are still pinned
+    # to. main() restarts explicitly when there was nothing to patch.
+    if [[ "$IMAGE_SOURCE" != "checkout" ]]; then
+        restart_deployment "$node"
+    fi
 
     REBUILT_COUNT=$((REBUILT_COUNT + 1))
     RESTARTED=true
@@ -453,6 +509,11 @@ function cluster_holds_db_image() {
 }
 
 function ensure_db_image() {
+    if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
+        info "Skipping the database operand image: --image-source=checkout leaves the operand override in place (the database is not a node)."
+        return 0
+    fi
+
     section "Ensuring the database operand image (${DB_IMAGE})"
 
     if [[ "$PULL_INFRA" != "true" ]] && cluster_holds_db_image; then
@@ -498,6 +559,109 @@ function wait_for_rollouts() {
 }
 
 #=============================================================================
+# REBUILDING A WIZARD-INSTALLED CLUSTER (--repo-root, --image-source=checkout)
+#=============================================================================
+
+# require_build_checkout -- the directory the images are built FROM.
+function require_build_checkout() {
+    local root="$1"
+    if [[ ! -d "$root" ]]; then
+        cap_fail 4 "repo-root ${root} does not exist"
+    fi
+    if [[ ! -f "${root}/Dockerfile" ]]; then
+        cap_fail 4 "repo-root ${root} has no Dockerfile -- it is not a MemQL checkout"
+    fi
+    if [[ ! -f "${root}/deploy/k8s/overlays/local/kustomization.yaml" ]]; then
+        cap_fail 4 "repo-root ${root} has no deploy/k8s/overlays/local/kustomization.yaml -- it is not a MemQL checkout"
+    fi
+    if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        cap_fail 4 "repo-root ${root} is not a git checkout, so what was built cannot be recorded"
+    fi
+}
+
+# checkout_facts -- commit, ref and dirtiness of the checkout, for the envelope.
+function checkout_facts() {
+    local root="$1"
+    CHECKOUT_COMMIT="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
+    local tag branch
+    tag="$(git -C "$root" describe --exact-match --tags HEAD 2>/dev/null || true)"
+    branch="$(git -C "$root" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+    if [[ -n "$tag" ]]; then CHECKOUT_REF="tag:${tag}"
+    elif [[ -n "$branch" ]]; then CHECKOUT_REF="branch:${branch}"
+    else CHECKOUT_REF="detached"; fi
+    # `|| true` for the same reason the three reads above carry it, and it is
+    # NOT decoration: under `set -euo pipefail` a failing git in a pipeline
+    # aborts the script (measured: exit 128), and every caller reaches this on
+    # a plain `make dev`. The abort would surface as the EXIT trap's
+    # "aborted without an explicit result" envelope, naming nothing.
+    CHECKOUT_DIRTY="$(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ' || true)"
+}
+
+# filter_node_image_overrides <json-string-array> -- the same list with every
+# node override removed and the database operand's kept. The argument is the
+# jsonpath rendering of spec.source.kustomize.images (a JSON array of
+# "name=image:tag" strings); the output is a JSON array, "[]" for nothing.
+function filter_node_image_overrides() {
+    local raw="${1:-}"
+    raw="${raw#[}"; raw="${raw%]}"
+    local out="" entry name base
+    local IFS=','
+    for entry in $raw; do
+        entry="${entry#\"}"; entry="${entry%\"}"
+        [[ -z "$entry" ]] && continue
+        name="${entry%%=*}"
+        base="$(basename "$name")"
+        if [[ "$base" == "memql-db" ]]; then
+            out+="${out:+,}\"${entry}\""
+        fi
+    done
+    printf '[%s]\n' "$out"
+}
+
+# point_application_at_local_images -- drop the node overrides a wizard install
+# wrote onto the Application, so the overlay's own :local references apply.
+# Call AFTER the images are imported: the sync this triggers rolls the pods.
+function point_application_at_local_images() {
+    section "Pointing Application '${APP_NAME}' at the locally built images"
+    local current filtered
+    current="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o 'jsonpath={.spec.source.kustomize.images}' 2>/dev/null || true)"
+    if [[ -z "$current" || "$current" == "[]" ]]; then
+        info "No image overrides on ${APP_NAME} -- the overlay's :local images already apply."
+        return 0
+    fi
+    filtered="$(filter_node_image_overrides "$current")"
+    if [[ "$filtered" == "$current" ]]; then
+        info "Only the database operand is overridden on ${APP_NAME} -- nothing to patch."
+        return 0
+    fi
+    info "Removing the node image overrides (keeping the database operand's)..."
+    kubectl -n "${ARGOCD_NAMESPACE}" patch application "${APP_NAME}" --type=merge \
+        -p "{\"spec\":{\"source\":{\"kustomize\":{\"images\":${filtered}}}}}" >&2 \
+        || cap_fail 5 "patching ${APP_NAME} image overrides failed"
+    kubectl -n "${ARGOCD_NAMESPACE}" annotate application "${APP_NAME}" argocd.argoproj.io/refresh=normal --overwrite >&2 || true
+    OVERRIDES_PATCHED=true
+    cap_changed
+    wait_for_application_synced
+}
+
+# wait_for_application_synced -- ArgoCD has reconciled the patched Application.
+function wait_for_application_synced() {
+    local timeout="${MEMQL_K3D_SYNC_TIMEOUT:-300}"
+    local deadline=$((SECONDS + timeout)) sync=""
+    info "Waiting for ${APP_NAME} to sync (up to ${timeout}s)..."
+    while ((SECONDS < deadline)); do
+        sync="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o 'jsonpath={.status.sync.status}' 2>/dev/null || true)"
+        if [[ "$sync" == "Synced" ]]; then
+            info "${APP_NAME} is Synced."
+            return 0
+        fi
+        sleep 5
+        (( (deadline - SECONDS) % 15 == 0 )) && info "  still ${sync:-unknown} ..."
+    done
+    cap_fail 5 "${APP_NAME} did not reach Synced within ${timeout}s (last: ${sync:-unknown}); inspect: kubectl -n ${ARGOCD_NAMESPACE} get application ${APP_NAME}"
+}
+
+#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -514,9 +678,26 @@ function main() {
     CARRIER_REPO="$(cap_param carrier-repo "${MEMQL_CARRIER_REPO:-}")"
     carrier_nodes_arg="$(cap_param carrier-nodes "${MEMQL_CARRIER_NODES:-}")"
     CARRIER_CONTEXT="$(cap_param carrier-context "${MEMQL_CARRIER_CONTEXT:-}")"
+    REPO_ROOT="$(cap_param repo-root "${REPO_ROOT}")"
+    APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-memql-local}")"
+    IMAGE_SOURCE="$(cap_param image-source "")"
 
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
+
+    # A closed set, refused up front. An unrecognised value must not read as
+    # "leave the overrides alone" -- that is the outcome the caller was trying
+    # to avoid, reported as success.
+    case "$IMAGE_SOURCE" in
+        ""|checkout) ;;
+        *) cap_fail 2 "image-source must be empty or 'checkout' (got '${IMAGE_SOURCE}')" ;;
+    esac
+
+    # Before anything is built: the root is what every build below reads, so a
+    # root that is not a checkout must fail here rather than as a Dockerfile
+    # that cannot be found, eight images into a rebuild.
+    require_build_checkout "$REPO_ROOT"
+    checkout_facts "$REPO_ROOT"
 
     if [ -n "${carrier_nodes_arg}" ]; then
         IFS=',' read -ra CARRIER_NODES <<< "${carrier_nodes_arg}"
@@ -580,6 +761,19 @@ function main() {
             process_node "$node"
         done
 
+        if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
+            point_application_at_local_images
+            # Nothing was patched: the Application already pointed at the
+            # overlay's own :local references, so the image REFS are unchanged
+            # and only their CONTENT moved -- which ArgoCD cannot see and a
+            # restart is what rolls.
+            if [[ "$OVERRIDES_PATCHED" != true ]]; then
+                for node in "${nodes_to_build[@]}"; do
+                    restart_deployment "$node"
+                done
+            fi
+        fi
+
         if [ -z "${wait_flag}" ]; then
             wait_for_rollouts "${nodes_to_build[@]}"
         fi
@@ -596,6 +790,13 @@ function main() {
     cap_result_set_raw restarted   "$RESTARTED"
     cap_result_set_raw infraPulled "$INFRA_PULLED"
     cap_result_set_raw dbImageImported "$DB_IMAGE_IMPORTED"
+    cap_result_set     imageSource "${IMAGE_SOURCE:-unchanged}"
+    cap_result_set     repoRoot    "$REPO_ROOT"
+    cap_result_set     commit      "$CHECKOUT_COMMIT"
+    cap_result_set     ref         "$CHECKOUT_REF"
+    cap_result_set_raw dirtyCount  "${CHECKOUT_DIRTY:-0}"
+    cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
+    cap_result_set     appName     "$APP_NAME"
     cap_ok
 }
 
