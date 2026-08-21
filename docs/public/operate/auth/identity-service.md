@@ -416,14 +416,85 @@ in `component/identity/refresh/rotate.go`
 
 The identity service composes emails (magic link, invitation,
 admin notifications) and hands them to the `email` integration
-plug-in. Configure exactly one sender:
+plug-in (`integrations/email`). Configure exactly one sender:
 
-- **Microsoft Graph** (`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
-  `AZURE_CLIENT_SECRET` + `MAIL_SENDER`) -- preferred.
+- **Microsoft Graph** (`MEMQL_EMAIL_AZURE_TENANT_ID` +
+  `MEMQL_EMAIL_AZURE_CLIENT_ID` + `MEMQL_EMAIL_AZURE_CLIENT_SECRET` +
+  `MEMQL_EMAIL_SENDER`, optional `MEMQL_EMAIL_FROM_NAME`) -- preferred,
+  and the ONLY sender on a cloud install (memql#4218: Graph only; no
+  SMTP, no Azure Communication Services on this path). The legacy
+  un-prefixed names (`AZURE_TENANT_ID`, `MAIL_SENDER`, ...) are still
+  read as a fallback.
 - **SMTP fallback** (`SMTP_HOST` + `SMTP_PORT` + `SMTP_USERNAME` +
-  `SMTP_PASSWORD` + `SMTP_FROM_ADDR`).
+  `SMTP_PASSWORD` + `SMTP_FROM_ADDR`) -- development only.
 - **LogSender** -- both unset; emails are written to the slog
   stream. Dev only.
+
+### The Graph sender lives on the MAILBOX tenant, not the AKS tenant
+
+`MEMQL_EMAIL_AZURE_TENANT_ID` is the Entra tenant that HOSTS THE SENDER
+MAILBOX -- the Microsoft 365 tenant the mail domain is verified on --
+and that is not necessarily the tenant the AKS subscription lives in.
+The sender runs the client-credentials flow against
+`login.microsoftonline.com/<tenant-id>` and then calls
+`POST /users/<sender>/sendMail`; Graph resolves `<sender>` in the tenant
+the token was issued for. On a tenant that does not own the mailbox that
+lookup is a 404 (or a guest object with no mailbox), and no permission
+granted on that tenant changes it.
+
+The first keep-it cluster hit exactly this (memql#4226): AKS and the
+Pay-As-You-Go subscription sat on one Entra tenant, the sender mailbox
+and the public mail domain on a different Microsoft 365 tenant. So
+EVERYTHING the sender needs is created on the MAILBOX tenant:
+
+- the app registration (`id-memql-mail` by convention) and its client
+  secret;
+- the `Mail.Send` APPLICATION permission, with admin consent granted;
+- the Exchange `ApplicationAccessPolicy` that scopes that app to the one
+  sender mailbox (hardening; without it `Mail.Send` is every mailbox in
+  the tenant);
+- and therefore `MEMQL_EMAIL_AZURE_TENANT_ID` = that tenant's id, and
+  `MEMQL_EMAIL_AZURE_CLIENT_ID` / `_CLIENT_SECRET` = that app's.
+
+Find the tenant without guessing -- both answers come from the domain,
+not from whichever portal you happen to be signed in to:
+
+```bash
+# Which tenant does this login name belong to? (NameSpaceType Managed /
+# Federated, plus the tenant's brand name)
+curl -s "https://login.microsoftonline.com/getuserrealm.srf?login=noreply@<domain>&json=1"
+
+# The tenant id itself: the issuer is https://sts.windows.net/<tenant-id>/
+curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configuration" | jq -r .issuer
+```
+
+### Next client install: verify the mailbox before wiring Graph
+
+1. Identify the mailbox tenant with the two commands above. Do not assume
+   it is the subscription's tenant.
+2. On THAT tenant, confirm the sender is a real, licensed mailbox:
+   `GET https://graph.microsoft.com/v1.0/users/noreply@<domain>?$select=id,userPrincipalName,userType,assignedLicenses`
+   must return the user with `userType: Member` and `assignedLicenses`
+   non-empty. A 404 is the wrong tenant or no such user; empty
+   `assignedLicenses` is no Exchange license, and the first `sendMail`
+   then fails with `MailboxNotEnabledForRESTAPI` -- that error means "not
+   a real mailbox", not a permission problem.
+3. Create `id-memql-mail`, grant `Mail.Send` (Application) with admin
+   consent, and apply the `ApplicationAccessPolicy` -- on that tenant
+   only. **Do not create the mail app on the AKS tenant, and do not
+   recreate `noreply@<domain>` on the AKS directory**: a same-named
+   object on the wrong tenant sends every later diagnosis down the wrong
+   path.
+4. Seed `MEMQL_EMAIL_AZURE_TENANT_ID` with the MAILBOX tenant id, then the
+   client id, the secret and `MEMQL_EMAIL_SENDER` -- through Key Vault +
+   External Secrets on a cloud install, like every other secret.
+5. Send one magic link and read the identity log: `email: using Microsoft
+   Graph sender` at boot, then `sendMail` answering `202 Accepted`. A
+   `404` on `/users/<sender>` points at the tenant; a `401` points at the
+   credential.
+
+The keep-it instance's own record of this is in
+[azure-keep-it.md](../azure-keep-it.md#mail-the-graph-sender-lives-on-the-mailbox-tenant).
 
 Branding controls (`MEMQL_IDENTITY_BRAND_NAME`,
 `MEMQL_IDENTITY_BRAND_PRIMARY_COLOR`, `MEMQL_IDENTITY_BRAND_LOGO_DATA_URI`)

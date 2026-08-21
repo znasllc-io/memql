@@ -245,6 +245,65 @@ Live `--apply` stays owner-gated. See
 [deploy-bundle-runbook.md](deploy-bundle-runbook.md). No
 `overlays/cloud`. No `top`. No extra monitoring addon.
 
+## Mail: the Graph sender lives on the mailbox tenant
+
+Magic links, invitations and admin notifications leave the identity
+service through `integrations/email`'s Microsoft Graph sender, and on
+this instance Graph is the ONLY path (memql#4218): no SMTP, no Azure
+Communication Services.
+
+The lesson from the first bring-up (memql#4226): AKS and the
+Pay-As-You-Go subscription sit on one Entra tenant; the sender mailbox
+(`noreply@<domain>`) and the public mail domain live on a DIFFERENT
+Microsoft 365 tenant. Graph resolves `/users/<sender>` in the tenant the
+token was issued for, so on the AKS tenant that user is a 404 (or a
+guest object with no mailbox), whatever permissions the app holds there.
+Everything the sender needs therefore lives on the MAILBOX tenant:
+
+| What | Where | Value |
+|---|---|---|
+| App registration `id-memql-mail` + client secret | mailbox tenant | `MEMQL_EMAIL_AZURE_CLIENT_ID` / `MEMQL_EMAIL_AZURE_CLIENT_SECRET` |
+| `Mail.Send` (Application) + admin consent | mailbox tenant | -- |
+| Exchange `ApplicationAccessPolicy` scoping the app to `noreply@<domain>` | mailbox tenant | -- |
+| Tenant id | mailbox tenant | `MEMQL_EMAIL_AZURE_TENANT_ID` -- NOT the AKS directory |
+| Sender | -- | `MEMQL_EMAIL_SENDER=noreply@<domain>` |
+
+Find the tenant from the domain, not from whichever portal you are
+signed in to:
+
+```bash
+curl -s "https://login.microsoftonline.com/getuserrealm.srf?login=noreply@<domain>&json=1"
+curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configuration" | jq -r .issuer
+# issuer = https://sts.windows.net/<tenant-id>/
+```
+
+### Next client install: mail checklist
+
+- [ ] Identify the tenant that hosts the sender mailbox with the two
+      commands above. Do not assume it is the subscription's tenant.
+- [ ] On that tenant,
+      `GET /v1.0/users/noreply@<domain>?$select=id,userType,assignedLicenses`
+      returns a `Member` with `assignedLicenses` non-empty. Empty
+      licenses, or `MailboxNotEnabledForRESTAPI` on the first send, means
+      no Exchange mailbox -- license it or pick another sender before
+      wiring anything.
+- [ ] Create `id-memql-mail`, grant `Mail.Send` (Application) with admin
+      consent, and apply the `ApplicationAccessPolicy` -- on the mailbox
+      tenant only.
+- [ ] Do NOT create the mail app on the AKS tenant. Do NOT recreate
+      `noreply@<domain>` on the AKS directory: a same-named object on the
+      wrong tenant sends every later diagnosis down the wrong path.
+- [ ] Seed `MEMQL_EMAIL_AZURE_TENANT_ID` (the mailbox tenant id),
+      `MEMQL_EMAIL_AZURE_CLIENT_ID`, `MEMQL_EMAIL_AZURE_CLIENT_SECRET` and
+      `MEMQL_EMAIL_SENDER` through Key Vault + External Secrets like every
+      other secret on the install.
+- [ ] Send one magic link; the identity log shows `email: using Microsoft
+      Graph sender` at boot and `sendMail` answering `202`. A `404` on
+      `/users/<sender>` is the tenant; a `401` is the credential.
+
+Full runbook:
+[auth/identity-service.md](auth/identity-service.md#email-delivery).
+
 ## What is not this page
 
 - The local k3d + Argo cluster --
