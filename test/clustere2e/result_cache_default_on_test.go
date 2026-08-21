@@ -64,7 +64,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 
 	createSpace := func(name string) string {
 		spaceID := "v1:cognition:space:" + id.NewShortId()
-		if _, err := qcA.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(spaceID, name, "")); err != nil {
+		if _, err := qcA.ExecuteNamed(ctx, "createSpace", buildCreateSpace(spaceID, name, "")); err != nil {
 			t.Fatalf("create space: %v", err)
 		}
 		return spaceID

@@ -162,7 +162,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		sent := make(map[string]struct{}, total)
 		for i := 0; i < total; i++ {
 			sid := "v1:cognition:space:" + id.NewShortId()
-			if _, err := qcA.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(sid, fmt.Sprintf("named-query space probe %03d", i), "active")); err != nil {
+			if _, err := qcA.ExecuteNamed(ctx, "createSpace", buildCreateSpace(sid, fmt.Sprintf("named-query space probe %03d", i), "active")); err != nil {
 				t.Fatalf("create space %d: %v", i, err)
 			}
 			sent[sid] = struct{}{}

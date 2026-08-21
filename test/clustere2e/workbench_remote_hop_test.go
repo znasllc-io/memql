@@ -44,7 +44,11 @@ import (
 // builtin is engine-owned and sits directly on top of the integration
 // capability, which is the seam the hop actually crosses.
 func buildWorkbenchExec(planID, cmd string) string {
-	return fmt.Sprintf("workbenchDispatchHost(action: %q, planId: %q, args: {cmd: %q})", "exec", planID, cmd)
+	// @args(profile="object") -- the builtin takes one JSON object, not a
+	// bare string or a named-arg list. Hop tests that passed
+	// workbenchDispatchHost("env") (or the named-arg form) fail argument
+	// validation (memql#4212).
+	return fmt.Sprintf(`workbenchDispatchHost({action: %q, planId: %q, args: {cmd: %q}})`, "exec", planID, cmd)
 }
 
 // workbenchDispatch is the dispatchResult shape the integration returns,
