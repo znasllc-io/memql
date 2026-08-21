@@ -70,16 +70,24 @@ func render(t *testing.T, dir string) string {
 }
 
 // resource is the slice of a rendered document these gates reason about.
+//
+// The Service fields (Type, ExternalTrafficPolicy, LoadBalancerSourceRanges)
+// are the LoadBalancer-only surface the cloud-entry voice-off hold removes
+// (memql#4225); they decode to their zero values on every other kind.
 type resource struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
 	Metadata   struct {
-		Name      string `yaml:"name"`
-		Namespace string `yaml:"namespace"`
+		Name        string            `yaml:"name"`
+		Namespace   string            `yaml:"namespace"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Data map[string]string `yaml:"data"`
 	Spec struct {
-		Replicas *int `yaml:"replicas"`
+		Replicas                 *int     `yaml:"replicas"`
+		Type                     string   `yaml:"type"`
+		ExternalTrafficPolicy    string   `yaml:"externalTrafficPolicy"`
+		LoadBalancerSourceRanges []string `yaml:"loadBalancerSourceRanges"`
 	} `yaml:"spec"`
 }
 
