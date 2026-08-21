@@ -24,7 +24,31 @@ import {
   type ElementRenderInput,
   type ElementSpec,
 } from "./fitness.js";
+
 import type { ConceptLike, RowLike } from "./types.js";
+
+// Paragraph-shaped columns. Marked by FIELD NAME, not by the cell's string
+// length: a one-word description is still a leftover-width column. Exact
+// match, case-insensitive -- "notes" is long, "footnotes" is not.
+const LONG_TABLE_FIELDS = new Set([
+  "description",
+  "personality",
+  "notes",
+  "note",
+  "bio",
+  "comment",
+  "body",
+  "prompt",
+  "systemprompt",
+  "message",
+  "instructions",
+  "summary",
+]);
+
+export function isLongTableField(field: string): boolean {
+  return LONG_TABLE_FIELDS.has(field.toLowerCase());
+}
+
 
 export const TABLE_ELEMENT: ElementSpec = {
   id: "table",
@@ -62,6 +86,19 @@ function sortRows(
   });
 }
 
+function viewAction(id: string): VNode {
+  return h(
+    "button",
+    {
+      class: "vk-row-action",
+      type: "button",
+      "data-vk-row-action": "view",
+      "data-vk-action-row-id": id,
+    },
+    [text("View")],
+  );
+}
+
 function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
   const columns = boundFields(fit, "column");
   if (rows.length === 0 || columns.length === 0) {
@@ -69,26 +106,27 @@ function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
   }
 
   const sort = options?.sort;
-  const head = h(
-    "tr",
-    {},
-    columns.map((field) => {
-      const attrs: Record<string, string> = {
-        class: "vk-table-head",
-        "data-vk-sort-field": field,
-        // A header is a sort control even before it is the active one, so the
-        // host's delegated listener has something to match on every column.
-        "aria-sort":
-          sort?.field === field
-            ? sort.direction === "desc"
-              ? "descending"
-              : "ascending"
-            : "none",
-      };
-      if (sort?.field === field) attrs["data-vk-sort-dir"] = sort.direction;
-      return h("th", attrs, [text(field)]);
-    }),
-  );
+  const showView = options?.rowAction === "view";
+  const headCells = columns.map((field) => {
+    const attrs: Record<string, string> = {
+      class: "vk-table-head",
+      "data-vk-sort-field": field,
+      // A header is a sort control even before it is the active one, so the
+      // host's delegated listener has something to match on every column.
+      "aria-sort":
+        sort?.field === field
+          ? sort.direction === "desc"
+            ? "descending"
+            : "ascending"
+          : "none",
+    };
+    if (sort?.field === field) attrs["data-vk-sort-dir"] = sort.direction;
+    return h("th", attrs, [text(field)]);
+  });
+  if (showView) {
+    headCells.push(h("th", { class: "vk-table-action-head" }, [text("")]));
+  }
+  const head = h("tr", {}, headCells);
 
   const body = sortRows(rows, sort).map((row) => {
     const id = rowDisplayId(row);
@@ -96,18 +134,22 @@ function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
     if (options?.selectedRowId !== undefined && id === options.selectedRowId) {
       attrs["data-selected"] = "true";
     }
-    return h(
-      "tr",
-      attrs,
-      columns.map((field) =>
-        h("td", { class: "vk-table-cell" }, [text(scalarText(row, field))]),
-      ),
-    );
+    const cells = columns.map((field) => {
+      const cell: Record<string, string> = { class: "vk-table-cell" };
+      if (isLongTableField(field)) cell["data-vk-cell"] = "long";
+      return h("td", cell, [text(scalarText(row, field))]);
+    });
+    if (showView) {
+      cells.push(h("td", { class: "vk-table-cell vk-table-action" }, [viewAction(id)]));
+    }
+    return h("tr", attrs, cells);
   });
 
-  return h("table", { class: "vk-table" }, [
-    h("thead", {}, [head]),
-    h("tbody", {}, body),
+  return h("div", { class: "vk-table-wrap" }, [
+    h("table", { class: "vk-table" }, [
+      h("thead", {}, [head]),
+      h("tbody", {}, body),
+    ]),
   ]);
 }
 

@@ -109,7 +109,7 @@ export {
   ROW_LIST_ELEMENT,
   DETAIL_ELEMENT,
 } from "./elements.js";
-export { renderTable, TABLE_ELEMENT } from "./table.js";
+export { renderTable, TABLE_ELEMENT, isLongTableField } from "./table.js";
 export { renderCalendar, CALENDAR_ELEMENT } from "./calendar.js";
 export { renderChecklist, CHECKLIST_ELEMENT } from "./checklist.js";
 export { renderTimeline, TIMELINE_ELEMENT } from "./timeline.js";

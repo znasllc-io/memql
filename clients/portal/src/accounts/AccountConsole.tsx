@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Button, ConfirmDialog, DataText, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { ACCOUNT_TOKEN_CONCEPT, accountTokenRows } from "./rows";
@@ -185,6 +187,9 @@ function TokenPanel({
   concept: Concept;
 }): ReactNode {
   const [label, setLabel] = useState("");
+  const dialog = useLocalRowId();
+  const tokenRows = accountTokenRows(state.tokens);
+  const dialogRow = rowWithId(tokenRows, dialog.rowId);
 
   return (
     <div className="flex flex-col gap-3 border-t border-line pt-4">
@@ -222,9 +227,16 @@ function TokenPanel({
         <>
           <ViewElement
             element={TABLE_ELEMENT}
-            rows={accountTokenRows(state.tokens)}
+            rows={tokenRows}
             concept={ACCOUNT_TOKEN_CONCEPT}
             options={{ sort: { field: "issued", direction: "desc" } }}
+            onSelect={dialog.onSelect}
+          />
+          <RowDetailDialog
+            open={dialog.open}
+            onClose={dialog.onClose}
+            rowId={dialog.rowId}
+            row={dialogRow ?? null}
           />
           <RevokeControl state={state} />
         </>

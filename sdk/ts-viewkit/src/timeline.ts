@@ -135,6 +135,23 @@ function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
         );
       }
     }
+    if (options?.rowAction === "view") {
+      // No data-row-id on the button: that attribute is the host's select
+      // hook, and this control must not fire it. data-vk-action-row-id names
+      // the row the host should open instead.
+      children.push(
+        h(
+          "button",
+          {
+            class: "vk-row-action",
+            type: "button",
+            "data-vk-row-action": "view",
+            "data-vk-action-row-id": id,
+          },
+          [text("View")],
+        ),
+      );
+    }
     items.push(h("li", attrs, children));
   }
 

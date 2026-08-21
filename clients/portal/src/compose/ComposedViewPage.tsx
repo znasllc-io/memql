@@ -1,9 +1,11 @@
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { sanitizeArrangement, profileConcept, type Arrangement } from "@znasllc-io/memql-view-kit";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
+import { RowDetailDialog } from "../components/RowDetailDialog";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
@@ -104,6 +106,10 @@ function SavedSection({
   const { status } = useCluster();
   const data = useViewRows(arrangement.conceptId);
   const concept = data.concept;
+  const [rowId, setRowId] = useState("");
+  const onSelect = useCallback((id: string) => setRowId(id), []);
+  const onClose = useCallback(() => setRowId(""), []);
+  const detail = useRowDetail(arrangement.conceptId, rowId);
 
   if (data.registryError) {
     return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
@@ -140,7 +146,16 @@ function SavedSection({
           />
         }
       />
-      <ArrangementBands arrangement={live} concept={concept} rows={data.rows} />
+      <ArrangementBands arrangement={live} concept={concept} rows={data.rows} onSelect={onSelect} />
+      <RowDetailDialog
+        open={rowId !== ""}
+        onClose={onClose}
+        rowId={rowId}
+        row={detail.row}
+        loading={detail.loading}
+        error={detail.error}
+        missing={detail.missing}
+      />
     </section>
   );
 }

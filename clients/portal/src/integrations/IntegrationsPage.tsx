@@ -6,6 +6,8 @@ import {
   TABLE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
 
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, PageHeader, Skeleton } from "../ui";
 import { ViewElement } from "../views/ViewElement";
@@ -60,6 +62,11 @@ export function IntegrationsPage(): ReactNode {
   const registry = useMemo(() => integrationRows(reports), [reports]);
   const settings = useMemo(() => settingRows(email?.settings ?? []), [email]);
   const credentials = useMemo(() => credentialRows(email?.credentials ?? []), [email]);
+  const dialog = useLocalRowId();
+  const dialogRow =
+    rowWithId(registry, dialog.rowId) ??
+    rowWithId(settings, dialog.rowId) ??
+    rowWithId(credentials, dialog.rowId);
 
   return (
     <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-6 pb-8">
@@ -117,6 +124,7 @@ export function IntegrationsPage(): ReactNode {
               rows={registry}
               concept={INTEGRATION_CONCEPT}
               options={{ sort: { field: "name", direction: "asc" } }}
+              onSelect={dialog.onSelect}
             />
           </Band>
 
@@ -136,6 +144,7 @@ export function IntegrationsPage(): ReactNode {
                 rows={settings}
                 concept={SETTING_CONCEPT}
                 options={{ sort: { field: "name", direction: "asc" } }}
+                onSelect={dialog.onSelect}
               />
             </div>
           </Band>
@@ -161,9 +170,16 @@ export function IntegrationsPage(): ReactNode {
                 rows={credentials}
                 concept={CREDENTIAL_CONCEPT}
                 options={{ sort: { field: "name", direction: "asc" } }}
+                onSelect={dialog.onSelect}
               />
             </div>
           </Band>
+          <RowDetailDialog
+            open={dialog.open}
+            onClose={dialog.onClose}
+            rowId={dialog.rowId}
+            row={dialogRow ?? null}
+          />
         </>
       )}
     </section>

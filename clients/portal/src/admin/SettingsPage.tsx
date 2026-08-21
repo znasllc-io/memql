@@ -3,6 +3,8 @@ import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import type { ClusterSettingsEdit } from "@znasllc-io/memql-sdk-core/identityadmin";
 
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, Select, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
@@ -44,6 +46,8 @@ export function SettingsPage(): ReactNode {
   const settings = useClusterSettings(canAdminister);
   const writes = useAdminWrites();
   const rows = settingRows(settings.data);
+  const dialog = useLocalRowId();
+  const dialogRow = rowWithId(rows, dialog.rowId);
 
   if (surface === undefined) return null;
   if (!canAdminister) {
@@ -103,6 +107,7 @@ export function SettingsPage(): ReactNode {
             rows={rows}
             concept={SETTING_CONCEPT}
             options={{ bindings: { column: ["group", "setting", "value"] } }}
+            onSelect={dialog.onSelect}
           />
         )}
       </Band>
@@ -119,6 +124,12 @@ export function SettingsPage(): ReactNode {
         )}
       </Band>
 
+      <RowDetailDialog
+        open={dialog.open}
+        onClose={dialog.onClose}
+        rowId={dialog.rowId}
+        row={dialogRow ?? null}
+      />
     </AdminFrame>
   );
 }

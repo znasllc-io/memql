@@ -11,16 +11,21 @@ import { Button, type ButtonTone } from "./Button";
 // jsdom implements HTMLDialogElement but not every environment does; the
 // open-attribute fallback keeps tests honest without a mock.
 
+export type DialogSize = "md" | "xl";
+
 export function Dialog({
   open,
   onClose,
   labelledBy,
+  size = "md",
   children,
 }: {
   open: boolean;
   // Fired for every close path: Escape, backdrop, and programmatic.
   onClose: () => void;
   labelledBy: string;
+  // Confirm stays md (max-w-md). A full-row read needs more room (xl / max-w-2xl).
+  size?: DialogSize;
   children: ReactNode;
 }): ReactNode {
   const ref = useRef<HTMLDialogElement>(null);
@@ -50,7 +55,7 @@ export function Dialog({
         // dialog's own confirm/cancel controls are the deliberate paths.
         if (event.target === event.currentTarget) onClose();
       }}
-      className="m-auto w-full max-w-md rounded-lg border border-line bg-surface p-0 text-fg backdrop:bg-bg/60 backdrop:backdrop-blur-sm"
+      className={`m-auto w-full ${size === "xl" ? "max-w-2xl" : "max-w-md"} rounded-lg border border-line bg-surface p-0 text-fg backdrop:bg-bg/60 backdrop:backdrop-blur-sm`}
     >
       {children}
     </dialog>

@@ -30,7 +30,8 @@ import {
 import { VIEW_KIT_ELEMENTS } from "../src/elements.js";
 import { CALENDAR_ELEMENT, renderCalendar } from "../src/calendar.js";
 import { CHECKLIST_ELEMENT, renderChecklist } from "../src/checklist.js";
-import { TABLE_ELEMENT, renderTable } from "../src/table.js";
+import { TABLE_ELEMENT, renderTable, isLongTableField } from "../src/table.js";
+import { viewKitStyles } from "../src/styles.js";
 import { TIMELINE_ELEMENT, renderTimeline } from "../src/timeline.js";
 import { KANBAN_ELEMENT, renderKanban } from "../src/kanban.js";
 import { STAT_TILE_ELEMENT, renderStatTiles } from "../src/statTile.js";
@@ -771,3 +772,77 @@ test("a chart of one category is still a chart", () => {
   assert.match(pie, /A80,80 0 1 1/, "a lone slice is two half-arcs, not a zero-length one");
   assert.match(pie, /100%/);
 });
+
+// ---------------------------------------------------------------------------
+// Table polish (memql#4231)
+// ---------------------------------------------------------------------------
+
+const POLISH_ROWS = [
+  {
+    id: "agent:a1",
+    name: "MemQL Planner",
+    ownerUserId: "user:u1",
+    createdAt: "2026-08-08T10:00:00Z",
+    description: "hi",
+    personality: "A careful planner.",
+    systemPrompt: "You are the planner.",
+  },
+];
+
+test("table marks long fields by name, including a short description and systemPrompt", () => {
+  const html = renderToHtml(renderTable(POLISH_ROWS, { id: "x", entity: "agent" }));
+  assert.match(html, /data-vk-cell="long"[^>]*>hi</);
+  assert.match(html, /data-vk-cell="long"[^>]*>A careful planner\.</);
+  assert.match(html, /data-vk-cell="long"[^>]*>You are the planner\.</);
+  // Short columns keep their text but are not marked long.
+  assert.match(html, />MemQL Planner</);
+  assert.match(html, />user:u1</);
+  assert.doesNotMatch(html, /data-vk-cell="long"[^>]*>MemQL Planner</);
+  assert.doesNotMatch(html, /data-vk-cell="long"[^>]*>user:u1</);
+  assert.doesNotMatch(html, /data-vk-cell="long"[^>]*>2026-08-08/);
+  assert.doesNotMatch(html, /data-vk-cell="long"[^>]*>agent:a1</);
+});
+
+test("isLongTableField is an exact, case-insensitive list that includes systemPrompt", () => {
+  assert.equal(isLongTableField("systemPrompt"), true);
+  assert.equal(isLongTableField("SystemPrompt"), true);
+  assert.equal(isLongTableField("SYSTEMPROMPT"), true);
+  assert.equal(isLongTableField("name"), false);
+  assert.equal(isLongTableField("ownerUserId"), false);
+  assert.equal(isLongTableField("createdAt"), false);
+  assert.equal(isLongTableField("id"), false);
+  assert.equal(isLongTableField("description"), true);
+  assert.equal(isLongTableField("personality"), true);
+  // Exact match, not substring: "notes" is long, "footnotes" is not.
+  assert.equal(isLongTableField("notes"), true);
+  assert.equal(isLongTableField("footnotes"), false);
+});
+
+test("table stylesheet drops last-row divider, nowraps short cells, and wraps for overflow", () => {
+  assert.match(viewKitStyles, /tbody tr:last-child \.vk-table-cell\s*\{[^}]*border-bottom:\s*none/);
+  assert.match(viewKitStyles, /\.vk-table-cell\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(viewKitStyles, /\.vk-table-cell\s*\{[^}]*text-overflow:\s*ellipsis/);
+  assert.match(viewKitStyles, /0\.8125rem/);
+  assert.match(viewKitStyles, /\.vk-table-wrap\s*\{[^}]*overflow-x:\s*auto/);
+  // The default cell rule must not wrap long tokens with overflow-wrap.
+  const cellRule = viewKitStyles.match(/\.vk-table-cell\s*\{[^}]+\}/);
+  assert.ok(cellRule, "expected a .vk-table-cell rule");
+  assert.doesNotMatch(cellRule[0], /overflow-wrap:\s*anywhere/);
+});
+
+test("rowAction view emits a trailing control on table and timeline", () => {
+  const table = renderToHtml(
+    renderTable(POLISH_ROWS, { id: "x", entity: "agent" }, { rowAction: "view" }),
+  );
+  assert.match(table, /data-vk-row-action="view"/);
+  assert.match(table, /data-vk-action-row-id="agent:a1"/);
+  assert.doesNotMatch(table, /data-vk-row-action="view"[^>]*data-row-id=/);
+
+  const timeline = renderToHtml(
+    renderTimeline(DEPLOYMENTS, conceptLike(DEPLOYMENT), { rowAction: "view" }),
+  );
+  assert.match(timeline, /data-vk-row-action="view"/);
+  assert.match(timeline, /data-vk-action-row-id="deployment:d1"/);
+  assert.match(timeline, /data-vk-action-row-id="deployment:d2"/);
+});
+

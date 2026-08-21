@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { useConcepts } from "../cluster/useConcepts";
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, Select } from "../ui";
 import { ViewElement } from "../views/ViewElement";
@@ -54,6 +56,8 @@ export function OverviewPage(): ReactNode {
   const { concepts } = useConcepts();
   const personConcept = concepts.find((c) => c.id === PERSON_CONCEPT_ID);
   const auditConcept = concepts.find((c) => c.id === AUDIT_CONCEPT_ID);
+  const dialog = useLocalRowId();
+  const dialogRow = rowWithId(activity.data, dialog.rowId);
 
   if (surface === undefined) return null;
   if (!canAdminister) {
@@ -199,6 +203,7 @@ export function OverviewPage(): ReactNode {
               },
               sort: { field: "occurredAt", direction: "desc" },
             }}
+            onSelect={dialog.onSelect}
           />
         )}
       </Band>
@@ -232,6 +237,12 @@ export function OverviewPage(): ReactNode {
         </Link>
         .
       </p>
+      <RowDetailDialog
+        open={dialog.open}
+        onClose={dialog.onClose}
+        rowId={dialog.rowId}
+        row={dialogRow ?? null}
+      />
     </AdminFrame>
   );
 }

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
+import { RowDetailDialog } from "../components/RowDetailDialog";
+import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
 import { ViewElement } from "../views/ViewElement";
@@ -31,6 +33,8 @@ export function KeysPage(): ReactNode {
   const rotations = useAuditTrail(canAdminister, "configuration");
   const rotated = lastRotation(rotations.data);
   const rows = signingKeyRows(keys.keys);
+  const dialog = useLocalRowId();
+  const dialogRow = rowWithId(rows, dialog.rowId);
 
   if (surface === undefined) return null;
   if (!canAdminister) {
@@ -107,6 +111,7 @@ export function KeysPage(): ReactNode {
             rows={rows}
             concept={SIGNING_KEY_CONCEPT}
             options={{ bindings: { column: ["kid", "role", "algorithm", "curve", "purpose"] } }}
+            onSelect={dialog.onSelect}
           />
         )}
       </Band>
@@ -144,6 +149,12 @@ export function KeysPage(): ReactNode {
         uses. Either way the rotation writes a <code>jwks_rotated</code> audit
         event and shows up in the reading above.
       </Elsewhere>
+      <RowDetailDialog
+        open={dialog.open}
+        onClose={dialog.onClose}
+        rowId={dialog.rowId}
+        row={dialogRow ?? null}
+      />
     </AdminFrame>
   );
 }
