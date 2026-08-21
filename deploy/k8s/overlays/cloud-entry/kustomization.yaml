@@ -119,28 +119,28 @@ patches:
       - { op: replace, path: /spec/retentionPolicy, value: "30d" }
 
 images:
-  # Engine pins from v0.19.2 (actions run 32445081212). overlays/cloud
+  # Engine pins from v0.19.3 (actions run 32451184414). overlays/cloud
   # is untouched. MCP is omitted on purpose: replicas 0, so there is
   # no running pin and no all-zeros digest (memql#4203).
   - name: memql-db
     newName: acrmemql.azurecr.io/memql-db
     newTag: 16.15-timescaledb-2.29.1
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:219ed7f108620bfe542c1647fff15be1f425420236323f0099ef68a7b95562be
+    digest: sha256:6fd2be87aa2b09a19265dfbb3fe967a909421adba1a5b409f17f1f9cd3212324
   - name: acrmemql.azurecr.io/memql-bff
-    digest: sha256:8db78f867608789f8abc0692dc09e10b6c487954486fae6a6d544fecd5c7c62b
+    digest: sha256:ad44b8102bbe155fa09332ded4b95c4f4528d5c9e68c8bc57b6db70e59454cb0
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:ed7450d2a5e983c97f016e8a31d5cbb1dcb0b25e5f3e2010aa357bc98abab90a
+    digest: sha256:f9699dea16c39eced7340c3441100bb961c87b6a707fc24f882a5631da1826c9
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:0d4dc0b1d68a0f822754164a7331ebf30be329f3128eac418c5a6fa325acb131
+    digest: sha256:edff3fe6478fc8a9a142097cfdb87e299201a55ce869b776efb43b83317b900d
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:a48c524b43dfd2421f285530197378626ec1ba842daf59f97a01a69a21a732de
+    digest: sha256:ef0aa0c81bc30182328018ba6d84c1f9adcf997a6d01b56f257121613125e48c
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:b49f6b22596a6e18d74c0c2cf53fb2051b960b6c1201100ba6a01f5ef25e12a8
+    digest: sha256:d00c1480c46d00aa83cac4dba9880fd7e277792a34544a34b275c49b6b0527a3
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:72b0aad166effad01f84faee95dc70ed3f0910dcc9047b6ba37a3ac31cef23e9
+    digest: sha256:9de1d39682d9f584072342b6de930cae1c8640a506225f9a1c43f5164161e971
   - name: acrmemql.azurecr.io/memql-edge
-    digest: sha256:3195f81d7cc5374a387b93f5625d65ca02f2038ffaaa9584854d357dcab847c5
+    digest: sha256:6cedc5fd90fa2d5e06a7ffd7932fdc9fe2558450357ff8bf8ffe1b061c359e04
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
