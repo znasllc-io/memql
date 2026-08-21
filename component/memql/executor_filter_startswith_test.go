@@ -108,6 +108,8 @@ func TestCompileIntrinsicComparison_StartsWith_Refused(t *testing.T) {
 	require.Error(t, err)
 	_, err = compileProvenanceComparison("kind", OpStartsWith, "auto")
 	require.Error(t, err)
+	_, err = (&MemQLEngine{}).compileConceptComparison(OpStartsWith, "v1:")
+	require.Error(t, err)
 }
 
 // The AST converter's operator switch defaults to OpEq for anything it does
