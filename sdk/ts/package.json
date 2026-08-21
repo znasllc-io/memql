@@ -42,6 +42,10 @@
       "types": "./dist/identityadmin/index.d.ts",
       "import": "./dist/identityadmin/index.js"
     },
+    "./pack": {
+      "types": "./dist/pack/index.d.ts",
+      "import": "./dist/pack/index.js"
+    },
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
       "import": "./dist/realtime/index.js"

@@ -431,6 +431,26 @@ export interface ListConstructsPayload {
   requestId: string;
 }
 
+// Pack browser (memql#2127 / B1): read-only enumeration of the embedded,
+// plugin-registered and MEMQL_DSL_PATH .memql trees. Three single-reply
+// exchanges -- the Go routing ledger (sdk/go/client/dispatcher_stream_routing_test.go)
+// already classifies the three results as single-reply, so nothing here joins
+// streamRequestId.
+export interface ListPackDomainsPayload {
+  requestId: string;
+}
+
+export interface ListPackFilesPayload {
+  requestId: string;
+  domain: string;
+}
+
+export interface ReadPackFilePayload {
+  requestId: string;
+  domain: string;
+  path: string;
+}
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -564,6 +584,9 @@ type ClientPayload =
   | { durableDemoteBundle: DurableDemoteBundlePayload }
   | { stageBundle: StageBundlePayload }
   | { listConstructs: ListConstructsPayload }
+  | { listPackDomains: ListPackDomainsPayload }
+  | { listPackFiles: ListPackFilesPayload }
+  | { readPackFile: ReadPackFilePayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
   | { clientToolResult: ClientToolResultPayload };
@@ -1221,6 +1244,38 @@ export interface ListConstructsResultPayload {
   constructs?: ConstructInfoWire[];
 }
 
+export interface PackDomainWire {
+  name?: string;
+  origin?: string;
+  fileCount?: number;
+}
+
+export interface PackFileWire {
+  path?: string;
+  // int64 on the wire: protojson may encode it as a string.
+  size?: string | number;
+}
+
+export interface ListPackDomainsResultPayload {
+  requestId?: string;
+  domains?: PackDomainWire[];
+}
+
+export interface ListPackFilesResultPayload {
+  requestId?: string;
+  domain?: string;
+  files?: PackFileWire[];
+}
+
+export interface ReadPackFileResultPayload {
+  requestId?: string;
+  domain?: string;
+  path?: string;
+  source?: string;
+  origin?: string;
+  found?: boolean;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -1454,6 +1509,9 @@ type ServerPayload =
   | { durableDemoteBundleResult: DurableDemoteBundleResultPayload }
   | { stageBundleResult: StageBundleResultPayload }
   | { listConstructsResult: ListConstructsResultPayload }
+  | { listPackDomainsResult: ListPackDomainsResultPayload }
+  | { listPackFilesResult: ListPackFilesResultPayload }
+  | { readPackFileResult: ReadPackFileResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
   | { clientToolCall: ClientToolCallPayload };
@@ -1505,6 +1563,9 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "durableDemoteBundleResult"; value: DurableDemoteBundleResultPayload }
   | { kind: "stageBundleResult"; value: StageBundleResultPayload }
   | { kind: "listConstructsResult"; value: ListConstructsResultPayload }
+  | { kind: "listPackDomainsResult"; value: ListPackDomainsResultPayload }
+  | { kind: "listPackFilesResult"; value: ListPackFilesResultPayload }
+  | { kind: "readPackFileResult"; value: ReadPackFileResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
   | { kind: "clientToolCall"; value: ClientToolCallPayload }
@@ -1635,6 +1696,21 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "listConstructsResult",
       value: m.listConstructsResult as ListConstructsResultPayload,
+    };
+  if (m.listPackDomainsResult)
+    return {
+      kind: "listPackDomainsResult",
+      value: m.listPackDomainsResult as ListPackDomainsResultPayload,
+    };
+  if (m.listPackFilesResult)
+    return {
+      kind: "listPackFilesResult",
+      value: m.listPackFilesResult as ListPackFilesResultPayload,
+    };
+  if (m.readPackFileResult)
+    return {
+      kind: "readPackFileResult",
+      value: m.readPackFileResult as ReadPackFileResultPayload,
     };
   if (m.listToolsResult)
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
