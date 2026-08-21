@@ -1,5 +1,5 @@
 ---
-title: The cluster front door — five host rules
+title: The cluster front door — six host rules
 audience: public
 status: stable
 area: operate
@@ -7,22 +7,23 @@ sinceVersion: 0.18.0
 owner: znas
 ---
 
-# The cluster front door — five host rules
+# The cluster front door — six host rules
 
 A MemQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
-traefik locally, nginx in the cloud — terminating TLS once with a wildcard plus
-apex certificate and routing by hostname. Port 80 exists only to redirect.
+traefik locally, nginx in the cloud — terminating TLS once with one certificate
+and routing by hostname. Port 80 exists only to redirect.
 
-Behind that door are **five host rules**, committed to `deploy/k8s`, plus a
+Behind that door are **six host rules**, committed to `deploy/k8s`, plus a
 **separate media plane** that does not and cannot go through it.
 
-Five is the number, and it stays five no matter how many customers,
+Six is the number, and it stays six no matter how many customers,
 applications or websites the cluster serves. That property is what this page is
 about.
 
-The host **set** is DERIVED from the closed **role** set (memql#3767) rather
-than maintained as a list. It grows only when a ROLE is added, which is a design
-change; it never grows with customers, apps or sites.
+The host **set** is DERIVED from the closed **role** set plus the platform's
+own site (memql#3767, memql#4224) rather than maintained as a list. It grows
+only when a ROLE is added, which is a design change; it never grows with
+customers, apps or sites.
 
 Related: [environment-parity.md](environment-parity.md) ·
 [install-prerequisites.md](install-prerequisites.md) ·
@@ -30,22 +31,47 @@ Related: [environment-parity.md](environment-parity.md) ·
 
 ---
 
-## The five hosts
+## The six hosts
 
-| Host | Backend | Protocol |
-|---|---|---|
-| `api.<domain>` | `svc/bff:50051` **and** `svc/bff-http:8085` | h2c (gRPC) + http |
-| `identity.<domain>` | `svc/identity:8085` | https |
-| `mcp.<domain>` | `svc/mcp:8090` | http |
-| `*.<domain>` | `svc/edge:8085` | http |
-| `<domain>` (apex) | `svc/edge:8085` | http |
+| Host | Backend | Protocol | Certificate SAN |
+|---|---|---|---|
+| `api.<domain>` | `svc/bff:50051` **and** `svc/bff-http:8085` | h2c (gRPC) + http | yes |
+| `identity.<domain>` | `svc/identity:8085` | https | yes |
+| `mcp.<domain>` | `svc/mcp:8090` | http | yes |
+| `portal.<domain>` | `svc/edge:8085` | http | yes |
+| `*.<domain>` | `svc/edge:8085` | http | **no** — see below |
+| `<domain>` (apex) | `svc/edge:8085` | http | yes |
 
-**Every host is a single label under the domain, and that is a TLS decision,
-not a style one.** A wildcard certificate matches exactly **one** label, so the
-cluster's `*.<domain>` certificate covers every role host and every site — one
-order, one renewal, however many sites there are. The apex is the exception and
-is requested as its own SAN, since the bare domain has no label for a wildcard
-to match.
+**Every host is a single label under the domain, and that is a routing
+decision.** An Ingress wildcard matches exactly **one** label, so the one
+`*.<domain>` rule routes every present and future site to the edge. It used to
+be a TLS decision too — one `*.<domain>` certificate covering every role host
+and every site, with the apex as the lone extra SAN — and that was never true
+of a running cluster (memql#4224). **The cloud issuer solves HTTP-01 only.**
+ACME cannot serve an HTTP-01 challenge for a wildcard, and one wildcard
+`dnsName` fails the whole order, so the Certificate sat Pending; when it was
+hand-edited to exact names, the edge Ingress whose `tls.hosts` still said
+`*.<domain>` made ingress-nginx serve its self-signed default for
+`portal.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
+certificate names **exact hosts only** — `api.`, `identity.`, `mcp.`, `portal.`
+and the apex — every Ingress lists exactly its own exact rule hosts under
+`tls`, and the union of those lists is the certificate's `dnsNames`. All three
+are gated by `deploy/k8s/overlays/frontdoor_hosts_test.go`, against both
+instance overlays.
+
+**The wildcard rule has no certificate behind it.** A site routed by
+`*.<domain>` terminates TLS with the ingress controller's default certificate
+until it has a `Certificate` and an exact-host Ingress of its own — see
+[site-hosting.md](site-hosting.md#2-add-the-hostname) — and that stays true
+until the issuer gains a DNS-01 solver. The portal is the exception because it
+is the one site the platform ships itself: its name exists before any operator
+creates a row, so the generator can write its rule and SAN, and the engine seeds
+its `v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
+(`frontdoor.PortalHost`). The exact rule is a TLS artefact, not a second way to
+serve the portal: ingress-nginx builds a certificate-bearing server block per
+**rule** host, never per `tls` host, so a `tls.hosts` entry alone would have
+changed nothing — which is why the ops workaround on the first keep-it cluster
+was an extra Ingress, and why that is now the generated shape.
 
 (The set was once the product of role × ENVIRONMENT, with a label that
 hyphenated into role hosts — `api-staging.<domain>` — and nested into site
@@ -74,13 +100,17 @@ and it is not proxied through the edge either: MCP clients configure a URL,
 they are not browsers, and an extra hop on a tool-calling path buys nothing.
 See [mcp-connect.md](mcp-connect.md).
 
-**`*.<domain>` and the apex** both point at the `edge` node, which resolves the
-request `Host` header against a `v1:platform:site` row and serves that site's
-bundle. The apex is not a special case: for a customer's own cluster the bare
-domain **is** their main website, so it is a site row like every other one.
+**`portal.<domain>`, `*.<domain>` and the apex** all point at the `edge` node,
+which resolves the request `Host` header against a `v1:platform:site` row and
+serves that site's bundle. The apex is not a special case: for a customer's own
+cluster the bare domain **is** their main website, so it is a site row like
+every other one. The portal is site #1 and takes the same path; its own rule
+exists for the certificate's sake ([above](#the-six-hosts)), not because the
+edge treats it differently.
 
 > **INFO: the edge route and the edge backend both ship as of memql#3714.**
-> `deploy/k8s/overlays/local/edge-front-door.yaml` carries both rules;
+> `deploy/k8s/overlays/local/edge-front-door.yaml` carries the wildcard and
+> apex rules (`portal-front-door.yaml` the portal's);
 > `deploy/k8s/base/edge.yaml` carries the Deployment, Service and
 > PodDisruptionBudget behind `svc/edge`. The `edge` node type itself — build
 > tag `edge`, `make edge`, see [build-tags.md](../build/build-tags.md) — is
@@ -114,10 +144,12 @@ nothing more about sites than the rule that routes them.
 
 ### Exact-versus-wildcard precedence is declared, not inherited
 
-`*.<domain>` also matches `api.<domain>`, `identity.<domain>` and
-`mcp.<domain>`. So whether the four named hosts keep their own backends is not a
-detail — it is a **load-bearing assumption of the five-host design**, and it is
-worth knowing the state of it.
+`*.<domain>` also matches `api.<domain>`, `identity.<domain>`, `mcp.<domain>`
+and `portal.<domain>`. So whether the named hosts keep their own backends is
+not a detail — it is a **load-bearing assumption of the six-host design**, and
+it is worth knowing the state of it. (For the portal the question is moot —
+its rule and the wildcard reach the same Service — which is exactly why it is
+not in the precedence probe's host set.)
 
 **Precedence between an exact host and a wildcard host is
 implementation-defined.** The Ingress specification says what a wildcard host
@@ -159,26 +191,27 @@ and every HTTP path on `api.<domain>` answered `415 Unsupported Media Type`
 with `Content-Type: application/grpc`.
 
 The fix moved the declaration to the other side of the relationship instead of
-removing it: **`api-front-door.yaml`, `front-door.yaml` and
-`mcp-front-door.yaml` carry NO `router.priority` annotation at all** (each
-file says so explicitly, in a comment naming memql#3810). Precedence over the
-wildcard is still declared — it has to be, or the wildcard genuinely does
+removing it: **`api-front-door.yaml`, `front-door.yaml`, `mcp-front-door.yaml`
+and `portal-front-door.yaml` carry NO `router.priority` annotation at all**
+(each file says so explicitly, in a comment naming memql#3810). Precedence over
+the wildcard is still declared — it has to be, or the wildcard genuinely does
 swallow the exact hosts — but it is declared **on the wildcard itself**, in
 `edge-front-door.yaml`, whose two rules (`*.<domain>` and the apex) carry
 `traefik.ingress.kubernetes.io/router.priority: "1"`. Priority `1` loses to
-every rule-length default, so all three exact hosts outrank the wildcard while
+every rule-length default, so all four exact hosts outrank the wildcard while
 keeping their own paths ordered by length exactly as before — the wildcard's
 two same-shaped `/` rules have no intra-host ordering for a uniform value to
 destroy, which is what makes it safe to put the annotation there and nowhere
 else. `deploy/k8s/overlays/local/render_priority_test.go` gates this shape:
 no Ingress declaring more than one distinct path may carry a uniform priority,
-and `edge-front-door.yaml` must carry one. The ingress-nginx side is not yet
-worked out here — this repository's overlays carry no cloud Ingress
-definitions at all (the product pack that runs on this engine owns those), so
-the equivalent declaration is that downstream repo's responsibility when it
-stands one up, following the same principle: declare the priority explicitly
-rather than trust either controller's default ranking heuristic, since the two
-controllers use different heuristics and neither is a spec guarantee.
+and `edge-front-door.yaml` must carry one. On ingress-nginx nothing needs
+declaring: nginx resolves `server_name` by specificity in its own core — an
+exact name beats a leading wildcard — so the generated cloud front door carries
+no priority annotation at all, and `cmd/frontdoorhosts/manifest.go` says not
+to add one (an Ingress-level priority is what flattened the api host's path
+ordering on traefik). The principle is the same on both: know what the
+controller's ranking is, and do not trust a heuristic the spec does not
+guarantee.
 
 **Checked by `scripts/install/verify-frontdoor.sh`'s `precedence` check**,
 reported per host for `api.` and `identity.` only — never `mcp.`, whose Ingress
@@ -230,11 +263,12 @@ controller points at it differs, and that is a value rather than architecture.
 Two things in the front door are derived rather than authored, by two
 generators that answer different questions and stay separable.
 
-**The HOSTS** — `cmd/frontdoorhosts` writes
-`deploy/k8s/overlays/cloud/front-door.generated.yaml` whole: the five Ingress
-rules and the cert-manager `Certificate` with its SANs. Its whole input is the
-closed role set plus the domain, and it emits ~390 lines from those — which is
-what earns generation for a single target.
+**The HOSTS** — `cmd/frontdoorhosts` writes `front-door.generated.yaml` into
+each instance overlay (`deploy/k8s/overlays/cloud` and `overlays/cloud-entry`)
+whole: the six Ingress rules and the cert-manager `Certificate` with its
+exact-host SANs. Its whole input is the closed role set, the portal and the
+domain, and it emits ~440 lines from those — which is what earns generation for
+a listed target.
 
 **The PATHS** on the api host — `cmd/frontdoorpaths` fills the block between
 markers in every api front door, from `component/server`'s own declarations. The
@@ -249,17 +283,17 @@ re-deriving it; the rest of this section is about that half.
 | Command | What it does |
 |---|---|
 | `make frontdoor` | Both, in order: hosts, then paths |
-| `make frontdoor-hosts` | Regenerates the cloud overlay's front door |
+| `make frontdoor-hosts` | Regenerates every instance overlay's front door |
 | `make frontdoor-hosts-check` | Fails when a generated front door is stale |
 | `make frontdoor-paths` | Regenerates the path block in every api front door |
 | `make frontdoor-paths-check` | Fails when a checked-in block is stale |
 
-The **local** overlay's four front-door files stay hand-authored: they are
+The **local** overlay's five front-door files stay hand-authored: they are
 traefik rather than nginx, and they carry the measured reasoning for a priority
 ranking that broke the API once already
 ([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)). They are
-not unchecked — `TestFrontDoorServesExactlyTheFiveHosts` computes the host set
-from the same `component/frontdoor` package the generator uses, so local's
+not unchecked — `TestFrontDoorServesExactlyTheDerivedHosts` computes the host
+set from the same `component/frontdoor` package the generator uses, so local's
 committed defaults cannot drift from what the cloud overlay serves.
 
 The set is exactly `server.PublicPaths()` ∪ `HandlerAuthorizedPaths()` ∪
@@ -315,24 +349,31 @@ health JSON, `/portal/` returns the portal's `index.html`.
 See [inbound-delivery.md](inbound-delivery.md) and
 [campaign-sending.md](campaign-sending.md) for the two exceptions themselves.
 
-## Why the count is five, and must not grow
+## Why the count is six, and must not grow
 
 Because **a site is data, not infrastructure.**
 
 `v1:platform:site` carries a hostname, a kind, a bundle reference and a status.
 Deploying a site is an upload plus a row write; rolling one back is a row
-write. There is no Kubernetes object per site, no git commit per site and no
-ArgoCD reconcile per site — so adding the tenth website to a cluster adds a
-**row**, not a routing rule, not a certificate SAN and not an overlay patch.
+write. There is no routing rule per site, no git commit per site and no ArgoCD
+reconcile per site — so adding the tenth website to a cluster adds a **row**,
+not a routing rule and not an overlay patch.
 
 The `*.<domain>` rule is what makes that possible: one wildcard rule routes
 every present and future site name to the one node that knows how to look them
-up — every name, that is, that the four exact hosts have not claimed, which is
+up — every name, that is, that the five exact hosts have not claimed, which is
 an assumption about rule ranking rather than a given
 ([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)).
-The certificate is the matching SAN pair (`*.<domain>` and `<domain>`), issued
-once at install — by mkcert locally, cert-manager in the cloud — so a new site
-needs no reissue either.
+
+**The certificate is not part of that claim in the cloud** (memql#4224). It
+names exact hosts, because the issuer is HTTP-01, so a new site gets routing
+for free and TLS only with a `Certificate` and exact-host Ingress of its own —
+one object pair per site, the one explicit exception to "a site is data", and
+it stands until the issuer gains a DNS-01 solver. Locally the mkcert pair is a
+wildcard, so a new site needs no reissue there — which is exactly why a site
+that works over https locally is no evidence it has a certificate in the cloud.
+The portal is the one site whose rule and SAN the generator writes, because it
+is the one site whose name is known before any row exists.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
@@ -341,10 +382,10 @@ a chat message is.
 
 Two consequences worth stating plainly:
 
-- **Adding a sixth ROLE is a design change, not a configuration change.** If a
-  proposal needs one, the thing being added is probably a site.
-  `TestRenderedHostsAreExactlyTheProduct` fails on a sixth host rule that is not
-  one of the five and is not the media plane.
+- **Adding a seventh host rule — a fourth ROLE — is a design change, not a
+  configuration change.** If a proposal needs one, the thing being added is
+  probably a site. `TestRenderedHostsAreExactlyTheProduct` fails on a seventh
+  host rule that is not one of the six and is not the media plane.
 - **A wildcard DNS record is not a wildcard hosts file.** In the cloud
   `*.<domain>` resolves at the DNS layer and nothing local is involved. On a
   developer machine there is no wildcard in `/etc/hosts`, so each name has to
@@ -353,7 +394,7 @@ Two consequences worth stating plainly:
 
 ## The media plane is separate, permanently
 
-Voice is not one of the five hosts and never will be. **WebRTC media is UDP and
+Voice is not one of the six hosts and never will be. **WebRTC media is UDP and
 cannot traverse an HTTP front door.**
 
 | Target | Media plane |
@@ -361,7 +402,7 @@ cannot traverse an HTTP front door.**
 | Cloud | `livekit.<domain>` for signaling, plus a LoadBalancer carrying UDP 7882 and TCP 7881 for media |
 | Local | LiveKit Cloud (the local overlay deletes the self-hosted livekit workloads) |
 
-So the honest statement of the topology is **five HTTP host rules plus a
+So the honest statement of the topology is **six HTTP host rules plus a
 separate media plane** — said here rather than left for someone to discover
 while wondering which Ingress rule is missing. See
 [livekit-provision.md](livekit-provision.md) and
@@ -375,27 +416,35 @@ implementation of each interchangeable part is in play.
 | | Varies | Does not vary |
 |---|---|---|
 | Proxy | traefik locally (`serversscheme` annotations) / nginx in the cloud (`backend-protocol`) | that there is exactly one L7 proxy on 443 |
-| Certificate | mkcert locally / cert-manager in the cloud | the `*.<domain>` + apex SAN pair, issued at install |
+| Certificate | mkcert locally (a `*.<domain>` + apex pair) / cert-manager in the cloud (exact hosts only — HTTP-01 cannot issue a wildcard, memql#4224) | one Secret, `memql-front-door-tls`, that every front-door Ingress terminates with, issued at install |
 | DNS | the `/etc/hosts` managed block locally / real DNS in the cloud | the hostnames themselves |
 | Secrets | `make secrets` locally / External Secrets + Key Vault in the cloud | — |
 
-Fixed everywhere: **the five host rules, the paths behind them, and the dial
+> **WARNING: the SAN set is the one place local is more permissive than the
+> cloud.** The local wildcard covers every site; the cloud certificate covers
+> the five exact hosts and nothing else. A site that works over https on the
+> local cluster has proven its routing, not its certificate.
+
+Fixed everywhere: **the six host rules, the paths behind them, and the dial
 path a client uses** (`https://api.<domain>`, TLS at the proxy, gRPC to the
 bff). The domain itself is a value too — one `MEMQL_DOMAIN`, from which every
 domain-shaped setting is derived at boot — so no file under `deploy/` names a
 domain except the Ingress hosts, which carry a committed default.
 
-The domain reaches both sides through ONE derivation: `cmd/frontdoorhosts`
-composes the Ingress hosts from it, and `component/envregistry/domain.go` composes
-the issuer, CORS origins, redirect URIs and MCP public URL from it, both through
+The domain reaches every side through ONE derivation: `cmd/frontdoorhosts`
+composes the Ingress hosts and certificate SANs from it,
+`component/envregistry/domain.go` composes the issuer, CORS origins, redirect
+URIs and MCP public URL from it, and `component/memql`'s SeedMaterializer
+composes the portal site row's hostname from it — all through
 `component/frontdoor`. Two copies of that rule would be two copies that can
-disagree, and the disagreement is an issuer nothing is served at — which fails
-as "sign-in is broken" with every manifest looking correct.
+disagree, and the disagreement is an issuer nothing is served at, or a
+certificate naming a host the site row does not carry — which fails as
+"sign-in is broken" with every manifest looking correct.
 
 What differs between the cloud and local is which of the interchangeable parts
 above is in play — plus that the local overlay's front door is hand-authored
 while the cloud one is generated, which is a source question rather than a shape
-one: the same five rules either way, gated against the same derivation.
+one: the same six rules either way, gated against the same derivation.
 
 The standard those rows answer to, and the reason the divergences are confined
 to annotations and secret sources, is
@@ -464,9 +513,10 @@ described above: the probe hits `/`, which is the gRPC backend.)
 
 **The probe set is smaller than the hosts block, on purpose.** `DEFAULT_HOSTS`
 is `api.` plus `identity.` only, while the managed block
-`scripts/install/hosts-entries.sh` writes carries five names. Those are
-different jobs: `/etc/hosts` has no wildcard semantics so it needs every name
-spelled out, whereas the probe set is only the doors we assert are up.
+`scripts/install/hosts-entries.sh` writes carries five names — the same five
+exact hosts the cloud certificate names. Those are different jobs: `/etc/hosts`
+has no wildcard semantics so it needs every name spelled out, whereas the probe
+set is only the doors we assert are up.
 
 > **WARNING: an h2 probe passes while an HTTP/1.1 path is broken.** That is
 > exactly how `/unsubscribe` stayed unrouted without anyone noticing — and note
@@ -480,8 +530,10 @@ spelled out, whereas the probe set is only the doors we assert are up.
 
 - Design: `docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`
   (epic [memql#3700](https://github.com/znasllc-io/memql/issues/3700)) —
-  decisions D3 (the five rules), D5 (a site is data) and D9 (the same-origin
-  proxy for hosted sites), each with the alternatives that were rejected.
+  decisions D3 (the five rules as designed; memql#4224 added the portal's
+  exact rule and retired D2's wildcard SAN in the cloud), D5 (a site is data)
+  and D9 (the same-origin proxy for hosted sites), each with the alternatives
+  that were rejected.
 - The Service split and its annotations:
   `deploy/k8s/components/engine-bff/bff.yaml`.
 - The path declarations the block is generated from:

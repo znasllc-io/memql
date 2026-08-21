@@ -65,7 +65,7 @@ route and is not forwarded. Top-level magic-link redirects (the
 empty `identityApiBaseUrl` so `fetch()` stays on the site origin.
 
 Same-origin XHR avoids a Safari / Chrome quirk where cross-origin
-fetch to a sibling host that shares a wildcard cert + IP can land
+fetch to a sibling host that shares a cert + IP can land
 on the wrong vhost (HTTP/2 connection coalescing). The portal
 then reports `identity returned no access token (invalid_response)`
 because the SPA fallback answered 200 HTML. A front-door nginx

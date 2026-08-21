@@ -7,25 +7,31 @@ import (
 
 const domain = "example.test"
 
-// TestEveryHostStaysSingleLabel is the assertion the whole certificate story
-// rests on.
+// TestEveryHostStaysSingleLabel is the assertion the sites wildcard RULE rests
+// on.
 //
-// A TLS wildcard matches exactly ONE label. Every host this package composes is
-// one label under the domain (the apex is zero, and is SAN'd explicitly), so
-// `*.<domain>` covers all of them with one order and one renewal. A host that
-// grew a second label would not be covered and would serve the controller's
-// default certificate -- a browser name mismatch at a host nobody thinks is new.
+// An Ingress wildcard host matches exactly ONE label, so `*.<domain>` routes
+// `shop.<domain>` to the edge and would NOT route `shop.eu.<domain>`. Every
+// host this package composes is one label under the domain (the apex is zero,
+// and carries its own rule), so the one wildcard rule covers every site. A host
+// that grew a second label would match no rule and answer with the controller's
+// 404 at a name nobody thinks is new.
+//
+// It used to be the certificate story too -- one `*.<domain>` SAN covering
+// every single-label host. memql#4224 retired that: the cloud issuer is
+// HTTP-01, which cannot issue a wildcard, so the certificate names exact hosts
+// and this property is about ROUTING only.
 func TestEveryHostStaysSingleLabel(t *testing.T) {
 	for _, h := range Hosts(domain) {
 		if h.Name == Apex(domain) {
-			continue // zero labels by construction; SAN'd on its own
+			continue // zero labels by construction; carries its own rule
 		}
 		prefix := strings.TrimSuffix(h.Name, "."+domain)
 		if prefix == h.Name {
 			t.Fatalf("%q does not end in the cluster domain", h.Name)
 		}
 		if strings.Contains(prefix, ".") {
-			t.Errorf("host %q has %d labels in front of the domain; a TLS wildcard covers exactly one, so this host is not covered by *.%s",
+			t.Errorf("host %q has %d labels in front of the domain; an Ingress wildcard matches exactly one, so this host is not routed by *.%s",
 				h.Name, strings.Count(prefix, ".")+1, domain)
 		}
 	}
@@ -64,13 +70,32 @@ func TestSitesWildcardAndApex(t *testing.T) {
 	}
 }
 
+// TestPortalHostIsASiteHost pins the ONE derivation of the portal's hostname
+// (memql#4224). The engine seeds the portal site row from MEMQL_DOMAIN
+// (component/memql's SeedMaterializer), envregistry derives the portal's
+// redirect URI and CORS origin from the same value, and cmd/frontdoorhosts
+// writes the portal's Ingress rule and certificate SAN. All three call
+// PortalHost, so a disagreement -- a certificate naming a host the site row
+// does not carry -- cannot be authored.
+func TestPortalHostIsASiteHost(t *testing.T) {
+	if got, want := PortalHost(domain), "portal.example.test"; got != want {
+		t.Errorf("PortalHost = %q, want %q", got, want)
+	}
+	if got, want := PortalHost(domain), SiteHost(PortalSite, domain); got != want {
+		t.Errorf("PortalHost = %q but SiteHost(PortalSite) = %q; the portal is site #1 and must be composed like any site", got, want)
+	}
+	if got, want := PortalHost(domain), PortalSite+DomainDerivationSuffix(domain); got != want {
+		t.Errorf("PortalHost = %q but the suffix composition gives %q", got, want)
+	}
+}
+
 // TestHostsIsTheWholeSet pins the count, because the count is the property
 // docs/public/operate/front-door.md is about: it is fixed by the closed role
-// set and never grows with sites.
+// set plus the platform's own site, and never grows with customer sites.
 func TestHostsIsTheWholeSet(t *testing.T) {
 	hosts := Hosts(domain)
-	if len(hosts) != 5 {
-		t.Errorf("Hosts returns %d rules, want 5 (three roles, the sites wildcard, the apex)", len(hosts))
+	if len(hosts) != 6 {
+		t.Errorf("Hosts returns %d rules, want 6 (three roles, the portal, the sites wildcard, the apex)", len(hosts))
 	}
 
 	seen := map[string]bool{}
@@ -80,39 +105,116 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
+
+	var wildcards int
+	for _, h := range hosts {
+		if h.Wildcard {
+			wildcards++
+			if !strings.HasPrefix(h.Name, "*.") {
+				t.Errorf("%q is flagged Wildcard but does not start with `*.`", h.Name)
+			}
+			if !h.Sites {
+				t.Errorf("%q is the wildcard and must be a sites rule", h.Name)
+			}
+		} else if strings.HasPrefix(h.Name, "*") {
+			t.Errorf("%q is a wildcard host that is not flagged Wildcard; the certificate derivation would request it", h.Name)
+		}
+	}
+	if wildcards != 1 {
+		t.Errorf("Hosts carries %d wildcard rules, want exactly 1 (the sites rule)", wildcards)
+	}
+
+	// The three rules that reach the edge: the portal (exact), every other
+	// site (the wildcard), and the apex.
+	var sites []string
+	for _, h := range hosts {
+		if h.Sites {
+			sites = append(sites, h.Name)
+		}
+	}
+	if want := strings.Join([]string{PortalHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
+		t.Errorf("sites rules are %v, want [%s]", sites, want)
+	}
 }
 
-// TestCertificateSANsCoverEveryHost is the gate that makes the single-label
-// property pay: every generated host must fall under a requested SAN, or it
-// serves a certificate error at a host nobody thinks is new.
-func TestCertificateSANsCoverEveryHost(t *testing.T) {
+// TestCertificateSANsAreExactlyTheExactHosts is the memql#4224 statement.
+//
+// The cloud issuer solves HTTP-01 only. ACME cannot serve an HTTP-01 challenge
+// for `*.<domain>` -- there is no host to serve it at -- and a single wildcard
+// dnsName fails the WHOLE order, so the Certificate sat Pending and every
+// Ingress served the controller's self-signed default. The certificate
+// therefore names every EXACT host the front door serves, and nothing else:
+// no wildcard, and no host that is not an Ingress rule.
+func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 	sans := CertificateSANs(domain)
-	for _, h := range Hosts(domain) {
-		if !coveredBy(h.Name, sans) {
-			t.Errorf("%q is served and the requested SANs are %v, none of which covers it", h.Name, sans)
+
+	want := []string{
+		RoleHost(RoleAPI, domain),
+		RoleHost(RoleIdentity, domain),
+		RoleHost(RoleMCP, domain),
+		PortalHost(domain),
+		Apex(domain),
+	}
+	if strings.Join(sans, ",") != strings.Join(want, ",") {
+		t.Errorf("CertificateSANs = %v, want %v (every exact host, in rule order)", sans, want)
+	}
+
+	for _, s := range sans {
+		if strings.HasPrefix(s, "*") {
+			t.Errorf("CertificateSANs requests the wildcard %q; an HTTP-01 issuer fails the whole order on it (memql#4224)", s)
 		}
 	}
 }
 
-// TestCertificateIsExactlyTwoSANs is the cost statement: one wildcard for every
-// role host and every site, plus the apex, which no wildcard can cover.
-func TestCertificateIsExactlyTwoSANs(t *testing.T) {
+// TestEveryExactHostIsASANAndTheWildcardIsNot is the two-way gate between the
+// host set and the SAN set. A served exact host with no SAN terminates TLS with
+// the controller's default certificate and presents as a browser name mismatch
+// at a host nobody thinks is new -- which is exactly how the portal failed on
+// the first keep-it cluster. A SAN with no rule is a name the order pays for
+// and nothing serves.
+func TestEveryExactHostIsASANAndTheWildcardIsNot(t *testing.T) {
 	sans := CertificateSANs(domain)
-	if len(sans) != 2 {
-		t.Fatalf("CertificateSANs returns %d entries (%v), want 2", len(sans), sans)
+	isSAN := map[string]bool{}
+	for _, s := range sans {
+		isSAN[s] = true
 	}
-	if sans[0] != "*."+domain {
-		t.Errorf("first SAN is %q, want the wildcard that covers every single-label host", sans[0])
+
+	for _, h := range Hosts(domain) {
+		if h.Wildcard {
+			if isSAN[h.Name] {
+				t.Errorf("the wildcard rule %q is requested as a SAN", h.Name)
+			}
+			continue
+		}
+		if !isSAN[h.Name] {
+			t.Errorf("%q is served and is not a requested SAN (%v)", h.Name, sans)
+		}
+		delete(isSAN, h.Name)
 	}
-	if sans[1] != domain {
-		t.Errorf("second SAN is %q, want the apex -- *.%s matches one label and the bare domain has none", sans[1], domain)
+	for s := range isSAN {
+		t.Errorf("SAN %q is requested but no host rule serves it", s)
+	}
+}
+
+// TestCoveredByIsExactOnly: the SAN matcher the overlay gates use is the
+// one-label wildcard rule, and it still has to be correct -- but with no
+// wildcard SAN requested, every host has to match a SAN by EXACT name. This
+// keeps the helper honest in both directions.
+func TestCoveredByIsExactOnly(t *testing.T) {
+	sans := CertificateSANs(domain)
+	if coveredBy(SiteHost("shop", domain), sans) {
+		t.Errorf("a customer site host is covered by the requested SANs %v; the certificate must not claim to cover hosts it does not name", sans)
+	}
+	if !coveredBy(PortalHost(domain), sans) {
+		t.Errorf("the portal host is not covered by the requested SANs %v", sans)
 	}
 }
 
 // coveredBy applies the ONE-LABEL wildcard rule rather than a substring match,
-// because the one-label rule is the entire reason this package exists. A
-// checker that accepted `*.example.test` for `api.staging.example.test` would
-// pass the exact configuration the design refuses.
+// so that a wildcard SAN, should one ever be requested again under a DNS-01
+// issuer, is read the way TLS reads it. A checker that accepted
+// `*.example.test` for `api.staging.example.test` would pass the exact
+// configuration the design refuses.
 func coveredBy(host string, sans []string) bool {
 	for _, san := range sans {
 		if san == host {
@@ -140,15 +242,15 @@ func TestCoveredByRefusesAMultiLabelMatch(t *testing.T) {
 	}
 }
 
-// TestTheSuffixHelperAgreesWithTheHostBuilders keeps genesis's derivation and
-// the generator's rules from drifting: genesis composes many names at once by
-// concatenating this suffix, and the generator calls the builders. Two spellings
-// of the same rule would disagree as an issuer nothing is served at.
+// TestTheSuffixHelperAgreesWithTheHostBuilders keeps envregistry's derivation
+// and the generator's rules from drifting: envregistry composes many names at
+// once by concatenating this suffix, and the generator calls the builders. Two
+// spellings of the same rule would disagree as an issuer nothing is served at.
 func TestTheSuffixHelperAgreesWithTheHostBuilders(t *testing.T) {
 	if got, want := "api"+DomainDerivationSuffix(domain), RoleHost(RoleAPI, domain); got != want {
 		t.Errorf("DomainDerivationSuffix composes %q, RoleHost gives %q", got, want)
 	}
-	if got, want := "portal"+DomainDerivationSuffix(domain), SiteHost("portal", domain); got != want {
-		t.Errorf("DomainDerivationSuffix composes %q, SiteHost gives %q", got, want)
+	if got, want := "portal"+DomainDerivationSuffix(domain), PortalHost(domain); got != want {
+		t.Errorf("DomainDerivationSuffix composes %q, PortalHost gives %q", got, want)
 	}
 }

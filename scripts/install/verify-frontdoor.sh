@@ -21,10 +21,10 @@
 #               HTTP/1.1, so a door that answers but will not speak h2 is a
 #               broken door.
 #   precedence  an exact hostname is not SWALLOWED by the wildcard rule beside
-#               it. The cluster front door (memql#3700) serves `*.<domain>` and
-#               the apex from the site edge alongside the exact api. /
-#               identity. / mcp. hosts, and the wildcard MATCHES those three
-#               exact names as well. The whole five-host design rests on an
+#               it. The cluster front door (memql#3700) serves `portal.<domain>`,
+#               `*.<domain>` and the apex from the site edge alongside the exact
+#               api. / identity. / mcp. hosts, and the wildcard MATCHES the
+#               exact names as well. The whole six-host design rests on an
 #               exact host outranking a wildcard (decision D3); if it does not,
 #               api. and identity. are answered by the site edge and every
 #               symptom is a 404 from a server nobody meant to dial.
@@ -37,11 +37,13 @@
 #               `mcp.`'s Ingress routes :8090, the MCP protocol port, while
 #               /healthz is on :8085 (deploy/k8s/base/mcp.yaml), so probing
 #               `mcp.` reports INCONCLUSIVE, never passed. And `--hosts` means
-#               the hosts that carry their OWN exact rule: `portal.` and the
-#               apex are served by the edge BY DESIGN, so there is no
-#               precedence to establish for them (PROBE 4 says what happens if
-#               they are passed anyway). Anything citing this check should
-#               claim those two hosts and no more.
+#               the hosts whose exact rule reaches a node OTHER THAN the edge:
+#               `portal.` (its own exact rule since memql#4224, pointing at the
+#               same edge Service the wildcard does) and the apex are served by
+#               the edge BY DESIGN, so there is no precedence to establish for
+#               them (PROBE 4 says what happens if they are passed anyway).
+#               Anything citing this check should claim those two hosts and no
+#               more.
 #
 # Each check reports ITSELF -- name, host, passed, status, detail -- because
 # "the front door is broken" is not actionable and "dns for
@@ -92,11 +94,11 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 # The label PROBE 4 dials to find out whether a wildcard router is loaded at
 # all. Deliberately synthetic and deliberately fixed: it has to be a name no
 # EXACT rule can ever match, or the probe stops measuring the wildcard. A real
-# name would look friendlier and be wrong -- portal.<domain> is served by the
-# wildcard today and gets its own exact Ingress rule the moment someone decides
-# it should, at which point this probe would quietly start measuring that rule
-# instead. Nothing will ever claim this one, and its name tells an operator who
-# finds it in a log exactly what it is.
+# name would look friendlier and be wrong -- portal.<domain> was served by the
+# wildcard until memql#4224 gave it an exact Ingress rule of its own (for the
+# cloud certificate's sake), at which point a probe dialing it would have
+# quietly started measuring that rule instead. Nothing will ever claim this
+# one, and its name tells an operator who finds it in a log exactly what it is.
 WILDCARD_PROBE_LABEL="frontdoor-precedence-probe"
 
 cap_init "install.verifyFrontDoor" \
@@ -308,19 +310,19 @@ function check_grpc() {
 # PROBE 4 -- WILDCARD VERSUS EXACT HOST PRECEDENCE
 #=============================================================================
 #
-# THE PROPERTY. The cluster front door (memql#3700) is five hosts: the exact
-# api. / identity. / mcp. names, plus `*.<domain>` and the apex, which both
-# reach the site edge. The wildcard MATCHES the three exact names too, so every
-# one of those doors depends on the Ingress rule that an exact host outranks a
-# wildcard (decision D3). Neither this repository nor anything else was checking
-# it, which is what this probe is for -- the manifest header claimed it was
-# probed before it was.
+# THE PROPERTY. The cluster front door (memql#3700) is six hosts: the exact
+# api. / identity. / mcp. names, the portal's exact name (memql#4224), plus
+# `*.<domain>` and the apex -- the last three all reach the site edge. The
+# wildcard MATCHES the exact names too, so every one of those doors depends on
+# the Ingress rule that an exact host outranks a wildcard (decision D3). Neither
+# this repository nor anything else was checking it, which is what this probe
+# is for -- the manifest header claimed it was probed before it was.
 #
 # AND IT IS NOT OBVIOUSLY TRUE, WHICH IS THE POINT. traefik orders routers by
 # RULE LENGTH unless a priority is set explicitly, and the wildcard's rule
 # string -- `HostRegexp(...) && PathPrefix("/")` -- is LONGER than
 # `Host("api.<domain>") && PathPrefix("/healthz")`. So the heuristic that
-# actually decides this does not obviously favour the design the five-host
+# actually decides this does not obviously favour the design the six-host
 # table depends on. An assurance that "both controllers implement it" is what
 # stood in for a measurement here before, and it is why the measurement was
 # missing.
@@ -384,26 +386,28 @@ function check_grpc() {
 # cluster could in principle yield /healthz to the exact rule while `/` went to
 # the wildcard. The reported details therefore name the route they measured
 # rather than claiming more than one request can support. The whole-host case is
-# what the five-host design turns on and is the one this catches; a per-path
+# what the six-host design turns on and is the one this catches; a per-path
 # split cannot be caught by a second probe of `/`, because the only response
 # that names its author on this front door is the health body.
 #
-# WHICH HOSTS BELONG IN `--hosts`: THE ONES THAT CARRY THEIR OWN EXACT RULE.
-# This check's question -- "is a node other than the wildcard's answering?" --
-# is only meaningful for such a host. `portal.<domain>` and the apex are served
-# by the edge BY DESIGN (the apex has its own rule pointing at the same Service
-# the wildcard does), so "the edge answered" is the correct outcome for them,
-# not a defect. The apex is detected here and reported inconclusive with that
-# reason, because it is cheap and exact -- a host equal to the wildcard's apex
-# cannot be anything else.
+# WHICH HOSTS BELONG IN `--hosts`: THE ONES WHOSE EXACT RULE REACHES A NODE
+# OTHER THAN THE EDGE. This check's question -- "is a node other than the
+# wildcard's answering?" -- is only meaningful for such a host. `portal.<domain>`
+# and the apex are served by the edge BY DESIGN (each has its own rule pointing
+# at the same Service the wildcard does; the portal's exists for the cloud
+# certificate's sake, memql#4224), so "the edge answered" is the correct outcome
+# for them, not a defect. The apex is detected here and reported inconclusive
+# with that reason, because it is cheap and exact -- a host equal to the
+# wildcard's apex cannot be anything else.
 #
-# `portal.` and any future wildcard-served label are NOT detected, because
-# deciding that from a name would mean keeping a list of which labels are exact,
+# `portal.` and any future edge-served label are NOT detected, because deciding
+# that from a name would mean keeping a list of which labels reach which node,
 # and that list would be wrong in one direction or the other on the day it
-# changed -- memql#3711 gives `portal.` a rule THROUGH THE WILDCARD, which is
-# precisely the case a name list would misread. So it is stated rather than
-# guessed: a wildcard-served name passed in `--hosts` will be reported FAILED
-# with a detail that is backwards, and the fix is to not pass it.
+# changed -- memql#3711 served `portal.` THROUGH THE WILDCARD and memql#4224
+# gave it an exact rule to the same Service, two states a name list would have
+# had to track for an outcome that is identical either way. So it is stated
+# rather than guessed: an edge-served name passed in `--hosts` will be reported
+# FAILED with a detail that is backwards, and the fix is to not pass it.
 # editors/vscode/src/install/session.ts's PROBE_SUBDOMAINS is the live example
 # of the right set (api. + identity.); its sibling HOSTS_BLOCK_SUBDOMAINS
 # carries `portal.` and the apex because a hosts file has no wildcard, and those

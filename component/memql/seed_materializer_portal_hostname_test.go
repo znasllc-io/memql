@@ -2,6 +2,8 @@ package memql
 
 import (
 	"testing"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // applyPortalSiteHostname is the #4222 hook: SeedMaterializer rewrites the
@@ -55,6 +57,36 @@ func TestApplyPortalSiteHostname_NoOpForOtherSeeds(t *testing.T) {
 	applyPortalSiteHostname(&SeedDefinition{Name: "portal", UseConcept: "agent"}, args)
 	if got := args["hostname"]; got != "shop.memql.localhost" {
 		t.Fatalf("portal-named non-site seed must not be rewritten, got %v", got)
+	}
+}
+
+// TestPortalSiteHostname_AgreesWithTheFrontDoor pins the memql#4224 parity:
+// the hostname this materializer writes onto the portal site row is the SAME
+// derivation cmd/frontdoorhosts writes into the portal's Ingress rule and the
+// front-door certificate's dnsNames, and envregistry writes into the portal's
+// redirect URI. A second spelling here would be a certificate naming a host
+// the site row does not carry -- the edge would 404 the name the certificate
+// was issued for, or serve the portal at a name it was not.
+func TestPortalSiteHostname_AgreesWithTheFrontDoor(t *testing.T) {
+	for _, domain := range []string{"example.com", "lab.example.com", "memql.localhost"} {
+		if got, want := portalSiteHostname(domain), frontdoor.PortalHost(domain); got != want {
+			t.Errorf("portalSiteHostname(%q) = %q, frontdoor.PortalHost = %q; the site row and the certificate disagree", domain, got, want)
+		}
+		var san bool
+		for _, s := range frontdoor.CertificateSANs(domain) {
+			if s == portalSiteHostname(domain) {
+				san = true
+			}
+		}
+		if !san {
+			t.Errorf("the portal site hostname %q is not a front-door certificate SAN (%v)", portalSiteHostname(domain), frontdoor.CertificateSANs(domain))
+		}
+	}
+	// The fail-closed default is the committed seed's value, which is also
+	// what the derivation yields for the committed default domain -- so an
+	// unset MEMQL_DOMAIN and a MEMQL_DOMAIN of memql.localhost agree.
+	if got, want := portalSiteHostname(""), frontdoor.PortalHost("memql.localhost"); got != want {
+		t.Errorf("fail-closed hostname = %q, want the derivation for the committed default %q", got, want)
 	}
 }
 

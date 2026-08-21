@@ -800,36 +800,54 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 ### The front door's HOST set is generated too (memql#3767)
 
-The host set is DERIVED from the closed **role** set, not maintained as a list:
+The host set is DERIVED from the closed **role** set plus the platform's own
+site, not maintained as a list:
 
 | Role | Host |
 |---|---|
 | api | `api.<domain>` |
 | identity | `identity.<domain>` |
 | mcp | `mcp.<domain>` |
-| sites | `*.<domain>`, plus the apex |
+| sites | `portal.<domain>` (site #1, its own exact rule), `*.<domain>`, plus the apex |
 
-**Every host is a SINGLE label under the domain, and that is a TLS fact.** A
-wildcard matches exactly ONE label, so the one `*.<domain>` certificate covers
-every role host and every site -- one order, one renewal, however many sites the
-cluster serves. The apex is the exception and is requested as its own SAN, since
-the bare domain has no label for a wildcard to match. (The host set was once the
-product of role x ENVIRONMENT, with a label that hyphenated into role hosts and
-nested into site hosts; epic memql#3943 removed the environment dimension, so
-the product has one factor left.)
+**Every host is a SINGLE label under the domain, and that is a ROUTING fact.** An
+Ingress wildcard matches exactly ONE label, so the one `*.<domain>` rule routes
+every present and future site to the edge. **It is NOT a certificate fact
+(memql#4224).** The cloud ClusterIssuer solves HTTP-01 only: ACME cannot issue a
+wildcard over HTTP-01, and ONE wildcard dnsName fails the WHOLE order -- so the
+Certificate that requested `*.<domain>` sat Pending, and once it was hand-edited
+to exact names, the edge Ingress whose `tls.hosts` still said `*.<domain>` made
+ingress-nginx serve its self-signed default for `portal.<domain>`. The
+front-door certificate therefore names EXACT hosts only (`api.`, `identity.`,
+`mcp.`, `portal.`, the apex); every Ingress lists exactly its own exact rule
+hosts under `tls`; and the union of those lists equals the dnsNames
+(`deploy/k8s/overlays/frontdoor_hosts_test.go` gates all three). The wildcard
+RULE stays and has no certificate behind it: a customer site hostname on the
+cloud front door needs its own Certificate and exact-host Ingress until a
+DNS-01 solver exists. The portal carries an exact rule because ingress-nginx
+builds a certificate-bearing server block per RULE host, never per tls host --
+it is the one site whose name exists before any row does. (The host set was
+once the product of role x ENVIRONMENT, with a label that hyphenated into role
+hosts and nested into site hosts; epic memql#3943 removed the environment
+dimension, so the product has one factor left.)
 
-`cmd/frontdoorhosts` writes
-`deploy/k8s/overlays/cloud/front-door.generated.yaml`, and
+`cmd/frontdoorhosts` writes `front-door.generated.yaml` into each instance
+overlay (`overlays/cloud`, `overlays/cloud-entry`);
 `component/envregistry/domain.go` composes the node's own issuer / CORS origins /
-redirect URIs from the SAME rule through `component/frontdoor`. One derivation,
-two consumers: a second copy of the rule would disagree, and the disagreement is
-an issuer nothing is served at, which presents as "sign-in is broken" with every
-manifest looking correct.
+redirect URIs from the SAME rule through `component/frontdoor`; and
+`component/memql`'s SeedMaterializer seeds the portal site row's hostname from
+it (`frontdoor.PortalHost`). One derivation, three consumers: a second copy of
+the rule would disagree, and the disagreement is an issuer nothing is served at
+-- or a certificate naming a host the site row does not carry -- which presents
+as "sign-in is broken" with every manifest looking correct.
 
 Adding a ROLE is a design change, not a configuration change. The LOCAL
-overlay's four front-door files stay hand-authored (traefik, not nginx, and they
+overlay's five front-door files stay hand-authored (traefik, not nginx, and they
 carry the measured priority reasoning from memql#3810), but they are gated
-against the same derivation, so they cannot drift from it.
+against the same derivation, so they cannot drift from it. Locally the mkcert
+pair is still a `*.<domain>` + apex wildcard, which is a TLS-source VALUE and
+the one place local is more permissive than the cloud: a site that works over
+https locally is no evidence it has a certificate in the cloud.
 
 Details: [docs/public/operate/front-door.md](docs/public/operate/front-door.md).
 

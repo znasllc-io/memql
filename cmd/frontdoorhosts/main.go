@@ -10,14 +10,20 @@
 //	api         api.<d>
 //	identity    identity.<d>
 //	mcp         mcp.<d>
+//	sites       portal.<d> (the platform's own site, site #1)
 //	sites       *.<d> + the apex
 //
-// It emits ~390 lines of Ingress + Certificate from those five names, which is
+// It emits ~440 lines of Ingress + Certificate from those six names, which is
 // what earns generation for a listed target: hand-maintaining that is the same
 // shape of mistake cmd/frontdoorpaths exists to stop, one level up. There, a
 // path with no rule does not 404 -- it hands HTTP/1.1 to an h2c backend and
 // fails naming nothing. Here, a host with no rule is a service that is simply
-// not reachable at the name every client was told to dial.
+// not reachable at the name every client was told to dial -- and a host with a
+// rule but no certificate SAN is one that answers with the ingress
+// controller's self-signed default (memql#4224). The Certificate names every
+// exact host and NO wildcard, because the cloud issuer is HTTP-01; see
+// manifest.go's header for the decision and component/frontdoor for the
+// derivation both sides share.
 //
 // This tool used to walk every overlay and take an ENVIRONMENT LABEL out of
 // each one's environment.yaml, hyphenating it into role hosts and nesting it

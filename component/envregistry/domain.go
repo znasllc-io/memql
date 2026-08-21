@@ -73,8 +73,11 @@ func DomainDerivations(domain string) map[string]string {
 	app := "https://app" + suffix
 	// The portal is site #1 (memql#3711): its bundle is served at its OWN
 	// hostname, not a /portal/ sub-path of another node's origin, so its
-	// redirect URI is this origin's own /auth/callback.
-	portal := "https://portal" + suffix
+	// redirect URI is this origin's own /auth/callback. The host is
+	// frontdoor.PortalHost -- the same call the engine's SeedMaterializer
+	// makes for the site row and cmd/frontdoorhosts makes for the portal's
+	// Ingress rule and certificate SAN (memql#4224).
+	portal := "https://" + frontdoor.PortalHost(d)
 
 	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
 	// redirect), so it carries no domain and is spelled out unchanged. Note

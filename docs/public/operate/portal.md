@@ -261,7 +261,7 @@ was ever intended to block this.
 [identity-service.md](auth/identity-service.md) still names a reason to
 prefer a same-origin path where one exists: Safari has an HTTP/2
 connection-coalescing bug that intermittently fails cross-origin credentialed
-XHR to a sibling host sharing a wildcard certificate and IP, surfacing as
+XHR to a sibling host sharing a certificate and IP, surfacing as
 `TypeError: Load failed` with no server-side trace at all. **For the portal,
 that alternative does not exist.** The old `MEMQL_PORTAL_IDENTITY_API_BASE_URL=self`
 toggle is retired along with `component/portal`, and nothing replaces it:

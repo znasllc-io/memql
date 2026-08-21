@@ -573,10 +573,10 @@ func TestVerifyFrontDoorGrpcProbeRequiresH2(t *testing.T) {
 // -----------------------------------------------------------------------
 // Wildcard versus exact host precedence, and the vacuous case
 //
-// The five-host front door (memql#3700) serves `*.<domain>` from the site edge
-// beside the exact api. / identity. / mcp. names, and the wildcard MATCHES
-// those exact names too -- so the design rests on an exact host outranking a
-// wildcard (D3). The trap is that the check is trivially satisfiable: with the
+// The six-host front door (memql#3700, memql#4224) serves `portal.<domain>`,
+// `*.<domain>` and the apex from the site edge beside the exact api. /
+// identity. / mcp. names, and the wildcard MATCHES those exact names too -- so
+// the design rests on an exact host outranking a wildcard (D3). The trap is that the check is trivially satisfiable: with the
 // wildcard's backend Service absent, the ingress controller drops the whole
 // wildcard router, and "api. reached the bff" is then true with no competing
 // route in existence. These tests pin BOTH halves: the check must be able to

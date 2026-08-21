@@ -2,43 +2,63 @@
 # Run `make frontdoor` (hosts, then paths). Hand edits are reverted by the generator
 # and TestFrontDoorHostsAreNotStale fails the build until they are.
 #
-# The front door for the `cloud` overlay, derived from the closed ROLE set
-# (memql#3767). The host COUNT never grows with customers, apps or sites, which is
-# what the sites wildcard is for (memql#3700).
+# The front door for the `cloud` overlay, derived from the closed ROLE set plus
+# the platform's own site (memql#3767, memql#4224). The host COUNT never grows with
+# customers, apps or sites, which is what the sites wildcard is for (memql#3700).
 #
 #   api          api.memql.localhost
 #   identity     identity.memql.localhost
 #   mcp          mcp.memql.localhost
+#   sites        portal.memql.localhost
 #   sites        *.memql.localhost
 #   sites        memql.localhost
 #
-# Every host is a SINGLE label under the domain, so the one *.<domain> wildcard
-# certificate covers all of them -- a TLS wildcard matches exactly one label. The apex
-# is the exception and is requested explicitly, since the bare domain has no label to
-# match.
+# THE CERTIFICATE NAMES EXACT HOSTS, NOT A WILDCARD (memql#4224). The ClusterIssuer
+# solves HTTP-01 only. ACME cannot serve an HTTP-01 challenge for *.<domain>, and ONE
+# wildcard dnsName fails the WHOLE order -- so the Certificate that used to request it sat
+# Pending, was hand-edited to exact names on the first keep-it cluster, and the edge
+# Ingress whose tls.hosts still said *.<domain> served ingress-nginx's self-signed default
+# for portal.<domain> (Safari: "This Connection Is Not Private"). DECISION: the wildcard
+# is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly
+# its own exact rule hosts under tls; and the union of those tls lists is the dnsNames
+# set -- deploy/k8s/overlays/frontdoor_hosts_test.go fails the build when they differ.
+# The *.<domain> RULE stays, because it is how every site reaches the edge, but it has no
+# certificate behind it: a customer site hostname needs its own Certificate and its own
+# exact-host Ingress until the issuer gains a DNS-01 solver
+# (docs/public/operate/site-hosting.md). The portal is the one site the generator can
+# name in advance, so it is the one site with an exact rule and a SAN.
 #
 # THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/
 # names a real domain: the domain is a value on the memql-domain ConfigMap, which every
-# node derives its issuer, CORS origins and redirect URIs from at boot
-# (component/envregistry/domain.go, threaded through component/frontdoor so the hosts below
-# and the hosts the nodes believe in cannot disagree). An Ingress host is a Kubernetes
-# API object, so it has to be in the render; an install overrides these through the
-# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so a
-# cluster reconciled before its domain is set fails visibly rather than half-working.
+# node derives its issuer, CORS origins, redirect URIs and portal site hostname from at
+# boot (component/envregistry/domain.go and component/memql's SeedMaterializer, threaded
+# through component/frontdoor so the hosts below and the hosts the nodes believe in
+# cannot disagree). An Ingress host is a Kubernetes API object, so it has to be in the
+# render; an install overrides these through the ArgoCD Application's
+# spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled
+# before its domain is set fails visibly rather than half-working.
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
-# wildcard -- so the role hosts outrank *.<domain> without anything being declared. That
-# is a guarantee traefik does not give, which is why the local overlay declares the
-# ranking by hand and why doing it there went wrong once (memql#3810). Do not copy that
-# annotation here: it would be an unnecessary declaration of something nginx already
-# does, and Ingress-level priority is what flattened the api host's path ordering.
+# wildcard -- so the role hosts and the portal outrank *.<domain> without anything being
+# declared. That is a guarantee traefik does not give, which is why the local overlay
+# declares the ranking by hand and why doing it there went wrong once (memql#3810). Do
+# not copy that annotation here: it would be an unnecessary declaration of something
+# nginx already does, and Ingress-level priority is what flattened the api host's path
+# ordering.
 ---
-# The front-door certificate for this namespace.
+# The front-door certificate for this namespace: every EXACT host the front door serves,
+# and nothing else (memql#4224).
 #
-# TWO SANs, and the second is why: *.<domain> matches exactly ONE label, so it covers
-# every role host and every site host, but NOT the bare domain, which has no label to
-# match. One order, one renewal, however many sites the cluster serves.
+# NO WILDCARD SAN. The issuer is HTTP-01 and a wildcard dnsName fails the whole order,
+# not the one name -- the Certificate would sit Pending and every host here would serve
+# the controller's default certificate. The apex is a dnsName like any other now; it
+# used to be the one exception to a wildcard that matched exactly one label. One order,
+# one renewal, and a new customer site does NOT join this list: it needs a Certificate
+# of its own until a DNS-01 solver exists (docs/public/operate/site-hosting.md).
+#
+# This list and the tls.hosts of the Ingresses below are the SAME set, derived from
+# component/frontdoor.CertificateSANs; the overlay render gate asserts the equality.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -50,7 +70,10 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - "*.memql.localhost"
+    - "api.memql.localhost"
+    - "identity.memql.localhost"
+    - "mcp.memql.localhost"
+    - "portal.memql.localhost"
     - "memql.localhost"
 ---
 # The API edge's HTTP half.
@@ -333,11 +356,60 @@ spec:
                 port:
                   number: 8090
 ---
-# The site edge -- the last front-door rules that will ever be added.
+# The portal -- site #1, and the ONE site with an exact rule of its own (memql#4224).
+#
+# To the edge the portal is a site like any other: the same Service the wildcard below
+# points at, resolved against the same v1:platform:site rows, no special path
+# (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason
+# and only that: ingress-nginx creates a certificate-bearing server block per RULE host,
+# never per tls host. With only the *.<domain> rule, portal.<domain> is answered by the
+# wildcard's server block, whose certificate is the controller's self-signed default
+# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first keep-it
+# cluster served to Safari. An exact rule gives the portal a server block the
+# certificate verifies for.
+#
+# It is the only site the generator can do this for, because it is the only site whose
+# name exists before an operator creates a row. The engine seeds that row's hostname
+# from MEMQL_DOMAIN through the same derivation that wrote this host
+# (component/frontdoor.PortalHost), so the certificate cannot name a host the row does
+# not carry. The same Service and port as the edge Ingress below, deliberately: this is
+# not a second way to serve the portal, it is the first way with a certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portal-front-door
+  namespace: memql
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "portal.memql.localhost"
+      secretName: memql-front-door-tls
+  rules:
+    - host: portal.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
+---
+# The site edge -- the wildcard and the apex, the last front-door rules that will ever
+# be added.
 #
 # Everything after this is a graph row. That is the whole of memql#3700's "a site is
-# data, not infrastructure": the host count is fixed by the closed ROLE set and never
-# grows with sites.
+# data, not infrastructure": the host count is fixed by the closed ROLE set plus the
+# platform's own portal, and never grows with sites.
+#
+# TLS NAMES THE APEX ONLY (memql#4224). The wildcard rule has no certificate behind it:
+# the issuer is HTTP-01, which cannot issue *.<domain>, and listing the wildcard under
+# tls anyway is what made ingress-nginx fall back to its self-signed default for every
+# name this rule answers. A site routed by the wildcard terminates TLS with that default
+# until it has a Certificate and an exact-host Ingress of its own
+# (docs/public/operate/site-hosting.md).
 #
 # The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here
 # -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https
@@ -351,14 +423,15 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "*.memql.localhost"
         - "memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    # Every hosted site: the portal, and every SPA or website the operator creates a
-    # v1:platform:site row for. ONE rule, forever -- the edge node resolves the request
-    # Host against the graph, so a new site is an upload plus a row write and the number
-    # of Kubernetes objects does not grow with it.
+    # Every hosted site: every SPA or website the operator creates a v1:platform:site
+    # row for (the portal has its own rule above, for TLS; it is served exactly like
+    # these). ONE rule, forever -- the edge node resolves the request Host against the
+    # graph, so a new site is an upload plus a row write and the number of Kubernetes
+    # objects does not grow with it. What a new site does NOT get from this rule is a
+    # certificate: see the tls block above.
     - host: "*.memql.localhost"
       http:
         paths:

@@ -116,6 +116,14 @@ issues locally (`MEMQL_LOCAL_TLS_HOSTNAMES="*.${DOMAIN},${DOMAIN}"`) and
 cert-manager issues in the cloud. Domain setup is an **install-time step
 performed by an operator**, not a runtime self-service feature.
 
+> **Superseded in part by memql#4224.** The cloud issuer solves HTTP-01 only,
+> which cannot issue `*.<domain>` -- one wildcard dnsName fails the whole
+> order. The cloud Certificate now names exact hosts (the three roles, the
+> portal and the apex), the portal carries an exact Ingress rule of its own,
+> and a customer site on the cloud front door needs its own Certificate until a
+> DNS-01 solver exists. Locally the mkcert pair is still the wildcard + apex.
+> The living statement is `docs/public/operate/front-door.md`.
+
 *Rejected: per-site custom domains with runtime ACME.* Designed in full during
 the brainstorm and shelved rather than discarded — HTTP-01 as the only viable
 challenge type for domains whose DNS you do not control, a pending/verifying
