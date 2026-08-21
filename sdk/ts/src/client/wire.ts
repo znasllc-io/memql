@@ -141,6 +141,21 @@ export interface RevokeWorkerTokenPayload {
   identityId: string;
 }
 
+// Account tokens (memql#3322): a credential an operator mints against a
+// managed customer account. Same custody rule as worker tokens -- the
+// plaintext exists in exactly one place, the mint reply.
+export interface CreateAccountTokenPayload {
+  requestId: string;
+  accountId: string;
+  label: string;
+  expiresAt?: string; // ISO8601, empty = no auto-expiry
+}
+
+export interface RevokeAccountTokenPayload {
+  requestId: string;
+  identityId: string;
+}
+
 // Badge registration lifecycle (memql#2513). The GRANT exchange is
 // identity-HTTP (POST /auth/badge/grant), not a stream message; these
 // register / revoke the badge credential itself.
@@ -510,6 +525,7 @@ type ClientPayload =
   | { unsubscribe: UnsubscribePayload }
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
+  | { conceptsSubscribe: ConceptsSubscribePayload }
   | { myAccess: MyAccessPayload }
   | { modulesList: ModulesListPayload }
   | { moduleDetail: ModuleDetailPayload }
@@ -529,6 +545,8 @@ type ClientPayload =
   | { revokeCurrentSession: RevokeCurrentSessionPayload }
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
+  | { createAccountToken: CreateAccountTokenPayload }
+  | { revokeAccountToken: RevokeAccountTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
@@ -589,6 +607,28 @@ export interface ConceptsListResultPayload {
   concepts?: ConceptInfoWire[];
   baseTopics?: string[];
   systemTopics?: string[];
+}
+
+// ConceptsSubscribeMsg is the CDC-filter CATALOG, not a registry stream: the
+// engine answers ONE reply grouping node.created.<concept> filters by domain
+// (component/grpc/concepts_handlers.go). A client uses it to discover the
+// per-domain filters it can hand to SubscriptionManager instead of composing
+// topic strings itself. It does NOT deliver registry deltas -- there is no
+// engine-side concept-registry change stream (memql#4233 records the gap).
+export interface ConceptsSubscribePayload {
+  requestId?: string;
+  // Optional: restrict the catalog to these domains.
+  domains?: string[];
+}
+
+export interface DomainSubscriptionWire {
+  domain?: string;
+  filters?: string[];
+}
+
+export interface ConceptsSubscribeResultPayload {
+  requestId?: string;
+  domains?: DomainSubscriptionWire[];
 }
 
 export interface DisplayCardWire {
@@ -752,6 +792,29 @@ export interface CreateWorkerTokenResultPayload {
   plainToken?: string; // shown once; never persisted server-side
   identityId?: string;
   ownerUserId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface CreateAccountTokenResultPayload {
+  requestId?: string;
+  success?: boolean;
+  // "mql_acct_<43 base64url>". Present only on the mint reply, only once.
+  plainToken?: string;
+  identityId?: string;
+  accountId?: string;
+  // The credential's authenticated SUBJECT: the operator user, never the
+  // account -- nothing authenticates as an account.
+  subjectUserId?: string;
+  auditEventId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeAccountTokenResultPayload {
+  requestId?: string;
+  success?: boolean;
+  auditEventId?: string;
   errorCode?: string;
   errorMessage?: string;
 }
@@ -1334,6 +1397,7 @@ type ServerPayload =
   | { event: EventPayload }
   | { heartbeat: HeartbeatPayload }
   | { conceptsListResult: ConceptsListResultPayload }
+  | { conceptsSubscribeResult: ConceptsSubscribeResultPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { modulesListResult: ModulesListResultPayload }
   | { moduleDetailResult: ModuleDetailResultPayload }
@@ -1354,6 +1418,8 @@ type ServerPayload =
   | { revokeCurrentSessionResult: RevokeCurrentSessionResultPayload }
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
+  | { createAccountTokenResult: CreateAccountTokenResultPayload }
+  | { revokeAccountTokenResult: RevokeAccountTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
@@ -1381,6 +1447,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "event"; value: EventPayload }
   | { kind: "heartbeat"; value: HeartbeatPayload }
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
+  | { kind: "conceptsSubscribeResult"; value: ConceptsSubscribeResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "modulesListResult"; value: ModulesListResultPayload }
   | { kind: "moduleDetailResult"; value: ModuleDetailResultPayload }
@@ -1401,6 +1468,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeCurrentSessionResult"; value: RevokeCurrentSessionResultPayload }
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
+  | { kind: "createAccountTokenResult"; value: CreateAccountTokenResultPayload }
+  | { kind: "revokeAccountTokenResult"; value: RevokeAccountTokenResultPayload }
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
@@ -1426,6 +1495,11 @@ export function readServerPayload(msg: ServerMessage):
   if (m.heartbeat) return { kind: "heartbeat", value: m.heartbeat as HeartbeatPayload };
   if (m.conceptsListResult)
     return { kind: "conceptsListResult", value: m.conceptsListResult as ConceptsListResultPayload };
+  if (m.conceptsSubscribeResult)
+    return {
+      kind: "conceptsSubscribeResult",
+      value: m.conceptsSubscribeResult as ConceptsSubscribeResultPayload,
+    };
   if (m.myAccessResult)
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
   if (m.modulesListResult)
@@ -1478,6 +1552,16 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "revokeAllSessionsResult", value: m.revokeAllSessionsResult as RevokeAllSessionsResultPayload };
   if (m.createWorkerTokenResult)
     return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
+  if (m.createAccountTokenResult)
+    return {
+      kind: "createAccountTokenResult",
+      value: m.createAccountTokenResult as CreateAccountTokenResultPayload,
+    };
+  if (m.revokeAccountTokenResult)
+    return {
+      kind: "revokeAccountTokenResult",
+      value: m.revokeAccountTokenResult as RevokeAccountTokenResultPayload,
+    };
   if (m.revokeWorkerTokenResult)
     return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
   if (m.createBadgeResult)

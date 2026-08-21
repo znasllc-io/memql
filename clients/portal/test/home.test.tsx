@@ -6,11 +6,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import type { Connection} from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const AUTH_DISABLED_CLUSTER = {
   identityUrl: "",
@@ -32,7 +33,7 @@ describe("the console home", () => {
   it("renders at /, counts honestly, and the audit tile ticks live", async () => {
     let auditCount = 1;
     const graphHandlers = new Map<string, () => void>();
-    const query = {
+    const query = asQueryClient({
       listConcepts: vi.fn(async () => []),
       getMyAccess: vi.fn(async () => ({
         userId: "user-1",
@@ -48,7 +49,7 @@ describe("the console home", () => {
         }
         return { rawNodes: () => rows, meta: () => ({ cursor: "" }) };
       }),
-    } as unknown as QueryClient;
+    });
     const conn = {
       nodeId: "bff-test",
       serverVersion: "0.0.0-test",

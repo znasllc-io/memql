@@ -46,6 +46,7 @@ export {
   rowString,
   type AccessSummary,
   type Concept,
+  type DomainSubscription,
   type Event,
   type GraphAction,
   type Role,
@@ -56,3 +57,23 @@ export { newShortId } from "./id.js";
 export { renderMemQLValue } from "./memqlValue.js";
 export { deepStripNulls } from "./payload.js";
 export { displayDomainIds, isSyntheticDomainId } from "./domainIds.js";
+
+// -----------------------------------------------------------------------------
+// The generated typed construct surface (memql#4232).
+//
+// These modules are emitted by `make sdk-gen` from dsl/**/*.memql and
+// committed; the sdk-gen-check drift gate keeps them in lockstep with the
+// DSL. Re-exporting them here is load-bearing twice over: the wildcard
+// re-export EXECUTES each module, which is what installs the generated
+// methods on QueryClient.prototype for every consumer of this barrel, and
+// it surfaces the per-construct Args interfaces + call-string builders so
+// a client's arguments typecheck against the construct's declared schema
+// instead of being hand-rolled around a string name. Construct names are
+// globally unique (the generator refuses cross-root collisions), so the
+// four wildcards cannot clash.
+// -----------------------------------------------------------------------------
+export * from "./generated_queries.js";
+export * from "./generated_mutations.js";
+export * from "./generated_logics.js";
+export * from "./generated_builtins.js";
+export * from "./generated_concepts.js";

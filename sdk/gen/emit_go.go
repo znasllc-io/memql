@@ -223,7 +223,7 @@ func goType(typ string) string {
 		return "string"
 	case "bool", "boolean":
 		return "bool"
-	case "number":
+	case "number", "float":
 		return "float64"
 	case "int", "integer":
 		return "int"

@@ -28,6 +28,13 @@ export {
   type RevokeWorkerTokenResult,
 } from "./workerToken.js";
 export {
+  mintAccountToken,
+  revokeAccountToken,
+  type MintAccountTokenArgs,
+  type AccountTokenMintResult,
+  type AccountTokenRevokeResult,
+} from "./accountToken.js";
+export {
   createBadge,
   revokeBadge,
   type CreateBadgeArgs,

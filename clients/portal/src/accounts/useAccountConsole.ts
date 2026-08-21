@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Role, Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
 import { flattenForList } from "../viewkit/rows";
@@ -10,13 +11,9 @@ import {
   type AccountTokenView,
   type SelectedAccount,
 } from "./rows";
-import {
-  mintAccountToken,
-  namedCall,
-  newAccountId,
-  revokeAccountToken,
-  type AccountTokenMintResult,
-} from "./wire";
+import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity";
+
+import { newAccountId } from "./rows";
 
 // The customer-management console: account CRUD plus the per-account credential
 // list, wired to the stream.
@@ -111,7 +108,7 @@ export function useAccountConsole(
   rows: readonly Row[],
   selectedRowId: string,
 ): AccountConsoleState {
-  const { query, dispatcher } = useCluster();
+  const { query, clients } = useCluster();
   const { access } = useMyAccess();
   const role: Role = access?.clusterRole ?? "";
   const canManage = CAN_MANAGE.includes(role);
@@ -151,10 +148,7 @@ export function useAccountConsole(
     setTokensError("");
 
     void query
-      .executeNamed(
-        "accountTokensForAccount",
-        namedCall("query", "accountTokensForAccount", { accountId: selectedId }),
-      )
+      .accountTokensForAccount({ accountId: selectedId })
       .then((result) => {
         if (live) setTokens(accountTokenViews(result.rows()));
       })
@@ -177,7 +171,7 @@ export function useAccountConsole(
   const refetchAccounts = useCallback(() => {
     if (query === null) return;
     void query
-      .executeNamed("accounts", namedCall("query", "accounts", {}))
+      .accounts({})
       .then((result) => setRefreshedRows(result.rows().map(flattenForList)))
       .catch(() => {
         // A failed re-read is not a failed write. Leave whatever the view is
@@ -218,17 +212,14 @@ export function useAccountConsole(
       run(
         () =>
           query
-            .executeNamed(
-              "createAccount",
-              namedCall("mutation", "createAccount", {
-                accountId,
-                name,
-                description: draft.description.trim(),
-                primaryContactName: draft.primaryContactName.trim(),
-                primaryContactEmail: draft.primaryContactEmail.trim(),
-                externalRef: draft.externalRef.trim(),
-              }),
-            )
+            .createAccount({
+              accountId,
+              name,
+              description: omitBlank(draft.description.trim()),
+              primaryContactName: omitBlank(draft.primaryContactName.trim()),
+              primaryContactEmail: omitBlank(draft.primaryContactEmail.trim()),
+              externalRef: omitBlank(draft.externalRef.trim()),
+            })
             .then(() => `Added ${name}.`),
         refetchAccounts,
       );
@@ -242,20 +233,17 @@ export function useAccountConsole(
       run(
         () =>
           query
-            .executeNamed(
-              "updateAccount",
-              // Empty fields are DROPPED by namedCall rather than sent as "".
-              // updateAccount is a partial read-merge, so an omitted field
-              // keeps its value while an empty string would blank it.
-              namedCall("mutation", "updateAccount", {
-                accountId: selectedId,
-                name: draft.name.trim(),
-                description: draft.description.trim(),
-                primaryContactName: draft.primaryContactName.trim(),
-                primaryContactEmail: draft.primaryContactEmail.trim(),
-                externalRef: draft.externalRef.trim(),
-              }),
-            )
+            // Empty fields are OMITTED (omitBlank) rather than sent as "".
+            // updateAccount is a partial read-merge, so an omitted field
+            // keeps its value while an empty string would blank it.
+            .updateAccount({
+              accountId: selectedId,
+              name: omitBlank(draft.name.trim()),
+              description: omitBlank(draft.description.trim()),
+              primaryContactName: omitBlank(draft.primaryContactName.trim()),
+              primaryContactEmail: omitBlank(draft.primaryContactEmail.trim()),
+              externalRef: omitBlank(draft.externalRef.trim()),
+            })
             .then(() => "Saved."),
         refetchAccounts,
       );
@@ -268,10 +256,7 @@ export function useAccountConsole(
     run(
       () =>
         query
-          .executeNamed(
-            "archiveAccount",
-            namedCall("mutation", "archiveAccount", { accountId: selectedId }),
-          )
+          .archiveAccount({ accountId: selectedId })
           .then(
             () =>
               "Archived. The record is kept in full -- MemQL has no hard delete.",
@@ -282,7 +267,7 @@ export function useAccountConsole(
 
   const mint = useCallback(
     (label: string) => {
-      if (dispatcher === null || selectedId === "") return;
+      if (clients === null || selectedId === "") return;
       const trimmed = label.trim();
       if (trimmed === "") {
         setError("Name the credential after the system that will hold it.");
@@ -290,7 +275,7 @@ export function useAccountConsole(
       }
       run(
         () =>
-          mintAccountToken(dispatcher, { accountId: selectedId, label: trimmed }).then(
+          clients.mintAccountToken({ accountId: selectedId, label: trimmed }).then(
             (result) => {
               if (!result.success) {
                 throw new Error(
@@ -304,15 +289,15 @@ export function useAccountConsole(
         () => setTokenEpoch((n) => n + 1),
       );
     },
-    [dispatcher, selectedId, run],
+    [clients, selectedId, run],
   );
 
   const revoke = useCallback(
     (identityId: string) => {
-      if (dispatcher === null || identityId === "") return;
+      if (clients === null || identityId === "") return;
       run(
         () =>
-          revokeAccountToken(dispatcher, identityId).then((result) => {
+          clients.revokeAccountToken(identityId).then((result) => {
             if (!result.success) {
               throw new Error(
                 result.errorMessage || result.errorCode || "the cluster refused the revoke",
@@ -323,7 +308,7 @@ export function useAccountConsole(
         () => setTokenEpoch((n) => n + 1),
       );
     },
-    [dispatcher, run],
+    [clients, run],
   );
 
   const dismissMinted = useCallback(() => setMinted(null), []);

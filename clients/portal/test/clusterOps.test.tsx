@@ -6,11 +6,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import type { Connection} from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const AUTH_DISABLED_CLUSTER = {
   identityUrl: "",
@@ -35,7 +36,7 @@ const DEPLOYMENT_ROWS = [
 ];
 
 function fakeConnection(role: string, sent: Array<Record<string, unknown>>): Connection {
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => []),
     getMyAccess: vi.fn(async () => ({
       userId: "user-1",
@@ -54,7 +55,7 @@ function fakeConnection(role: string, sent: Array<Record<string, unknown>>): Con
         meta: () => ({ cursor: "" }),
       };
     }),
-  } as unknown as QueryClient;
+  });
   const dispatcher = {
     send: vi.fn(),
     addEventListener: vi.fn(() => () => {}),

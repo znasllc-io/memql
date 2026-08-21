@@ -2,22 +2,16 @@ import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-
 
 // The wire vocabulary of the composer.
 //
-// A composed view is stored in `v1:portalviews:view`, read through the
-// `composedViews` / `composedViewById` queries and written through the
-// `createComposedView` / `updateComposedView` / `archiveComposedView`
-// mutations (dsl/portalviews/). All five are NAMED CALLS dispatched through
-// QueryClient.executeNamed -- the same seam the concept browser, the
-// integrations surface and the generated SDKs ride. No new gRPC message was
-// needed and none was added.
-//
-// WHY THE CALL STRINGS ARE BUILT HERE. `make sdk-gen` emits typed builders for
-// Go only (the Makefile passes an empty --ts-out), so there is no generated
-// TypeScript counterpart to import. The alternative is call strings scattered
-// through the composer's components, which is worse in the one way that
-// matters: argument quoting. Every value goes through the SDK's
-// renderMemQLValue, which mirrors the engine's literal grammar, so a view name
-// containing a quote or a newline -- or an arrangement whose title does --
-// cannot break the statement around it.
+// The saved-view lifecycle -- `composedViews` / `composedViewById` /
+// `createComposedView` / `updateComposedView` / `archiveComposedView` --
+// moved onto the GENERATED typed methods when the TS emitter landed
+// (memql#4232); see useSavedViews. What stays here is the one path the
+// generator structurally cannot type: the composer runs constructs the USER
+// picked at runtime, so the construct name is a value, not a compile-time
+// method. That is the same generic-by-design posture as the concept
+// browser, and quoting still goes through the SDK's renderMemQLValue, so a
+// name containing a quote or a newline cannot break the statement around
+// it.
 //
 // This deliberately MIRRORS src/integrations/calls.ts rather than importing
 // it. The two surfaces are being built in parallel and neither should be able

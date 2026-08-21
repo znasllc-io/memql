@@ -1,4 +1,4 @@
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { ConceptLike, RowLike } from "@znasllc-io/memql-view-kit";
 
 // Adapting an account's credential list into a row set an element can render.
@@ -112,4 +112,11 @@ export function selectedAccount(rows: readonly Row[], rowId: string): SelectedAc
     primaryContactEmail: text(match, "primaryContactEmail"),
     externalRef: text(match, "externalRef"),
   };
+}
+
+// newAccountId mints the opaque shortId half of a new account's row id. The
+// canonical `{concept}:{shortId}` composition is the engine's job -- clients
+// never compose canonical ids (docs/public/concepts/identifiers.md).
+export function newAccountId(): string {
+  return newShortId();
 }

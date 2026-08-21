@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ModulesClient,
   type Module,
   type ModuleDetail,
   type ModulesInventory,
@@ -27,16 +26,13 @@ export interface ModulesState {
 }
 
 export function useModulesInventory(enabled: boolean): ModulesState {
-  const { dispatcher, status } = useCluster();
+  const { clients, status } = useCluster();
   const [inventory, setInventory] = useState<ModulesInventory | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [epoch, setEpoch] = useState(0);
 
-  const client = useMemo(
-    () => (dispatcher ? new ModulesClient(dispatcher) : null),
-    [dispatcher],
-  );
+  const client = clients?.modules ?? null;
 
   useEffect(() => {
     if (!enabled || !client || status !== "connected") return;
@@ -71,16 +67,13 @@ export interface ModuleDetailState {
 }
 
 export function useModuleDetail(kind: string, name: string, enabled: boolean): ModuleDetailState {
-  const { dispatcher, status } = useCluster();
+  const { clients, status } = useCluster();
   const [detail, setDetail] = useState<ModuleDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [epoch, setEpoch] = useState(0);
 
-  const client = useMemo(
-    () => (dispatcher ? new ModulesClient(dispatcher) : null),
-    [dispatcher],
-  );
+  const client = clients?.modules ?? null;
 
   useEffect(() => {
     if (!enabled || !client || status !== "connected" || kind === "" || name === "") return;
@@ -115,21 +108,21 @@ export interface PackFlipState {
 }
 
 export function useSetPackEnabled(): PackFlipState {
-  const { dispatcher } = useCluster();
+  const { clients } = useCluster();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState<SetPackEnabledOutcome | null>(null);
 
   const flip = useCallback(
     (packDomain: string, enabled: boolean, reason: string, onDone: () => void) => {
-      if (!dispatcher) {
+      if (!clients) {
         setError("not connected");
         return;
       }
       setBusy(true);
       setError("");
       setOutcome(null);
-      new ModulesClient(dispatcher)
+      clients.modules
         .setPackEnabled(packDomain, enabled, reason)
         .then((result) => {
           setOutcome(result);
@@ -140,7 +133,7 @@ export function useSetPackEnabled(): PackFlipState {
         })
         .finally(() => setBusy(false));
     },
-    [dispatcher],
+    [clients],
   );
 
   return { busy, error, outcome, flip };

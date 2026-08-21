@@ -20,7 +20,6 @@ import {
   type AccessSummary,
   type Concept,
   type Connection,
-  type QueryClient,
   type Role,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -28,6 +27,7 @@ import {
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
+import { asQueryClient } from "./support/queryFake";
 
 const USER = "v1:identity:user";
 const AGENT = "v1:agents:agent";
@@ -191,7 +191,7 @@ function renderView({ role = "owner", deployFails, without }: Partial<Harness>, 
     clusterRole: role,
   };
 
-  const query = {
+  const query = asQueryClient({
     listConcepts: vi.fn(async () => concepts),
     getMyAccess: vi.fn(async () => access),
     executeNamed: vi.fn(async (_name: string, call: string) => {
@@ -199,7 +199,7 @@ function renderView({ role = "owner", deployFails, without }: Partial<Harness>, 
       const id = match?.[1] ?? "";
       return new Result({ bundle: { nodes: ROWS[id] ?? [] }, meta: { cursor: "" } });
     }),
-  } as unknown as QueryClient;
+  });
 
   const dispatcher = {
     sendAndWait: vi.fn(async () => {

@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { fetchSiteVersionHistory, justBefore, MAX_HISTORY_VERSIONS } from "../src/sites/history";
+import { asQueryClient } from "./support/queryFake";
 
 interface FakeVersion {
   bundleRef: string;
@@ -49,7 +50,7 @@ function fakeQueryClient(versions: readonly FakeVersion[]): { query: QueryClient
           : [{ id: "site-1", createdAt: chosen.createdAt, bundleRef: chosen.bundleRef, status: chosen.status ?? "live" }],
     };
   };
-  return { query: { executeNamed } as unknown as QueryClient, calls };
+  return { query: asQueryClient({ executeNamed }), calls };
 }
 
 describe("justBefore", () => {

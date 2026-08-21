@@ -23,13 +23,51 @@ import {
 } from "react";
 import {
   Connection,
-  type Dispatcher,
+  ModulesClient,
   type QueryClient,
   type SubscriptionManager,
 } from "@znasllc-io/memql-sdk-core/client";
+import { aiSuggest, type AiSuggestOptions, type AiSuggestResult } from "@znasllc-io/memql-sdk-core/ai";
+import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
+import {
+  mintAccountToken,
+  revokeAccountToken,
+  type AccountTokenMintResult,
+  type AccountTokenRevokeResult,
+  type MintAccountTokenArgs,
+} from "@znasllc-io/memql-sdk-core/identity";
+import { IdentityAdminClient } from "@znasllc-io/memql-sdk-core/identityadmin";
 
 import { anonymousAuthSource, toConnectionAuth, type PortalAuthSource } from "./auth";
 import { portalBridgePath } from "./endpoint";
+
+// The connection-scoped typed clients (memql#4234). Everything here is an
+// SDK surface constructed over the ONE stream's transport; the transport
+// handle itself (the Dispatcher) never leaves this module, so nothing in
+// the app can compose a raw envelope -- the seam the old `dispatcher`
+// field left open cannot regrow. Built together when the stream comes up
+// and nulled together when it ends, for the same reason query and
+// subscriptions are: a request must not outlive the stream it was issued
+// on.
+export interface ClusterClients {
+  // The deploy console's nine RPCs (memql#3311).
+  deployControl: DeployControlClient;
+  // The admin console's writes, behind the cluster's own owner/admin gate.
+  identityAdmin: IdentityAdminClient;
+  // The modules inventory + pack flip (memql#4188/#4189).
+  modules: ModulesClient;
+  // Account-token custody (memql#3322): plaintext exists only in the mint
+  // reply; these are the typed identity-subpackage functions, bound to the
+  // stream.
+  mintAccountToken: (args: MintAccountTokenArgs) => Promise<AccountTokenMintResult>;
+  revokeAccountToken: (identityId: string, signal?: AbortSignal) => Promise<AccountTokenRevokeResult>;
+  // Structured-output suggestion (the composer's arrangement suggester).
+  suggest: (
+    domain: string,
+    payload: Record<string, unknown>,
+    opts?: AiSuggestOptions,
+  ) => Promise<AiSuggestResult>;
+}
 
 export type ConnectionStatus =
   // No dial attempted, because the provider is disabled -- there is no
@@ -53,16 +91,9 @@ export interface ClusterState {
   // cannot outlive the stream it was opened on -- a CDC handler still firing
   // against a dead socket is how a list ends up "live" and wrong.
   subscriptions: SubscriptionManager | null;
-  // The raw multiplexer under `query`, for the one surface that speaks an
-  // envelope QueryClient does not model: the deploy console. memql#3311
-  // bridges DeployControlService's nine RPCs onto MemqlService.Stream behind
-  // a DeployControlMsg, and sdk/ts/src/deploy takes a Dispatcher. Exposed and
-  // nulled alongside `query`, for the same reason -- a request must not
-  // outlive the stream it was issued on.
-  //
-  // NOT a general-purpose escape hatch: anything that IS a query belongs on
-  // QueryClient, where the wire shape is modelled once.
-  dispatcher: Dispatcher | null;
+  // The connection-scoped typed clients (see ClusterClients above). null
+  // exactly when `query` is null.
+  clients: ClusterClients | null;
   // Server identity from the ServerHello, for the header. Empty until
   // connected.
   nodeId: string;
@@ -96,7 +127,7 @@ export function ClusterProvider({
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? "connecting" : "idle");
   const [query, setQuery] = useState<QueryClient | null>(null);
   const [subscriptions, setSubscriptions] = useState<SubscriptionManager | null>(null);
-  const [dispatcher, setDispatcher] = useState<Dispatcher | null>(null);
+  const [clients, setClients] = useState<ClusterClients | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
   const [error, setError] = useState("");
@@ -124,7 +155,7 @@ export function ClusterProvider({
     if (!enabled) {
       setQuery(null);
       setSubscriptions(null);
-      setDispatcher(null);
+      setClients(null);
       setStatus("idle");
       setError("");
       return;
@@ -155,9 +186,23 @@ export function ClusterProvider({
         // than on a call to undefined.subscribeGraph().
         setSubscriptions(conn.subscriptions ?? null);
         // `?? null` for the same reason as subscriptions above: a narrowed
-        // test double without one must land on the null branch that hides the
-        // deploy console, not on a call to undefined.sendAndWait().
-        setDispatcher(conn.dispatcher ?? null);
+        // test double without a dispatcher must land on the null branch that
+        // hides the client-backed surfaces, not on a constructor over
+        // undefined.
+        const transport = conn.dispatcher ?? null;
+        setClients(
+          transport === null
+            ? null
+            : {
+                deployControl: new DeployControlClient(transport),
+                identityAdmin: new IdentityAdminClient(transport),
+                modules: new ModulesClient(transport),
+                mintAccountToken: (args) => mintAccountToken(transport, args),
+                revokeAccountToken: (identityId, signal) =>
+                  revokeAccountToken(transport, identityId, signal),
+                suggest: (domain, payload, opts) => aiSuggest(transport, domain, payload, opts),
+              },
+        );
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setStatus("connected");
@@ -169,14 +214,14 @@ export function ClusterProvider({
           if (generation.current !== mine) return;
           setQuery(null);
           setSubscriptions(null);
-          setDispatcher(null);
+          setClients(null);
           setStatus("closed");
         });
       } catch (err) {
         if (cancelled || generation.current !== mine) return;
         setQuery(null);
         setSubscriptions(null);
-        setDispatcher(null);
+        setClients(null);
         setStatus("error");
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -195,13 +240,13 @@ export function ClusterProvider({
       status,
       query,
       subscriptions,
-      dispatcher,
+      clients,
       nodeId,
       serverVersion,
       error,
       reconnect,
     }),
-    [status, query, subscriptions, dispatcher, nodeId, serverVersion, error, reconnect],
+    [status, query, subscriptions, clients, nodeId, serverVersion, error, reconnect],
   );
 
   return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;

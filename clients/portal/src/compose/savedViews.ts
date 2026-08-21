@@ -1,6 +1,7 @@
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import type { CreateComposedViewArgs, Row } from "@znasllc-io/memql-sdk-core/client";
 import { BAND_ROLES, type Arrangement, type ArrangedElement } from "@znasllc-io/memql-view-kit";
 
+import { omitBlank } from "../cluster/args";
 import { flattenForList } from "../viewkit/rows";
 
 // A saved view, both directions: the row the cluster stores and the value the
@@ -106,17 +107,17 @@ export interface SavedViewInput {
 // actor.userId and would reject a mutation that accepted it from here. A
 // client cannot compose a view owned by somebody else because there is no
 // argument through which to try.
-export function savedViewArgs(input: SavedViewInput): Record<string, unknown> {
+export function savedViewArgs(input: SavedViewInput): CreateComposedViewArgs {
   return {
     viewId: input.viewId,
     name: input.name,
-    description: input.description,
+    description: omitBlank(input.description),
     conceptIds: [...input.conceptIds],
     // Serialized structurally, not as a JSON string. The field is []object, so
     // the arrangement stays queryable and readable in the concept browser
     // rather than being an opaque blob only this client can open.
     arrangements: input.arrangements.map(serializeArrangement),
-    origin: input.origin,
+    origin: omitBlank(input.origin),
   };
 }
 

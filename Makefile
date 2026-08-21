@@ -454,13 +454,17 @@ db-failover-litmus:
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
-## methods on the Go SDK (sdk/go/client.QueryClient). The TS typed
-## methods are no longer generated here -- the runtime core
-## (@znasllc-io/memql-sdk-core, sdk/ts) is client-agnostic, and each
-## product BFF generates its own typed surface from core + its DSL
-## (see #171 / #172 / #43). Re-run after any DSL change that touches a
-## construct's args / signature / shape. The drift gate
-## (sdk-gen-check) catches stale checkouts in CI.
+## methods on BOTH SDKs: the Go client (sdk/go/client.QueryClient) and
+## the TS runtime core (sdk/ts/src/client, augmenting QueryClient via
+## declare-module + prototype assignment). The TS half was deliberately
+## OFF for a while (#171 / #172 / #43 kept sdk-core client-agnostic and
+## left typed TS emission to product BFFs); memql#4232 turned it back on
+## for the CORE constructs so first-party clients -- the portal, the
+## extension -- consume the same generated, typecheck-enforced surface
+## the Go side always had. A product BFF still composes its OWN surface
+## from `core DSL ∪ its DSL` by importing sdk/gen. Re-run after any DSL
+## change that touches a construct's args / signature / shape. The
+## drift gate (sdk-gen-check) covers Go and TS alike.
 ##
 ## Multi-root: the generator (and the importable sdk/gen package it
 ## wraps) accepts repeatable / comma-separated --dsl roots and merges
@@ -471,13 +475,13 @@ db-failover-litmus:
 ## drift gate by calling gen.Generate with Check=true over the same
 ## merged roots (a non-nil error means "regenerate and commit").
 sdk-gen:
-	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=
+	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
 ## CI gate: regenerate, then diff against the checked-in tree. Fails
 ## if the DSL evolved without the generator running. Pair with
 ## `make sdk-gen` locally to fix.
 sdk-gen-check:
-	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
+	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
 # ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
 # target, so the flag set exists exactly once in the repo. Declared above the
