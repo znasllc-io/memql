@@ -6,7 +6,7 @@
 export { Badge, StatusDot, type StatusTone } from "./Badge";
 export { Band, Panel } from "./Band";
 export { Breadcrumbs, type Crumb } from "./Breadcrumbs";
-export { Button, type ButtonSize, type ButtonTone } from "./Button";
+export { Button, ButtonLink, type ButtonSize, type ButtonTone } from "./Button";
 export { Container } from "./Container";
 export { DataText, type DataKind } from "./DataText";
 export { ConfirmDialog, Dialog, type DialogSize } from "./Dialog";

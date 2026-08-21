@@ -1,9 +1,12 @@
 import { type ReactNode } from "react";
 import { Link, Outlet, useMatch, useParams, useSearchParams } from "react-router-dom";
 
+import { useAuth } from "../auth/AuthProvider";
 import { useCluster } from "../cluster/ClusterProvider";
+import { clusterDomainFor } from "../cluster/editorLink";
 import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
+import { OpenInVsCode } from "../components/OpenInVsCode";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Breadcrumbs, DataText, Skeleton, Tabs } from "../ui";
 import type { ConceptPaneContext } from "./conceptContext";
@@ -35,6 +38,7 @@ import {
 export function ConceptPage(): ReactNode {
   const { conceptId = "" } = useParams<{ conceptId: string }>();
   const { status } = useCluster();
+  const { config } = useAuth();
   const { concepts, loading, error } = useConcepts();
   const [params] = useSearchParams();
   const search = params.toString();
@@ -96,6 +100,8 @@ export function ConceptPage(): ReactNode {
         <code className="font-mono text-sm break-all text-muted">{concept.id}</code>
         {concept.type ? <Chip>{concept.type}</Chip> : null}
         {concept.version ? <Chip>{concept.version}</Chip> : null}
+        <span className="basis-full" />
+        <OpenInVsCode domain={clusterDomainFor(config)} kind="concept" name={concept.id} />
       </header>
 
       {concept.description ? (

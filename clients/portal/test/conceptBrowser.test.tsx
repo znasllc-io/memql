@@ -197,7 +197,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
-  domain: "",
+  domain: "memql.test",
 };
 
 function renderBrowser(h: Harness, path: string) {
@@ -380,6 +380,14 @@ describe("one concept's rows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Retry from where it stopped/ }));
     await waitFor(() => expect(screen.getAllByText(/^pod-\d$/)).toHaveLength(PAGE_SIZE));
+  });
+
+  it("offers to open the concept's definition in VS Code, addressed to this cluster", async () => {
+    renderBrowser(harness(), `/concepts/${NODE}`);
+    const link = await screen.findByRole("link", { name: "Open definition in VS Code" });
+    expect(link.getAttribute("href")).toBe(
+      `vscode://znasllc.memql/open?v=1&cluster=memql.test&kind=concept&name=${encodeURIComponent(NODE)}`,
+    );
   });
 });
 
