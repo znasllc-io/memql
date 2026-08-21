@@ -1409,9 +1409,12 @@ node-type binary (`make identity`) and owns:
   on-disk overlay checkout and so exists only on the identity node, but
   a bff FORWARDS the deploy RPCs here over `NodeService.Stream`
   (`DeployControlForwardRequest` / `Response`), carrying the caller as a
-  verified `ForwardedAuthority` so the owner-only rollback gate runs
-  against the originating human rather than the relaying node
-  (`component/grpc/deploy_control_forward.go`).
+  verified `ForwardedAuthority` so the owner-only rollback and repair gates
+  run against the originating human rather than the relaying node
+  (`component/grpc/deploy_control_forward.go`). Repair (memql#4209) is an
+  owner-only, observed re-sync of the installation's ArgoCD Application
+  through the same Executor, recorded on the deployment timeline
+  (`component/deploycontrol/repair.go`).
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 

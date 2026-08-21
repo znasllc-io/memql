@@ -18,13 +18,28 @@ const DEPLOYMENT_CONCEPT = "v1:cluster:deployment";
 const NODE_SPEC_CONCEPT = "v1:cluster:deploymentNodeSpec";
 const TIMELINE_PAGE = 50;
 
+// A repair (memql#4209) is a deployment record too -- same concept, same
+// timeline -- marked by the engine with a "repair:" note prefix, since the
+// concept carries no kind field. The prefix is the one convention a reader
+// needs to tell a repair from a deploy; it is defined once, in
+// component/deploycontrol/repair.go (repairNotePrefix), and mirrored here.
+const REPAIR_NOTE_PREFIX = "repair:";
+
+export type DeploymentKind = "deploy" | "repair";
+
 export interface DeploymentEntry {
   rowId: string;
   deploymentId: string;
   status: string;
   engineVersion: string;
   createdAt: string;
+  kind: DeploymentKind;
+  notes: string;
   nodeSpecs: Array<{ nodeType: string; version: string; replicas: number }>;
+}
+
+export function deploymentKindOf(notes: string): DeploymentKind {
+  return notes.trimStart().startsWith(REPAIR_NOTE_PREFIX) ? "repair" : "deploy";
 }
 
 export interface TimelineState {
@@ -100,12 +115,15 @@ export function useDeploymentTimeline(enabled: boolean): TimelineState {
         const deploymentId = str(p["deploymentId"]) || str((row as { id?: unknown }).id);
         if (deploymentId === "" || seen.has(deploymentId)) continue;
         seen.add(deploymentId);
+        const notes = str(p["notes"]);
         collapsed.push({
           rowId: str((row as { id?: unknown }).id),
           deploymentId,
           status: str(p["status"]),
           engineVersion: str(p["engineVersion"]) || str(p["version"]),
           createdAt: str((row as { createdAt?: unknown }).createdAt),
+          kind: deploymentKindOf(notes),
+          notes,
           nodeSpecs: [...(specsByDeployment.get(deploymentId)?.values() ?? [])].sort((a, b) =>
             a.nodeType.localeCompare(b.nodeType),
           ),
