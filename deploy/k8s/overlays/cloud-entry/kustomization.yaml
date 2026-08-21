@@ -71,6 +71,16 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 0 }
 
+  # The domain, delivered once (memql#4222 / #3593).
+  # Every rematerializing engine node reads MEMQL_DOMAIN from the
+  # memql-domain ConfigMap so SeedMaterializer can derive the portal
+  # site hostname. envFrom has no merge key -- JSON 6902 append only.
+  # No hostname is committed here.
+  - path: patches/domain-envfrom.yaml
+    target:
+      kind: Deployment
+      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
+
   # -------------------------------------------------------------------------
   # DATABASE -- same cloud VALUES as overlays/cloud; SIZES come from entry.
   # -------------------------------------------------------------------------

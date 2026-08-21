@@ -152,3 +152,54 @@ func deploymentsByName(t *testing.T, rendered string) map[string]resource {
 	}
 	return byName
 }
+
+// entryRematerialize are the engine Deployments whose boot sweep rematerializes
+// seeds (#4222). Listed rather than discovered: the failure this catches is a
+// node that rematerializes without MEMQL_DOMAIN, so the portal hostname stays
+// portal.memql.localhost on an install that set a real domain.
+var entryRematerialize = []string{
+	"identity", "bff", "cognition", "agent", "planner",
+	"workbench", "mcp", "voice", "voice-agent", "edge",
+}
+
+func TestCloudEntryRematerializingDeploymentsMountMemqlDomain(t *testing.T) {
+	rendered := render(t, entryOverlay)
+	docs := strings.Split(rendered, "\n---\n")
+
+	for _, node := range entryRematerialize {
+		var found bool
+		for _, doc := range docs {
+			if !strings.Contains(doc, "kind: Deployment") ||
+				!strings.Contains(doc, "\n  name: "+node+"\n") {
+				continue
+			}
+			found = true
+			if !strings.Contains(doc, "name: memql-domain") {
+				t.Errorf("%s does not mount the memql-domain ConfigMap", node)
+			}
+		}
+		if !found {
+			t.Errorf("no Deployment named %s in the rendered cloud-entry overlay", node)
+		}
+	}
+}
+
+func TestCloudEntryCommitsNoHostname(t *testing.T) {
+	// The overlay states the relationship to MEMQL_DOMAIN, never a value.
+	// A committed portal hostname would beat the materializer rewrite for
+	// nothing -- the seed hostname is derived at rematerialize time.
+	raw, err := os.ReadFile(filepath.Join(entryOverlay, "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("reading cloud-entry kustomization: %v", err)
+	}
+	if strings.Contains(string(raw), "portal.") && strings.Contains(string(raw), "hostname") {
+		t.Error("cloud-entry kustomization commits a portal hostname")
+	}
+	patch, err := os.ReadFile(filepath.Join(entryOverlay, "patches", "domain-envfrom.yaml"))
+	if err != nil {
+		t.Fatalf("reading domain-envfrom: %v", err)
+	}
+	if strings.Contains(string(patch), "hostname:") {
+		t.Error("domain-envfrom.yaml commits a hostname")
+	}
+}
