@@ -4,7 +4,7 @@ import type {
   IntegrationCredential,
   IntegrationReport,
   IntegrationSetting,
-} from "./calls";
+} from "./statusReply";
 
 // Adapting the integration-status reply into row sets the element library can
 // render (memql#3323).

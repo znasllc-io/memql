@@ -394,7 +394,9 @@ describe("the campaign editor", () => {
 
     await waitFor(() => expect(callsNamed(calls, "campaignStartSend").length).toBe(1));
     // The keyword matters: `builtin` is what the engine's parser dispatches on,
-    // and a `mutation` spelling would reach nothing.
+    // and a `mutation` spelling would reach nothing. The string is the
+    // generated builder's (memql#4239), composed through the real prototype
+    // method -- not a copy typed here.
     expect(callsNamed(calls, "campaignStartSend")[0]).toBe(
       'builtin campaignStartSend(campaignId: "camp-1")',
     );

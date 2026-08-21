@@ -1,76 +1,21 @@
-import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-// The wire vocabulary of the integrations surface (memql#3323).
+// The integrationStatus builtin's REPLY (memql#3323).
 //
-// Everything this module builds is a NAMED CALL -- `query campaigns(...)`,
-// `mutation createCampaign(...)`, `builtin integrationStatus(...)` -- dispatched
-// through QueryClient.executeNamed, which is the same seam the concept browser
-// and the generated SDKs ride. No new gRPC message was added for this surface
-// and none is needed: the engine already routes a named call over
-// MemqlService.Stream.
-//
-// WHAT REMAINS HERE, AND WHY (memql#4232). The TypeScript emitter this
-// module's earlier header anticipated has landed: `make sdk-gen` now emits
-// typed builders + QueryClient methods for every query and mutation, and the
-// call sites that used runQuery/runMutation compose those instead -- so both
-// helpers are gone. What stays is the BUILTIN path: the generator emits only
-// builtins marked @sdk (most builtins are internal), and the campaign send
-// actions -- campaignStartSend / campaignPauseSend / campaignResumeSend /
-// campaignScheduleSend -- plus integrationStatus are not yet marked. Until
-// they are (a one-line dsl/ annotation each, tracked in the memql#4232
-// adoption notes), this file keeps the one hand-built form they need, with
-// the same quoting rule as ever: every value goes through the SDK's
-// renderMemQLValue, so a name containing a quote or newline cannot break the
-// statement around it.
-
-// callArgs renders `k: v, k: v` from a record, dropping undefined and empty
-// entries so an optional argument is OMITTED rather than sent as "".
-//
-// Omission is not a tidiness choice. A `when(args.x) { ... }` guard in a filter
-// is dropped when its argument is ABSENT, and an empty string is present -- so
-// sending `status: ""` to a query that guards on status filters for rows whose
-// status is the empty string, which is nothing at all.
-function callArgs(args: Record<string, unknown>): string {
-  const parts: string[] = [];
-  for (const key of Object.keys(args)) {
-    const value = args[key];
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value === "") continue;
-    parts.push(`${key}: ${renderMemQLValue(value)}`);
-  }
-  return parts.join(", ");
-}
-
-export function buildCall(
-  kind: "builtin",
-  name: string,
-  args: Record<string, unknown> = {},
-): string {
-  return `${kind} ${name}(${callArgs(args)})`;
-}
-
-// runBuiltin is the one verb left on this surface. It landed
-// with campaign sending (memql#3348), where the operator actions are builtins
-// rather than mutations -- starting a send is a preflight across several rows
-// plus two writes, and neither is expressible in a mutation body.
-//
-// The reply is discarded here on purpose. A builtin answers with one synthetic
-// node, and every caller on this surface wants the FAILURE (which arrives as a
-// rejected promise carrying the engine's own refusal text -- "template is not
-// ready", "no email sender is registered") rather than the payload. A caller
-// that needs the payload should read it off executeNamed directly, as
-// useIntegrationStatus does.
-export async function runBuiltin(
-  query: QueryClient,
-  name: string,
-  args: Record<string, unknown> = {},
-): Promise<void> {
-  await query.executeNamed(name, buildCall("builtin", name, args));
-}
-
-// ---------------------------------------------------------------------------
-// The integration-status builtin's reply
-// ---------------------------------------------------------------------------
+// Nothing in this module builds a call. The five builtins the integrations
+// surface drives -- campaignStartSend / campaignScheduleSend /
+// campaignPauseSend / campaignResumeSend and integrationStatus -- are marked
+// @sdk (memql#4239), so `make sdk-gen` emits a typed QueryClient method for
+// each and the hooks call those: a renamed builtin or a changed argument
+// fails typecheck instead of runtime, and quoting lives in the generated
+// builders (the SDK's renderMemQLValue), the same place it lives for every
+// query and mutation this app calls (memql#4232). This file used to carry the
+// hand-built `builtin name(...)` form those five needed before they were
+// marked. What remains is the one thing the generator does not type -- the
+// SHAPE OF A BUILTIN'S REPLY -- for the only builtin here whose payload a
+// caller reads; the four send actions answer with a synthetic node the hooks
+// discard, because what they want is the failure, which arrives as the
+// rejected promise carrying the engine's own refusal text.
 
 export interface IntegrationSetting {
   name: string;

@@ -13,10 +13,12 @@ import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-
 // name containing a quote or a newline cannot break the statement around
 // it.
 //
-// This deliberately MIRRORS src/integrations/calls.ts rather than importing
-// it. The two surfaces are being built in parallel and neither should be able
-// to break the other by refining its own helper; if a generated TypeScript
-// emitter ever lands, it replaces both.
+// This is the last `<kind> name(...)` composer in the portal. The
+// integrations surface once carried a twin of it for the five builtins the
+// generator did not yet emit; those are @sdk now (memql#4239) and its hooks
+// call the generated methods, so the twin is gone. What stays here stays for
+// the reason above -- a construct chosen at runtime has no compile-time
+// method -- not for lack of an emitter.
 
 // callArgs renders `k: v, k: v`, dropping undefined / null and empty strings so
 // an optional argument is OMITTED rather than sent as "".
