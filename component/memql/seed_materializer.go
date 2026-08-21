@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/frontdoor"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/provenance"
 )
@@ -43,6 +44,18 @@ const (
 // vendor account). `make dev-refresh` exports this so the avatar "just works"
 // after login. See frontend#237.
 const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
+
+// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The portal
+// site hostname is derived from it on every global rematerialize; the
+// committed DSL seed stays portal.memql.localhost.
+const memqlDomainEnv = "MEMQL_DOMAIN"
+
+// defaultPortalHostname is the product fail-closed hostname when MEMQL_DOMAIN
+// is unset or empty. Same committed default as dsl/platform/seeds.memql.
+const defaultPortalHostname = "portal.memql.localhost"
+
+const portalSiteSeedName = "portal"
+const portalSiteConcept = "site"
 
 // seedMaterializerActor is the synthetic actor every materializer
 // mutation runs as. Mutations require an actor (for createdBy
@@ -374,6 +387,7 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 		return fmt.Errorf("global seed %q must declare a string `id` field", def.Name)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
+	applyPortalSiteHostname(def, args)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
@@ -441,6 +455,36 @@ func (m *SeedMaterializer) applyDevDefaultAvatarPersona(ctx context.Context, def
 		m.engine.Logger.Info("seed materializer: stamped dev default avatar persona on assistant",
 			"personaName", personaName, "vendor", vendor, "avatarPersonaId", personaId)
 	}
+}
+
+// applyPortalSiteHostname rewrites the portal site hostname from MEMQL_DOMAIN
+// on every global rematerialize (#4222). The committed seed in
+// dsl/platform/seeds.memql stays portal.memql.localhost; this overwrite is
+// why a kubectl patch of the site row is out of scope -- the next boot sweep
+// would clobber it.
+//
+// Only the `portal` / concept `site` seed is touched. The suffix comes from
+// frontdoor.DomainDerivationSuffix so envregistry / frontdoorhosts cannot
+// drift against this rewrite. Unset or empty MEMQL_DOMAIN fail-closed to
+// portal.memql.localhost.
+func applyPortalSiteHostname(def *SeedDefinition, args map[string]any) {
+	if def == nil || args == nil {
+		return
+	}
+	if def.Name != portalSiteSeedName || def.UseConcept != portalSiteConcept {
+		return
+	}
+	args["hostname"] = portalSiteHostname(os.Getenv(memqlDomainEnv))
+}
+
+// portalSiteHostname is the pure derivation: portal + DomainDerivationSuffix
+// when MEMQL_DOMAIN is set, else the committed localhost default.
+func portalSiteHostname(domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return defaultPortalHostname
+	}
+	return "portal" + frontdoor.DomainDerivationSuffix(domain)
 }
 
 // resolveAvatarPersonaByName looks up a v1:agents:avatarPersona catalog row by

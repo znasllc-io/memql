@@ -1,0 +1,18 @@
+# JSON 6902 patch: mount the `memql-domain` ConfigMap as env on every engine
+# node that rematerializes (znasllc-io/memql#4222). Copied from the local
+# overlay (memql#3593) -- envFrom has no patch merge key, so a strategic
+# merge would replace the whole list and drop memql-secrets. `add` at
+# envFrom/- appends.
+#
+# WHAT SEEDS IT: the install's memql-domain ConfigMap, one key MEMQL_DOMAIN.
+# SeedMaterializer derives the portal site hostname from it. No hostname is
+# committed in this overlay.
+#
+# WHY NOT `optional`: a node with no domain rematerializes portal.memql.localhost
+# and cannot be reached at the install host. Refusing to start is the honest
+# failure.
+- op: add
+  path: /spec/template/spec/containers/0/envFrom/-
+  value:
+    configMapRef:
+      name: memql-domain
