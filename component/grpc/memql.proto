@@ -3090,6 +3090,9 @@ message DeployControlMsg {
     znasllc.memql.deploycontrol.v1.CutVersionRequest cut_version = 16;
     znasllc.memql.deploycontrol.v1.DeployRequest deploy = 17;
     znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest rollback_deployment = 18;
+    // Repair (memql#4209): owner-only, async -- ok acknowledges the kick-off
+    // and the v1:cluster:deployment record carries the terminal state.
+    znasllc.memql.deploycontrol.v1.RepairRequest repair = 19;
   }
 }
 
