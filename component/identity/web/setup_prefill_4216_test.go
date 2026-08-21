@@ -113,3 +113,39 @@ func TestSetupPrefillsExplicitBootstrapWhenMEMQLDomainUnset(t *testing.T) {
 		t.Errorf("domain input value = %q, want explicit bootstrap %q", got, "acme.com")
 	}
 }
+
+// TestSetupLeavesDomainEmptyWhenOnlyExamplePlaceholder is the
+// fail-closed base: both MEMQL_DOMAIN and the bootstrap pin are
+// absent or the RFC example.com placeholder. The box stays empty so
+// the operator types a real domain (memql#4216).
+func TestSetupLeavesDomainEmptyWhenOnlyExamplePlaceholder(t *testing.T) {
+	t.Setenv("MEMQL_DOMAIN", "")
+	s := setupPrefillServer(t)
+	s.Cfg.Bootstrap.Domain = "example.com"
+
+	code, body := getSetupBody(t, s)
+	if code != http.StatusOK {
+		t.Fatalf("GET /setup: status = %d, want 200; body=%s", code, body)
+	}
+	got := domainInputValue(body)
+	if got != "" {
+		t.Errorf("domain input value = %q, want empty (example.com is unset for this field)", got)
+	}
+}
+
+// TestSetupFallsBackPastExampleComMEMQLDomain treats a MEMQL_DOMAIN
+// of example.com the same as unset and uses a real bootstrap domain.
+func TestSetupFallsBackPastExampleComMEMQLDomain(t *testing.T) {
+	t.Setenv("MEMQL_DOMAIN", "example.com")
+	s := setupPrefillServer(t)
+	s.Cfg.Bootstrap.Domain = "acme.com"
+
+	code, body := getSetupBody(t, s)
+	if code != http.StatusOK {
+		t.Fatalf("GET /setup: status = %d, want 200; body=%s", code, body)
+	}
+	got := domainInputValue(body)
+	if got != "acme.com" {
+		t.Errorf("domain input value = %q, want real bootstrap %q", got, "acme.com")
+	}
+}

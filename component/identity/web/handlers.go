@@ -478,13 +478,23 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 // MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=example.com as a fail-closed
 // placeholder; envregistry derivation is set-if-absent, so that pin
 // wins and Bootstrap.Domain is the placeholder, not the install.
-// Prefer the install domain when it is set. An explicit bootstrap
-// domain still fills the box when MEMQL_DOMAIN is empty.
+// Prefer the install domain when it is a real value. Treat example.com
+// and empty as unset for THIS field only — do not rewrite
+// ApplyDomainDerivations. An explicit real bootstrap domain still
+// fills the box when MEMQL_DOMAIN is empty or the placeholder.
 func setupPrefillDomain(cfg identity.Config) string {
-	if d := strings.TrimSpace(os.Getenv("MEMQL_DOMAIN")); d != "" {
+	if d := usableSetupDomain(os.Getenv("MEMQL_DOMAIN")); d != "" {
 		return d
 	}
-	return strings.TrimSpace(cfg.Bootstrap.Domain)
+	return usableSetupDomain(cfg.Bootstrap.Domain)
+}
+
+func usableSetupDomain(raw string) string {
+	d := strings.TrimSpace(raw)
+	if d == "" || strings.EqualFold(d, "example.com") {
+		return ""
+	}
+	return d
 }
 
 // handleSetupGet renders the first-run wizard. 404s unless the cluster
