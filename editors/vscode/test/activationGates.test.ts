@@ -34,9 +34,26 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'memql-activation-gates-'));
 process.env.HOME = home;
 process.env.PATH = '';
 
+// registerRuntimeSurface takes a parked portal handoff out of globalState on
+// its way in (memql#4251), so the fake context has to model one. In-memory and
+// empty: this lane is about activation ORDER, and a replay would drag a uri
+// handler's whole decision into a test about which surface came up first.
+const globalState = {
+  store: new Map<string, unknown>(),
+  get<T>(key: string): T | undefined {
+    return globalState.store.get(key) as T | undefined;
+  },
+  update(key: string, value: unknown): Promise<void> {
+    if (value === undefined) globalState.store.delete(key);
+    else globalState.store.set(key, value);
+    return Promise.resolve();
+  },
+};
+
 const context = {
   subscriptions: [] as { dispose(): unknown }[],
   asAbsolutePath: (relative: string) => path.join(home, 'extension', relative),
+  globalState,
 } as unknown as ExtensionContext;
 
 // A workspace that tries to redirect the language server at itself, in a

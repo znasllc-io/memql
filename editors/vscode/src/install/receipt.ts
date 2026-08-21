@@ -595,6 +595,14 @@ export function recordedStackRefKind(receipt: Receipt | null): string {
   return typeof kind === "string" ? kind.trim() : "";
 }
 
+/** The directory `install.cloneStack` put the checkout in, or "" when the receipt records none. */
+export function recordedStackDir(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "stackCheckout");
+  const dest = entry?.result?.dest ?? entry?.params?.dest;
+  return typeof dest === "string" ? dest.trim() : "";
+}
+
 /**
  * The IMAGE tag a previous run's cluster was actually brought up with (memql#4068).
  *

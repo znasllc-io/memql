@@ -50,6 +50,7 @@ import {
 } from "../constructs/catalogTarget.js";
 import { COMMAND_RUN, COMMAND_RUN_AUTOMATION, COMMAND_RUN_WITH } from "../constructs/runnable.js";
 import { signatureLine } from "../constructs/signature.js";
+import { workspaceCandidates } from "../handoff/resolve.js";
 
 /**
  * What the page needs from the host that it cannot reach itself.
@@ -61,6 +62,38 @@ import { signatureLine } from "../constructs/signature.js";
  */
 export interface ConstructPanelDeps {
   viewSourceFromCluster: (construct: CatalogConstruct) => Promise<void>;
+}
+
+/**
+ * Opens a file on disk and reveals the construct's declaration.
+ *
+ * EXPORTED so the portal handoff (memql#4251) lands on a construct the same way
+ * a click on this page does. The two arrived at the same file by different
+ * routes -- one from a webview message, one from a `vscode://` link -- and a
+ * second copy of "open, find the signature, reveal" is a second answer to where
+ * the cursor ends up, which is the whole visible behaviour of both.
+ *
+ * A signature the search does not find opens the file at the top rather than
+ * guessing, for the reason this module's header gives: landing on the wrong
+ * line is worse than landing on the first one.
+ */
+export async function openFileAtSignature(
+  uri: vscode.Uri,
+  kind: string,
+  name: string,
+): Promise<vscode.TextEditor> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const line = signatureLine(document.getText(), kind, name);
+  const editor = await vscode.window.showTextDocument(document, {
+    viewColumn: vscode.ViewColumn.One,
+    preview: false,
+  });
+  if (line >= 0) {
+    const at = new vscode.Position(line, 0);
+    editor.selection = new vscode.Selection(at, at);
+    editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
+  }
+  return editor;
 }
 
 export class ConstructPanel {
@@ -141,14 +174,23 @@ export class ConstructPanel {
     this.fileUri = undefined;
     const rel = this.construct.originPath;
     if (rel !== "") {
-      for (const folder of vscode.workspace.workspaceFolders ?? []) {
-        const candidate = vscode.Uri.joinPath(folder.uri, rel);
-        try {
-          await vscode.workspace.fs.stat(candidate);
-          this.fileUri = candidate;
-          break;
-        } catch {
-          // Not in this folder; try the next.
+      // TWO LAYOUTS PER FOLDER (memql#4251). The catalog's path is relative to
+      // the DSL TREE ROOT (`cognition/queries.memql`) and a repository checkout
+      // keeps that tree under `dsl/`, so trying only the path as reported makes
+      // an engine checkout -- the folder a local cluster's operator most likely
+      // has open -- look like a machine that does not have the file. The
+      // candidate list is the handoff's, deliberately: the page and the portal
+      // link must not disagree about whether a file is in this workspace.
+      outer: for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        for (const relative of workspaceCandidates(rel)) {
+          const candidate = vscode.Uri.joinPath(folder.uri, relative);
+          try {
+            await vscode.workspace.fs.stat(candidate);
+            this.fileUri = candidate;
+            break outer;
+          } catch {
+            // Not in this folder under this layout; try the next.
+          }
         }
       }
     }
@@ -221,17 +263,7 @@ export class ConstructPanel {
       this.render();
       return;
     }
-    const document = await vscode.workspace.openTextDocument(uri);
-    const line = signatureLine(document.getText(), this.construct.kind, this.construct.name);
-    const editor = await vscode.window.showTextDocument(document, {
-      viewColumn: vscode.ViewColumn.One,
-      preview: false,
-    });
-    if (line >= 0) {
-      const at = new vscode.Position(line, 0);
-      editor.selection = new vscode.Selection(at, at);
-      editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
-    }
+    await openFileAtSignature(uri, this.construct.kind, this.construct.name);
   }
 
   private render(): void {

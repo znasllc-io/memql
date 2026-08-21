@@ -39,11 +39,28 @@ process.env.HOME = home;
 // the real PATH entries.
 process.env.PATH = '';
 
+// registerRuntimeSurface takes a parked portal handoff out of globalState on
+// its way in (memql#4251), so the fake context has to model one. In-memory and
+// empty: this lane is about activation ORDER, and a replay would drag a uri
+// handler's whole decision into a test about which surface came up first.
+const globalState = {
+  store: new Map<string, unknown>(),
+  get<T>(key: string): T | undefined {
+    return globalState.store.get(key) as T | undefined;
+  },
+  update(key: string, value: unknown): Promise<void> {
+    if (value === undefined) globalState.store.delete(key);
+    else globalState.store.set(key, value);
+    return Promise.resolve();
+  },
+};
+
 // asAbsolutePath points into an empty directory, so the bundled-binary
 // candidate (bin/<platform>-<arch>/memql-lsp) does not exist either.
 const context = {
   subscriptions: [] as { dispose(): unknown }[],
   asAbsolutePath: (relative: string) => path.join(home, 'extension', relative),
+  globalState,
 } as unknown as ExtensionContext;
 
 // ACTIVATION HAPPENS ONCE, HERE. registerRuntimeSurface guards on module state

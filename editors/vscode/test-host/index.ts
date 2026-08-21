@@ -691,6 +691,50 @@ smoke("a cluster document opens read-only with no language-server diagnostics", 
 });
 
 // -----------------------------------------------------------------------------
+// The portal handoff (memql#4251)
+// -----------------------------------------------------------------------------
+
+// WHAT ONLY A HOST CAN ANSWER: that activate() returns the api at all, that a
+// real `vscode.Uri` parses into the path and query the handler reads, and --
+// the one that matters -- that a link naming a cluster nobody registered
+// changes NOTHING on disk. The parse rules and the landing decision are
+// unit-tested away from `vscode` in src/handoff/; what those tests structurally
+// cannot see is the file the handler is one prompt away from writing.
+//
+// The runner points HOME at a temp directory, so `~/.memql/clusters.yaml` below
+// is that one and not the developer's own.
+//
+// NOTHING CLICKS "Add cluster...". The offer is a non-modal
+// showInformationMessage, which resolves undefined when nothing answers it, so
+// the handler falls through to `noCluster` and the byte-for-byte comparison is
+// the assertion: a link may offer to add a cluster, and may never add one.
+
+smoke("a portal link for an unregistered cluster is refused without side effects", async () => {
+  const ext = extension();
+  const api = (await ext.activate()) as { handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string }> };
+  const file = path.join(os.homedir(), ".memql", "clusters.yaml");
+  const before = await fs.promises.readFile(file, "utf8").catch(() => "");
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=1&cluster=nowhere.test&kind=query&name=x")
+  );
+  assert.equal(result.outcome, "noCluster");
+  const after = await fs.promises.readFile(file, "utf8").catch(() => "");
+  assert.equal(after, before, "a link must not write clusters.yaml");
+});
+
+smoke("a malformed portal link is refused by name", async () => {
+  const ext = extension();
+  const api = (await ext.activate()) as {
+    handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string; detail: string }>;
+  };
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=9&cluster=a.test&kind=query&name=x")
+  );
+  assert.equal(result.outcome, "refused");
+  assert.match(result.detail, /v=9/);
+});
+
+// -----------------------------------------------------------------------------
 // Sign-in (memql#3403)
 // -----------------------------------------------------------------------------
 
