@@ -2985,6 +2985,28 @@ func LibraryArtifactByIdBuild(args LibraryArtifactByIdArgs) string {
 	return b.String()
 }
 
+// LibraryArtifactBySourceConceptRef -- Internal read backing touchArtifact / the label-write capabilities (integrations/library/): resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. sourceConceptRef is the idempotency key createArtifact derives the row's id from (one index row per source ref), so this is bounded to at most one row without needing to re-derive that id in Go -- the coupling a Go-side re-implementation of createArtifact's hash expression would otherwise create.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactBySourceConceptRef"] in generated_concepts.go).
+type LibraryArtifactBySourceConceptRefArgs struct {
+	SourceConceptRef string
+}
+
+// LibraryArtifactBySourceConceptRef calls the engine query libraryArtifactBySourceConceptRef.
+func (qc *QueryClient) LibraryArtifactBySourceConceptRef(ctx context.Context, args LibraryArtifactBySourceConceptRefArgs) (*Result, error) {
+	call := LibraryArtifactBySourceConceptRefBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactBySourceConceptRef", call)
+}
+
+func LibraryArtifactBySourceConceptRefBuild(args LibraryArtifactBySourceConceptRefArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactBySourceConceptRef(")
+	b.WriteString("sourceConceptRef: ")
+	b.WriteString(quoteMemQL(args.SourceConceptRef))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.go).

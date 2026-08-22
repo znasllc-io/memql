@@ -394,6 +394,7 @@ var BoundConcepts = map[string]string{
 	"joinSpaceAsHuman":                      "v1:cognition:participant",
 	"leaveSpace":                            "v1:cognition:participant",
 	"libraryArtifactById":                   "v1:library:artifact",
+	"libraryArtifactBySourceConceptRef":     "v1:library:artifact",
 	"libraryArtifacts":                      "v1:library:artifact",
 	"libraryArtifactsByKind":                "v1:library:artifact",
 	"libraryArtifactsByLabel":               "v1:library:artifact",

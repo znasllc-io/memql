@@ -33,17 +33,24 @@ type stubEngine struct {
 	// row, in append order. Nothing is ever removed -- the test asserts
 	// the count grows by one per edit.
 	versions []map[string]any
-	// artifacts is the v1:library:artifact index-row store, keyed by the
-	// row's own id (artifactIdForSourceRef(sourceConceptRef), mirroring
-	// createArtifact's `id: concat("artifact-", hash(args.sourceConceptRef))`
-	// derivation). createArtifact REPLACES the row at that id wholesale --
-	// modelling the real engine's bare `insert{}` semantics (D3: a version
-	// carries only the fields THIS call names, nothing carried over from the
-	// prior version) -- which is exactly the shape the label-loss regression
-	// test below needs to be able to fail against.
+	// artifacts is the v1:library:artifact index-row store, keyed by an
+	// arbitrary id the stub assigns (createArtifact's real id derivation
+	// is a DSL expression this stub does not need to reproduce -- lookups
+	// go by sourceConceptRef or by the caller-supplied artifactId, never
+	// by re-deriving the id in Go). createArtifact REPLACES the row at
+	// that id wholesale -- modelling the real engine's bare `insert{}`
+	// semantics (D3: a version carries only the fields THIS call names,
+	// nothing carried over from the prior version) -- which is exactly
+	// the shape the label-loss regression test below needs to be able to
+	// fail against.
 	artifacts map[string]map[string]any
 	// calls records every mutation/query string for assertion.
 	calls []string
+	// failArtifactSourceRefLookup, when set, makes
+	// libraryArtifactBySourceConceptRef return an error -- simulating a
+	// genuine read failure so a test can prove touchArtifact skips its
+	// re-stamp entirely rather than writing labels: [] over a real row.
+	failArtifactSourceRefLookup bool
 }
 
 func newStubEngine() *stubEngine {
@@ -54,11 +61,99 @@ func (s *stubEngine) seedDocument(d map[string]any) {
 	s.doc[d["id"].(string)] = d
 }
 
-// seedArtifact seeds the library index row backing a document, keyed the
-// same way createArtifact derives it, so a lookup by
-// artifactIdForSourceRef(sourceConceptRef) finds it.
+// seedArtifact seeds the library index row backing a document, keyed by
+// its own "id" field.
 func (s *stubEngine) seedArtifact(a map[string]any) {
 	s.artifacts[a["id"].(string)] = a
+}
+
+// stubArtifactId is the stub's own arbitrary bookkeeping key for an
+// artifact row, deterministic in sourceConceptRef so a seeded row and a
+// later createArtifact re-version for the SAME source ref land on the
+// SAME stub key (re-versioning it in place) -- mirroring the one
+// index-row-per-source-ref property the real engine's hash-derived id
+// provides, without needing to reproduce that hash. Used both by the
+// createArtifact case below and by any test that seeds a row it expects
+// a later re-version to land on.
+func stubArtifactId(sourceRef string) string {
+	return "artifact:" + sourceRef
+}
+
+// artifactFullShapeFields lists the fields the REAL artifactFull shape
+// projects (dsl/library/shapes.memql) -- hand-kept in sync; there is no
+// schema introspection available to a Go-level stub. A shaped read must
+// return ONLY these keys, never the full underlying row, or the stub
+// cannot catch a Go call site that assumes an UNprojected field survived
+// a shaped read -- which is exactly the shape of the real bug the review
+// found: artifactFull omitted producedByWorkerId / producedByWorkerName,
+// loadArtifactUnderOwner read them as "" through the shaped
+// libraryArtifactById, and writeArtifactLabels wrote that "" back,
+// permanently destroying machine attribution on the first label change.
+var artifactFullShapeFields = []string{
+	"id", "ownerUserId", "lens", "kind", "source", "sourceConceptRef",
+	"title", "summary", "format", "mimeType", "live", "scope", "labels",
+	"partitionId", "agentId", "producedByPlanId", "producedByWorkerId",
+	"producedByWorkerName", "validationStatus", "updatedAt", "createdAt",
+}
+
+// projectShapeFields models a MemQL shaped read: a FRESH map containing
+// only the given fields' values from row (when present), never the row
+// itself. A real shape returns a template-fresh map per row; leaking
+// extra row keys through a "shaped" stub read would let production code
+// get away with reading a field the real shape does not actually project.
+func projectShapeFields(row map[string]any, fields []string) map[string]any {
+	out := make(map[string]any, len(fields))
+	for _, f := range fields {
+		if v, ok := row[f]; ok {
+			out[f] = v
+		}
+	}
+	return out
+}
+
+// artifactEnumValues mirrors createArtifact's enum arg declarations
+// (dsl/library/mutations.memql). lens/kind/source are required(!), so an
+// existing row already carries a valid value for them; format, scope and
+// validationStatus are OPTIONAL, and a real row's stored value is
+// routinely blank -- none of the five promotion automations pass scope,
+// and a record-lens row has no format at all.
+var artifactEnumValues = map[string][]string{
+	"lens":             {"artifact", "record"},
+	"kind":             {"document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source"},
+	"source":           {"uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live"},
+	"format":           {"markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other"},
+	"scope":            {"workspace", "private"},
+	"validationStatus": {"none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded"},
+}
+
+// validateCreateArtifactEnums models the one piece of the real engine's
+// arg validation (validateArgsField) this suite needs: a call naming an
+// enum argument with a value outside its declared set is REFUSED --
+// exactly the "argument \"scope\": value  is not in enum [...]" error the
+// review reproduced against the real engine. An OMITTED key is not
+// validated at all: that omitted/present-and-blank distinction is the
+// entire point of writeArtifactLabels's conditional-enum-omission fix,
+// and a stub that could not tell the two apart could not prove the fix
+// correct.
+func validateCreateArtifactEnums(args map[string]any) error {
+	for field, allowed := range artifactEnumValues {
+		v, present := args[field]
+		if !present {
+			continue
+		}
+		s, _ := v.(string)
+		ok := false
+		for _, a := range allowed {
+			if s == a {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("argument %q: value %s is not in enum %v", field, s, allowed)
+		}
+	}
+	return nil
 }
 
 // argRe extracts `key: value` pairs from a `name({...})` call. Values
@@ -175,12 +270,35 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 	case "libraryArtifactById":
 		id, _ := args["artifactId"].(string)
 		if a, ok := s.artifacts[id]; ok {
-			return bundleOf([]map[string]any{a}), nil
+			// Shaped (shape artifactFull): a fresh, template-only projection,
+			// not the underlying row -- see artifactFullShapeFields.
+			return bundleOf([]map[string]any{projectShapeFields(a, artifactFullShapeFields)}), nil
+		}
+		return bundleOf(nil), nil
+	case "libraryArtifactBySourceConceptRef":
+		if s.failArtifactSourceRefLookup {
+			return nil, fmt.Errorf("stub: simulated read failure")
+		}
+		sourceRef, _ := args["sourceConceptRef"].(string)
+		for _, a := range s.artifacts {
+			if stringField(a, "sourceConceptRef") == sourceRef {
+				// Shaped (shape artifactFull), same projection as above.
+				return bundleOf([]map[string]any{projectShapeFields(a, artifactFullShapeFields)}), nil
+			}
 		}
 		return bundleOf(nil), nil
 	case "createArtifact":
+		// The real engine's validateArgsField refuses a PRESENT enum value
+		// outside its declared set -- including "" (present-and-blank is not
+		// omitted). Modelling this is what lets the stub catch
+		// writeArtifactLabels sending a blank optional enum unconditionally
+		// (the CRITICAL fix): without it, this stub would silently accept
+		// the exact call the real engine refuses.
+		if err := validateCreateArtifactEnums(args); err != nil {
+			return nil, err
+		}
 		sourceRef, _ := args["sourceConceptRef"].(string)
-		id := artifactIdForSourceRef(sourceRef)
+		id := stubArtifactId(sourceRef)
 		// Full replace, not merge: mirrors createArtifact's bare `insert{}`
 		// body (D3) -- a re-version carries only the fields THIS call names.
 		// A field this call omits is ABSENT from the new version, not
@@ -381,7 +499,7 @@ func TestTouchArtifact_PreservesLabelsAcrossEdit(t *testing.T) {
 	// have already promoted it, carrying labels a person or an earlier agent
 	// turn put on it before this edit.
 	sourceRef := "v1:library:generatedOutput:doc-1"
-	artifactId := artifactIdForSourceRef(sourceRef)
+	artifactId := stubArtifactId(sourceRef)
 	eng.seedArtifact(map[string]any{
 		"id":               artifactId,
 		"sourceConceptRef": sourceRef,
@@ -414,6 +532,80 @@ func TestTouchArtifact_PreservesLabelsAcrossEdit(t *testing.T) {
 		t.Fatalf("artifact labels after document edit = %v, want %v (unchanged) -- "+
 			"touchArtifact must read the current row's labels and pass them through "+
 			"the createArtifact re-version call, or an edit silently wipes them", got, want)
+	}
+}
+
+// TestTouchArtifact_SkipsReStampOnReadFailure is the finding-4 regression:
+// currentArtifactLabels distinguishes "read failed" from "no row yet" / "row
+// has no labels" -- only the latter two legitimately carry forward as no
+// labels. A genuine read failure must make touchArtifact skip the
+// createArtifact re-stamp ENTIRELY; writing labels: [] on a failed read
+// would DESTROY real labels, not merely leave updatedAt stale (the
+// documented, accepted best-effort price of skipping).
+func TestTouchArtifact_SkipsReStampOnReadFailure(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedDocument(seededDoc())
+	sourceRef := "v1:library:generatedOutput:doc-1"
+	artifactId := stubArtifactId(sourceRef)
+	eng.seedArtifact(map[string]any{
+		"id":               artifactId,
+		"sourceConceptRef": sourceRef,
+		"ownerUserId":      "user-a",
+		"lens":             "artifact",
+		"kind":             "generated_output",
+		"source":           "agent_generated",
+		"title":            "Birds",
+		"labels":           []any{"reports", "q3"},
+	})
+	eng.failArtifactSourceRefLookup = true
+
+	i := NewIntegration(eng)
+	if _, err := i.handleEditDocument(context.Background(), map[string]any{
+		"documentId": "doc-1",
+		"content":    "edited once",
+		"authorKind": "user",
+		"authorId":   "user-a",
+	}, 0); err != nil {
+		t.Fatalf("edit: %v (the edit itself must still succeed; only the best-effort re-stamp is skipped)", err)
+	}
+
+	// touchArtifact must not have called createArtifact at all -- the row
+	// is untouched, labels intact, rather than re-versioned with labels: [].
+	if n := countCalls(eng, "createArtifact"); n != 0 {
+		t.Fatalf("createArtifact called %d times after a failed label read, want 0 -- "+
+			"touchArtifact must skip the re-stamp entirely on a read failure, not risk "+
+			"writing labels: [] over the row's real labels", n)
+	}
+	got := stringSliceField(eng.artifacts[artifactId], "labels")
+	want := []string{"reports", "q3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("artifact labels = %v, want %v (untouched -- the re-stamp must have been skipped)", got, want)
+	}
+}
+
+// TestMergeLabel_ComparesTrimmed covers the minor review finding:
+// removeArtifactLabel trims the CALLER's label, but a label already
+// stored on the row can carry whitespace padding if it arrived through
+// some path other than mergeLabelAdd (createArtifact directly, an
+// automation) -- an exact-match compare would make that label permanently
+// unremovable through this capability. mergeLabelAdd gets the same
+// trimmed compare for symmetry: an add of the trimmed form must recognise
+// an existing padded label as already present, not append a
+// visually-identical duplicate.
+func TestMergeLabel_ComparesTrimmed(t *testing.T) {
+	padded := []string{"reports", " urgent "}
+
+	remaining, changed := mergeLabelRemove(padded, "urgent")
+	if !changed {
+		t.Fatalf("mergeLabelRemove(%v, %q) changed=false, want true -- a trimmed compare must match the padded stored label", padded, "urgent")
+	}
+	if slices.Contains(remaining, " urgent ") {
+		t.Fatalf("mergeLabelRemove(%v, %q) = %v, the padded label was not removed", padded, "urgent", remaining)
+	}
+
+	_, changed = mergeLabelAdd(padded, "urgent")
+	if changed {
+		t.Fatalf("mergeLabelAdd(%v, %q) changed=true, want false -- %q already matches the padded %q", padded, "urgent", "urgent", " urgent ")
 	}
 }
 
@@ -696,16 +888,17 @@ func unwrapLabel(t *testing.T, nodes []memorynodes.MemoryNode) artifactLabelResu
 	return r
 }
 
-// testArtifactId is the id createArtifact would actually assign the
-// backing doc-1 generatedOutput's index row (artifactIdForSourceRef
-// mirrors createArtifact's own `concat("artifact-", hash(sourceConceptRef))`
-// derivation). seededArtifact's "id" MUST equal this: writeArtifactLabels
-// re-derives the id from sourceConceptRef on every write-back (it never
-// passes an explicit id: arg, exactly like touchArtifact), so a seeded row
-// whose id does not match its own sourceConceptRef would have its
-// write-back land at a different stub key than the one a test reads back
-// from -- silently validating nothing.
-var testArtifactId = artifactIdForSourceRef("v1:library:generatedOutput:doc-1")
+// testArtifactId is the stub id createArtifact will assign the backing
+// doc-1 generatedOutput's index row (stubArtifactId is the stub's own
+// deterministic-in-sourceConceptRef bookkeeping key, not a reproduction
+// of the real engine's hash-based id -- see its doc comment).
+// seededArtifact's "id" MUST equal this: writeArtifactLabels never passes
+// an explicit id: arg (exactly like touchArtifact) -- createArtifact
+// derives it from sourceConceptRef on every write-back -- so a seeded row
+// whose id does not match what THIS STUB derives from its own
+// sourceConceptRef would have its write-back land at a different stub key
+// than the one a test reads back from -- silently validating nothing.
+var testArtifactId = stubArtifactId("v1:library:generatedOutput:doc-1")
 
 // seededArtifact returns a fully-populated artifact row, every field a
 // distinct sentinel value, so a test that round-trips it through
@@ -974,6 +1167,41 @@ func TestArtifactLabel_PreservesOtherFieldsOnWrite(t *testing.T) {
 		}
 		if got[field] != wantVal {
 			t.Fatalf("field %q = %v, want %v (unrelated field must survive a label write untouched)", field, got[field], wantVal)
+		}
+	}
+}
+
+// TestArtifactLabel_SurvivesBlankOptionalEnums is the CRITICAL regression
+// test the review's real-engine verification found: format, scope and
+// validationStatus are OPTIONAL enum args on createArtifact, and a real
+// promoted artifact routinely carries a BLANK one -- none of the five
+// promotion automations pass scope, and a record-lens row has no format.
+// writeArtifactLabels used to thread every field through unconditionally
+// via QuoteString, which renders a blank field as a PRESENT empty-string
+// argument; the real engine's arg validation refuses a present value
+// outside an enum's declared set (including ""), so EVERY label change on
+// EVERY automation-promoted artifact was refused. This seeds exactly that
+// shape -- scope/format/validationStatus all blank, mirroring a real
+// promoted row -- and asserts the write still succeeds.
+func TestArtifactLabel_SurvivesBlankOptionalEnums(t *testing.T) {
+	eng := newStubEngine()
+	a := seededArtifact()
+	a["scope"] = ""
+	a["format"] = ""
+	a["validationStatus"] = ""
+	eng.seedArtifact(a)
+	i := NewIntegration(eng)
+
+	if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId, "label": "urgent",
+	}, 0); err != nil {
+		t.Fatalf("add with blank optional enums: %v -- writeArtifactLabels must OMIT a blank "+
+			"optional enum arg rather than send it as a present empty string", err)
+	}
+	got := eng.artifacts[testArtifactId]
+	for _, field := range []string{"scope", "format", "validationStatus"} {
+		if got[field] != nil && got[field] != "" {
+			t.Fatalf("field %q = %v, want blank/absent (nothing set it)", field, got[field])
 		}
 	}
 }

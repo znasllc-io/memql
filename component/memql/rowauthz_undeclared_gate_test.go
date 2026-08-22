@@ -372,10 +372,20 @@ const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric r
 // owner's behalf, not as the owner; see library_test.go's own note on
 // TestEditDocument_OwnerThreadedFromRow), so a tier is a redesign of that
 // write path, not a side effect of adding one more read. The read itself
-// carries no new risk over its five already-listed v1:library:artifact
-// siblings immediately above: the identical ownerUserId==actor.userId
-// top-level conjunct, narrowed by a labels membership predicate instead
-// of a lens/kind equality.
+// carries no new risk over FOUR of its five already-listed
+// v1:library:artifact siblings immediately above (libraryArtifactById,
+// libraryArtifacts, libraryArtifactsByKind, libraryArtifactsByLens): the
+// identical ownerUserId==actor.userId top-level conjunct, narrowed by a
+// labels membership predicate instead of a lens/kind equality. The fifth,
+// libraryWorkspaceLiveSources, is @public with no owner conjunct at all,
+// so it is not part of that comparison.
+//
+// Also covers libraryArtifactBySourceConceptRef, the Go-integration-facing
+// read touchArtifact / the label-write capabilities use to resolve the
+// CURRENT artifact row by its sourceConceptRef -- same concept, same
+// ownerUserId==actor.userId conjunct, same memql#2803 gap, added for the
+// same review-round-1 reason (replacing a Go-side re-derivation of
+// createArtifact's hash-based id with a declared-field filter).
 const undeclared2803ArtifactLabelReason = "memql#2803 -- label facet read; v1:library:artifact still declares no tier (same gap as its five sibling reads), and a tier is a promotion-write-path redesign out of scope for a read-shape addition"
 
 // undeclared3716CORSGrantsReason covers oAuthClientCORSGrants, the read
@@ -655,12 +665,13 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"documentChunksForDomain": {"v1:knowledge:documentChunk", undeclaredGrandfatherReason},
 
 	// v1:library:artifact
-	"libraryArtifactById":         {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifacts":            {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifactsByKind":      {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifactsByLabel":     {"v1:library:artifact", undeclared2803ArtifactLabelReason},
-	"libraryArtifactsByLens":      {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryWorkspaceLiveSources": {"v1:library:artifact", undeclaredGrandfatherReason},
+	"libraryArtifactById":               {"v1:library:artifact", undeclaredGrandfatherReason},
+	"libraryArtifactBySourceConceptRef": {"v1:library:artifact", undeclared2803ArtifactLabelReason},
+	"libraryArtifacts":                  {"v1:library:artifact", undeclaredGrandfatherReason},
+	"libraryArtifactsByKind":            {"v1:library:artifact", undeclaredGrandfatherReason},
+	"libraryArtifactsByLabel":           {"v1:library:artifact", undeclared2803ArtifactLabelReason},
+	"libraryArtifactsByLens":            {"v1:library:artifact", undeclaredGrandfatherReason},
+	"libraryWorkspaceLiveSources":       {"v1:library:artifact", undeclaredGrandfatherReason},
 
 	// v1:observability:codeMetric
 	"codeMetricsInWindow": {"v1:observability:codeMetric", undeclared4208CodeMetricReason},

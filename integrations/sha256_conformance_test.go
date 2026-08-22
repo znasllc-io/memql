@@ -36,28 +36,16 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	// Allow-list: filename -> reason. Empty until the artifacts-labels
-	// feature; every OTHER existing sha256 site was migrated to core/id
-	// helpers per memql#102.
-	allow := map[string]string{
-		// library/library.go's artifactIdForSourceRef reproduces
-		// createArtifact's OWN id derivation
-		// (`id: concat("artifact-", hash(args.sourceConceptRef))`,
-		// dsl/library/mutations.memql) so touchArtifact / the label
-		// capabilities can look up the CURRENT v1:library:artifact row
-		// before re-versioning it. hash() (component/memql/mutation_
-		// templates.go's evalHash) is plain hex(sha256(input)) -- wire-
-		// format interop with a SPECIFIC DSL expression, not a fresh id
-		// this package is minting. core/id's helpers are NOT a substitute
-		// here: Engine.FromString/FromBytes/MustFromMap run a bespoke
-		// commutative/idempotent byte-by-byte Merkle-combine scheme
-		// (core/id/id.go), which produces a completely different digest
-		// than plain SHA-256 hex for the same input. Routing through it
-		// would silently compute the WRONG artifact id -- the lookup
-		// would never find the row, and label preservation would always
-		// see "no labels" instead of failing loudly.
-		"library/library.go": "reproduces createArtifact's hash()-derived id (plain SHA-256 hex) for a lookup; core/id's Engine uses an unrelated Merkle-combine scheme and would compute a non-matching id",
-	}
+	// Allow-list: filename -> reason. Empty for now; every existing
+	// sha256 site was migrated to core/id helpers per memql#102.
+	//
+	// (The artifacts-labels feature briefly needed an entry here for a
+	// Go-side re-derivation of createArtifact's hash-based id. Review
+	// round 1 replaced that with libraryArtifactBySourceConceptRef -- a
+	// DSL query filtering on the declared sourceConceptRef payload field
+	// -- specifically to remove the unguarded coupling a duplicated hash
+	// expression created, so the entry is gone rather than kept.)
+	allow := map[string]string{}
 
 	type violation struct {
 		path string

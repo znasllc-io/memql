@@ -47,8 +47,6 @@ package library
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -512,28 +510,58 @@ func (i *Integration) loadArtifactUnderOwner(ctx context.Context, artifactId str
 // is absent from the new version, not carried over from the prior one --
 // so every artifact field is threaded through explicitly rather than
 // leaving any of them to an implicit carry-forward that does not exist.
+// artifactEnumFields lists createArtifact's OPTIONAL enum args (mirrors
+// the enum declarations on dsl/library/mutations.memql's createArtifact
+// args block). lens/kind/source are enums too but required(!), so a row
+// that exists at all already carries a valid value for them; format,
+// scope and validationStatus are optional, and a real row's stored value
+// is routinely blank -- none of the five promotion automations pass
+// scope, and a record-lens row has no format at all.
+var artifactEnumFields = []string{"format", "scope", "validationStatus"}
+
+// writeArtifactLabels re-versions the artifact row via createArtifact,
+// carrying every field the row itself currently holds forward and
+// replacing labels with the given set. createArtifact's insert body is a
+// bare `insert{}` block -- a full replace (D3): a field this call omits
+// is absent from the new version, not carried over from the prior one --
+// so every artifact field is threaded through explicitly rather than
+// leaving any of them to an implicit carry-forward that does not exist.
+//
+// The three OPTIONAL ENUM fields (artifactEnumFields) are the one
+// exception to "thread every field through": createArtifact's arg
+// validation rejects a PRESENT value outside its declared enum set, and
+// an empty string IS present -- it is not the same as the caller never
+// naming the argument. A blank optional enum on the loaded row (the
+// common case: no promotion automation passes scope, a record-lens row
+// has no format) must therefore be OMITTED from the call entirely, not
+// quoted through as "". Plain-string optionals (summary, mimeType,
+// partitionId, ...) have no such set to violate, so they stay
+// unconditional -- the same shape touchArtifact and the automations
+// already use for them.
 func (i *Integration) writeArtifactLabels(ctx context.Context, row map[string]any, labels []string) error {
-	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: %s, kind: %s, source: %s, title: %s, summary: %s, format: %s, mimeType: %s, live: %t, scope: %s, labels: %s, partitionId: %s, agentId: %s, producedByPlanId: %s, producedByWorkerId: %s, producedByWorkerName: %s, validationStatus: %s)`,
-		langparser.QuoteString(stringField(row, "sourceConceptRef")),
-		langparser.QuoteString(stringField(row, "ownerUserId")),
-		langparser.QuoteString(stringField(row, "lens")),
-		langparser.QuoteString(stringField(row, "kind")),
-		langparser.QuoteString(stringField(row, "source")),
-		langparser.QuoteString(stringField(row, "title")),
-		langparser.QuoteString(stringField(row, "summary")),
-		langparser.QuoteString(stringField(row, "format")),
-		langparser.QuoteString(stringField(row, "mimeType")),
-		boolField(row, "live"),
-		langparser.QuoteString(stringField(row, "scope")),
-		quoteStringArray(labels),
-		langparser.QuoteString(stringField(row, "partitionId")),
-		langparser.QuoteString(stringField(row, "agentId")),
-		langparser.QuoteString(stringField(row, "producedByPlanId")),
-		langparser.QuoteString(stringField(row, "producedByWorkerId")),
-		langparser.QuoteString(stringField(row, "producedByWorkerName")),
-		langparser.QuoteString(stringField(row, "validationStatus")),
-	)
+	parts := []string{
+		fmt.Sprintf("sourceConceptRef: %s", langparser.QuoteString(stringField(row, "sourceConceptRef"))),
+		fmt.Sprintf("ownerUserId: %s", langparser.QuoteString(stringField(row, "ownerUserId"))),
+		fmt.Sprintf("lens: %s", langparser.QuoteString(stringField(row, "lens"))),
+		fmt.Sprintf("kind: %s", langparser.QuoteString(stringField(row, "kind"))),
+		fmt.Sprintf("source: %s", langparser.QuoteString(stringField(row, "source"))),
+		fmt.Sprintf("title: %s", langparser.QuoteString(stringField(row, "title"))),
+		fmt.Sprintf("summary: %s", langparser.QuoteString(stringField(row, "summary"))),
+		fmt.Sprintf("mimeType: %s", langparser.QuoteString(stringField(row, "mimeType"))),
+		fmt.Sprintf("live: %t", boolField(row, "live")),
+		fmt.Sprintf("labels: %s", quoteStringArray(labels)),
+		fmt.Sprintf("partitionId: %s", langparser.QuoteString(stringField(row, "partitionId"))),
+		fmt.Sprintf("agentId: %s", langparser.QuoteString(stringField(row, "agentId"))),
+		fmt.Sprintf("producedByPlanId: %s", langparser.QuoteString(stringField(row, "producedByPlanId"))),
+		fmt.Sprintf("producedByWorkerId: %s", langparser.QuoteString(stringField(row, "producedByWorkerId"))),
+		fmt.Sprintf("producedByWorkerName: %s", langparser.QuoteString(stringField(row, "producedByWorkerName"))),
+	}
+	for _, field := range artifactEnumFields {
+		if v := stringField(row, field); v != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", field, langparser.QuoteString(v)))
+		}
+	}
+	q := fmt.Sprintf("mutation createArtifact(%s)", strings.Join(parts, ", "))
 	_, err := i.engine.Execute(ctx, q)
 	return err
 }
@@ -541,9 +569,12 @@ func (i *Integration) writeArtifactLabels(ctx context.Context, row map[string]an
 // mergeLabelAdd returns labels with label appended if absent. Idempotent:
 // a label already present is returned unchanged (changed=false), so a
 // caller can skip the write-back entirely on a no-op retry or double-click.
+// Compares trimmed so a label written whitespace-padded through some
+// OTHER path (createArtifact directly, an automation) is still
+// recognised as the same label -- mirrors mergeLabelRemove.
 func mergeLabelAdd(labels []string, label string) (merged []string, changed bool) {
 	for _, l := range labels {
-		if l == label {
+		if strings.TrimSpace(l) == label {
 			return labels, false
 		}
 	}
@@ -555,11 +586,17 @@ func mergeLabelAdd(labels []string, label string) (merged []string, changed bool
 
 // mergeLabelRemove returns labels with label dropped if present.
 // Idempotent: a label already absent is returned unchanged (changed=false).
+// Compares trimmed: handleRemoveArtifactLabel trims the caller's label
+// before calling this, but a STORED label can carry whitespace padding if
+// it was written through some other path (createArtifact directly, an
+// automation) that never ran it through mergeLabelAdd's own trim -- an
+// exact-match compare would then make that label permanently
+// unremovable through this capability.
 func mergeLabelRemove(labels []string, label string) (remaining []string, changed bool) {
 	found := false
 	out := make([]string, 0, len(labels))
 	for _, l := range labels {
-		if l == label {
+		if strings.TrimSpace(l) == label {
 			found = true
 			continue
 		}
@@ -659,9 +696,16 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 // derived from doc (the generatedOutput row has no labels field) -- it
 // lives on the artifact row itself, so it has to be read back from the
 // CURRENT artifact row before re-versioning, or every document edit
-// silently drops whatever labels the artifact carried. The lookup is
-// best-effort like the rest of this function: a failed read degrades to
-// "no labels carried forward" rather than blocking the edit.
+// silently drops whatever labels the artifact carried.
+//
+// The lookup is best-effort like the rest of this function -- EXCEPT for
+// the specific failure mode of losing labels. currentArtifactLabels
+// distinguishes "read failed" from "no row yet" / "row has no labels":
+// only the latter two legitimately carry forward as no labels. On a
+// genuine read failure this function skips the re-stamp ENTIRELY rather
+// than risk writing `labels: []` over whatever the row actually holds --
+// a stale updatedAt watermark is the documented best-effort price of a
+// failed re-stamp; destroying real labels is not.
 func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	docId := stringField(doc, "id")
 	if docId == "" {
@@ -672,7 +716,10 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	if source == "" {
 		source = "agent_generated"
 	}
-	labels := i.currentArtifactLabels(ctx, sourceRef)
+	labels, ok := i.currentArtifactLabels(ctx, sourceRef)
+	if !ok {
+		return
+	}
 	q := fmt.Sprintf(
 		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s)`,
 		langparser.QuoteString(sourceRef),
@@ -691,23 +738,26 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 
 // currentArtifactLabels reads the CURRENT artifact index row's labels for
 // a source ref, so touchArtifact can carry them forward into its
-// re-version call. artifactIdForSourceRef reproduces createArtifact's own
-// id derivation, so this finds the same row createArtifact will
-// overwrite. Best-effort like touchArtifact itself: no row yet (first
-// promotion hasn't landed) or a read error both degrade to "no labels" --
-// exactly what an artifact that has never been labelled should carry.
-func (i *Integration) currentArtifactLabels(ctx context.Context, sourceRef string) []string {
-	artifactId := artifactIdForSourceRef(sourceRef)
-	q := fmt.Sprintf(`query libraryArtifactById(artifactId: %s)`, langparser.QuoteString(artifactId))
+// re-version call. Resolves the row via libraryArtifactBySourceConceptRef
+// -- a declared-payload-field filter, not a Go-side re-derivation of
+// createArtifact's hash-based id, so a future change to that DSL
+// expression cannot silently reopen this exact lookup.
+//
+// ok=false is a GENUINE read failure -- the caller must not treat that as
+// "no labels" (see touchArtifact). ok=true with a nil/empty result covers
+// both legitimate no-labels cases: no row promoted yet, and a row that
+// has never been labelled.
+func (i *Integration) currentArtifactLabels(ctx context.Context, sourceRef string) (labels []string, ok bool) {
+	q := fmt.Sprintf(`query libraryArtifactBySourceConceptRef(sourceConceptRef: %s)`, langparser.QuoteString(sourceRef))
 	raw, err := i.engine.Execute(ctx, q)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	rows := extractRows(raw)
 	if len(rows) == 0 {
-		return nil
+		return nil, true
 	}
-	return stringSliceField(rows[0], "labels")
+	return stringSliceField(rows[0], "labels"), true
 }
 
 // loadGeneratedOutput reads the backing document row. Runs under a
@@ -840,20 +890,6 @@ func boolField(m map[string]any, key string) bool {
 	}
 	b, _ := m[key].(bool)
 	return b
-}
-
-// artifactIdForSourceRef mirrors createArtifact's id derivation
-// (`id: concat("artifact-", hash(args.sourceConceptRef))`,
-// dsl/library/mutations.memql) so Go code can look up the CURRENT artifact
-// row for a source ref without a dedicated by-sourceConceptRef query.
-// hash() is SHA-256 hex, evaluated by the mutation-template evaluator
-// (component/memql/mutation_templates.go's evalHash) -- duplicated here
-// rather than shared because the DSL id-derivation expression is the single
-// source of truth for the real id and this is the one Go call site that
-// needs to reproduce it ahead of a lookup.
-func artifactIdForSourceRef(sourceRef string) string {
-	sum := sha256.Sum256([]byte(sourceRef))
-	return "artifact-" + hex.EncodeToString(sum[:])
 }
 
 // quoteStringArray renders a []string as a MemQL array-literal call

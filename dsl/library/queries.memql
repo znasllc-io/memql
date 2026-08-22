@@ -104,6 +104,22 @@ query artifact libraryArtifactById {
   shape   artifactFull
 }
 
+/// Internal read backing touchArtifact / the label-write capabilities (integrations/library/):
+/// resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller.
+/// Owned: ownerUserId==actor.userId is the load-bearing guard. sourceConceptRef is the idempotency
+/// key createArtifact derives the row's id from (one index row per source ref), so this is bounded
+/// to at most one row without needing to re-derive that id in Go -- the coupling a Go-side
+/// re-implementation of createArtifact's hash expression would otherwise create.
+@unbounded("library artifact by source ref (guarded), gated to the owner -- bounded to a single row by the idempotency-key uniqueness createArtifact enforces")
+@actor
+query artifact libraryArtifactBySourceConceptRef {
+  args {
+    sourceConceptRef  string!
+  }
+  filter  ownerUserId==actor.userId && sourceConceptRef==args.sourceConceptRef
+  shape   artifactFull
+}
+
 /// Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id,
 /// gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening
 /// a generated_output artifact resolved from its sourceConceptRef.

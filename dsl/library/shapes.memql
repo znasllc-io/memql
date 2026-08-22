@@ -21,6 +21,8 @@ shape artifact artifactFull {
   partitionId
   agentId
   producedByPlanId
+  producedByWorkerId
+  producedByWorkerName
   validationStatus
   updatedAt
   row.createdAt
