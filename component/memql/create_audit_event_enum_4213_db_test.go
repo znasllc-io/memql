@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -64,8 +65,11 @@ func TestCreateAuditEvent_EveryDeclaredTargetTypeIsWritable(t *testing.T) {
 	// The gate is still armed: a value the enum does not name is refused
 	// before any row is written, with the error shape the issue quoted.
 	t.Run("undeclared value is refused", func(t *testing.T) {
-		call := fmt.Sprintf(`mutation createAuditEvent(eventId: %q, occurredAt: %q, category: "auth", action: "enum_probe_refused", targetType: "notAConceptAnyoneDeclared")`,
-			"audit-4213-refused-"+id.NewShortId(), time.Now().UTC().Format(time.RFC3339Nano))
+		// languageParser.QuoteString, not %q: Go's escape grammar is not the
+		// MemQL lexer's (TestDSLCallStringsDoNotUseGoQuoting).
+		call := fmt.Sprintf(`mutation createAuditEvent(eventId: %s, occurredAt: %s, category: "auth", action: "enum_probe_refused", targetType: "notAConceptAnyoneDeclared")`,
+			languageParser.QuoteString("audit-4213-refused-"+id.NewShortId()),
+			languageParser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano)))
 		_, err := eng.Execute(ctx, call)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "is not in enum")

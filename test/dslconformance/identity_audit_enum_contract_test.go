@@ -71,6 +71,7 @@ import (
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/core/repowalk"
 	"github.com/znasllc-io/memql/dsl"
 )
 
@@ -255,8 +256,10 @@ func scanIdentityAuditWriters(t *testing.T) *identityAuditScan {
 			return err
 		}
 		if d.IsDir() {
-			n := d.Name()
-			if path != root && (n == "testdata" || n == "vendor" || strings.HasPrefix(n, ".") || strings.HasPrefix(n, "_")) {
+			// The shared skip list (memql#3678): testdata, vendor, dot- and
+			// underscore-prefixed trees, and the worktree checkouts under
+			// .claude/ that a bespoke list would walk into.
+			if path != root && repowalk.SkipDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

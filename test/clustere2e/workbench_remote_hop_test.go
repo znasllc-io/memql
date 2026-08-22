@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
@@ -47,8 +48,10 @@ func buildWorkbenchExec(planID, cmd string) string {
 	// @args(profile="object") -- the builtin takes one JSON object, not a
 	// bare string or a named-arg list. Hop tests that passed
 	// workbenchDispatchHost("env") (or the named-arg form) fail argument
-	// validation (memql#4212).
-	return fmt.Sprintf(`workbenchDispatchHost({action: %q, planId: %q, args: {cmd: %q}})`, "exec", planID, cmd)
+	// validation (memql#4212). Values are rendered with the MemQL lexer's own
+	// quoting, not Go's %q, whose escape grammar the lexer rejects.
+	return fmt.Sprintf(`workbenchDispatchHost({action: "exec", planId: %s, args: {cmd: %s}})`,
+		langparser.QuoteString(planID), langparser.QuoteString(cmd))
 }
 
 // workbenchDispatch is the dispatchResult shape the integration returns,
