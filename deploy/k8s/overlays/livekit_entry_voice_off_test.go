@@ -3,9 +3,9 @@
 // WHAT IT PROTECTS. overlays/cloud-entry runs voice at replicas 0, and
 // replicas 0 is not the whole of voice-off: a LoadBalancer Service with zero
 // endpoints still allocates a public IP on Azure, and base declares two for
-// the media plane (livekit-rtc) and the SIP plane (livekit-sip). Keep-it
-// converted both to ClusterIP by hand, and the next Argo sync of the overlay
-// was refused:
+// the media plane (livekit-rtc) and the SIP plane (livekit-sip). The first
+// entry install converted both to ClusterIP by hand, and the next Argo sync of
+// the overlay was refused:
 //
 //	Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid
 //	value: "Local": may only be set for externally-accessible services
