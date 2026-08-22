@@ -358,6 +358,30 @@ The audit trail and deployments are **not** here either: they are populations,
 and they live in the predefined views at `/views/audit` and
 `/views/deployments`.
 
+### Inviting somebody
+
+An owner or admin invites a person from the **People view's** header, not from a
+separate screen (memql#4272). The dialog states what an invitation MEANS on this
+cluster, because that depends on the registration mode and an operator who does
+not know which case they are in will misread the result:
+
+| Mode | What the dialog says, and what the server does |
+|---|---|
+| `invite_only` | The link is the only way in. |
+| `domain_restricted` | Names the allowed domains; the server **refuses** an address outside them, because a link the recipient cannot redeem is worse than a refusal — they find out after clicking. |
+| `waitlist` | An invitation admits somebody directly, without waiting. |
+| `open` | Anyone can already register, so the link is a convenience rather than a gate. |
+
+The mode is read to word the dialog and is **never the check**: the gate in
+`component/identity/adminops` applies the policy and refuses independently, and
+a client deciding its own authorization is not a check.
+
+The link is shown **once** — only its SHA-256 hash reaches the cluster, so it
+cannot be shown a second time. An "Invited" band under the population lists who
+is still outstanding, live, with a revoke for a link sent to the wrong address.
+Revoking is a soft cancel: the record stays, because revoking does not make
+whoever holds the link forget it.
+
 ### The gate is the cluster's, on both halves
 
 **Reads.** Each admin read names a query carrying `requiresOwnerOrAdmin` in its

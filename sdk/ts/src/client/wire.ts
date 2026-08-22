@@ -263,6 +263,27 @@ export interface IdentityAdminRevokeTokenPayload {
 // credential that lets them register their FIRST passkey with no mailbox in
 // the loop. The minted link comes back on IdentityAdminResultPayload
 // .enrolmentUrl and is shown once.
+/**
+ * Mint a user-targeted invitation (memql#4270).
+ *
+ * `role` is the cluster role the recipient lands with; empty takes the
+ * cluster's default. An inviter cannot grant above their own role -- the server
+ * refuses, it is not a client-side check.
+ *
+ * `ttlSeconds` of 0 takes the server's 7-day default; a larger value is clamped
+ * down to the ceiling rather than refused.
+ */
+export interface IdentityAdminIssueUserInvitationPayload {
+  email: string;
+  role?: string;
+  ttlSeconds?: number;
+}
+
+/** Revoke an unaccepted invitation (memql#4270). A SOFT cancel: the row stays. */
+export interface IdentityAdminRevokeUserInvitationPayload {
+  invitationId: string;
+}
+
 export interface IdentityAdminIssueEnrolmentLinkPayload {
   userId: string;
   // 0 = the server's 15-minute default. Values above the server ceiling are
@@ -305,7 +326,9 @@ export type IdentityAdminRequestPayload =
   | { updateClusterSettings: IdentityAdminClusterSettingsPayload }
   | { issueEnrolmentLink: IdentityAdminIssueEnrolmentLinkPayload }
   | { revokeEnrolmentLink: IdentityAdminRevokeEnrolmentLinkPayload }
-  | { rotateRecoveryKey: IdentityAdminRotateRecoveryKeyPayload };
+  | { rotateRecoveryKey: IdentityAdminRotateRecoveryKeyPayload }
+  | { issueUserInvitation: IdentityAdminIssueUserInvitationPayload }
+  | { revokeUserInvitation: IdentityAdminRevokeUserInvitationPayload };
 
 /**
  * Rotate the cluster's owner recovery key (memql#3970).
@@ -995,6 +1018,16 @@ export interface IdentityAdminResultPayload {
   // and no later request can fetch it. Empty on every other operation and on
   // every refusal.
   enrolmentUrl?: string;
+  // Set by issueUserInvitation ONLY (memql#4270) -- the THIRD credential-
+  // bearing field, for the same reason as enrolmentUrl. Empty on every other
+  // operation and on every refusal.
+  invitationUrl?: string;
+  // What the cluster's registration policy MEANT for that call: one of "open",
+  // "domain_restricted", "invite_only", "waitlist". Not a credential -- it is
+  // here so a console can say what the link is FOR ("this cluster allows open
+  // sign-up, so the link is a convenience") without re-reading cluster
+  // settings and racing them.
+  registrationMode?: string;
   // Set by rotateRecoveryKey ONLY (memql#3970) -- the SECOND field on this
   // reply that carries a credential, for the same reason as enrolmentUrl
   // above. Empty on every other operation.
