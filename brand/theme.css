@@ -1,0 +1,81 @@
+/*
+ * The Tailwind v4 bridge: every token in tokens.css registered as a utility
+ * namespace, so `bg-bg`, `text-fg`, `text-accent`, `border-line` and
+ * `font-mono` mean the same thing in the portal and on the identity pages.
+ *
+ * `inline` IS LOAD-BEARING. Without it Tailwind copies the token's RESOLVED
+ * value into each utility, and because every colour is a light-dark() pair
+ * that resolution happens once -- freezing every utility into the light theme.
+ * With `inline`, the utility emits var(--memql-*) and the theme flip works.
+ *
+ * Both consumers are Tailwind v4. That is not incidental: v3 cannot read an
+ * @theme block and v4 cannot read a tailwind.config.js, so a shared bridge
+ * only exists at all because identity moved to v4 (memql#4267). If either
+ * side is ever pinned back, this file has to become two and the palettes
+ * start drifting the same week.
+ */
+
+@theme inline {
+  --color-bg: var(--memql-bg);
+  --color-surface: var(--memql-surface);
+  --color-raised: var(--memql-surface-raised);
+
+  --color-fg: var(--memql-fg);
+  --color-muted: var(--memql-fg-muted);
+  --color-subtle: var(--memql-fg-subtle);
+
+  --color-line: var(--memql-border);
+  --color-line-strong: var(--memql-border-strong);
+
+  --color-accent: var(--memql-accent);
+  --color-accent-fg: var(--memql-accent-fg);
+  --color-accent-subtle: var(--memql-accent-subtle);
+  --color-accent-deep: var(--memql-accent-deep);
+
+  --color-ok: var(--memql-ok);
+  --color-ok-subtle: var(--memql-ok-subtle);
+  --color-warn: var(--memql-warn);
+  --color-warn-subtle: var(--memql-warn-subtle);
+  --color-danger: var(--memql-danger);
+  --color-danger-subtle: var(--memql-danger-subtle);
+
+  --color-data-number: var(--memql-data-number);
+  --color-data-string: var(--memql-data-string);
+
+  --font-sans: var(--memql-font-sans);
+  --font-mono: var(--memql-font-mono);
+  --font-display: var(--memql-font-display);
+
+  --text-xs: var(--memql-text-xs);
+  --text-sm: var(--memql-text-sm);
+  --text-base: var(--memql-text-base);
+  --text-lg: var(--memql-text-lg);
+  --text-xl: var(--memql-text-xl);
+  --text-display: var(--memql-text-display);
+
+  --radius-DEFAULT: var(--memql-radius);
+  --radius-lg: var(--memql-radius-lg);
+}
+
+/*
+ * Document-level defaults. There is no element to hang a class on, so these
+ * are the one place bare CSS is correct in either surface.
+ */
+@layer base {
+  body {
+    /* The host paints its own ground behind the page; a transparent body
+       borrows it and the theme flip stops halfway. Paint it explicitly. */
+    background-color: var(--memql-bg);
+    color: var(--memql-fg);
+    font-family: var(--memql-font-sans);
+    font-size: var(--memql-text-base);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A visible, theme-aware focus ring on every interactive element. Both an
+     operations console and a sign-in form get driven by keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--memql-accent);
+    outline-offset: 2px;
+  }
+}

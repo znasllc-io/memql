@@ -36,7 +36,7 @@
  * ===========================================================================
  * THE COLOUR IS THE BORDER AND THE FILL, NEVER THE TEXT
  * ===========================================================================
- * A badge is ~12px, and `--portal-ok` on the page background is about 3.4:1 in
+ * A badge is ~12px, and `--memql-ok` on the page background is about 3.4:1 in
  * light mode -- under the 4.5:1 floor for text that small. So the hue goes on
  * the border and a tinted fill, and the label keeps `--vk-fg`. That also makes
  * the badge readable without colour at all, which matters more than the hue:
@@ -45,7 +45,7 @@
  * alone -- it applies to the whole badge, and the tinted fill is already
  * calibrated against it.
  *
- * Both themes resolve through --portal-* roles, which the token layer
+ * Both themes resolve through --memql-* roles, which the token layer
  * redefines for dark, so nothing here needs a second copy.
  */
 
@@ -56,8 +56,8 @@
 .vk-row-status[data-status="connected"],
 .vk-row-status[data-status="passed"],
 .vk-row-status[data-status="provisioned"] {
-  border-color: var(--portal-ok);
-  background: var(--portal-ok-subtle);
+  border-color: var(--memql-ok);
+  background: var(--memql-ok-subtle);
 }
 
 .vk-row-status[data-status="pending"],
@@ -68,8 +68,8 @@
 .vk-row-status[data-status="suspended"],
 .vk-row-status[data-status="paused"],
 .vk-row-status[data-status="blocked"] {
-  border-color: var(--portal-warn);
-  background: var(--portal-warn-subtle);
+  border-color: var(--memql-warn);
+  background: var(--memql-warn-subtle);
 }
 
 .vk-row-status[data-status="failed"],
@@ -80,6 +80,6 @@
 .vk-row-status[data-status="cancelled"],
 .vk-row-status[data-status="rolled_back"],
 .vk-row-status[data-status="revoked"] {
-  border-color: var(--portal-danger);
-  background: var(--portal-danger-subtle);
+  border-color: var(--memql-danger);
+  background: var(--memql-danger-subtle);
 }

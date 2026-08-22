@@ -1,0 +1,84 @@
+/*
+ * The three brand faces, self-hosted.
+ *
+ * WHY SELF-HOSTED: the edge CSP declares no font-src, so font requests fall
+ * back to default-src 'self'. A bundled font works and an external host never
+ * can -- not Google Fonts, not a CDN. The files live in ./fonts/ next to this
+ * stylesheet.
+ *
+ * WHY RELATIVE URLS, AND WHY THAT IS LOAD-BEARING: the two builds that import
+ * this file resolve ./fonts/ differently, and both are correct.
+ *
+ *   clients/portal   Vite sees url("./fonts/x.woff2"), copies the file into
+ *                    the bundle and rewrites the URL to a hashed asset path.
+ *   identity         The Tailwind CLI passes url() through untouched, so the
+ *                    path resolves relative to the SERVED stylesheet
+ *                    (/static/app.css) -- which is why the identity CSS build
+ *                    copies brand/fonts/ to component/identity/web/static/fonts/.
+ *
+ * An absolute URL would break the portal; a bundler-only import would break
+ * identity. The relative path is the one form both builds honour.
+ *
+ * Latin subsets only. The product's chrome is English; a page needing another
+ * script adds the subset it needs rather than every build carrying all of them.
+ */
+
+/* Inter Variable -- the chrome. One file covers weights 100..900. */
+@font-face {
+  font-family: "InterVariable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* JetBrains Mono -- the data voice. Rows, ids and payload values are read
+   character by character, not word by word. Three weights, no italics. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("./fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("./fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("./fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Squada One -- the display face. The wordmark and big-number moments only;
+   never body copy, never a heading a page reaches for casually. */
+@font-face {
+  font-family: "Squada One";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("./fonts/squada-one-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}

@@ -12,6 +12,11 @@
 # The output (component/identity/web/static/app.css) is gitignored;
 # every build regenerates it. Same script runs in the Dockerfile so
 # the production image carries a freshly-compiled CSS bundle.
+#
+# The palette, the Tailwind bridge and the faces are NOT here -- they are
+# brand/ at the repo root, shared with the portal (brand/README.md). This
+# script also copies brand/fonts/ next to the output, which is what makes the
+# shared stylesheet's relative font URLs resolve when served.
 
 set -euo pipefail
 
@@ -21,10 +26,9 @@ source "${SCRIPT_DIR}/lib.sh"
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TOOLS_DIR="${REPO_ROOT}/bin/tools"
-TAILWIND_VERSION="v3.4.17"
+TAILWIND_VERSION="v4.1.11"
 
 INPUT="${REPO_ROOT}/component/identity/web/tailwind/input.css"
-CONFIG="${REPO_ROOT}/component/identity/web/tailwind/tailwind.config.js"
 OUTPUT="${REPO_ROOT}/component/identity/web/static/app.css"
 
 # detect_platform → echoes the asset suffix Tailwind's release uses
@@ -79,10 +83,30 @@ function compile_css() {
     local bin_path="$1"
     log_info "compiling Tailwind -> $(basename "${OUTPUT}")"
     "${bin_path}" \
-        --config "${CONFIG}" \
         --input  "${INPUT}" \
         --output "${OUTPUT}" \
         --minify
+}
+
+# copy_fonts places the brand faces next to the served stylesheet.
+#
+# brand/fonts.css declares src: url("./fonts/x.woff2"), which the portal's
+# bundler rewrites and the Tailwind CLI passes through untouched. Passing it
+# through is what we want: relative to the SERVED file (/static/app.css) it
+# resolves to /static/fonts/x.woff2, so the faces just have to be there. The
+# alternative -- an absolute URL in the shared file -- would break the portal's
+# bundling, so the copy lives here rather than in the stylesheet.
+function copy_fonts() {
+    local dest="${REPO_ROOT}/component/identity/web/static/fonts"
+    log_info "copying brand faces -> static/fonts"
+    mkdir -p "${dest}"
+    cp "${REPO_ROOT}"/brand/fonts/*.woff2 "${dest}/"
+
+    # The favicon is a real file at a fixed path (the layout links it), so it
+    # is copied rather than imported -- the same one deliberate copy the portal
+    # keeps in public/. brand_shared_source_test.go pins both to the source.
+    log_info "copying brand favicon -> static/favicon.svg"
+    cp "${REPO_ROOT}/brand/favicon.svg" "${REPO_ROOT}/component/identity/web/static/favicon.svg"
 }
 
 function main() {
@@ -90,13 +114,10 @@ function main() {
         log_error "input not found: ${INPUT}"
         exit 1
     fi
-    if [[ ! -f "${CONFIG}" ]]; then
-        log_error "config not found: ${CONFIG}"
-        exit 1
-    fi
     local bin
     bin="$(resolve_tailwind_binary)"
     compile_css "${bin}"
+    copy_fonts
 }
 
 main "$@"

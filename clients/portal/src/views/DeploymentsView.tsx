@@ -92,7 +92,7 @@ export function DeploymentsView({
         {/* Errors reuse the shared banner so a deploy failure reads exactly
             like every other failure in the portal. The success note is its
             mirror -- a tinted panel with full-contrast text, never coloured
-            small text: --portal-ok on the page ground is about 3.4:1 in light
+            small text: --memql-ok on the page ground is about 3.4:1 in light
             mode, under the floor for 13px. */}
         {error ? (
           <div className="mt-3">
@@ -316,7 +316,7 @@ function ReleaseReading({
         <span className="text-muted">engine {engineVersion}</span>
       ) : null}
       {/* Drift is said in words, at full contrast, rather than in a hue:
-          --portal-warn is a ~2.3:1 amber in light mode and would be the least
+          --memql-warn is a ~2.3:1 amber in light mode and would be the least
           legible thing on the page while carrying the most weight. */}
       {sync ? (
         <span className={outOfSync ? "font-medium text-fg" : "text-muted"}>
