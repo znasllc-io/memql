@@ -60,7 +60,7 @@ concept artifact {
 
   scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' = a partition-shared row with NO single owner (ownerUserId is empty); it is invisible to the owned reads and surfaces instead through the non-owned libraryWorkspaceLiveSources path so every partition member sees it. 'private' = owner-scoped like everything else (gated by ownerUserId==actor.userId). Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
 
-  labels           []string  @description("Free-text labels the owner or their agents put on this artifact to say what it was for. Rendered as chips in the portal Artifacts page and filterable one label at a time. Distinct from v1:worker:registration.labels and v1:cluster:node.labels, which are key=value OBJECT maps for machine routing -- these are display labels on a []string, matching note.tags and skill.tags.")
+  labels           []string  @description("Free-text labels the owner or their agents put on this artifact to say what it was for. Rendered as chips in the portal Artifacts page and filterable one label at a time. Distinct from v1:worker:registration.labels (routing among a user's own workers) and v1:cluster:node.labels (arbitrary node metadata), which are key=value OBJECT maps -- these are display labels on a []string, matching note.tags and skill.tags.")
 
   partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
 

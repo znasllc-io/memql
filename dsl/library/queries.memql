@@ -7,10 +7,12 @@
 // MemQL query filters are equality / membership predicates with no OR
 // and no in-filter substring match, so the surface here mirrors the
 // notes / calendar pattern: a small set of server-side-narrowed reads
-// (all / by lens / by kind / by space / by id) over the owner-scoped
+// (all / by lens / by kind / by label / by space / by id) over the owner-scoped
 // row set, with free-text SEARCH layered client-side over the returned
 // page (the Library list panel, #298). The lens / kind / space facets
-// ARE server-side -- they're the high-cardinality narrowing that
+// ARE server-side -- as is the label facet, which is a membership
+// predicate over a []string rather than an equality. They're the
+// high-cardinality narrowing that
 // matters; search is the cheap client-side refinement on top.
 
 /// List the caller's entire Library (artifacts + records). Owned: the row set is gated by
