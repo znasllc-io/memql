@@ -77,7 +77,31 @@ export interface FailureGuidance {
  * best. That is the confident-wrong-advice failure this function exists to
  * prevent, inverted into confidently disclaiming knowledge the system has.
  */
-export function failureGuidance(exitCode: number | null, remedy = ""): FailureGuidance {
+/**
+ * The one honest refuse when detect.sh rejects the OS/arch (memql#4294).
+ *
+ * Generic exit 3 is "the step refused to act" / artifact-protection. Detect's
+ * platform refuse is a different sentence: the wizard cannot run here, retry
+ * will not help, and macOS inner-loop is `make up`.
+ */
+export function refusedPlatformGuidance(): FailureGuidance {
+  return {
+    headline: "This machine is not a supported platform for the local cluster wizard.",
+    advice:
+      "The wizard targets linux/amd64 only. On macOS use make up for the inner-loop cluster. " +
+      "Repair, retry, or picking another tag will not change that.",
+    retryable: false,
+  };
+}
+
+export function isUnsupportedPlatformRefuse(exitCode: number | null, detail = ""): boolean {
+  return exitCode === 3 && /unsupported platform/i.test(detail);
+}
+
+export function failureGuidance(exitCode: number | null, remedy = "", detail = ""): FailureGuidance {
+  if (isUnsupportedPlatformRefuse(exitCode, detail)) {
+    return refusedPlatformGuidance();
+  }
   // A REMEDY OUTRANKS THE CODE, on the one code that can carry it.
   //
   // "prerequisite missing" is the honest classification for a step that needs

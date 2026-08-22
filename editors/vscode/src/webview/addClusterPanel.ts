@@ -79,6 +79,7 @@ import {
 import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind } from "../install/graph.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
+import { platformRefuseEvents, refuseUnsupportedPlatform } from "../install/platform.js";
 import {
   installSessionOptions,
   previewUninstall,
@@ -499,7 +500,7 @@ export class AddClusterPanel {
       // registry that never arrives costs the inline refusal but not the
       // write-time one.
       if (action === "connect") void this.loadRegistry();
-      if (action === "install" || action === "installGuided") void this.loadVersionChoices();
+      if (action === "install" || action === "installGuided") void this.gateCreateDeployment();
       // A repair now COLLECTS the key fields (memql#3544), so it opens with the
       // recorded answers already in the boxes -- nobody retypes a good path,
       // and a bad one is finally reachable.
@@ -876,6 +877,18 @@ export class AddClusterPanel {
       this.state.finish({ ok: false });
       this.render();
       return;
+    }
+
+    // Repair does not go through gateCreateDeployment, so it must refuse
+    // here -- before sudo -- on an unsupported platform (memql#4294).
+    // Install already refused at the tag list.
+    if (action === "repair") {
+      const refused = await refuseUnsupportedPlatform(this.platformSession(), this.hooks({}));
+      if (refused !== undefined) {
+        for (const event of platformRefuseEvents(refused)) this.state.apply(event);
+        this.render();
+        return;
+      }
     }
 
     // ONE PASSWORD FOR THE WHOLE RUN (memql#3568). Collected before the first
@@ -1410,6 +1423,17 @@ export class AddClusterPanel {
     if (this.uninstalling || this.uninstallPreview === undefined) return;
 
     this.uninstalling = true;
+    // Platform before sudo (memql#4294). Asking for a password so we can then
+    // say the wizard cannot run here is the wrong order.
+    const refused = await refuseUnsupportedPlatform(this.uninstallOptions(), this.hooks({}));
+    if (refused !== undefined) {
+      this.uninstall.begin();
+      for (const event of platformRefuseEvents(refused)) this.uninstall.apply(event);
+      this.uninstall.finish(refused);
+      this.render();
+      this.uninstalling = false;
+      return;
+    }
     // A removal takes root too -- the hosts block, and the CA if it is ticked.
     // Asked once, here, for the same reason the install asks once.
     await this.collectSudoPassword("uninstall");
@@ -1768,6 +1792,39 @@ ${cards}`;
    * banner over a form whose default is already correct would be noise about a
    * choice most operators will not make.
    */
+  /**
+   * Create deployment on a machine with no wizard cluster (memql#4294).
+   *
+   * The tag list is a list of versions this wizard would then run. On an
+   * unsupported platform that run is a refuse, so offering the list (or a
+   * text box) would invite an operator to pick a tag that cannot install.
+   */
+  private async gateCreateDeployment(): Promise<void> {
+    const refused = await refuseUnsupportedPlatform(this.platformSession(), this.hooks({}));
+    if (refused !== undefined) {
+      for (const event of platformRefuseEvents(refused)) this.state.apply(event);
+      this.render();
+      return;
+    }
+    await this.loadVersionChoices();
+  }
+
+  private platformSession(): SessionOptions {
+    return {
+      root: this.deps.installRoot,
+      receiptFile: this.deps.receiptFile,
+      skip: new Set<string>(),
+      provider: "anthropic",
+      stepParams: {},
+      timeoutMs: STEP_TIMEOUT_MS,
+      // Same marker the install run puts on every step (memql#3586): detect is
+      // read-only, but it still goes through elevate.sh's environment, and a
+      // probe that omitted this would be the one script free to draw a desktop
+      // dialog.
+      env: elevationEnv(undefined),
+    };
+  }
+
   private async loadVersionChoices(): Promise<void> {
     if (this.versionChoices.length > 0) return;
     // Asked of the REPOSITORY, not of a checkout: the wizard is choosing what
@@ -2181,7 +2238,7 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
 </div>`;
     }
 
-    const guidance = failureGuidance(failed.exitCode);
+    const guidance = failureGuidance(failed.exitCode, failed.remedy, failed.reason || failed.log);
     return `<h1>${escapeHtml(failed.description === "" ? failed.id : failed.description)} failed</h1>
 <p class="lede">${escapeHtml(guidance.headline)}</p>
 <p>${escapeHtml(guidance.advice)}</p>

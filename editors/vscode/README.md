@@ -130,6 +130,11 @@ replicas and image digest a deployment declared.
 | Uninstall | -- | the uninstall graph, behind its preview | -- |
 | Cut version / Promote / Rollout / Roll back | -- | -- | by role |
 
+The local-cluster wizard targets **linux/amd64** only. On any other platform
+Create deployment, Repair, Upgrade and Uninstall refuse at the platform gate --
+they do not list a tag that cannot run, and they do not touch hosts, mkcert or
+the receipt. macOS inner-loop remains `make up`.
+
 **Re-running the install graph is the repair, and it is also the upgrade.**
 Every step verifies before it acts and skips whatever is already satisfied, so
 one graph serves all three: an install does everything, a repair does whatever

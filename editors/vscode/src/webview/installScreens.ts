@@ -408,7 +408,7 @@ export function renderFailedScreen(input: FailedScreenInput): string {
   // the name is already the heading, so repeating it would be noise.
   const blocks = failures
     .map((failure) => {
-      const guidance = failureGuidance(failure.exitCode, failure.remedy);
+      const guidance = failureGuidance(failure.exitCode, failure.remedy, failure.reason || failure.log);
       const name = failure.description === "" ? failure.id : failure.description;
       // WHAT THE STEP ITSELF SAID, above the generic advice for its exit code.
       // The guidance is keyed on a number and so can only ever be about a

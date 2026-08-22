@@ -480,6 +480,12 @@ func TestUnsupportedOSIsRefusedNotMissing(t *testing.T) {
 	if env.Changed {
 		t.Error("changed=true on the refusal path -- detection must never mutate")
 	}
+	if env.Error == nil || !strings.Contains(env.Error.Message, "unsupported platform") {
+		t.Errorf("refusal message should name unsupported platform; envelope: %s", out)
+	}
+	if env.Error == nil || !strings.Contains(env.Error.Message, "linux/amd64") {
+		t.Errorf("refusal message should name linux/amd64 as the target; envelope: %s", out)
+	}
 }
 
 // TestDetectReportsOSArchAndDisk covers the remaining inventory fields.

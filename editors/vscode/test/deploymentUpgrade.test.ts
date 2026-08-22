@@ -34,6 +34,8 @@ import {
 import { listRuns, readRun, runFilePath } from "../src/state/runLog.js";
 import { RunRecorder } from "../src/state/runRecorder.js";
 import { isSameVersion, upgradePlan, upgradeSummary } from "../src/state/upgradePlan.js";
+import { renderChooseTag } from "../src/webview/deploymentScreens.js";
+import { refusedPlatformGuidance } from "../src/state/installProgress.js";
 
 function tmpdir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "memql-upgrade-"));
@@ -355,4 +357,27 @@ test("a run's record joins the history the tree lists", async () => {
   }
   const runs = await listRuns(dir);
   assert.deepEqual(runs.map((r) => r.kind), ["upgrade", "install"]);
+});
+
+test("Create deployment on a refused platform does not offer a tag field", () => {
+  const g = refusedPlatformGuidance();
+  const html = renderChooseTag({
+    instance: {
+      name: "local",
+      kind: "local",
+      presence: "absent",
+      connected: false,
+    },
+    listing: { tags: ["v0.19.6"], error: `${g.headline} ${g.advice}`, refusedPlatform: true },
+    target: "",
+    tagError: "",
+    sameVersion: false,
+    plan: [],
+    summary: "",
+  });
+  assert.match(html, /linux\/amd64/);
+  assert.match(html, /make up/);
+  assert.doesNotMatch(html, /data-field="tag"/);
+  assert.doesNotMatch(html, /Type the tag/);
+  assert.doesNotMatch(html, /<select/);
 });

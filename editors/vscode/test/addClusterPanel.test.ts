@@ -662,7 +662,9 @@ test("the steps ahead are on screen while the first one is still running", () =>
     let gated = true;
     runner.run = async (run) => {
       entered += 1;
-      if (gated) {
+      // The choose-time platform probe is the first detect. Hold the NEXT
+      // invocation -- the graph's detect -- so the run is mid-flight.
+      if (gated && entered >= 2) {
         gated = false;
         await gate;
       }
@@ -674,7 +676,7 @@ test("the steps ahead are on screen while the first one is still running", () =>
       beginInstall(h);
       // `calls` is recorded by the inner runner, which the gate is holding --
       // so the wrapper's own counter is what says the step is in flight.
-      await until(() => entered > 0, "the first step to be in flight");
+      await until(() => entered >= 2, "the graph detect to be in flight");
       // Drain the render that followed `stepStarted`.
       await new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -721,6 +723,48 @@ test("a wave with several failures explains each of them, not one at random", as
       html,
       /Retry these steps/,
       'the label must not say "this step" in front of four failures',
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("Create deployment on an unsupported platform refuses instead of listing tags", async () => {
+  const runner = await fakeRunner();
+  const inner = runner.run;
+  const darwin =
+    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+  runner.run = async (run) => {
+    if (run.capability === "install.detect") {
+      runner.calls.push(run);
+      return {
+        argv: [run.scriptPath],
+        exitCode: 3,
+        signal: null,
+        stdout: "",
+        stderr: darwin,
+        envelope: {
+          ok: false,
+          capability: "install.detect",
+          changed: false,
+          result: { os: "darwin", arch: "arm64", supported: false },
+          error: { code: 3, message: darwin },
+        },
+      };
+    }
+    return inner(run);
+  };
+  const h = open({ runner });
+  try {
+    h.post({ type: "choose", value: "install" });
+    await until(() => /linux\/amd64/.test(h.html()), "the refused-platform screen");
+    const html = h.html();
+    assert.match(html, /make up/);
+    assert.doesNotMatch(html, /The step refused to act/, "must not use generic exit-3 artifact copy");
+    assert.doesNotMatch(html, /data-field="version"/, "must not offer a tag list that cannot run");
+    assert.ok(
+      runner.calls.every((c) => c.capability === "install.detect"),
+      "only detect may run",
     );
   } finally {
     h.close();
