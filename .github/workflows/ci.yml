@@ -645,11 +645,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go test (path routing + CI-configuration guards)
         run: go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
 
@@ -680,11 +680,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
 
       # --- gate inputs (gates bucket) -- a non-Go change a Go test reads ---
       #
@@ -883,11 +883,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
       # design D5.3b). Those six trees carry 543+ test files that db-tests owns
       # and re-runs in full, so testing them here compiled and executed the same
@@ -996,6 +996,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Retried (memql#3166 / design D4.3): apt-get is a network op, and a
       # transient mirror failure here reds a lane that has nothing to do with
       # the change under test.
@@ -1043,11 +1045,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go build -tags ${{ matrix.tag }}
         run: go build -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
       - name: go vet -tags ${{ matrix.tag }}
@@ -1213,11 +1215,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
       - name: create required Postgres extensions
@@ -1318,11 +1320,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
       - name: create required Postgres extensions
@@ -1484,6 +1486,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
@@ -1642,11 +1646,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go.work lists every module in the tree
         run: |
           set -euo pipefail
