@@ -576,33 +576,6 @@ export function recordedStackCommit(receipt: Receipt | null): string {
 }
 
 /**
- * WHERE a previous run put the checkout (memql#4244).
- *
- * The fourth reader over the same `stackCheckout` entry, and the one that
- * answers a different KIND of question from the three above it. Those say what
- * a repair must replay; this says which directory on this machine the local
- * cluster is rebuilt FROM -- which is what lets the editor tell a developer
- * that the clone they are typing in is not that directory.
- *
- * The RESULT first, the param second. clone-stack.sh sets `result.dest` on
- * every run that completes, so that is where the tree demonstrably IS; the
- * param is the fallback for a run that died before reporting one, where the
- * directory it was pointed at is the best evidence available and the one a
- * repair will use.
- *
- * Empty means the receipt records no checkout -- an install that never reached
- * the clone step, or a cluster somebody registered by hand. The caller must
- * treat that as "unknown", never as "somewhere else": an editor that read it as
- * a mismatch would tell every developer their checkout is the wrong one.
- */
-export function recordedStackDir(receipt: Receipt | null): string {
-  if (!receipt) return "";
-  const entry = entryFor(receipt, "stackCheckout");
-  const dest = entry?.result?.dest ?? entry?.params?.dest;
-  return typeof dest === "string" ? dest.trim() : "";
-}
-
-/**
  * What KIND of ref a previous run was asked for: "tag", "branch", "commit", or
  * "" when the receipt predates memql#3901 or records no checkout.
  *
@@ -794,7 +767,8 @@ export type ImageSource = "released" | "checkout";
 export interface RecordedRebuild {
   commit: string;
   ref: string;
-  dirtyCount: number;
+  /** Absent when the envelope did not report it -- never defaulted to 0. */
+  dirtyCount?: number;
   nodes: string;
   recordedAt: string;
 }
@@ -803,23 +777,32 @@ export interface RecordedRebuild {
  * The last rebuild, when its envelope says the cluster was pointed at
  * checkout images (memql#4246).
  *
- * THE ENVELOPE'S OWN VERDICT, not merely "a rebuild step ran" -- `k3d.dev`
- * also supports `--image-source=released` (rebuild the binaries, keep
- * running released images), which leaves an entry here too. Reading that as
- * "the cluster is in checkout mode" would be wrong in the one case a
- * developer most needs this to be right: right after they deliberately
- * asked NOT to run their own edits.
+ * THE ENVELOPE'S OWN VERDICT, not merely "a rebuild step ran". There is no
+ * `--image-source=released` for it to be distinguishing: the script's set is
+ * closed to "" or "checkout" and anything else is a bad param, exit 2. What
+ * this guard actually rejects is a run whose result does not say `checkout` at
+ * all -- a rebuild that FAILED before it patched the Application emits no
+ * `imageSource`, and reading that as "the cluster is in checkout mode" would
+ * claim a crossing that never happened.
+ *
+ * A run that patched and then failed DOES say `checkout`, and should: by then
+ * the Application is in that lane whatever happened afterwards, which is why
+ * dev.sh records the field at the patch rather than at the end of the run.
  */
 export function recordedRebuild(receipt: Receipt | null): RecordedRebuild | undefined {
   if (!receipt) return undefined;
   const entry = entryFor(receipt, "rebuildFromCheckout");
   if (entry === undefined || entry.result?.imageSource !== "checkout") return undefined;
   const str = (v: unknown) => (typeof v === "string" ? v : "");
-  const n = Number(entry.result.dirtyCount);
+  // `typeof`, not a coercion -- the same rule `rebuiltMessage` states at
+  // length. `Number(undefined)` is NaN, which renders "NaN uncommitted"; and
+  // `Number(null)` is 0, which renders "0 uncommitted files when it was built"
+  // -- a CLAIM that the tree was clean, made from a field never reported.
+  const dirty = entry.result.dirtyCount;
   return {
     commit: str(entry.result.commit),
     ref: str(entry.result.ref),
-    dirtyCount: Number.isFinite(n) ? n : 0,
+    ...(typeof dirty === "number" && Number.isFinite(dirty) ? { dirtyCount: dirty } : {}),
     nodes: str(entry.result.nodes),
     recordedAt: entry.recordedAt,
   };

@@ -87,7 +87,7 @@ package main
 // so, and it says so in the engine, next to the kind vocabulary itself.
 //
 // The wire shape below is a FIXED contract shared with the TypeScript consumer.
-// Field names, the five-value `state` set, and the "empty array, never null"
+// Field names, the seven-value `state` set, and the "empty array, never null"
 // rule for `constructs` are load-bearing; changing any of them means changing
 // both sides in the same commit.
 
@@ -106,7 +106,7 @@ import (
 // `capabilities.experimental` so a client can feature-detect the request instead
 // of calling it blind and handling MethodNotFound.
 //
-// Both names, and the five `state` values below, are the extension's -- posted
+// Both names, and the seven `state` values below, are the extension's -- posted
 // on memql#3761 before this side existed, precisely so the two could be checked
 // against each other while a rename was still one constant. That side has since
 // SHIPPED the rendering against them, so these are no longer this file's to

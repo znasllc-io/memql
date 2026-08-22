@@ -165,14 +165,14 @@ function parsePosition(raw: unknown): { line: number; character: number } | unde
 // -----------------------------------------------------------------------------
 
 /**
- * What the gutter distinguishes. THREE, not five.
+ * What the gutter distinguishes. THREE, not seven.
  *
  * The gutter answers one question -- *does what I am looking at match what
- * runs?* -- and that question has three answers. `trained` and `seeded` are the
- * same answer to it (yes), and differ only in how the cluster came to have the
- * construct, which is a question about ACTIONS and belongs on the lens. Giving
- * them separate near-identical icons would spend the gutter's very limited
- * legibility on a distinction the gutter is not being asked about.
+ * runs?* -- and that question has three answers. `trained`, `seeded` and
+ * `staged` are the same answer to it (yes), and differ only in how the cluster
+ * came to have the construct, which is a question about ACTIONS and belongs on
+ * the lens. Giving them separate near-identical icons would spend the gutter's
+ * very limited legibility on a distinction the gutter is not being asked about.
  *
  * `unknown` is absent from this type on purpose: it has no mark at all.
  */

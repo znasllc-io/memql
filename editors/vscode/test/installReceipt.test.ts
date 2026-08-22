@@ -665,24 +665,44 @@ test("the image source is whichever lane ran last", () => {
 });
 
 test("a rebuild entry that did NOT point at checkout images is not a recorded rebuild", () => {
-  // A rebuild can also run with `--image-source=released` (rebuild the
-  // binaries, keep the release images) -- see k3d.dev. That leaves an entry
-  // on the receipt too, and it must not be read as "the cluster is in
-  // checkout mode" -- the whole reason `recordedImageSource` checks the
-  // envelope's OWN verdict rather than merely "a rebuild step ran".
+  // THE CASE THIS GUARDS IS A FAILED RUN, not a "released" mode: k3d.dev's
+  // image-source set is closed to "" or "checkout", and anything else is exit
+  // 2. A rebuild that failed BEFORE it patched the Application emits no
+  // imageSource at all, and that must not read as "the cluster is in checkout
+  // mode" -- the whole reason this checks the envelope's OWN verdict rather
+  // than merely "a rebuild step ran".
   const r = emptyReceipt("install");
   r.entries.push(
     entry({
       stepId: "rebuildFromCheckout",
       script: "k3d.dev",
       receipt: "rebuild",
-      params: { "image-source": "released" },
-      result: { imageSource: "released" },
+      params: { "image-source": "checkout" },
+      result: {},
       recordedAt: "2026-08-21T10:00:00.000Z",
     }),
   );
   assert.equal(recordedRebuild(r), undefined);
   assert.equal(recordedImageSource(r), "");
+});
+
+test("a rebuild that reported no dirtyCount leaves it out rather than claiming a clean tree", () => {
+  // `Number(null)` is 0, so a coercion here renders "0 uncommitted files when
+  // it was built" -- a claim about the checkout made from a field the envelope
+  // never carried. The sibling rule is stated at length on `rebuiltMessage`.
+  const r = emptyReceipt("install");
+  r.entries.push(
+    entry({
+      stepId: "rebuildFromCheckout",
+      script: "k3d.dev",
+      receipt: "rebuild",
+      params: { "image-source": "checkout" },
+      result: { imageSource: "checkout", commit: "abc1234def", nodes: "bff", dirtyCount: null },
+      recordedAt: "2026-08-21T10:00:00.000Z",
+    }),
+  );
+  assert.equal(recordedRebuild(r)?.dirtyCount, undefined);
+  assert.equal("dirtyCount" in (recordedRebuild(r) ?? {}), false);
 });
 
 test("no receipt and an empty receipt both answer with nothing to go on", () => {

@@ -8,22 +8,24 @@ import (
 	"testing"
 )
 
-// filter_node_image_overrides keeps the database operand's override and drops
-// every node override, because under --image-source=checkout the nodes must
-// resolve to the overlay's own :local images while the operand must not roll.
+// filter_node_image_overrides drops the override of every node THIS RUN built
+// and keeps everything else -- the database operand, and any node the run did
+// not touch. Under --image-source=checkout a rebuilt node must resolve to the
+// overlay's own :local image, and a node nobody rebuilt must keep pointing at
+// the released image that is actually in the cluster.
 //
 // ITS INPUT IS ONE ENTRY PER LINE -- kubectl's `{range ...}{@}{"\n"}{end}`
 // rendering, which every kubectl version produces identically. It used to be
 // the bare array node, whose rendering is version-dependent (JSON on 1.36, Go's
 // `[a b]` on older ones); the tests below pin the line form and pin that the
 // old form is REFUSED rather than mis-split.
-func runFilter(t *testing.T, input string) string {
+func runFilter(t *testing.T, input string, nodes ...string) string {
 	t.Helper()
 	root := repoRoot(t)
 	harness := filepath.Join(t.TempDir(), "harness.sh")
 	body := "set -euo pipefail\n" +
 		"source \"" + filepath.Join(root, "scripts", "k3d", "dev.sh") + "\"\n" +
-		"filter_node_image_overrides '" + input + "'\n"
+		"filter_node_image_overrides '" + input + "' " + strings.Join(nodes, " ") + "\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,7 @@ func TestFilterNodeImageOverridesKeepsTheOperandOnly(t *testing.T) {
 	in := "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" +
 		operandOverride + "\n" +
 		"memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n"
-	if got, want := runFilter(t, in), `["`+operandOverride+`"]`; got != want {
+	if got, want := runFilter(t, in, "bff", "agent"), `["`+operandOverride+`"]`; got != want {
 		t.Errorf("filter = %s, want %s", got, want)
 	}
 }
@@ -50,20 +52,33 @@ func TestFilterNodeImageOverridesKeepsTheOperandOnly(t *testing.T) {
 func TestFilterNodeImageOverridesKeepsARegistryQualifiedOperand(t *testing.T) {
 	const qualified = "ghcr.io/znasllc-io/memql-db=ghcr.io/znasllc-io/memql-db:16.15-timescaledb-2.29.1"
 	in := "ghcr.io/znasllc-io/memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" + qualified + "\n"
-	if got, want := runFilter(t, in), `["`+qualified+`"]`; got != want {
+	if got, want := runFilter(t, in, "bff"), `["`+qualified+`"]`; got != want {
 		t.Errorf("filter = %s, want %s", got, want)
 	}
 }
 
 func TestFilterNodeImageOverridesIsIdempotent(t *testing.T) {
-	if got, want := runFilter(t, operandOverride+"\n"), `["`+operandOverride+`"]`; got != want {
+	if got, want := runFilter(t, operandOverride+"\n", "bff"), `["`+operandOverride+`"]`; got != want {
 		t.Errorf("filter changed an already-filtered list: %s, want %s", got, want)
 	}
-	if got := runFilter(t, ""); got != "[]" {
+	if got := runFilter(t, "", "bff"); got != "[]" {
 		t.Errorf("filter of no list = %s", got)
 	}
-	if got := runFilter(t, "\n"); got != "[]" {
+	if got := runFilter(t, "\n", "bff"); got != "[]" {
 		t.Errorf("filter of a blank line = %s", got)
+	}
+}
+
+// THE CRITICAL ONE, at the unit. A node the run did NOT build keeps its
+// override: its :local image was never imported, so dropping the override
+// points the Deployment at an image that does not exist in the cluster, and
+// with imagePullPolicy IfNotPresent that is ImagePullBackOff.
+func TestFilterNodeImageOverridesKeepsNodesItDidNotBuild(t *testing.T) {
+	const bff = "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0"
+	const agent = "memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0"
+	in := bff + "\n" + agent + "\n" + operandOverride + "\n"
+	if got, want := runFilter(t, in, "bff"), `["`+agent+`","`+operandOverride+`"]`; got != want {
+		t.Errorf("filter = %s, want %s", got, want)
 	}
 }
 
@@ -116,9 +131,10 @@ exit 0
 // pointAppFake drives fakeKubectlApplication.
 type pointAppFake struct {
 	appExists bool
-	images    string // newline-separated, as kubectl's range form renders
-	readFails bool   // the override-list read itself fails
-	syncod    string // .status.sync.status (default "Synced")
+	images    string   // newline-separated, as kubectl's range form renders
+	nodes     []string // the nodes this run built (default: bff)
+	readFails bool     // the override-list read itself fails
+	syncod    string   // .status.sync.status (default "Synced")
 }
 
 // runPointApplication sources dev.sh and calls point_application_at_local_images
@@ -131,16 +147,21 @@ func runPointApplication(t *testing.T, f pointAppFake) (string, int, []string) {
 	if err := os.WriteFile(filepath.Join(tmp, "kubectl"), []byte(fakeKubectlApplication), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	built := f.nodes
+	if len(built) == 0 {
+		built = []string{"bff"}
+	}
 	patchLog := filepath.Join(tmp, "patches")
 	harness := filepath.Join(tmp, "harness.sh")
 	body := "set -euo pipefail\n" +
 		"source \"" + filepath.Join(root, "scripts", "k3d", "dev.sh") + "\"\n" +
 		"APP_NAME=memql-local\n" +
+		"IMAGE_SOURCE=checkout\n" +
 		// A regression that reaches the sync wait must FAIL, not hang: against a
 		// fake that never answers "Synced" the real 300s budget would stall the
 		// package for five minutes and report a timeout naming nothing.
 		"function sleep() { :; }\n" +
-		"point_application_at_local_images\n" +
+		"point_application_at_local_images " + strings.Join(built, " ") + "\n" +
 		"echo \"OVERRIDES_PATCHED=$OVERRIDES_PATCHED\"\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
@@ -224,7 +245,9 @@ func TestPointApplicationPatchesAReleasedApplicationToTheOperandOnly(t *testing.
 	images := "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" +
 		"memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n" +
 		operandOverride
-	out, code, patches := runPointApplication(t, pointAppFake{appExists: true, images: images})
+	out, code, patches := runPointApplication(t, pointAppFake{
+		appExists: true, images: images, nodes: []string{"bff", "agent"},
+	})
 	if code != 0 {
 		t.Errorf("exit = %d, want 0:\n%s", code, out)
 	}
@@ -268,6 +291,99 @@ func TestPointApplicationRefusesTheGoArrayRenderingRatherThanMisSplittingIt(t *t
 	}
 }
 
+// --------------------------------------------------------------------------
+// a PARTIAL rebuild keeps the overrides it did not build (memql#4245, CRITICAL)
+// --------------------------------------------------------------------------
+
+// allAppNodes is DEFAULT_APP_NODES: what a wizard install writes an override
+// for, and what a bare `make dev` rebuilds.
+var allAppNodes = []string{"identity", "bff", "voice", "mcp", "cognition", "agent", "planner", "workbench", "edge"}
+
+// releasedOverrides is the override list `k3d.up --image-registry/--image-tag`
+// leaves on a wizard-installed Application: one per node type, plus the operand.
+func releasedOverrides() string {
+	lines := make([]string, 0, len(allAppNodes)+1)
+	for _, n := range allAppNodes {
+		lines = append(lines, "memql-"+n+"=ghcr.io/znasllc-io/memql-"+n+":v0.17.0")
+	}
+	return strings.Join(append(lines, operandOverride), "\n")
+}
+
+// THE CRITICAL DEFECT. `--node=bff --image-source=checkout` built and imported
+// ONE image and removed ALL NINE overrides, leaving eight Deployments naming
+// memql-<node>:local images that were never imported -- ImagePullBackOff under
+// imagePullPolicy IfNotPresent -- while the run exited 0 with
+// imageSource=checkout, the verify passed, and the toast said the cluster runs
+// your checkout. The image wait could not catch it either: it only waits on the
+// nodes that WERE built.
+//
+// The Nodes field on the rebuild screen hints "For example: bff, agent", so
+// this is the invited path, not an exotic one.
+func TestPointApplicationKeepsTheOverridesOfNodesItDidNotBuild(t *testing.T) {
+	out, code, patches := runPointApplication(t, pointAppFake{
+		appExists: true, images: releasedOverrides(), nodes: []string{"bff"},
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0:\n%s", code, out)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("want exactly one patch, got %d: %v\n%s", len(patches), patches, out)
+	}
+	if strings.Contains(patches[0], "memql-bff=") {
+		t.Errorf("the rebuilt node kept its released override -- it must move to :local: %s", patches[0])
+	}
+	// Every node NOT rebuilt keeps its released override, and so does the operand.
+	for _, n := range allAppNodes {
+		if n == "bff" {
+			continue
+		}
+		if !strings.Contains(patches[0], "memql-"+n+"=") {
+			t.Errorf("the patch dropped the %s override although this run never built %s -- "+
+				"its :local image was never imported, so the Deployment lands in ImagePullBackOff: %s",
+				n, n, patches[0])
+		}
+	}
+	if !strings.Contains(patches[0], operandOverride) {
+		t.Errorf("the patch dropped the database operand override: %s", patches[0])
+	}
+}
+
+// The whole-cluster rebuild is the other end of the same rule: build all nine
+// and every node override goes, leaving exactly the operand.
+func TestPointApplicationDropsEveryOverrideWhenEveryNodeWasBuilt(t *testing.T) {
+	out, code, patches := runPointApplication(t, pointAppFake{
+		appExists: true, images: releasedOverrides(), nodes: allAppNodes,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0:\n%s", code, out)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("want exactly one patch, got %d: %v\n%s", len(patches), patches, out)
+	}
+	want := `{"spec":{"source":{"kustomize":{"images":["` + operandOverride + `"]}}}}`
+	if !strings.Contains(patches[0], want) {
+		t.Errorf("patch payload = %s\nwant it to carry exactly %s", patches[0], want)
+	}
+}
+
+// Nothing this run built is overridden, so there is nothing to patch -- and
+// patching anyway would rewrite the list for no reason.
+func TestPointApplicationPatchesNothingWhenTheBuiltNodeHasNoOverride(t *testing.T) {
+	images := "memql-bff=ghcr.io/znasllc-io/memql-bff:v0.17.0\n" + operandOverride
+	out, code, patches := runPointApplication(t, pointAppFake{
+		appExists: true, images: images, nodes: []string{"agent"},
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0:\n%s", code, out)
+	}
+	if len(patches) != 0 {
+		t.Errorf("patched although no node this run built is overridden: %v\n%s", patches, out)
+	}
+	if !strings.Contains(out, "nothing to patch") {
+		t.Errorf("output does not say there was nothing to patch:\n%s", out)
+	}
+}
+
 // A FAILED read is not an empty list. `|| true` on the read turned a kubectl
 // that errored into "no overrides -- the overlay's :local images already
 // apply", i.e. a success envelope over a cluster nobody looked at.
@@ -281,6 +397,37 @@ func TestPointApplicationRefusesAFailedOverrideRead(t *testing.T) {
 	}
 	if len(patches) != 0 {
 		t.Errorf("patched after a failed read: %v", patches)
+	}
+}
+
+// A run that PATCHED and then failed must still say which lane the Application
+// is in (memql#4245). dev.sh set its result fields only in main()'s tail, so a
+// failure between the patch and there emitted `result:{}` -- and the editor,
+// finding no rebuild entry, read the lane off the older clusterUp entry and
+// showed a released version for a cluster whose Application was already patched
+// and whose pods were converging onto :local. The envelope a failure carries is
+// the only record of a crossing that already happened.
+func TestPointApplicationRecordsTheLaneEvenWhenTheSyncWaitFails(t *testing.T) {
+	out, code, patches := runPointApplication(t, pointAppFake{
+		appExists: true, images: releasedOverrides(), nodes: allAppNodes,
+		syncod: "OutOfSync",
+	})
+	if code != 5 {
+		t.Fatalf("exit = %d, want 5 (the sync never converged):\n%s", code, out)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("want the patch to have happened, got %d: %v", len(patches), patches)
+	}
+	for _, want := range []string{`"imageSource":"checkout"`, `"overridesPatched":true`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the failure envelope does not carry %s -- the Application is patched and "+
+				"nothing records it:\n%s", want, out)
+		}
+	}
+	// Emitted once, at the patch. cap_result_set APPENDS, so a second set in
+	// main()'s tail would put the key in the object twice.
+	if n := strings.Count(out, `"imageSource"`); n != 1 {
+		t.Errorf(`"imageSource" appears %d times in the envelope, want 1:\n%s`, n, out)
 	}
 }
 

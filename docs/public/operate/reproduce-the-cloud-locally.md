@@ -329,7 +329,7 @@ close that gap:
 | Flag | What it names |
 |---|---|
 | `--repo-root=<checkout>` | the checkout the images are **built from**. Mirrors `k3d.up --repo-root`, and exists for the same reason: the packaged editor extension runs a staged copy of `scripts/` with no Go source beside it, so "this script's own repository" is not a MemQL tree there. |
-| `--image-source=checkout` | after the images are imported, **remove the Application's node-image overrides** so the overlay's own `:local` references apply. ArgoCD's resulting sync is what rolls the pods. |
+| `--image-source=checkout` | after the images are imported, **remove the image override of every node this run built** so the overlay's own `:local` references apply to them. ArgoCD's resulting sync is what rolls the pods. |
 
 The extension's **Rebuild from checkout** is exactly
 `k3d.dev --repo-root=<checkout> --image-source=checkout`, driven by the one-step
@@ -339,6 +339,13 @@ The **database operand's override is kept**. `memql-db` is not a node: it is
 versioned on the PostgreSQL axis, and CloudNativePG refuses an `imageName` whose
 tag it cannot parse (memql#4063), so the rebuild leaves it pinned and skips
 building it.
+
+**So does every node you did not rebuild.** With `NODE=bff` only bff's override
+is dropped; the other eight keep pointing at their released images, which are
+the images actually in the cluster. Dropping theirs would aim them at a
+`memql-<node>:local` this run never imported -- and under
+`imagePullPolicy: IfNotPresent` that is `ImagePullBackOff`, on nodes you never
+asked to touch.
 
 **It fails rather than flattering you.** An `--app-name` no Application answers
 to is refused (exit 4) instead of being read as "there were no overrides to

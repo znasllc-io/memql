@@ -300,10 +300,14 @@ export function instanceRowStatus(
   if (instance.imageSource === "checkout" && instance.rebuild !== undefined) {
     const { rebuild } = instance;
     const shortCommit = rebuild.commit.slice(0, 7);
-    versionText = `checkout ${shortCommit}${rebuild.dirtyCount > 0 ? ` (${rebuild.dirtyCount} uncommitted)` : ""}`;
+    // A count the envelope did not carry is LEFT OUT, never invented: printing
+    // "0 uncommitted files" from an unreported field is a claim that the tree
+    // was clean.
+    const dirty = rebuild.dirtyCount;
+    versionText = `checkout ${shortCommit}${dirty !== undefined && dirty > 0 ? ` (${dirty} uncommitted)` : ""}`;
     checkoutTooltip =
-      `\nRunning images built from the checkout at ${shortCommit} ` +
-      `(${rebuild.dirtyCount} uncommitted files when it was built). ` +
+      `\nRunning images built from the checkout at ${shortCommit}` +
+      (dirty === undefined ? ". " : ` (${dirty} uncommitted files when it was built). `) +
       "An install, upgrade or repair returns it to released images.";
   }
   // The presence verdict stays FIRST in the tooltip. It is what an operator

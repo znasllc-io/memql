@@ -75,14 +75,22 @@
 #                        (spec.source.kustomize.images, written by
 #                        `k3d.up --image-registry/--image-tag`), so a bare
 #                        rebuild imports images nothing references. Under this
-#                        flag the node overrides are removed AFTER the images
-#                        are imported, which lets the overlay's own ':local'
-#                        references apply, and ArgoCD's resulting sync rolls
-#                        the pods. The DATABASE OPERAND's override is KEPT: it
-#                        is not a node, it is versioned on the PostgreSQL axis,
-#                        and CNPG refuses an imageName whose tag it cannot
-#                        parse (memql#4063). Nothing is patched without the
-#                        flag, so `make dev` is unchanged.
+#                        flag the override of every node THIS RUN BUILT is
+#                        removed AFTER the images are imported, which lets the
+#                        overlay's own ':local' references apply to them, and
+#                        ArgoCD's resulting sync rolls the pods.
+#                        TWO KINDS OF OVERRIDE ARE KEPT. The DATABASE OPERAND's,
+#                        because it is not a node, is versioned on the
+#                        PostgreSQL axis, and CNPG refuses an imageName whose
+#                        tag it cannot parse (memql#4063). And every node this
+#                        run did NOT build (`--node=bff` on a nine-node
+#                        cluster), because its ':local' image was never
+#                        imported -- dropping its override would aim the
+#                        Deployment at an image that is not in the cluster, and
+#                        under imagePullPolicy IfNotPresent that is
+#                        ImagePullBackOff (memql#4245).
+#                        Nothing is patched without the flag, so `make dev` is
+#                        unchanged.
 #
 # An install, upgrade or repair rewrites those overrides, so it returns the
 # cluster to released images. Reaching --app-name is how a cluster whose
@@ -621,6 +629,42 @@ function override_entry_is_operand() {
     [[ "$(basename "$name")" == "${DB_IMAGE%%:*}" ]]
 }
 
+# override_entry_targets_built_node <entry> <node...> -- true when the entry
+# overrides the image of a node THIS RUN built and imported.
+#
+# WHY THE NODE LIST HAS TO REACH THIS FAR (memql#4245). Dropping an override
+# says "resolve this image from the overlay", and the overlay names
+# memql-<node>:local -- an image that exists in the cluster only because this
+# run imported it. So dropping the override of a node the run did NOT build
+# points that Deployment at an image nothing ever imported, and under
+# imagePullPolicy IfNotPresent that is ImagePullBackOff.
+#
+# This filter used to keep the operand and drop EVERYTHING else, which was
+# right only for a whole-cluster rebuild. `--node=bff --image-source=checkout`
+# built one image, removed all nine overrides, and left eight nodes pulling
+# images that were never imported -- while the run exited 0, because the image
+# wait afterwards only waits on the nodes that were built. A partial rebuild is
+# the invited path, not an exotic one: the rebuild screen's Nodes field hints
+# "For example: bff, agent".
+function override_entry_targets_built_node() {
+    local entry="$1"; shift
+    local name node
+    # The operand is never a node and is never dropped. Stated rather than
+    # relied upon: "no node type is called db" is a fact about VALID_NODES that
+    # a future node type could quietly change, and the cost of it changing
+    # unnoticed is memql#4063 -- CNPG refusing an imageName it cannot parse.
+    if override_entry_is_operand "$entry"; then
+        return 1
+    fi
+    name="$(basename "${entry%%=*}")"
+    for node in "$@"; do
+        if [[ "$name" == "memql-${node}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # first_unparseable_override_entry <entries> -- the first line that is not a
 # <name>=<image> override, or nothing when every line parses.
 #
@@ -644,51 +688,61 @@ function first_unparseable_override_entry() {
     done <<< "$raw"
 }
 
-# has_node_override <entries> -- true when at least one entry overrides a NODE
-# image, i.e. there is something for the patch to remove.
-function has_node_override() {
-    local raw="${1:-}" entry
+# has_built_node_override <entries> <node...> -- true when at least one entry
+# overrides a node THIS RUN built, i.e. there is something for the patch to
+# remove. A list that overrides only the operand, or only nodes this run did
+# not touch, is left exactly as it is.
+function has_built_node_override() {
+    local raw="${1:-}"; shift
+    local entry
     while IFS= read -r entry; do
         entry="${entry%$'\r'}"
         [[ -z "${entry//[[:space:]]/}" ]] && continue
-        override_entry_is_operand "$entry" || return 0
+        if override_entry_targets_built_node "$entry" "$@"; then
+            return 0
+        fi
     done <<< "$raw"
     return 1
 }
 
-# filter_node_image_overrides <entries> -- the same list with every node
-# override removed and the database operand's kept, as a JSON array ("[]" for
-# nothing).
+# filter_node_image_overrides <entries> <node...> -- the same list with the
+# override of every node THIS RUN built removed, and everything else kept: the
+# database operand, and any node the run did not build. Emitted as a JSON array
+# ("[]" for nothing).
 #
 # THE INPUT IS ONE ENTRY PER LINE -- kubectl's
 # `{range .spec.source.kustomize.images[*]}{@}{"\n"}{end}` rendering, which no
 # kubectl version varies. Entries contain no newlines, so a line IS an entry.
 # Values are quoted through cap_json_escape rather than by hand.
 function filter_node_image_overrides() {
-    local raw="${1:-}" out="" entry
+    local raw="${1:-}"; shift
+    local out="" entry
     while IFS= read -r entry; do
         entry="${entry%$'\r'}"
         [[ -z "${entry//[[:space:]]/}" ]] && continue
-        if override_entry_is_operand "$entry"; then
+        if ! override_entry_targets_built_node "$entry" "$@"; then
             out+="${out:+,}\"$(cap_json_escape "$entry")\""
         fi
     done <<< "$raw"
     printf '[%s]\n' "$out"
 }
 
-# point_application_at_local_images -- drop the node overrides a wizard install
-# wrote onto the Application, so the overlay's own :local references apply.
+# point_application_at_local_images <node...> -- drop the overrides a wizard
+# install wrote for the nodes THIS RUN built, so the overlay's own :local
+# references apply to them. Every other override is left alone -- the database
+# operand's, and any node this run did not build.
 # Call AFTER the images are imported: the sync this triggers rolls the pods.
 function point_application_at_local_images() {
+    local built=("$@")
     section "Pointing Application '${APP_NAME}' at the locally built images"
-    # EXISTENCE FIRST, and it is not a formality. The read below is
-    # `|| true`-guarded, so "no such Application" and "an Application with no
-    # image overrides" both arrive as the empty string -- and the second is a
-    # legitimate pass-through. Without this probe a typo'd --app-name logs
-    # "the overlay's :local images already apply", returns 0, and the run
-    # reports imageSource=checkout while the pods stay on the released images
-    # this exists to replace. That satisfies the graph's verify, which is the
-    # worst shape a failure can take.
+    # EXISTENCE FIRST, and it is not a formality. An Application that is not
+    # there and one that carries no image overrides are two different answers,
+    # and only the second is a legitimate pass-through. Probing separately is
+    # what lets a typo'd --app-name fail as exit 4 naming the flag rather than
+    # arriving as the read failure below, whose message is about a read. Before
+    # that read checked its exit status at all, this probe was the only thing
+    # between a wrong name and "the overlay's :local images already apply" plus
+    # a success envelope over a cluster nobody had managed to look at.
     if ! kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o name >/dev/null 2>&1; then
         cap_fail 4 "ArgoCD Application ${APP_NAME} not found in namespace ${ARGOCD_NAMESPACE} -- pass --app-name=<name> (k3d.up registers it as \${MEMQL_K3D_APP_NAME:-memql-local})"
     fi
@@ -711,18 +765,31 @@ function point_application_at_local_images() {
     if [[ -n "$unparseable" ]]; then
         cap_fail 5 "cannot parse the image overrides of ${APP_NAME}: expected one <name>=<image> per line, got '${unparseable}' -- refusing to patch a list this does not understand, because the patch replaces the whole list and would drop it"
     fi
-    if ! has_node_override "$current"; then
-        info "Only the database operand is overridden on ${APP_NAME} -- nothing to patch."
+    if ! has_built_node_override "$current" "${built[@]}"; then
+        info "No override on ${APP_NAME} names a node this run built -- nothing to patch."
         return 0
     fi
-    filtered="$(filter_node_image_overrides "$current")"
-    info "Removing the node image overrides (keeping the database operand's)..."
+    filtered="$(filter_node_image_overrides "$current" "${built[@]}")"
+    info "Removing the overrides of the nodes this run built (keeping the database operand's, and any node it did not build)..."
     kubectl -n "${ARGOCD_NAMESPACE}" patch application "${APP_NAME}" --type=merge \
         -p "{\"spec\":{\"source\":{\"kustomize\":{\"images\":${filtered}}}}}" >&2 \
         || cap_fail 5 "patching ${APP_NAME} image overrides failed"
     kubectl -n "${ARGOCD_NAMESPACE}" annotate application "${APP_NAME}" argocd.argoproj.io/refresh=normal --overwrite >&2 || true
     OVERRIDES_PATCHED=true
     cap_changed
+    # THE LANE IS RECORDED THE MOMENT IT CHANGES, not at the end of main().
+    # Everything after this point can still fail -- the sync wait, the image
+    # wait -- and a failure envelope carries whatever result fields exist WHEN
+    # IT IS EMITTED. With the fields set only in main()'s tail, a rebuild that
+    # patched and then timed out reported `result:{}`, so the editor read the
+    # lane off the older clusterUp entry and showed a released version for a
+    # cluster whose Application was already patched and converging onto :local.
+    #
+    # Set HERE and not also in the tail: cap_result_set APPENDS (measured -- two
+    # calls put the key in the object twice), so main() skips these two when the
+    # patch already recorded them.
+    cap_result_set     imageSource      "${IMAGE_SOURCE:-unchanged}"
+    cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
     wait_for_application_synced
 }
 
@@ -904,7 +971,7 @@ function main() {
         done
 
         if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
-            point_application_at_local_images
+            point_application_at_local_images "${nodes_to_build[@]}"
             if [[ "$OVERRIDES_PATCHED" == true ]]; then
                 # Synced is ArgoCD's own bookkeeping and can be a stale read;
                 # the pods' image refs are the fact the patch was for.
@@ -936,12 +1003,17 @@ function main() {
     cap_result_set_raw restarted   "$RESTARTED"
     cap_result_set_raw infraPulled "$INFRA_PULLED"
     cap_result_set_raw dbImageImported "$DB_IMAGE_IMPORTED"
-    cap_result_set     imageSource "${IMAGE_SOURCE:-unchanged}"
+    # Skipped when the patch already emitted them (see
+    # point_application_at_local_images): cap_result_set appends, so setting a
+    # key twice puts it in the object twice.
+    if [[ "$OVERRIDES_PATCHED" != true ]]; then
+        cap_result_set     imageSource      "${IMAGE_SOURCE:-unchanged}"
+        cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
+    fi
     cap_result_set     repoRoot    "$REPO_ROOT"
     cap_result_set     commit      "$CHECKOUT_COMMIT"
     cap_result_set     ref         "$CHECKOUT_REF"
     cap_result_set_raw dirtyCount  "${CHECKOUT_DIRTY:-0}"
-    cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
     cap_result_set     appName     "$APP_NAME"
     cap_ok
 }
