@@ -182,6 +182,26 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
 		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
+		// memql#4270. The two halves of user invitations, and neither is
+		// caller-scopable for the same underlying reason: the row is not the
+		// caller's.
+		//
+		// createUserInvitation mints a credential for somebody who has no
+		// account yet -- there is no ownership relation to filter on, and
+		// actor.userId scoping would say "you may invite yourself". The real
+		// decision is a ROLE question plus the cluster's REGISTRATION POLICY
+		// (domain_restricted must match the allowlist; under open the link is
+		// a courtesy), and the policy is not on the row, so it cannot be a
+		// filter over it.
+		//
+		// revokeUserInvitation COULD be filtered on inviterId -- the field is
+		// right there -- but that is the wrong policy: it would mean only the
+		// original inviter may revoke, and the case revocation exists for is
+		// an admin sending a link to the wrong address and an owner killing
+		// it. Both take the owner/admin gate in adminops instead, one audited
+		// event per call, refusals included.
+		{Path: "identity/mutations.memql", Name: "createUserInvitation"}: true,
+		{Path: "identity/mutations.memql", Name: "revokeUserInvitation"}: true,
 		// memql#2991. Caller-scoping is not merely hard here, it is
 		// INEXPRESSIBLE: `update { id: args.userId; args.payload }` relates the
 		// target to nothing, and no mutation in the tree carries a filter --

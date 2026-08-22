@@ -13,6 +13,7 @@ export {
   type AdminWriteResult,
   type ClusterSettingsEdit,
   type EnrolmentLinkResult,
+  type UserInvitationResult,
   type IdentityAdminCallOptions,
   type UserProfileEdit,
 } from "./identityAdmin.js";

@@ -252,6 +252,24 @@ const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lo
 // most one row and only for a caller who already holds the plaintext.
 const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-actor by construction (the token IS the credential), so no owner tier can be compared against"
 
+// undeclared4270InvitationReason covers the console read memql#4270 added when
+// user invitations gained an issuing side.
+//
+// The concept CANNOT declare a tier, and the reason is the one already written
+// on v1:identity:invitation and shared with enrolmentToken: the redeem lookup
+// (invitationByTokenHash) is PRE-ACTOR. The token IS the credential, so at
+// lookup time no authenticated caller exists, an owner tier would compare the
+// row against actor.userId == "" and match nothing, and every redeem would turn
+// into a silent "invalid". Declaring a tier to satisfy this gate would break the
+// flow the gate is protecting.
+//
+// The read itself is NOT unguarded. pendingUserInvitations carries
+// requiresOwnerOrAdmin as a top-level conjunct in its own filter, so the engine
+// empties it for a caller below the floor -- the same shape the admin console's
+// other reads take, and the reason they were written that way rather than as a
+// concept browse.
+const undeclared4270InvitationReason = "memql#4270 -- owner/admin console read; the concept cannot carry a tier because its redeem lookup is pre-actor (see undeclared3408EnrolmentReason), and this query gates itself with requiresOwnerOrAdmin instead"
+
 // undeclared3964RecoveryKeyReason covers the two reads memql#3964 added for the
 // owner recovery key.
 //
@@ -586,6 +604,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"invitationById":                {"v1:identity:invitation", undeclaredGrandfatherReason},
 	"invitationByPreviousTokenHash": {"v1:identity:invitation", undeclaredGrandfatherReason},
 	"invitationByTokenHash":         {"v1:identity:invitation", undeclaredGrandfatherReason},
+	"pendingUserInvitations":        {"v1:identity:invitation", undeclared4270InvitationReason},
 
 	// v1:identity:magicLinkRequest
 	"expiredMagicLinkRequests":    {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},

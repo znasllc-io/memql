@@ -3674,6 +3674,28 @@ QueryClient.prototype.pendingAccessRequests = function (this: QueryClient, args:
   return this.executeNamed("pendingAccessRequests", buildPendingAccessRequests(args), opts);
 };
 
+/** Every pending user invitation on this cluster -- who was invited, by whom, and until when.
+The console's "who is still outstanding" read, and the list a revoke acts on. Owner/admin only: an invitation names an address somebody chose to invite, which is not a fact every authenticated reader is owed.
+kind=="user" is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface. */
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.ts).
+export interface PendingUserInvitationsArgs {
+}
+
+export function buildPendingUserInvitations(args: PendingUserInvitationsArgs): string {
+  void args;
+  return "query pendingUserInvitations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pendingUserInvitations(args?: PendingUserInvitationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pendingUserInvitations = function (this: QueryClient, args: PendingUserInvitationsArgs = {} as PendingUserInvitationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pendingUserInvitations", buildPendingUserInvitations(args), opts);
+};
+
 /** Single Plan by id. */
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["planById"] in generated_concepts.ts).
 export interface PlanByIdArgs {

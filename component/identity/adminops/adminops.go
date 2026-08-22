@@ -120,6 +120,23 @@ type Result struct {
 	// something did, and they would rotate again.
 	RecoveryKey string
 
+	// InvitationURL is the THIRD credential-bearing field on this Result, set
+	// by exactly one operation (IssueUserInvitation, memql#4270).
+	//
+	// It earns the exception the same way the two above do: the link IS the
+	// product of that call, only its SHA-256 hash is persisted, and no later
+	// request can fetch it. Empty on every other operation and on every
+	// refusal, and a surface showing it must show it ONCE.
+	InvitationURL string
+
+	// RegistrationMode is what the cluster's policy MEANT for the call that
+	// just ran, set by IssueUserInvitation. Not a credential -- it is here so a
+	// console can say something true about what the link is for without
+	// re-reading cluster settings and racing them. Under `open` an invitation
+	// is a courtesy rather than a gate, and telling an operator that is the
+	// difference between a link they understand and one they misread.
+	RegistrationMode string
+
 	// EnrolmentURL is the ONE field on this Result that carries a credential,
 	// and it is set by exactly one operation (IssueEnrolmentLink, memql#3408).
 	//
@@ -173,6 +190,19 @@ type Service struct {
 	// Optional: nil, empty, or non-https refuses IssueEnrolmentLink with an
 	// actionable message and leaves every other operation untouched.
 	IdentityBaseURL func(ctx context.Context) string
+
+	// RegistrationPolicy resolves the cluster's registration mode and its
+	// domain allowlist (memql#4270).
+	//
+	// A seam for the reason IdentityBaseURL is one: this Service is built on
+	// every node with an engine and the config is not the same on all of them,
+	// so the package stays out of the environment and the wiring layer answers.
+	//
+	// Optional. Unset degrades to "open" -- the mode that adds no restriction.
+	// A node that cannot read the policy must not invent one, and inventing
+	// invite_only here would refuse invitations on a cluster that never asked
+	// for it.
+	RegistrationPolicy func(ctx context.Context) (mode string, domains []string)
 }
 
 // New validates dependencies and returns a ready Service.

@@ -3667,6 +3667,25 @@ func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 	return "query pendingAccessRequests()"
 }
 
+// PendingUserInvitations -- Every pending user invitation on this cluster -- who was invited, by whom, and until when.
+// The console's "who is still outstanding" read, and the list a revoke acts on. Owner/admin only: an invitation names an address somebody chose to invite, which is not a fact every authenticated reader is owed.
+// kind=="user" is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface.
+//
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.go).
+type PendingUserInvitationsArgs struct {
+}
+
+// PendingUserInvitations calls the engine query pendingUserInvitations.
+func (qc *QueryClient) PendingUserInvitations(ctx context.Context, args PendingUserInvitationsArgs) (*Result, error) {
+	call := PendingUserInvitationsBuild(args)
+	return qc.executeNamed(ctx, "pendingUserInvitations", call)
+}
+
+func PendingUserInvitationsBuild(args PendingUserInvitationsArgs) string {
+	_ = args
+	return "query pendingUserInvitations()"
+}
+
 // PlanById -- Single Plan by id.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["planById"] in generated_concepts.go).

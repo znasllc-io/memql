@@ -7,10 +7,12 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
+import { InvitePerson, PendingInvitations } from "../people/InvitePerson";
 import { PersonActions } from "../people/PersonActions";
-import { useAdminAccess } from "../admin/useAdminConsole";
+import { usePendingInvitations } from "../people/usePendingInvitations";
+import { useAdminAccess, useAdminWrites } from "../admin/useAdminConsole";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { Band, Container, EmptyState, PageHeader, Skeleton } from "../ui";
 import { conceptPath, conceptsPath } from "../concepts/urls";
 import { AgentsView } from "./AgentsView";
 import { AuditView } from "./AuditView";
@@ -45,6 +47,12 @@ const BODIES: Readonly<Record<string, (props: ViewProps) => ReactNode>> = {
 export function ViewPage(): ReactNode {
   const { canAdminister } = useAdminAccess();
   const { viewId = "", rowId = "" } = useParams<{ viewId: string; rowId: string }>();
+  // The People view is where a person is ADDED as well as read (memql#4272).
+  // The verbs live outside src/views/ for the reason PersonActions states; the
+  // view supplies the slot.
+  const peopleAdmin = canAdminister && viewId === "people";
+  const invitations = usePendingInvitations(peopleAdmin);
+  const inviteWrites = useAdminWrites();
   const { status } = useCluster();
   const navigate = useNavigate();
 
@@ -124,6 +132,7 @@ export function ViewPage(): ReactNode {
           onRetry={data.retry}
         />
       }
+      {...(peopleAdmin ? { actions: <InvitePerson onInvited={invitations.reload} /> } : {})}
     >
       <Body
         view={view}
@@ -132,6 +141,25 @@ export function ViewPage(): ReactNode {
         selectedRowId={rowId}
         onSelect={onSelect}
       />
+      {/* AFTER the body, deliberately. A predefined view's bands read
+          reading -> shape -> roll, and who is on their way IN is an
+          administrative addendum to that population rather than part of its
+          grammar -- putting it on top would push the reading below the fold
+          for the operator who came to look at people. */}
+      {peopleAdmin ? (
+        <Band title="Invited" meta="pending invitations, newest first — live">
+          {invitations.error !== "" ? (
+            <ErrorMessage>Could not read invitations: {invitations.error}</ErrorMessage>
+          ) : (
+            <PendingInvitations
+              rows={invitations.rows}
+              writes={inviteWrites}
+              onChanged={invitations.reload}
+            />
+          )}
+        </Band>
+      ) : null}
+
       <RowDetailDialog
         open={rowDialog !== ""}
         onClose={onCloseRow}

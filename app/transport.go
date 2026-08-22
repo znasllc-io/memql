@@ -108,6 +108,11 @@ func (a *App) transportBase() {
 			// that gets its domain from the settings row after bring-up starts
 			// composing correct links without a restart.
 			IdentityBaseURL: a.publicIdentityBaseURL,
+			// The registration policy an invitation has to honour
+			// (memql#4270). Resolved per call for the same reason the base URL
+			// is: an owner who changes the mode from the portal should not
+			// have to restart a node for the next invitation to respect it.
+			RegistrationPolicy: a.registrationPolicy,
 		})
 		if err != nil {
 			a.fatal("identity admin: build failed", "error", err)
@@ -419,4 +424,39 @@ func (a *App) publicIdentityBaseURL(ctx context.Context) string {
 		return ""
 	}
 	return "https://identity." + domain
+}
+
+// registrationPolicy resolves the cluster's registration mode and its domain
+// allowlist for adminops (memql#4270).
+//
+// The stored SETTINGS ROW wins over the environment, deliberately and in that
+// order: MEMQL_IDENTITY_REGISTRATION_MODE is the bootstrap value, and an owner
+// who later changed the mode from the portal's Cluster settings page meant the
+// change. Reading env first would let a redeploy silently revert a policy
+// decision nobody made again.
+//
+// Returns "" when neither answers, which adminops reads as `open` -- the mode
+// that adds no restriction. A node that cannot read the policy must not invent
+// one.
+func (a *App) registrationPolicy(ctx context.Context) (string, []string) {
+	split := func(list string) []string {
+		var out []string
+		for _, part := range strings.Split(list, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+
+	if a != nil && a.engine != nil {
+		store := &identity.Store{Engine: a.engine, Logger: a.Logger}
+		if row, err := store.ReadClusterSettings(ctx); err == nil && row != nil {
+			if mode := strings.TrimSpace(row.RegistrationMode); mode != "" {
+				return mode, split(row.RegistrationDomains)
+			}
+		}
+	}
+	return strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_REGISTRATION_MODE")),
+		split(os.Getenv("MEMQL_IDENTITY_REGISTRATION_DOMAINS"))
 }

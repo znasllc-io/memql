@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/invitation"
 	"github.com/znasllc-io/memql/component/identity/registration"
 )
 
@@ -220,9 +221,19 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	if in.Bootstrap || in.ExistingUser {
 		decision = registration.Decision{Action: registration.ActionIssueMagicLink}
 	} else {
-		hasInvitation := strings.TrimSpace(in.InvitationId) != ""
+		// RESOLVE the invitation before it decides anything (memql#4282).
+		//
+		// What was here was `hasInvitation := strings.TrimSpace(...) != ""`,
+		// and registration.Decide treated that as overriding every mode. So
+		// under invite_only -- the mode an operator picks to close
+		// registration -- typing any characters into a field labelled
+		// "invitation" let anybody in, and domain_restricted was bypassed the
+		// same way, because the invitation branch returned before the
+		// allowlist was consulted. The value was never hashed, never looked
+		// up, and never checked against the address registering.
+		invite := i.resolveInvitation(ctx, in, email)
 		var err error
-		decision, err = registration.Decide(i.Cfg, email, hasInvitation)
+		decision, err = registration.Decide(i.Cfg, email, invite)
 		if err != nil {
 			i.audit(ctx, identity.AuditEvent{
 				Category:      identity.AuditCategoryAuth,
@@ -437,4 +448,79 @@ func buildMagicLinkURL(baseURL, plainToken, state string) string {
 func HashMagicLinkToken(plain string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
 	return hex.EncodeToString(sum[:])
+}
+
+// resolveInvitation turns a presented invitation token into the row that
+// authorizes it, or nil when nothing usable was presented (memql#4282).
+//
+// # Why every rejection returns nil rather than an error
+//
+// A bad invitation does not fail the request -- it means the caller has no
+// invitation, and the registration mode then decides on its own terms. Under
+// `open` that person can register anyway and refusing them because they pasted
+// a stale token would be absurd; under invite_only they cannot, which is the
+// correct outcome and the one that was missing. Turning it into an error here
+// would also make the modes disagree about the same input.
+//
+// Each rejection IS audited, because "somebody tried a token that does not
+// resolve" is a security signal even when the request goes on to be handled
+// correctly on other grounds.
+func (i *Issuer) resolveInvitation(ctx context.Context, in IssueInput, email string) *registration.Invitation {
+	presented := strings.TrimSpace(in.InvitationId)
+	if presented == "" {
+		return nil
+	}
+
+	refuse := func(reason string) *registration.Invitation {
+		i.audit(ctx, identity.AuditEvent{
+			Category:      identity.AuditCategoryAuth,
+			Action:        "invitation_rejected",
+			TargetEmail:   email,
+			SourceIP:      in.SourceIP,
+			UserAgent:     in.UserAgent,
+			CorrelationId: in.CorrelationId,
+			Outcome:       identity.AuditOutcomeBlocked,
+			FailureReason: reason,
+		})
+		return nil
+	}
+
+	if i.Store == nil {
+		// No store means nothing can be verified, and an unverifiable
+		// invitation must never be treated as a valid one -- that is the whole
+		// defect. Fail CLOSED.
+		return refuse("invitation_unverifiable")
+	}
+
+	row, err := i.Store.LookupInvitationByTokenHash(ctx, invitation.Hash(presented))
+	if err != nil {
+		if i.Logger != nil {
+			i.Logger.Warn("invitation lookup failed", "error", err)
+		}
+		return refuse("invitation_lookup_failed")
+	}
+	if row == nil {
+		return refuse("invitation_not_found")
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.Kind), "user") {
+		// A guest invitation authorizes joining a space, not registering an
+		// account on the cluster. Different credential, different flow.
+		return refuse("invitation_wrong_kind")
+	}
+	if !row.Active {
+		return refuse("invitation_revoked")
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.Status), "pending") {
+		return refuse("invitation_already_used")
+	}
+	if !row.ExpiresAt.IsZero() && !row.ExpiresAt.After(time.Now().UTC()) {
+		return refuse("invitation_expired")
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.Email), email) {
+		// The address check. Without it one leaked link is a general-purpose
+		// bypass rather than a credential for one person.
+		return refuse("invitation_address_mismatch")
+	}
+
+	return &registration.Invitation{Id: row.ID, Email: row.Email, Role: row.Role}
 }
