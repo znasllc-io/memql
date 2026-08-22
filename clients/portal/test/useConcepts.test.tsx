@@ -29,15 +29,17 @@ function delta(partial: Partial<ConceptRegistryDelta>): ConceptRegistryDelta {
 
 interface Harness {
   emit: (d: ConceptRegistryDelta) => void;
+  fail: (message: string) => void;
   subscribeCount: () => number;
   unsubscribeCount: () => number;
 }
 
 function Probe(): ReactNode {
-  const { concepts, loading } = useConcepts();
+  const { concepts, loading, error } = useConcepts();
   return (
     <div>
       <span data-testid="loading">{loading ? "loading" : "ready"}</span>
+      <span data-testid="error">{error}</span>
       <ul data-testid="list">
         {concepts.map((c) => (
           <li key={c.id}>{c.id}</li>
@@ -49,15 +51,20 @@ function Probe(): ReactNode {
 
 async function renderProbe(): Promise<Harness> {
   let onDelta: ((d: ConceptRegistryDelta) => void) | null = null;
+  let onError: ((err: Error) => void) | null = null;
   let subscribeCount = 0;
   let unsubscribeCount = 0;
 
   const query = asQueryClient({
     // Own property, so it shadows the real prototype method AND the
     // listConcepts adapter in asQueryClient: this test drives deltas directly.
-    subscribeConceptRegistry: (cb: (d: ConceptRegistryDelta) => void): ConceptRegistryFollow => {
+    subscribeConceptRegistry: (
+      cb: (d: ConceptRegistryDelta) => void,
+      opts: { onError?: (err: Error) => void } = {},
+    ): ConceptRegistryFollow => {
       subscribeCount += 1;
       onDelta = cb;
+      onError = opts.onError ?? null;
       return {
         unsubscribe: () => {
           unsubscribeCount += 1;
@@ -92,6 +99,11 @@ async function renderProbe(): Promise<Harness> {
     emit: (d) => {
       act(() => {
         onDelta?.(d);
+      });
+    },
+    fail: (message) => {
+      act(() => {
+        onError?.(new Error(message));
       });
     },
     subscribeCount: () => subscribeCount,
@@ -135,5 +147,17 @@ describe("useConcepts (live registry)", () => {
     // The fresh subscription's snapshot renders the current set.
     h.emit(delta({ generation: 1, reset: true, added: [concept("v1:a:a"), concept("v1:b:b")] }));
     await waitFor(() => expect(renderedIds()).toEqual(["v1:a:a", "v1:b:b"]));
+  });
+
+  it("surfaces a refusal instead of sitting at loading forever", async () => {
+    const h = await renderProbe();
+    expect(screen.getByTestId("loading").textContent).toBe("loading");
+
+    h.fail("subscribeConceptRegistry: concept registry follow requires an engine on this node");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("error").textContent).toMatch(/requires an engine on this node/),
+    );
+    expect(screen.getByTestId("loading").textContent).toBe("ready");
   });
 });

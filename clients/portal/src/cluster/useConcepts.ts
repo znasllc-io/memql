@@ -51,19 +51,31 @@ export function useConcepts(): ConceptsState {
     // accumulator -- the honest response to "you missed a delta".
     const subscribe = (): void => {
       try {
-        follow = query.subscribeConceptRegistry((delta) => {
-          if (!live) return;
-          const { state: next, gap } = applyRegistryDelta(stateRef.current, delta);
-          if (gap) {
-            follow?.unsubscribe();
-            stateRef.current = EMPTY_REGISTRY;
-            subscribe();
-            return;
-          }
-          stateRef.current = next;
-          setConcepts(next.concepts);
-          setLoading(false);
-        });
+        follow = query.subscribeConceptRegistry(
+          (delta) => {
+            if (!live) return;
+            const { state: next, gap } = applyRegistryDelta(stateRef.current, delta);
+            if (gap) {
+              follow?.unsubscribe();
+              stateRef.current = EMPTY_REGISTRY;
+              subscribe();
+              return;
+            }
+            stateRef.current = next;
+            setConcepts(next.concepts);
+            setLoading(false);
+          },
+          {
+            // The engine refuses a follow on a node with no engine. Without
+            // this the pane would sit at "loading" forever on a snapshot that
+            // is never coming.
+            onError: (err) => {
+              if (!live) return;
+              setError(err.message);
+              setLoading(false);
+            },
+          },
+        );
       } catch (err: unknown) {
         if (!live) return;
         setError(err instanceof Error ? err.message : String(err));

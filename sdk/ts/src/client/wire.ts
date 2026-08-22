@@ -1702,6 +1702,11 @@ export function streamRequestId(msg: ServerMessage): string {
   // emits exactly one frame today. Costless for current callers, which use
   // sendAndWait and are served by correlateTo.
   if (m.queryResult?.requestId) return m.queryResult.requestId;
+  // Concept-registry follow stream (memql#4238). One ConceptsSubscribeMsg with
+  // follow=true yields a snapshot frame then one per registry change, all
+  // carrying that request id. The follow=false catalog reply is a single reply
+  // served by correlateTo in the tier above and is unaffected.
+  if (m.conceptsRegistryDelta?.requestId) return m.conceptsRegistryDelta.requestId;
   // The error terminal for any of the above. See the coverage rule.
   if (m.queryError?.requestId) return m.queryError.requestId;
   return "";

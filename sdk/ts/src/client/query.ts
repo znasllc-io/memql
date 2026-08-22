@@ -163,22 +163,40 @@ export class QueryClient {
   // means a delta was missed (a slow consumer dropped one), so unsubscribe and
   // re-subscribe to re-snapshot.
   //
-  // Unlike the catalog read this is not request/response -- deltas arrive on the
-  // shared event fanout, matched to this subscription by the request id -- so it
-  // returns a handle rather than a Promise.
+  // Unlike the catalog read this is not request/response -- the engine keeps
+  // pushing frames on this request id until the subscription ends -- so it
+  // returns a handle rather than a Promise. Pass opts.onError to be told when
+  // the engine refuses the follow.
   subscribeConceptRegistry(
     onDelta: (delta: ConceptRegistryDelta) => void,
-    opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal; onError?: (err: Error) => void } = {},
   ): ConceptRegistryFollow {
     const reqId = newShortId();
     let subscriptionId = "";
     let closed = false;
 
-    const remove = this.dispatcher.addEventListener((msg) => {
+    // registerStream, not addEventListener: a follow subscription is a
+    // MULTI-FRAME exchange keyed by request id (snapshot, then one frame per
+    // registry change), which is the tier the dispatcher routes those to --
+    // see streamRequestId in wire.ts and the routed/unrouted ledger in
+    // sdk/go/client/dispatcher_stream_routing_test.go. Registered BEFORE the
+    // send so the snapshot cannot arrive before there is a listener for it.
+    const remove = this.dispatcher.registerStream(reqId, (msg) => {
       const payload = readServerPayload(msg);
+      // The engine refuses a follow on a node with no engine, and that
+      // queryError carries this request id -- so it lands here rather than
+      // vanishing. Surfacing it is what keeps a caller from waiting forever on
+      // a snapshot that is never coming.
+      if (payload?.kind === "queryError") {
+        opts.onError?.(
+          new Error(
+            `subscribeConceptRegistry: ${payload.value.error?.message ?? "(no message)"}`,
+          ),
+        );
+        return;
+      }
       if (payload?.kind !== "conceptsRegistryDelta") return;
       const v = payload.value;
-      if (v.requestId !== reqId) return;
       if (typeof v.subscriptionId === "string" && v.subscriptionId !== "") {
         subscriptionId = v.subscriptionId;
       }

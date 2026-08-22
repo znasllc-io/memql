@@ -1,11 +1,15 @@
 // subscribeConceptRegistry -- the follow-mode registry-delta stream (memql#4238).
 //
-// Deltas arrive on the shared event fanout, matched to the subscription by
-// request id, so these tests drive a mock dispatcher that records sends and
-// emits server messages, and assert: the follow request shape, snapshot +
-// incremental decode (including the uint64 generation string), request-id
-// filtering, and that unsubscribe removes the listener and sends the
-// UnsubscribeMsg for the id the snapshot carried.
+// A follow subscription is a MULTI-FRAME exchange keyed by request id, so it
+// rides the dispatcher's STREAM tier (registerStream / streamRequestId), not the
+// event fanout -- the routed side of the ledger in
+// sdk/go/client/dispatcher_stream_routing_test.go. These tests drive a mock
+// dispatcher that records sends and delivers frames to the registered stream,
+// and assert: the follow request shape, that the stream is registered under the
+// request id BEFORE the send, snapshot + incremental decode (including the
+// uint64 generation string), the queryError refusal path, and that unsubscribe
+// removes the listener and sends the UnsubscribeMsg for the id the snapshot
+// carried.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -17,24 +21,35 @@ import type { ConceptRegistryDelta } from "../src/client/types.js";
 
 class MockDispatcher {
   readonly sent: ClientMessage[] = [];
-  private listeners = new Set<(msg: ServerMessage) => void>();
+  // Registration order matters: the stream must exist before the subscribe is
+  // sent, or the snapshot races it. `sentWhenRegistered` records how many
+  // messages had been sent at registration time so a test can assert that.
+  private streams = new Map<string, (msg: ServerMessage) => void>();
+  sentWhenRegistered = -1;
 
   send(msg: ClientMessage): string {
     this.sent.push(msg);
     return "mock-id";
   }
 
-  addEventListener(handler: (msg: ServerMessage) => void): () => void {
-    this.listeners.add(handler);
-    return () => this.listeners.delete(handler);
+  registerStream(requestId: string, handler: (msg: ServerMessage) => void): () => void {
+    this.streams.set(requestId, handler);
+    this.sentWhenRegistered = this.sent.length;
+    return () => {
+      if (this.streams.get(requestId) === handler) this.streams.delete(requestId);
+    };
   }
 
+  // emit delivers to the stream registered for the frame's request id, exactly
+  // as Dispatcher.route does -- a frame for an unregistered id goes nowhere.
   emit(msg: ServerMessage): void {
-    for (const l of [...this.listeners]) l(msg);
+    const m = msg as unknown as Record<string, { requestId?: string } | undefined>;
+    const reqId = m.conceptsRegistryDelta?.requestId ?? m.queryError?.requestId ?? "";
+    this.streams.get(reqId)?.(msg);
   }
 
   listenerCount(): number {
-    return this.listeners.size;
+    return this.streams.size;
   }
 
   // The request id the follow subscribe was sent with.
@@ -65,6 +80,10 @@ test("sends a follow subscribe with a request id and follow=true", () => {
   assert.ok(sub, "must send a conceptsSubscribe");
   assert.equal(sub?.follow, true);
   assert.ok(sub?.requestId && sub.requestId.length > 0, "must carry a request id");
+  // Registered before the send: a snapshot that arrives synchronously with the
+  // subscribe must still have a listener waiting for it.
+  assert.equal(d.sentWhenRegistered, 0, "the stream must be registered before the subscribe is sent");
+  assert.equal(d.listenerCount(), 1);
 });
 
 test("decodes the reset snapshot and incremental deltas, parsing the uint64 generation string", () => {
@@ -112,14 +131,36 @@ test("decodes the reset snapshot and incremental deltas, parsing the uint64 gene
   assert.deepEqual(rem.removed, ["v1:trainingns:widget"]);
 });
 
-test("ignores deltas addressed to a different subscription's request id", () => {
+test("a delta for another subscription's request id is never delivered here", () => {
   const d = new MockDispatcher();
   const qc = new QueryClient(d.asDispatcher());
   const got: ConceptRegistryDelta[] = [];
   qc.subscribeConceptRegistry((x) => got.push(x));
 
   d.emit(delta("some-other-request", { generation: "1", reset: true }));
-  assert.equal(got.length, 0, "a delta for another request id must be ignored");
+  assert.equal(got.length, 0, "a delta for another request id must not reach this subscription");
+});
+
+test("surfaces a queryError refusal through onError instead of hanging", () => {
+  const d = new MockDispatcher();
+  const qc = new QueryClient(d.asDispatcher());
+  const got: ConceptRegistryDelta[] = [];
+  const errors: string[] = [];
+  qc.subscribeConceptRegistry((x) => got.push(x), { onError: (e) => errors.push(e.message) });
+  const reqId = d.followRequestId();
+
+  // The engine refuses a follow on a node with no engine; that queryError
+  // carries this request id, so it routes to this stream.
+  d.emit({
+    queryError: {
+      requestId: reqId,
+      error: { message: "concept registry follow requires an engine on this node" },
+    },
+  } as unknown as ServerMessage);
+
+  assert.equal(got.length, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0] ?? "", /concept registry follow requires an engine on this node/);
 });
 
 test("unsubscribe removes the listener and sends UnsubscribeMsg for the snapshot's id", () => {
