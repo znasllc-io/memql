@@ -523,8 +523,10 @@ copy is written — but it does not block Units A, C, D or E.
 > **Consequence, pending leg 2.** The conservative branch shipped: memql#3408's
 > `/enroll` page names the platform authenticator and says nothing about phones,
 > and `docs/public/operate/auth/sign-in-paths.md` documents the split rather
-> than promising cross-device enrolment. A one-command harness with an empty
-> results table is at `scripts/spikes/webauthn-rpid/`.
+> than promising cross-device enrolment. The one-command harness that measured
+> leg 1 lived at `scripts/spikes/webauthn-rpid/` and was deleted in memql#4217 --
+> the end state its own README specified. Recover it with
+> `git log --diff-filter=D -- scripts/spikes/webauthn-rpid` if leg 2 is ever run.
 >
 > [html-rds]: https://html.spec.whatwg.org/multipage/browsers.html#is-a-registrable-domain-suffix-of-or-is-equal-to
 

@@ -1871,9 +1871,9 @@ In `editors/vscode/src/install/stackPin.ts`, replace `SUPPORTED_LOCAL_DOMAIN` an
  * `memql.localhost` rather than a company's domain: the engine is meant to
  * carry no product, and a hostname is product. `.localhost` resolves to
  * loopback by RFC 6761, needs no domain ownership and no third party, and its
- * WebAuthn RP id is accepted by Chrome's validator -- measured in
- * scripts/spikes/webauthn-rpid (memql#3405), where bare `localhost` is refused
- * as a public suffix and `memql.localhost` is not.
+ * WebAuthn RP id is accepted by Chrome's validator -- measured by the
+ * memql#3405 spike, where bare `localhost` is refused as a public suffix and
+ * `memql.localhost` is not.
  *
  * Kept in step with deploy/k8s/overlays/local's committed Ingress hosts. The
  * install-domain test asserts the agreement against the shipped files.

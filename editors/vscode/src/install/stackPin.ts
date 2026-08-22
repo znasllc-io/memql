@@ -287,10 +287,9 @@ export const DEFAULT_CAROOT_DIR = ".memql/mkcert";
  * `memql.localhost` rather than a company's domain, because the engine is meant
  * to carry no product and a hostname is product. It needs no domain ownership,
  * no DNS provider and no third party: `.localhost` resolves to loopback by RFC
- * 6761. Its WebAuthn RP id is accepted -- measured in
- * scripts/spikes/webauthn-rpid (memql#3405), where bare `localhost` is refused
- * as a public suffix and `memql.localhost` is not -- so one passkey covers every
- * host under it.
+ * 6761. Its WebAuthn RP id is accepted -- measured by the memql#3405 spike,
+ * where bare `localhost` is refused as a public suffix and `memql.localhost` is
+ * not -- so one passkey covers every host under it.
  *
  * Kept in step with deploy/k8s/overlays/local, whose two Ingresses carry this
  * same apex as their committed default. installDomain.test.ts asserts that

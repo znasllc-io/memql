@@ -80,8 +80,8 @@ working *through the BYO path*, which that design required. The `nip.io` / `ssli
 rejected on its original grounds: consumer routers' DNS-rebind protection blocks
 public names resolving to 127.0.0.1, so it fails intermittently and confusingly.
 
-The `.localhost` RP-id risk is already half-measured. `scripts/spikes/webauthn-rpid/`
-(memql#3405) shows Chrome 151 **accepts** `memql.localhost` as a WebAuthn RP id for
+The `.localhost` RP-id risk is already half-measured. The memql#3405 spike
+(harness since deleted; findings on the issue) shows Chrome 151 **accepts** `memql.localhost` as a WebAuthn RP id for
 origin `https://identity.memql.localhost`, with a positive control proving bare
 `localhost` is refused as a public suffix. One passkey therefore covers every host
 under the domain. Leg 2 of that spike — iOS/Android over hybrid transport, and
