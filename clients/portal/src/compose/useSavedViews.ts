@@ -21,7 +21,7 @@ export interface SavedViewsState {
 }
 
 export function useSavedViews(): SavedViewsState {
-  const { query } = useCluster();
+  const { query, subscriptions, status } = useCluster();
   const [views, setViews] = useState<SavedView[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -38,8 +38,22 @@ export function useSavedViews(): SavedViewsState {
     setLoading(true);
     setError("");
 
-    void query
-      .composedViews({ status: "active" })
+    // Wrapped, because this hook is now on the NAV RAIL's path (memql#4264).
+    // A read that throws SYNCHRONOUSLY -- a client without the generated
+    // method, an older engine -- would otherwise take the whole shell down
+    // with it, and losing the rail because a saved-view list could not be read
+    // is wildly out of proportion. An empty Custom section is the right
+    // degradation.
+    let read: Promise<unknown>;
+    try {
+      read = query.composedViews({ status: "active" });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLoading(false);
+      return;
+    }
+
+    void (read as ReturnType<typeof query.composedViews>)
       .then((result) => {
         if (!live) return;
         setViews(parseSavedViews(result.rows()));
@@ -55,6 +69,26 @@ export function useSavedViews(): SavedViewsState {
       live = false;
     };
   }, [query, epoch]);
+
+  // LIVE (memql#4264). The rail lists these, and a view composed a moment ago
+  // appearing only after a reload is the kind of staleness that makes an
+  // operator doubt the save worked. Same shape as the console's tiles: a CDC
+  // arrival bumps an epoch and the bounded read runs again -- no poll, and no
+  // splicing of a partial row into a list the read owns.
+  useEffect(() => {
+    if (subscriptions === null || status !== "connected") return;
+    try {
+      return subscriptions.subscribeGraph(() => setEpoch((n) => n + 1), {
+        concept: "v1:portalviews:view",
+        actions: ["created", "updated", "deleted"],
+      });
+    } catch {
+      // A cluster whose subscription surface refuses is still perfectly usable
+      // here -- the list is correct, it just stops being live. Failing the
+      // whole hook over the live half would be worse than losing it.
+      return;
+    }
+  }, [subscriptions, status]);
 
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
   return { views, loading, error, refresh };

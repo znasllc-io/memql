@@ -168,7 +168,10 @@ function harness(
   });
 
   const subscriptions = {
-    subscribeGraph: (fn: (event: Event) => void) => {
+    // Keyed by concept: the nav rail also subscribes now (memql#4264), and a
+    // fake holding one handler would hand this page's events to it.
+    subscribeGraph: (fn: (event: Event) => void, opts?: { concept?: string }) => {
+      if (opts?.concept === "v1:portalviews:view") return () => {};
       if (overrides.subscribeThrows) throw overrides.subscribeThrows;
       handler = fn;
       return () => {
@@ -197,6 +200,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "memql.test",
 };
 
 function renderBrowser(h: Harness, path: string) {
@@ -237,9 +241,13 @@ describe("the concept registry page", () => {
     await waitFor(() => expect(screen.getByText(NODE)).toBeTruthy());
     expect(screen.getByText(SPACE)).toBeTruthy();
     expect(screen.getByText(AUDIT)).toBeTruthy();
-    // Domain headings, so the registry is navigable without a search.
-    expect(screen.getByRole("heading", { name: /cluster/i })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /identity/i })).toBeTruthy();
+    // Domain headings, so the registry is navigable without a search. Scoped
+    // to <main>: the rail's group headings are h2s too, and one of them is
+    // "Cluster" (memql#4264), which a document-wide role query cannot tell
+    // from the cluster DOMAIN heading on this page.
+    const main = within(screen.getByRole("main"));
+    expect(main.getByRole("heading", { name: /cluster/i })).toBeTruthy();
+    expect(main.getByRole("heading", { name: /identity/i })).toBeTruthy();
   });
 
   it("searches across ids, entities and descriptions", async () => {
@@ -379,6 +387,14 @@ describe("one concept's rows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Retry from where it stopped/ }));
     await waitFor(() => expect(screen.getAllByText(/^pod-\d$/)).toHaveLength(PAGE_SIZE));
+  });
+
+  it("offers to open the concept's definition in VS Code, addressed to this cluster", async () => {
+    renderBrowser(harness(), `/concepts/${NODE}`);
+    const link = await screen.findByRole("link", { name: "Open definition in VS Code" });
+    expect(link.getAttribute("href")).toBe(
+      `vscode://znasllc.memql/open?v=1&cluster=memql.test&kind=concept&name=${encodeURIComponent(NODE)}`,
+    );
   });
 });
 

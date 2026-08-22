@@ -29,7 +29,7 @@ export function ModulesPage(): ReactNode {
 
   const inventory = state.inventory;
   return (
-    <Container variant="data">
+    <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
           title="Modules"

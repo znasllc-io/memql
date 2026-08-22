@@ -9,7 +9,7 @@ import {
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, PageHeader, Skeleton } from "../ui";
+import { Band, Button, Container, PageHeader, Skeleton } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
@@ -69,120 +69,122 @@ export function IntegrationsPage(): ReactNode {
     rowWithId(credentials, dialog.rowId);
 
   return (
-    <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-6 pb-8">
-      <PageHeader
-        title="Integrations"
-        blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
-        actions={
+    <Container>
+      <section className="flex min-h-full flex-col gap-6 pb-8">
+        <PageHeader
+          title="Integrations"
+          blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
+          actions={
+            <>
+              <Link
+                to={campaignsPath()}
+                className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
+              >
+                Email campaigns
+              </Link>
+              <Button size="xs" onClick={refresh}>
+                Refresh
+              </Button>
+              <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
+                Check now
+              </Button>
+            </>
+          }
+        />
+
+        {!canView ? (
+          <Empty>
+            Reading integration configuration needs the owner or admin role; this session holds
+            {role === "" ? " none" : ` "${role}"`}. The cluster enforces that server-side — this
+            page is only declining to ask.
+          </Empty>
+        ) : error ? (
+          <ErrorMessage>Could not read the integration registry: {error}</ErrorMessage>
+        ) : loading && status === null ? (
+          <Skeleton variant="rows" rows={4} />
+        ) : reports.length === 0 ? (
+          <Empty>This node registered no integration plug-ins.</Empty>
+        ) : (
           <>
-            <Link
-              to={campaignsPath()}
-              className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
-            >
-              Email campaigns
-            </Link>
-            <Button size="xs" onClick={refresh}>
-              Refresh
-            </Button>
-            <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
-              Check now
-            </Button>
-          </>
-        }
-      />
+            {probeError ? (
+              <ErrorMessage>The live check could not run: {probeError}</ErrorMessage>
+            ) : null}
 
-      {!canView ? (
-        <Empty>
-          Reading integration configuration needs the owner or admin role; this session holds
-          {role === "" ? " none" : ` "${role}"`}. The cluster enforces that server-side — this
-          page is only declining to ask.
-        </Empty>
-      ) : error ? (
-        <ErrorMessage>Could not read the integration registry: {error}</ErrorMessage>
-      ) : loading && status === null ? (
-        <Skeleton variant="rows" rows={4} />
-      ) : reports.length === 0 ? (
-        <Empty>This node registered no integration plug-ins.</Empty>
-      ) : (
-        <>
-          {probeError ? (
-            <ErrorMessage>The live check could not run: {probeError}</ErrorMessage>
-          ) : null}
+            <Band title="Configured" meta="registration is not configuration">
+              <ViewElement
+                element={PROPORTION_BAR_ELEMENT}
+                rows={registry}
+                concept={INTEGRATION_CONCEPT}
+                options={{ bindings: { value: [] } }}
+              />
+            </Band>
 
-          <Band title="Configured" meta="registration is not configuration">
-            <ViewElement
-              element={PROPORTION_BAR_ELEMENT}
-              rows={registry}
-              concept={INTEGRATION_CONCEPT}
-              options={{ bindings: { value: [] } }}
-            />
-          </Band>
-
-          <Band title="Registered on this node" panel>
-            <ViewElement
-              element={TABLE_ELEMENT}
-              rows={registry}
-              concept={INTEGRATION_CONCEPT}
-              options={{ sort: { field: "name", direction: "asc" } }}
-              onSelect={dialog.onSelect}
-            />
-          </Band>
-
-          <EmailSummary detail={email?.detail ?? ""} probed={status?.probed === true} />
-
-          <Band title="Email settings" meta="non-secret, and the source decides whether it is changeable">
-            <p className="mb-3 max-w-3xl text-sm text-muted">
-              A setting sourced from <code className="font-mono text-xs">globalVariable</code> is a
-              row in the graph, so it can be changed without a redeploy. One sourced from{" "}
-              <code className="font-mono text-xs">env</code> comes from the bootstrap envelope, and
-              the resolver reads the environment first and stops — writing a row for it would have
-              no effect.
-            </p>
-            <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
+            <Band title="Registered on this node" panel>
               <ViewElement
                 element={TABLE_ELEMENT}
-                rows={settings}
-                concept={SETTING_CONCEPT}
+                rows={registry}
+                concept={INTEGRATION_CONCEPT}
                 options={{ sort: { field: "name", direction: "asc" } }}
                 onSelect={dialog.onSelect}
               />
-            </div>
-          </Band>
+            </Band>
 
-          <Band title="Email credentials" meta="presence only — no value is ever sent to this page">
-            <p className="mb-3 max-w-3xl text-sm text-muted">
-              Secrets are sealed under the cluster master key and are never returned to a client,
-              in any form. To set or rotate one, run{" "}
-              <code className="font-mono text-xs">
-                make secret-set NAME=&lt;variable&gt; VALUE=&lt;new value&gt; SCOPE=global
-              </code>{" "}
-              against the cluster; the exact variable name for each slot is in the table below.
-            </p>
-            <ViewElement
-              element={CHECKLIST_ELEMENT}
-              rows={credentials}
-              concept={CREDENTIAL_CONCEPT}
-              options={{ bindings: { group: [] } }}
-            />
-            <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
+            <EmailSummary detail={email?.detail ?? ""} probed={status?.probed === true} />
+
+            <Band title="Email settings" meta="non-secret, and the source decides whether it is changeable">
+              <p className="mb-3 max-w-3xl text-sm text-muted">
+                A setting sourced from <code className="font-mono text-xs">globalVariable</code> is a
+                row in the graph, so it can be changed without a redeploy. One sourced from{" "}
+                <code className="font-mono text-xs">env</code> comes from the bootstrap envelope, and
+                the resolver reads the environment first and stops — writing a row for it would have
+                no effect.
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
+                <ViewElement
+                  element={TABLE_ELEMENT}
+                  rows={settings}
+                  concept={SETTING_CONCEPT}
+                  options={{ sort: { field: "name", direction: "asc" } }}
+                  onSelect={dialog.onSelect}
+                />
+              </div>
+            </Band>
+
+            <Band title="Email credentials" meta="presence only — no value is ever sent to this page">
+              <p className="mb-3 max-w-3xl text-sm text-muted">
+                Secrets are sealed under the cluster master key and are never returned to a client,
+                in any form. To set or rotate one, run{" "}
+                <code className="font-mono text-xs">
+                  make secret-set NAME=&lt;variable&gt; VALUE=&lt;new value&gt; SCOPE=global
+                </code>{" "}
+                against the cluster; the exact variable name for each slot is in the table below.
+              </p>
               <ViewElement
-                element={TABLE_ELEMENT}
+                element={CHECKLIST_ELEMENT}
                 rows={credentials}
                 concept={CREDENTIAL_CONCEPT}
-                options={{ sort: { field: "name", direction: "asc" } }}
-                onSelect={dialog.onSelect}
+                options={{ bindings: { group: [] } }}
               />
-            </div>
-          </Band>
-          <RowDetailDialog
-            open={dialog.open}
-            onClose={dialog.onClose}
-            rowId={dialog.rowId}
-            row={dialogRow ?? null}
-          />
-        </>
-      )}
-    </section>
+              <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
+                <ViewElement
+                  element={TABLE_ELEMENT}
+                  rows={credentials}
+                  concept={CREDENTIAL_CONCEPT}
+                  options={{ sort: { field: "name", direction: "asc" } }}
+                  onSelect={dialog.onSelect}
+                />
+              </div>
+            </Band>
+            <RowDetailDialog
+              open={dialog.open}
+              onClose={dialog.onClose}
+              rowId={dialog.rowId}
+              row={dialogRow ?? null}
+            />
+          </>
+        )}
+      </section>
+    </Container>
   );
 }
 

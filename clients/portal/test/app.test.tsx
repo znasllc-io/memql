@@ -65,6 +65,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 function renderApp(dial: typeof Connection.dial, path = "/concepts") {
@@ -130,6 +131,7 @@ const AUTH_ENABLED_CLUSTER = {
   identityApiBaseUrl: "https://identity.example.com",
   oauthClientId: "portal",
   authEnabled: true,
+  domain: "example.com",
 };
 
 function renderSignedIn(dial: typeof Connection.dial, path = "/concepts") {
@@ -157,13 +159,15 @@ function renderSignedIn(dial: typeof Connection.dial, path = "/concepts") {
 }
 
 function header(): HTMLElement {
-  // ConceptsPage (and other surfaces) also render a <header>, so the
-  // implicit banner role is not unique. The chrome header is the one
-  // that names the cluster.
-  const cluster = screen.getByText("Cluster");
-  const el = cluster.closest("header");
-  if (el === null) throw new Error("portal chrome header not found");
-  return el;
+  // The chrome header by ROLE, not by its text. A page's own <header> nests
+  // inside <main>, which strips the implicit banner role, so exactly one
+  // element in the document carries it.
+  //
+  // It used to be found by getByText("Cluster") -- which stopped being unique
+  // when the rail gained a "Cluster" group (memql#4264). Two elements can
+  // legitimately carry the same word; a query that depends on a word being
+  // unique in the whole document is the fragile half of that.
+  return screen.getByRole("banner", { name: "Cluster and session" });
 }
 
 function rail(): HTMLElement {

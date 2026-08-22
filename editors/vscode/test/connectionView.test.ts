@@ -20,7 +20,12 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { connectionView, formatExpiry } from "../src/clusters/connectionView.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
-import { composePortalUrl, portalTarget } from "../src/clusters/portalUrl.js";
+import {
+  composePortalUrl,
+  encodePortalSegment,
+  portalConceptUrl,
+  portalTarget,
+} from "../src/clusters/portalUrl.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
 const NOW = Date.parse("2026-08-14T12:00:00Z");
@@ -260,6 +265,35 @@ test("an endpoint that names no api front door composes nothing", () => {
 test("nothing to compose from yields nothing, not https:///", () => {
   assert.equal(composePortalUrl({ name: "x", endpoint: "" }), "");
   assert.equal(portalTarget({ name: "x", endpoint: "" }, []).url, "");
+});
+
+// -----------------------------------------------------------------------------
+// a concept's rows, in the portal (memql#4252)
+// -----------------------------------------------------------------------------
+
+test("a concept id keeps its colons and encodes everything else", () => {
+  // Pinned to the portal's own fixtures (clients/portal/test/conceptUrls.test.tsx):
+  // colons stay literal so an id reads as an id in the address bar.
+  assert.equal(encodePortalSegment("v1:cognition:space"), "v1:cognition:space");
+  assert.equal(encodePortalSegment("v1:a b:c/d"), "v1:a%20b:c%2Fd");
+});
+
+test("a literal %3A in an id is not mistaken for an escaped colon", () => {
+  // encodeURIComponent turns the id's own "%" into "%25" first, so the "%3A"
+  // this restores is only ever one it escaped -- never one that was already
+  // there. Same fixture as the portal's own encodeSegment test.
+  assert.equal(encodePortalSegment("already%3Aescaped"), "already%253Aescaped");
+});
+
+test("the concept url hangs off the portal root", () => {
+  assert.equal(
+    portalConceptUrl("https://portal.acme.test/", "v1:cognition:space"),
+    "https://portal.acme.test/concepts/v1:cognition:space",
+  );
+  assert.equal(
+    portalConceptUrl("https://portal.acme.test", "v1:cognition:space"),
+    "https://portal.acme.test/concepts/v1:cognition:space",
+  );
 });
 
 // -----------------------------------------------------------------------------

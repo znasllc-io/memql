@@ -48,7 +48,7 @@ export function SitesPage(): ReactNode {
   }
 
   return (
-    <Container variant="data">
+    <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
       <PageHeader
         eyebrow={SITE_CONCEPT_ID}

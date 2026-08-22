@@ -23,24 +23,21 @@ export interface AdminSurface {
   readonly blurb: string;
 }
 
+// TWO SURFACES RETIRED HERE (memql#4264), and both for the same reason:
+// they were second doors to something the portal already had.
+//
+//   "" (Cluster overview)  answered the same question as the console -- "what
+//     is the state of this cluster" -- with the same tiles and the same "By
+//     role" band. Two landing pages is one too many; /admin now redirects to
+//     the console, and the readings it carried that were NOT duplicated (the
+//     signing key, the last rotation, the registration mode) already render on
+//     the Signing keys and Settings surfaces.
+//
+//   people                 was the CHANGE surface for a person, sitting beside
+//     a People VIEW that listed the same population. The list was always the
+//     view's job; the verbs moved to the view's row detail
+//     (src/people/PersonActions.tsx), and /admin/people redirects there.
 export const ADMIN_SURFACES: readonly AdminSurface[] = [
-  {
-    id: "",
-    label: "Overview",
-    title: "Cluster overview",
-    blurb:
-      "Who can sign in, what the cluster has been doing, and which key it is " +
-      "signing with right now.",
-  },
-  {
-    id: "people",
-    label: "People",
-    title: "People",
-    blurb:
-      "Everyone who can sign in, and what an owner or admin may " +
-      "change about one of them: their profile, their role, and whether they " +
-      "may sign in at all.",
-  },
   {
     id: "tokens",
     label: "Tokens",

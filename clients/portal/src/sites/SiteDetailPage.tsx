@@ -4,7 +4,7 @@ import { rowBool, rowString } from "@znasllc-io/memql-sdk-core/client";
 
 import { useMyAccess } from "../cluster/useMyAccess";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Breadcrumbs, Button, ConfirmDialog, DataText, Field, PageHeader, Skeleton, TextInput } from "../ui";
+import { Breadcrumbs, Button, ConfirmDialog, Container, DataText, Field, PageHeader, Skeleton, TextInput } from "../ui";
 import { Band } from "../ui";
 import { EnumSelect } from "./EnumSelect";
 import { SitesRefused } from "./SitesRefused";
@@ -91,128 +91,132 @@ export function SiteDetailPage(): ReactNode {
   }
 
   return (
-    <section className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 pb-8">
-      <PageHeader
-        eyebrow={<Breadcrumbs items={[{ label: "Sites", to: sitesPath() }, { label: title || hostname }]} />}
-        title={title || hostname}
-        blurb={
-          <>
-            <DataText kind="id">{hostname}</DataText> · {kind || "unknown kind"} · status{" "}
-            <span className="font-medium text-fg">{status || "unknown"}</span>
-            {systemOwned ? " · system-owned" : ""}
-          </>
-        }
-      />
+    <Container>
+      <section className="flex min-h-full flex-col gap-6 pb-8">
+        <PageHeader
+          eyebrow={<Breadcrumbs items={[{ label: "Sites", to: sitesPath() }, { label: title || hostname }]} />}
+          title={title || hostname}
+          blurb={
+            <>
+              <DataText kind="id">{hostname}</DataText> · {kind || "unknown kind"} · status{" "}
+              <span className="font-medium text-fg">{status || "unknown"}</span>
+              {systemOwned ? " · system-owned" : ""}
+            </>
+          }
+        />
 
-      {detail.actionError ? <ErrorMessage>{detail.actionError}</ErrorMessage> : null}
-      {detail.actionMessage ? (
-        <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
-          {detail.actionMessage}
-        </p>
-      ) : null}
-
-      <Band title="Publish" meta="point this site at a bundle version">
-        <form onSubmit={submitBundle} className="flex flex-wrap items-end gap-2">
-          <Field
-            label="Bundle"
-            grow
-            hint="A bundleRef VALUE this cluster already has -- 'blob://sites/<id>/<version>/' for an uploaded bundle, or a file:// path baked into the edge image. Uploading the bytes themselves is a CI/CLI action; this only points the row at a version that exists."
-          >
-            <TextInput value={bundleRef} onChange={setBundleRef} placeholder={currentBundleRef} />
-          </Field>
-          <Button type="submit" size="xs" busyLabel="Working…" busy={detail.busy} disabled={bundleRef.trim() === ""}>
-            Publish
-          </Button>
-        </form>
-        <p className="mt-1 text-xs text-subtle">Currently serving {currentBundleRef || "(none set)"}.</p>
-      </Band>
-
-      <Band
-        title="Version history"
-        meta={`the last ${MAX_HISTORY_VERSIONS <= 1 ? "version" : `up to ${MAX_HISTORY_VERSIONS} versions`}`}
-      >
-        {history.loading ? (
-          <Skeleton variant="rows" rows={4} />
-        ) : history.error ? (
-          <ErrorMessage>Could not read version history: {history.error}</ErrorMessage>
-        ) : history.versions.length === 0 ? (
-          <Empty>No version history yet.</Empty>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {history.versions.map((version, index) => (
-              <li
-                key={version.createdAt || index}
-                className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-xs"><DataText kind="id">{version.bundleRef || "(empty)"}</DataText></p>
-                  <p className="text-xs text-subtle">
-                    {version.createdAt}
-                    {index === 0 ? " · current" : ""}
-                  </p>
-                </div>
-                {index === 0 ? null : (
-                  <Button size="xs"
-                    onClick={() => detail.publish(version.bundleRef)}
-                    disabled={detail.busy || version.bundleRef === ""}
-                  >
-                    Roll back to this
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Band>
-
-      <Band title="Status">
-        <div className="flex flex-wrap items-center gap-2">
-          <EnumSelect
-            value={status}
-            onChange={(next) => detail.setStatus(next)}
-            values={SITE_STATUS_VALUES}
-            placeholder="Change status…"
-          />
-          <p className="text-xs text-subtle">
-            draft resolves for nobody; live serves; disabled answers 503 rather than 404.
-          </p>
-        </div>
-      </Band>
-
-      <Band title="Delete">
-        {systemOwned ? (
-          <p className="mb-2 text-sm text-subtle">
-            This site is system-owned -- the platform's own console, re-seeded at boot -- so it
-            cannot be deleted. The cluster refuses this write even if the control below were
-            enabled; an operator cannot brick cluster management by deleting this row.
+        {detail.actionError ? <ErrorMessage>{detail.actionError}</ErrorMessage> : null}
+        {detail.actionMessage ? (
+          <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
+            {detail.actionMessage}
           </p>
         ) : null}
-        <Button
-          size="xs"
-          onClick={() => setConfirmingDelete(true)}
-          disabled={detail.busy || systemOwned}
-          tone="danger"
-        >
-          Delete site
-        </Button>
-      </Band>
 
-      <ConfirmDialog
-        open={confirmingDelete}
-        title="Delete this site?"
-        confirmLabel="Delete site"
-        tone="danger"
-        busy={detail.busy}
-        onConfirm={() => {
-          setConfirmingDelete(false);
-          detail.remove();
-        }}
-        onCancel={() => setConfirmingDelete(false)}
-      >
-        The edge stops answering for <DataText kind="id">{hostname}</DataText> once its resolve
-        cache turns over. Uploaded bundle bytes are not removed by this; re-creating the site at
-        the same hostname and re-publishing a version brings it back.
-      </ConfirmDialog>
-    </section>
+        <Band title="Publish" meta="point this site at a bundle version">
+          {/* Capped on the form, not the page: the bundle field is one input,
+              and the status + delete bands below want the full width. */}
+          <form onSubmit={submitBundle} className="flex max-w-3xl flex-wrap items-end gap-2">
+            <Field
+              label="Bundle"
+              grow
+              hint="A bundleRef VALUE this cluster already has -- 'blob://sites/<id>/<version>/' for an uploaded bundle, or a file:// path baked into the edge image. Uploading the bytes themselves is a CI/CLI action; this only points the row at a version that exists."
+            >
+              <TextInput value={bundleRef} onChange={setBundleRef} placeholder={currentBundleRef} />
+            </Field>
+            <Button type="submit" size="xs" busyLabel="Working…" busy={detail.busy} disabled={bundleRef.trim() === ""}>
+              Publish
+            </Button>
+          </form>
+          <p className="mt-1 text-xs text-subtle">Currently serving {currentBundleRef || "(none set)"}.</p>
+        </Band>
+
+        <Band
+          title="Version history"
+          meta={`the last ${MAX_HISTORY_VERSIONS <= 1 ? "version" : `up to ${MAX_HISTORY_VERSIONS} versions`}`}
+        >
+          {history.loading ? (
+            <Skeleton variant="rows" rows={4} />
+          ) : history.error ? (
+            <ErrorMessage>Could not read version history: {history.error}</ErrorMessage>
+          ) : history.versions.length === 0 ? (
+            <Empty>No version history yet.</Empty>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {history.versions.map((version, index) => (
+                <li
+                  key={version.createdAt || index}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs"><DataText kind="id">{version.bundleRef || "(empty)"}</DataText></p>
+                    <p className="text-xs text-subtle">
+                      {version.createdAt}
+                      {index === 0 ? " · current" : ""}
+                    </p>
+                  </div>
+                  {index === 0 ? null : (
+                    <Button size="xs"
+                      onClick={() => detail.publish(version.bundleRef)}
+                      disabled={detail.busy || version.bundleRef === ""}
+                    >
+                      Roll back to this
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Band>
+
+        <Band title="Status">
+          <div className="flex flex-wrap items-center gap-2">
+            <EnumSelect
+              value={status}
+              onChange={(next) => detail.setStatus(next)}
+              values={SITE_STATUS_VALUES}
+              placeholder="Change status…"
+            />
+            <p className="text-xs text-subtle">
+              draft resolves for nobody; live serves; disabled answers 503 rather than 404.
+            </p>
+          </div>
+        </Band>
+
+        <Band title="Delete">
+          {systemOwned ? (
+            <p className="mb-2 text-sm text-subtle">
+              This site is system-owned -- the platform's own console, re-seeded at boot -- so it
+              cannot be deleted. The cluster refuses this write even if the control below were
+              enabled; an operator cannot brick cluster management by deleting this row.
+            </p>
+          ) : null}
+          <Button
+            size="xs"
+            onClick={() => setConfirmingDelete(true)}
+            disabled={detail.busy || systemOwned}
+            tone="danger"
+          >
+            Delete site
+          </Button>
+        </Band>
+
+        <ConfirmDialog
+          open={confirmingDelete}
+          title="Delete this site?"
+          confirmLabel="Delete site"
+          tone="danger"
+          busy={detail.busy}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            detail.remove();
+          }}
+          onCancel={() => setConfirmingDelete(false)}
+        >
+          The edge stops answering for <DataText kind="id">{hostname}</DataText> once its resolve
+          cache turns over. Uploaded bundle bytes are not removed by this; re-creating the site at
+          the same hostname and re-publishing a version brings it back.
+        </ConfirmDialog>
+      </section>
+    </Container>
   );
 }

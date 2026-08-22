@@ -120,3 +120,32 @@ export function composePortalUrl(cluster: ClusterConfig): string {
   }
   return "";
 }
+
+/**
+ * The portal's own path-segment escaping, mirrored (memql#4252).
+ *
+ * The extension cannot import `clients/portal/src/concepts/urls.ts` -- that is
+ * a browser module, and this is a `vscode` extension host -- so this is a
+ * second copy of ONE rule, tested against the portal's own fixtures rather
+ * than trusted to agree by construction. A colon is a legal URL path-segment
+ * character (RFC 3986 §3.3) and a MemQL id is colon-delimited, so escaping it
+ * would turn every id in a link into a `%3A` thicket nobody recognises;
+ * everything else a segment cannot carry (`/`, spaces, `?`, `#`, a literal
+ * `%`) still gets escaped.
+ */
+export function encodePortalSegment(value: string): string {
+  return encodeURIComponent(value).replace(/%3A/g, ":");
+}
+
+/**
+ * The portal's concept-rows page for one concept, under the root `portalTarget`
+ * found.
+ *
+ * `conceptId` is a `CatalogConstruct.name` for a `kind === "concept"` row --
+ * the catalog's name for a concept IS its id (`v1:cognition:space`), so
+ * nothing here looks it up or translates it.
+ */
+export function portalConceptUrl(root: string, conceptId: string): string {
+  const base = root.endsWith("/") ? root : `${root}/`;
+  return `${base}concepts/${encodePortalSegment(conceptId)}`;
+}

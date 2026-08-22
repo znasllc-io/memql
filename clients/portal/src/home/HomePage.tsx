@@ -7,11 +7,17 @@ import { useDeployConsole } from "../deploy/useDeployConsole";
 import { Band, Container, DataText, PageHeader, Skeleton } from "../ui";
 import { payloadOf, useConceptTile, type HomeTileState } from "./useHomeTiles";
 
-// The console home (memql#4182): "is my cluster healthy and what changed",
-// answerable in five seconds. It is a ROUTER, not a dashboard-for-its-own-
-// sake -- every tile is a door into its full surface, the numbers are the
-// display-face moment (the one place Squada One carries data), and there is
-// no charting here beyond what the surfaces themselves already render.
+// The console (memql#4182, memql#4263): "is my cluster healthy and what
+// changed", answerable in five seconds. It is a ROUTER, not a
+// dashboard-for-its-own-sake -- every tile is a door into its full surface,
+// the numbers are the display-face moment (the one place Squada One carries
+// data), and there is no charting here beyond what the surfaces themselves
+// already render.
+//
+// The tiles are one per POPULATION the rail offers -- people, agents,
+// customers, sites -- plus the two that TICK: deployments and the audit trail.
+// Customers was missing while being one of the five predefined views, which is
+// exactly the kind of gap a console exists to close.
 //
 // Deploy facts (engine version, sync) come from the deploy console and are
 // admin/owner reads; below that role the header simply states the host and
@@ -25,13 +31,15 @@ export function HomePage(): ReactNode {
 
   const people = useConceptTile("v1:identity:user", false, 0);
   const agents = useConceptTile("v1:agents:agent", false, 0);
+  const customers = useConceptTile("v1:identity:account", false, 0);
+  const sites = useConceptTile("v1:platform:site", false, 0);
   const deployments = useConceptTile("v1:cluster:deployment", true, 3);
   // The audit trail is the tile that TICKS: security-relevant events land
   // here live, which is the reason an operator glances at a console at all.
   const audit = useConceptTile("v1:identity:auditEvent", true, 5);
 
   return (
-    <Container variant="data">
+    <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
           title="Console"
@@ -51,17 +59,19 @@ export function HomePage(): ReactNode {
           }
         />
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <NumberTile label="people" to="/views/people" tile={people} />
           <NumberTile label="agents" to="/views/agents" tile={agents} />
-          <NumberTile label="deployments" to="/cluster-ops" tile={deployments} />
+          <NumberTile label="customers" to="/views/customers" tile={customers} />
+          <NumberTile label="sites" to="/sites" tile={sites} />
+          <NumberTile label="deployments" to="/views/deployments" tile={deployments} />
           <NumberTile label="audit events" to="/views/audit" tile={audit} live />
         </div>
 
         <Band title="Recent deployments" meta="live">
           <RecentList
             tile={deployments}
-            to="/cluster-ops"
+            to="/views/deployments"
             renderRow={(row) => {
               const p = payloadOf(row);
               return (
@@ -102,6 +112,11 @@ export function HomePage(): ReactNode {
 
 // The big-number moment. font-display/text-display is Squada One, reserved
 // for the wordmark and exactly this surface (ui/README type scale).
+//
+// The number is EXACT -- the engine counts server-side under the caller's own
+// authz. A tile that could not read renders an em dash and its reason: nothing
+// here fabricates a number, and "0" would be a claim this surface is not
+// entitled to make.
 function NumberTile({
   label,
   to,
@@ -123,7 +138,7 @@ function NumberTile({
       ) : (
         <>
           <div className="font-display text-display leading-none text-fg">
-            {tile.error !== "" ? "—" : `${tile.count}${tile.more ? "+" : ""}`}
+            {tile.error !== "" ? "—" : tile.count}
           </div>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted">
             <span className="uppercase tracking-wide">{label}</span>
@@ -131,8 +146,6 @@ function NumberTile({
           </div>
           {tile.error !== "" ? (
             <p className="mt-1 text-xs text-subtle">could not read: {tile.error}</p>
-          ) : tile.more ? (
-            <p className="mt-1 text-xs text-subtle">first page loaded; open for the rest</p>
           ) : null}
         </>
       )}

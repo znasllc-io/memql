@@ -16,6 +16,34 @@ copied layout primitives.
 | data | `font-mono` via `DataText` (number/string tints, id, time) | graph values only, never chrome |
 | display | `font-display text-display` | Squada One: wordmark + big-number moments only |
 
+## The page frame
+
+**Every routed page renders its body inside `<Container>`.** There is one
+content width -- the full width of the shell's main area, with the shell's
+gutter -- and a page, pane, frame or view never sets `max-w-*`, `mx-auto` or a
+fixed width on its own root.
+
+Measure belongs to CONTENT, never to the frame:
+
+- a paragraph caps its own line length (`max-w-prose` on the `<p>`),
+- a form caps its own field width (`max-w-3xl` on the `<form>`),
+- an `EmptyState` centres itself.
+
+That distinction is what lets one page carry both a form that wants a short
+measure and a table that wants every pixel. Capping the PAGE gets the table
+wrong to make the form right.
+
+The two full-viewport cards -- `SignInPage` and `AuthCallbackPage` -- render
+outside the shell and are the only exceptions. `Dialog` and the row-detail
+aside are components with their own widths, not page frames.
+
+**Why a rule and not taste.** Before memql#4262 six page roots hand-rolled
+their own width and the rest did not, so the column jumped as an operator moved
+between sections: Concepts and Integrations at `max-w-5xl`, campaign editing at
+`3xl`, Sites full width but its own detail page at `3xl`. Every one of those was
+a reasonable local choice. `portal_page_frame_test.go` at the repo root now
+fails the build on a width token in a page root.
+
 ## Composition rules
 
 - Buttons: `Button` -- tones primary / quiet / danger, sizes sm / xs. One

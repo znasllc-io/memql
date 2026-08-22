@@ -70,6 +70,51 @@ const (
 // `docker-local` provider with a pointer to `make up`.
 var overlayDir = filepath.Join("deploy", "k8s", "overlays", "cloud")
 
+// The two reasons an overlay read finds nothing, as machine-readable prefixes
+// the portal branches on. They are DIFFERENT situations wanting different
+// words, and a caller cannot tell them apart from an ENOENT:
+//
+//	local_cluster        this cluster is not a deploy target at all. Local
+//	                     installations are operated with `make up` (k3d +
+//	                     ArgoCD); driver.go has refused `docker-local` deploys
+//	                     since the console was written, but nothing set the
+//	                     provider on the local overlay, so that deliberate
+//	                     refusal was unreachable and an operator got an ENOENT
+//	                     instead of the sentence explaining it.
+//
+//	no_overlay_checkout  this node has no deploy checkout on disk. The console
+//	                     was designed around one (MEMQL_DEPLOY_REPO_ROOT, see
+//	                     the deploy-bundle runbook) back when it ran from an
+//	                     operator's machine; when it moved into the identity
+//	                     node the convention did not move with it, and no
+//	                     manifest sets the variable. Where an in-cluster node
+//	                     SHOULD get an overlay is an open design question --
+//	                     this constant is how the surface stays honest until it
+//	                     is answered.
+const (
+	ReasonLocalCluster      = "local_cluster"
+	ReasonNoOverlayCheckout = "no_overlay_checkout"
+
+	// providerDockerLocal is the value the local overlay stamps on
+	// MEMQL_DEPLOY_PROVIDER. driver.go refuses deploys for it; this is the
+	// READ side saying the same thing.
+	providerDockerLocal = "docker-local"
+)
+
+// noOverlayReason names which of the two situations this node is in, and says
+// it in a sentence an operator can act on. The machine-readable prefix comes
+// first so a client can branch without parsing prose.
+func (s *Service) noOverlayReason() string {
+	if deploymentProvider() == providerDockerLocal {
+		return ReasonLocalCluster + ": this is a local cluster, which is operated with `make up` " +
+			"(k3d + ArgoCD) rather than through the deploy console. There is no overlay to read " +
+			"and nothing here to deploy."
+	}
+	return ReasonNoOverlayCheckout + ": this node has no deploy checkout on disk, so what is " +
+		"pinned cannot be read. The console reads " + overlayDir + "/kustomization.yaml under " +
+		"MEMQL_DEPLOY_REPO_ROOT, which is unset here."
+}
+
 // Options configures NewService.
 type Options struct {
 	// Logger is required.
@@ -445,9 +490,20 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, _ *memqlv1.GetDeploym
 	out := &memqlv1.DeploymentStatus{}
 
 	// Overlay (on-disk image authority) -> components + promoted version.
+	//
+	// A MISSING overlay is a PRECONDITION, not an internal error (memql#4265).
+	// It says something true and actionable about how this node is deployed --
+	// it has no deploy checkout -- and a caller that knows which of the two
+	// cases it is can say so instead of rendering a file path at an operator.
+	// Returning Internal here made the portal print an ENOENT and then claim
+	// "Nothing is pinned in the overlay", which reads as "nothing is deployed"
+	// and is false.
 	overlayPath := filepath.Join(s.repoRoot, overlayDir, "kustomization.yaml")
 	overlayRaw, err := os.ReadFile(overlayPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, status.Error(codes.FailedPrecondition, s.noOverlayReason())
+		}
 		return nil, status.Errorf(codes.Internal, "deploy console: read overlay %s: %v", overlayPath, err)
 	}
 	overlay, err := ParseOverlay(overlayRaw)

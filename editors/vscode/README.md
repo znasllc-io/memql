@@ -275,6 +275,28 @@ would be a second authoring path for something that already has one.
 
 Full rationale: [the Constructs view design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-constructs-view-design.md).
 
+## Open from the portal
+
+The portal's concept page has **Open definition in VS Code**. It is a link of
+one shape:
+
+    vscode://znasllc.memql/open?v=1&cluster=<domain>&kind=<kind>&name=<registry key>
+
+and this extension handles it in four steps: match `cluster` against the
+domains in `clusters.yaml`, select and connect that cluster (the same sign-in
+you would get from the tree), find the construct in its catalog, and open it
+where it is -- the file in your workspace, revealed at its signature; the local
+cluster's checkout, if you have none of it open; a read-only document served
+from the cluster, when the file is not on this machine; or the construct's
+detail page, when it was promoted and has no file.
+
+**A link may select a registered cluster, connect it, and open a document. It
+may never add a cluster, sign in silently, run anything, or write settings.**
+An unregistered domain gets an offer to add it through the ordinary prompts;
+a malformed link is refused and the refusal names the field. VS Code's own
+"allow this extension to open the URI" prompt is the consent gate; there is no
+second one.
+
 ## Training: what the cluster knows about the file you are editing
 
 The Constructs view answers *what is loaded on this cluster*. Training answers

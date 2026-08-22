@@ -39,11 +39,28 @@ process.env.HOME = home;
 // the real PATH entries.
 process.env.PATH = '';
 
+// registerRuntimeSurface takes a parked portal handoff out of globalState on
+// its way in (memql#4251), so the fake context has to model one. In-memory and
+// empty: this lane is about activation ORDER, and a replay would drag a uri
+// handler's whole decision into a test about which surface came up first.
+const globalState = {
+  store: new Map<string, unknown>(),
+  get<T>(key: string): T | undefined {
+    return globalState.store.get(key) as T | undefined;
+  },
+  update(key: string, value: unknown): Promise<void> {
+    if (value === undefined) globalState.store.delete(key);
+    else globalState.store.set(key, value);
+    return Promise.resolve();
+  },
+};
+
 // asAbsolutePath points into an empty directory, so the bundled-binary
 // candidate (bin/<platform>-<arch>/memql-lsp) does not exist either.
 const context = {
   subscriptions: [] as { dispose(): unknown }[],
   asAbsolutePath: (relative: string) => path.join(home, 'extension', relative),
+  globalState,
 } as unknown as ExtensionContext;
 
 // ACTIVATION HAPPENS ONCE, HERE. registerRuntimeSurface guards on module state
@@ -92,6 +109,42 @@ test('the runtime commands are registered, so a cluster can be selected and conn
   ]) {
     assert.ok(recorded.commands.includes(id), `${id} was not registered`);
   }
+});
+
+test('a portal link can activate the extension, and reaches a handler when it does', () => {
+  // memql#4251 -- two halves of one premise, both invisible to every other test.
+  //
+  // `onUri` is what starts the extension when an operator clicks a portal link.
+  // `workspaceContains:**/*.memql` is what starts it in the window that OPENING
+  // THE CHECKOUT just produced: the handoff parks its request in globalState and
+  // replays it from activation, so without this entry a freshly-opened checkout
+  // waits for the operator to open a .memql file or click into the MemQL view,
+  // and the parked request silently expires after its two-minute TTL if they do
+  // neither. package.json is strict JSON and cannot carry that reasoning, so it
+  // lives here, next to the assertion that keeps the entry.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')
+  ) as { activationEvents?: string[] };
+  for (const event of ['onUri', 'workspaceContains:**/*.memql']) {
+    assert.ok(
+      manifest.activationEvents?.includes(event),
+      `${event} is not in activationEvents: ${JSON.stringify(manifest.activationEvents)}`
+    );
+  }
+
+  // And the handler is there the moment activate() returns. The untrusted half
+  // of this claim is asserted in activationGates.test.ts, which is the window
+  // where it could plausibly have been skipped.
+  assert.equal(recorded.uriHandlers, 1);
+});
+
+test('the memql-cluster scheme is claimed, so a cluster document has something to open with', () => {
+  // memql#4248. A `memql-cluster:` uri with no registered content provider does
+  // not fail loudly -- openTextDocument rejects with "cannot open", which reads
+  // as the DOCUMENT being broken rather than as the registration being absent.
+  // The host lane opens one for real, but that lane does not run in CI, so this
+  // is the guard that travels with every pull request.
+  assert.deepEqual(recorded.contentProviderSchemes, ['memql-cluster']);
 });
 
 test('every file the trees read is watched, so an external edit refreshes them', () => {

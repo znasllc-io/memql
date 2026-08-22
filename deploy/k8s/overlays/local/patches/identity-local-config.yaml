@@ -42,3 +42,19 @@ spec:
             # (Tiger Cloud staging has a pre-existing schema; local does not).
             - name: MEMORY_NODES_DATABASE_MIGRATE_ON_START
               value: "true"
+            # This installation is not a deploy target (memql#4265).
+            #
+            # component/deploycontrol/driver.go has refused `docker-local`
+            # deploys since the console was written -- local clusters are
+            # operated with `make up` (k3d + ArgoCD) -- but nothing ever SET
+            # the provider here, and deploymentProvider() defaults to "azure".
+            # So that deliberate refusal was unreachable: a local operator
+            # opening Deployments got an ENOENT on a cloud overlay path
+            # instead of the sentence explaining why there is nothing to
+            # deploy.
+            #
+            # A VALUE in an overlay, which is what overlays are for. It
+            # introduces no environment branch -- `provider` is the deploy
+            # TARGET axis the design already carries.
+            - name: MEMQL_DEPLOY_PROVIDER
+              value: "docker-local"

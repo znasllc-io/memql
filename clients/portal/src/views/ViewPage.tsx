@@ -1,13 +1,17 @@
 import { useCallback, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
+
 import { useCluster } from "../cluster/ClusterProvider";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
+import { PersonActions } from "../people/PersonActions";
+import { useAdminAccess } from "../admin/useAdminConsole";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton } from "../ui";
-import { conceptPath } from "../concepts/urls";
+import { Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { conceptPath, conceptsPath } from "../concepts/urls";
 import { AgentsView } from "./AgentsView";
 import { AuditView } from "./AuditView";
 import { CustomersView } from "./CustomersView";
@@ -39,6 +43,7 @@ const BODIES: Readonly<Record<string, (props: ViewProps) => ReactNode>> = {
 };
 
 export function ViewPage(): ReactNode {
+  const { canAdminister } = useAdminAccess();
   const { viewId = "", rowId = "" } = useParams<{ viewId: string; rowId: string }>();
   const { status } = useCluster();
   const navigate = useNavigate();
@@ -62,13 +67,24 @@ export function ViewPage(): ReactNode {
 
   if (view === undefined) {
     return (
-      <section className="mx-auto max-w-2xl">
-        <h1 className="text-xl font-semibold tracking-tight">No such view</h1>
-        <p className="mt-2 text-sm text-muted">
-          The portal has no view called “{viewId}”. Views are a fixed set; every
-          other concept is browsable in the registry.
-        </p>
-      </section>
+      <Container>
+        <section className="flex flex-col gap-6">
+          <PageHeader title="No such view" />
+          <EmptyState
+            statement={
+              <>
+                The portal has no view called “{viewId}”. The predefined views are
+                a fixed set; every other concept is browsable in the registry.
+              </>
+            }
+            action={
+              <Link to={conceptsPath()} className="text-sm text-accent hover:underline">
+                Browse the concept registry
+              </Link>
+            }
+          />
+        </section>
+      </Container>
     );
   }
 
@@ -124,6 +140,13 @@ export function ViewPage(): ReactNode {
         loading={detail.loading}
         error={detail.error}
         missing={detail.missing}
+        {...(view.id === "people" && canAdminister && detail.row !== null
+          ? {
+              actions: (
+                <PersonActions person={detail.row as Row} onChanged={data.retry} />
+              ),
+            }
+          : {})}
       />
     </ViewFrame>
   );
@@ -138,20 +161,28 @@ export function ViewPage(): ReactNode {
 // an empty page that reads as "you have no customers".
 function MissingConcept({ view }: { view: ViewDefinition }): ReactNode {
   return (
-    <section className="mx-auto max-w-2xl">
-      <h1 className="text-xl font-semibold tracking-tight">{view.title}</h1>
-      <p className="mt-2 text-sm text-muted">
-        This cluster publishes no concept called{" "}
-        <code className="font-mono break-all">{view.conceptId}</code>, so there is
-        nothing for this view to show. The node may not mount the bundle that
-        declares it.
-      </p>
-      <Link
-        to={conceptPath(view.conceptId)}
-        className="mt-4 inline-block text-sm text-accent hover:underline"
-      >
-        Look it up in the registry
-      </Link>
-    </section>
+    <Container>
+      <section className="flex flex-col gap-6">
+        <PageHeader title={view.title} />
+        <EmptyState
+          statement={
+            <>
+              This cluster publishes no concept called{" "}
+              <code className="font-mono break-all">{view.conceptId}</code>, so
+              there is nothing for this view to show. The node may not mount the
+              bundle that declares it.
+            </>
+          }
+          action={
+            <Link
+              to={conceptPath(view.conceptId)}
+              className="text-sm text-accent hover:underline"
+            >
+              Look it up in the registry
+            </Link>
+          }
+        />
+      </section>
+    </Container>
   );
 }

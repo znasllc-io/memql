@@ -1,185 +1,35 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { useConcepts } from "../cluster/useConcepts";
-import { ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, ConfirmDialog, DataText, Field as UiField, Select, TextInput } from "../ui";
-import { ViewElement } from "../views/ViewElement";
-import { AdminFrame, Reading, Refused } from "./AdminLayout";
-import { surfaceById } from "./urls";
-import { useAdminAccess, useAdminWrites, usePeople, type WriteState } from "./useAdminConsole";
-import { WriteOutcome } from "./WriteOutcome";
+import { useAdminWrites, type WriteState } from "../admin/useAdminConsole";
+import { WriteOutcome } from "../admin/WriteOutcome";
 
-const PERSON_CONCEPT_ID = "v1:identity:user";
-
-// The people an operator ADMINISTERS -- the absorbed /admin/users list and
-// /admin/users/detail (memql#3324).
+// The per-person CHANGE surface.
 //
-// ===========================================================================
-// WHY THIS AND THE People VIEW BOTH EXIST
-// ===========================================================================
-// They answer different questions and deliberately do not merge.
+// # Why this is not in src/admin/ any more (memql#4264)
 //
-// /views/people is the POPULATION: who is in the organisation, how the roles
-// divide, who has a session open. It is one of the five predefined views, it
-// composes only elements, and it is readable by anyone the cluster shows rows
-// to. It has no controls, and adding them there would put an owner-only write
-// inside a screen whose whole contract is "a layout choice over rows".
+// It used to be the bottom half of an /admin/people page that also listed
+// everyone -- which meant People existed twice in the portal: once as the
+// population under "Operate" and again as the change surface under
+// "Administer", with the "By role" band rendering on both (and a third time on
+// the admin overview). An operator looking for a person had two doors and no
+// way to know which one they wanted.
 //
-// This is the CHANGE surface: one person at a time, and the four things an
-// owner or admin may do to them. The list here exists only to pick that
-// person, which is why it is a bare table rather than a second designed view.
+// The LIST was always the People view's job. What was genuinely only here is
+// this: the four things an owner or admin does TO one person. So it moved to
+// where a person is already selected -- the view's row detail -- and the
+// duplicate surface went away.
 //
-// ===========================================================================
-// THE CONTROLS BELOW ARE NOT THE GATE
-// ===========================================================================
-// Every write goes through IdentityAdminClient and is refused server-side for
-// a caller below owner/admin, in component/identity/adminops, against the role
-// the stream interceptor verified -- with an `admin_auth_forbidden` audit
-// event whose id comes back on the refusal. This page hides its controls from
-// a caller it can already tell will be refused, which saves an operator a
-// pointless round trip and teaches them who can; it decides nothing.
-export function PeoplePage(): ReactNode {
-  const surface = surfaceById("people");
-  const { role, canAdminister, resolved } = useAdminAccess();
-  const people = usePeople(canAdminister);
-  const writes = useAdminWrites();
-  const { concepts } = useConcepts();
-  const personConcept = concepts.find((c) => c.id === PERSON_CONCEPT_ID);
-
-  // The selection lives in the URL so an operator can hand a colleague a link
-  // to the person they are talking about, exactly as the predefined views do
-  // with their row detail.
-  const [params, setParams] = useSearchParams();
-  const selectedId = params.get("person") ?? "";
-  const select = (rowId: string) => {
-    const next = new URLSearchParams(params);
-    if (rowId === "" || rowId === selectedId) next.delete("person");
-    else next.set("person", rowId);
-    setParams(next, { replace: true });
-  };
-
-  if (surface === undefined) return null;
-  if (!canAdminister) {
-    return (
-      <AdminFrame surface={surface} role={role} resolved={resolved}>
-        <Refused role={role} resolved={resolved} />
-      </AdminFrame>
-    );
-  }
-
-  // From the rows already read rather than a second query. `searchUsers`
-  // returns deactivated people too (the console omits its `active` argument on
-  // purpose), and the by-id read that would otherwise serve this -- `userById`
-  // -- filters on isActiveRecord, so a suspended account would vanish from the
-  // one screen that exists to reinstate it.
-  const selected = people.data.find((row) => rowId(row) === selectedId);
-  const suspended = people.data.filter((row) => row["active"] === false).length;
-  const admins = people.data.filter(
-    (row) => row["role"] === "owner" || row["role"] === "admin",
-  ).length;
-
-  return (
-    <AdminFrame
-      surface={surface}
-      role={role}
-      resolved={resolved}
-      actions={<Button size="xs" onClick={people.reload}>Refresh</Button>}
-    >
-      <Band>
-        <div className="flex flex-wrap gap-2">
-          <Reading
-            label="People"
-            value={people.loading ? "…" : String(people.data.length)}
-            sub="active and suspended"
-          />
-          <Reading
-            label="Owners and admins"
-            value={people.loading ? "…" : String(admins)}
-            sub="everyone who can reach this console"
-          />
-          <Reading
-            label="Suspended"
-            value={people.loading ? "…" : String(suspended)}
-            sub="cannot sign in"
-          />
-        </div>
-        {people.error === "" ? null : (
-          <div className="mt-3">
-            <ErrorMessage>Could not read the people list: {people.error}</ErrorMessage>
-          </div>
-        )}
-        <WriteOutcome state={writes} />
-      </Band>
-
-      <Band title="By role" meta="Cluster-wide role, not per-partition grants">
-        {personConcept === undefined ? (
-          <p className="text-sm text-subtle">
-            This node does not publish the user concept, so the role split cannot
-            be drawn.
-          </p>
-        ) : (
-          <ViewElement
-            element={PROPORTION_BAR_ELEMENT}
-            rows={people.data}
-            concept={personConcept}
-            options={{ bindings: { category: "role", value: [] } }}
-          />
-        )}
-      </Band>
-
-      <Band title="Everyone" meta="Pick a person to change them" panel>
-        {personConcept === undefined ? (
-          <p className="p-3 text-sm text-subtle">
-            This node does not publish the user concept.
-          </p>
-        ) : people.data.length === 0 ? (
-          <p className="p-3 text-sm text-subtle">
-            {people.loading ? "Reading people…" : "Nobody can sign in to this cluster yet."}
-          </p>
-        ) : (
-          <ViewElement
-            element={TABLE_ELEMENT}
-            rows={people.data}
-            concept={personConcept}
-            options={{
-              ...(selectedId === "" ? {} : { selectedRowId: selectedId }),
-              bindings: {
-                column: ["displayName", "primaryEmail", "role", "active", "lastSeenAt"],
-              },
-              sort: { field: "displayName", direction: "asc" },
-            }}
-            onSelect={select}
-          />
-        )}
-      </Band>
-
-      {selected === undefined ? (
-        <p className="text-sm text-subtle">
-          Nobody is selected. The whole population, with the sessions open in
-          their name, is in the{" "}
-          <Link to="/views/people" className="underline hover:text-fg">
-            People view
-          </Link>
-          .
-        </p>
-      ) : (
-        <PersonDetail person={selected} writes={writes} onChanged={people.reload} />
-      )}
-    </AdminFrame>
-  );
-}
-
-function rowId(row: Row): string {
-  return typeof row["id"] === "string" ? row["id"] : "";
-}
-
-function field(row: Row, key: string): string {
-  const v = row[key];
-  return typeof v === "string" ? v : "";
-}
+// # Why it is not in src/views/ either
+//
+// portal_view_composition_test.go forbids row markup and iteration inside
+// src/views/, and these forms iterate a role list and a TTL list. The guard is
+// right to forbid that there: a designed view reaching past the element library
+// is how the library stops being the thing that makes a new concept work for
+// free. So the actions live in their own directory and ViewLayout renders them
+// as an opaque child -- which is also what keeps them usable from anywhere else
+// a person is in hand.
 
 // The three changes an operator makes to one person, as three separate forms.
 //
@@ -189,6 +39,38 @@ function field(row: Row, key: string): string {
 // owner, and a single "Save" button would let one be done by accident while
 // intending the other. The retired console split them the same way, for the
 // same reason.
+function rowId(row: Row): string {
+  return typeof row["id"] === "string" ? row["id"] : "";
+}
+
+function field(row: Row, key: string): string {
+  const v = row[key];
+  return typeof v === "string" ? v : "";
+}
+
+// The entry point. Takes the row the surrounding surface already has, so it
+// makes no read of its own -- the caller owns the population and this owns the
+// verbs.
+export function PersonActions({
+  person,
+  onChanged,
+}: {
+  person: Row;
+  onChanged: () => void;
+}): ReactNode {
+  const writes = useAdminWrites();
+  return (
+    <>
+      <PersonDetail person={person} writes={writes} onChanged={onChanged} />
+      {/* The outcome of the last write, either way -- and the audit id it
+          recorded, which is present on a REFUSAL too. An operator arguing
+          about a denial needs its id, so this renders below the forms rather
+          than inside whichever one fired. */}
+      <WriteOutcome state={writes} />
+    </>
+  );
+}
+
 function PersonDetail({
   person,
   writes,

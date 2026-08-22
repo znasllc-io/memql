@@ -37,7 +37,10 @@ func (s *Service) SuggestNextVersion(ctx context.Context, _ *memqlv1.SuggestNext
 		return nil, err
 	}
 
-	current, _, source := s.currentVersion(ctx)
+	current, _, source, err := s.currentVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Base the proposals on the current version, or on 0.0.0 when no
 	// current version is known (so the suggestions are still useful for a
@@ -100,7 +103,10 @@ func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest
 
 	// Resolve the target version + the set of versions already taken (the
 	// duplicate guard).
-	current, taken, source := s.currentVersion(ctx)
+	current, taken, source, err := s.currentVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var target string
 	if explicit != "" {
 		v, _ := parseSemver(explicit) // already validated above
@@ -164,7 +170,12 @@ func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest
 // overlay's promoted version. taken collects EVERY stored version (any status)
 // so an in-flight pending/in_progress cut still blocks a re-cut. source is one
 // of "deployment" / "overlay" / "none".
-func (s *Service) currentVersion(ctx context.Context) (current string, taken map[string]bool, source string) {
+// currentVersion answers "what is the highest version this installation knows".
+//
+// The overlay is the FALLBACK, consulted only when no deployment row carries a
+// version. A node with no deploy checkout returns the error rather than
+// pretending the answer is "none" -- see overlayPromotedVersion (memql#4265).
+func (s *Service) currentVersion(ctx context.Context) (current string, taken map[string]bool, source string, err error) {
 	taken = map[string]bool{}
 
 	var best semver
@@ -203,27 +214,45 @@ func (s *Service) currentVersion(ctx context.Context) (current string, taken map
 		}
 	}
 	if haveBest {
-		return best.String(), taken, "deployment"
+		return best.String(), taken, "deployment", nil
 	}
-	if v := s.overlayPromotedVersion(); v != "" {
-		return v, taken, "overlay"
+	v, overlayErr := s.overlayPromotedVersion()
+	if overlayErr != nil {
+		return "", taken, "", overlayErr
 	}
-	return "", taken, "none"
+	if v != "" {
+		return v, taken, "overlay", nil
+	}
+	return "", taken, "none", nil
 }
 
 // overlayPromotedVersion reads the on-disk kustomization overlay and returns
-// its promoted version (empty when absent / unparseable / unpromoted).
-func (s *Service) overlayPromotedVersion() string {
+// its promoted version.
+//
+// AN ABSENT OVERLAY IS AN ERROR HERE, not an empty string (memql#4265). It
+// used to return "" for every failure alike, which conflated three different
+// facts -- "nothing is promoted yet", "the file is unparseable", and "this node
+// has no deploy checkout at all" -- and let a cut proceed from an empty
+// promoted version on a node that could not read the overlay in the first
+// place. GetDeploymentStatus surfaces the same condition as a typed
+// precondition; this is the write side refusing rather than guessing.
+//
+// An overlay that EXISTS and promotes nothing still yields "" with no error:
+// that one genuinely is "nothing is promoted yet".
+func (s *Service) overlayPromotedVersion() (string, error) {
 	overlayPath := filepath.Join(s.repoRoot, overlayDir, "kustomization.yaml")
 	raw, err := os.ReadFile(overlayPath)
 	if err != nil {
-		return ""
+		if os.IsNotExist(err) {
+			return "", status.Error(codes.FailedPrecondition, s.noOverlayReason())
+		}
+		return "", status.Errorf(codes.Internal, "deploy console: read overlay %s: %v", overlayPath, err)
 	}
 	overlay, err := ParseOverlay(raw)
 	if err != nil {
-		return ""
+		return "", status.Errorf(codes.Internal, "deploy console: %v", err)
 	}
-	return overlay.PromotedVersion
+	return overlay.PromotedVersion, nil
 }
 
 // createPendingDeployment writes a new v1:cluster:deployment row in the

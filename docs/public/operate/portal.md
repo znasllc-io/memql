@@ -330,20 +330,33 @@ routes carry no mount prefix.)
 
 | Surface | Address | What it answers |
 |---|---|---|
-| Overview | `/admin` | How many people can sign in, how they divide by role, how a new person gets an account, which key is signing, and what has happened recently. |
-| People | `/admin/people` | Who can sign in, and the changes an owner or admin may make to one of them: profile, cluster role, suspension. |
 | Sessions and tokens | `/admin/tokens` | Every personal access token issued against the cluster and who holds it, plus every node credential; revoke either. |
 | Signing keys | `/admin/keys` | The Ed25519 keys the cluster publishes, which one is signing, whether an overlap window is open, and when it last rotated. |
 | Cluster settings | `/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and the form that changes them. |
 
-The audit trail and deployments are **not** here: they are populations, and
-they live in the predefined views at `/views/audit` and
-`/views/deployments`. Neither is the People *population*
-(`/views/people`) -- that view answers "who is in this organisation and
-who is signed in", carries no controls, and composes only view-kit elements.
-`/admin/people` is the CHANGE surface, one person at a time. Putting an
-owner-only write inside a predefined view would break the contract that makes
-those views work for a concept nobody has designed for.
+Two surfaces that used to be here retired in memql#4264, and both redirect
+rather than 404 -- an operator with either bookmarked did nothing wrong:
+
+- **`/admin` (Overview)** answered the same question as the console at `/`,
+  with the same tiles and the same "By role" band. It now sends you there. The
+  readings it carried that the console does not -- which key is signing, when
+  it last rotated, the registration policy -- are on Signing keys and Cluster
+  settings, where they were already rendered.
+- **`/admin/people`** was the CHANGE surface for one person, beside a People
+  *view* listing the same population. The list was always the view's job, so
+  the four things an owner or admin does to a person -- profile, cluster role,
+  suspension, enrolment link -- moved onto that view's row detail, and
+  `/admin/people` sends you to `/views/people`.
+
+Putting those verbs on the view does not break the contract that makes the
+predefined views work for a concept nobody designed for: the view BODY still
+composes only view-kit elements, and the actions render in the row dialog from
+`src/people/PersonActions.tsx`, outside `src/views/`. The guard that forbids
+row markup and iteration inside a view is untouched.
+
+The audit trail and deployments are **not** here either: they are populations,
+and they live in the predefined views at `/views/audit` and
+`/views/deployments`.
 
 ### The gate is the cluster's, on both halves
 

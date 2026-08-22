@@ -8,3 +8,4 @@ export * as ai from "./ai/index.js";
 export * as automation from "./automation/index.js";
 export * as tools from "./tools/index.js";
 export * as voice from "./voice/index.js";
+export * as pack from "./pack/index.js";

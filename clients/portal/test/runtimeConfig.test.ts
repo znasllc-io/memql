@@ -39,12 +39,14 @@ describe("normalizeRuntimeConfig", () => {
         identityApiBaseUrl: "https://identity.example.com",
         oauthClientId: "portal",
         authEnabled: true,
+        domain: "example.com",
       }),
     ).toEqual({
       identityUrl: "https://identity.example.com",
       identityApiBaseUrl: "https://identity.example.com",
       oauthClientId: "portal",
       authEnabled: true,
+      domain: "example.com",
     });
   });
 
@@ -69,6 +71,26 @@ describe("normalizeRuntimeConfig", () => {
     }) as unknown as Record<string, unknown>;
     expect(cfg.clusters).toBeUndefined();
     expect(cfg.identityUrl).toBe("https://identity.example.com");
+  });
+
+  it("reads the domain, and defaults it to empty when an older node omits it", () => {
+    expect(
+      normalizeRuntimeConfig({
+        identityUrl: "https://identity.acme.example.com",
+        identityApiBaseUrl: "",
+        oauthClientId: "portal",
+        authEnabled: true,
+        domain: "acme.example.com",
+      }).domain,
+    ).toBe("acme.example.com");
+    expect(
+      normalizeRuntimeConfig({
+        identityUrl: "https://identity.acme.example.com",
+        identityApiBaseUrl: "",
+        oauthClientId: "portal",
+        authEnabled: true,
+      }).domain,
+    ).toBe("");
   });
 });
 
@@ -123,6 +145,7 @@ describe("isRuntimeConfigReady", () => {
         identityApiBaseUrl: "",
         oauthClientId: "portal",
         authEnabled: true,
+        domain: "memql.localhost",
       }),
     ).toBe(true);
   });
