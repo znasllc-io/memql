@@ -71,16 +71,26 @@ export function LabelChips({
         </Badge>
       ))}
       {readOnly ? null : (
+        // The placeholder is the ONLY visible affordance for an Enter-only
+        // add path, so it has to name the key, not just describe the field
+        // ("Add a label" alone left a typed label with no visible way to
+        // tell it commits). w-48 borrows Field.tsx's own `grow` minimum
+        // (min-w-48) rather than inventing a new width -- wide enough that
+        // the longer placeholder is readable and a realistic label
+        // ("customer-onboarding-v2") doesn't scroll out of view while it's
+        // being typed. Fixed rather than w-full/flex-1: this row wraps a
+        // mix of small chips, and a growing input would swing width
+        // unpredictably with how many chips preceded it on the line.
         <label className="inline-flex">
           <span className="sr-only">Add a label</span>
           <input
             type="text"
             value={draft}
             disabled={busy}
-            placeholder="Add a label"
+            placeholder="Add a label, press Enter"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-28 rounded border border-line bg-surface px-2 py-1 text-xs text-fg placeholder:text-subtle disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-48 rounded border border-line bg-surface px-2 py-1 text-xs text-fg placeholder:text-subtle disabled:cursor-not-allowed disabled:opacity-40"
           />
         </label>
       )}

@@ -77,4 +77,13 @@ describe("LabelChips", () => {
     const input = screen.getByLabelText("Add a label") as HTMLInputElement;
     expect(input.disabled).toBe(true);
   });
+
+  it("names the Enter key in the add input's placeholder", () => {
+    // The add path is Enter-only and this placeholder is its only visible
+    // affordance -- a regression here would leave a typed label with no
+    // visible way to tell it commits (fix round 1, review finding).
+    render(<LabelChips labels={[]} onAdd={() => {}} onRemove={() => {}} />);
+    const input = screen.getByLabelText("Add a label") as HTMLInputElement;
+    expect(input.placeholder.toLowerCase()).toContain("enter");
+  });
 });
