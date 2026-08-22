@@ -196,10 +196,10 @@ func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 		"id":                  settingsId,
 		"registrationMode":    "open",
 		"internalDefaultRole": "reader",
-		"internalDomains":     "znas.io,example.com",
+		"internalDomains":     "example.org,example.com",
 	})
 	before := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, "znas.io,example.com", before["internalDomains"])
+	require.Equal(t, "example.org,example.com", before["internalDomains"])
 
 	// Partial update: change brandName ONLY, omit internalDomains.
 	runMutation(t, ctx, eng, "updateClusterSettings", map[string]any{
@@ -210,6 +210,6 @@ func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 	})
 	after := latestPayload(t, ctx, db, conceptName, storedId)
 	require.Equal(t, "Acme", after["brandName"], "brandName must update")
-	require.Equal(t, "znas.io,example.com", after["internalDomains"],
+	require.Equal(t, "example.org,example.com", after["internalDomains"],
 		"omitted internalDomains must be preserved, not wiped (#1686)")
 }
