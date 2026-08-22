@@ -1,10 +1,11 @@
 import { Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { Navigate } from "react-router-dom";
+
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { viewPath } from "../views/urls";
 import { KeysPage } from "./KeysPage";
-import { OverviewPage } from "./OverviewPage";
-import { PeoplePage } from "./PeoplePage";
 import { SettingsPage } from "./SettingsPage";
 import { TokensPage } from "./TokensPage";
 
@@ -41,8 +42,12 @@ import { TokensPage } from "./TokensPage";
 export function AdminRoutes(): ReactNode {
   return (
     <Routes>
-      <Route index element={<OverviewPage />} />
-      <Route path="people" element={<PeoplePage />} />
+      {/* Two surfaces retired in memql#4264, and REDIRECTED rather than
+          404'd: an operator with either bookmarked did nothing wrong, and a
+          Not Found would read as "the capability is gone" when it moved.
+          `replace` so Back does not bounce them straight here again. */}
+      <Route index element={<Navigate to="/" replace />} />
+      <Route path="people" element={<Navigate to={viewPath("people")} replace />} />
       <Route path="tokens" element={<TokensPage />} />
       <Route path="keys" element={<KeysPage />} />
       <Route path="settings" element={<SettingsPage />} />

@@ -270,15 +270,29 @@ function bandTitles(): (string | null)[] {
 }
 
 describe("the nav rail", () => {
-  it("groups the designed surfaces apart from the concept registry", async () => {
+  // The rail's three groups (memql#4264). The names are the decision: the DATA
+  // as screens, the SUBSTRATE those screens are made of, and the CLUSTER
+  // itself. What this replaced -- Operate / Explore / Administer -- put People
+  // in two groups at once, which is the shape being asserted against here.
+  it("groups the views, the substrate, and the cluster", async () => {
     renderView({}, "/views/people");
-    await waitFor(() => expect(screen.getByText("Operate")).toBeTruthy());
-    expect(screen.getByText("Explore")).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Portal sections" });
+    await waitFor(() => expect(within(nav).getByText("Views")).toBeTruthy());
+    for (const group of ["Custom", "Build", "Cluster"]) {
+      expect(within(nav).getByText(group)).toBeTruthy();
+    }
     for (const label of ["People", "Agents", "Customers", "Deployments", "Audit"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
     }
     expect(within(nav).getByRole("link", { name: "Concepts" })).toBeTruthy();
+
+    // The composer's door is always the last Custom entry, so an operator with
+    // no saved views still has somewhere to start.
+    expect(within(nav).getByRole("link", { name: "New view" })).toBeTruthy();
+
+    // People appears ONCE. The duplicate was the whole reason for this change:
+    // the population under one group and the change surface under another.
+    expect(within(nav).getAllByRole("link", { name: "People" })).toHaveLength(1);
   });
 });
 

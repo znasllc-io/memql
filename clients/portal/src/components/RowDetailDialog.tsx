@@ -7,6 +7,16 @@ import { RowDetail } from "./RowDetail";
 // The full-row read for a table (or timeline) selection. Same RowDetail the
 // retired RowAside used, hosted in the existing Dialog so every TABLE_ELEMENT
 // page shares one surface instead of stacking an aside beside a modal.
+//
+// It also carries the row's ACTIONS (memql#4264): whatever an owner or admin
+// can do to the row they have open. Passed in as an opaque child rather than
+// built here, because the verbs are per-concept -- a person is suspended, a
+// site is not -- and because they iterate option lists, which
+// portal_view_composition_test.go rightly forbids inside src/views/. See
+// src/people/PersonActions.tsx.
+//
+// The verbs sit UNDER the reading, never above it: an operator confirms they
+// are looking at the right row before they change it.
 
 export function RowDetailDialog({
   open,
@@ -16,6 +26,7 @@ export function RowDetailDialog({
   loading = false,
   error = "",
   missing = false,
+  actions,
 }: {
   open: boolean;
   onClose: () => void;
@@ -24,6 +35,7 @@ export function RowDetailDialog({
   loading?: boolean;
   error?: string;
   missing?: boolean;
+  actions?: ReactNode;
 }): ReactNode {
   return (
     <Dialog open={open} onClose={onClose} labelledBy="row-detail-dialog-title" size="xl">
@@ -51,6 +63,7 @@ export function RowDetailDialog({
             <RowDetail row={row as Row} />
           ) : null}
         </Panel>
+        {actions === undefined || row === null ? null : actions}
       </div>
     </Dialog>
   );

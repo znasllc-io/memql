@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { STAT_TILE_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Field, PageHeader, Skeleton, Textarea, TextInput } from "../ui";
+import { Band, Button, Container, Field, PageHeader, Skeleton, Textarea, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useCampaigns } from "./useCampaigns";
 import {
@@ -55,96 +55,98 @@ export function CampaignsPage(): ReactNode {
     descriptor(TEMPLATE_CONCEPT_ID) ?? fallbackConcept(TEMPLATE_CONCEPT_ID, "template");
 
   return (
-    <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-6 pb-8">
-      <PageHeader
-        eyebrow={CAMPAIGN_CONCEPT_ID}
-        title="Email campaigns"
-        blurb="Audiences, templates and the campaigns that pair them. Open a campaign to send it — scheduling records an intended time and does not start a send on its own."
-        actions={
+    <Container>
+      <section className="flex min-h-full flex-col gap-6 pb-8">
+        <PageHeader
+          eyebrow={CAMPAIGN_CONCEPT_ID}
+          title="Email campaigns"
+          blurb="Audiences, templates and the campaigns that pair them. Open a campaign to send it — scheduling records an intended time and does not start a send on its own."
+          actions={
+            <>
+              <Button size="xs" onClick={refresh}>
+                Refresh
+              </Button>
+              <Button size="xs" onClick={() => navigate(newCampaignPath())}>
+                New campaign
+              </Button>
+            </>
+          }
+        />
+
+        {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
+        {actionMessage ? (
+          <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
+            {actionMessage}
+          </p>
+        ) : null}
+
+        {error ? (
+          <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>
+        ) : loading && campaigns.length === 0 && audiences.length === 0 ? (
+          <Skeleton variant="rows" rows={6} />
+        ) : (
           <>
-            <Button size="xs" onClick={refresh}>
-              Refresh
-            </Button>
-            <Button size="xs" onClick={() => navigate(newCampaignPath())}>
-              New campaign
-            </Button>
-          </>
-        }
-      />
-
-      {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
-      {actionMessage ? (
-        <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
-          {actionMessage}
-        </p>
-      ) : null}
-
-      {error ? (
-        <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>
-      ) : loading && campaigns.length === 0 && audiences.length === 0 ? (
-        <Skeleton variant="rows" rows={6} />
-      ) : (
-        <>
-          <Band>
-            <ViewElement
-              element={STAT_TILE_ELEMENT}
-              rows={campaigns}
-              concept={campaignConcept}
-              options={{ bindings: { metric: [] } }}
-            />
-          </Band>
-
-          <Band title="Campaigns" meta="pick one to edit it" panel>
-            {campaigns.length === 0 ? (
-              <Empty>
-                No campaigns yet. A campaign needs an audience and a template, so start with
-                those below.
-              </Empty>
-            ) : (
+            <Band>
               <ViewElement
-                element={TABLE_ELEMENT}
+                element={STAT_TILE_ELEMENT}
                 rows={campaigns}
                 concept={campaignConcept}
-                options={{ sort: { field: "createdAt", direction: "desc" } }}
-                onSelect={(rowId) => navigate(campaignPath(rowId))}
+                options={{ bindings: { metric: [] } }}
               />
-            )}
-          </Band>
+            </Band>
 
-          <Band title="Audiences" meta="who a campaign is addressed to">
-            <NewAudienceForm busy={busy} onCreate={createAudience} />
-            <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
-              {audiences.length === 0 ? (
-                <Empty>No audiences yet.</Empty>
+            <Band title="Campaigns" meta="pick one to edit it" panel>
+              {campaigns.length === 0 ? (
+                <Empty>
+                  No campaigns yet. A campaign needs an audience and a template, so start with
+                  those below.
+                </Empty>
               ) : (
                 <ViewElement
                   element={TABLE_ELEMENT}
-                  rows={audiences}
-                  concept={audienceConcept}
+                  rows={campaigns}
+                  concept={campaignConcept}
                   options={{ sort: { field: "createdAt", direction: "desc" } }}
+                  onSelect={(rowId) => navigate(campaignPath(rowId))}
                 />
               )}
-            </div>
-          </Band>
+            </Band>
 
-          <Band title="Templates" meta="what a campaign says">
-            <NewTemplateForm busy={busy} onCreate={createTemplate} />
-            <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
-              {templates.length === 0 ? (
-                <Empty>No templates yet.</Empty>
-              ) : (
-                <ViewElement
-                  element={TABLE_ELEMENT}
-                  rows={templates}
-                  concept={templateConcept}
-                  options={{ sort: { field: "createdAt", direction: "desc" } }}
-                />
-              )}
-            </div>
-          </Band>
-        </>
-      )}
-    </section>
+            <Band title="Audiences" meta="who a campaign is addressed to">
+              <NewAudienceForm busy={busy} onCreate={createAudience} />
+              <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
+                {audiences.length === 0 ? (
+                  <Empty>No audiences yet.</Empty>
+                ) : (
+                  <ViewElement
+                    element={TABLE_ELEMENT}
+                    rows={audiences}
+                    concept={audienceConcept}
+                    options={{ sort: { field: "createdAt", direction: "desc" } }}
+                  />
+                )}
+              </div>
+            </Band>
+
+            <Band title="Templates" meta="what a campaign says">
+              <NewTemplateForm busy={busy} onCreate={createTemplate} />
+              <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
+                {templates.length === 0 ? (
+                  <Empty>No templates yet.</Empty>
+                ) : (
+                  <ViewElement
+                    element={TABLE_ELEMENT}
+                    rows={templates}
+                    concept={templateConcept}
+                    options={{ sort: { field: "createdAt", direction: "desc" } }}
+                  />
+                )}
+              </div>
+            </Band>
+          </>
+        )}
+      </section>
+    </Container>
   );
 }
 

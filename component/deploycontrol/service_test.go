@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -122,7 +123,7 @@ func newTestService(t *testing.T, exec Executor, audit identity.AuditLogger) *Se
 	svc, err := NewService(Options{
 		Logger:   quietLogger(),
 		Audit:    audit,
-		RepoRoot: t.TempDir(),
+		RepoRoot: repoRootWithOverlay(t),
 		Executor: exec,
 	})
 	if err != nil {
@@ -130,6 +131,29 @@ func newTestService(t *testing.T, exec Executor, audit identity.AuditLogger) *Se
 	}
 	stubRepairWatch(svc)
 	return svc
+}
+
+// repoRootWithOverlay is a repo root that HAS a deploy checkout -- which is
+// what every deploy-capable node has, and what these tests are about.
+//
+// It matters that this is explicit (memql#4265). The harness used to hand out
+// a bare t.TempDir(), and the overlay reader swallowed the resulting ENOENT
+// and returned "" -- so a whole suite ran against a state no real deploy node
+// is ever in, and the swallow that made it possible was the defect. The
+// overlay written here promotes nothing, which is the genuine "no version cut
+// yet" case those tests mean.
+func repoRootWithOverlay(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, overlayDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("overlay dir: %v", err)
+	}
+	const empty = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+	if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(empty), 0o644); err != nil {
+		t.Fatalf("overlay: %v", err)
+	}
+	return root
 }
 
 // stubRepairWatch replaces the repair watcher goroutine (memql#4209) with a
@@ -398,5 +422,74 @@ func TestGetDeploymentStatusUnauthenticatedDenied(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeBlocked {
 		t.Errorf("want one blocked audit event, got %+v", audit.events)
+	}
+}
+
+// A node with NO deploy checkout answers with a typed precondition naming
+// which situation it is in -- not an Internal error carrying a file path
+// (memql#4265).
+//
+// This is the state every in-cluster node is actually in today: the console
+// was designed around an on-disk checkout named by MEMQL_DEPLOY_REPO_ROOT, no
+// manifest sets it, and no image ships deploy/. The surface has to be honest
+// about that rather than rendering an ENOENT at an operator and then claiming
+// "nothing is pinned", which reads as "nothing is deployed" and is false.
+func TestGetDeploymentStatusWithoutACheckoutIsAPrecondition(t *testing.T) {
+	svc, err := NewService(Options{
+		Logger:   quietLogger(),
+		Audit:    &fakeAudit{},
+		RepoRoot: t.TempDir(), // deliberately bare: no deploy/ tree
+		Executor: &fakeExecutor{},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	stubRepairWatch(svc)
+
+	_, err = svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{})
+	if err == nil {
+		t.Fatal("expected a refusal from a node with no deploy checkout")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition (got %v)", st.Code(), err)
+	}
+	if !strings.HasPrefix(st.Message(), ReasonNoOverlayCheckout+":") {
+		t.Errorf("message must lead with the machine-readable reason so a client can\n"+
+			"branch without parsing prose; got:\n%s", st.Message())
+	}
+	if !strings.Contains(st.Message(), "MEMQL_DEPLOY_REPO_ROOT") {
+		t.Errorf("the message must name what is unset, so an operator knows what to do:\n%s", st.Message())
+	}
+}
+
+// On a LOCAL cluster the same absence means something different, and says so.
+// driver.go has refused docker-local deploys since the console was written;
+// this is the read side finally able to explain it, now that the local overlay
+// stamps the provider (memql#4265).
+func TestGetDeploymentStatusOnALocalClusterSaysSo(t *testing.T) {
+	t.Setenv("MEMQL_DEPLOY_PROVIDER", "docker-local")
+	svc, err := NewService(Options{
+		Logger:   quietLogger(),
+		Audit:    &fakeAudit{},
+		RepoRoot: t.TempDir(),
+		Executor: &fakeExecutor{},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	stubRepairWatch(svc)
+
+	_, err = svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", st.Code())
+	}
+	if !strings.HasPrefix(st.Message(), ReasonLocalCluster+":") {
+		t.Errorf("a local cluster must be told it is not a deploy target, not that a\n"+
+			"checkout is missing; got:\n%s", st.Message())
+	}
+	if !strings.Contains(st.Message(), "make up") {
+		t.Errorf("the message must name how a local cluster IS operated:\n%s", st.Message())
 	}
 }

@@ -56,7 +56,9 @@ function fakeConnection({
     captureGraph === undefined
       ? null
       : {
-          subscribeGraph: (handler: GraphHandler) => {
+          // Keyed by concept: the nav rail also subscribes (memql#4264).
+          subscribeGraph: (handler: GraphHandler, opts?: { concept?: string }) => {
+            if (opts?.concept === "v1:portalviews:view") return () => {};
             captureGraph(handler);
             return () => {};
           },

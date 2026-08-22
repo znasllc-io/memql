@@ -67,7 +67,7 @@ export function ConceptPage(): ReactNode {
   if (concept === undefined) {
     if (loading) return <Skeleton variant="rows" rows={8} />;
     return (
-      <section className="mx-auto max-w-2xl">
+      <section className="flex flex-col gap-4">
         <h1 className="text-xl font-semibold tracking-tight break-all"><DataText kind="id">{conceptId}</DataText></h1>
         <p className="mt-2 text-sm text-muted">
           This cluster declares no concept with that id. It may belong to a product

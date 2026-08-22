@@ -260,6 +260,20 @@ function renderAdmin(
         const nodes = TOKENS[match?.[1] ?? ""] ?? [];
         return new Result({ bundle: { nodes }, meta: { cursor: "" } });
       }
+      // The People VIEW browses the concept (memql#4264): the change surface
+      // moved onto its row detail, so these tests reach the verbs through the
+      // view rather than through a second admin page.
+      if (name === "conceptRow") {
+        // The row ASKED FOR. Returning the whole population here would make
+        // every row detail show whoever happens to be first, which is exactly
+        // the bug a test asserting on user-grace should catch.
+        const wanted = /id==([^\s&)]+)/.exec(call)?.[1] ?? "";
+        const nodes = PEOPLE.filter((row) => row.id === wanted);
+        return new Result({ bundle: { nodes }, meta: { cursor: "" } });
+      }
+      if (name === "conceptBrowse" || name === "conceptCount") {
+        return new Result({ bundle: { nodes: PEOPLE }, meta: { cursor: "" } });
+      }
       throw new Error(`the admin console called an unexpected query: ${name}`);
     }),
   });
@@ -338,11 +352,6 @@ function viewKitClasses(container: HTMLElement): Set<string> {
   return out;
 }
 
-function bandTitles(): (string | null)[] {
-  const main = screen.getByRole("main");
-  return [...main.querySelectorAll("h2")].map((h) => h.textContent);
-}
-
 beforeEach(() => {
   calls = [];
   sent = [];
@@ -350,8 +359,12 @@ beforeEach(() => {
 
 describe("the admin console's authorization shape", () => {
   it("reads through queries that gate themselves, never a raw concept browse", async () => {
-    renderAdmin({}, "/admin");
-    await waitFor(() => expect(screen.getByText("login_succeeded")).toBeTruthy());
+    // On an ADMIN surface. /admin itself is gone (memql#4264 -- it answered the
+    // same question as the console), so the shape is asserted where it still
+    // applies: the tokens page, which joins people to the credentials they
+    // hold and therefore makes both of the reads named below.
+    renderAdmin({}, "/admin/tokens");
+    await waitFor(() => expect(calls.some((c) => c.name === "searchUsers")).toBe(true));
 
     // THE ASSERTION THAT MATTERS. `searchUsers` and `patIdentitiesForUser`
     // carry `requiresOwnerOrAdmin` as a top-level conjunct in their own DSL
@@ -367,7 +380,7 @@ describe("the admin console's authorization shape", () => {
   });
 
   it("never reaches a write through the query surface", async () => {
-    for (const path of ["/admin", "/admin/people", "/admin/tokens", "/admin/keys", "/admin/settings"]) {
+    for (const path of ["/admin/tokens", "/admin/keys", "/admin/settings", "/views/people"]) {
       const view = renderAdmin({}, path);
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
       // THE ASSERTION THAT MATTERS ABOUT WRITES. Every write this console
@@ -386,7 +399,7 @@ describe("the admin console's authorization shape", () => {
   });
 
   it("offers a reader nothing, and says whose decision that is", async () => {
-    renderAdmin({ role: "reader" }, "/admin");
+    renderAdmin({ role: "reader" }, "/admin/tokens");
     await waitFor(() =>
       expect(screen.getByText(/resolved your role on this connection as reader/)).toBeTruthy(),
     );
@@ -396,74 +409,57 @@ describe("the admin console's authorization shape", () => {
   });
 
   it("states the role floor and the caller's own role in the eyebrow", async () => {
-    renderAdmin({}, "/admin");
+    renderAdmin({}, "/admin/tokens");
     await waitFor(() => expect(screen.getByText(/owner or admin/)).toBeTruthy());
     expect(screen.getByText(/you are owner/)).toBeTruthy();
   });
 });
 
-describe("the overview", () => {
-  it("opens on readings, divides people by role, and rolls out the trail", async () => {
-    const { container } = renderAdmin({}, "/admin");
-    await waitFor(() => expect(screen.getByText("login_succeeded")).toBeTruthy());
-
-    const classes = viewKitClasses(container);
-    expect(classes.has("vk-chart-rail-seg")).toBe(true);
-    expect(classes.has("vk-table")).toBe(true);
-
-    expect(bandTitles()).toEqual(["By role", "Recent activity"]);
-    expect(screen.getByText("owner 1 (50%)")).toBeTruthy();
-    expect(screen.getByText("reader 1 (50%)")).toBeTruthy();
-
-    // The four readings the retired dashboard carried, plus the one it could
-    // not: the rotation itself rather than a duration off one replica's clock.
-    expect(screen.getByText("People who can sign in")).toBeTruthy();
-    expect(screen.getByText("invite_only")).toBeTruthy();
-    expect(screen.getByText("kid-current")).toBeTruthy();
-    expect(screen.getByText("2026-08-07T04:00:00Z")).toBeTruthy();
-    expect(screen.getByText("by ada@example.com")).toBeTruthy();
+// The two surfaces memql#4264 retired, and what happened to each.
+//
+// Both were second doors. /admin answered "what is the state of this cluster"
+// with the same tiles and the same "By role" band as the console; /admin/people
+// was the CHANGE surface for a person, beside a People view listing the same
+// population. An operator looking for a person had two doors and no way to know
+// which one they wanted.
+//
+// Both REDIRECT rather than 404. Someone with either bookmarked did nothing
+// wrong, and a Not Found would read as "the capability is gone" when it moved.
+describe("the retired admin surfaces", () => {
+  it("sends /admin to the console, which answers that question now", async () => {
+    renderAdmin({}, "/admin");
+    // The console's own heading, reached without the operator doing anything.
+    // Scoped to <main>: "Console" is also the rail's first entry.
+    await waitFor(() =>
+      expect(within(screen.getByRole("main")).getByText("Console")).toBeTruthy(),
+    );
   });
 
-  it("filters the trail server-side, by category", async () => {
-    renderAdmin({}, "/admin");
-    await waitFor(() => expect(screen.getByText("login_succeeded")).toBeTruthy());
-
-    // The unfiltered strip asks for every category, and the rotation reading
-    // asks for `configuration` regardless -- a rotation the operator filtered
-    // away has not stopped being the answer to "when did this key change".
-    const audits = calls.filter((c) => c.name === "recentAuditEvents");
-    expect(audits.some((c) => c.call === "query recentAuditEvents()")).toBe(true);
-    expect(audits.some((c) => c.call.includes('category: "configuration"'))).toBe(true);
-  });
-
-  it("points at the change surface rather than carrying its controls", async () => {
-    renderAdmin({}, "/admin");
-    await waitFor(() => expect(screen.getByText("Where a person gets changed")).toBeTruthy());
-    // An overview is where an operator looks to find out what is going on.
-    // Nothing on it changes who can do what.
-    expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
-    const main = screen.getByRole("main");
-    expect(
-      within(main)
-        .getAllByRole("link", { name: "People" })
-        .some((link) => link.getAttribute("href") === "/admin/people"),
-    ).toBe(true);
+  it("sends /admin/people to the People view, where the verbs now live", async () => {
+    renderAdmin({}, "/admin/people");
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
+    // The view's eyebrow, not an admin page's.
+    expect(screen.getByText("v1:identity:user")).toBeTruthy();
   });
 });
 
-describe("people -- the change surface", () => {
+// The per-person CHANGE surface, where it lives now (memql#4264): the People
+// view's row detail. Same four decisions, same gated seam, same audit ids --
+// what changed is that an operator reaches them from the person they were
+// already looking at, instead of from a second page listing the same people.
+//
+// The row is addressed in the URL (/views/people/rows/<id>), so these render
+// straight at it rather than clicking through a table.
+describe("a person's change surface, on the People view", () => {
   it("offers no controls until a person is picked", async () => {
-    renderAdmin({}, "/admin/people");
+    renderAdmin({}, "/views/people");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
-    // The population itself lives in the predefined view, and the page says so
-    // rather than duplicating it.
-    expect(screen.getByRole("link", { name: "People view" })).toBeTruthy();
   });
 
   it("edits a picked person's profile through the gated seam", async () => {
-    renderAdmin({}, "/admin/people?person=user-grace");
-    await waitFor(() => expect(screen.getAllByText("Grace Hopper").length).toBe(2));
+    renderAdmin({}, "/views/people/rows/user-grace");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save the profile" })).toBeTruthy());
 
     screen.getByRole("button", { name: "Save the profile" }).click();
     await waitFor(() => expect(sent.length).toBe(1));
@@ -471,13 +467,12 @@ describe("people -- the change surface", () => {
     const edit = (sent[0] as { identityAdmin?: Record<string, unknown> }).identityAdmin
       ?.updateUserProfile as Record<string, unknown>;
     expect(edit.userId).toBe("user-grace");
-    expect(edit.displayName).toBe("Grace Hopper");
     await waitFor(() => expect(screen.getByText("audit-write-1")).toBeTruthy());
   });
 
   it("changes a role and suspends, as two separate decisions", async () => {
-    renderAdmin({}, "/admin/people?person=user-grace");
-    await waitFor(() => expect(screen.getAllByText("Grace Hopper").length).toBe(2));
+    renderAdmin({}, "/views/people/rows/user-grace");
+    await waitFor(() => expect(screen.getByLabelText("Cluster role")).toBeTruthy());
 
     // Two forms, two buttons, two audit actions. A single "Save" would let a
     // role change ride along with a phone-number correction.
@@ -495,12 +490,19 @@ describe("people -- the change surface", () => {
       (sent[0] as { identityAdmin?: Record<string, unknown> }).identityAdmin?.setUserRole,
     ).toEqual({ userId: "user-grace", role: "admin" });
 
-    screen.getByRole("button", { name: "Suspend the account" }).click();
     // Suspending confirms in a dialog (memql#4181); the write happens there.
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
-    within(screen.getByRole("dialog"))
-      .getByRole("button", { name: "Suspend the account" })
-      .click();
+    // The trigger and the confirmation share a label -- deliberately, since
+    // the confirmation restates the act rather than saying "OK" -- so the
+    // trigger is the FIRST and the confirmation the LAST.
+    const triggers = screen.getAllByRole("button", { name: "Suspend the account" });
+    triggers[0]!.click();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Suspend the account" }).length).toBeGreaterThan(
+        triggers.length,
+      ),
+    );
+    const all = screen.getAllByRole("button", { name: "Suspend the account" });
+    all[all.length - 1]!.click();
     await waitFor(() => expect(sent.length).toBe(2));
     const suspend = (sent[1] as { identityAdmin?: Record<string, unknown> }).identityAdmin
       ?.setUserSuspended as Record<string, unknown>;
@@ -508,12 +510,13 @@ describe("people -- the change surface", () => {
     expect(suspend.suspended).toBe(true);
   });
 
-  it("refuses to offer anything to a reader, and issues no read", async () => {
-    renderAdmin({ role: "reader" }, "/admin/people");
-    await waitFor(() =>
-      expect(screen.getByText("This is an owner and admin surface")).toBeTruthy(),
-    );
-    expect(calls.some((c) => c.name === "searchUsers")).toBe(false);
+  it("offers a reader nothing, and issues no write", async () => {
+    renderAdmin({ role: "reader" }, "/views/people/rows/user-grace");
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
+    // The verbs are not rendered at all below the floor. The engine refuses
+    // them anyway -- this is the courtesy half, and it costs nothing.
+    expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply the role" })).toBeNull();
     expect(sent.length).toBe(0);
   });
 });
@@ -694,8 +697,13 @@ describe("the admin sub-nav", () => {
     renderAdmin({}, "/admin/tokens");
     await waitFor(() => expect(screen.getByText("Sessions and tokens")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: "Administration" });
-    for (const label of ["Overview", "People", "Tokens", "Signing keys", "Settings"]) {
+    // Three surfaces, not five. Overview and People retired in memql#4264 --
+    // the console answers the first and the People view carries the second.
+    for (const label of ["Tokens", "Signing keys", "Settings"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
+    }
+    for (const gone of ["Overview", "People"]) {
+      expect(within(nav).queryByRole("link", { name: gone })).toBeNull();
     }
     expect(within(nav).getByRole("link", { name: "Tokens" }).getAttribute("aria-current")).toBe(
       "page",

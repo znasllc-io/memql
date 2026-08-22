@@ -44,7 +44,7 @@ export function ModuleDetailPage(): ReactNode {
 
   const detail = state.detail;
   return (
-    <Container variant="data">
+    <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
           eyebrow={

@@ -215,7 +215,13 @@ function harness(overrides: { role?: Role } = {}): Harness {
   });
 
   const subscriptions = {
-    subscribeGraph: (fn: (event: Event) => void) => {
+    // Keyed by concept, because more than one surface subscribes now: the nav
+    // rail watches v1:portalviews:view for the Custom section (memql#4264), so
+    // a fake holding ONE handler hands this page's events to the rail.
+    subscribeGraph: (fn: (event: Event) => void, opts?: { concept?: string }) => {
+      if (opts?.concept !== undefined && opts.concept !== "v1:platform:site") {
+        return () => {};
+      }
       handler = fn;
       return () => {
         handler = null;

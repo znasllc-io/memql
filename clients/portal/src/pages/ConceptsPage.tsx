@@ -1,4 +1,4 @@
-import { Skeleton, TextInput } from "../ui";
+import { Container, Skeleton, TextInput } from "../ui";
 import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -66,108 +66,110 @@ export function ConceptsPage(): ReactNode {
   }
 
   return (
-    <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-5">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">Concept registry</h1>
-        <p className="mt-1 text-sm text-muted">
-          {concepts.length === 0
-            ? "Reading the registry from the cluster."
-            : `${concepts.length} concepts declared across ${domains.length} domains. ` +
-              "Pick one to inspect its schema and browse its rows."}
-        </p>
-      </header>
+    <Container>
+      <section className="flex min-h-full flex-col gap-5">
+        <header>
+          <h1 className="text-xl font-semibold tracking-tight">Concept registry</h1>
+          <p className="mt-1 text-sm text-muted">
+            {concepts.length === 0
+              ? "Reading the registry from the cluster."
+              : `${concepts.length} concepts declared across ${domains.length} domains. ` +
+                "Pick one to inspect its schema and browse its rows."}
+          </p>
+        </header>
 
-      <div className="flex flex-col gap-3">
-        <label className="relative block">
-          <span className="sr-only">Search concepts</span>
-          <TextInput
-            type="search"
-            value={filter.query}
-            onChange={(next) => setParam(SEARCH_PARAM, next)}
-            placeholder="Search ids, entities and descriptions…"
-          />
-        </label>
-
-        {/* Domain chips rather than a <select>: an operator scanning a
-            registry wants to SEE how the cluster is carved up, and the counts
-            are half the information. The row scrolls on its own axis so a
-            cluster with thirty domains does not widen the page. */}
-        <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
-          <DomainChip
-            label="All"
-            count={concepts.length}
-            active={filter.domain === ""}
-            onSelect={() => setParam(DOMAIN_PARAM, "")}
-          />
-          {domains.map((summary) => (
-            <DomainChip
-              key={summary.domain}
-              label={summary.domain}
-              count={summary.count}
-              active={filter.domain === summary.domain}
-              onSelect={() =>
-                setParam(
-                  DOMAIN_PARAM,
-                  filter.domain === summary.domain ? "" : summary.domain,
-                )
-              }
+        <div className="flex flex-col gap-3">
+          <label className="relative block">
+            <span className="sr-only">Search concepts</span>
+            <TextInput
+              type="search"
+              value={filter.query}
+              onChange={(next) => setParam(SEARCH_PARAM, next)}
+              placeholder="Search ids, entities and descriptions…"
             />
-          ))}
-        </div>
-      </div>
+          </label>
 
-      {error ? (
-        <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
-      ) : loading && concepts.length === 0 ? (
-        <Skeleton variant="rows" rows={6} />
-      ) : concepts.length === 0 ? (
-        <Empty>This cluster declares no concepts.</Empty>
-      ) : matches.length === 0 ? (
-        <Empty>
-          No concept matches that search.{" "}
-          <button
-            type="button"
-            className="text-accent underline"
-            onClick={() => setParams(new URLSearchParams(), { replace: true })}
-          >
-            Clear the filters
-          </button>
-        </Empty>
-      ) : (
-        <div className="flex flex-col gap-6 pb-6">
-          {groups.map((group) => (
-            <div key={group.domain}>
-              <h2 className="mb-2 flex items-baseline gap-2 text-xs font-semibold tracking-wide text-muted uppercase">
-                {group.domain}
-                <span className="font-normal normal-case">{group.concepts.length}</span>
-              </h2>
-              <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
-                {group.concepts.map((concept) => (
-                  <li key={concept.id}>
-                    <Link
-                      to={conceptPath(concept.id, params.toString())}
-                      className="flex flex-col gap-0.5 px-3 py-2.5 hover:bg-raised"
-                    >
-                      <span className="flex items-baseline gap-2">
-                        <span className="font-medium text-fg">{concept.entity}</span>
-                        <span className="truncate font-mono text-xs text-subtle">
-                          {concept.id}
-                        </span>
-                      </span>
-                      {concept.description ? (
-                        <span className="line-clamp-2 text-xs text-muted">
-                          {concept.description}
-                        </span>
-                      ) : null}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {/* Domain chips rather than a <select>: an operator scanning a
+              registry wants to SEE how the cluster is carved up, and the counts
+              are half the information. The row scrolls on its own axis so a
+              cluster with thirty domains does not widen the page. */}
+          <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+            <DomainChip
+              label="All"
+              count={concepts.length}
+              active={filter.domain === ""}
+              onSelect={() => setParam(DOMAIN_PARAM, "")}
+            />
+            {domains.map((summary) => (
+              <DomainChip
+                key={summary.domain}
+                label={summary.domain}
+                count={summary.count}
+                active={filter.domain === summary.domain}
+                onSelect={() =>
+                  setParam(
+                    DOMAIN_PARAM,
+                    filter.domain === summary.domain ? "" : summary.domain,
+                  )
+                }
+              />
+            ))}
+          </div>
         </div>
-      )}
-    </section>
+
+        {error ? (
+          <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
+        ) : loading && concepts.length === 0 ? (
+          <Skeleton variant="rows" rows={6} />
+        ) : concepts.length === 0 ? (
+          <Empty>This cluster declares no concepts.</Empty>
+        ) : matches.length === 0 ? (
+          <Empty>
+            No concept matches that search.{" "}
+            <button
+              type="button"
+              className="text-accent underline"
+              onClick={() => setParams(new URLSearchParams(), { replace: true })}
+            >
+              Clear the filters
+            </button>
+          </Empty>
+        ) : (
+          <div className="flex flex-col gap-6 pb-6">
+            {groups.map((group) => (
+              <div key={group.domain}>
+                <h2 className="mb-2 flex items-baseline gap-2 text-xs font-semibold tracking-wide text-muted uppercase">
+                  {group.domain}
+                  <span className="font-normal normal-case">{group.concepts.length}</span>
+                </h2>
+                <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
+                  {group.concepts.map((concept) => (
+                    <li key={concept.id}>
+                      <Link
+                        to={conceptPath(concept.id, params.toString())}
+                        className="flex flex-col gap-0.5 px-3 py-2.5 hover:bg-raised"
+                      >
+                        <span className="flex items-baseline gap-2">
+                          <span className="font-medium text-fg">{concept.entity}</span>
+                          <span className="truncate font-mono text-xs text-subtle">
+                            {concept.id}
+                          </span>
+                        </span>
+                        {concept.description ? (
+                          <span className="line-clamp-2 text-xs text-muted">
+                            {concept.description}
+                          </span>
+                        ) : null}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </Container>
   );
 }
 

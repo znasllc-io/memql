@@ -95,3 +95,58 @@ export async function getRowByConceptAndId(
   const nodes = result.rawNodes();
   return nodes.length > 0 ? (nodes[0] ?? null) : null;
 }
+
+/**
+ * Count the rows of a concept the CALLER may see.
+ *
+ * The engine's `count` directive (memql#1730) computes this server-side through
+ * the same pipeline a normal query uses -- deduped, latest-version,
+ * post-filtered, and under the caller's own per-row authz -- and returns a
+ * `{count: N}` envelope instead of materializing rows. A raw SQL COUNT(*) would
+ * over-count under the time-series versioning model (many versions per id) and
+ * skip the in-process folds, which is why this is a directive rather than a
+ * cheaper query.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM browseConceptPage. A surface wanting "how
+ * many customers are there" used to fetch a page of rows and count what came
+ * back, which answers a different question: it caps at the page size and has to
+ * render "100+". Two calls -- this for the number, a bounded page for the rows
+ * a surface actually shows -- is both cheaper and honest (memql#4263).
+ *
+ * The count is PER-CALLER by construction. A reader's count is the rows a
+ * reader may see, and that is the correct number to show the person looking at
+ * it; do not reach for a privileged count to make it look bigger.
+ */
+export async function countConcept(
+  query: QueryClient,
+  conceptId: string,
+  opts: QueryCallOptions = {},
+): Promise<number> {
+  if (conceptId === "") {
+    throw new Error("countConcept: conceptId is required");
+  }
+  const result = await query.executeNamed(
+    "conceptCount",
+    `count(concept==${conceptId})`,
+    opts,
+  );
+
+  // The engine sets ResultMeta.count AND returns a {count: N} output row. Read
+  // the meta first (it is the typed field), and fall back to the row for a
+  // node that answered with only the envelope.
+  const meta = result.meta();
+  if (meta?.count !== undefined && meta.count !== null) {
+    const n = typeof meta.count === "string" ? Number(meta.count) : meta.count;
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  const row = result.single();
+  const raw = row?.["count"];
+  const n = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : NaN;
+  if (!Number.isFinite(n) || n < 0) {
+    // -1 is the engine's "unknown count" sentinel (component/memql/result.go).
+    // Reporting it as a number would put "-1 people" on a console; refusing is
+    // what lets the caller render its own "could not read" state.
+    throw new Error(`countConcept: ${conceptId} returned no usable count`);
+  }
+  return n;
+}

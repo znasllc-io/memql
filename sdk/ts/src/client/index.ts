@@ -26,6 +26,7 @@ export {
 } from "./modules.js";
 export {
   browseConceptPage,
+  countConcept,
   getRowByConceptAndId,
   DEFAULT_CONCEPT_BROWSE_PAGE_SIZE,
   type ConceptPage,
