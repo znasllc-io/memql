@@ -8,7 +8,7 @@
 # certificate-bearing server block per Ingress RULE host, never per tls host,
 # so with only the wildcard rule portal.<domain> is answered by the wildcard's
 # server block and its certificate is the controller's self-signed default --
-# which is what the first keep-it cluster served to Safari. An exact rule is
+# which is what the first entry-shape cluster served to Safari. An exact rule is
 # what gives the portal a server block the certificate verifies for.
 #
 # Locally none of that bites -- the mkcert pair IS a wildcard and traefik picks

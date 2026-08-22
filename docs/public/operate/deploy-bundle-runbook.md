@@ -108,11 +108,11 @@ gate) runs -- in dry-run reporting mode by default. A LIVE `azure`
 deploy through this path is owner-gated; see memql#2381 for the ACR
 digest-resolution decision it depends on.
 
-The ZNAS keep-it instance is `cloud-entry`, not `cloud`. Later rolls
+An entry instance is `cloud-entry`, not `cloud`. Later rolls
 against that cluster must pass
 `overlayPath=deploy/k8s/overlays/cloud-entry`. First bring-up is Argo
 on that overlay, not this cockpit path -- see
-[azure-keep-it.md](azure-keep-it.md).
+[azure-entry-install.md](azure-entry-install.md).
 
 ## Reading the evidence
 

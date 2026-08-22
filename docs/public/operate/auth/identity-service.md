@@ -442,7 +442,7 @@ the token was issued for. On a tenant that does not own the mailbox that
 lookup is a 404 (or a guest object with no mailbox), and no permission
 granted on that tenant changes it.
 
-The first keep-it cluster hit exactly this (memql#4226): AKS and the
+The first entry-shape cluster hit exactly this (memql#4226): AKS and the
 Pay-As-You-Go subscription sat on one Entra tenant, the sender mailbox
 and the public mail domain on a different Microsoft 365 tenant. So
 EVERYTHING the sender needs is created on the MAILBOX tenant:
@@ -493,8 +493,8 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
    `404` on `/users/<sender>` points at the tenant; a `401` points at the
    credential.
 
-The keep-it instance's own record of this is in
-[azure-keep-it.md](../azure-keep-it.md#mail-the-graph-sender-lives-on-the-mailbox-tenant).
+The entry install's own record of this is in
+[azure-entry-install.md](../azure-entry-install.md#mail-the-graph-sender-lives-on-the-mailbox-tenant).
 
 Branding controls (`MEMQL_IDENTITY_BRAND_NAME`,
 `MEMQL_IDENTITY_BRAND_PRIMARY_COLOR`, `MEMQL_IDENTITY_BRAND_LOGO_DATA_URI`)

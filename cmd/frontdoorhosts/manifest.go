@@ -77,7 +77,7 @@ func header(overlay, domain string) string {
 		"# THE CERTIFICATE NAMES EXACT HOSTS, NOT A WILDCARD (memql#4224). The ClusterIssuer\n" +
 		"# solves HTTP-01 only. ACME cannot serve an HTTP-01 challenge for *.<domain>, and ONE\n" +
 		"# wildcard dnsName fails the WHOLE order -- so the Certificate that used to request it sat\n" +
-		"# Pending, was hand-edited to exact names on the first keep-it cluster, and the edge\n" +
+		"# Pending, was hand-edited to exact names on the first entry-shape cluster, and the edge\n" +
 		"# Ingress whose tls.hosts still said *.<domain> served ingress-nginx's self-signed default\n" +
 		"# for portal.<domain> (Safari: \"This Connection Is Not Private\"). DECISION: the wildcard\n" +
 		"# is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly\n" +
@@ -281,7 +281,7 @@ func portalIngress(domain string) string {
 		"# and only that: ingress-nginx creates a certificate-bearing server block per RULE host,\n" +
 		"# never per tls host. With only the *.<domain> rule, portal.<domain> is answered by the\n" +
 		"# wildcard's server block, whose certificate is the controller's self-signed default\n" +
-		"# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first keep-it\n" +
+		"# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first entry-shape\n" +
 		"# cluster served to Safari. An exact rule gives the portal a server block the\n" +
 		"# certificate verifies for.\n" +
 		"#\n" +

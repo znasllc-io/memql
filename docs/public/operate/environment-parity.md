@@ -136,7 +136,7 @@ The base + overlay + component split is how the standard is enforced mechanicall
   `dsl-bundle`) an overlay composes; they add topology without a branch.
 
 There are three overlays -- `local`, `cloud` (the top-sized instance, what
-`deploy/argocd/apps/memql.yaml` points at) and `cloud-entry` (the keep-it /
+`deploy/argocd/apps/memql.yaml` points at) and `cloud-entry` (the entry /
 client instance, memql#4203) -- and the two cloud ones are two INSTANCE
 shapes, not two environments (epic memql#3943). The gates keep all three
 honest against one derivation rather than against each other:

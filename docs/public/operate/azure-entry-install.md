@@ -1,21 +1,31 @@
 ---
-title: Azure keep-it -- sanctioned first bring-up
+title: Azure entry install -- sanctioned first bring-up on AKS
 audience: public
 status: stable
 area: operate
 sinceVersion: 0.18.0
-owner: znas
+owner: platform
 ---
 
-# Azure keep-it: sanctioned first bring-up
+# Azure entry install: sanctioned first bring-up
 
-**Audience:** operators standing up the ZNAS keep-it cluster on Azure
-(`rg-znas-memql`). **Issue:** memql#4204.
+**Audience:** an operator standing up an entry-shape MemQL instance on
+Azure. **Issue:** memql#4204.
 
-First bring-up is **Argo in `aks-znas-memql` reconciling
+**Placeholders.** Every Azure name below is the operator's, and this page
+names none of them -- the same rule the hostnames already follow with
+`$MEMQL_DOMAIN`. Substitute your own throughout: `<aks-name>` (the
+cluster), `<cluster-rg>` (its resource group), `<backup-rg>` (the backup
+resource group), `<registry-rg>` (the resource group holding the ACR and
+Key Vault), `<instance-repo>` (the private repository that will hold this
+instance's definition), and `<instance>` (the overlay directory inside
+it).
+
+First bring-up is **Argo in `<aks-name>` reconciling
 `deploy/k8s/overlays/cloud-entry`**. It is not `make deploy`. It is not
 `aks-deploy.sh` (that script is gone). Those are digest rolls against an
-already-installed cluster. This page is the sanctioned keep-it path.
+already-installed cluster. This page is the sanctioned entry-install
+path.
 
 Related: [front-door.md](front-door.md) ·
 [reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md) ·
@@ -29,11 +39,11 @@ instance -- own AKS, own Argo, own domain -- not a staging/prod split
 inside one cluster (epic memql#3943). `overlays/cloud` stays on
 `cnpg-db/presets/top` and mesh 2; it is what
 `deploy/argocd/apps/memql.yaml` points at. **Do not apply
-`overlays/cloud` to `rg-znas-memql`.** Do not add a second Application
+`overlays/cloud` to `<cluster-rg>`.** Do not add a second Application
 next to `deploy/argocd/apps/memql.yaml`.
 
 `cloud-entry` is the same base and the same CNPG shape, with the
-numbers a keep-it / client install actually wants:
+numbers an entry / client install actually wants:
 
 | | `overlays/cloud` | `overlays/cloud-entry` |
 |---|---|---|
@@ -49,8 +59,8 @@ Voice-off is first-class replicas 0 on `voice`, `voice-agent`,
 
 Replicas 0 stops the pods; it does not stop Azure allocating a public IP
 for every `LoadBalancer` Service base declares -- `livekit-rtc` (media)
-and `livekit-sip` (SIP) -- so keep-it converted both to `ClusterIP` by
-hand, and the next Argo sync was refused:
+and `livekit-sip` (SIP) -- so the first entry install converted both to
+`ClusterIP` by hand, and the next Argo sync was refused:
 
 ```
 Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid value: "Local": may only be set for externally-accessible services
@@ -76,8 +86,8 @@ kubectl kustomize deploy/k8s/overlays/cloud-entry | grep -A12 'name: livekit-rtc
 kubectl -n memql get svc livekit livekit-rtc livekit-sip   # TYPE ClusterIP, EXTERNAL-IP <none>
 ```
 
-Turning voice on for keep-it is a different decision and not this
-overlay: `overlays/cloud` keeps the LoadBalancers and is untouched.
+Turning voice on for an entry install is a different decision and not
+this overlay: `overlays/cloud` keeps the LoadBalancers and is untouched.
 
 ## Domain and hosts
 
@@ -126,8 +136,8 @@ no DNS-01 solver on this cluster. That matters in two ways:
   the Certificate sits Pending, the Secret is never written, and every
   host serves ingress-nginx's self-signed default ("Kubernetes Ingress
   Controller Fake Certificate"; Safari: "This Connection Is Not Private").
-  That is how the first keep-it bring-up went, and the hand-edit to exact
-  names that followed is now the generated shape.
+  That is how the first entry-shape bring-up went, and the hand-edit to
+  exact names that followed is now the generated shape.
 - **`tls.hosts` must say the same names.** ingress-nginx verifies the
   certificate against each host an Ingress lists under `tls` and falls
   back to the default for a host the certificate does not name -- and it
@@ -143,8 +153,9 @@ no DNS-01 solver on this cluster. That matters in two ways:
 
 A customer site hostname routed by the wildcard has **no certificate**
 until it has a `Certificate` and an exact-host Ingress of its own
-([site-hosting.md](site-hosting.md#2-add-the-hostname)). On keep-it there
-is none, so nothing is missing; a client install that hosts a site on the
+([site-hosting.md](site-hosting.md#2-add-the-hostname)). An engine-only
+entry install hosts no such site, so nothing is missing; a client install
+that hosts a site on the
 cloud front door must plan for that object pair per site until a DNS-01
 solver exists.
 
@@ -192,9 +203,9 @@ kustomize refuses a sibling path (load restrictor).
 
 ## First bring-up
 
-1. Cluster `aks-znas-memql` in `rg-znas-memql` (AKS Free, entry node
-   pools). Backup RG is `rg-znas-memql-backup`. `rg-memql-staging`
-   ACR / Key Vault stays.
+1. Cluster `<aks-name>` in `<cluster-rg>` (AKS Free, entry node
+   pools). Backups go to `<backup-rg>`; the ACR and Key Vault in
+   `<registry-rg>` stay where they are.
 2. Point that cluster's Argo at `znasllc-io/memql`, path
    `deploy/k8s/overlays/cloud-entry`, and the host-patches above.
    Do not retarget `deploy/argocd/apps/memql.yaml`.
@@ -233,7 +244,7 @@ precedence to prove for them.
 ## Later rolls (not this bring-up)
 
 Cockpit digest rolls stay owner-gated and still default to
-`overlayPath=deploy/k8s/overlays/cloud`. This instance must pass
+`overlayPath=deploy/k8s/overlays/cloud`. An entry instance must pass
 `cloud-entry` explicitly:
 
 ```bash
@@ -304,12 +315,12 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
 Full runbook:
 [auth/identity-service.md](auth/identity-service.md#email-delivery).
 
-## Handoff to an instance repo (memql-znas)
+## Handoff to an instance repo
 
-Keep-it's definition is not in git today. This section is the operator's
+An entry instance's definition is not in git today. This section is the operator's
 record of where it lives, what the target shape is, and the exact switch --
 from the read-only research pass on memql#4210 (the instance repo) and
-memql#4205 (twice-daily entry deploys), 2026-08-21. Nothing below has been
+memql#4205 (twice-daily entry deploys). Nothing below has been
 executed: creating the repo, the ESO credential and vault, the AppProject and
 repo-credential writes, and the Argo source switch are owner-gated.
 
@@ -350,12 +361,12 @@ repo-credential writes, and the Argo source switch are owner-gated.
 ### The target shape
 
 - **An instance repo that holds the cluster's definition, not the cluster's
-  code** (`znasllc-io/memql-znas`, private; it does not exist yet): an
-  overlay, the pins, and an ArgoCD app-of-apps. It is NOT a product repo
-  stamped from the `memql-project` template: the template stamps a product
-  (DSL bundle, a client surface, a `bff-<product>` head, its own public
-  entry and its own `letsencrypt-prod` ClusterIssuer), and its Makefile and
-  CI fail by design with no `dsl/<domain>` and no `clients/<name>/`. Keep-it
+  code** (`<instance-repo>`, private): an overlay, the pins, and an ArgoCD
+  app-of-apps. It is NOT a product repo stamped from the `memql-project`
+  template: the template stamps a product (DSL bundle, a client surface, a
+  `bff-<product>` head, its own public entry and its own `letsencrypt-prod`
+  ClusterIssuer), and its Makefile and CI fail by design with no
+  `dsl/<domain>` and no `clients/<name>/`. An engine-only entry instance
   runs the plain engine plus the portal.
 - **The mechanism exists and is verified** (kustomize v5.8.1, 54 documents
   rendered): compose the engine's entry overlay as a remote kustomize
@@ -390,7 +401,7 @@ images:                        # the eight engine digests (identity bff cognitio
   auto-applied.
 - **Who owns the pins** is the owner's decision. The recommendation is the
   shape above (the instance repo owns them). The alternatives were: the
-  engine keeps them, so every keep-it deploy stays an engine PR through
+  engine keeps them, so every entry deploy stays an engine PR through
   the merge queue; or the instance repo vendors a copy of `base` and
   `cloud-entry`, rejected because a CVE then means patching every fork.
 
@@ -434,7 +445,7 @@ kubectl -n memql get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" "}{
 against the live render:
 
 ```bash
-kubectl kustomize <instance repo>/deploy/k8s/overlays/keep-it | diff - capture/live-render.yaml
+kubectl kustomize <instance-repo>/deploy/k8s/overlays/<instance> | diff - capture/live-render.yaml
 ```
 
 The diff must be empty apart from the items deliberately being moved into
@@ -445,12 +456,12 @@ the engine tag carries them).
 matters):**
 
 ```bash
-gh repo deploy-key add argocd-keepit-ro.pub --repo znasllc-io/memql-znas --title argocd-keepit-ro            # read-only
-kubectl -n argocd create secret generic repo-memql-znas --from-literal=type=git \
-  --from-literal=url=git@github.com:znasllc-io/memql-znas.git --from-file=sshPrivateKey=argocd-keepit-ro
-kubectl -n argocd label secret repo-memql-znas argocd.argoproj.io/secret-type=repository
+gh repo deploy-key add argocd-instance-ro.pub --repo <instance-repo> --title argocd-instance-ro   # read-only
+kubectl -n argocd create secret generic repo-instance --from-literal=type=git \
+  --from-literal=url=git@github.com:<instance-repo>.git --from-file=sshPrivateKey=argocd-instance-ro
+kubectl -n argocd label secret repo-instance argocd.argoproj.io/secret-type=repository
 kubectl -n argocd patch appproject memql --type=json \
-  -p '[{"op":"add","path":"/spec/sourceRepos/-","value":"git@github.com:znasllc-io/memql-znas.git"}]'
+  -p '[{"op":"add","path":"/spec/sourceRepos/-","value":"git@github.com:<instance-repo>.git"}]'
 kubectl -n argocd replace -f deploy/argocd/apps/memql.yaml                  # REPLACE, in place, same name `memql`
 argocd app get memql --refresh                                              # Synced, or OutOfSync listing ONLY the moved items
 argocd app diff memql                                                       # must be empty / known
@@ -484,7 +495,7 @@ content-identical, so the sync is a no-op.
 ```bash
 kubectl -n argocd replace -f capture/memql-app.before.yaml && argocd app sync memql
 # the AppProject entry and the repo Secret are harmless to leave; to remove them:
-kubectl -n argocd replace -f capture/appproject.before.yaml ; kubectl -n argocd delete secret repo-memql-znas
+kubectl -n argocd replace -f capture/appproject.before.yaml ; kubectl -n argocd delete secret repo-instance
 ```
 
 ### The twice-daily entry pin loop (sketch)
@@ -501,7 +512,7 @@ means "within 12 hours of a cut":
    -> digest. Abort if any node lacks the tag (the images are not built
    yet; never half-pin).
 3. Rewrite `?ref=vX.Y.Z` and the eight `digest:` lines in
-   `deploy/k8s/overlays/keep-it/kustomization.yaml`; render. A render
+   `deploy/k8s/overlays/<instance>/kustomization.yaml`; render. A render
    failure -- typically a patch target the new engine tag renamed -- means
    do not commit; an unchanged render is a no-op.
 4. One-file commit: a PR with auto-merge, or direct to `main` -- the

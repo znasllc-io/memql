@@ -16,7 +16,7 @@
 # THE CERTIFICATE NAMES EXACT HOSTS, NOT A WILDCARD (memql#4224). The ClusterIssuer
 # solves HTTP-01 only. ACME cannot serve an HTTP-01 challenge for *.<domain>, and ONE
 # wildcard dnsName fails the WHOLE order -- so the Certificate that used to request it sat
-# Pending, was hand-edited to exact names on the first keep-it cluster, and the edge
+# Pending, was hand-edited to exact names on the first entry-shape cluster, and the edge
 # Ingress whose tls.hosts still said *.<domain> served ingress-nginx's self-signed default
 # for portal.<domain> (Safari: "This Connection Is Not Private"). DECISION: the wildcard
 # is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly
@@ -364,7 +364,7 @@ spec:
 # and only that: ingress-nginx creates a certificate-bearing server block per RULE host,
 # never per tls host. With only the *.<domain> rule, portal.<domain> is answered by the
 # wildcard's server block, whose certificate is the controller's self-signed default
-# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first keep-it
+# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first entry-shape
 # cluster served to Safari. An exact rule gives the portal a server block the
 # certificate verifies for.
 #

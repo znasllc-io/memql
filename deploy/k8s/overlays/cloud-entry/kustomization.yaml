@@ -1,10 +1,10 @@
-# CLOUD-ENTRY overlay -- keep-it / client install (memql#4203).
+# CLOUD-ENTRY overlay -- the entry / client install shape (memql#4203).
 #
 # A SECOND INSTANCE overlay, not a staging/prod split. overlays/cloud stays
 # on cnpg-db/presets/top + mesh 2 and is what deploy/argocd/apps/memql.yaml
 # points at. This directory is what a ZNAS (or client) Argo in its OWN
 # cluster reconciles: same base, same cnpg-db shape, entry sizes, mesh 1,
-# voice-off. Do not apply overlays/cloud to rg-znas-memql.
+# voice-off. Do not apply overlays/cloud to an entry install's resource group.
 #
 # Voice-off is first-class replicas 0 on voice / voice-agent / livekit /
 # livekit-sip / mcp (and livekit-redis, which exists only for the sip

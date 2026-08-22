@@ -11,7 +11,7 @@
 // does not stop the Ingress from existing; the request reaches TLS termination,
 // the controller serves whatever default certificate it has, and the browser
 // reports a name mismatch at a host nobody thinks is new. That is exactly how
-// the portal failed on the first keep-it cluster (memql#4224): the Certificate
+// the portal failed on the first entry-shape cluster (memql#4224): the Certificate
 // requested `*.<domain>`, which an HTTP-01 issuer cannot issue, and the edge
 // Ingress listed the wildcard under tls, so ingress-nginx served its
 // self-signed default for portal.<domain>. So three things are gated here, by
@@ -45,7 +45,7 @@ const committedDomain = "memql.localhost"
 const frontDoorSecret = "memql-front-door-tls"
 
 // generatedOverlays are the two instance overlays cmd/frontdoorhosts writes.
-// Both are gated: the keep-it / client instance (cloud-entry) is the one that
+// Both are gated: the entry / client instance (cloud-entry) is the one that
 // hit memql#4224 first, and overlays/cloud carries the same generated shape.
 var generatedOverlays = []string{cloudOverlay, entryOverlay}
 

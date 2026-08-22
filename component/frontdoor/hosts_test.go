@@ -170,7 +170,7 @@ func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 // host set and the SAN set. A served exact host with no SAN terminates TLS with
 // the controller's default certificate and presents as a browser name mismatch
 // at a host nobody thinks is new -- which is exactly how the portal failed on
-// the first keep-it cluster. A SAN with no rule is a name the order pays for
+// the first entry-shape cluster. A SAN with no rule is a name the order pays for
 // and nothing serves.
 func TestEveryExactHostIsASANAndTheWildcardIsNot(t *testing.T) {
 	sans := CertificateSANs(domain)
