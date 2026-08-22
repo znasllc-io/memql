@@ -26,4 +26,5 @@ export {
   Shield,
   Sun,
   Users,
+  X,
 } from "lucide-react";

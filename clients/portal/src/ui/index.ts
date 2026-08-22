@@ -12,6 +12,7 @@ export { DataText, type DataKind } from "./DataText";
 export { ConfirmDialog, Dialog, type DialogSize } from "./Dialog";
 export { EmptyState } from "./EmptyState";
 export { Field, Select, TextInput, Textarea } from "./Field";
+export { LabelChips } from "./LabelChips";
 export { PageHeader } from "./PageHeader";
 export { PopulationMeta } from "./PopulationMeta";
 export { Skeleton } from "./Skeleton";
