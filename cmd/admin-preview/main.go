@@ -106,7 +106,7 @@ func main() {
 		Mode:               "domain_restricted",
 		Stage:              "waitlist_signup",
 		PrefillEmail:       "alex@partner.io",
-		AllowedDomainsHint: "znasllc.io",
+		AllowedDomainsHint: "example.com",
 		Flash:              &webtempl.Flash{Kind: "info", Message: "Your email isn't in this cluster's allowed-domain list. You can join the waitlist instead — the operator will follow up."},
 	}))
 	render(filepath.Join(outDir, "login-needs-invite.html"), webtempl.Login(webtempl.LoginData{
