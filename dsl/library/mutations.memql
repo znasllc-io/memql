@@ -33,6 +33,7 @@ mutate artifact createArtifact {
     mimeType          string
     live              bool
     scope             enum("workspace", "private")
+    labels            []string
     partitionId           string
     agentId           string
     producedByPlanId  string
@@ -53,6 +54,7 @@ mutate artifact createArtifact {
     args.mimeType
     live: args.live ?? false
     args.scope
+    args.labels
     args.partitionId
     args.agentId
     args.producedByPlanId

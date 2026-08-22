@@ -3023,6 +3023,28 @@ QueryClient.prototype.libraryArtifactsByKind = function (this: QueryClient, args
   return this.executeNamed("libraryArtifactsByKind", buildLibraryArtifactsByKind(args), opts);
 };
 
+/** List the caller's Library rows carrying a given label -- backs the label facet filter. Owned: ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even when args.label is absent); the when() membership predicate narrows to rows whose labels include the given value. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLabel"] in generated_concepts.ts).
+export interface LibraryArtifactsByLabelArgs {
+  label: string;
+}
+
+export function buildLibraryArtifactsByLabel(args: LibraryArtifactsByLabelArgs): string {
+  const parts: string[] = [];
+  parts.push("label: " + renderMemQLValue(args.label));
+  return "query libraryArtifactsByLabel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactsByLabel(args: LibraryArtifactsByLabelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactsByLabel = function (this: QueryClient, args: LibraryArtifactsByLabelArgs = {} as LibraryArtifactsByLabelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactsByLabel", buildLibraryArtifactsByLabel(args), opts);
+};
+
 /** List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLens"] in generated_concepts.ts).
 export interface LibraryArtifactsByLensArgs {

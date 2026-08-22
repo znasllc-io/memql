@@ -2050,6 +2050,7 @@ type CreateArtifactArgs struct {
 	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
 	// Enum: workspace | private
 	Scope                string
+	Labels               []string
 	PartitionId          string
 	AgentId              string
 	ProducedByPlanId     string
@@ -2129,6 +2130,13 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 		}
 		b.WriteString("scope: ")
 		b.WriteString(quoteMemQL(args.Scope))
+	}
+	if args.Labels != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 24 {

@@ -62,6 +62,24 @@ query artifact libraryArtifactsByKind {
   shape   artifactFull
 }
 
+/// List the caller's Library rows carrying a given label -- backs the label facet filter. Owned:
+/// ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even
+/// when args.label is absent); the when() membership predicate narrows to rows whose labels include
+/// the given value.
+@actor
+query artifact libraryArtifactsByLabel {
+  args {
+    label  string!
+  }
+  filter  ownerUserId==actor.userId && when(args.label) { args.label in labels }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   artifactFull
+}
+
 // queryLibraryArtifactsBySpace (the per-space Library facet) moved to the
 // product pack (the pack's queries file) in Epic 3
 // 3.6 (memql#1903): the per-space filter is a product surface. The

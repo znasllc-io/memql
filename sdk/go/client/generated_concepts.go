@@ -396,6 +396,7 @@ var BoundConcepts = map[string]string{
 	"libraryArtifactById":                   "v1:library:artifact",
 	"libraryArtifacts":                      "v1:library:artifact",
 	"libraryArtifactsByKind":                "v1:library:artifact",
+	"libraryArtifactsByLabel":               "v1:library:artifact",
 	"libraryArtifactsByLens":                "v1:library:artifact",
 	"libraryWorkspaceLiveSources":           "v1:library:artifact",
 	"logMissingCapability":                  "v1:platform:missingCapability",

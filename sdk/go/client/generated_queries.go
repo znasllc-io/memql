@@ -3024,6 +3024,28 @@ func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 	return b.String()
 }
 
+// LibraryArtifactsByLabel -- List the caller's Library rows carrying a given label -- backs the label facet filter. Owned: ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even when args.label is absent); the when() membership predicate narrows to rows whose labels include the given value.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLabel"] in generated_concepts.go).
+type LibraryArtifactsByLabelArgs struct {
+	Label string
+}
+
+// LibraryArtifactsByLabel calls the engine query libraryArtifactsByLabel.
+func (qc *QueryClient) LibraryArtifactsByLabel(ctx context.Context, args LibraryArtifactsByLabelArgs) (*Result, error) {
+	call := LibraryArtifactsByLabelBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsByLabel", call)
+}
+
+func LibraryArtifactsByLabelBuild(args LibraryArtifactsByLabelArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactsByLabel(")
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifactsByLens -- List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLens"] in generated_concepts.go).

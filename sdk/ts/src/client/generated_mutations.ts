@@ -1283,6 +1283,7 @@ export interface CreateArtifactArgs {
   live?: boolean;
   // Enum: workspace | private
   scope?: string;
+  labels?: string[];
   partitionId?: string;
   agentId?: string;
   producedByPlanId?: string;
@@ -1305,6 +1306,7 @@ export function buildCreateArtifact(args: CreateArtifactArgs): string {
   if (args.mimeType !== undefined) parts.push("mimeType: " + renderMemQLValue(args.mimeType));
   if (args.live !== undefined) parts.push("live: " + renderMemQLValue(args.live));
   if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
+  if (args.labels !== undefined) parts.push("labels: " + renderMemQLValue(args.labels));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));

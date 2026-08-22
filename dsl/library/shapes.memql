@@ -17,6 +17,7 @@ shape artifact artifactFull {
   mimeType
   live
   scope
+  labels
   partitionId
   agentId
   producedByPlanId
