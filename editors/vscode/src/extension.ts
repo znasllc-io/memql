@@ -175,7 +175,7 @@ import {
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
 import { DeploymentPanel } from './webview/deploymentPanel.js';
-import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
+import { SITE_CONCEPT, portalConceptUrl, portalTarget } from './clusters/portalUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
@@ -1285,6 +1285,30 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         void offerDetails('error', connectionOutput, `MemQL: ${state.clusterName} could not serve that file.`);
       }
     },
+    // Rows live inside the cluster, not on this machine, so this hands off to
+    // the portal rather than fetching and rendering them here (memql#4252) --
+    // same division of labour as viewSourceFromCluster above, the other way
+    // round. clusters.yaml is read here because ConnectionState carries only
+    // the connected cluster's NAME (`clusterName`) -- ConnectionManager has no
+    // getter for the ClusterConfig it dialled with -- so the name is what
+    // resolves back to a full config.
+    browseRowsInPortal: async (construct) => {
+      const state = connections?.state;
+      if (state?.status !== 'connected') {
+        void window.showInformationMessage('MemQL: connect to a cluster to browse its rows in the portal.');
+        return;
+      }
+      const result = await readClustersFileSafe(clustersPath);
+      const cluster = result.ok ? result.file.clusters.find((c) => c.name === state.clusterName) : undefined;
+      const root = cluster === undefined ? '' : await portalUrlForCluster(cluster);
+      if (root === '') {
+        void window.showErrorMessage(
+          'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+        );
+        return;
+      }
+      await env.openExternal(Uri.parse(portalConceptUrl(root, construct.name)));
+    },
   });
 
   // Everything the portal handoff (memql#4251) needs from this function, in
@@ -1978,14 +2002,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      const query = connections?.query;
-      const state = connections?.state;
-      const connected =
-        query !== undefined && state?.status === 'connected' && state.clusterName === target.cluster.name;
-      const page = connected
-        ? await browseConceptPage(query, SITE_CONCEPT, { pageSize: 50 }).catch(() => null)
-        : null;
-      const url = portalTarget(target.cluster, page?.rows ?? []).url;
+      const url = await portalUrlForCluster(target.cluster);
       if (url === '') {
         void window.showErrorMessage(
           'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
@@ -3202,6 +3219,23 @@ async function writeCluster(
     return;
   }
   clustersTree.refresh();
+}
+
+// The portal's URL for a cluster: the site row when there is a live
+// connection to read it over, the composed address otherwise (see
+// portalTarget). Factored out of memql.clusters.openPortal (memql#4252) so
+// the construct page's "Browse rows in portal" button computes the same
+// answer instead of growing a second copy of the connected-vs-composed
+// choice.
+async function portalUrlForCluster(cluster: ClusterConfig): Promise<string> {
+  const query = connections?.query;
+  const state = connections?.state;
+  const connected =
+    query !== undefined && state?.status === 'connected' && state.clusterName === cluster.name;
+  const page = connected
+    ? await browseConceptPage(query, SITE_CONCEPT, { pageSize: 50 }).catch(() => null)
+    : null;
+  return portalTarget(cluster, page?.rows ?? []).url;
 }
 
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {

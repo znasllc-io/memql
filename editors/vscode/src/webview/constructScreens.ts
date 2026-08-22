@@ -130,6 +130,12 @@ ${sourceHtml(construct)}`;
  * "Open the .memql file" is offered only when there IS a file and it is
  * reachable. For a promoted construct the source is shown below instead, and
  * saying so beats a button that opens nothing.
+ *
+ * "Browse rows in portal" is CONCEPTS ONLY (memql#4252) -- rows are cluster
+ * state, which the portal already draws, so this hands off rather than a
+ * second rows browser growing in the extension. No other kind has rows, so no
+ * other kind draws the button; the absence is the statement, same as the run
+ * button above.
  */
 function actionsHtml(input: ConstructPageInput): string {
   const buttons: string[] = [];
@@ -159,6 +165,9 @@ function actionsHtml(input: ConstructPageInput): string {
     buttons.push(
       `<button class="secondary" type="button" data-act="viewSourceFromCluster">View source from cluster</button>`,
     );
+  }
+  if (input.construct.kind === "concept") {
+    buttons.push(`<button class="secondary" type="button" data-act="browseRows">Browse rows in portal</button>`);
   }
   if (buttons.length === 0) return "";
   return `<div class="actions">${buttons.join("")}</div>`;

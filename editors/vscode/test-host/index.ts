@@ -510,6 +510,12 @@ smoke("every webview surface opens without throwing", async () => {
       viewSourceFromCluster: () => {
         throw new Error("no cluster source in the smoke lane");
       },
+      // Same reasoning, and doubly unreachable here: the fixture's kind is
+      // "logic", so the page draws no browse-rows button to click in the
+      // first place (memql#4252).
+      browseRowsInPortal: () => {
+        throw new Error("no portal browse in the smoke lane");
+      },
     }
   );
   expected.push("Construct: trainedResponder");

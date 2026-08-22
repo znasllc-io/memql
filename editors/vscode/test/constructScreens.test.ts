@@ -64,3 +64,32 @@ test("a promoted construct is offered no cluster source -- there is no file to s
   });
   assert.equal(html.includes(CLUSTER_SOURCE), false, "a construct with no file was offered a fetch of it");
 });
+
+// -----------------------------------------------------------------------------
+// browse rows in the portal (memql#4252) -- concepts only
+// -----------------------------------------------------------------------------
+
+const BROWSE_ROWS = 'data-act="browseRows"';
+
+test("a concept offers to browse its rows in the portal", () => {
+  const html = renderConstructPage({
+    construct: construct({ kind: "concept" }),
+    fileInWorkspace: false,
+    offerClusterSource: false,
+    error: "",
+  });
+  assert.ok(html.includes(BROWSE_ROWS));
+  assert.ok(html.includes("Browse rows in portal"));
+});
+
+test("no other kind offers to browse rows -- the absence is the statement", () => {
+  for (const kind of ["query", "mutation", "automation", "tool", "spec", "shape", "prompt", "provider"]) {
+    const html = renderConstructPage({
+      construct: construct({ kind }),
+      fileInWorkspace: false,
+      offerClusterSource: false,
+      error: "",
+    });
+    assert.equal(html.includes(BROWSE_ROWS), false, `${kind} drew a browse-rows button`);
+  }
+});

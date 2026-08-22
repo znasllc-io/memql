@@ -55,13 +55,20 @@ import { workspaceCandidates } from "../handoff/resolve.js";
 /**
  * What the page needs from the host that it cannot reach itself.
  *
- * Exactly one entry, and it is INJECTED rather than imported because the fetch
- * needs the live connection -- which lives in extension.ts and which a webview
- * module has no business reading. The panel posts an intent; the host decides
+ * Two entries, both INJECTED rather than imported, because each needs the
+ * live connection -- which lives in extension.ts and which a webview module
+ * has no business reading. The panel posts an intent; the host decides
  * whether there is a cluster to serve it.
+ *
+ * `browseRowsInPortal` (memql#4252) is the other half of `viewSourceFromCluster`:
+ * that dep reads a construct's DEFINITION from the cluster, this one hands a
+ * concept's ROWS to the portal rather than fetching or rendering them here --
+ * the extension owns what is on this machine and what it can reach, the
+ * portal owns what is inside a cluster.
  */
 export interface ConstructPanelDeps {
   viewSourceFromCluster: (construct: CatalogConstruct) => Promise<void>;
+  browseRowsInPortal: (construct: CatalogConstruct) => Promise<void>;
 }
 
 /**
@@ -206,6 +213,10 @@ export class ConstructPanel {
     }
     if (type === "viewSourceFromCluster") {
       await this.deps.viewSourceFromCluster(this.construct);
+      return;
+    }
+    if (type === "browseRows") {
+      await this.deps.browseRowsInPortal(this.construct);
       return;
     }
     if (type !== "openFile") return;
