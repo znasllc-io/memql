@@ -7,16 +7,17 @@ import "net/http"
 // to allow the brand-logo data URI inlined into the layout. No remote
 // hosts, no `unsafe-eval`.
 //
-// `style-src 'self' 'unsafe-inline'` is the single concession to the
-// "no unsafe-inline" target documented in the implementation plan §2.11
-// — the layout uses an inline <style> tag to inject the brand-primary
-// CSS variable so templates don't have to be re-rendered when the brand
-// color changes. We can drop 'unsafe-inline' once the brand CSS is
-// exposed via a dedicated /static/brand.css endpoint that serves
-// :root vars.
+// `style-src 'self'` with no 'unsafe-inline'. That concession existed for one
+// reason -- the layout injected the brand colour as an inline style attribute
+// on <body> -- and memql#4269 retired it: the same values are served as
+// /static/brand.css, a :root override block rendered from cluster settings
+// (component/identity/web/brand.go).
+//
+// Keep it that way. Reaching for an inline style attribute again re-weakens
+// the directive for every page to move a value that has a stylesheet.
 const cspBase = "default-src 'self'; " +
 	"img-src 'self' data:; " +
-	"style-src 'self' 'unsafe-inline'; " +
+	"style-src 'self'; " +
 	"script-src 'self'; " +
 	"connect-src 'self'; " +
 	"font-src 'self'; " +
@@ -29,7 +30,7 @@ const cspBase = "default-src 'self'; " +
 // `upgrade-insecure-requests` directive forces ALL subresource fetches
 // to https — necessary in production, fatal on a local-dev http://
 // origin (the browser tries to fetch https://localhost:8081/static/
-// identity.css, fails because no TLS, and the page renders unstyled).
+// app.css, fails because no TLS, and the page renders unstyled).
 const upgradeDirective = "; upgrade-insecure-requests"
 
 // policyFor picks the right CSP for the request. HTTPS responses get

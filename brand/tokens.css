@@ -1,0 +1,145 @@
+/*
+ * MemQL's design tokens -- the one place the product's palette, type scale and
+ * radius rhythm are written down.
+ *
+ * WHO IMPORTS THIS, AND WHY IT LIVES AT THE REPO ROOT
+ *
+ * Two builds consume this file and neither may carry a copy:
+ *
+ *   clients/portal   Tailwind v4 via @tailwindcss/vite, bundling with Vite.
+ *   component/identity/web   Tailwind v4 via the standalone CLI, output
+ *                            embedded into the Go binary.
+ *
+ * They are a TypeScript app and a Go binary; they share no package manager and
+ * no config format. Plain CSS custom properties are the one format both
+ * consume, which is why the shared layer is CSS rather than a Tailwind config,
+ * and why it sits at the repo root rather than inside either surface --
+ * neither owns it. brand_shared_source_test.go asserts both builds import
+ * these files instead of copying them, because two copies of a palette is
+ * two palettes.
+ *
+ * WHAT LIVES HERE: the semantic roles (surface / fg / muted / border / accent /
+ * danger), the type scale, the radius rhythm. Semantic names, never colour
+ * names: "mint-300" is a value that cannot survive a theme flip, "--memql-fg"
+ * is a role that can. View-kit's --vk-* contract is NOT here -- view-kit is a
+ * portal concern and its bridge stays in clients/portal/src/styles/viewkit.css.
+ *
+ * THE PALETTE IS memql.io's, exactly (memql#4177). The neutrals are
+ * green-tinted -- the dark ground is a near-black with a moss cast, the light
+ * ground a warm paper -- and the one accent is the brand green the site's
+ * graph mark wears. Warn and danger are re-derived warm hues muted toward the
+ * same olive cast so the three status families read as one system.
+ *
+ * THEME RESOLUTION -- one definition per token via light-dark():
+ *
+ *   :root { color-scheme: light dark }        -> no data-theme attribute means
+ *                                                "follow the OS", which is the
+ *                                                correct default for a viewer
+ *                                                who has never chosen.
+ *   :root[data-theme="light"] { color-scheme: light }
+ *   :root[data-theme="dark"]  { color-scheme: dark }
+ *
+ * Every colour token is written ONCE as light-dark(<light>, <dark>) and the
+ * three color-scheme declarations are the entire switch. The portal writes the
+ * attribute from src/app/theme.ts; the identity pages never write it, because
+ * a sign-in page cannot read the portal's localStorage across origins -- they
+ * follow the OS, which is the honest default there.
+ *
+ * CONTRAST (measured, WCAG relative luminance -- keep this table honest when
+ * a value moves):
+ *   dark  fg/bg 15.96 . muted/bg 7.68 . subtle/bg 4.04 . accent/bg 10.21
+ *         accent-fg on accent 10.21 . warn/bg 8.95 . danger/bg 6.32
+ *         data-number/surface 16.08 . data-string/surface 9.15
+ *   light fg/bg 15.15 . muted/white 6.42 . subtle/white 3.86 . accent/white 5.14
+ *         accent-fg on accent 5.14 . warn/bg 4.94 . danger/white 6.04
+ *         data-number/white 5.47 . data-string/white 5.02
+ * The binding floors: warn is a border and a dot (non-text UI, >= 3:1 against
+ * the ground it sits on -- both themes clear it with room); accent and the
+ * data tints carry small text (>= 4.5:1 -- both themes clear it).
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* --- surfaces, back to front ------------------------------------- */
+  --memql-bg: light-dark(#f2f4ef, #07090a);          /* the page itself */
+  --memql-surface: light-dark(#ffffff, #0b1110);     /* cards, panels, the rail */
+  --memql-surface-raised: light-dark(#e9ede6, #0e1311); /* hover, selected rows */
+
+  /* --- foreground ---------------------------------------------------- */
+  --memql-fg: light-dark(#14201a, #e8e6dd);          /* body text */
+  --memql-fg-muted: light-dark(#586159, #9ca395);    /* labels, secondary slots */
+  --memql-fg-subtle: light-dark(#7c847b, #6c726a);   /* placeholders, "null" */
+
+  /* --- lines --------------------------------------------------------- */
+  --memql-border: light-dark(#d6ddd4, #18231e);
+  --memql-border-strong: light-dark(#c2cabf, #213029);
+
+  /* --- accents -------------------------------------------------------- */
+  --memql-accent: light-dark(#047d5a, #5ccda7);
+  --memql-accent-fg: light-dark(#ffffff, #07090a);
+  --memql-accent-subtle: light-dark(#dcefe6, #0f2a20);
+  /* The deep brand green, for the rare filled moment that wants the site's
+     darker pole (memql.io's accent-deep #026842 family). Not a status. */
+  --memql-accent-deep: light-dark(#026842, #026842);
+
+  /* --- status ---------------------------------------------------------
+   * ok IS the brand green: on a console whose brand is green, "healthy"
+   * wearing the accent is the point, not a collision. warn/danger are warm
+   * hues pulled toward the olive-tinted neutrals so the three families sit
+   * in one palette; ratios in the header table.
+   */
+  --memql-ok: light-dark(#047d5a, #5ccda7);
+  --memql-ok-subtle: light-dark(#dcefe6, #0f2a20);
+  --memql-warn: light-dark(#8a6210, #d2a75a);
+  --memql-warn-subtle: light-dark(#f5ead2, #2a2113);
+  --memql-danger: light-dark(#b3362a, #e0705f);
+  --memql-danger-subtle: light-dark(#f8e3df, #2b1512);
+
+  /* --- the two-voice data tints ---------------------------------------
+   * Graph data (ids, counts, timestamps, field values) renders in the mono
+   * voice with these tints -- numbers mint, strings amber -- mirroring the
+   * site's code samples. Chrome never wears them.
+   */
+  --memql-data-number: light-dark(#0f766e, #98ffe0);
+  --memql-data-string: light-dark(#b45309, #cbb083);
+
+  /* --- type scale ----------------------------------------------------
+   * A fifth-based ramp, deliberately short. Five sizes is enough for an
+   * operations console and a short ramp is what keeps two screens built by
+   * two different issues looking like one product. `display` is the one
+   * exception -- the Squada One big-number/wordmark size -- and it is a
+   * moment, not a step pages may reach for casually.
+   */
+  --memql-text-xs: 0.75rem;
+  --memql-text-sm: 0.8125rem;
+  --memql-text-base: 0.9375rem;
+  --memql-text-lg: 1.125rem;
+  --memql-text-xl: 1.5rem;
+  --memql-text-display: 2.25rem;
+
+  /* Inter carries the chrome; JetBrains Mono carries the data voice -- rows,
+     ids and payload values are read character by character, not word by
+     word. Squada One is the display face: the wordmark and big-number
+     moments only. All three are self-hosted (fontsource) because the edge
+     CSP allows no external font host; the stacks keep real fallbacks. */
+  --memql-font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --memql-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+  --memql-font-display: "Squada One", "InterVariable", "Inter", ui-sans-serif,
+    sans-serif;
+
+  --memql-radius: 0.375rem;
+  --memql-radius-lg: 0.625rem;
+}
+
+/* The explicit choice, written by src/app/theme.ts. Pinning color-scheme is
+ * the entire override: every light-dark() token above re-resolves. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

@@ -158,7 +158,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # across all builder stages and one TLS hiccup killed the whole cluster
 # build (memql#1351). Keep TAILWIND_VERSION in sync with the script's pin;
 # a missed bump degrades gracefully (the script re-downloads, with retries).
-ARG TAILWIND_VERSION=v3.4.17
+ARG TAILWIND_VERSION=v4.1.11
 RUN set -e; \
     case "$(uname -m)" in \
         x86_64) platform=linux-x64 ;; \

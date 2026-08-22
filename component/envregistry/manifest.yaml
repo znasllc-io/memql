@@ -2025,7 +2025,7 @@ variables:
   - name: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR
     component: identity
     scope: node
-    default: "#0433ff"
+    default: ""
     optional: true
     description: "Hex accent color used for HTML emails and the web UI primary button."
 

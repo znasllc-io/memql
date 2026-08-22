@@ -17,21 +17,30 @@ import (
 // their browser cache:
 //
 //  1. Each embedded static asset gets an 8-char content hash computed
-//     once at boot. The map { "/static/identity.css" -> "a1b2c3d4" }
+//     once at boot. The map { "/static/app.css" -> "a1b2c3d4" }
 //     lives on Server.assetVersions.
 //
-//  2. Templates reference assets via {{asset "/static/identity.css"}}
-//     which expands to "/static/identity.css?v=a1b2c3d4". A new
-//     deploy with a changed stylesheet produces a new hash, a new
-//     URL, and the browser is FORCED to fetch the new bytes —
+//     ONE asset is deliberately outside this scheme: /static/brand.css
+//     is generated per request from cluster settings, so its bytes can
+//     change while the process runs and a boot-time hash would be wrong
+//     exactly when an owner changes the brand. It carries its own
+//     per-request fingerprint — see component/identity/web/brand.go.
+//
+//  2. Templates reference assets via the layout's asset() helper —
+//     asset("/static/app.css") expands to "/static/app.css?v=a1b2c3d4".
+//     A new deploy with a changed stylesheet produces a new hash, a
+//     new URL, and the browser is FORCED to fetch the new bytes —
 //     there's no way around it because the old cached entry is at
-//     a different URL.
+//     a different URL. (templ is typed Go, not text/template; there
+//     is no {{asset}} syntax and never was in this package.)
 //
 //  3. Static responses set
 //     `Cache-Control: public, max-age=31536000, immutable`
 //     so browsers cache the assets aggressively (a year), but the
 //     hash-bearing URL means a content change is a different URL
 //     entirely. Best of both worlds: no perf hit, no stale code.
+//     (brand.css is `no-cache, must-revalidate` instead, for the
+//     reason in #1.)
 //
 // HTML responses get
 //     `Cache-Control: no-store, must-revalidate`
@@ -64,7 +73,7 @@ func computeAssetVersions(fsys fs.FS, dir string) (map[string]string, error) {
 			return fmt.Errorf("hash %q: %w", p, err)
 		}
 		sum := sha256.Sum256(body)
-		urlPath := "/" + p // "static/identity.css" -> "/static/identity.css"
+		urlPath := "/" + p // "static/app.css" -> "/static/app.css"
 		out[urlPath] = hex.EncodeToString(sum[:4])
 		return nil
 	})

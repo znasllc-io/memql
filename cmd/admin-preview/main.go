@@ -65,14 +65,13 @@ func main() {
 
 	layout := func(title, path string, scripts ...string) webtempl.LayoutData {
 		return webtempl.LayoutData{
-			Title:             title,
-			BrandName:         "Znasllc",
-			BrandPrimaryColor: "#0433ff",
-			Year:              time.Now().UTC().Year(),
-			NavLinks:          nav,
-			ExtraScripts:      scripts,
-			Asset:             asset,
-			Path:              path,
+			Title:        title,
+			BrandName:    "Znasllc",
+			Year:         time.Now().UTC().Year(),
+			NavLinks:     nav,
+			ExtraScripts: scripts,
+			Asset:        asset,
+			Path:         path,
 		}
 	}
 
@@ -84,12 +83,11 @@ func main() {
 	publicNav := []webtempl.NavLink{}
 	publicLayout := func(title string) webtempl.LayoutData {
 		return webtempl.LayoutData{
-			Title:             title,
-			BrandName:         "Znasllc",
-			BrandPrimaryColor: "#0433ff",
-			Year:              time.Now().UTC().Year(),
-			NavLinks:          publicNav,
-			Asset:             asset,
+			Title:     title,
+			BrandName: "Znasllc",
+			Year:      time.Now().UTC().Year(),
+			NavLinks:  publicNav,
+			Asset:     asset,
 		}
 	}
 	render(filepath.Join(outDir, "login-email.html"), webtempl.Login(webtempl.LoginData{
