@@ -13,6 +13,7 @@
 // under bare `node --test` (cmd/memql-lsp/vscodeimportrule_test.go).
 
 import type { ImageSource } from "../install/receipt.js";
+import { returnsToReleasedImages } from "./imageLane.js";
 
 export interface PreflightItem {
   label: string;
@@ -118,9 +119,12 @@ export function preflightItems(inputs: PreflightInputs): PreflightItem[] {
     items.push({
       label: "Image source",
       state: "attention",
-      detail:
-        `This returns local to released ${inputs.releasedTag || "release"} images; it is ` +
-        "running a checkout build today. Rebuild from checkout brings them back.",
+      // The shared sentence (state/imageLane.ts), plus the one clause only this
+      // surface can offer: the way back.
+      detail: `${returnsToReleasedImages(
+        "local",
+        inputs.releasedTag ?? "",
+      )} Rebuild from checkout brings them back.`,
     });
   }
 

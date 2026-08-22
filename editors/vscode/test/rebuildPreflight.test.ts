@@ -1,4 +1,5 @@
-// The "Before it runs" list for a rebuild (memql#4246).
+// The "Before it runs" list for a rebuild, and the screens around it
+// (memql#4246).
 //
 // The item that carries the epic is "Image source". A rebuild moves a cluster
 // off released images and onto ones built from a working tree, and NOTHING ELSE
@@ -15,6 +16,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { rebuildPreflightItems } from "../src/state/rebuildPreflight.js";
+import type { StepProgress } from "../src/state/addCluster.js";
+import { renderFailedScreen, renderRebuildScreen } from "../src/webview/installScreens.js";
 
 const base = {
   dockerReachable: true,
@@ -74,6 +77,71 @@ test("the node line names the default honestly", () => {
   assert.match(
     rebuildPreflightItems({ ...base, nodes: "bff,agent" }).find((i) => i.label === "Nodes")!.detail,
     /bff, agent/,
+  );
+});
+
+test("the checklist words the same string the run will be given", () => {
+  // ONE NORMALISER, BOTH PATHS. The display side used to tidy the operator's
+  // typing for the sentence while the send side forwarded it raw, so the
+  // checklist blessed "bff, agent" and the script exited 2 on " agent".
+  const nodes = (raw: string): string =>
+    rebuildPreflightItems({ ...base, nodes: raw }).find((i) => i.label === "Nodes")!.detail;
+  assert.match(nodes("bff, agent"), /bff, agent\./);
+  assert.match(nodes(" bff ,agent,, "), /bff, agent\./);
+  // A list that is nothing but separators is not a list.
+  assert.match(nodes("  ,  , "), /all app nodes/);
+});
+
+// -----------------------------------------------------------------------------
+// the rebuild's own screens
+// -----------------------------------------------------------------------------
+
+test("a failed rebuild offers Retry and Back -- guided has nothing to offer it", () => {
+  // "Switch to guided" is a WIZARD concept: it re-runs one step with the
+  // operator driving the privileged part by hand. A rebuild is one unprivileged
+  // step, so the control is a second Retry wearing a name that promises
+  // something else.
+  const failure: StepProgress = {
+    id: "rebuildFromCheckout",
+    description: "Build the node images",
+    state: "failed",
+    exitCode: 5,
+    reason: "an image build failed",
+    log: "",
+    guided: false,
+    remedy: "",
+  };
+  const rebuild = renderFailedScreen({
+    steps: [failure],
+    mode: "rebuild",
+    running: false,
+    failures: [failure],
+  });
+  assert.match(rebuild, /data-act="retry"/);
+  assert.match(rebuild, /data-act="cancel"/);
+  assert.doesNotMatch(rebuild, /data-act="guided"/);
+
+  // Every other run keeps it: the wizard's graph has privileged steps, which is
+  // the whole case for the control.
+  assert.match(
+    renderFailedScreen({ steps: [failure], mode: "deploy", running: false, failures: [failure] }),
+    /data-act="guided"/,
+  );
+});
+
+test("the rebuild screen names the checkout and asks one thing", () => {
+  const html = renderRebuildScreen({
+    checkoutDir: "/home/me/.memql/src",
+    nodes: "bff",
+    preflight: rebuildPreflightItems(base),
+  });
+  assert.match(html, /\/home\/me\/\.memql\/src/);
+  assert.match(html, /data-field="nodes"/);
+  assert.match(html, /data-act="beginRebuild"/);
+  // The checklist is above the Start button, so it is an informed click.
+  assert.ok(
+    html.indexOf("Before it runs") < html.indexOf('data-act="beginRebuild"'),
+    "the checklist must render before the Start button",
   );
 });
 

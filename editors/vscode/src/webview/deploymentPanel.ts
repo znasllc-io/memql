@@ -87,6 +87,7 @@ import {
   recordedProviderKeyFile,
   readReceipt,
 } from "../install/receipt.js";
+import { rebuiltMessage } from "../state/imageLane.js";
 import { rebuildPreflightItems, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
 import { RunRecorder } from "../state/runRecorder.js";
 import { defaultRunsDir } from "../state/runLog.js";
@@ -472,9 +473,14 @@ export class DeploymentPanel {
       return;
     }
     if (type === "guided") {
+      // The rebuild failure screen draws no guided control (installScreens.ts
+      // says why), so this is a message the page never rendered -- dropped, the
+      // same call `choose` makes for an action an instance does not offer,
+      // rather than run as a second Retry.
+      if (this.runMode === "rebuild") return;
       this.state.switchToGuided();
       this.render();
-      await (this.runMode === "rebuild" ? this.startRebuild() : this.startDeploy());
+      await this.startDeploy();
       return;
     }
     if (type === "cancel") {
@@ -761,7 +767,12 @@ export class DeploymentPanel {
       // training state was decided against the tree that is no longer there --
       // which is the state the `edited` lens reads to offer this very button.
       void vscode.commands.executeCommand("memql.constructs.refresh");
-      void vscode.window.showInformationMessage(rebuiltMessage(instance.name, report));
+      void vscode.window.showInformationMessage(
+        rebuiltMessage(
+          instance.name,
+          report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
+        ),
+      );
     }
 
     this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
@@ -1371,35 +1382,6 @@ async function isMemqlCheckout(dir: string): Promise<boolean> {
     ),
   );
   return found.every((ok) => ok);
-}
-
-/**
- * What the operator is told when a rebuild lands.
- *
- * READ OFF THE ENVELOPE the step actually produced, not off what was asked for:
- * `k3d.dev` reports the nodes it built, the commit it built them from and how
- * many files were uncommitted at that moment, and those are facts about what is
- * now running. Restating the request would say "bff, agent" for a run that
- * expanded an empty list into nine node types.
- */
-function rebuiltMessage(instanceName: string, report: ExecutionReport | undefined): string {
-  const result = report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result;
-  const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
-  // The script reports the expanded list, space-separated.
-  const built = str(result?.nodes).split(/\s+/).filter((n) => n !== "");
-  const nodes = built.length === 0 ? "the app nodes" : built.join(", ");
-  const commit = str(result?.commit);
-  const dirty = Number(result?.dirtyCount);
-  // Each fact is named only when the envelope carried it: "(0000000, NaN
-  // uncommitted files)" would be this page inventing provenance for a build.
-  const parts = [
-    ...(commit === "" ? [] : [commit.slice(0, 7)]),
-    ...(Number.isFinite(dirty)
-      ? [`${String(dirty)} uncommitted file${dirty === 1 ? "" : "s"}`]
-      : []),
-  ];
-  const provenance = parts.length === 0 ? "" : ` (${parts.join(", ")})`;
-  return `Rebuilt ${nodes} -- ${instanceName} now runs your checkout${provenance}.`;
 }
 
 /**

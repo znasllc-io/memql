@@ -423,6 +423,23 @@ ${renderRemedy(failure)}`;
     })
     .join("");
 
+  // GUIDED IS A WIZARD CONCEPT, AND A REBUILD HAS NO USE FOR IT (memql#4246).
+  // It re-runs one step with the operator driving the privileged part by hand
+  // in their own terminal, which is what makes `hostsBlock` and the docker
+  // group reachable at all. A rebuild is ONE unprivileged step, so the control
+  // there is a second Retry wearing a name that promises something else.
+  //
+  // Decided from `mode`, which this input already carries, rather than from a
+  // flag beside it: two fields saying which run this is could be passed
+  // disagreeing, and the heading above would then name one run while the
+  // buttons below served another.
+  const guided =
+    input.mode === "rebuild"
+      ? ""
+      : `<button class="secondary" type="button" data-act="guided">${
+          many ? "Switch these steps to guided" : "Switch this step to guided"
+        }</button>`;
+
   // The labels count. "Retry this step" in front of three failures names one
   // thing and does another -- the recovery re-runs the graph, and every failed
   // step goes back into it.
@@ -433,9 +450,7 @@ ${renderToHtml(renderInstallSteps(toStepViews(input.steps)))}
   <button class="primary" type="button" data-act="retry">${
     many ? "Retry these steps" : "Retry this step"
   }</button>
-  <button class="secondary" type="button" data-act="guided">${
-    many ? "Switch these steps to guided" : "Switch this step to guided"
-  }</button>
+  ${guided}
   <button class="secondary" type="button" data-act="cancel">Cancel</button>
 </div>`;
 }

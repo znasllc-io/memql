@@ -216,6 +216,47 @@ test("the newest marker follows the list, not a guess", () => {
   assert.doesNotMatch(html, /v0\.17\.0 \(newest\)/);
 });
 
+test("the tag screen states the lane crossing on a checkout-mode cluster", () => {
+  // THE LIKELIEST PLACE THE SILENT CROSSING HAPPENS (memql#4246). Create
+  // deployment is reached from the SAME row as Rebuild from checkout, it
+  // re-runs clusterUp -- which rewrites the Application's image overrides back
+  // to released ones -- and unlike Repair and Upgrade it asks for no
+  // confirmation and shows no checklist. Without this line nothing anywhere
+  // tells the operator their own build is about to stop running.
+  const html = renderChooseTag({
+    ...CHOOSE,
+    instance: { ...healthy("v0.18.0"), imageSource: "checkout" },
+    target: "v0.19.0",
+    listing: { tags: ["v0.19.0", "v0.18.0"], error: "" },
+  });
+  assert.match(html, /returns local to released v0\.19\.0 images/);
+  assert.match(html, /runs a checkout build today/);
+  // Above the button, so Start is an informed click -- the same placement rule
+  // the install checklist follows.
+  assert.ok(
+    html.indexOf("checkout build today") < html.indexOf('data-act="beginDeploy"'),
+    "the crossing must be stated before the Start button",
+  );
+});
+
+test("a released-lane cluster crosses nothing, and the tag screen says nothing", () => {
+  // A line drawn on every deployment is the noise that makes the one that
+  // matters unreadable.
+  const html = renderChooseTag({
+    ...CHOOSE,
+    instance: { ...healthy("v0.18.0"), imageSource: "released" },
+    target: "v0.19.0",
+    listing: { tags: ["v0.19.0"], error: "" },
+  });
+  assert.doesNotMatch(html, /checkout build today/);
+  // And a cluster whose image source was never recorded says nothing either:
+  // "" is no evidence, never "released".
+  assert.doesNotMatch(
+    renderChooseTag({ ...CHOOSE, target: "v0.19.0", listing: { tags: ["v0.19.0"], error: "" } }),
+    /checkout build today/,
+  );
+});
+
 test("an operator's own choice is what gets selected", () => {
   const html = renderChooseTag({
     ...CHOOSE,

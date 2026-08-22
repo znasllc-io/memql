@@ -43,6 +43,7 @@ import {
   type GraphKind,
   type Step,
 } from "./graph.js";
+import { normalizeNodeList } from "./nodeList.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, withInstalledTools, type RunScript } from "./runner.js";
 import {
@@ -609,6 +610,12 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
  * `--repo-root` is `resolveStackDir`, the same derivation `stackCheckout` and
  * `clusterUp` share, so the images are built from the directory the install
  * actually cloned into rather than from wherever the packaged script sits.
+ *
+ * AND `--node` IS NORMALISED HERE, by the rule the screen words its Nodes line
+ * with (install/nodeList.ts). The hint under that field says "bff, agent" and
+ * dev.sh splits on commas only, so forwarding the operator's typing raw handed
+ * it " agent" and it exited 2 -- with guidance that blames MemQL, for the
+ * example text MemQL printed.
  */
 export function rebuildPlan(opts: SessionOptions): (step: Step) => StepPlan {
   const stackDir = resolveStackDir(opts);
@@ -620,7 +627,11 @@ export function rebuildPlan(opts: SessionOptions): (step: Step) => StepPlan {
     return {
       action: "run",
       params: {
-        ...present({ "repo-root": stackDir, "app-name": opts.appName, node: opts.nodes }),
+        ...present({
+          "repo-root": stackDir,
+          "app-name": opts.appName,
+          node: normalizeNodeList(opts.nodes ?? ""),
+        }),
         ...(opts.stepParams[step.id] ?? {}),
       },
     };

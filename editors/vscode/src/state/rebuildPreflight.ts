@@ -18,7 +18,9 @@
 // Refs: #4246 #4195
 
 import type { CheckoutState } from "../install/checkoutState.js";
+import { normalizeNodeList } from "../install/nodeList.js";
 import type { ImageSource } from "../install/receipt.js";
+import { releasedImages } from "./imageLane.js";
 import type { PreflightItem } from "./preflight.js";
 
 export interface RebuildPreflightInputs {
@@ -99,17 +101,18 @@ export function rebuildPreflightItems(i: RebuildPreflightInputs): PreflightItem[
     });
   }
 
+  // WORDED FROM WHAT THE RUN WILL BE SENT, not from the raw typing. The two used
+  // to be different rules -- this one tidied "bff, agent" for the sentence while
+  // the plan forwarded it verbatim -- so the checklist blessed a list the script
+  // then refused with exit 2 (install/nodeList.ts).
+  const nodes = normalizeNodeList(i.nodes);
   items.push({
     label: "Nodes",
     state: "ok",
     detail:
-      i.nodes.trim() === ""
+      nodes === ""
         ? "all app nodes (the script's default)."
-        : i.nodes
-            .split(",")
-            .map((n) => n.trim())
-            .filter((n) => n !== "")
-            .join(", ") + ".",
+        : nodes.split(",").join(", ") + ".",
   });
 
   // THE LANE CROSSING. Stated when it is a crossing and not when it is not: a
@@ -127,7 +130,7 @@ export function rebuildPreflightItems(i: RebuildPreflightInputs): PreflightItem[
           state: "attention",
           detail:
             "This switches local to images built from your checkout. An install, upgrade or " +
-            `repair returns it to released ${i.releasedTag || "release"} images.`,
+            `repair returns it to ${releasedImages(i.releasedTag)}.`,
         },
   );
 

@@ -252,6 +252,19 @@ test("runUninstall removes what the receipt recorded", async () => {
 // rebuild from checkout (memql#4246)
 // -----------------------------------------------------------------------------
 
+/** The one step rebuild.json declares, as loadGraph would hand it to a plan. */
+const REBUILD_STEP: Step = {
+  id: "rebuildFromCheckout",
+  script: "k3d.dev",
+  description: "",
+  elevation: "none",
+  retained: false,
+  retainedReason: "",
+  shared: false,
+  sharedReason: "",
+  verify: { kind: "resultEquals", field: "result.imageSource", value: "checkout" },
+};
+
 /** A runner whose envelope satisfies rebuild.json's own verify predicate. */
 function rebuildRunner(): { run: RunScript; seen: Record<string, string>[] } {
   const seen: Record<string, string>[] = [];
@@ -279,17 +292,7 @@ test("the rebuild plan names the checkout, the Application and the nodes", () =>
   const plan = rebuildPlan(
     options({ stackDir: "/home/me/.memql/src", appName: "memql-local", nodes: "bff,agent" }),
   );
-  const step: Step = {
-    id: "rebuildFromCheckout",
-    script: "k3d.dev",
-    description: "",
-    elevation: "none",
-    retained: false,
-    retainedReason: "",
-    shared: false,
-    sharedReason: "",
-    verify: { kind: "resultEquals", field: "result.imageSource", value: "checkout" },
-  };
+  const step = REBUILD_STEP;
   assert.deepEqual(plan(step), {
     action: "run",
     params: {
@@ -312,6 +315,30 @@ test("the rebuild plan names the checkout, the Application and the nodes", () =>
   // rebuild's params: this plan is the one-step graph's, and a caller who
   // handed it another document must not get a k3d.dev invocation out of it.
   assert.equal(plan({ ...step, id: "clusterUp" }).action, "skip");
+});
+
+test("a node list typed the way the screen suggests reaches the script as one it accepts", () => {
+  // THE HINT UNDER THE FIELD SAYS "bff, agent" -- with a space -- and dev.sh
+  // splits `--node` on COMMAS ONLY, so a raw forward hands it " agent" and it
+  // exits 2 ("unknown node type"). Exit 2's guidance in this extension reads "a
+  // fault in MemQL rather than in your machine or your answers", so the failure
+  // screen would blame MemQL for the example text it printed.
+  //
+  // Normalised on the SEND path, by the same rule the checklist words its Nodes
+  // line with, so the two cannot answer differently about one string.
+  const paramsFor = (nodes: string): Record<string, string> => {
+    const plan = rebuildPlan(options({ stackDir: "/src", nodes }));
+    const decision = plan(REBUILD_STEP);
+    assert.equal(decision.action, "run");
+    return decision.action === "run" ? decision.params : {};
+  };
+
+  assert.equal(paramsFor("bff, agent").node, "bff,agent");
+  assert.equal(paramsFor(" bff ,agent,, ").node, "bff,agent");
+  assert.equal(paramsFor("bff").node, "bff");
+  // A list that normalises to nothing passes NO flag, which is how the script
+  // applies its own default -- the same distinction `present()` draws.
+  assert.equal("node" in paramsFor("  ,  , "), false);
 });
 
 test("runRebuild runs the shipped one-step graph, under its pinned image-source", async () => {

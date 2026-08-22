@@ -631,7 +631,12 @@ somebody else is using.
       the run returns the cluster to released images. The same sentence appears
       in the confirmation for **Upgrade to \<version\>**
 - [ ] A failed rebuild lands on the failure screen with the step's own reason,
-      and **Retry** re-runs the REBUILD -- not a deployment
+      and **Retry** re-runs the REBUILD -- not a deployment. There is no
+      *Switch to guided* control: guided is a wizard concept, and a rebuild is
+      one unprivileged step
+- [ ] **Create deployment** on a checkout-mode cluster states, above its Start
+      button, that the move returns the cluster to released images -- the tag
+      path crosses the lane too, and asks for no confirmation
 
 ### 5d. A remote instance
 

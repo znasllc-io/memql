@@ -31,6 +31,7 @@ import { actionById, satisfiesTier, type RoleTier, type RoleVisibility } from ".
 import { moveFlowFor, type InstanceActionFlow } from "./instanceActions.js";
 import type { Instance } from "../state/deployments.js";
 import { barriersCrossed, type UpgradeBarrier } from "../version/barriers.js";
+import { returnsToReleasedImages } from "../state/imageLane.js";
 import type { VersionDescription } from "../version/describe.js";
 
 /** Which machinery a move reaches, and between which two versions. */
@@ -238,8 +239,11 @@ function confirmationMessage(instance: Instance, target: UpgradeTarget): string 
   // APPENDED rather than woven in, so the sentence about WHICH MACHINERY RUNS
   // keeps its place: that is the part people leave out, and it is the one that
   // decides whether the run is let through at all.
+  //
+  // The tag is NOT named here, deliberately: `target.to` is already the second
+  // sentence of `head`, and repeating it would read as a different release.
   return instance.imageSource === "checkout"
-    ? `${body} This returns ${instance.name} to released images; it runs a checkout build today.`
+    ? `${body} ${returnsToReleasedImages(instance.name, "")}`
     : body;
 }
 
