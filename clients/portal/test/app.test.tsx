@@ -131,6 +131,7 @@ const AUTH_ENABLED_CLUSTER = {
   identityApiBaseUrl: "https://identity.example.com",
   oauthClientId: "portal",
   authEnabled: true,
+  domain: "example.com",
 };
 
 function renderSignedIn(dial: typeof Connection.dial, path = "/concepts") {
