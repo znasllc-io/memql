@@ -231,16 +231,25 @@ arguments with their types and flags, and the way back to its source.
 
 ### Where a construct came from
 
-Three origins, and they are three different situations rather than three
-labels:
+Four origins, and they are four different situations rather than four labels.
+The order is the tier order -- sealed, shipped, shared, private -- rather than
+alphabetical:
 
 | Origin | What it means |
 |---|---|
 | **core** | The engine's embedded DSL tree. |
 | **bundle** | A product's DSL, mounted at `MEMQL_DSL_PATH`. |
 | **promoted** | It lives in the cluster's database and **has no file at all**. |
+| **staged** | The same place as promoted, with a different audience: **only you can call it** until it is trained. |
 
-Jump-to-source has the same three answers, and one of them changed. When the
+`staged` is a sibling of `promoted` rather than a qualifier on it. The two
+differ in WHO can call the construct, which is the question every consumer of
+the field is asking -- and it is the reason the read-only rule treats them
+identically further down: neither lives in a sealed tree, and for both the file
+on disk is the author's own working copy.
+
+Jump-to-source has three answers rather than four -- a staged construct has no
+file either, so it shares promoted's -- and one of the three changed. When the
 file is in your workspace it opens, revealed at the signature. When there is no
 file at all, the source is rendered on the page from what the cluster holds,
 labelled as living in the database -- the case where a developer first meets
@@ -249,11 +258,10 @@ the seeded-versus-trained distinction.
 **The answer in between used to be a dead end and is now an action.** The
 catalog reports a path relative to the CLUSTER's tree, and a remote cluster is
 usually not the checkout you have open, so the page named the path and stopped
-there.
-But the cluster that loaded the construct also serves the file, over its pack
-browser -- so the page offers **View source from cluster**, which opens it as a
-read-only `memql-cluster://` document: at the signature, badged `RO`, with one
-header lens back to these details.
+there. But the cluster that loaded the construct also serves the file, over its
+pack browser -- so the page offers **View source from cluster**, which opens it
+as a read-only `memql-cluster://` document: at the signature, badged `RO`, with
+one header lens back to these details.
 
 That document gets `memql` highlighting and **no diagnostics**, which is
 deliberate rather than incomplete. The language server is an offline process

@@ -237,6 +237,7 @@ question that already has one.
 | `core` | The engine's embedded DSL tree | Opens the file, revealed at the signature -- when the file is in this workspace |
 | `bundle` | A product's DSL, mounted at `MEMQL_DSL_PATH` | Same, and the same caveat |
 | `promoted` | Lives in the cluster's database; **there is no file** | Nothing to open. The source is rendered on the page from what the cluster holds |
+| `staged` | The same place as `promoted`, with a different audience: **only its author can call it** until it is trained | The same answer, for the same reason |
 
 The catalog reports a path relative to the **cluster's** tree, which is
 not obliged to be the checkout you have open -- for a remote cluster it

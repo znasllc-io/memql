@@ -501,16 +501,25 @@ Two things to know before flipping it on:
   Unset, the proxy refuses `/_memql/*` for every site regardless of any
   individual site's `apiProxy` value, and the edge logs a warning once at
   boot rather than staying silent about it.
-- **A site with signed-in users needs more than the proxy.** The OAuth
-  token exchange (`POST /oauth/token`, `/auth/refresh`, `/auth/logout`) is
-  a `fetch()` straight to the identity service -- a DIFFERENT origin from
-  the site's own -- and `/_memql/*` only ever targets the bff. The edge's
-  CSP covers this by naming the cluster's identity origin in every site's
-  `connect-src` alongside its own origin (`component/edge/csp.go`). The
-  symptom if that were ever missing is worth knowing regardless: the
-  top-level `/authorize` redirect is a navigation, which `connect-src`
-  does not govern, so sign-in visibly proceeds and then fails silently at
-  the very last step, with nothing in identity's own logs to explain why.
+- **A site with signed-in users needs more than the proxy.** Not because
+  the token exchange is cross-origin -- it is not. `POST /oauth/token`,
+  `/auth/refresh`, `/auth/logout` and `GET /.well-known/jwks.json` are
+  `fetch()` calls that stay on the SITE's own origin: `runtime-config.json`
+  publishes an empty `identityApiBaseUrl`, and the edge forwards those four
+  exact paths to the identity service (`component/edge/identity_proxy.go`).
+  That is a separate forwarder from `/_memql/*`, which only ever targets the
+  bff, and it is not gated on `apiProxy`. What IS cross-origin is the
+  top-level **`/authorize` navigation**, which still goes to
+  `identity.<domain>` -- so the site's own `https://<hostname>/auth/callback`
+  has to be registered in `MEMQL_IDENTITY_REGISTERED_CLIENTS` before sign-in
+  can return anything, and no proxy setting substitutes for that. The edge's
+  CSP names the cluster's identity origin in every site's `connect-src`
+  regardless (`component/edge/csp.go`), so a client still calling identity
+  cross-origin is not additionally broken by a policy violation. The symptom
+  of that entry being missing for such a client is worth knowing: a
+  navigation is not governed by `connect-src`, so sign-in visibly proceeds
+  and then fails silently at the very last step, with nothing in identity's
+  own logs to explain why.
 
 Every LIVE hosted site also gets `GET /runtime-config.json` for free -- not
 an opt-in, unlike the proxy -- carrying the cluster's identity URL, its
