@@ -1,8 +1,18 @@
-// Cluster operations (memql#4193): courtesy gating, the timeline rendered
-// from the graph's own deployment records, rollback staying owner-only, and
-// repair (memql#4209) -- owner-only, type-to-confirm, riding the
-// deploy-control wire like every other action, with the engine's audit id
-// shown back and the repair record marked on the timeline.
+// Cluster operations, ON THE DEPLOYMENTS VIEW (memql#4193, memql#4209,
+// memql#4264): courtesy gating, rollback staying owner-only, and repair --
+// owner-only, type-to-confirm, riding the deploy-control wire like every other
+// action, with the engine's audit id shown back.
+//
+// These used to render /cluster-ops. That page is gone: it carried the same
+// four verbs as this view's Ship band and the two DISAGREED about how
+// dangerous they are -- the view fired deploy and roll back on a single click,
+// the page confirmed every one. An operator's protection depended on which
+// door they walked through. The careful set won, and it lives here now.
+//
+// The assertions that moved with it are the ones about SAFETY, not layout:
+// what a reader is offered, what an admin is offered, that repair is armed
+// only by typing the word, and that a repair record is never a rollback
+// target.
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
@@ -54,7 +64,25 @@ const DEPLOYMENT_ROWS = [
 
 function fakeConnection(role: string, sent: Array<Record<string, unknown>>): Connection {
   const query = asQueryClient({
-    listConcepts: vi.fn(async () => []),
+    // The VIEW resolves its concept through the registry (the retired page did
+    // not), so the deployment concept has to be here or the view renders its
+    // honest "this cluster publishes no such concept" state instead.
+    listConcepts: vi.fn(async () => [
+      {
+        id: "v1:cluster:deployment",
+        version: "v1",
+        domain: "cluster",
+        entity: "deployment",
+        type: "concept",
+        description: "An append-only deployment record",
+        displayCard: {
+          primary: "engineVersion",
+          secondary: "deploymentId",
+          tertiary: "notes",
+          status: "status",
+        },
+      },
+    ]),
     getMyAccess: vi.fn(async () => ({
       userId: "user-1",
       primaryEmail: "op@example.test",
@@ -126,10 +154,14 @@ function fakeConnection(role: string, sent: Array<Record<string, unknown>>): Con
   } as unknown as Connection;
 }
 
-function renderOps(role: string, sent: Array<Record<string, unknown>> = []) {
+function renderOps(
+  role: string,
+  sent: Array<Record<string, unknown>> = [],
+  at = "/views/deployments",
+) {
   const dial = vi.fn(async () => fakeConnection(role, sent)) as unknown as typeof Connection.dial;
   render(
-    <MemoryRouter initialEntries={["/cluster-ops"]}>
+    <MemoryRouter initialEntries={[at]}>
       <AuthProvider
         config={AUTH_DISABLED_CLUSTER}
         fetchImpl={async () => {
@@ -148,75 +180,92 @@ function renderOps(role: string, sent: Array<Record<string, unknown>> = []) {
   return sent;
 }
 
-describe("cluster operations", () => {
-  it("offers nothing below the operator roles", async () => {
+describe("cluster operations, on the Deployments view", () => {
+  it("offers a reader none of the verbs", async () => {
     renderOps("reader");
-    await waitFor(() => expect(screen.getByText("This is an operator surface")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Deployments")).toBeTruthy());
+    // Absent, not present-and-refused. The gate is the cluster's; hiding the
+    // control is the courtesy half (src/deploy/useDeployConsole.ts).
+    for (const verb of [
+      "Cut a patch version",
+      "Deploy the selected version",
+      "Roll back to the selected version",
+      "Repair this installation",
+    ]) {
+      expect(screen.queryByRole("button", { name: verb })).toBeNull();
+    }
   });
 
-  it("renders the timeline from the deployment records and keeps repair owner-only", async () => {
+  it("lets an admin ship but never roll back or repair", async () => {
     renderOps("admin");
-    await waitFor(() => expect(screen.getAllByText("v0.19.0").length).toBeGreaterThan(0));
-    // The repair record is marked as one on the timeline.
-    expect(screen.getByText("repair")).toBeTruthy();
-    // Admin can ship but neither roll back nor repair: the two owner-only
-    // controls never render, and the band says why instead of faking one.
-    expect(screen.queryByRole("button", { name: /Roll back to this/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cut a patch version" })).toBeTruthy());
+    // The two owner-only verbs do not render at all.
+    expect(screen.queryByRole("button", { name: "Roll back to the selected version" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Repair this installation" })).toBeNull();
-    expect(screen.getByText(/Owner-only: the control is offered to the cluster owner/)).toBeTruthy();
-    // The gap sentence is gone with the gap.
-    expect(screen.queryByText(/no repair verb/)).toBeNull();
   });
 
-  it("owner repairs through a type-to-confirm dialog and is shown the audit id", async () => {
+  it("arms repair only by typing the word, and shows the audit id back", async () => {
     const sent = renderOps("owner");
-    await waitFor(() => expect(screen.getAllByText("v0.19.0").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Repair this installation" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Repair this installation" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Owner-only");
     expect(dialog.textContent).toContain("Nothing changes version");
 
-    // Armed only by the phrase: the verb is disabled until "repair" is typed.
     const confirm = within(dialog).getByRole("button", { name: "Repair" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
     fireEvent.change(within(dialog).getByPlaceholderText("repair"), { target: { value: "repai" } });
     expect(confirm.disabled).toBe(true);
-    expect(sent.some((m) => "deployControl" in m && "repair" in (m["deployControl"] as Record<string, unknown>))).toBe(false);
+    // Nothing has reached the wire on a near-miss.
+    expect(
+      sent.some((m) => "deployControl" in m && "repair" in (m["deployControl"] as Record<string, unknown>)),
+    ).toBe(false);
+
     fireEvent.change(within(dialog).getByPlaceholderText("repair"), { target: { value: "repair" } });
     expect(confirm.disabled).toBe(false);
     fireEvent.click(confirm);
 
-    // The wire carries the bridged repair request, and nothing else is
-    // shelled or improvised on the client.
+    // The bridged request, and nothing shelled or improvised on the client.
     await waitFor(() =>
       expect(
         sent.some((m) => "deployControl" in m && "repair" in (m["deployControl"] as Record<string, unknown>)),
       ).toBe(true),
     );
-    // The ack and the success event's id are shown back, exactly as a
-    // rollback refusal's id is. (The shell carries its own role="status"
-    // element, so the outcome line is found by its text.)
     const outcome = () =>
       screen.getAllByRole("status").find((el) => el.textContent?.includes("repair kicked off"));
     await waitFor(() => expect(outcome()).toBeTruthy());
     expect(outcome()?.textContent).toContain("aud-repair-1");
   });
 
-  it("a repair record is never offered as a rollback target", async () => {
-    renderOps("owner");
-    await waitFor(() => expect(screen.getAllByText("v0.19.0").length).toBeGreaterThan(0));
-    // Two succeeded records sit below the newest entry (rep-1 and dep-1);
-    // only the deploy record is a rollback target.
-    expect(screen.getAllByRole("button", { name: "Roll back to this" })).toHaveLength(1);
+  // THE SAFETY PROPERTY THAT HAD TO SURVIVE THE MERGE (memql#4264).
+  //
+  // The retired timeline enforced it per row; this view selects a row and acts
+  // on the selection, so the same rule has to gate the button instead. A repair
+  // pins no version -- it re-converges the cluster onto what is already
+  // committed -- so "roll back to this repair" names nothing to roll to.
+  it("never offers a repair record as a rollback target", async () => {
+    renderOps("owner", [], "/views/deployments/rows/v1:cluster:deployment:rep-1");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Roll back to the selected version" })).toBeTruthy(),
+    );
+    const button = screen.getByRole("button", {
+      name: "Roll back to the selected version",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
   });
 
-  it("owner rolls back through a dialog that states the gate", async () => {
-    const sent = renderOps("owner");
-    await waitFor(() => expect(screen.getAllByText("v0.19.0").length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole("button", { name: "Roll back to this" }));
+  it("rolls back to a real deployment through a dialog that states the gate", async () => {
+    const sent = renderOps("owner", [], "/views/deployments/rows/v1:cluster:deployment:dep-1");
+    const button = () =>
+      screen.getByRole("button", { name: "Roll back to the selected version" }) as HTMLButtonElement;
+    await waitFor(() => expect(button().disabled).toBe(false));
+
+    fireEvent.click(button());
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
     expect(screen.getByRole("dialog").textContent).toContain("Owner-only");
+
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Roll back" }));
     await waitFor(() =>
       expect(

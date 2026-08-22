@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { AppShell } from "./AppShell";
@@ -15,7 +15,6 @@ import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
-import { ClusterOpsPage } from "../clusterops/ClusterOpsPage";
 import { HomePage } from "../home/HomePage";
 import {
   CONCEPTS_ROUTE_PATTERN,
@@ -23,7 +22,7 @@ import {
   CONCEPT_ROW_CHILD_PATTERN,
   CONCEPT_SCHEMA_CHILD_PATTERN,
 } from "../concepts/urls";
-import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN } from "../views/urls";
+import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/urls";
 
 // The route table.
 //
@@ -119,7 +118,12 @@ export function AppRoutes(): ReactNode {
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="sites/*" element={<SitesRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
-          <Route path="cluster-ops" element={<ClusterOpsPage />} />
+          {/* Retired in memql#4264: the Deployments view carries the four
+              verbs now, with the confirmations this page had and that view's
+              Ship band did not. Redirected rather than 404'd -- whoever
+              bookmarked it did nothing wrong, and a Not Found would read as
+              "the capability is gone" when it moved. */}
+          <Route path="cluster-ops" element={<Navigate to={viewPath("deployments")} replace />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
