@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { DEFAULT_INPUTS, requiredFields } from "../src/state/addCluster.js";
 import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import { listReleaseTags } from "../src/install/tags.js";
+import { refusedPlatformGuidance } from "../src/state/installProgress.js";
 import { dedupeKeepingDefault } from "../src/webview/installScreens.js";
 
 // installVersionField.test.ts -- znasllc-io/memql#3882.
@@ -99,4 +100,25 @@ test("the current value is not duplicated when the listing already has it", () =
 
 test("an empty current value adds no blank option", () => {
   assert.deepEqual(dedupeKeepingDefault(["v0.19.0"], ""), ["v0.19.0"]);
+});
+
+test("Create deployment on an unsupported platform refuses instead of listing tags", async () => {
+  // Darwin + no wizard cluster: a tag list is a list of versions that cannot
+  // run. The listing must not degrade to a text box (memql#4294).
+  let listed = false;
+  const g = refusedPlatformGuidance();
+  const listing = await listReleaseTags({
+    cwd: "/tmp",
+    repo: DEFAULT_STACK_REPO,
+    platformRefuse: async () => `${g.headline} ${g.advice}`,
+    run: async () => {
+      listed = true;
+      return { stdout: "aa\trefs/tags/v0.19.0\n", error: "" };
+    },
+  });
+  assert.equal(listed, false, "git must not be asked when the platform already refused");
+  assert.deepEqual(listing.tags, []);
+  assert.equal(listing.refusedPlatform, true);
+  assert.match(listing.error, /linux\/amd64/);
+  assert.match(listing.error, /make up/);
 });

@@ -35,6 +35,11 @@ export interface TagListing {
    * than because the project has no releases.
    */
   error: string;
+  /**
+   * The wizard cannot run on this machine (memql#4294). Callers must not
+   * degrade to a text box: there is no tag that will install.
+   */
+  refusedPlatform?: boolean;
 }
 
 /**
@@ -134,6 +139,11 @@ export interface ListTagsOptions {
   timeoutMs?: number;
   /** Injectable for tests; the real `git ls-remote` when absent. */
   run?: (cwd: string, timeoutMs: number, repo: string) => Promise<{ stdout: string; error: string }>;
+  /**
+   * When this returns a sentence, Create deployment refuses instead of listing
+   * tags (memql#4294). Injected so tests do not need a Darwin host.
+   */
+  platformRefuse?: () => Promise<string | undefined>;
 }
 
 /**
@@ -144,6 +154,10 @@ export interface ListTagsOptions {
  * the caller's alternative to a list is a text box and not an error dialog.
  */
 export async function listReleaseTags(options: ListTagsOptions): Promise<TagListing> {
+  const refused = options.platformRefuse === undefined ? undefined : await options.platformRefuse();
+  if (refused !== undefined && refused !== "") {
+    return { tags: [], error: refused, refusedPlatform: true };
+  }
   const timeoutMs = options.timeoutMs ?? TAG_LIST_TIMEOUT_MS;
   const run = options.run ?? runGitLsRemote;
   try {

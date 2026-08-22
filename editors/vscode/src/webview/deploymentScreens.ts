@@ -193,7 +193,17 @@ export function renderChooseTag(input: ChooseTagInput): string {
   const listingNote =
     input.listing.error === ""
       ? ""
-      : `<p class="notice">${escapeHtml(input.listing.error)} Type the tag below.</p>`;
+      : input.listing.refusedPlatform === true
+        ? `<p class="lede">${escapeHtml(input.listing.error)}</p>`
+        : `<p class="notice">${escapeHtml(input.listing.error)} Type the tag below.</p>`;
+
+  if (input.listing.refusedPlatform === true) {
+    return `<h1>Create deployment</h1>
+${listingNote}
+<div class="actions">
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+  }
 
   const typed = `<div class="field" data-invalid="${input.tagError !== ""}">
   <label for="tag-type">${escapeHtml(

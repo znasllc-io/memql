@@ -29,7 +29,9 @@ import {
   type Graph,
   type Step,
 } from "../src/install/graph.js";
+import { refuseUnsupportedPlatform } from "../src/install/platform.js";
 import { capabilityScriptPath, type RunScript } from "../src/install/runner.js";
+import { failureGuidance } from "../src/state/installProgress.js";
 import {
   installPlan,
   installSessionOptions,
@@ -77,6 +79,38 @@ const INSTALL_GRAPH: Graph = graph({
       description: "create the cluster",
       script: "k3d.up",
       dependsOn: ["binary"],
+      elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
+      receipt: "stack",
+      preExistingPath: "none",
+      verify: { kind: "resultTrue", field: "result.installed" },
+    },
+  ],
+});
+
+const DETECT_GRAPH: Graph = graph({
+  name: "test-install-detect",
+  kind: "install",
+  steps: [
+    {
+      id: "detect",
+      description: "inventory the machine",
+      script: "install.detect",
+      elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
+      verify: { kind: "resultTrue", field: "result.supported" },
+    },
+    {
+      id: "cluster",
+      description: "create the cluster",
+      script: "k3d.up",
+      dependsOn: ["detect"],
       elevation: "none",
       retained: false,
       retainedReason: "",
@@ -137,6 +171,48 @@ function okRunner(seen: string[] = []): { run: RunScript; seen: string[] } {
         changed: true,
         // Satisfies both graphs' verify predicates, and carries the artifact
         // fields the receipt reads back for a removal.
+        result: { installed: true, removed: true, path: "/tmp/k3d", cluster: "memql" },
+        error: null,
+      },
+    };
+  };
+  return { run, seen };
+}
+
+const DARWIN_REFUSE =
+  "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+
+function darwinDetectRun(seen: string[] = []): { run: RunScript; seen: string[] } {
+  const run: RunScript = async (inv) => {
+    const cap = inv.capability ?? inv.scriptPath;
+    seen.push(cap);
+    const detect = cap.includes("detect");
+    if (detect) {
+      return {
+        argv: [],
+        exitCode: 3,
+        signal: null,
+        stdout: "",
+        stderr: DARWIN_REFUSE,
+        envelope: {
+          ok: false,
+          capability: "install.detect",
+          changed: false,
+          result: { os: "darwin", arch: "arm64", supported: false },
+          error: { code: 3, message: DARWIN_REFUSE },
+        },
+      };
+    }
+    return {
+      argv: [],
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      envelope: {
+        ok: true,
+        capability: "t",
+        changed: true,
         result: { installed: true, removed: true, path: "/tmp/k3d", cluster: "memql" },
         error: null,
       },
@@ -1158,4 +1234,72 @@ test("every param the plan supplies is a flag the script declares", async () => 
     [],
     `these steps would fail immediately with "unknown flag":\n  ${undeclared.join("\n  ")}`,
   );
+});
+
+// -----------------------------------------------------------------------------
+// platform refuse (memql#4294)
+// -----------------------------------------------------------------------------
+
+test("runInstall on an unsupported platform fails at detect and does not create the cluster", async () => {
+  const { run, seen } = darwinDetectRun();
+  const report = await runInstall(options(), { graph: DETECT_GRAPH, run });
+  assert.equal(report.ok, false);
+  assert.deepEqual(
+    report.outcomes.map((o) => `${o.id}:${o.status}:${o.exitCode}`),
+    ["detect:failed:3", "cluster:skipped:null"],
+  );
+  assert.match(report.outcomes[0]?.reason ?? "", /unsupported platform/);
+  assert.ok(
+    !seen.some((c) => c.includes("k3d.up") || c.includes("k3d") && !c.includes("detect")),
+    `later steps ran after the refuse: ${seen.join(" | ")}`,
+  );
+  const copy = failureGuidance(3, "", report.outcomes[0]?.reason ?? "");
+  assert.match(copy.advice, /linux\/amd64/);
+  assert.match(copy.advice, /make up/);
+  assert.equal(copy.retryable, false);
+});
+
+test("repair and upgrade are the same runInstall path, so they refuse at detect too", async () => {
+  // Repair and Upgrade-in-behind both call runInstall. The fixture is the
+  // detect-first graph the shipped install.json starts with.
+  const { run } = darwinDetectRun();
+  const repair = await runInstall(options({ commit: "abc" }), { graph: DETECT_GRAPH, run });
+  const upgrade = await runInstall(options({ tag: "v0.19.6" }), { graph: DETECT_GRAPH, run });
+  assert.equal(repair.ok, false);
+  assert.equal(upgrade.ok, false);
+  assert.equal(repair.outcomes[0]?.id, "detect");
+  assert.equal(upgrade.outcomes[0]?.exitCode, 3);
+});
+
+test("runUninstall refuses the platform before the receipt and does not mutate", async () => {
+  const receiptFile = await tempReceipt([
+    entry("cluster", "stack", { cluster: "memql" }, false),
+    entry("binary", "binary", { path: "/tmp/k3d" }, false),
+  ]);
+  const before = await fs.readFile(receiptFile, "utf8");
+  const { run, seen } = darwinDetectRun();
+  const report = await runUninstall(options({ receiptFile }), { graph: UNINSTALL_GRAPH, run });
+  assert.equal(report.ok, false);
+  assert.equal(report.outcomes[0]?.id, "detect");
+  assert.equal(report.outcomes[0]?.exitCode, 3);
+  assert.ok(
+    !seen.some((c) => !c.includes("detect")),
+    `uninstall ran a later capability after the refuse: ${seen.join(" | ")}`,
+  );
+  assert.equal(await fs.readFile(receiptFile, "utf8"), before, "the receipt must remain");
+});
+
+test("runUninstall on an unsupported platform refuses even without a receipt", async () => {
+  const { run } = darwinDetectRun();
+  const report = await runUninstall(options(), { graph: UNINSTALL_GRAPH, run });
+  assert.equal(report.ok, false);
+  assert.equal(report.outcomes[0]?.id, "detect");
+});
+
+test("refuseUnsupportedPlatform is the same gate install and uninstall share", async () => {
+  const { run } = darwinDetectRun();
+  const report = await refuseUnsupportedPlatform(options(), { run });
+  assert.ok(report);
+  assert.equal(report?.ok, false);
+  assert.equal(report?.outcomes[0]?.exitCode, 3);
 });

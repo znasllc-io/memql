@@ -35,6 +35,7 @@ import { loadGraph, type Graph } from "../src/install/graph.js";
 import { removalPreviewItems } from "../src/install/removalPreview.js";
 import type { RunScript } from "../src/install/runner.js";
 import { previewUninstall, runUninstall, type SessionOptions } from "../src/install/session.js";
+import { failureGuidance } from "../src/state/installProgress.js";
 import { UninstallRunState } from "../src/state/uninstallRun.js";
 
 function graph(doc: unknown): Graph {
@@ -344,6 +345,41 @@ test("a step whose sibling failed still runs -- one refusal is not a stopped uni
 test("the run refuses without a receipt rather than guessing at the machine", async () => {
   const { run } = remover();
   await assert.rejects(() => runUninstall(options(), { graph: UNINSTALL_GRAPH, run }), /receipt/);
+});
+
+test("an unsupported platform refuses uninstall before any removal, and the receipt stays", async () => {
+  const receiptFile = await machineReceipt();
+  const before = await fs.readFile(receiptFile, "utf8");
+  const inner = remover();
+  const darwin =
+    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+  const run: RunScript = async (inv) => {
+    if ((inv.capability ?? inv.scriptPath).includes("detect")) {
+      return {
+        argv: [],
+        exitCode: 3,
+        signal: null,
+        stdout: "",
+        stderr: darwin,
+        envelope: {
+          ok: false,
+          capability: "install.detect",
+          changed: false,
+          result: { os: "darwin", arch: "arm64", supported: false },
+          error: { code: 3, message: darwin },
+        },
+      };
+    }
+    return inner.run(inv);
+  };
+  const report = await runUninstall(options({ receiptFile }), { graph: UNINSTALL_GRAPH, run });
+  assert.equal(report.ok, false);
+  assert.equal(report.outcomes.map((o) => o.id).join(","), "detect");
+  assert.equal(inner.seen.length, 0, "removeCluster / removeHostsBlock / removeLocalCA must not run");
+  assert.equal(await fs.readFile(receiptFile, "utf8"), before);
+  const copy = failureGuidance(report.outcomes[0]?.exitCode ?? null, "", report.outcomes[0]?.reason ?? "");
+  assert.match(copy.advice, /linux\/amd64/);
+  assert.equal(copy.retryable, false);
 });
 
 // -----------------------------------------------------------------------------

@@ -45,6 +45,7 @@ import {
 } from "./graph.js";
 import { normalizeNodeList } from "./nodeList.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
+import { refuseUnsupportedPlatform } from "./platform.js";
 import { capabilityScriptPath, withInstalledTools, type RunScript } from "./runner.js";
 import {
   DEFAULT_CAROOT_DIR,
@@ -748,6 +749,12 @@ export async function runUninstall(
   opts: SessionOptions,
   hooks: SessionHooks = {},
 ): Promise<ExecutionReport> {
+  // Platform first (memql#4294). detect.sh is read-only and its only refusal
+  // is an unsupported OS/arch. Running it here -- before requireReceipt, and
+  // so before sudo / hosts / mkcert / tool removals -- is what keeps a Darwin
+  // uninstall from mutating a machine the wizard cannot put back.
+  const refused = await refuseUnsupportedPlatform(opts, hooks);
+  if (refused !== undefined) return refused;
   const graph = hooks.graph ?? (await loadGraphFor("uninstall", opts));
   const receipt = await requireReceipt(opts);
   return execute(graph, uninstallPlan(receipt, opts.skip), opts, hooks, undefined);

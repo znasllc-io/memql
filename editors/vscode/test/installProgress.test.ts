@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { SYNTHESISED_EXIT_CODES } from "../src/install/runner.js";
 import {
   failureGuidance,
+  refusedPlatformGuidance,
   inlineStepError,
   runIsSettled,
   toStepViews,
@@ -218,6 +219,31 @@ test("a bad parameter is named as MemQL's fault, not the operator's", () => {
   const g = failureGuidance(2);
   assert.match(g.advice, /fault in MemQL/i);
   assert.equal(g.retryable, false);
+});
+
+test("exit 3 with an unsupported-platform sentence is refused-platform, not artifact protection", () => {
+  // Generic exit 3 stays "The step refused to act" -- hosts-block protecting a
+  // pre-existing artifact, a bad key. Detect's refuse is a different next
+  // action: the wizard cannot run here, and Repair / another tag will not help
+  // (memql#4294).
+  const generic = failureGuidance(3);
+  assert.match(generic.headline, /refus/i);
+  assert.match(generic.advice, /artifact|declined/i);
+  assert.equal(generic.retryable, false);
+
+  const platform = failureGuidance(
+    3,
+    "",
+    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only",
+  );
+  assert.notEqual(platform.headline, generic.headline);
+  assert.match(platform.headline, /supported platform/i);
+  assert.match(platform.advice, /linux\/amd64/);
+  assert.match(platform.advice, /make up/);
+  assert.match(platform.advice, /will not change that/);
+  assert.doesNotMatch(platform.advice, /picking another tag will help/i);
+  assert.equal(platform.retryable, false);
+  assert.deepEqual(platform, refusedPlatformGuidance());
 });
 
 test("retryable distinguishes 'could differ' from 'will fail identically'", () => {
