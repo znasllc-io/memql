@@ -274,6 +274,14 @@ jobs:
               - 'VERSION'
               - 'component/database/memory-nodes/migrations/**'
               - 'component/identity/web/**'
+              # brand/ is an INPUT to component/identity/web's embed: the
+              # generated static/app.css is Tailwind over brand/tokens.css +
+              # theme.css, and brand/fonts/ + favicon.svg are copied next to it
+              # (memql#4266). So a brand-only PR changes what the identity
+              # binary ships, and brand_shared_source_test.go in the root
+              # package is the guard over it -- which is the same delayed-blame
+              # fail-open this block exists to close.
+              - 'brand/**'
               - 'component/mcp/*.svg'
               - 'dsl/**'
               - 'examples/deploypack/dsl/**'
@@ -490,6 +498,10 @@ jobs:
               - 'sdk/ts/**'
               - 'sdk/ts-viewkit/**'
               - 'scripts/portal/**'
+              # The portal's stylesheet @imports brand/ directly, so a token
+              # change is a portal change even with nothing under clients/
+              # touched (memql#4266).
+              - 'brand/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -636,6 +648,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go test (path routing + CI-configuration guards)
         run: go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
 
@@ -669,6 +683,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
 
       # --- gate inputs (gates bucket) -- a non-Go change a Go test reads ---
       #
@@ -870,6 +886,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
       # design D5.3b). Those six trees carry 543+ test files that db-tests owns
       # and re-runs in full, so testing them here compiled and executed the same
@@ -978,6 +996,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Retried (memql#3166 / design D4.3): apt-get is a network op, and a
       # transient mirror failure here reds a lane that has nothing to do with
       # the change under test.
@@ -1028,6 +1048,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go build -tags ${{ matrix.tag }}
         run: go build -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
       - name: go vet -tags ${{ matrix.tag }}
@@ -1196,6 +1218,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
       - name: create required Postgres extensions
@@ -1299,6 +1323,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
       - name: create required Postgres extensions
@@ -1460,6 +1486,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
@@ -1621,6 +1649,8 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
       - name: go.work lists every module in the tree
         run: |
           set -euo pipefail

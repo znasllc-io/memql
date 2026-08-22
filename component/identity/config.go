@@ -473,11 +473,11 @@ type Config struct {
 	BrandName string
 
 	// BrandPrimaryColor is the hex accent color in HTML emails and
-	// the web UI primary button. Defaults to a deep blue (#0433ff)
+	// the web UI primary button. Empty means the MemQL brand accent
 	// matching the in-CSS :root --brand-primary fallback so a
 	// freshly bootstrapped cluster renders consistently from
 	// either side of the boundary.
-	// Env: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR (default "#0433ff")
+	// Env: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR (default "": the brand accent)
 	BrandPrimaryColor string
 
 	// BrandLogoDataURI is the embedded horizontal logo (wordmark)
@@ -699,7 +699,7 @@ func LoadConfigFromEnv() (Config, error) {
 			NotifyEmails:        envStringList("MEMQL_IDENTITY_BOOTSTRAP_NOTIFY_EMAILS"),
 		},
 		BrandName:                       os.Getenv("MEMQL_IDENTITY_BRAND_NAME"),
-		BrandPrimaryColor:               envString("MEMQL_IDENTITY_BRAND_PRIMARY_COLOR", "#0433ff"),
+		BrandPrimaryColor:               envString("MEMQL_IDENTITY_BRAND_PRIMARY_COLOR", ""),
 		BrandLogoDataURI:                os.Getenv("MEMQL_IDENTITY_BRAND_LOGO_DATA_URI"),
 		BrandIconDataURI:                os.Getenv("MEMQL_IDENTITY_BRAND_ICON_DATA_URI"),
 		InternalDefaultRole:             envString("MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE", "writer"),

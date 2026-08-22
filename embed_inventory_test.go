@@ -84,20 +84,28 @@ import (
 // all the same event -- somebody changed what ships inside the binary -- and
 // each should be an explicit edit here rather than a silent drift.
 var embedInventory = map[string]int{
-	"github.com/znasllc-io/memql":                                 1,   // VERSION
-	"github.com/znasllc-io/memql/component/architecture/embedded": 1,   // topology.model.json
-	"github.com/znasllc-io/memql/component/database":              28,  // memory-nodes/migrations/*.sql
-	"github.com/znasllc-io/memql/component/envregistry":           1,   // manifest.yaml
-	"github.com/znasllc-io/memql/component/identity/web":          13,  // static/* legal/*.md (admin-settings-branding.js went with the settings page, memql#3324; +passkey-login.js memql#3407; +me-passkeys.js memql#3409; +enroll.js memql#3408)
-	"github.com/znasllc-io/memql/component/mcp":                   1,   // icon.svg
-	"github.com/znasllc-io/memql/docs":                            1,   // public/language/memql.md
-	"github.com/znasllc-io/memql/dsl":                             241, // all:<domain> x37 (+observability queries -- memql#4208; +shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
-	"github.com/znasllc-io/memql/examples/deploypack":             3,   // all:dsl
-	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
-	"github.com/znasllc-io/memql/examples/reviewspack":            5,   // all:dsl (memql#4139)
-	"github.com/znasllc-io/memql/examples/shopifypack":            6,   // all:dsl -- memql#4138 attach/secrets/sync
-	"github.com/znasllc-io/memql/integrations":                    1,   // *.json
-	"github.com/znasllc-io/memql/scripts/install/graph":           2,   // install.json uninstall.json (memql#3369)
+	"github.com/znasllc-io/memql":                                 1,  // VERSION
+	"github.com/znasllc-io/memql/component/architecture/embedded": 1,  // topology.model.json
+	"github.com/znasllc-io/memql/component/database":              28, // memory-nodes/migrations/*.sql
+	"github.com/znasllc-io/memql/component/envregistry":           1,  // manifest.yaml
+	// 20 = 18 static + 2 legal, WITH the generated stylesheet present. The old
+	// pin of 13 encoded the opposite state: app.css is gitignored and was
+	// embedded through a glob, so a tree where nobody had run the CSS build
+	// counted one file FEWER and the number here agreed with it. That is the
+	// bug embed.go's explicit //go:embed static/app.css now makes impossible --
+	// and this count is only reachable after `make identity-tailwind`, which is
+	// the point (memql#4268). +6 over that: app.css, favicon.svg, 5 fonts, less
+	// the one the old pin was already missing.
+	"github.com/znasllc-io/memql/component/identity/web": 20,  // static/* (incl. generated app.css, favicon.svg, fonts/) + legal/*.md
+	"github.com/znasllc-io/memql/component/mcp":          1,   // icon.svg
+	"github.com/znasllc-io/memql/docs":                   1,   // public/language/memql.md
+	"github.com/znasllc-io/memql/dsl":                    241, // all:<domain> x37 (+observability queries -- memql#4208; +shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
+	"github.com/znasllc-io/memql/examples/deploypack":    3,   // all:dsl
+	"github.com/znasllc-io/memql/examples/referencepack": 5,   // all:dsl
+	"github.com/znasllc-io/memql/examples/reviewspack":   5,   // all:dsl (memql#4139)
+	"github.com/znasllc-io/memql/examples/shopifypack":   6,   // all:dsl -- memql#4138 attach/secrets/sync
+	"github.com/znasllc-io/memql/integrations":           1,   // *.json
+	"github.com/znasllc-io/memql/scripts/install/graph":  2,   // install.json uninstall.json (memql#3369)
 }
 
 // embedModulePath is the selector root. Spelled as the module pattern, not

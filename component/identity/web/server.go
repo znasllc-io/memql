@@ -298,6 +298,9 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// browser is guaranteed to fetch fresh bytes.
 	staticFS, err := fs.Sub(FS, "static")
 	if err == nil {
+		// Generated ahead of the file server: brand.css is rendered per request
+		// from cluster settings, not embedded (component/identity/web/brand.go).
+		mux.HandleFunc("GET /static/brand.css", s.handleBrandCSS)
 		mux.Handle("GET /static/", staticCacheHeaders(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))))
 	}
 
@@ -454,11 +457,11 @@ func (s *Server) LayoutData(r *http.Request, title string, dataMe bool, navLinks
 		path = r.URL.Path
 	}
 	return webtempl.LayoutData{
-		Title:             title,
-		BrandName:         settings.BrandName,
-		BrandPrimaryColor: settings.BrandPrimaryColor,
-		BrandLogoDataURI:  settings.BrandLogoDataURI,
-		BrandIconDataURI:  settings.BrandIconDataURI,
+		Title:            title,
+		BrandName:        settings.BrandName,
+		BrandLogoDataURI: settings.BrandLogoDataURI,
+		BrandIconDataURI: settings.BrandIconDataURI,
+		BrandCSSVersion:  s.brandAssetVersion(r),
 		Year:              time.Now().UTC().Year(),
 		NavLinks:          navLinks,
 		ExtraScripts:      extraScripts,
@@ -476,7 +479,6 @@ func (s *Server) LayoutData(r *http.Request, title string, dataMe bool, navLinks
 func (s *Server) snapshotSettings(r *http.Request) Settings {
 	settings := Settings{
 		BrandName:           "MemQL",
-		BrandPrimaryColor:   "#0433ff",
 		RegistrationMode:    s.Cfg.RegistrationMode,
 		RegistrationDomains: strings.Join(s.Cfg.RegistrationDomains, ", "),
 	}

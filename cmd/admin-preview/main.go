@@ -65,14 +65,13 @@ func main() {
 
 	layout := func(title, path string, scripts ...string) webtempl.LayoutData {
 		return webtempl.LayoutData{
-			Title:             title,
-			BrandName:         "Acme",
-			BrandPrimaryColor: "#0433ff",
-			Year:              time.Now().UTC().Year(),
-			NavLinks:          nav,
-			ExtraScripts:      scripts,
-			Asset:             asset,
-			Path:              path,
+			Title:        title,
+			BrandName:    "Acme",
+			Year:         time.Now().UTC().Year(),
+			NavLinks:     nav,
+			ExtraScripts: scripts,
+			Asset:        asset,
+			Path:         path,
 		}
 	}
 
@@ -84,12 +83,11 @@ func main() {
 	publicNav := []webtempl.NavLink{}
 	publicLayout := func(title string) webtempl.LayoutData {
 		return webtempl.LayoutData{
-			Title:             title,
-			BrandName:         "Acme",
-			BrandPrimaryColor: "#0433ff",
-			Year:              time.Now().UTC().Year(),
-			NavLinks:          publicNav,
-			Asset:             asset,
+			Title:     title,
+			BrandName: "Acme",
+			Year:      time.Now().UTC().Year(),
+			NavLinks:  publicNav,
+			Asset:     asset,
 		}
 	}
 	render(filepath.Join(outDir, "login-email.html"), webtempl.Login(webtempl.LoginData{
@@ -108,7 +106,7 @@ func main() {
 		Mode:               "domain_restricted",
 		Stage:              "waitlist_signup",
 		PrefillEmail:       "alex@partner.io",
-		AllowedDomainsHint: "example.com",
+		AllowedDomainsHint: "znasllc.io",
 		Flash:              &webtempl.Flash{Kind: "info", Message: "Your email isn't in this cluster's allowed-domain list. You can join the waitlist instead — the operator will follow up."},
 	}))
 	render(filepath.Join(outDir, "login-needs-invite.html"), webtempl.Login(webtempl.LoginData{

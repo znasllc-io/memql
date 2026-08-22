@@ -149,6 +149,10 @@ clients/portal/dist/
 # scripts/identity/build-css.sh; run as part of make identity
 # and the Dockerfile build.
 component/identity/web/static/app.css
+# Copied from brand/ by scripts/identity/build-css.sh so the shared
+# stylesheet's relative URLs resolve when served (memql#4266).
+component/identity/web/static/fonts/
+component/identity/web/static/favicon.svg
 
 # Tailwind standalone CLI cache (per-platform binary downloaded
 # on demand by scripts/identity/build-css.sh).
