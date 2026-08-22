@@ -163,8 +163,9 @@ func DialEndpointFromOrigin(origin string) string {
 //   - The WORKER-PAIRING REPLY hands its value to sdk/go/worker.ParseClusterURL,
 //     which maps a bare `host:port` to useTLS=FALSE. The same string that is
 //     correct in the discovery document therefore told a cockpit to dial
-//     api.local.znas.io:443 in plaintext -- putting its `mql_wkr_` bearer
-//     token on the wire in the clear before the handshake failed.
+//     the cluster's `api.<domain>:443` front door in plaintext -- putting its
+//     `mql_wkr_` bearer token on the wire in the clear before the handshake
+//     failed.
 //
 // The server was never guessing: the origin it is handed carries the answer,
 // and the bare form was throwing it away. Strip the scheme from this
@@ -268,7 +269,7 @@ const plaintextDialPort = "50050"
 //
 // WHY THIS EXISTS (memql#3399). The override used to be trusted
 // verbatim, so the value an operator happened to write -- in the local
-// cluster's case "https://bff.local.znas.io", carried in the genesis
+// cluster's case a `https://bff.<domain>` URL, carried in the genesis
 // envelope -- went straight onto the wire. That is a URL, and a URL is
 // not a dial address: `grpc.NewClient` cannot use it, and the VS Code
 // extension's parser (editors/vscode/src/connection/endpoint.ts)

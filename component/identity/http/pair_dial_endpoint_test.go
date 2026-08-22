@@ -22,14 +22,14 @@ import "testing"
 // asserts separately that stripping the scheme reproduces exactly the bare
 // strings this test used to expect.
 func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
-	const discovery = "api.local.znas.io:443"
+	const discovery = "api.local.example.com:443"
 
 	t.Run("stored URL wins over the cluster-wide discovery endpoint", func(t *testing.T) {
 		t.Setenv("MEMQL_WORKER_DIAL_ENDPOINT", "")
 		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", discovery)
 
-		got := resolveWorkerDialEndpoint("https://app.local.znas.io")
-		if want := "https://app.local.znas.io:443"; got != want {
+		got := resolveWorkerDialEndpoint("https://app.local.example.com")
+		if want := "https://app.local.example.com:443"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint = %q, want %q (the pairing row's own origin, not the advertised %q)", got, want, discovery)
 		}
 	})
@@ -48,7 +48,7 @@ func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
 		t.Setenv("MEMQL_WORKER_DIAL_ENDPOINT", "agent.acme.com:443")
 		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", discovery)
 
-		got := resolveWorkerDialEndpoint("https://app.local.znas.io")
+		got := resolveWorkerDialEndpoint("https://app.local.example.com")
 		if want := "agent.acme.com:443"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint = %q, want %q", got, want)
 		}

@@ -11,7 +11,7 @@ import (
 // so -- that form is pinned by test/fixtures/discovery-endpoint-contract.json
 // and asserted from Go and TypeScript. The worker-pairing reply has a
 // different consumer, sdk/go/worker.ParseClusterURL, which reads a bare
-// address as useTLS=false; a bare "api.local.znas.io:443" therefore told
+// address as useTLS=false; a bare "api.local.example.com:443" therefore told
 // a cockpit to dial a TLS port in plaintext.
 //
 // So there are two renderings of ONE answer, and the property that keeps them
@@ -83,7 +83,7 @@ func TestDialURLFromEndpoint_HonoursASchemeAndInventsNone(t *testing.T) {
 		// DELIBERATE ONE: reading `:443` as https is exactly as much of a
 		// guess as reading `:8443` as http, and the server does not guess on
 		// a credential-carrying hop.
-		{"the deployed discovery value names a port, not a transport", "api.local.znas.io:443", "api.local.znas.io:443"},
+		{"the deployed discovery value names a port, not a transport", "api.local.example.com:443", "api.local.example.com:443"},
 		{"a non-standard port is equally silent", "agent.acme.com:8443", "agent.acme.com:8443"},
 
 		// An unrecognised scheme falls into rules 2/3 -- the same vocabulary
@@ -159,7 +159,7 @@ func TestDialURLFormsAgreeWithTheDiscoveryContract(t *testing.T) {
 // property of the refactor that gave both forms one parser.
 func TestDiscoveryDocumentIsUnaffectedByTheSchemeStatingForms(t *testing.T) {
 	inputs := []string{
-		"", "://", "api.local.znas.io:443", "https://bff.local.znas.io",
+		"", "://", "api.local.example.com:443", "https://bff.local.example.com",
 		"https://api.example.com:8443", "http://localhost:50050",
 		"https://api.example.com/", "api.example.com", "localhost",
 		"grpc://api.example.com:443", "user@api.example.com",

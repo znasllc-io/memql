@@ -15,7 +15,7 @@ import (
 // extension, editors/vscode/src/connection/endpoint.ts lifts it to a /memql/ws
 // URL and refuses anything carrying a scheme other than ws/wss. Nothing in the
 // build links the emitter to that parser, so both sides stayed green while the
-// live cluster published "https://bff.local.znas.io": a form the parser rejects
+// live cluster published a `https://bff.<domain>` URL: a form the parser rejects
 // outright, naming a host with no ingress.
 //
 // The fix for the string is a deploy value. The fix for the DRIFT is this pair

@@ -133,7 +133,7 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 			// fire on the cluster the bug was found on.
 			name: "dev-wildcard origin is NOT exempt (it fronts a replica set) -> REFUSE",
 			mutate: func(c *Config) {
-				c.BaseURL = "https://identity.local.znas.io"
+				c.BaseURL = "https://identity.local.example.com"
 				c.SigningKeyB64 = ""
 				c.AllowEphemeralKey = false
 				c.KeyEncryptionKey = ""
@@ -149,7 +149,7 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 			// MEMQL_IDENTITY_KEY_ENCRYPTION_KEY.
 			name: "dev-wildcard origin with a shared seed and no encryption key -> ALLOW",
 			mutate: func(c *Config) {
-				c.BaseURL = "https://identity.local.znas.io"
+				c.BaseURL = "https://identity.local.example.com"
 				c.SigningKeyB64 = seedB64
 				c.AllowEphemeralKey = false
 				c.KeyEncryptionKey = ""

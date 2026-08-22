@@ -74,7 +74,7 @@ func TestEvaluateAutoBootstrap(t *testing.T) {
 			store: &fakeGuardStore{
 				bootstrapped:    false,
 				hasClaimedOwner: false,
-				settings:        &ClusterSettingsRow{BootstrapEmail: "znas@znas.io"},
+				settings:        &ClusterSettingsRow{BootstrapEmail: "owner@example.com"},
 			},
 			wantAction: BootstrapActionSuppress,
 		},
