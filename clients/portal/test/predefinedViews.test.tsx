@@ -311,7 +311,10 @@ describe("the People view", () => {
     expect(classes.has("vk-table")).toBe(true);
 
     // Band order is the grammar: reading, then shape, then roll.
-    expect(bandTitles()).toEqual(["By role", "Everyone", "Open sessions"]);
+    // Band order is the grammar: reading, then shape, then roll. "Invited" is
+    // an administrative addendum (memql#4272) and sits AFTER all three -- the
+    // operator came to look at people, not at who is on their way in.
+    expect(bandTitles()).toEqual(["By role", "Everyone", "Open sessions", "Invited"]);
 
     // The rail divides on role, which is what this view designed for -- not
     // on the concept's declared status slot, which would be active/inactive.

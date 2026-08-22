@@ -3499,6 +3499,8 @@ message IdentityAdminMsg {
     RevokeEnrolmentLinkRequest revoke_enrolment_link = 17;
     SetOAuthClientCorsOriginsRequest set_oauth_client_cors_origins = 18;
     RotateRecoveryKeyRequest rotate_recovery_key = 19;
+    IssueUserInvitationRequest issue_user_invitation = 20;
+    RevokeUserInvitationRequest revoke_user_invitation = 21;
   }
 }
 
@@ -3548,6 +3550,83 @@ message IdentityAdminResult {
   // remember which request it sent to know what it was holding. The type
   // system should carry that instead.
   string recovery_key = 8;
+  // The invitation link, set by issue_user_invitation ONLY (memql#4270).
+  //
+  // The THIRD credential-bearing field, and it earns the exception exactly as
+  // the two above do: the link IS that call's product, only its SHA-256 hash
+  // is persisted, and no later request can fetch it. Empty for every other
+  // operation and for every refusal.
+  //
+  // Its own field for the reason recovery_key states: a console holding "the
+  // string from the last admin call" would have to remember which call it
+  // made to know what it is holding, and these three have different
+  // lifetimes, different audiences and different handling.
+  string invitation_url = 9;
+  // What the cluster's registration policy MEANT for this call, set by
+  // issue_user_invitation (memql#4270). One of "open", "domain_restricted",
+  // "invite_only", "waitlist".
+  //
+  // Present so a console can say something true about what the link is FOR
+  // without re-reading cluster settings and racing them. Under `open` an
+  // invitation is a courtesy -- the recipient could have registered anyway --
+  // and telling an operator that is the difference between a link they
+  // understand and one they think is a gate.
+  string registration_mode = 10;
+}
+
+// IssueUserInvitationRequest mints a user-targeted invitation (memql#4270).
+//
+// # The half that was missing
+//
+// v1:identity:invitation has carried kind = "user" | "guest" since it was
+// written, and the identity login page has REDEEMED a user invitation the
+// whole time -- stage `needs_invite` posts form=invite and binds the token
+// into the magic-link flow. Nothing ever ISSUED one. The only writer of
+// invitation rows was the guest-space flow, no `mutate invitation ...` existed
+// in any DSL file, and this envelope carried profile / role / suspend / tokens
+// / settings / enrolment / recovery-key and no invite.
+//
+// So an owner could put a cluster into invite_only mode from the portal and
+// then have no way to let anybody in. approveAccessRequest could not be driven
+// either: it REQUIRES an invitationId, and nothing could mint one.
+//
+// # What the registration mode does to this call
+//
+// The mode is policy, and the gate applies it rather than the console:
+//
+//	invite_only        the normal path. The link is the only way in.
+//	waitlist           this verb is what mints the invitationId that
+//	                   approveAccessRequest needs to approve a request.
+//	domain_restricted  REFUSED unless the address matches the allowlist. A
+//	                   link the recipient cannot redeem is worse than a
+//	                   refusal, because they only find out after clicking.
+//	open               permitted, and the reply says the mode so a console can
+//	                   tell the operator this is a courtesy rather than a gate
+//	                   -- the recipient could have registered unaided.
+message IssueUserInvitationRequest {
+  // The address the invitation is for. Checked against the registration
+  // allowlist under domain_restricted.
+  string email = 1;
+  // The cluster role the recipient lands with on redemption. Empty means the
+  // cluster's default for a new user; an inviter cannot grant a role above
+  // their own.
+  string role = 2;
+  // Lifetime override in seconds. 0 uses the server default. Clamped down to
+  // the ceiling rather than refused, for the reason IssueEnrolmentLinkRequest
+  // states: a caller asking for too much still wants a link.
+  int32 ttl_seconds = 3;
+}
+
+// RevokeUserInvitationRequest kills an unaccepted invitation before its TTL
+// expires -- the issuer's undo for a link sent to the wrong address.
+//
+// Distinct from acceptance all the way down, for the reason
+// RevokeEnrolmentLinkRequest gives: "you already used this" and "somebody
+// cancelled this" call for different next steps, so the redeeming page tells
+// them apart.
+message RevokeUserInvitationRequest {
+  // The v1:identity:invitation row id.
+  string invitation_id = 1;
 }
 
 // UpdateUserProfileRequest sets a person's directory fields. Replaces

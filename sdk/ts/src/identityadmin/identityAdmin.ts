@@ -114,6 +114,25 @@ export interface RecoveryKeyResult extends AdminWriteResult {
   key: string;
 }
 
+/**
+ * What `issueUserInvitation` reports back.
+ *
+ * `url` is a CREDENTIAL, for the same reason `EnrolmentLinkResult.url` is: it
+ * exists nowhere else (the server persisted only its SHA-256 hash) and no
+ * later call can retrieve it. Show it once, let the operator copy it, and hold
+ * it nowhere else.
+ *
+ * `registrationMode` is what the cluster's policy MEANT for this call, so a
+ * surface can say what the link is for rather than guessing. Under `open` an
+ * invitation is a convenience -- the recipient could have registered unaided --
+ * and telling an operator that is the difference between a link they
+ * understand and one they misread as a gate.
+ */
+export interface UserInvitationResult extends AdminWriteResult {
+  url: string;
+  registrationMode: string;
+}
+
 export interface IdentityAdminCallOptions {
   signal?: AbortSignal;
 }
@@ -257,6 +276,69 @@ export class IdentityAdminClient {
       );
     }
     return { ...result, url };
+  }
+
+  /**
+   * Invite somebody to this cluster: mint a user-targeted invitation and
+   * return the link ONCE (memql#4270).
+   *
+   * The registration mode is applied SERVER-SIDE and can refuse this call --
+   * under `domain_restricted` an address outside the allowlist is refused,
+   * because a link the recipient cannot redeem is worse than a refusal. A
+   * surface may render the mode as guidance; it must not treat its own reading
+   * of the mode as the check.
+   *
+   * `role` empty takes the cluster default. An inviter cannot grant above
+   * their own role.
+   *
+   * The returned `url` is shown ONCE. See UserInvitationResult.
+   */
+  async issueUserInvitation(
+    email: string,
+    role = "",
+    ttlSeconds = 0,
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<UserInvitationResult> {
+    requireArg("issuing an invitation", "email", email);
+    const { result, raw } = await this.callRaw(
+      "issuing an invitation",
+      { issueUserInvitation: { email, role, ttlSeconds } },
+      opts,
+    );
+    const url = raw.invitationUrl ?? "";
+    if (url === "") {
+      // A success with no link is not a success -- it would leave a live
+      // invitation in the cluster that nobody can use and nobody knows exists.
+      // Same reasoning as issueEnrolmentLink.
+      throw new IdentityAdminError(
+        "issuing an invitation",
+        13,
+        "the server reported success but returned no link",
+        result.auditEventId,
+      );
+    }
+    return { ...result, url, registrationMode: raw.registrationMode ?? "" };
+  }
+
+  /**
+   * Revoke an unaccepted invitation -- the undo for a link sent to the wrong
+   * address (memql#4270).
+   *
+   * A SOFT cancel: the row stays as audit history and its token hash stays
+   * taken, because revoking does not make the holder forget the token they
+   * were sent.
+   */
+  async revokeUserInvitation(
+    invitationId: string,
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<AdminWriteResult> {
+    requireArg("revoking an invitation", "invitationId", invitationId);
+    const { result } = await this.callRaw(
+      "revoking an invitation",
+      { revokeUserInvitation: { invitationId } },
+      opts,
+    );
+    return result;
   }
 
   /**

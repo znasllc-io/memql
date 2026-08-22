@@ -432,6 +432,7 @@ var BoundConcepts = map[string]string{
 	"patIdentityByKeyHash":                  "v1:identity:identity",
 	"pauseCampaign":                         "v1:campaigns:campaign",
 	"pendingAccessRequests":                 "v1:identity:accessRequest",
+	"pendingUserInvitations":                "v1:identity:invitation",
 	"persistTaskState":                      "v1:planner:taskState",
 	"planById":                              "v1:planner:plan",
 	"plansForResponsibility":                "v1:planner:plan",

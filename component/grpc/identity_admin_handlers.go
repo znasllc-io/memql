@@ -121,6 +121,19 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 		// field, and the audit event this writes gets the address from the
 		// stream's own metadata the same way every other admin event does.
 		res = svc.RotateRecoveryKey(ctx, req.RotateRecoveryKey.GetUserId())
+	case *memqlv1.IdentityAdminMsg_IssueUserInvitation:
+		p := req.IssueUserInvitation
+		res = svc.IssueUserInvitation(ctx, adminops.UserInvitation{
+			Email:      p.GetEmail(),
+			Role:       p.GetRole(),
+			TTLSeconds: int(p.GetTtlSeconds()),
+			// The stream's peer address, not a caller-supplied value, for the
+			// reason IssueEnrolmentLink states: an audit field a caller can
+			// set is an audit field a caller can forge.
+			SourceIP: extractRequestMeta(ctx).ClientIP,
+		})
+	case *memqlv1.IdentityAdminMsg_RevokeUserInvitation:
+		res = svc.RevokeUserInvitation(ctx, req.RevokeUserInvitation.GetInvitationId())
 	case *memqlv1.IdentityAdminMsg_SetOauthClientCorsOrigins:
 		p := req.SetOauthClientCorsOrigins
 		// The origin list is passed through verbatim. Validation lives in
@@ -143,6 +156,11 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 	// every refusal. See IdentityAdminResult.enrolment_url in memql.proto for
 	// why one field on this reply is allowed to carry a credential.
 	out.EnrolmentUrl = res.EnrolmentURL
+	// Set by IssueUserInvitation alone; empty everywhere else, refusals
+	// included. Same one-time-credential contract EnrolmentUrl carries
+	// (memql#4270).
+	out.InvitationUrl = res.InvitationURL
+	out.RegistrationMode = res.RegistrationMode
 	// Set by RotateRecoveryKey alone; empty everywhere else. The one place it
 	// rides a NON-ok reply is a rotation that minted and revealed the
 	// replacement but failed to retire a predecessor -- see the field comment
