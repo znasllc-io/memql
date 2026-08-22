@@ -697,3 +697,115 @@ func TestPatchedRunRestartsNothingWhenEveryBuiltNodeMoved(t *testing.T) {
 			"redundant rolls: %v", restarts)
 	}
 }
+
+// --------------------------------------------------------------------------
+// main() itself: the restart DECISION, not just the machinery it calls
+// --------------------------------------------------------------------------
+
+// WHY THIS EXISTS SEPARATELY FROM runPatchThenRestart. That harness mirrors
+// main()'s patched branch rather than running it, so it proves the two
+// functions behave -- and a revert that deleted only the CALL in main(),
+// leaving both functions and the global in place, would keep it green. That is
+// exactly the shape of the defect this pins: the machinery was right and the
+// decision in main() was not.
+//
+// So this drives the real script end to end, through fakes on PATH. Nothing
+// here reaches docker, k3d or a cluster: the three binaries are stubs, and the
+// only real external tool is git, read-only against this checkout (which is
+// what --repo-root points at, and what require_build_checkout demands).
+const e2eFakeDocker = `#!/usr/bin/env bash
+# ` + "`image inspect`" + ` succeeding is what makes prewarm_build_frontend skip its pull.
+exit 0
+`
+
+const e2eFakeK3d = `#!/usr/bin/env bash
+case "$*" in
+  *"cluster list"*) printf 'memql   1/1   0/0   true\n'; exit 0 ;;
+esac
+exit 0
+`
+
+const e2eFakeKubectl = `#!/usr/bin/env bash
+case "$*" in
+  *"config use-context"*) exit 0 ;;
+  *"rollout restart"*)
+    printf '%s\n' "$*" >> "$FAKE_RESTART_LOG"; exit 0 ;;
+  *"rollout status"*) exit 0 ;;
+  *"get application"*"-o name"*)
+    printf 'application.argoproj.io/memql-local\n'; exit 0 ;;
+  *"get application"*kustomize.images*)
+    [ -n "${FAKE_IMAGES:-}" ] && printf '%s\n' "$FAKE_IMAGES"
+    exit 0 ;;
+  *"get application"*status.sync.status*)
+    printf 'Synced'; exit 0 ;;
+  *"patch application"*)
+    printf '%s\n' "$*" >> "$FAKE_PATCH_LOG"; exit 0 ;;
+  *"get deployment"*jsonpath*)
+    # The Deployment already runs what this run built -- the ref is what the
+    # image wait reads, and for a node whose override was just dropped ArgoCD
+    # would have updated it.
+    dep=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "deployment" ] && dep="$a"
+      prev="$a"
+    done
+    printf 'memql-%s:local' "$dep"; exit 0 ;;
+esac
+exit 0
+`
+
+// THE MIXED CASE, through main(). An Application overriding the operand and
+// agent only, rebuilding bff AND agent: agent's override is dropped so ArgoCD
+// rolls it, and bff -- already on :local from an earlier rebuild -- changes no
+// ref, so main() must restart it or the pod keeps serving the previous
+// rebuild's image.
+func TestMainRestartsTheBuiltNodeThePatchDidNotMove(t *testing.T) {
+	for _, bin := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s is not available, and this test drives the real script", bin)
+		}
+	}
+	root := repoRoot(t)
+	tmp := t.TempDir()
+	for name, body := range map[string]string{
+		"docker": e2eFakeDocker, "k3d": e2eFakeK3d, "kubectl": e2eFakeKubectl,
+	} {
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	patchLog, restartLog := filepath.Join(tmp, "patches"), filepath.Join(tmp, "restarts")
+
+	cmd := exec.Command(filepath.Join(root, "scripts", "k3d", "dev.sh"), //nolint:gosec // constant path
+		"--node=bff,agent", "--image-source=checkout", "--repo-root="+root,
+		"--app-name=memql-local", "--cluster=memql", "--namespace=memql")
+	cmd.Env = append(os.Environ(),
+		"PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"FAKE_IMAGES=memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n"+operandOverride,
+		"FAKE_PATCH_LOG="+patchLog,
+		"FAKE_RESTART_LOG="+restartLog,
+		"MEMQL_K3D_SYNC_TIMEOUT=5",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dev.sh failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), `"imageSource":"checkout"`) {
+		t.Errorf("the envelope does not report the checkout lane:\n%s", out)
+	}
+
+	restarts, _ := os.ReadFile(restartLog)
+	if !strings.Contains(string(restarts), "deployment/bff") {
+		t.Errorf("main() did not restart bff. Its override was already gone, so the patch changed "+
+			"no ref for it and ArgoCD rolls nothing -- the pod keeps running the PREVIOUS "+
+			"rebuild's image while the run reports success.\nrestarts:\n%s\noutput:\n%s", restarts, out)
+	}
+	if strings.Contains(string(restarts), "deployment/agent") {
+		t.Errorf("main() restarted agent, whose override the patch dropped -- ArgoCD's sync rolls "+
+			"it, so this is a second, redundant roll.\nrestarts:\n%s", restarts)
+	}
+	patches, _ := os.ReadFile(patchLog)
+	if !strings.Contains(string(patches), operandOverride) {
+		t.Errorf("the patch dropped the database operand override:\n%s", patches)
+	}
+}

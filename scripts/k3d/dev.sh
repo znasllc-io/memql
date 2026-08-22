@@ -810,14 +810,15 @@ function point_application_at_local_images() {
     # lane off the older clusterUp entry and showed a released version for a
     # cluster whose Application was already patched and converging onto :local.
     #
+    # ALL FIVE of the fields that describe the rebuild, not just the lane: an
+    # entry recording `checkout` with an empty commit/ref/nodes renders as
+    # "checkout " and "...from the checkout at .". Every one of them is known
+    # long before the patch -- checkout_facts read them before the first image
+    # was built.
+    #
     # Set HERE and not also in the tail: cap_result_set APPENDS (measured -- two
-    # calls put the key in the object twice), so main() skips these two when the
+    # calls put the key in the object twice), so main() skips all five when the
     # patch already recorded them.
-    # All FIVE of the fields that describe the rebuild, not just the lane: the
-    # tail never runs on a failure, and a rebuild entry recording `checkout`
-    # with an empty commit/ref/nodes renders as "checkout " and "...from the
-    # checkout at .". Every one of these is known long before the patch --
-    # checkout_facts read them before the first image was built.
     cap_result_set     imageSource      "${IMAGE_SOURCE:-unchanged}"
     cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
     cap_result_set     commit           "$CHECKOUT_COMMIT"
@@ -856,7 +857,7 @@ function restart_nodes_the_patch_did_not_move() {
         if node_override_was_dropped "$node"; then
             continue
         fi
-        info "${node} was already on its :local image -- the sync rolls nothing, so restarting it."
+        info "${node}'s image reference did not change, so ArgoCD's sync will not roll it."
         restart_deployment "$node"
     done
 }
