@@ -1,5 +1,13 @@
 # Local Cluster Install Substrate (Epic 1) Implementation Plan
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the Linux, no-UI substrate that installs a local memQL cluster from nothing and completely reverses it — capability scripts, a validated step graph, a host executor, and a receipt.
@@ -2228,7 +2236,7 @@ Create `scripts/install/verify-frontdoor.sh`:
 #
 # Usage:
 #   scripts/install/verify-frontdoor.sh --domain=memql.localhost
-#   scripts/install/verify-frontdoor.sh --domain=local.znas.io --report-only
+#   scripts/install/verify-frontdoor.sh --domain=lab.example.com --report-only
 #   scripts/install/verify-frontdoor.sh --print-spec
 #
 # Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (curl) |
@@ -4001,7 +4009,7 @@ concept installRun {
   graphName    string!  @description("Which graph produced this run: install or uninstall.")
   status       enum("running", "succeeded", "failed", "cancelled")!  @default("running")  @description("Terminal state of the run. A cancelled run is still fully reversible -- the receipt is appended per step, not written at the end.")
   mode         enum("automatic", "guided")!  @default("automatic")  @description("Which execution mode ran the graph. The step list is identical; only who executed each step differs.")
-  domain       string  @description("Front-door domain the cluster was installed under (e.g. memql.localhost or local.znas.io).")
+  domain       string  @description("Front-door domain the cluster was installed under (e.g. memql.localhost, or a domain the operator brings).")
   stackRef     string  @description("Release tag the stack was pinned to.")
   stackCommit  string  @description("Resolved commit of the pinned tag -- what was actually installed.")
   steps        []object!  @description("Ordered step records replayed from the receipt. Each entry: {id, script, status, changed, startedAt, endedAt, receipt}. receipt is null for a step that created nothing reversible.")

@@ -10,6 +10,14 @@ surface: VS Code extension (editors/vscode)
 
 # VS Code Deployments Surface
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 Give the extension a Deployments view whose top level is a memQL **instance**
 and whose second level is a **run** that changed that instance's deployed
 state. Move the install/repair/uninstall entry points out of the Clusters `+`
@@ -322,7 +330,7 @@ Cluster: staging                        [Open Portal ↗]
     probed     4s ago · 84ms
 
   Identity
-    signed in as  znas@znas.io
+    signed in as  owner@example.com
     role          owner
     token         expires in 11m  (auto-renews)
 

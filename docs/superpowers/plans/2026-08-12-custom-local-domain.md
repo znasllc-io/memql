@@ -1,5 +1,13 @@
 # Custom Local Domain Implementation Plan
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the local cluster's domain a value an operator chooses, so a memQL install serves `memql.localhost` by default and any domain the operator brings, with no file under `deploy/` naming a domain.
@@ -403,7 +411,7 @@ func TestIsSingleProcessHostIsLoopbackNamesOnly(t *testing.T) {
 		"identity.memql.localhost",
 		"cockpit.memql.localhost",
 		"memql.localhost",
-		"identity.local.znas.io",
+		"identity.local.example.com",
 		"identity.example.com",
 	}
 	for _, host := range notSingle {
@@ -1375,7 +1383,7 @@ spec:
 
 - [ ] **Step 4: Move the Ingress hosts to the new default and rename the secret**
 
-In `deploy/k8s/overlays/local/cockpit-front-door.yaml` and `front-door.yaml`, replace every `local.znas.io` with `memql.localhost` and every `local-znas-tls` with `memql-front-door-tls`. Add to each file's header comment:
+In `deploy/k8s/overlays/local/cockpit-front-door.yaml` and `front-door.yaml`, replace every vendor-domain hostname with `memql.localhost` and every `local-znas-tls` with `memql-front-door-tls`. Add to each file's header comment:
 
 ```
 # THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
@@ -1389,11 +1397,12 @@ In `deploy/k8s/overlays/local/cockpit-front-door.yaml` and `front-door.yaml`, re
 
 Run:
 ```bash
+VENDOR_DOMAIN=<the domain being removed>
 kubectl kustomize deploy/k8s/overlays/local > /tmp/rendered.yaml && \
   grep -c "memql-domain" /tmp/rendered.yaml && \
-  grep -c "znas.io" /tmp/rendered.yaml
+  grep -c "$VENDOR_DOMAIN" /tmp/rendered.yaml
 ```
-Expected: at least 9 for `memql-domain`; `grep -c znas.io` prints `0` (grep exits 1 on no match, which is the pass here). If `kubectl kustomize` is unavailable, `kustomize build` is equivalent. If neither is installed, stop and report — this step cannot be faked.
+Expected: at least 9 for `memql-domain`; the vendor-domain count prints `0` (grep exits 1 on no match, which is the pass here). If `kubectl kustomize` is unavailable, `kustomize build` is equivalent. If neither is installed, stop and report — this step cannot be faked.
 
 - [ ] **Step 6: Commit**
 
@@ -1669,8 +1678,8 @@ func render(t *testing.T) string {
 // and carry the committed default.
 func TestRenderedOverlayCarriesNoVendorDomain(t *testing.T) {
 	rendered := render(t)
-	if strings.Contains(rendered, "znas.io") {
-		t.Error("rendered overlay still names znas.io")
+	if strings.Contains(rendered, bannedVendorDomain) {
+		t.Error("rendered overlay still names the vendor domain")
 	}
 	if strings.Contains(rendered, "local-znas-tls") {
 		t.Error("rendered overlay still names the old TLS secret")
@@ -1727,8 +1736,8 @@ Expected: PASS if Task 7 is complete. A skip means `kubectl` is missing — inst
 Add the guard to `product_neutrality_test.go` (repo root, package `main`), which is where the existing banned-names sweep lives:
 
 ```go
-// znas.io is one company's domain. The engine is meant to carry no product, and
-// a hostname is product (memql#3593). The local default is memql.localhost;
+// The vendor domain is one company's domain. The engine is meant to carry no
+// product, and a hostname is product (memql#3593). The local default is memql.localhost;
 // anything else is an operator's own choice, arriving as --domain.
 //
 // SAME CAVEAT AS TestEngineIsProductNeutral, which this sits beside: it is a
@@ -1759,8 +1768,8 @@ func TestNoVendorDomainLiterals(t *testing.T) {
 				// not a place a hostname hides in a way that reaches a cluster.
 				return nil //nolint:nilerr
 			}
-			if bytes.Contains(body, []byte("znas.io")) {
-				t.Errorf("%s names znas.io -- the domain is a value now, supplied as --domain", path)
+			if bytes.Contains(body, []byte(bannedVendorDomain)) {
+				t.Errorf("%s names the vendor domain -- it is a value now, supplied as --domain", path)
 			}
 			return nil
 		})
@@ -1811,7 +1820,7 @@ test("the default domain is the one the overlay commits", () => {
 });
 
 test("a well-formed domain is accepted, whoever owns it", () => {
-  for (const domain of ["memql.localhost", "lab.example.com", "local.znas.io", "a.b.c.d.test"]) {
+  for (const domain of ["memql.localhost", "lab.example.com", "local.example.org", "a.b.c.d.test"]) {
     assert.equal(installDomainProblem(domain), undefined, `${domain} should be accepted`);
   }
 });

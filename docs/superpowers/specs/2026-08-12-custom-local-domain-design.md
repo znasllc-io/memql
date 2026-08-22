@@ -1,5 +1,13 @@
 # Custom local domain: one `MEMQL_DOMAIN`, derived everywhere
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 **Issue:** memql#3593
 **Status:** design approved, not implemented
 **Supersedes nothing. Implements D5 of** [`2026-08-08-local-cluster-install-wizard-design.md`](2026-08-08-local-cluster-install-wizard-design.md).
@@ -11,7 +19,8 @@
 The Add-a-cluster wizard shows a **Domain** field and lets an operator edit it.
 Until memql#3590, whatever they typed reached `seedBootstrap` — which bootstrapped
 identity for that domain — while `hostsBlock`, `localCA` and `frontDoor` each used
-their own `local.znas.io` defaults. The cluster's issuer named one domain; its hosts
+their own defaults, all naming the vendor domain then in use. The cluster's issuer
+named one domain; its hosts
 block, certificate and probe named another.
 
 memql#3590 fixed the **installer** half: the typed domain now reaches all four steps.
@@ -22,18 +31,18 @@ reaches those manifests. A custom domain therefore resolves — the hosts block 
 it at 127.0.0.1 — and then answers as the wrong site, because traefik has no Ingress
 rule for it and serves its default certificate.
 
-So `stackPin.ts` currently refuses any domain but `local.znas.io`
+So `stackPin.ts` currently refuses any domain but the vendor one then in use
 (`installDomainProblem`). That refusal is honest, and it is not a design.
 
 ### 1.1 Every place the domain is pinned today
 
 | File | What it pins |
 |---|---|
-| `overlays/local/cockpit-front-door.yaml` | Ingress `host:` + `spec.tls.hosts` → `cockpit.local.znas.io` |
-| `overlays/local/front-door.yaml` | the same for `identity.local.znas.io` |
+| `overlays/local/cockpit-front-door.yaml` | Ingress `host:` + `spec.tls.hosts` → `cockpit.<vendor domain>` |
+| `overlays/local/front-door.yaml` | the same for `identity.<vendor domain>` |
 | `overlays/local/patches/identity-local-config.yaml` | `MEMQL_IDENTITY_BASE_URL`, expected issuer, `MEMQL_IDENTITY_BOOTSTRAP_DOMAIN`, `MEMQL_DISCOVERY_GRPC_ENDPOINT`, CORS origins, **OAuth registered-client redirect URIs** |
 | `overlays/local/kustomization.yaml` | `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`, repeated for **eight** node Deployments |
-| `scripts/lib/localtls.sh` | the certificate SANs (`*.local.znas.io,local.znas.io`) and the secret name `local-znas-tls` |
+| `scripts/lib/localtls.sh` | the certificate SANs (the vendor wildcard and its apex) and the secret name `local-znas-tls` |
 
 memql#3593 lists five sites. The two it understates are inside the identity patch and
 are the ones that fail most confusingly: the **OAuth redirect URIs** and the
@@ -49,8 +58,9 @@ Two reasons, and the second is the stronger one.
    source and the TLS source as the things *allowed* to vary per environment.
    Treating the domain as the shape of the system rather than as a value is that rule
    pointed the wrong way.
-2. **The engine is supposed to be product-neutral.** `znas.io` is a company's domain
-   hardcoded in a public repo whose stated rule is that the engine carries no product.
+2. **The engine is supposed to be product-neutral.** The vendor domain was a
+   company's domain hardcoded in a public repo whose stated rule is that the engine
+   carries no product.
    Someone cloning memQL to learn it gets a cluster named under a stranger's domain,
    and `product_neutrality_test.go` is a banned-names list that would never notice.
    Parameterising the domain is de-branding the engine; the local default becomes a
@@ -65,8 +75,8 @@ resolves to 127.0.0.1 and the mkcert CA is trusted on that machine. Everything b
 follows from this; LAN and public reach are explicitly out of scope (§7).
 
 **D2 — Default domain `memql.localhost`, BYO as the advanced path.** This is D5 of the
-install-wizard design, implemented as written. `local.znas.io` keeps working *through
-the BYO path*, which that design required. The `nip.io` / `sslip.io` alternative stays
+install-wizard design, implemented as written. The vendor domain then in use keeps
+working *through the BYO path*, which that design required. The `nip.io` / `sslip.io` alternative stays
 rejected on its original grounds: consumer routers' DNS-rebind protection blocks
 public names resolving to 127.0.0.1, so it fails intermittently and confusingly.
 
@@ -357,7 +367,7 @@ re-seeds the ConfigMap and the renamed TLS secret; hosts entries need re-adding 
 the new names; `~/.memql/clusters.yaml` endpoints change; passkeys need re-enrolling
 (magic-link remains the universal recovery route per the sign-in design's D6).
 
-`make up DOMAIN=local.znas.io` reproduces the old hostnames exactly — and
+`make up DOMAIN=<the vendor domain>` reproduces the old hostnames exactly — and
 does so *through the new parameter*, emitting the two Ingress patches. That is the
 proof the parameterisation is real rather than a rename.
 
@@ -377,7 +387,7 @@ proof the parameterisation is real rather than a rename.
   `MEMQL_DOMAIN` set resolves the same issuer as one with
   `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` set, checked through `portal`, `mcp` and
   `cluster` rather than through the verifier alone.
-- Existing tests carrying `local.znas.io` literals move with the default:
+- Existing tests carrying the vendor-domain literal move with the default:
   `component/portal/config_test.go`, `component/identity/config_test.go`,
   `dial_url_test.go`, `discovery_endpoint_contract_test.go`, and the other files the
   grep in §1.1 turns up.
@@ -402,7 +412,7 @@ rename in the seed-secrets tests; new param specs through the existing
 uppercase; `--domain` reaches `clusterUp` as well as the four steps memql#3590 already
 threads; the collect screen's default is the new constant.
 
-**Cross-cutting guard.** A sweep asserting no `znas.io` literal remains under
+**Cross-cutting guard.** A sweep asserting no vendor-domain literal remains under
 `deploy/`, `scripts/`, `editors/` and `component/`. It serves the de-branding goal
 directly and stops re-introduction — with the caveat CLAUDE.md already records about
 banned-name lists: it catches this name, not the next one. Allowlist: this design doc
