@@ -80,3 +80,63 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	}
 	mustParseCall(t, got)
 }
+
+// TestGeneratedBuilder_CampaignSendActionsAndIntegrationStatus pins the
+// five builtins memql#4239 put on the generated surface -- the four
+// operator send actions and the integration-status read -- against the
+// REAL generated builders. The exact strings are load-bearing: they are
+// the wire forms the portal's tests assert on
+// (clients/portal/test/campaignAuthoring.test.tsx,
+// clients/portal/test/integrations.test.tsx), and the portal now composes
+// them through these builders' TypeScript twins rather than by hand. A
+// builtin that drops out of the @sdk set, or a generator change to the
+// kind-prefixed invocation form, fails here first.
+func TestGeneratedBuilder_CampaignSendActionsAndIntegrationStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{
+			name: "campaignStartSend",
+			got:  CampaignStartSendBuild(CampaignStartSendArgs{CampaignId: "camp-1"}),
+			want: `builtin campaignStartSend(campaignId: "camp-1")`,
+		},
+		{
+			name: "campaignScheduleSend",
+			got: CampaignScheduleSendBuild(CampaignScheduleSendArgs{
+				CampaignId:  "camp-1",
+				ScheduledAt: "2026-09-01T09:00:00Z",
+			}),
+			want: `builtin campaignScheduleSend(campaignId: "camp-1", scheduledAt: "2026-09-01T09:00:00Z")`,
+		},
+		{
+			name: "campaignPauseSend",
+			got:  CampaignPauseSendBuild(CampaignPauseSendArgs{CampaignId: "camp-1"}),
+			want: `builtin campaignPauseSend(campaignId: "camp-1")`,
+		},
+		{
+			name: "campaignResumeSend",
+			got:  CampaignResumeSendBuild(CampaignResumeSendArgs{CampaignId: "camp-1"}),
+			want: `builtin campaignResumeSend(campaignId: "camp-1")`,
+		},
+		{
+			// probe is an optional bool: unset means "the configuration
+			// question only", and the Go builder omits it unless ProbeSet.
+			name: "integrationStatus (configuration read)",
+			got:  IntegrationStatusBuild(IntegrationStatusArgs{}),
+			want: `builtin integrationStatus()`,
+		},
+		{
+			name: "integrationStatus (live probe)",
+			got:  IntegrationStatusBuild(IntegrationStatusArgs{Probe: true, ProbeSet: true}),
+			want: `builtin integrationStatus(probe: true)`,
+		},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s: call = %q, want %q", tc.name, tc.got, tc.want)
+		}
+		mustParseCall(t, tc.got)
+	}
+}

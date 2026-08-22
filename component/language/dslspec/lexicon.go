@@ -19,6 +19,7 @@ func keywords() []Keyword {
 		{Name: "return", Doc: "Return the trailing value from a logic body.", Kind: "control"},
 		{Name: "when", Doc: "Arg-conditional guard: when(args.x) { <expr> } -- the guarded block (and its connective) is dropped if args.x is absent.", Kind: "control"},
 		{Name: "in", Doc: "Membership test: args.x in payload.list, or payload.kind in [\"a\", \"b\"]. The single membership operator (`has` is retired).", Kind: "control"},
+		{Name: "startsWith", Doc: "String-prefix test: <field> startsWith \"lit\", [\"a\", \"b\"] (ANY of) or args.x. Filter and spec predicate; an empty list and a blank prefix match nothing (memql#4208).", Kind: "control"},
 
 		// Block-header clauses (struct-form construct bodies).
 		{Name: "args", Doc: "Input-schema block: declares caller-passed args read as args.X in the body.", Kind: "clause"},
@@ -79,6 +80,7 @@ func operators() []Operator {
 		// (memql#3630).
 		{Symbol: "!", Doc: "Logical NOT -- NOT SUPPORTED in filters, specs, logic bodies or collection lambdas; rejected at load. Write the != comparison form. Works in runtime condition strings only: an automation cond-step condition and a trigger @filter."},
 		{Symbol: "in", Doc: "Membership: lhs in rhsCollection."},
+		{Symbol: "startsWith", Doc: "String prefix: field startsWith prefix, or ANY of a list of prefixes. Parameterized `^@ ANY(text[])` in SQL; empty list / blank prefix match nothing (memql#4208)."},
 		{Symbol: "??", Doc: "Null-coalescing: first non-nil/non-empty operand; a ?? b ?? c folds to coalesce(a, b, c) with the final operand as the ultimate fallback. Binds tighter than comparison, looser than arithmetic (#2611)."},
 	}
 }

@@ -2652,3 +2652,68 @@ The S5 uniqueness gate (memql#2360) narrowed to match: the same name in two
 namespaces is legal; the same name twice in **one** namespace is still the
 silent last-wins overwrite it always was, and is still refused.
 
+---
+
+## 32. `startsWith` is a selection, never a pass-through (memql#4208)
+
+**Rule.** `<field> startsWith <prefix>` matches a row whose string
+property begins with the prefix, or with ANY prefix in a list. The
+right-hand side is a string literal, a list of string literals, or an
+`args.<field>` that resolves to either at call time. Two inputs match
+NOTHING, and that is the contract rather than an edge case:
+
+- an **empty list** (`args.prefixes` bound to `[]`);
+- a **blank prefix** (`""` or whitespace), on its own or inside a list --
+  blanks are dropped, and a list of nothing but blanks is an empty list.
+
+Right -- a prefix-scoped read that cannot widen (the read behind
+memql#4208, `dsl/observability/queries.memql`):
+
+```memql fragment
+filter  bucket==args.bucket && (when(args.codeReference) { codeReference==args.codeReference } || codeReference startsWith args.prefixes)
+```
+
+Wrong -- expecting Go's `strings.HasPrefix(s, "")`:
+
+```memql fragment
+filter  codeReference startsWith args.prefix   // args.prefix == "" returns NO rows, not every row
+```
+
+**Why.** Every language's HasPrefix says the empty string is a prefix of
+everything, and in a query filter that is exactly the fail-open shape this
+document keeps recording (`!= ""` as the is-set idiom in #27, `??`
+blank-coalescing in #30): a selection that admits every row on a blank
+input. `codeReference startsWith args.prefixes` is safe to hand whatever
+list the caller holds because neither an empty list nor a list of blanks
+can turn it into a cluster-wide scan. The engine rule lives in
+`normalizePrefixValues` (`component/memql/executor_filter.go`) and every
+evaluator reads it -- the SQL compile (`((payload #>> '{f}') ^@
+ANY(?::text[]))`, or the constant `FALSE` for an empty list), the
+in-process post-filter every SQL candidate goes through, collection
+lambdas and shape-template matches -- so they cannot disagree.
+
+**What it does NOT do.**
+
+- It is not a pattern. `^@` is Postgres `starts_with()` as an operator, a
+  byte-prefix test; `%` and `_` in a prefix are literal, and nothing is
+  escaped or concatenated -- one `text[]` parameter is bound whatever the
+  right-hand shape was.
+- It does not drop on absence. `when(args.x) { ... }` is the "no
+  constraint when the arg is absent" form; a blank is a VALUE, and as a
+  prefix it is not one. Declare the list arg `[]string!` when an absent
+  list must be a refused call rather than an unconstrained one.
+- It is not a runtime-condition operator. Filters and spec bodies compile
+  it; an automation cond-step condition or a trigger `@filter` is refused
+  by name (`component/automations/evaluator.go`), because that string
+  grammar would otherwise read the whole condition as a non-empty --
+  truthy -- string.
+- `not startsWith` is not a form; the left side must be a row field
+  (`args.x startsWith ...` is refused); a bare identifier on the right is
+  refused rather than read as its own literal text; a row intrinsic
+  (`row.id startsWith`) is refused at compile.
+
+**Tested by.** `component/language/parser/startswith_test.go` (grammar and
+its negative cases), `component/memql/executor_filter_startswith_test.go`
+(SQL + in-process agreement), and
+`component/memql/code_metrics_in_window_db_test.go` (the memql#4208 read
+against a real Postgres, db-gated).

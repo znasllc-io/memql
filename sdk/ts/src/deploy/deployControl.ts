@@ -12,9 +12,9 @@
 // AUTHORIZATION IS SERVER-SIDE, ALWAYS. Nothing in this file checks a
 // role. The engine enforces the locked matrix (epic #1871) on the streamed
 // path through the SAME gate the unary path uses -- view is owner/admin,
-// cut + deploy are developer/admin/owner, rollback is owner ONLY, not even
-// admin -- and every action writes a v1:identity:auditEvent whose id comes
-// back on the result. A caller may hide buttons a user cannot use, but
+// cut + deploy are developer/admin/owner, rollback and repair are owner
+// ONLY, not even admin -- and every action writes a v1:identity:auditEvent
+// whose id comes back on the result. A caller may hide buttons a user cannot use, but
 // that is presentation; the refusal is authoritative and arrives as a
 // DeployControlError with code PERMISSION_DENIED.
 //
@@ -332,6 +332,29 @@ export class DeployControlClient {
     return actionFromWire(
       await this.call("rollback_deployment", { rollbackDeployment: { toDeploymentId } }, opts),
     );
+  }
+
+  /**
+   * Re-converge this installation onto its committed overlay (memql#4209).
+   *
+   * The identity node asks ArgoCD to hard-refresh and sync the
+   * installation's Application (prune included) and watches it until it is
+   * synced AND healthy. Nothing changes version: a repair returns a drifted,
+   * half-applied or hand-edited cluster to the state Git already describes.
+   *
+   * Async, like deploy(): ok acknowledges the KICK-OFF. The repair is a
+   * v1:cluster:deployment record (details.deploymentId, notes "repair: ...")
+   * written at in_progress and resolved to succeeded | failed as the
+   * reconciliation is observed -- poll it, or getDeploymentStatus().
+   *
+   * OWNER-ONLY server-side, the rollback floor: an admin caller gets
+   * PERMISSION_DENIED. A provider with no defined repair is refused INSIDE
+   * the result (ok=false, details.reason = "repair_undefined_for_provider")
+   * rather than half-run, and that refusal is audited too -- its id is on
+   * auditEventId like any other action's.
+   */
+  async repair(opts: DeployControlCallOptions = {}): Promise<ActionResult> {
+    return actionFromWire(await this.call("repair", { repair: {} }, opts));
   }
 
   // call sends one bridged request and unwraps its reply, turning a

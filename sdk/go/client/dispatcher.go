@@ -477,6 +477,15 @@ func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 	case *memqlv1.MemqlServerMessage_QueryResult:
 		return p.QueryResult.GetRequestId()
 
+	// Concept-registry follow stream (memql#4238). ONE ConceptsSubscribeMsg
+	// with follow=true produces a snapshot frame and then one frame per
+	// registry change, all carrying that request_id, for as long as the
+	// subscription lives -- the multi-frame shape this tier exists for. The
+	// catalog reply (follow=false) is unaffected: it is a single reply served
+	// by correlate_to in the tier above.
+	case *memqlv1.MemqlServerMessage_ConceptsRegistryDelta:
+		return p.ConceptsRegistryDelta.GetRequestId()
+
 	// The error terminal for any of the above. See the coverage rule.
 	case *memqlv1.MemqlServerMessage_QueryError:
 		return p.QueryError.GetRequestId()

@@ -179,6 +179,21 @@ func (c *DeployControlClient) RollbackDeployment(ctx context.Context, toDeployme
 	return actionResultFromProto(resp), wrapActionErr("rollback_deployment", err)
 }
 
+// Repair re-converges this installation onto its committed overlay
+// (memql#4209): the identity node asks ArgoCD to hard-refresh and sync the
+// installation's Application (prune included) and watches it until it is
+// synced AND healthy. Nothing changes version. Async: ok acknowledges the
+// kick-off, and the v1:cluster:deployment record named by
+// Details["deploymentId"] (notes "repair: ...") carries the terminal status
+// -- poll it or GetDeploymentStatus. OWNER-ONLY server-side, the
+// RollbackDeployment floor; a provider with no defined repair is refused
+// inside the ActionResult (OK=false, Details["reason"] =
+// "repair_undefined_for_provider") rather than half-run.
+func (c *DeployControlClient) Repair(ctx context.Context) (ActionResult, error) {
+	resp, err := c.grpc.Repair(ctx, &memqlv1.RepairRequest{})
+	return actionResultFromProto(resp), wrapActionErr("repair", err)
+}
+
 // -----------------------------------------------------------------------------
 // proto -> SDK translation
 // -----------------------------------------------------------------------------

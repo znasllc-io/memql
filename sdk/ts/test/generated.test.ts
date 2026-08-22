@@ -30,6 +30,11 @@ import {
   QueryClient,
   buildSiteById,
   buildTodos,
+  buildCampaignStartSend,
+  buildCampaignScheduleSend,
+  buildCampaignPauseSend,
+  buildCampaignResumeSend,
+  buildIntegrationStatus,
   BoundConcepts,
   Concepts,
   topicFor,
@@ -104,4 +109,41 @@ test("concept metadata joins constructs to canonical ids and composes topics", (
   assert.equal(Concepts.PLATFORM_SITE, "v1:platform:site");
   assert.equal(topicFor("v1:platform:site", "created"), "graph.node.created.v1:platform:site");
   assert.equal(filterFor("v1:platform:site", "updated"), "node.updated.v1:platform:site");
+});
+
+// The five builtins memql#4239 put on the generated surface: the four
+// operator send actions and the integration-status read. A builtin is
+// emitted only when marked @sdk, so this pins both that the marker held
+// and that the builders compose the exact wire forms the portal's tests
+// assert on (clients/portal/test/campaignAuthoring.test.tsx,
+// clients/portal/test/integrations.test.tsx) -- the portal composes them
+// through these builders now, not by hand.
+test("the @sdk builtins are installed on the prototype and compose the kind-prefixed form", () => {
+  assert.equal(typeof QueryClient.prototype.campaignStartSend, "function"); // builtins
+  assert.equal(typeof QueryClient.prototype.integrationStatus, "function"); // builtins
+
+  assert.equal(
+    buildCampaignStartSend({ campaignId: "camp-1" }),
+    'builtin campaignStartSend(campaignId: "camp-1")',
+  );
+  assert.equal(
+    buildCampaignScheduleSend({ campaignId: "camp-1", scheduledAt: "2026-09-01T09:00:00Z" }),
+    'builtin campaignScheduleSend(campaignId: "camp-1", scheduledAt: "2026-09-01T09:00:00Z")',
+  );
+  assert.equal(
+    buildCampaignPauseSend({ campaignId: "camp-1" }),
+    'builtin campaignPauseSend(campaignId: "camp-1")',
+  );
+  assert.equal(
+    buildCampaignResumeSend({ campaignId: "camp-1" }),
+    'builtin campaignResumeSend(campaignId: "camp-1")',
+  );
+
+  // probe is an optional bool. Undefined is omitted; false is SENT -- the
+  // portal's configuration read says `probe: false` explicitly and its
+  // test asserts the string, so a builder that dropped a false would pass
+  // typecheck and fail the portal.
+  assert.equal(buildIntegrationStatus({}), "builtin integrationStatus()");
+  assert.equal(buildIntegrationStatus({ probe: false }), "builtin integrationStatus(probe: false)");
+  assert.equal(buildIntegrationStatus({ probe: true }), "builtin integrationStatus(probe: true)");
 });

@@ -372,6 +372,14 @@ transport.
    The preflight refuses — with the reason — if no sender is registered, if
    one-click unsubscribe is unconfigured, if the template is not ready, or if
    the audience is empty or at the ceiling.
+
+   From a client, the same call is a generated SDK method — the builtin is
+   marked `@sdk` (memql#4239), which is what puts it on that surface:
+   `qc.CampaignStartSend(ctx, client.CampaignStartSendArgs{CampaignId: id})`
+   in Go, `query.campaignStartSend({ campaignId })` in TypeScript. The pause,
+   resume and schedule calls below have theirs too (`campaignPauseSend`,
+   `campaignResumeSend`, `campaignScheduleSend`), and the portal's buttons go
+   through those methods rather than composing the call string by hand.
 4. Watch the campaign row's counters, or the delivery ledger
    (`deliveriesForCampaign`).
 

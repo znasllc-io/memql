@@ -1485,6 +1485,18 @@ func (e *Evaluator) EvaluateCondition(condition string) (bool, error) {
 	// everywhere; a conformance test rejects the word forms.
 	condition = normalizeConditionOperators(condition)
 
+	// `startsWith` is a query-filter / spec predicate (memql#4208): it
+	// compiles to SQL and is evaluated in-process by the engine's comparison
+	// evaluators. This string grammar does not carry it, and without this
+	// refusal a condition written with it would fall through to the truthy
+	// tail -- a non-empty string -- and fire on EVERYTHING, the memql#2819 /
+	// memql#1396 shape. It sits ABOVE the OR split on purpose: the OR branch
+	// skips erroring parts, so a guard below it is routed around by the
+	// comma inside a list literal.
+	if startsWithOperatorRe.MatchString(condition) {
+		return false, fmt.Errorf("condition %q uses startsWith, which is a query-filter / spec predicate and is not evaluated in automation or logic conditions; move the prefix test into a query filter or a spec", condition)
+	}
+
 	// Strip a redundant fully-wrapping paren pair so a parenthesised group
 	// like `(a || b || c)` recurses into its OR-split instead of reaching the
 	// atomic evaluator as one un-splittable comparison.
@@ -1640,6 +1652,11 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 // strings.Join(parts, " "), so `where a.b` arrives as `a . b`. An anchored
 // no-space pattern silently failed to match that spelling, leaving the exact
 // fail-open this guard exists to close alive on that one path.
+// startsWithOperatorRe matches the `startsWith` keyword as a word, outside
+// nothing -- a string literal containing the word is refused too, which is
+// the conservative side for a guard whose alternative is fail-open.
+var startsWithOperatorRe = regexp.MustCompile(`\bstartsWith\b`)
+
 var bareDottedPathRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\.[ \t]*[A-Za-z_][A-Za-z0-9_]*)+$`)
 
 func isBareDottedPath(condition string) bool {

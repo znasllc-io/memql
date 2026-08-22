@@ -203,6 +203,7 @@ var (
 	OpGt                     = ast.OpGt
 	OpHas                    = ast.OpHas
 	OpIn                     = ast.OpIn
+	OpStartsWith             = ast.OpStartsWith
 	OpLe                     = ast.OpLe
 	OpLt                     = ast.OpLt
 	OpMissing                = ast.OpMissing

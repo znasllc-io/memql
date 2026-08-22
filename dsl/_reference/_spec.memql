@@ -188,6 +188,7 @@ trait statusIsActive {
 // Comparison operators: == != > >= < <=
 // Logical operators:    && || (specs refuse `!` -- write `!=` instead)
 // Set operators:        in (X, Y, Z)
+// Prefix operator:      field startsWith "lit" / ["a", "b"] / args.x  (ANY of; an empty list and a blank prefix match nothing, memql#4208)
 // Null check:           field == null  /  field != null
 // Parentheses:          (expr1) || (expr2 && expr3)
 //

@@ -107,6 +107,12 @@ func Dispatch(ctx context.Context, srv memqlv1.DeployControlServiceServer, msg *
 			return failResult(out, err)
 		}
 		out.Result = &memqlv1.DeployControlResult_Action{Action: res}
+	case *memqlv1.DeployControlMsg_Repair:
+		res, err := srv.Repair(ctx, req.Repair)
+		if err != nil {
+			return failResult(out, err)
+		}
+		out.Result = &memqlv1.DeployControlResult_Action{Action: res}
 	default:
 		// A request variant added to the proto but not wired here. Fail
 		// loudly rather than returning an empty ok=true reply that a

@@ -447,7 +447,7 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 |----------------------|-----------------------------------------------------------------------------------------------------------------|
 | Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with parentheses, using Go precedence. **No `!` (NOT)** — it parses and is then refused by the AST converter on every surface (memql#3630); write the `!=` form. |
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or a bare payload property (`status`, `profile.name`).                                         |
-| Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
+| Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` and `startsWith` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
@@ -491,9 +491,10 @@ concept==v1:assistant && active==true
 - Group with parentheses: `(concept==A || concept==B) && active==true`
 - Field paths support dot notation for nested JSON: `profile.name`
 
-In **authored DSL filter clauses** (the `filter` line of a struct query) two more forms are available:
+In **authored DSL filter clauses** (the `filter` line of a struct query) three more forms are available:
 
 - **Membership**: the single `in` operator — `args.x in list` or `kind in ["a", "b"]`.
+- **Prefix selection**: `<field> startsWith <prefix>` (memql#4208) — the prefix is a string literal, a list of string literals (starts with ANY of), or an `args.<field>` that resolves to either at call time: `codeReference startsWith "integration."`, `codeReference startsWith args.prefixes`. It compiles to a parameterized `^@ ANY(text[])` (a byte-prefix test, so `%` / `_` are literal) and is evaluated in-process with `strings.HasPrefix`. An **empty list and a blank prefix match nothing** — the predicate is a selection, never a pass-through; see [authoring-rules.md §32](authoring-rules.md). Also valid in a spec body; not in an automation condition string.
 - **Arg-conditional predicates**: the `when(args.x) { <expr> }` guard — if `args.x` is absent at call time, the guarded block and its connective are dropped as if never written (unambiguous under `||`).
 
 ### Directives
@@ -529,6 +530,7 @@ Path segments follow JSON keys, including arrays via numeric indices when needed
 | `>` / `<`         | `score>0.85`                                                    | Numeric comparisons (strings use lexical ordering).                                       |
 | `>=` / `<=`       | `attempts<=3`                                                   | Greater-than-or-equal / less-than-or-equal.                                               |
 | `in`              | `stage in ["lead", "qualified", "won"]`                         | Membership against a collection. Works with scalar fields against lists and scalars against array fields. DSL filter clauses only — in a runtime query string, rewrite as a disjunction (`x=="a" \|\| x=="b"`). |
+| `startsWith`      | `codeReference startsWith "integration."`, `codeReference startsWith args.prefixes` | String prefix against a string literal, a list of string literals (starts with ANY of), or an `args.<field>` resolving to either. Parameterized `^@ ANY(text[])` in SQL — `%` / `_` are literal. An empty list and a blank prefix match NOTHING (see [authoring-rules.md §32](authoring-rules.md)). DSL filter clauses and spec bodies only (memql#4208). |
 | `==nil`           | `metadata.notes==nil`                                           | Field absent or explicitly `null`. Apply to payload paths or intrinsic columns.           |
 | `!=nil`           | `metadata.tags!=nil`                                            | Field present with a non-null value.                                                      |
 
@@ -1954,6 +1956,7 @@ createdAt>"2025-01-01T00:00:00Z"
 | `==nil` | `field==nil` | Field is null/absent |
 | `!=nil` | `field!=nil` | Field exists |
 | `in` | `kind in ["a", "b"]` | Membership — DSL filter clauses only; in runtime strings write a disjunction |
+| `startsWith` | `codeReference startsWith ["integration.", "method:"]` | String prefix, ANY of a list — DSL filter clauses and spec bodies only; an empty list and a blank prefix match nothing (memql#4208) |
 
 ### Logical Operators
 

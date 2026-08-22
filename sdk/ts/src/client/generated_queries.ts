@@ -1763,6 +1763,42 @@ QueryClient.prototype.clusterSpawnEvents = function (this: QueryClient, args: Cl
   return this.executeNamed("clusterSpawnEvents", buildClusterSpawnEvents(args), opts);
 };
 
+/** codeMetric rows for one bucket inside [windowStart, windowEnd), selected by codeReference prefix (ANY of prefixes) or by the exact codeReference. An empty prefixes list with no codeReference returns nothing. Keyset-paged in row.createdAt order; order by windowStart client-side. */
+// Bound concept: v1:observability:codeMetric (machine-readable: BoundConcepts["codeMetricsInWindow"] in generated_concepts.ts).
+export interface CodeMetricsInWindowArgs {
+  /** codeReference prefixes to match (a module's fqnPrefixes). Required so an absent list is refused; an empty list matches nothing. */
+  prefixes: string[];
+  /** Optional exact codeReference, matched in addition to the prefixes. */
+  codeReference?: string;
+  /** Which continuous aggregate the rows came from. */
+  // Enum: 1m | 1h
+  bucket: string;
+  /** Inclusive window start, aligned to the bucket by the caller. */
+  windowStart: string;
+  /** Exclusive window end, aligned to the bucket by the caller. */
+  windowEnd: string;
+}
+
+export function buildCodeMetricsInWindow(args: CodeMetricsInWindowArgs): string {
+  const parts: string[] = [];
+  parts.push("prefixes: " + renderMemQLValue(args.prefixes));
+  if (args.codeReference !== undefined) parts.push("codeReference: " + renderMemQLValue(args.codeReference));
+  parts.push("bucket: " + renderMemQLValue(args.bucket));
+  parts.push("windowStart: " + renderMemQLValue(args.windowStart));
+  parts.push("windowEnd: " + renderMemQLValue(args.windowEnd));
+  return "query codeMetricsInWindow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    codeMetricsInWindow(args: CodeMetricsInWindowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.codeMetricsInWindow = function (this: QueryClient, args: CodeMetricsInWindowArgs = {} as CodeMetricsInWindowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("codeMetricsInWindow", buildCodeMetricsInWindow(args), opts);
+};
+
 /** Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit. */
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.ts).
 export interface ComposedViewByIdArgs {

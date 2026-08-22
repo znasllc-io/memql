@@ -324,6 +324,12 @@ const (
 	OpHas        ComparisonOperator = "has"
 	OpMissing    ComparisonOperator = "== nil"
 	OpNotMissing ComparisonOperator = "!= nil"
+	// OpStartsWith is the string-prefix comparison (memql#4208): `<field>
+	// startsWith <prefix>`, prefix being a string or a list of strings (ANY
+	// of). SQL: `(<text path> ^@ ANY(?::text[]))`; in-process:
+	// strings.HasPrefix. An empty list and a blank prefix match nothing --
+	// see normalizePrefixValues for why.
+	OpStartsWith ComparisonOperator = "startsWith"
 )
 
 // ComparisonExpression compares a field to a literal value or collection.

@@ -77,6 +77,9 @@ func (refusingExecutor) RunRollback(context.Context, string) (string, error) {
 func (refusingExecutor) RunRolloutAction(context.Context, string, string) (string, error) {
 	return "", context.Canceled
 }
+func (refusingExecutor) RunRepair(context.Context, string) (string, error) {
+	return "", context.Canceled
+}
 func (refusingExecutor) KubectlJSON(context.Context, ...string) ([]byte, error) {
 	return nil, context.Canceled
 }
@@ -264,6 +267,128 @@ func TestForwardedRollbackIsOwnerOnly(t *testing.T) {
 				t.Fatalf("%s rollback error code = %v, want PermissionDenied", role, got)
 			}
 		})
+	}
+}
+
+// repairMsg is the OTHER owner-only action (memql#4209), and the one whose
+// gate matters most over the hop: the portal is the only surface that offers
+// repair, the portal's stream always lands on a bff, so EVERY repair an
+// operator requests is decided on the identity node from the forwarded
+// assertion and nothing else.
+func repairMsg() *memqlv1.DeployControlMsg {
+	return &memqlv1.DeployControlMsg{
+		RequestId: "req-repair",
+		Request: &memqlv1.DeployControlMsg_Repair{
+			Repair: &memqlv1.RepairRequest{},
+		},
+	}
+}
+
+// TestForwardedRepairIsOwnerOnly is memql#4209's acceptance test over the
+// mesh: the ORIGINATING human's role decides a forwarded repair. A forwarded
+// non-owner is refused and the refusal is audited against them; a forwarded
+// owner is admitted (asserted as "not PermissionDenied" and audited as not
+// blocked -- the fixture's refusing executor fails the kick-off afterwards,
+// which is the right boundary for a gate test).
+func TestForwardedRepairIsOwnerOnly(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader} {
+		role := role
+		t.Run(string(role)+" is refused", func(t *testing.T) {
+			h, audit := newForwardFixture(t)
+
+			res, err := runHop(t, h, principalForRole(t, role), repairMsg())
+			if err != nil {
+				t.Fatalf("the hop itself must succeed; a refusal travels INSIDE the result: %v", err)
+			}
+			if res.GetOk() {
+				t.Fatalf("a %s repair came back ok=true over the mesh: the owner-only gate did not survive the hop", role)
+			}
+			if got := codes.Code(res.GetErrorCode()); got != codes.PermissionDenied {
+				t.Fatalf("error code = %v, want PermissionDenied (message %q)", got, res.GetErrorMessage())
+			}
+			if res.GetRequestId() != "req-repair" {
+				t.Errorf("request_id = %q, want the caller's own id echoed back", res.GetRequestId())
+			}
+
+			events := audit.all()
+			if len(events) != 1 || events[0].Outcome != identity.AuditOutcomeBlocked {
+				t.Fatalf("want exactly one blocked audit event, got %+v", events)
+			}
+			if events[0].Action != "deployment_console_repair" {
+				t.Errorf("audit action = %q, want deployment_console_repair", events[0].Action)
+			}
+			if events[0].ActorRole != string(role) {
+				t.Errorf("audit actor role = %q, want %s -- the refusal must be attributed to the ORIGINATING caller",
+					events[0].ActorRole, role)
+			}
+			if got, want := res.GetAuditEventId(), events[0].CorrelationId; got != want {
+				t.Errorf("forwarded audit_event_id = %q, want %q -- the refused caller quotes it", got, want)
+			}
+		})
+	}
+
+	t.Run("owner is admitted", func(t *testing.T) {
+		h, audit := newForwardFixture(t)
+
+		res, err := runHop(t, h, principalForRole(t, auth.RoleOwner), repairMsg())
+		if err != nil {
+			t.Fatalf("hop: %v", err)
+		}
+		if got := codes.Code(res.GetErrorCode()); got == codes.PermissionDenied || got == codes.Unauthenticated {
+			t.Fatalf("an OWNER was refused repair over the mesh: %q", res.GetErrorMessage())
+		}
+		if res.GetAction() == nil {
+			t.Fatalf("an admitted repair must answer with an ActionResult, got %T (code %v, %q)",
+				res.GetResult(), codes.Code(res.GetErrorCode()), res.GetErrorMessage())
+		}
+
+		events := audit.all()
+		if len(events) != 1 {
+			t.Fatalf("want exactly one audit event, got %+v", events)
+		}
+		if events[0].Outcome == identity.AuditOutcomeBlocked {
+			t.Fatalf("owner repair was audited as blocked: %+v", events[0])
+		}
+		if events[0].ActorUserId != "v1:identity:user:owner-person" {
+			t.Errorf("audit actor = %q, want the originating caller's subject", events[0].ActorUserId)
+		}
+		// The action's own audit id rides inside the ActionResult, as on
+		// every other admitted write -- and the fixture has no engine, so the
+		// honest answer is ok=false with the reason on the result, never a
+		// silent ok.
+		if res.GetAction().GetAuditEventId() != events[0].CorrelationId {
+			t.Errorf("action audit id = %q, want %q", res.GetAction().GetAuditEventId(), events[0].CorrelationId)
+		}
+		if res.GetAction().GetOk() {
+			t.Error("a repair with no engine to record it came back ok=true")
+		}
+	})
+}
+
+// TestDeployControlForwardIgnoresTheForwardingNodesOwnCredentialForRepair
+// is the same property the rollback test pins, for the second owner-only
+// verb: an owner-shaped AMBIENT context on the receiving node must not
+// admit a forwarded admin.
+func TestDeployControlForwardIgnoresTheForwardingNodesOwnCredentialForRepair(t *testing.T) {
+	h, audit := newForwardFixture(t)
+
+	poisoned := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+		UserId:       "v1:identity:user:the-bff-itself",
+		PrimaryEmail: "bff@cluster.internal",
+		Role:         auth.RoleOwner,
+	})
+
+	res, err := runHopOnContext(t, poisoned, h, principalForRole(t, auth.RoleAdmin), repairMsg())
+	if err != nil {
+		t.Fatalf("hop: %v", err)
+	}
+	if got := codes.Code(res.GetErrorCode()); got != codes.PermissionDenied {
+		t.Fatalf("an owner-shaped ambient context let an ADMIN repair (code %v): the receiver is "+
+			"resolving the actor from the connection, not from the assertion", got)
+	}
+	events := audit.all()
+	if len(events) != 1 || events[0].ActorUserId != "v1:identity:user:admin-person" {
+		t.Errorf("audit = %+v, want one event attributed to the ORIGINATING admin", events)
 	}
 }
 
@@ -461,6 +586,9 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 	noRejectableArgument := map[string]bool{
 		"GetDeploymentStatus": true,
 		"SuggestNextVersion":  true,
+		// RepairRequest is empty by design (memql#4209): a repair operates on
+		// this installation and carries no version.
+		"Repair": true,
 	}
 	for _, rpc := range rpcs {
 		if noRejectableArgument[rpc] {

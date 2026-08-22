@@ -4,6 +4,7 @@
 
 import type {
   ConceptInfoWire,
+  ConceptsRegistryDeltaPayload,
   EventPayload,
   GraphBundleWire,
   GraphNodeActionWire,
@@ -94,6 +95,19 @@ export type GraphAction = "created" | "updated" | "deleted";
 export interface DomainSubscription {
   domain: string;
   filters: string[];
+}
+
+// ConceptRegistryDelta is one registry-change notification on a follow-mode
+// concept subscription (memql#4238). `added` carries whole descriptors (upsert
+// by id); `removed` carries ids that left; `reset` marks the initial snapshot
+// (replace the whole registry with `added`); `generation` is the monotonic
+// registry version after this delta -- a client that sees a non-contiguous
+// generation has missed one and re-subscribes.
+export interface ConceptRegistryDelta {
+  generation: number;
+  added: Concept[];
+  removed: string[];
+  reset: boolean;
 }
 
 // Row is the shape-flattened form every query / mutation returns. Keys
@@ -259,6 +273,21 @@ export function conceptsFromWire(in_: ConceptInfoWire[] | undefined): Concept[] 
     }
     return concept;
   });
+}
+
+// conceptRegistryDeltaFromWire decodes a ConceptsRegistryDelta into the
+// SDK-owned shape (memql#4238). `generation` is a uint64 -> protojson string, so
+// it is parsed with Number(); a missing/NaN value coalesces to 0.
+export function conceptRegistryDeltaFromWire(
+  p: ConceptsRegistryDeltaPayload,
+): ConceptRegistryDelta {
+  const generation = Number(p.generation ?? 0);
+  return {
+    generation: Number.isFinite(generation) ? generation : 0,
+    added: conceptsFromWire(p.added),
+    removed: (p.removed ?? []).filter((r): r is string => typeof r === "string"),
+    reset: p.reset === true,
+  };
 }
 
 export function accessSummaryFromWire(p: MyAccessResultPayload | undefined): AccessSummary | null {

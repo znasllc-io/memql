@@ -51,6 +51,16 @@ func (g *gateProbe) Rollback(ctx context.Context, _ *memqlv1.RollbackRequest) (*
 	return &memqlv1.ActionResult{Ok: true, AuditEventId: "aud-1", Message: "reverted"}, nil
 }
 
+func (g *gateProbe) Repair(ctx context.Context, _ *memqlv1.RepairRequest) (*memqlv1.ActionResult, error) {
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		g.sawAccess = ac
+	}
+	if g.denyWith != nil {
+		return nil, g.denyWith
+	}
+	return &memqlv1.ActionResult{Ok: true, AuditEventId: "aud-repair", Message: "repair kicked off"}, nil
+}
+
 func newDeployControlSession(t *testing.T, role auth.Role, h memqlv1.DeployControlServiceServer) (*streamSession, *captureStream) {
 	t.Helper()
 	cs := newCaptureStream(t)
@@ -77,6 +87,18 @@ func rollbackEnvelope() *memqlv1.MemqlClientMessage {
 				Request: &memqlv1.DeployControlMsg_Rollback{
 					Rollback: &memqlv1.RollbackRequest{CommitSha: "abc1234"},
 				},
+			},
+		},
+	}
+}
+
+func repairEnvelope() *memqlv1.MemqlClientMessage {
+	return &memqlv1.MemqlClientMessage{
+		MessageId: "m2",
+		Payload: &memqlv1.MemqlClientMessage_DeployControl{
+			DeployControl: &memqlv1.DeployControlMsg{
+				RequestId: "r2",
+				Request:   &memqlv1.DeployControlMsg_Repair{Repair: &memqlv1.RepairRequest{}},
 			},
 		},
 	}
@@ -156,6 +178,27 @@ func TestDeployControl_ReachableThroughTheStreamPayloadSwitch(t *testing.T) {
 
 	res := deployControlResult(t, cs)
 	assert.True(t, res.GetOk(), "handleMessage must route DeployControl to its handler")
+}
+
+// Repair (memql#4209) rides the same landing: the session's identity reaches
+// the gate, the ack comes back on the stream with its audit id, and the
+// envelope is routed through handleMessage's payload switch like every other
+// bridged verb -- a new oneof member that Dispatch did not route would be
+// answered Unimplemented, which this would catch as ok=false.
+func TestDeployControl_RepairReachesTheGateWithTheSessionIdentity(t *testing.T) {
+	probe := &gateProbe{}
+	s, cs := newDeployControlSession(t, auth.RoleOwner, probe)
+
+	require.NoError(t, s.handleMessage(repairEnvelope()))
+
+	require.NotNil(t, probe.sawAccess, "the service must receive the caller's AccessContext")
+	assert.Equal(t, auth.RoleOwner, probe.sawAccess.Role)
+
+	res := deployControlResult(t, cs)
+	assert.True(t, res.GetOk(), "handleMessage must route the repair envelope to its handler: %s", res.GetErrorMessage())
+	assert.Equal(t, "r2", res.GetRequestId())
+	require.NotNil(t, res.GetAction())
+	assert.Equal(t, "aud-repair", res.GetAction().GetAuditEventId())
 }
 
 // A live badge grant is attribution-grade, not a full operator session: it

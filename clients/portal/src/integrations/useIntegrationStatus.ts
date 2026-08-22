@@ -3,7 +3,7 @@ import type { Role } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
-import { buildCall, readStatusPayload, type IntegrationStatus } from "./calls";
+import { readStatusPayload, type IntegrationStatus } from "./statusReply";
 
 // Reading this node's integration registry (memql#3323).
 //
@@ -65,8 +65,11 @@ export function useIntegrationStatus(): IntegrationStatusState {
     setLoading(true);
     setError("");
 
+    // The generated typed method (memql#4239). `probe: false` is sent rather
+    // than omitted, so the call string itself says which of the two questions
+    // it is asking.
     void query
-      .executeNamed("integrationStatus", buildCall("builtin", "integrationStatus", { probe: false }))
+      .integrationStatus({ probe: false })
       .then((result) => {
         if (!live) return;
         const payload = readStatusPayload(result.rows());
@@ -95,7 +98,7 @@ export function useIntegrationStatus(): IntegrationStatusState {
     setProbing(true);
     setProbeError("");
     void query
-      .executeNamed("integrationStatus", buildCall("builtin", "integrationStatus", { probe: true }))
+      .integrationStatus({ probe: true })
       .then((result) => {
         const payload = readStatusPayload(result.rows());
         if (payload === null) {

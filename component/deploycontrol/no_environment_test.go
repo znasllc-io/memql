@@ -93,3 +93,21 @@ func TestGetDeploymentStatusTakesNoParameter(t *testing.T) {
 			f.Name)
 	}
 }
+
+// TestRepairRequestTakesNoParameter is the same claim for Repair (memql#4209):
+// a repair operates on this installation and names no version -- a repair
+// that installs a different version is an upgrade wearing a repair's name
+// (memql#3605) -- so the request is deliberately empty, and this is what
+// notices a field arriving on it.
+func TestRepairRequestTakesNoParameter(t *testing.T) {
+	req := reflect.TypeOf(memqlv1.RepairRequest{})
+	for i := 0; i < req.NumField(); i++ {
+		f := req.Field(i)
+		if f.PkgPath != "" {
+			continue
+		}
+		t.Errorf("RepairRequest.%s: the request is deliberately empty -- a repair "+
+			"operates on this installation and carries no version (memql#4209, memql#3605)",
+			f.Name)
+	}
+}

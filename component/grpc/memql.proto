@@ -403,6 +403,11 @@ message MemqlServerMessage {
     // Concepts results
     ConceptsListResult concepts_list_result = 78;
     ConceptsSubscribeResult concepts_subscribe_result = 79;
+    // Registry-change delta stream (memql#4238). Emitted only on a follow-mode
+    // ConceptsSubscribeMsg (follow=true): the first is the snapshot, then one
+    // per registry change, so a client's concept registry stays live without a
+    // reconnect.
+    ConceptsRegistryDelta concepts_registry_delta = 134;
     // Access / authorization
     MyAccessResult my_access_result = 80;
     // Streaming transcription replies (see AiTranscribeStreamStart).
@@ -1979,6 +1984,17 @@ message DisplayCard {
 message ConceptsSubscribeMsg {
   string request_id = 1;
   repeated string domains = 2;  // Optional: filter to specific domains
+
+  // follow turns this into a registry-DELTA subscription (memql#4238). With
+  // follow=false (the default, and every existing caller) the reply is the
+  // one-shot ConceptsSubscribeResult catalog above, unchanged. With follow=true
+  // the session answers with a ConceptsRegistryDelta snapshot (reset=true,
+  // carrying the whole concept set at the current generation) and then keeps
+  // emitting ConceptsRegistryDelta messages as the registry changes -- until the
+  // stream closes or the client sends an UnsubscribeMsg for the subscription_id
+  // the snapshot carried. `domains` is not applied in follow mode (the registry
+  // set is small; a client filters client-side).
+  bool follow = 3;
 }
 
 message ConceptsSubscribeResult {
@@ -1989,6 +2005,32 @@ message ConceptsSubscribeResult {
 message DomainSubscription {
   string domain = 1;
   repeated string filters = 2;
+}
+
+// ConceptsRegistryDelta is one registry-change notification on the follow-mode
+// ConceptsSubscribeMsg stream (memql#4238). The first message on a follow
+// subscription is a snapshot (reset=true, the whole set in `added`); every
+// subsequent message is incremental.
+message ConceptsRegistryDelta {
+  string request_id = 1;
+  // generation is the monotonically increasing registry version AFTER this
+  // delta. A client that receives a generation that is not exactly one past the
+  // last it saw has missed a delta and must re-snapshot (re-send follow=true).
+  uint64 generation = 2;
+  // added carries whole concept descriptors -- the same shape ConceptsListMsg
+  // returns. A client upserts by id, so a re-promote whose schema/displayCard
+  // changed rides `added` too. On the snapshot message it is the full set.
+  repeated ConceptInfo added = 3;
+  // removed carries the ids of concepts that left the registry (a zero-row
+  // demote). A retire (rows still exist -- registered + readable) is not a set
+  // change and is deliberately not delivered here.
+  repeated string removed = 4;
+  // reset marks the initial snapshot: the client replaces its whole registry
+  // with `added` (removed is empty). False on every incremental delta.
+  bool reset = 5;
+  // subscription_id names this follow subscription; the client passes it to
+  // UnsubscribeMsg to stop delivery before the stream closes.
+  string subscription_id = 6;
 }
 
 
@@ -3090,6 +3132,9 @@ message DeployControlMsg {
     znasllc.memql.deploycontrol.v1.CutVersionRequest cut_version = 16;
     znasllc.memql.deploycontrol.v1.DeployRequest deploy = 17;
     znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest rollback_deployment = 18;
+    // Repair (memql#4209): owner-only, async -- ok acknowledges the kick-off
+    // and the v1:cluster:deployment record carries the terminal state.
+    znasllc.memql.deploycontrol.v1.RepairRequest repair = 19;
   }
 }
 

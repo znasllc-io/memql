@@ -294,6 +294,42 @@ also rejected.
 **Free-text filter glob grammar** (non-graph kinds): `*` matches exactly
 one segment, `#` matches zero or more segments.
 
+### Concept-registry subscriptions are a SEPARATE stream (memql#4238)
+
+Graph subscriptions above are about ROWS -- a node of some concept being
+created/updated/deleted. The **concept registry** itself -- the set of concept
+*types* the cluster knows -- also changes at runtime: a concept trained/promoted
+into a running cluster, or demoted/removed from it. A client that read the
+registry once (`ConceptsListMsg`, or the `ConceptsSubscribeMsg` CDC-filter
+catalog) would not see that change until it reconnected.
+
+`ConceptsSubscribeMsg` therefore has a **follow mode**. `follow=false` (the
+default, and every existing caller) is unchanged -- the one-shot
+`ConceptsSubscribeResult` catalog of CDC filters grouped by domain. `follow=true`
+opens a registry-DELTA stream:
+
+- the first reply is a `ConceptsRegistryDelta` **snapshot** (`reset=true`,
+  carrying the whole concept set in `added`, a `generation`, and a
+  `subscription_id`);
+- then one `ConceptsRegistryDelta` per change -- `added` for a promote or
+  re-promote (upsert by id), `removed` for a zero-row demote -- each stamping the
+  next `generation`;
+- until the client sends an `UnsubscribeMsg` for that `subscription_id`, or the
+  stream closes.
+
+`generation` is monotonically increasing; a client that receives a generation
+that is not exactly one past the last it saw has missed a delta (a slow consumer
+had one dropped) and re-snapshots by re-subscribing. A **retire** (a demote of a
+concept that still has rows -- it stays registered and readable, only new writes
+are refused) is not a registry-set change and is deliberately not delivered here.
+
+This rides the existing cross-node convergence: a durable promote/demote already
+broadcasts to every replica (`authoring.promote.*` / `authoring.demote.*`), and
+each replica re-registers the concept into its own registry -- which is where the
+delta is emitted, so a promote on one replica reaches a follower on another with
+no reconnect. Clients use `QueryClient.subscribeConceptRegistry` (sdk/ts); the
+portal's `useConcepts` hook folds the deltas in place.
+
 ### Example: Subscribe to All Graph Events
 
 ```javascript

@@ -326,6 +326,22 @@ const undeclared3409SignInRoutesReason = "memql#3409 -- self-scoped sign-in-rout
 // auth.CallOrigin.
 const undeclared3591ClaimedOwnerReason = "memql#3591 -- pre-actor owner-claim check at identity boot; v1:identity:identity cannot carry a tier (measured, see the concept header)"
 
+// undeclared4208CodeMetricReason covers codeMetricsInWindow, the
+// prefix-scoped client read over the continuous-aggregate rollups
+// (dsl/observability/queries.memql, memql#4208).
+//
+// Listed rather than declared, and carrying its own issue rather than the
+// grandfather marker. The lock for memql#4208 is "the same read gate
+// codeMetric has today": the portal read these rows through the generic
+// concept browse, which admits every row of an undeclared, PII-free concept
+// to any authenticated caller, and this read is strictly no wider -- it is
+// the same rows behind a prefix + bucket + window predicate. Declaring a
+// tier on v1:observability:codeMetric is an authorization judgment about
+// the observability domain as a whole (codeProfile and invocation declare
+// nothing either), and making it as a side effect of a read-shape task is
+// the quiet scope change this gate exists to surface.
+const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric read for clients, the same gate as the generic browse it replaces; a tier on v1:observability:codeMetric is the observability domain's decision"
+
 // undeclared3716CORSGrantsReason covers oAuthClientCORSGrants, the read
 // memql#3716 added so identity's CORS allowlist stops being a boot-time env
 // snapshot.
@@ -607,6 +623,9 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"libraryArtifactsByKind":      {"v1:library:artifact", undeclaredGrandfatherReason},
 	"libraryArtifactsByLens":      {"v1:library:artifact", undeclaredGrandfatherReason},
 	"libraryWorkspaceLiveSources": {"v1:library:artifact", undeclaredGrandfatherReason},
+
+	// v1:observability:codeMetric
+	"codeMetricsInWindow": {"v1:observability:codeMetric", undeclared4208CodeMetricReason},
 
 	// v1:planner:plan
 	"activePlansForUser":               {"v1:planner:plan", undeclaredGrandfatherReason},

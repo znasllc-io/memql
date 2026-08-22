@@ -39,7 +39,7 @@ import { useMyAccess } from "../cluster/useMyAccess";
 //
 //   view (getDeploymentStatus)              admin / owner
 //   cut + deploy                            developer / admin / owner
-//   roll back                               OWNER ONLY -- not even admin
+//   roll back / repair                      OWNER ONLY -- not even admin
 //
 // The view row reads admin/owner on purpose. Older summary tables said any
 // role could view; the shipped gate never did, and memql#3332 settled it in
@@ -52,12 +52,16 @@ import { useMyAccess } from "../cluster/useMyAccess";
 const CAN_VIEW: readonly Role[] = ["owner", "admin"];
 const CAN_SHIP: readonly Role[] = ["owner", "admin", "developer"];
 const CAN_ROLL_BACK: readonly Role[] = ["owner"];
+// Repair (memql#4209) shares rollback's floor: it mutates a running cluster
+// with no Git revert trail.
+const CAN_REPAIR: readonly Role[] = ["owner"];
 
 export interface DeployPermissions {
   role: Role;
   canView: boolean;
   canShip: boolean;
   canRollBack: boolean;
+  canRepair: boolean;
 }
 
 export interface DeployConsoleState {
@@ -72,16 +76,23 @@ export interface DeployConsoleState {
   // operator wants the most recent thing that happened, not a log.
   actionMessage: string;
   actionError: string;
-  // The audit event a REFUSED action wrote (memql#3334). Non-empty only
-  // alongside actionError, and only when the failure was the ROLE GATE -- an
-  // invalid argument or an unreachable identity node writes no event and so
-  // has no id. See describeDeployError for why the id is shown at all.
+  // The audit event the last action wrote, whichever way it went: the
+  // success event of an admitted action (on ActionResult.auditEventId), the
+  // failure event of one that ran or was refused past the gate (a provider
+  // with no defined repair, a kick-off that failed -- same field), or the
+  // blocked event of a ROLE GATE refusal (memql#3334, on the thrown
+  // DeployControlError). Empty when nothing was audited: an invalid argument
+  // or an unreachable identity node writes no event and so has no id. See
+  // describeDeployError for why the id is shown at all.
   actionAuditEventId: string;
   busy: boolean;
   refresh: () => void;
   cut: (bump: SemverBump) => void;
   ship: (deploymentId: string) => void;
   rollBack: (toDeploymentId: string) => void;
+  // Repair this installation (memql#4209): owner-only; ok acknowledges the
+  // kick-off and the repair record on the timeline carries the outcome.
+  repair: () => void;
 }
 
 /**
@@ -143,6 +154,7 @@ export function useDeployConsole(): DeployConsoleState {
     canView: CAN_VIEW.includes(role),
     canShip: CAN_SHIP.includes(role),
     canRollBack: CAN_ROLL_BACK.includes(role),
+    canRepair: CAN_REPAIR.includes(role),
   };
 
   const [status, setStatus] = useState<DeploymentStatus | null>(null);
@@ -192,7 +204,7 @@ export function useDeployConsole(): DeployConsoleState {
   // run funnels every action through one place so the busy flag, the message
   // handling and the follow-up refresh cannot be forgotten on the third one.
   const run = useCallback(
-    (what: Promise<{ ok: boolean; message: string }> | null) => {
+    (what: Promise<{ ok: boolean; message: string; auditEventId?: string }> | null) => {
       if (what === null) return;
       setBusy(true);
       setActionMessage("");
@@ -200,6 +212,10 @@ export function useDeployConsole(): DeployConsoleState {
       setActionAuditEventId("");
       void what
         .then((result) => {
+          // Admitted actions are audited too, whichever way they went, and
+          // the result names the event -- show it on both outcomes, exactly
+          // as a gate refusal's id is shown below.
+          setActionAuditEventId(result.auditEventId ?? "");
           if (result.ok) setActionMessage(result.message || "Done.");
           else setActionError(result.message || "The cluster refused the action.");
         })
@@ -235,6 +251,11 @@ export function useDeployConsole(): DeployConsoleState {
     [clients, run],
   );
 
+  const repair = useCallback(
+    () => run(clients ? clients.deployControl.repair() : null),
+    [clients, run],
+  );
+
   return {
     permissions,
     status,
@@ -248,5 +269,6 @@ export function useDeployConsole(): DeployConsoleState {
     cut,
     ship,
     rollBack,
+    repair,
   };
 }

@@ -352,6 +352,21 @@ engine can honestly assert today:
   surface. If the drill-in needs it, that is an engine-side gap to file,
   per the memql#4192 instruction, not something to approximate here.
 
+**The engine-side gap is closed by memql#4208**, as a DSL query rather
+than a Stream message. `codeMetricsInWindow`
+(`dsl/observability/queries.memql`) takes the module's `fqnPrefixes`, an
+optional exact `codeReference`, the bucket and a `[windowStart,
+windowEnd)` range, and selects rows with the `startsWith` filter predicate
+that issue added to the language (`codeReference startsWith
+args.prefixes` -- starts with ANY of, compiled to a parameterized `^@
+ANY(text[])`). The portal drill-in issues that one query for the selected
+window and walks its keyset cursor to exhaustion; the 3 x 200 client-side
+cap and the coverage footer are gone. The unmapped `component` rows stay
+unmapped: the portal renders "no code reference mapped for this module"
+and issues no read, and the predicate's own rule -- an empty prefix list
+with no exact key selects nothing -- means the engine would return an
+empty result rather than a cluster-wide scan if it did.
+
 ## 8. Harness-as-pack (the proving migration, memql#4190)
 
 The harness is the proof that a substantial, engine-adjacent capability

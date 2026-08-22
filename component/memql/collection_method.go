@@ -544,6 +544,19 @@ func evalCollComparison(node *ComparisonExpression, args, locals map[string]any)
 		return runtimeCompareValues(lhs, rhs) < 0, nil
 	case OpLe:
 		return runtimeCompareValues(lhs, rhs) <= 0, nil
+	case OpStartsWith:
+		// Same semantics as the filter evaluator (memql#4208): a blank
+		// prefix or an empty list matches nothing; a non-string lhs never
+		// matches.
+		prefixes, err := normalizePrefixValues(rhs)
+		if err != nil {
+			return nil, err
+		}
+		str, ok := payloadText(lhs)
+		if !ok {
+			return false, nil
+		}
+		return startsWithAny(str, prefixes), nil
 	default:
 		return nil, fmt.Errorf("operator %q is not supported inside a collection lambda", node.Operator)
 	}

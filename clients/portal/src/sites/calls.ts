@@ -1,8 +1,8 @@
 import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-// The one raw-call form this feature needs beyond runQuery/runMutation
-// (integrations/calls.ts, reused as-is for every ordinary named call): the
-// asOf(...) wrapper the rollback picker walks a site's history with.
+// The one raw-call form this feature needs beyond the generated typed
+// methods (memql#4232, which every ordinary named call here goes through):
+// the asOf(...) wrapper the rollback picker walks a site's history with.
 //
 // WHY THIS IS NOT A NAMED CALL. siteById deliberately declares no `asOf`
 // clause of its own (dsl/platform/queries.memql, memql#3717 / D10 / #2880):
@@ -16,9 +16,9 @@ import { renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-
 // BARE call form (no `query` keyword) as the wrapper's first argument --
 // `asOf(deploymentById(deploymentId:"x"), "...")` -- because that argument
 // is parsed as an EXPRESSION, and `query` is a top-level dispatch keyword
-// with no place inside one. This mirrors that exact shape rather than
-// integrations/calls.ts's buildCall, which always prepends
-// `query `/`mutation `/`builtin `.
+// with no place inside one. This mirrors that exact shape rather than the
+// generated builders, which always prepend the kind keyword --
+// `query `/`mutation `/`builtin ` -- and so cannot be nested in a wrapper.
 //
 // Quoting still goes through renderMemQLValue, never hand-interpolated --
 // the one rule every call-building path in this portal is held to.

@@ -12,15 +12,26 @@
 import type { Dispatcher } from "./dispatcher.js";
 import {
   accessSummaryFromWire,
+  conceptRegistryDeltaFromWire,
   conceptsFromWire,
   Result,
   resultFromQueryPayload,
   type AccessSummary,
   type Concept,
+  type ConceptRegistryDelta,
   type DomainSubscription,
 } from "./types.js";
 import { newShortId } from "./id.js";
 import { readServerPayload } from "./wire.js";
+
+// ConceptRegistryFollow is the handle returned by subscribeConceptRegistry: call
+// unsubscribe to stop delivery (removes the local listener and, if the snapshot
+// arrived, sends an UnsubscribeMsg for its subscription id). Closing the
+// connection also stops delivery, so a caller that tears the connection down
+// need not call this.
+export interface ConceptRegistryFollow {
+  unsubscribe: () => void;
+}
 
 export interface QueryCallOptions {
   signal?: AbortSignal;
@@ -141,6 +152,77 @@ export class QueryClient {
       });
     }
     return out;
+  }
+
+  // subscribeConceptRegistry opens a follow-mode concept subscription
+  // (memql#4238): the engine sends a snapshot (reset=true, the whole registry)
+  // and then live add/remove deltas, so a client's concept registry stays
+  // current without a reconnect. onDelta is called for EVERY delta, snapshot
+  // included -- apply a reset by replacing the registry, and an incremental by
+  // upserting `added` (by id) and dropping `removed`. Track `generation`: a gap
+  // means a delta was missed (a slow consumer dropped one), so unsubscribe and
+  // re-subscribe to re-snapshot.
+  //
+  // Unlike the catalog read this is not request/response -- the engine keeps
+  // pushing frames on this request id until the subscription ends -- so it
+  // returns a handle rather than a Promise. Pass opts.onError to be told when
+  // the engine refuses the follow.
+  subscribeConceptRegistry(
+    onDelta: (delta: ConceptRegistryDelta) => void,
+    opts: { signal?: AbortSignal; onError?: (err: Error) => void } = {},
+  ): ConceptRegistryFollow {
+    const reqId = newShortId();
+    let subscriptionId = "";
+    let closed = false;
+
+    // registerStream, not addEventListener: a follow subscription is a
+    // MULTI-FRAME exchange keyed by request id (snapshot, then one frame per
+    // registry change), which is the tier the dispatcher routes those to --
+    // see streamRequestId in wire.ts and the routed/unrouted ledger in
+    // sdk/go/client/dispatcher_stream_routing_test.go. Registered BEFORE the
+    // send so the snapshot cannot arrive before there is a listener for it.
+    const remove = this.dispatcher.registerStream(reqId, (msg) => {
+      const payload = readServerPayload(msg);
+      // The engine refuses a follow on a node with no engine, and that
+      // queryError carries this request id -- so it lands here rather than
+      // vanishing. Surfacing it is what keeps a caller from waiting forever on
+      // a snapshot that is never coming.
+      if (payload?.kind === "queryError") {
+        opts.onError?.(
+          new Error(
+            `subscribeConceptRegistry: ${payload.value.error?.message ?? "(no message)"}`,
+          ),
+        );
+        return;
+      }
+      if (payload?.kind !== "conceptsRegistryDelta") return;
+      const v = payload.value;
+      if (typeof v.subscriptionId === "string" && v.subscriptionId !== "") {
+        subscriptionId = v.subscriptionId;
+      }
+      onDelta(conceptRegistryDeltaFromWire(v));
+    });
+
+    this.dispatcher.send({ conceptsSubscribe: { requestId: reqId, follow: true } });
+
+    const unsubscribe = (): void => {
+      if (closed) return;
+      closed = true;
+      remove();
+      // Only after the snapshot did the server tell us the subscription id; if
+      // we tear down before it arrives, closing the connection is what stops
+      // the (not-yet-started) delivery.
+      if (subscriptionId !== "") {
+        this.dispatcher.send({ unsubscribe: { subscriptionId } });
+      }
+    };
+
+    if (opts.signal) {
+      if (opts.signal.aborted) unsubscribe();
+      else opts.signal.addEventListener("abort", unsubscribe, { once: true });
+    }
+
+    return { unsubscribe };
   }
 
   async getMyAccess(opts: QueryCallOptions = {}): Promise<AccessSummary | null> {

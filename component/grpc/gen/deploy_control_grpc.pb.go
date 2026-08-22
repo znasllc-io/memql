@@ -26,6 +26,7 @@ const (
 	DeployControlService_CutVersion_FullMethodName          = "/znasllc.memql.deploycontrol.v1.DeployControlService/CutVersion"
 	DeployControlService_Deploy_FullMethodName              = "/znasllc.memql.deploycontrol.v1.DeployControlService/Deploy"
 	DeployControlService_RollbackDeployment_FullMethodName  = "/znasllc.memql.deploycontrol.v1.DeployControlService/RollbackDeployment"
+	DeployControlService_Repair_FullMethodName              = "/znasllc.memql.deploycontrol.v1.DeployControlService/Repair"
 )
 
 // DeployControlServiceClient is the client API for DeployControlService service.
@@ -83,6 +84,29 @@ type DeployControlServiceClient interface {
 	// and runs it through the driver, landing in rolled_back on success.
 	// Owner/admin gated; emits an audit event.
 	RollbackDeployment(ctx context.Context, in *RollbackDeploymentRequest, opts ...grpc.CallOption) (*ActionResult, error)
+	// Repair re-converges THIS installation onto its committed overlay
+	// (memql#4209): it asks ArgoCD to hard-refresh and sync the installation's
+	// Application -- prune included -- through the same Executor boundary every
+	// other write uses, never a direct apply. Nothing changes version: a repair
+	// returns a drifted, half-applied or hand-edited cluster to the state Git
+	// already describes, which is the cluster-side half of what the VS Code
+	// extension's install-graph replay does for a local cluster. The host-side
+	// half (tools, hosts file, local CA, checkout, the k3d cluster itself) is
+	// not reachable from inside the cluster and stays with the extension.
+	//
+	// ASYNC. ok=true means accepted AND kicked off, not "repaired": a
+	// v1:cluster:deployment record (notes prefixed "repair:") is written at
+	// in_progress and resolved to succeeded | failed as the reconciliation is
+	// OBSERVED, so callers poll GetDeploymentStatus / the deployment concept for
+	// the terminal state. There is no progress stream.
+	//
+	// OWNER ONLY -- the RollbackDeployment floor, not Deploy's: a repair mutates
+	// a running cluster with no Git revert trail. Refusals are audited and carry
+	// their audit id on both transports. A provider with no defined repair
+	// (anything other than docker-local | azure, both of which reconcile through
+	// the one ArgoCD Application) is refused INSIDE the ActionResult with
+	// "repair is not defined for this provider" rather than half-run.
+	Repair(ctx context.Context, in *RepairRequest, opts ...grpc.CallOption) (*ActionResult, error)
 }
 
 type deployControlServiceClient struct {
@@ -163,6 +187,16 @@ func (c *deployControlServiceClient) RollbackDeployment(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *deployControlServiceClient) Repair(ctx context.Context, in *RepairRequest, opts ...grpc.CallOption) (*ActionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActionResult)
+	err := c.cc.Invoke(ctx, DeployControlService_Repair_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeployControlServiceServer is the server API for DeployControlService service.
 // All implementations must embed UnimplementedDeployControlServiceServer
 // for forward compatibility.
@@ -218,6 +252,29 @@ type DeployControlServiceServer interface {
 	// and runs it through the driver, landing in rolled_back on success.
 	// Owner/admin gated; emits an audit event.
 	RollbackDeployment(context.Context, *RollbackDeploymentRequest) (*ActionResult, error)
+	// Repair re-converges THIS installation onto its committed overlay
+	// (memql#4209): it asks ArgoCD to hard-refresh and sync the installation's
+	// Application -- prune included -- through the same Executor boundary every
+	// other write uses, never a direct apply. Nothing changes version: a repair
+	// returns a drifted, half-applied or hand-edited cluster to the state Git
+	// already describes, which is the cluster-side half of what the VS Code
+	// extension's install-graph replay does for a local cluster. The host-side
+	// half (tools, hosts file, local CA, checkout, the k3d cluster itself) is
+	// not reachable from inside the cluster and stays with the extension.
+	//
+	// ASYNC. ok=true means accepted AND kicked off, not "repaired": a
+	// v1:cluster:deployment record (notes prefixed "repair:") is written at
+	// in_progress and resolved to succeeded | failed as the reconciliation is
+	// OBSERVED, so callers poll GetDeploymentStatus / the deployment concept for
+	// the terminal state. There is no progress stream.
+	//
+	// OWNER ONLY -- the RollbackDeployment floor, not Deploy's: a repair mutates
+	// a running cluster with no Git revert trail. Refusals are audited and carry
+	// their audit id on both transports. A provider with no defined repair
+	// (anything other than docker-local | azure, both of which reconcile through
+	// the one ArgoCD Application) is refused INSIDE the ActionResult with
+	// "repair is not defined for this provider" rather than half-run.
+	Repair(context.Context, *RepairRequest) (*ActionResult, error)
 	mustEmbedUnimplementedDeployControlServiceServer()
 }
 
@@ -248,6 +305,9 @@ func (UnimplementedDeployControlServiceServer) Deploy(context.Context, *DeployRe
 }
 func (UnimplementedDeployControlServiceServer) RollbackDeployment(context.Context, *RollbackDeploymentRequest) (*ActionResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method RollbackDeployment not implemented")
+}
+func (UnimplementedDeployControlServiceServer) Repair(context.Context, *RepairRequest) (*ActionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method Repair not implemented")
 }
 func (UnimplementedDeployControlServiceServer) mustEmbedUnimplementedDeployControlServiceServer() {}
 func (UnimplementedDeployControlServiceServer) testEmbeddedByValue()                              {}
@@ -396,6 +456,24 @@ func _DeployControlService_RollbackDeployment_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeployControlService_Repair_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RepairRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeployControlServiceServer).Repair(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeployControlService_Repair_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeployControlServiceServer).Repair(ctx, req.(*RepairRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeployControlService_ServiceDesc is the grpc.ServiceDesc for DeployControlService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -430,6 +508,10 @@ var DeployControlService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RollbackDeployment",
 			Handler:    _DeployControlService_RollbackDeployment_Handler,
+		},
+		{
+			MethodName: "Repair",
+			Handler:    _DeployControlService_Repair_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

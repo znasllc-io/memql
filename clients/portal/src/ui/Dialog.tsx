@@ -73,6 +73,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   tone = "primary",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -85,6 +86,10 @@ export function ConfirmDialog({
   cancelLabel?: string;
   tone?: ButtonTone;
   busy?: boolean;
+  // Holds the confirm button back until the body's own precondition is met
+  // -- a type-to-confirm phrase, typically. The body owns the input; the
+  // dialog only needs to know whether the verb may fire yet.
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }): ReactNode {
@@ -99,7 +104,7 @@ export function ConfirmDialog({
           <Button tone="quiet" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </Button>
-          <Button tone={tone} onClick={onConfirm} busy={busy}>
+          <Button tone={tone} onClick={onConfirm} busy={busy} disabled={confirmDisabled}>
             {confirmLabel}
           </Button>
         </div>
