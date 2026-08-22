@@ -1822,3 +1822,63 @@ func emptyToWriter(s string) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// User invitations (memql#4270, memql#4282)
+// ---------------------------------------------------------------------------
+
+// InvitationRow projects the fields the redeem path needs from a
+// v1:identity:invitation row.
+type InvitationRow struct {
+	ID     string
+	Kind   string
+	Status string
+	Active bool
+	// Email is the address the invitation was issued FOR. The redeem path
+	// compares it against the address being registered, which is what makes
+	// the invitation a credential for one person rather than a general-purpose
+	// bypass (memql#4282).
+	Email       string
+	Role        string
+	InviterId   string
+	InviterName string
+	ExpiresAt   time.Time
+	RespondedAt time.Time
+}
+
+// LookupInvitationByTokenHash resolves a presented invitation token to its row.
+//
+// The lookup is by HASH, so the plaintext never has to be stored and a database
+// snapshot cannot be replayed into a registration. It returns the row whatever
+// its state -- expired, revoked, already accepted -- because the caller has to
+// tell those apart: "you already used this", "somebody cancelled this" and
+// "this expired" are three different next steps for the person holding the
+// link, and collapsing them into "invalid" is what makes an invitation flow
+// feel broken.
+func (s *Store) LookupInvitationByTokenHash(ctx context.Context, tokenHash string) (*InvitationRow, error) {
+	if strings.TrimSpace(tokenHash) == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`query invitationByTokenHash(tokenHash: "%s")`, escapeMemQLString(tokenHash))
+	nodes, err := s.executeAndExtract(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup invitation: %w", err)
+	}
+	if len(nodes) == 0 || nodes[0] == nil {
+		return nil, nil
+	}
+	node := nodes[0]
+	g := newFieldGetter(node)
+	return &InvitationRow{
+		ID:          firstNonEmpty(g.str("id"), node.GetId()),
+		Kind:        g.str("kind"),
+		Status:      g.str("status"),
+		Active:      g.boolField("active"),
+		Email:       g.str("inviteeEmail"),
+		Role:        g.str("inviteeRole"),
+		InviterId:   g.str("inviterId"),
+		InviterName: g.str("inviterName"),
+		ExpiresAt:   g.time("expiresAt"),
+		RespondedAt: g.time("respondedAt"),
+	}, nil
+}

@@ -2636,3 +2636,89 @@ mutate identity deactivateRecoveryKey {
     active: false
   }
 }
+
+/// Mint a user-targeted invitation: the credential that lets an address register (memql#4270).
+///
+/// THE HALF THAT WAS MISSING. v1:identity:invitation has carried kind="user"
+/// since it was written, and the identity login page has REDEEMED one the whole
+/// time (stage needs_invite, form=invite). Nothing ever issued one -- the only
+/// writer of invitation rows was the guest-space flow, so an owner could put a
+/// cluster into invite_only mode and then have no way to let anybody in.
+///
+/// Only the token HASH is written. The plaintext is returned once by the
+/// caller's reply and persisted nowhere, the same convention every other
+/// credential row in this domain follows.
+///
+/// @serverOnly, and actor.userId scoping is not the fix -- it is the WRONG
+/// question. This row does not belong to the caller. An invitation is a
+/// credential for somebody who has no account yet, so there is no ownership
+/// relation for a per-row filter to test; scoping to actor.userId would say
+/// "you may invite yourself", which is not an operation anybody wants.
+///
+/// The real decision is "may this caller invite anyone at all", which is a
+/// ROLE question, and it has a second half no row carries: the cluster's
+/// registration policy. Under domain_restricted the address must match the
+/// allowlist; under open the link is a courtesy rather than a gate. Neither
+/// fact is on the invitation, so the check cannot be a filter over it.
+/// component/identity/adminops is where the caller, their role and the
+/// cluster settings are all in hand at once.
+@serverOnly
+mutate invitation createUserInvitation {
+  args {
+    invitationId  string!
+    email         string!
+    tokenHash     string!
+    expiresAt     datetime!
+    inviterId     string!
+    inviterName   string
+    role          string
+  }
+  insert {
+    accept { tokenHash, expiresAt, inviterId }
+    stamp {
+      id: args.invitationId
+      kind: "user"
+      inviteeEmail: args.email
+      inviteeRole: args.role ?? ""
+      inviterName: args.inviterName ?? ""
+      status: "pending"
+      active: true
+    }
+  }
+}
+
+/// Revoke an unaccepted invitation before its TTL runs out (memql#4270).
+///
+/// @serverOnly, and actor.userId scoping is not the fix -- it would be a
+/// narrower rule than the one that is correct. Scoping to the caller means
+/// only the ORIGINAL INVITER can revoke, and the case revocation exists for is
+/// precisely the one where that is wrong: an admin sends a link to the wrong
+/// address and an owner has to kill it. `inviterId` is on the row, so the
+/// filter is expressible; it is just the wrong policy.
+///
+/// The right rule is the same owner/admin gate the issuing side takes, applied
+/// in component/identity/adminops where the caller's role is in hand -- with
+/// one audited event per call, refusals included.
+///
+/// A SOFT cancel: active goes false and the row stays. It is audit history, and
+/// its tokenHash must remain taken -- revoking a row does not make the holder
+/// forget the token they were sent, and a hash that came free could be minted
+/// onto a second invitation. Same reasoning the passkey revoke path records.
+///
+/// Distinct from acceptance all the way down, so the redeeming page can say
+/// "somebody cancelled this" rather than "you already used this" -- two
+/// different next steps for the person holding the link.
+@serverOnly
+mutate invitation revokeUserInvitation {
+  args {
+    invitationId  string!
+  }
+  update {
+    stamp {
+      id: args.invitationId
+      active: false
+      status: "dismissed"
+      respondedAt: now
+    }
+  }
+}

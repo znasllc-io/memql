@@ -49,13 +49,44 @@ type Decision struct {
 // the configured registration policy.
 var ErrEmailNotAllowed = errors.New("registration: email domain not allowed")
 
-// Decide evaluates cfg + email + invitation context and returns the
+// Invitation is a RESOLVED invitation -- a row that was found by the hash of
+// the token somebody presented, and checked (memql#4282).
+//
+// It replaces the `hasInvitation bool` this function used to take, and the
+// change of type IS the fix. A boolean could only ever mean "the caller sent a
+// non-empty string", and that is exactly what it meant: the presented value was
+// never hashed, never looked up, never checked for expiry, acceptance,
+// revocation or kind, and never checked against the address being registered.
+// Under invite_only -- the mode an operator selects precisely to close
+// registration -- typing any characters into a field labelled "invitation" let
+// anybody in, and domain_restricted was bypassed the same way, because the
+// invitation branch returns before the allowlist is consulted.
+//
+// A nil *Invitation means no usable invitation was presented. Callers resolve
+// it; this package decides what it MEANS.
+type Invitation struct {
+	// Id is the v1:identity:invitation row id, for the audit trail.
+	Id string
+	// Email is the address the invitation was issued FOR. Decide refuses an
+	// invitation whose address is not the one registering: without that check
+	// one leaked link is a general-purpose bypass rather than a credential for
+	// one person.
+	Email string
+	// Role is the cluster role the issuer chose for the recipient. Empty means
+	// the cluster default.
+	Role string
+}
+
+// Decide evaluates cfg + email + a RESOLVED invitation and returns the
 // downstream Action plus the user-shape metadata for that action.
 //
-// hasInvitation flips invite_only / waitlist modes from "reject" /
-// "create access request" to "issue magic link" — an admin-approved
-// invitation overrides the gating policy.
-func Decide(cfg identity.Config, email string, hasInvitation bool) (Decision, error) {
+// A valid invitation flips invite_only / waitlist modes from "reject" /
+// "create access request" to "issue magic link" -- an admin-approved
+// invitation overrides the gating policy. An invitation for a DIFFERENT
+// address does not, and is treated as though none were presented: the modes
+// then decide on their own terms, which is the honest outcome (under `open`
+// the person can register anyway; under invite_only they cannot).
+func Decide(cfg identity.Config, email string, invite *Invitation) (Decision, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return Decision{}, ErrEmailNotAllowed
@@ -67,12 +98,23 @@ func Decide(cfg identity.Config, email string, hasInvitation bool) (Decision, er
 		role = cfg.InternalDefaultRole
 	}
 
-	// Invitation overrides everything else.
-	if hasInvitation {
+	// A VALID invitation, for THIS address, overrides everything else.
+	//
+	// The address check is not a formality. An invitation names one person; if
+	// any holder of any live token could register any address, the credential
+	// would authorize the wrong thing entirely -- and a single link forwarded
+	// once would reopen a cluster its operator had closed.
+	if invite != nil && strings.EqualFold(strings.TrimSpace(invite.Email), email) {
+		invitedRole := role
+		if r := strings.TrimSpace(invite.Role); r != "" {
+			// The issuer's choice wins over the internal-domain default: an
+			// admin who deliberately invited somebody as a reader meant it.
+			invitedRole = r
+		}
 		return Decision{
 			Action:   ActionIssueMagicLink,
 			Internal: internal,
-			Role:     role,
+			Role:     invitedRole,
 			Reason:   "invitation",
 		}, nil
 	}

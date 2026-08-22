@@ -76,12 +76,37 @@ flows:
   sends a guest a link via `SendGuestInviteMsg`. Guests authenticate with
   `Authorization: Guest <token>` (the gRPC stream interceptor's
   guest-aware path).
-- **User invitations** (admin / waitlist mode): an admin issues a
-  user-targeted invitation. The recipient lands in the registration
-  flow with the invitation token pre-bound; on completion the
-  identity service stamps the issuing admin's specified cluster-wide
-  role. There is no separate partition grant to stamp -- the role is
-  the whole of it.
+- **User invitations** (memql#4270): an owner or admin issues one over
+  `IdentityAdminMsg.issue_user_invitation`, and the reply carries the link
+  ONCE -- only the token's SHA-256 digest is persisted, the same convention
+  every other credential row in this domain follows. The recipient opens
+  `/login?invitation=<token>`, the field is pre-filled, and on completion the
+  identity service stamps the role the issuer chose. There is no separate
+  partition grant to stamp -- the role is the whole of it.
+
+  **What the registration mode does to it.** The policy is applied in the
+  gate (`component/identity/adminops`), never by the console:
+
+  | Mode | Issuing an invitation |
+  |---|---|
+  | `invite_only` | The normal path. The link is the only way in. |
+  | `waitlist` | This verb mints the `invitationId` `approveAccessRequest` needs, which is what turns the queue into an admission. |
+  | `domain_restricted` | **Refused** unless the address matches the allowlist. A link the recipient cannot redeem is worse than a refusal -- they only find out after clicking. |
+  | `open` | Permitted, and the reply says the mode so a console can tell the operator this is a courtesy: the recipient could have registered unaided. |
+
+  An inviter cannot grant a role above their own.
+
+  `revoke_user_invitation` is the undo for a link sent to the wrong address.
+  It is a SOFT cancel -- the row stays and its token hash stays taken, because
+  revoking does not make the holder forget the token they were sent.
+
+  **Redemption is validated** (memql#4282). The presented token is hashed and
+  resolved to its row, which must be `kind="user"`, active, pending, unexpired,
+  and issued **for the address registering**. Before that, the invitation was a
+  presence check -- `strings.TrimSpace(x) != ""` -- so any non-empty string
+  satisfied `invite_only` and bypassed `domain_restricted`. Each rejection is
+  audited, and none of them fails the request: an unusable invitation means the
+  caller has none, and the registration mode then decides on its own terms.
 
 Tokens are stored as SHA-256 hashes (column: `tokenHash`); the
 plaintext is shown only once at issuance.
