@@ -47,6 +47,17 @@ package citags
 // while never executing. Now that every node tag has a lane, that is the most
 // likely way this bug recurs, so the comparison is tag AND package.
 //
+// # Compile-only lanes are not coverage
+//
+// A `go test -tags X -c` step compiles a tagged package to a binary it never
+// runs. That is worth having -- test/clustere2e did not even BUILD for a
+// stretch before memql#4201, and nothing in CI could tell (memql#4212) -- but
+// it asserts nothing about behaviour, so it must not satisfy this gate: a
+// `-c` step would otherwise be the cheapest way to make any tag "covered".
+// ciLanes marks such a lane compileOnly and the coverage walk skips it; the
+// tag stays in deliberatelyNotRunInCI with its reason, and the compile lane
+// is pinned separately by TestClusterE2ECompileLaneGatesTheMerge.
+//
 // Untagged on purpose: this must run in the default lane, because it is what
 // catches the tags that do not.
 
@@ -69,7 +80,7 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e":  "needs a provisioned parity cluster (k3d + ArgoCD); covered by the parity-cluster e2e workflow, not by this repo's CI",
+	"clustere2e":  "needs a provisioned 2-replica parity cluster to run (make cluster-e2e); ci.yml's build-clustere2e job compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run",
 	"telnyx_live": "hits the live Telnyx API with real credentials; must not run on every PR",
 }
 
@@ -91,6 +102,9 @@ type lane struct {
 	tags     []string
 	pkgs     []string
 	workflow string
+	// compileOnly marks a `go test -c` step: it builds the test binary and
+	// never runs it, so it proves the package compiles and nothing else.
+	compileOnly bool
 }
 
 // covers reports whether this lane's package arguments include dir, a
@@ -173,12 +187,16 @@ func ciLanes(t *testing.T, root string) []lane {
 						continue
 					}
 					var pkgs []string
+					compileOnly := false
 					for _, f := range strings.Fields(args) {
 						if strings.HasPrefix(f, "./") || f == "..." {
 							pkgs = append(pkgs, f)
 						}
+						if f == "-c" {
+							compileOnly = true
+						}
 					}
-					out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: e.Name()})
+					out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: e.Name(), compileOnly: compileOnly})
 				}
 			}
 		}
@@ -269,6 +287,9 @@ func TestEveryTaggedTestFileIsRunSomewhere(t *testing.T) {
 
 		covered := false
 		for _, l := range lanes {
+			if l.compileOnly {
+				continue // compiles it; does not run it (see the header)
+			}
 			if buildsUnder(t, dir, name, l.tags) && l.covers(relDir) {
 				covered = true
 				break
@@ -322,5 +343,157 @@ func TestDeliberateExclusionsAreHonest(t *testing.T) {
 			t.Errorf("deliberatelyNotRunInCI lists %q, but no tagged *_test.go requires it any more. "+
 				"Remove the entry (memql#2903).", tag)
 		}
+	}
+}
+
+// ciJobDoc is the fuller slice of the workflow schema the compile-lane pin
+// reads: job env + needs, and per-step name / run / if / continue-on-error.
+type ciJobDoc struct {
+	Jobs map[string]struct {
+		If    string            `yaml:"if"`
+		Needs any               `yaml:"needs"`
+		Env   map[string]string `yaml:"env"`
+		Steps []struct {
+			Name            string `yaml:"name"`
+			Run             string `yaml:"run"`
+			If              string `yaml:"if"`
+			ContinueOnError any    `yaml:"continue-on-error"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+// laneCovers reports whether a `go vet` / `go test` command line carries the
+// tag and names the package directory, reusing lane.covers for the package
+// matching so the two gates cannot disagree about what "covers" means.
+func laneCovers(cmdArgs, tag, dir string) bool {
+	m := tagsFlag.FindStringSubmatch(cmdArgs)
+	if m == nil {
+		return false
+	}
+	hasTag := false
+	for _, tg := range strings.Split(m[1], ",") {
+		if tg == tag {
+			hasTag = true
+		}
+	}
+	if !hasTag {
+		return false
+	}
+	var pkgs []string
+	for _, f := range strings.Fields(cmdArgs) {
+		if strings.HasPrefix(f, "./") || f == "..." {
+			pkgs = append(pkgs, f)
+		}
+	}
+	return lane{pkgs: pkgs}.covers(dir)
+}
+
+var (
+	goVetCmd = regexp.MustCompile(`go vet\b([^\n]*)`)
+	flagC    = regexp.MustCompile(`(^|\s)-c(\s|$)`)
+)
+
+// TestClusterE2ECompileLaneGatesTheMerge pins the memql#4212 compile lane.
+//
+// The live suite cannot run here, so deliberatelyNotRunInCI excuses it from
+// the gate above -- and a compile-only lane is excluded from that gate by
+// design. That leaves the lane itself unguarded: delete the job, drop `-tags`,
+// point it at another package, let it run in workspace mode, or leave it out
+// of ci-required, and every other test in this package stays green while the
+// package goes back to rotting. Each of those edits is checked here.
+//
+// The lane runs with GOWORK=off because scripts/test/cluster-e2e.sh runs the
+// live suite with GOWORK=off: under the workspace a module silently satisfies
+// an import it does not require (see go.work), so a require the root go.mod
+// lacks would compile green here and fail on the cluster.
+func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
+	const (
+		tag = "clustere2e"
+		dir = "test/clustere2e"
+	)
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("read ci.yml: %v", err)
+	}
+	var wf ciJobDoc
+	if err := yaml.Unmarshal(data, &wf); err != nil {
+		t.Fatalf("parse ci.yml: %v", err)
+	}
+
+	// Find the job by what it DOES, not by its name, so a rename is free.
+	var found []string
+	for name, job := range wf.Jobs {
+		vets, compiles := false, false
+		for _, step := range job.Steps {
+			for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
+				if laneCovers(cmd[1], tag, dir) {
+					vets = true
+				}
+			}
+			for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
+				if laneCovers(cmd[1], tag, dir) && flagC.MatchString(cmd[1]) {
+					compiles = true
+				}
+			}
+		}
+		if vets && compiles {
+			found = append(found, name)
+		}
+	}
+	sort.Strings(found)
+	if len(found) == 0 {
+		t.Fatalf("no ci.yml job both `go vet -tags %s ./%s/` and `go test -tags %s -c ... ./%s/`. "+
+			"The tagged package is then compiled by nothing on any PR and rots silently, which is "+
+			"exactly memql#4212.", tag, dir, tag, dir)
+	}
+	if len(found) > 1 {
+		t.Fatalf("%d ci.yml jobs compile %s: %v -- one lane, so there is one place to read", len(found), dir, found)
+	}
+	jobName := found[0]
+	job := wf.Jobs[jobName]
+
+	if got := strings.TrimSpace(job.Env["GOWORK"]); got != "off" {
+		t.Errorf("ci.yml job %q must set GOWORK: 'off' at job level (got %q): scripts/test/cluster-e2e.sh "+
+			"runs the live suite with GOWORK=off, and a require the root go.mod lacks compiles green "+
+			"under the workspace and fails on the cluster", jobName, got)
+	}
+	if !strings.Contains(strings.ReplaceAll(job.If, " ", ""), "needs.changes.outputs.go=='true'") {
+		t.Errorf("ci.yml job %q is gated on `if: %s`, which does not fire on the `go` bucket; a tagged "+
+			"compile can break on any Go change, so the lane must run whenever Go changed "+
+			"(build-node-tags is the model)", jobName, job.If)
+	}
+	for _, step := range job.Steps {
+		if !goVetCmd.MatchString(step.Run) && !goTestCmd.MatchString(step.Run) {
+			continue
+		}
+		if strings.TrimSpace(step.If) != "" {
+			t.Errorf("ci.yml job %q step %q is gated on `if: %s`; a condition that evaluates false compiles "+
+				"nothing and reports green", jobName, step.Name, step.If)
+		}
+		if step.ContinueOnError != nil && step.ContinueOnError != false {
+			t.Errorf("ci.yml job %q step %q sets continue-on-error=%v; a swallowed compile failure is not a gate",
+				jobName, step.Name, step.ContinueOnError)
+		}
+	}
+
+	// In ci-required's needs, or it runs without blocking anything (memql#3019).
+	required, ok := wf.Jobs["ci-required"]
+	if !ok {
+		t.Fatal("no ci-required job in ci.yml; branch protection requires that check by name")
+	}
+	inNeeds := false
+	switch n := required.Needs.(type) {
+	case string:
+		inNeeds = n == jobName
+	case []any:
+		for _, v := range n {
+			if v == jobName {
+				inNeeds = true
+			}
+		}
+	}
+	if !inNeeds {
+		t.Errorf("ci.yml job %q is not in ci-required's `needs`, so a red compile does not block a merge", jobName)
 	}
 }

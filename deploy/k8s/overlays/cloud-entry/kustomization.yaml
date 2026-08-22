@@ -8,8 +8,10 @@
 #
 # Voice-off is first-class replicas 0 on voice / voice-agent / livekit /
 # livekit-sip / mcp (and livekit-redis, which exists only for the sip
-# plane). It is not LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP
-# digest -- those were fail-closed placeholders for a running pin.
+# plane), AND the LiveKit Services held at ClusterIP (memql#4225) so that
+# no public IP is allocated for a plane that is not running. It is not
+# LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP digest -- those were
+# fail-closed placeholders for a running pin.
 #
 # The generated front door lives in THIS directory (memql#4204).
 # cmd/frontdoorhosts writes front-door.generated.yaml here with the
@@ -70,6 +72,39 @@ patches:
   - target: { kind: Deployment, name: livekit-redis }
     patch: |
       - { op: replace, path: /spec/replicas, value: 0 }
+
+  # VOICE-OFF, PART TWO: NO PUBLIC IPs (memql#4225). Replicas 0 above stops
+  # the pods; it does not stop Azure allocating a public IP for every
+  # LoadBalancer Service base declares for the media plane (livekit-rtc)
+  # and the SIP plane (livekit-sip). Keep-it converted both to ClusterIP by
+  # hand, and the next Argo sync of this overlay was refused:
+  #
+  #   Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid
+  #   value: "Local": may only be set for externally-accessible services
+  #
+  # because the overlay still wanted LoadBalancer + externalTrafficPolicy
+  # Local, and a ClusterIP Service cannot carry that field (nor
+  # loadBalancerSourceRanges, nor the Azure mixed-protocol annotation). The
+  # Application stayed OutOfSync/Failed with every pin inside it correct.
+  # So voice-off is ONE decision, stated here for the Services as it is
+  # above for the replicas: type ClusterIP, every LoadBalancer-only field
+  # removed. `remove`, not `replace`-to-empty, so a base that stops
+  # declaring a field fails this render loudly instead of leaving a silent
+  # no-op behind. overlays/cloud keeps voice on and is untouched; the
+  # `livekit` signaling Service is ClusterIP in base already.
+  # Gated by ../livekit_entry_voice_off_test.go (text, cannot skip) and
+  # ../render_cloud_entry_test.go (rendered).
+  - target: { kind: Service, name: livekit-rtc }
+    patch: |
+      - { op: replace, path: /spec/type, value: ClusterIP }
+      - { op: remove, path: /spec/externalTrafficPolicy }
+      - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
+  - target: { kind: Service, name: livekit-sip }
+    patch: |
+      - { op: replace, path: /spec/type, value: ClusterIP }
+      - { op: remove, path: /spec/externalTrafficPolicy }
+      - { op: remove, path: /spec/loadBalancerSourceRanges }
+      - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
 
   # The domain, delivered once (memql#4222 / #3593).
   # Every rematerializing engine node reads MEMQL_DOMAIN from the

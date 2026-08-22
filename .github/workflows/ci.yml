@@ -1033,6 +1033,38 @@ jobs:
       - name: go vet -tags ${{ matrix.tag }}
         run: go vet -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
 
+  # Cluster-e2e compile/vet lane (memql#4212). test/clustere2e is gated behind
+  # `//go:build clustere2e` and needs a provisioned 2-replica parity cluster to
+  # RUN, so no lane here runs it -- scripts/citags records the exclusion. But a
+  # package nothing compiles rots silently: it did not even build until
+  # memql#4201, and nothing in CI could tell. This job compiles and vets it
+  # under its tag, and nothing more: `go test -c` to a discarded binary, never
+  # a run (scripts/citags does not count a `-c` step as coverage, so the
+  # exclusion stays honest). GOWORK=off matches scripts/test/cluster-e2e.sh,
+  # which runs the live suite that way, so a require the root go.mod lacks
+  # fails here rather than on the cluster. Gates on `go` (like build-voice and
+  # build-node-tags): any Go change can break it. Listed in ci-required below;
+  # scripts/citags TestClusterE2ECompileLaneGatesTheMerge pins all of this.
+  build-clustere2e:
+    name: build clustere2e
+    timeout-minutes: 10
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      # Quoted: a bare `off` is a YAML 1.1 boolean to some parsers.
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: go vet -tags clustere2e
+        run: go vet -tags clustere2e ./test/clustere2e/
+      - name: go test -tags clustere2e -c (compile only, never run)
+        run: go test -tags clustere2e -c -o /dev/null ./test/clustere2e/
+
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
@@ -1727,6 +1759,7 @@ jobs:
       - go-tests
       - build-voice
       - build-node-tags
+      - build-clustere2e
       - sdk-ts-typecheck
       - viewkit-checks
       - portal-checks

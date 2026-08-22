@@ -1,0 +1,59 @@
+# The portal's own exact-host rule (memql#4224) -- site #1, served by the same
+# edge Service the wildcard in edge-front-door.yaml points at.
+#
+# WHY A RULE OF ITS OWN WHEN THE WILDCARD ALREADY MATCHES IT. In the cloud the
+# front-door certificate names EXACT hosts and no wildcard: the ClusterIssuer
+# is HTTP-01, ACME cannot serve an HTTP-01 challenge for *.<domain>, and one
+# wildcard dnsName fails the whole order. ingress-nginx builds a
+# certificate-bearing server block per Ingress RULE host, never per tls host,
+# so with only the wildcard rule portal.<domain> is answered by the wildcard's
+# server block and its certificate is the controller's self-signed default --
+# which is what the first keep-it cluster served to Safari. An exact rule is
+# what gives the portal a server block the certificate verifies for.
+#
+# Locally none of that bites -- the mkcert pair IS a wildcard and traefik picks
+# certificates by SNI against the certificate's own names -- so this rule
+# changes nothing a browser can see here. It exists because the local cluster
+# is the cloud's parity topology (docs/public/operate/environment-parity.md):
+# the front door has the same six host rules everywhere, and
+# ../render_frontdoor_test.go computes that set from component/frontdoor, the
+# same derivation cmd/frontdoorhosts writes the cloud front door from. A rule
+# the cloud has and local lacks is a rule local cannot prove anything about.
+#
+# The portal is the ONE site this file can name, because it is the one site
+# whose name exists before an operator creates a row: the engine seeds the
+# portal's v1:platform:site hostname from MEMQL_DOMAIN through the same
+# derivation (frontdoor.PortalHost). Every other site is a row, routed by the
+# wildcard, and needs no file here (docs/public/operate/site-hosting.md).
+#
+# NO router.priority HERE, DELIBERATELY (memql#3810). Precedence over the
+# wildcard is declared ON THE WILDCARD, in edge-front-door.yaml, which names
+# itself lowest; this exact host keeps traefik's length-based default and
+# outranks it. Both routers reach the same Service, so the ranking is moot for
+# this host today -- the annotation stays absent so the ranking is stated in
+# one place, as ../render_priority_test.go requires.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593), like every
+# other front-door file in this directory.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portal-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["portal.memql.localhost"]
+      secretName: memql-front-door-tls
+  rules:
+    - host: portal.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085

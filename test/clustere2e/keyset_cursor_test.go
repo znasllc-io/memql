@@ -39,8 +39,8 @@ import (
 )
 
 // keysetSpaceQuery pages a space's utterances newest-first. The space id is
-// already canonical (minted by mutationCreateSpace), so the FK comparison on
-// payload.partitionId matches the stored canonical value. The cursor rides the
+// already canonical (newSpaceWithHuman mints it so), so the comparison on
+// payload.partitionId matches the stored value. The cursor rides the
 // request via ExecutePaginated, not the query string.
 func keysetSpaceQuery(spaceID string, pageSize int) string {
 	return fmt.Sprintf(

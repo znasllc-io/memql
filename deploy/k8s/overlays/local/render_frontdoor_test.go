@@ -11,22 +11,30 @@ import (
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// The five hosts the front door serves (design D3). The COUNT is the
-// invariant: it must not grow with customers, apps or sites.
+// The six hosts the front door serves (design D3, plus the portal's own exact
+// rule from memql#4224). The COUNT is the invariant: it must not grow with
+// customers, apps or sites.
 //
 // COMPUTED from component/frontdoor rather than listed, since memql#3767. Local
 // is ONE environment (TestLocalStaysOneEnvironment) and it is the UNPREFIXED
-// one, so its host set is exactly what the role x environment product yields
-// for the empty label -- the same product cmd/frontdoorhosts writes into the
-// two cloud overlays.
+// one, so its host set is exactly what the derivation yields for the committed
+// default domain -- the same set cmd/frontdoorhosts writes into the two cloud
+// overlays.
 //
-// The point of computing it is that this overlay's four front-door files stay
+// The point of computing it is that this overlay's five front-door files stay
 // HAND-AUTHORED, and deliberately so: they are traefik rather than nginx, and
 // they carry the measured reasoning for a priority ranking that broke the API
 // once already (memql#3810). Hand-authored is not the same as unchecked. This
 // binds them to the same derivation the generator uses, so local's committed
 // defaults cannot drift from what the cloud overlay serves -- which is what
 // would make the local cluster stop proving anything about the cloud one.
+//
+// The portal is the host this gate most needs to keep honest: locally the
+// mkcert wildcard covers portal.memql.localhost whether or not an exact rule
+// exists, so a developer would never notice the rule missing. In the cloud the
+// certificate names exact hosts only (HTTP-01 cannot issue a wildcard), and
+// without the rule the portal serves the ingress controller's self-signed
+// default. Same six rules everywhere is what lets local prove the shape.
 var frontDoorHosts = func() []string {
 	var out []string
 	for _, h := range frontdoor.Hosts("memql.localhost") {
@@ -55,7 +63,7 @@ func hostsIn(rendered string) map[string]bool {
 	return out
 }
 
-func TestFrontDoorServesExactlyTheFiveHosts(t *testing.T) {
+func TestFrontDoorServesExactlyTheDerivedHosts(t *testing.T) {
 	got := hostsIn(render(t))
 
 	for _, want := range frontDoorHosts {
@@ -77,6 +85,33 @@ func TestFrontDoorServesExactlyTheFiveHosts(t *testing.T) {
 		sort.Strings(extra)
 		t.Errorf("front door serves %d hosts, want %d; unexpected: %v",
 			len(got), len(frontDoorHosts), extra)
+	}
+}
+
+// TestThePortalRuleReachesTheEdge pins that the portal's exact rule is the
+// SAME path as the wildcard -- svc/edge:8085 -- and not a second way to serve
+// the portal. The rule exists for the cloud certificate's sake (memql#4224);
+// a different backend here would be the portal-specific branch
+// component/edge's dogfood gate forbids, expressed as routing.
+func TestThePortalRuleReachesTheEdge(t *testing.T) {
+	rendered := render(t)
+	portal := frontdoor.PortalHost("memql.localhost")
+
+	var found bool
+	for _, doc := range strings.Split(rendered, "\n---\n") {
+		if !strings.Contains(doc, "kind: Ingress") || !strings.Contains(doc, "host: "+portal) {
+			continue
+		}
+		found = true
+		if !strings.Contains(doc, "name: edge") {
+			t.Errorf("the Ingress serving %q does not point at svc/edge; the portal is a site and takes the site path", portal)
+		}
+		if strings.Contains(doc, "router.priority") {
+			t.Errorf("the Ingress serving %q declares a router.priority; precedence is declared on the wildcard only (memql#3810)", portal)
+		}
+	}
+	if !found {
+		t.Fatalf("no Ingress in the rendered overlay carries an exact rule for %q", portal)
 	}
 }
 

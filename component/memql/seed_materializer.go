@@ -463,9 +463,11 @@ func (m *SeedMaterializer) applyDevDefaultAvatarPersona(ctx context.Context, def
 // why a kubectl patch of the site row is out of scope -- the next boot sweep
 // would clobber it.
 //
-// Only the `portal` / concept `site` seed is touched. The suffix comes from
-// frontdoor.DomainDerivationSuffix so envregistry / frontdoorhosts cannot
-// drift against this rewrite. Unset or empty MEMQL_DOMAIN fail-closed to
+// Only the `portal` / concept `site` seed is touched. The hostname is
+// frontdoor.PortalHost -- the same call cmd/frontdoorhosts makes for the
+// portal's Ingress rule and certificate SAN and envregistry makes for its
+// redirect URI (memql#4224) -- so the certificate cannot name a host the site
+// row does not carry. Unset or empty MEMQL_DOMAIN fail-closed to
 // portal.memql.localhost.
 func applyPortalSiteHostname(def *SeedDefinition, args map[string]any) {
 	if def == nil || args == nil {
@@ -477,14 +479,14 @@ func applyPortalSiteHostname(def *SeedDefinition, args map[string]any) {
 	args["hostname"] = portalSiteHostname(os.Getenv(memqlDomainEnv))
 }
 
-// portalSiteHostname is the pure derivation: portal + DomainDerivationSuffix
-// when MEMQL_DOMAIN is set, else the committed localhost default.
+// portalSiteHostname is the pure derivation: frontdoor.PortalHost when
+// MEMQL_DOMAIN is set, else the committed localhost default.
 func portalSiteHostname(domain string) string {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
 		return defaultPortalHostname
 	}
-	return "portal" + frontdoor.DomainDerivationSuffix(domain)
+	return frontdoor.PortalHost(domain)
 }
 
 // resolveAvatarPersonaByName looks up a v1:agents:avatarPersona catalog row by

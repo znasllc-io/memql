@@ -1,21 +1,27 @@
 //go:build clustere2e
 
 // named_query_pagination_test.go is the CROSS-NODE proof for issue 5.2
-// (memql#1966): the three known hot offenders now declare `sort` + `paginate`
-// and must page through the KEYSET CURSOR primitive (5.12 / memql#1985) over
-// the live NAMED-QUERY surface -- not the inline `sort(paginate(...))` raw
-// string the 5.12 codec proof (keyset_cursor_test.go) exercises.
+// (memql#1966) and its 5.3 backfill: the authored hot-offender queries declare
+// `sort` + `paginate` and must page through the KEYSET CURSOR primitive (5.12 /
+// memql#1985) over the live NAMED-QUERY surface -- not the inline
+// `sort(paginate(...))` raw string the 5.12 codec proof (keyset_cursor_test.go)
+// exercises.
 //
 // WHY A SEPARATE TEST FROM keyset_cursor_test.go
 // ----------------------------------------------
 // keyset_cursor_test.go proves the engine primitive against a handwritten
 // query string. THIS test proves the actual authored queries
-// (`spaceUtterances`, `queryActiveSpaces`) -- the strings the generated
-// SDK *Build helpers emit -- carry the sort+paginate directives end-to-end and
-// thread the opaque cursor through `ExecuteQueryMsg.cursor` / `ResultMeta.cursor`
-// on the generic executeNamed path. If a future edit drops the paginate
-// directive from one of the offenders, this test regresses; the 5.12 codec
-// test would not.
+// (`spaceUtterances`, `notes`) -- the strings the generated SDK *Build helpers
+// emit -- carry the sort+paginate directives end-to-end and thread the opaque
+// cursor through `ExecuteQueryMsg.cursor` / `ResultMeta.cursor` on the generic
+// executeNamed path. If a future edit drops the paginate directive from one of
+// the offenders, this test regresses; the 5.12 codec test would not.
+//
+// Both queries are ENGINE-owned. The 5.2 offender this file used to drive
+// alongside spaceUtterances, queryActiveSpaces, is product-pack DSL the engine
+// tree does not declare and the parity cluster does not load (memql#4212); the
+// owner-scoped `notes` query (5.3 backfill, `paginate 50`) has the same shape
+// and a cheap engine-owned write.
 //
 // HOW IT EXERCISES THE HOP
 // ------------------------
@@ -87,10 +93,11 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 	}()
 	connA, connB := conns[0], conns[1]
 
-	// namedPageSize MUST match the `paginate <N>` literal authored on the three
-	// hot-offender queries in dsl/. The cross-node proof seeds strictly more than
-	// this so the NAMED query itself mints a real nextCursor on its full first
-	// page (rather than exhausting the set in one page).
+	// namedPageSize MUST match the `paginate <N>` literal authored on both
+	// queries in dsl/ (cognition/queries.memql spaceUtterances, notes/queries.memql
+	// notes). The cross-node proof seeds strictly more than this so the NAMED
+	// query itself mints a real nextCursor on its full first page (rather than
+	// exhausting the set in one page).
 	const namedPageSize = 50
 
 	t.Run("spaceUtterances", func(t *testing.T) {
@@ -152,29 +159,33 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		assertNoDupNoGap(t, got, wantNewestFirst)
 	})
 
-	t.Run("queryActiveSpaces", func(t *testing.T) {
+	t.Run("notes", func(t *testing.T) {
 		qcA := memqlclient.NewQueryClient(connA.Dispatcher())
 
-		// Seed > one page of active spaces owned by this user so the named query
-		// mints a real cursor on its full first page. Each create stamps
-		// ownerUserId=actor.userId, satisfying queryActiveSpaces' authz gate.
+		// Seed > one page of notes owned by this user so the named query mints
+		// a real cursor on its full first page. Each create stamps
+		// ownerUserId=actor.userId, satisfying notes' authz gate.
 		const total = namedPageSize + 6
 		sent := make(map[string]struct{}, total)
 		for i := 0; i < total; i++ {
-			sid := "v1:cognition:space:" + id.NewShortId()
-			if _, err := qcA.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(sid, fmt.Sprintf("named-query space probe %03d", i), "active")); err != nil {
-				t.Fatalf("create space %d: %v", i, err)
+			nid := "v1:notes:note:" + id.NewShortId()
+			if _, err := qcA.CreateNote(ctx, memqlclient.CreateNoteArgs{
+				NoteId: nid,
+				Title:  fmt.Sprintf("named-query note probe %03d", i),
+				Body:   "clustere2e named-query pagination probe",
+			}); err != nil {
+				t.Fatalf("create note %d: %v", i, err)
 			}
-			sent[sid] = struct{}{}
+			sent[nid] = struct{}{}
 			time.Sleep(8 * time.Millisecond)
 		}
 
-		// queryActiveSpaces is self-scoped (filters on ownerUserId==actor.userId),
-		// so the result is bounded to OUR spaces -- but the cluster may carry
-		// other active spaces this user owns from prior runs. We therefore assert
-		// page mechanics (bounded first page + cursor) and that every seeded id is
+		// notes is self-scoped (filters on ownerUserId==actor.userId), so the
+		// result is bounded to OUR notes -- but the cluster may carry other
+		// notes this user owns from prior runs. We therefore assert page
+		// mechanics (bounded first page + cursor) and that every seeded id is
 		// walked exactly once with no dup, rather than an exact total count.
-		query := buildQueryActiveSpaces()
+		query := memqlclient.NotesBuild(memqlclient.NotesArgs{})
 
 		qcB := memqlclient.NewQueryClient(connB.Dispatcher())
 		cursor := ""
@@ -188,18 +199,18 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 			}
 			res, err := qc.ExecutePaginated(ctx, query, cursor)
 			if err != nil {
-				t.Fatalf("active-spaces named query page %d: %v", page, err)
+				t.Fatalf("notes named query page %d: %v", page, err)
 			}
 			if page == 0 {
 				firstPageLen = len(res.Rows)
 			}
 			if len(res.Rows) > namedPageSize {
-				t.Fatalf("active-spaces page %d returned %d rows, exceeds the bounded %d", page, len(res.Rows), namedPageSize)
+				t.Fatalf("notes page %d returned %d rows, exceeds the bounded %d", page, len(res.Rows), namedPageSize)
 			}
 			for _, r := range res.Rows {
-				rid := rowID(r)
+				rid := bareID(rowID(r))
 				if _, dup := walked[rid]; dup {
-					t.Fatalf("active-spaces cross-node walk OVERLAP on %s", rid)
+					t.Fatalf("notes cross-node walk OVERLAP on %s", rid)
 				}
 				walked[rid] = struct{}{}
 			}
@@ -209,22 +220,23 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 			mintedCursor = true
 			cursor = res.NextCursor
 			if page > 64 {
-				t.Fatal("active-spaces pagination did not terminate")
+				t.Fatal("notes pagination did not terminate")
 			}
 		}
-		// Every seeded space must appear exactly once across the cross-node walk.
-		for sid := range sent {
-			if _, ok := walked[sid]; !ok {
-				t.Fatalf("active-spaces cross-node walk dropped seeded space %s (gap)", sid)
+		// Every seeded note must appear exactly once across the cross-node walk.
+		// #2441: rows carry BARE ids; compare on the bare form.
+		for nid := range sent {
+			if _, ok := walked[bareID(nid)]; !ok {
+				t.Fatalf("notes cross-node walk dropped seeded note %s (gap)", nid)
 			}
 		}
 		// We seeded > namedPageSize, so the named query MUST have minted a cursor
 		// (proving the bounded-page + continuation path on the real query def).
 		if !mintedCursor {
-			t.Fatalf("active-spaces seeded %d (> page %d) but the named query never minted a cursor", total, namedPageSize)
+			t.Fatalf("notes seeded %d (> page %d) but the named query never minted a cursor", total, namedPageSize)
 		}
 		if firstPageLen != namedPageSize {
-			t.Fatalf("active-spaces first page size = %d, want the bounded %d", firstPageLen, namedPageSize)
+			t.Fatalf("notes first page size = %d, want the bounded %d", firstPageLen, namedPageSize)
 		}
 	})
 }

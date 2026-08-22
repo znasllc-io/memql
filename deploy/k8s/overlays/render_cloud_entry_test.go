@@ -203,3 +203,82 @@ func TestCloudEntryCommitsNoHostname(t *testing.T) {
 		t.Error("domain-envfrom.yaml commits a hostname")
 	}
 }
+
+// liveKitServices are the media-plane and SIP-plane Services base declares.
+// `livekit` (signaling) is ClusterIP in base already; the other two are
+// LoadBalancers there, which is right for overlays/cloud (voice on) and wrong
+// for this overlay (memql#4225): a LoadBalancer with zero endpoints still
+// allocates a public IP on Azure.
+var liveKitServices = []string{"livekit", "livekit-rtc", "livekit-sip"}
+
+// azureLoadBalancerAnnotation is the prefix of every Azure LB tuning
+// annotation base carries on those Services. LoadBalancer-only, so it goes
+// with the type.
+const azureLoadBalancerAnnotation = "service.beta.kubernetes.io/azure-load-balancer"
+
+func servicesByName(t *testing.T, rendered string) map[string]resource {
+	t.Helper()
+	byName := map[string]resource{}
+	for _, r := range parse(t, rendered) {
+		if r.Kind == "Service" {
+			byName[r.Metadata.Name] = r
+		}
+	}
+	return byName
+}
+
+// TestCloudEntryLiveKitServicesAreClusterIP is the rendered half of the
+// voice-off Service hold (memql#4225); livekit_entry_voice_off_test.go is the
+// text-level half that cannot skip.
+//
+// The failure this catches reconciles at first and then does not: keep-it
+// converted these Services to ClusterIP by hand, and the next Argo sync of
+// the overlay -- still LoadBalancer + externalTrafficPolicy=Local -- was
+// refused by the API server ("may only be set for externally-accessible
+// services"), leaving the Application OutOfSync/Failed while the pins inside
+// it were fine.
+func TestCloudEntryLiveKitServicesAreClusterIP(t *testing.T) {
+	byName := servicesByName(t, render(t, entryOverlay))
+	for _, name := range liveKitServices {
+		r, ok := byName[name]
+		if !ok {
+			t.Errorf("Service %s does not render; voice-off holds the Service at ClusterIP, it does not delete it", name)
+			continue
+		}
+		if r.Spec.Type != "ClusterIP" {
+			t.Errorf("Service %s renders as type %q, want ClusterIP -- a LoadBalancer with zero endpoints still allocates a public IP", name, r.Spec.Type)
+		}
+		if r.Spec.ExternalTrafficPolicy != "" {
+			t.Errorf("Service %s still carries externalTrafficPolicy=%q; the API server refuses that on a ClusterIP Service and Argo stays Failed", name, r.Spec.ExternalTrafficPolicy)
+		}
+		if len(r.Spec.LoadBalancerSourceRanges) > 0 {
+			t.Errorf("Service %s still carries loadBalancerSourceRanges %v; the API server refuses that on a ClusterIP Service", name, r.Spec.LoadBalancerSourceRanges)
+		}
+		for k := range r.Metadata.Annotations {
+			if strings.HasPrefix(k, azureLoadBalancerAnnotation) {
+				t.Errorf("Service %s still carries the LoadBalancer-only annotation %s", name, k)
+			}
+		}
+	}
+}
+
+// TestCloudKeepsLiveKitLoadBalancers is the reachable positive for the gate
+// above: the same assertion, inverted, on the overlay where voice stays ON.
+// If the media plane stopped being a LoadBalancer in base, the cloud-entry
+// gate would pass for a reason that has nothing to do with the hold.
+func TestCloudKeepsLiveKitLoadBalancers(t *testing.T) {
+	byName := servicesByName(t, render(t, cloudOverlay))
+	for _, name := range []string{"livekit-rtc", "livekit-sip"} {
+		r, ok := byName[name]
+		if !ok {
+			t.Errorf("Service %s does not render in the cloud overlay", name)
+			continue
+		}
+		if r.Spec.Type != "LoadBalancer" {
+			t.Errorf("cloud overlay Service %s is %q, want LoadBalancer -- voice stays on there; the ClusterIP hold is cloud-entry's alone", name, r.Spec.Type)
+		}
+		if r.Spec.ExternalTrafficPolicy != "Local" {
+			t.Errorf("cloud overlay Service %s has externalTrafficPolicy=%q, want Local", name, r.Spec.ExternalTrafficPolicy)
+		}
+	}
+}

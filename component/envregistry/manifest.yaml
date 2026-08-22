@@ -335,7 +335,7 @@ variables:
   - name: MEMQL_EMAIL_AZURE_TENANT_ID
     component: email
     scope: global
-    description: "Azure AD tenant ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_TENANT_ID` still accepted by integrations/email as a fallback.)"
+    description: "Entra tenant ID for the email integration's Microsoft Graph sender: the tenant that HOSTS THE SENDER MAILBOX (the Microsoft 365 tenant the mail domain is verified on), which is not necessarily the AKS subscription's tenant -- the sender's app registration, Mail.Send consent and ApplicationAccessPolicy live there too (memql#4226). (Legacy name `AZURE_TENANT_ID` still accepted by integrations/email as a fallback.)"
 
   - name: MEMQL_EMAIL_AZURE_CLIENT_ID
     component: email

@@ -19,19 +19,24 @@ import (
 // GraphConfig configures the Microsoft Graph email sender.
 //
 // The client-credentials OAuth flow is used: the app authenticates as
-// itself (not a user) with the Entra tenant, requests an access token
-// for the Microsoft Graph API, and calls the `/users/{sender}/sendMail`
-// endpoint on behalf of `Sender` (the mailbox to send from).
+// itself (not a user) with the Entra tenant that HOSTS THE SENDER MAILBOX,
+// requests an access token for the Microsoft Graph API, and calls the
+// `/users/{sender}/sendMail` endpoint on behalf of `Sender` (the mailbox to
+// send from). Graph resolves {sender} in the tenant the token was issued
+// for, so TenantId is the Microsoft 365 tenant the mailbox lives on -- not
+// necessarily the tenant the cluster's subscription lives in; a token from
+// the wrong tenant is a 404 on a mailbox that exists (memql#4226,
+// docs/public/operate/auth/identity-service.md).
 //
 // Admin consent for the Graph Mail.Send (Application) permission must
-// be granted in Entra ahead of time. Optionally, an Exchange
-// ApplicationAccessPolicy should be applied to scope the app to a
+// be granted on that tenant ahead of time. Optionally, an Exchange
+// ApplicationAccessPolicy should be applied there to scope the app to a
 // single mailbox (hardening) -- see GUEST_INVITE_SPECS.md.
 type GraphConfig struct {
-	TenantId     string // e.g. "9e861255-f48b-4000-b00c-81de9d9c203e"
+	TenantId     string // The mailbox tenant's id (a GUID), not the subscription's
 	ClientId     string // Entra app registration's application (client) ID
 	ClientSecret string // Raw client secret value (never log)
-	SenderAddr   string // Full mailbox address the app sends as, e.g. "no-reply@znas.io"
+	SenderAddr   string // Full mailbox address the app sends as, e.g. "no-reply@<domain>"
 	FromName     string // Friendly display name, e.g. "Example App"
 }
 

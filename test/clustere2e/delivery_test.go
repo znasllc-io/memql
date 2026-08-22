@@ -141,18 +141,28 @@ func userIDFromToken(t *testing.T, tok string) string {
 	return claims.Sub
 }
 
-// newSpaceWithHuman creates a fresh space, joins the token's user to it as a
+// newSpaceWithHuman mints a fresh space id, joins the token's user to it as a
 // human participant, and returns the space id + the SERVER-assigned human
 // participant id (content-addressed on (space, user); we read it back rather
 // than guess it). The user can then send utterances and see the space's
 // graph events.
+//
+// No space ROW is written, and that is deliberate (memql#4212). The `space`
+// concept and its mutations (createSpace, formerly mutationCreateSpace) are
+// product-pack DSL delivered at runtime through MEMQL_DSL_PATH: the engine
+// tree declares no `concept space`, and the parity cluster this suite runs
+// against (deploy/k8s/overlays/local -- the engine-bff component, no bundle)
+// loads no pack. Every engine-owned construct the suite drives --
+// joinSpaceAsHuman, sendTextUtterance, spaceUtterances, spaceParticipants,
+// emitTextChunk, updateParticipantPresence -- keys on partitionId with no
+// @relationship to a space row (see the comment above joinSpaceAsHuman in
+// dsl/cognition/mutations.memql), so a minted canonical id is all they need.
+// Naming the pack mutation here is what took ten tests down at once, and it is
+// what test/dslconformance/clustere2e_named_calls_test.go now refuses.
 func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Connection, userID string) (spaceID, participantID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
 	spaceID = "v1:cognition:space:" + id.NewShortId()
-	if _, err := qc.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(spaceID, "clustere2e delivery probe", "active")); err != nil {
-		t.Fatalf("create space: %v", err)
-	}
 	if _, err := qc.JoinSpaceAsHuman(ctx, memqlclient.JoinSpaceAsHumanArgs{
 		PartitionId: spaceID,
 		UserId:      userID,

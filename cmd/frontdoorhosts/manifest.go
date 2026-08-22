@@ -15,13 +15,16 @@ const tlsSecret = "memql-front-door-tls"
 // public-entry overlay to own it) and referenced by name, exactly as
 // deploy/k8s/base/livekit.yaml already references it.
 //
-// IT MUST RESOLVE DNS-01. A wildcard SAN cannot be issued over HTTP-01 -- ACME
-// has no way to serve a challenge for a name that does not exist yet -- and the
-// certificate here requests one. An issuer configured for
-// HTTP-01 alone does not fail at apply time; the Certificate sits Pending, the
-// Secret is never created, and the Ingresses serve the controller's default
-// certificate, which presents as a name-mismatch warning in a browser rather
-// than as anything naming cert-manager.
+// IT SOLVES HTTP-01, AND THE CERTIFICATE IS SHAPED FOR THAT (memql#4224). An
+// earlier version of this comment demanded a DNS-01 solver because the
+// Certificate requested `*.<domain>`; the cluster's issuer never had one, and
+// the consequence was not a failure at apply time. ACME cannot serve an HTTP-01
+// challenge for a wildcard, ONE wildcard dnsName fails the WHOLE order, the
+// Certificate sat Pending, and every Ingress served the controller's
+// self-signed default -- a browser name-mismatch warning naming nothing. So the
+// Certificate names exact hosts only, which HTTP-01 issues without ceremony: a
+// GET to /.well-known/acme-challenge/ on each name, answered through the same
+// ingress controller that routes everything else here.
 const clusterIssuer = "letsencrypt-prod"
 
 // ingressClass is the cloud front door's L7 proxy.
@@ -38,9 +41,9 @@ const ingressClass = "nginx"
 // manifest renders one instance overlay's whole front door.
 //
 // The order is: certificate first (nothing else works without it), then the
-// roles in the order component/frontdoor declares them, then the sites
-// wildcard. Stable, because a reordering would show up as a diff in a generated
-// file and cost a review round for nothing.
+// roles in the order component/frontdoor declares them, then the portal, then
+// the sites wildcard and the apex. Stable, because a reordering would show up
+// as a diff in a generated file and cost a review round for nothing.
 func manifest(overlay, domain, pathBlock string) string {
 	var b strings.Builder
 	b.WriteString(header(overlay, domain))
@@ -49,6 +52,7 @@ func manifest(overlay, domain, pathBlock string) string {
 	b.WriteString(apiGRPCIngress(domain))
 	b.WriteString(identityIngress(domain))
 	b.WriteString(mcpIngress(domain))
+	b.WriteString(portalIngress(domain))
 	b.WriteString(edgeIngress(domain))
 	return b.String()
 }
@@ -64,33 +68,45 @@ func header(overlay, domain string) string {
 		"# Run `make frontdoor` (hosts, then paths). Hand edits are reverted by the generator\n" +
 		"# and TestFrontDoorHostsAreNotStale fails the build until they are.\n" +
 		"#\n" +
-		"# The front door for the `" + overlay + "` overlay, derived from the closed ROLE set\n" +
-		"# (memql#3767). The host COUNT never grows with customers, apps or sites, which is\n" +
-		"# what the sites wildcard is for (memql#3700).\n" +
+		"# The front door for the `" + overlay + "` overlay, derived from the closed ROLE set plus\n" +
+		"# the platform's own site (memql#3767, memql#4224). The host COUNT never grows with\n" +
+		"# customers, apps or sites, which is what the sites wildcard is for (memql#3700).\n" +
 		"#\n" +
 		rows.String() +
 		"#\n" +
-		"# Every host is a SINGLE label under the domain, so the one *.<domain> wildcard\n" +
-		"# certificate covers all of them -- a TLS wildcard matches exactly one label. The apex\n" +
-		"# is the exception and is requested explicitly, since the bare domain has no label to\n" +
-		"# match.\n" +
+		"# THE CERTIFICATE NAMES EXACT HOSTS, NOT A WILDCARD (memql#4224). The ClusterIssuer\n" +
+		"# solves HTTP-01 only. ACME cannot serve an HTTP-01 challenge for *.<domain>, and ONE\n" +
+		"# wildcard dnsName fails the WHOLE order -- so the Certificate that used to request it sat\n" +
+		"# Pending, was hand-edited to exact names on the first keep-it cluster, and the edge\n" +
+		"# Ingress whose tls.hosts still said *.<domain> served ingress-nginx's self-signed default\n" +
+		"# for portal.<domain> (Safari: \"This Connection Is Not Private\"). DECISION: the wildcard\n" +
+		"# is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly\n" +
+		"# its own exact rule hosts under tls; and the union of those tls lists is the dnsNames\n" +
+		"# set -- deploy/k8s/overlays/frontdoor_hosts_test.go fails the build when they differ.\n" +
+		"# The *.<domain> RULE stays, because it is how every site reaches the edge, but it has no\n" +
+		"# certificate behind it: a customer site hostname needs its own Certificate and its own\n" +
+		"# exact-host Ingress until the issuer gains a DNS-01 solver\n" +
+		"# (docs/public/operate/site-hosting.md). The portal is the one site the generator can\n" +
+		"# name in advance, so it is the one site with an exact rule and a SAN.\n" +
 		"#\n" +
 		"# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/\n" +
 		"# names a real domain: the domain is a value on the memql-domain ConfigMap, which every\n" +
-		"# node derives its issuer, CORS origins and redirect URIs from at boot\n" +
-		"# (component/envregistry/domain.go, threaded through component/frontdoor so the hosts below\n" +
-		"# and the hosts the nodes believe in cannot disagree). An Ingress host is a Kubernetes\n" +
-		"# API object, so it has to be in the render; an install overrides these through the\n" +
-		"# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so a\n" +
-		"# cluster reconciled before its domain is set fails visibly rather than half-working.\n" +
+		"# node derives its issuer, CORS origins, redirect URIs and portal site hostname from at\n" +
+		"# boot (component/envregistry/domain.go and component/memql's SeedMaterializer, threaded\n" +
+		"# through component/frontdoor so the hosts below and the hosts the nodes believe in\n" +
+		"# cannot disagree). An Ingress host is a Kubernetes API object, so it has to be in the\n" +
+		"# render; an install overrides these through the ArgoCD Application's\n" +
+		"# spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled\n" +
+		"# before its domain is set fails visibly rather than half-working.\n" +
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +
-		"# wildcard -- so the role hosts outrank *.<domain> without anything being declared. That\n" +
-		"# is a guarantee traefik does not give, which is why the local overlay declares the\n" +
-		"# ranking by hand and why doing it there went wrong once (memql#3810). Do not copy that\n" +
-		"# annotation here: it would be an unnecessary declaration of something nginx already\n" +
-		"# does, and Ingress-level priority is what flattened the api host's path ordering.\n"
+		"# wildcard -- so the role hosts and the portal outrank *.<domain> without anything being\n" +
+		"# declared. That is a guarantee traefik does not give, which is why the local overlay\n" +
+		"# declares the ranking by hand and why doing it there went wrong once (memql#3810). Do\n" +
+		"# not copy that annotation here: it would be an unnecessary declaration of something\n" +
+		"# nginx already does, and Ingress-level priority is what flattened the api host's path\n" +
+		"# ordering.\n"
 }
 
 func certificate(domain string) string {
@@ -100,11 +116,18 @@ func certificate(domain string) string {
 	}
 
 	return "---\n" +
-		"# The front-door certificate for this namespace.\n" +
+		"# The front-door certificate for this namespace: every EXACT host the front door serves,\n" +
+		"# and nothing else (memql#4224).\n" +
 		"#\n" +
-		"# TWO SANs, and the second is why: *.<domain> matches exactly ONE label, so it covers\n" +
-		"# every role host and every site host, but NOT the bare domain, which has no label to\n" +
-		"# match. One order, one renewal, however many sites the cluster serves.\n" +
+		"# NO WILDCARD SAN. The issuer is HTTP-01 and a wildcard dnsName fails the whole order,\n" +
+		"# not the one name -- the Certificate would sit Pending and every host here would serve\n" +
+		"# the controller's default certificate. The apex is a dnsName like any other now; it\n" +
+		"# used to be the one exception to a wildcard that matched exactly one label. One order,\n" +
+		"# one renewal, and a new customer site does NOT join this list: it needs a Certificate\n" +
+		"# of its own until a DNS-01 solver exists (docs/public/operate/site-hosting.md).\n" +
+		"#\n" +
+		"# This list and the tls.hosts of the Ingresses below are the SAME set, derived from\n" +
+		"# component/frontdoor.CertificateSANs; the overlay render gate asserts the equality.\n" +
 		"apiVersion: cert-manager.io/v1\n" +
 		"kind: Certificate\n" +
 		"metadata:\n" +
@@ -245,16 +268,55 @@ func mcpIngress(domain string) string {
 		pathRule("/", "mcp", 8090)
 }
 
+// portalIngress is the portal's own exact-host rule (memql#4224).
+func portalIngress(domain string) string {
+	host := frontdoor.PortalHost(domain)
+
+	return "---\n" +
+		"# The portal -- site #1, and the ONE site with an exact rule of its own (memql#4224).\n" +
+		"#\n" +
+		"# To the edge the portal is a site like any other: the same Service the wildcard below\n" +
+		"# points at, resolved against the same v1:platform:site rows, no special path\n" +
+		"# (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason\n" +
+		"# and only that: ingress-nginx creates a certificate-bearing server block per RULE host,\n" +
+		"# never per tls host. With only the *.<domain> rule, portal.<domain> is answered by the\n" +
+		"# wildcard's server block, whose certificate is the controller's self-signed default\n" +
+		"# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first keep-it\n" +
+		"# cluster served to Safari. An exact rule gives the portal a server block the\n" +
+		"# certificate verifies for.\n" +
+		"#\n" +
+		"# It is the only site the generator can do this for, because it is the only site whose\n" +
+		"# name exists before an operator creates a row. The engine seeds that row's hostname\n" +
+		"# from MEMQL_DOMAIN through the same derivation that wrote this host\n" +
+		"# (component/frontdoor.PortalHost), so the certificate cannot name a host the row does\n" +
+		"# not carry. The same Service and port as the edge Ingress below, deliberately: this is\n" +
+		"# not a second way to serve the portal, it is the first way with a certificate.\n" +
+		"apiVersion: networking.k8s.io/v1\n" +
+		"kind: Ingress\n" +
+		"metadata:\n" +
+		"  name: portal-front-door\n" +
+		"  namespace: memql\n" +
+		"spec:\n" +
+		"  ingressClassName: " + ingressClass + "\n" +
+		tlsBlock(host) +
+		"  rules:\n" +
+		"    - host: " + host + "\n" +
+		"      http:\n" +
+		"        paths:\n" +
+		pathRule("/", "edge", 8085)
+}
+
 func edgeIngress(domain string) string {
 	wildcard := frontdoor.SitesWildcard(domain)
 	apex := frontdoor.Apex(domain)
 
-	hosts := []string{wildcard, apex}
 	rules := "" +
-		"    # Every hosted site: the portal, and every SPA or website the operator creates a\n" +
-		"    # v1:platform:site row for. ONE rule, forever -- the edge node resolves the request\n" +
-		"    # Host against the graph, so a new site is an upload plus a row write and the number\n" +
-		"    # of Kubernetes objects does not grow with it.\n" +
+		"    # Every hosted site: every SPA or website the operator creates a v1:platform:site\n" +
+		"    # row for (the portal has its own rule above, for TLS; it is served exactly like\n" +
+		"    # these). ONE rule, forever -- the edge node resolves the request Host against the\n" +
+		"    # graph, so a new site is an upload plus a row write and the number of Kubernetes\n" +
+		"    # objects does not grow with it. What a new site does NOT get from this rule is a\n" +
+		"    # certificate: see the tls block above.\n" +
 		"    - host: " + fmt.Sprintf("%q", wildcard) + "\n" +
 		"      http:\n" +
 		"        paths:\n" +
@@ -269,11 +331,19 @@ func edgeIngress(domain string) string {
 		pathRule("/", "edge", 8085)
 
 	return "---\n" +
-		"# The site edge -- the last front-door rules that will ever be added.\n" +
+		"# The site edge -- the wildcard and the apex, the last front-door rules that will ever\n" +
+		"# be added.\n" +
 		"#\n" +
 		"# Everything after this is a graph row. That is the whole of memql#3700's \"a site is\n" +
-		"# data, not infrastructure\": the host count is fixed by the closed ROLE set and never\n" +
-		"# grows with sites.\n" +
+		"# data, not infrastructure\": the host count is fixed by the closed ROLE set plus the\n" +
+		"# platform's own portal, and never grows with sites.\n" +
+		"#\n" +
+		"# TLS NAMES THE APEX ONLY (memql#4224). The wildcard rule has no certificate behind it:\n" +
+		"# the issuer is HTTP-01, which cannot issue *.<domain>, and listing the wildcard under\n" +
+		"# tls anyway is what made ingress-nginx fall back to its self-signed default for every\n" +
+		"# name this rule answers. A site routed by the wildcard terminates TLS with that default\n" +
+		"# until it has a Certificate and an exact-host Ingress of its own\n" +
+		"# (docs/public/operate/site-hosting.md).\n" +
 		"#\n" +
 		"# The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here\n" +
 		"# -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https\n" +
@@ -285,14 +355,18 @@ func edgeIngress(domain string) string {
 		"  namespace: memql\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
-		tlsBlock(hosts...) +
+		tlsBlock(apex) +
 		"  rules:\n" +
 		rules
 }
 
-// tlsBlock names the certificate an Ingress terminates with. Every front-door
-// Ingress in a namespace names the SAME Secret, which the Certificate above
-// creates -- one certificate per namespace covering every host in it.
+// tlsBlock names the certificate an Ingress terminates with, and the EXACT
+// hosts it terminates for. Every front-door Ingress in a namespace names the
+// SAME Secret, which the Certificate above creates -- one certificate per
+// namespace covering every exact host in it -- and lists under tls exactly the
+// exact rule hosts it carries, never the wildcard (memql#4224): ingress-nginx
+// verifies the certificate against each tls host and falls back to its
+// self-signed default for a host the certificate does not name.
 func tlsBlock(hosts ...string) string {
 	var b strings.Builder
 	b.WriteString("  tls:\n    - hosts:\n")

@@ -149,7 +149,7 @@ func TestClusterStreamedTurn(t *testing.T) {
 		cid := chunkID(runID, seq)
 		if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 			UtteranceId:     cid,
-			PartitionId:         spaceID,
+			PartitionId:     spaceID,
 			ParticipantId:   participantID,
 			ParticipantType: "human",
 			Text:            fmt.Sprintf("clustere2e streamed-turn chunk seq=%d", seq),

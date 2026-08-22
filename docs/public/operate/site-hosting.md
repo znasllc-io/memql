@@ -16,7 +16,7 @@ door -- what a build has to emit, how to publish and roll one back, and
 where the real limits are.
 
 Read [front-door.md](front-door.md) first if you have not -- it covers the
-five host rules and the `*.<domain>` / apex routing every hosted site rides
+six host rules and the `*.<domain>` / apex routing every hosted site rides
 on. This page does not restate it.
 
 Related: [The cluster front door](front-door.md) ·
@@ -277,11 +277,22 @@ Three things worth knowing before you run it:
 
 ### 2. Add the hostname
 
-**In the cloud, nothing to do.** The cluster's wildcard certificate and DNS
-record (`*.<domain>` plus the apex, issued once at install -- decision D2)
-already cover any `<label>.<domain>` hostname the moment a live site row
-names it. That is what makes "add a site" an upload-plus-a-row-write claim
-true end to end, not just for the bytes.
+**In the cloud, routing needs nothing; TLS needs an object per site.** The
+wildcard DNS record and the `*.<domain>` Ingress rule (committed once at
+install -- decision D2) route any `<label>.<domain>` hostname to the edge the
+moment a live site row names it, so the bytes are served end to end. **The
+certificate is not covered by that claim** (memql#4224): the cloud front-door
+certificate names exact hosts only -- `api.`, `identity.`, `mcp.`, `portal.`
+and the apex -- because the issuer is HTTP-01 and a single wildcard SAN fails
+the whole ACME order. A site routed by the wildcard terminates TLS with the
+ingress controller's self-signed default until it has a cert-manager
+`Certificate` for its hostname and an exact-host Ingress pointing at
+`svc/edge:8085` -- the same shape as the generated `portal-front-door`,
+which exists for exactly this reason. That is one Kubernetes object pair per
+site, an explicit exception to "a site is data" forced by HTTP-01, and it
+stands until the issuer gains a DNS-01 solver. Locally the mkcert pair IS a
+wildcard, so a site that works over https on the local cluster is no
+evidence that it has a certificate in the cloud.
 
 **Locally, there is no wildcard hosts entry**, so the new hostname has to
 be added to the managed block `scripts/install/hosts-entries.sh` owns
@@ -676,9 +687,9 @@ same lever `MEMQL_DOMAIN` already is -- not a row a site's owner sets.
 does keep its own backend rather than falling to the wildcard `*.<domain>`
 edge rule -- is covered in full in [front-door.md](front-door.md). This
 page does not restate it; the short version is that it is a load-bearing
-assumption of the five-host design and, as of this writing, not yet a
-DECLARED property (an explicit `router.priority`) rather than an inherited
-one.
+assumption of the six-host design, DECLARED on the wildcard locally (it
+names itself lowest, memql#3810) and resolved by `server_name` specificity
+on ingress-nginx in the cloud.
 
 **The edge Deployment itself is landing separately** (memql#3714, in
 progress alongside this page). Everything above the front-door routing --
