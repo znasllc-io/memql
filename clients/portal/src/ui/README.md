@@ -48,6 +48,10 @@ fails the build on a width token in a page root.
 
 - Buttons: `Button` -- tones primary / quiet / danger, sizes sm / xs. One
   primary per screen at most; `type="submit"` is explicit.
+- A button that NAVIGATES is `ButtonLink` -- same tones and sizes, one shared
+  class recipe, but an `<a href>`. The element is the point: an anchor lets the
+  browser own the gesture, which is what a `vscode://` deep link, middle-click
+  and copy-link all need.
 - Forms: `Field` wraps label/hint/error; `TextInput` / `Select` /
   `Textarea` share one inset style.
 - Secondary nav is always `Tabs` (routed underline strip).

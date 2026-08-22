@@ -68,6 +68,16 @@ nobody has proposed yet:
 | Which pods run, which are orphaned, which tier is under-replicated | **portal** |
 | Integrations, identity, sites, accounts | **portal** |
 | What does this construct do, what rows exist | extension -- Constructs / Data / Runs |
+| Read or edit a construct's SOURCE | extension -- from your workspace or from the cluster |
+
+**The row above it is adjacent, not the same claim.** *What does this construct
+do* is a description and *what rows exist* is data; the portal could render
+either, and for rows it already does. Code is neither. So the portal's concept
+page carries **Open definition in VS Code** and no source pane -- one door, and
+it opens in the editor -- while the extension serves the bytes from wherever
+they are: your workspace when the file is there, the cluster's own pack browser
+when it is not. Even a construct whose file is nowhere on your machine is read
+here rather than there.
 
 **Topology used to be here and is not any more.** A pod grid, orphan verdicts
 and under-replica alarms are cluster state, the portal already draws them, and
@@ -221,22 +231,63 @@ arguments with their types and flags, and the way back to its source.
 
 ### Where a construct came from
 
-Three origins, and they are three different situations rather than three
-labels:
+Four origins, and they are four different situations rather than four labels.
+The order is the tier order -- sealed, shipped, shared, private -- rather than
+alphabetical:
 
 | Origin | What it means |
 |---|---|
 | **core** | The engine's embedded DSL tree. |
 | **bundle** | A product's DSL, mounted at `MEMQL_DSL_PATH`. |
 | **promoted** | It lives in the cluster's database and **has no file at all**. |
+| **staged** | The same place as promoted, with a different audience: **only you can call it** until it is trained. |
 
-Jump-to-source has the same three answers. When the file is in your workspace
-it opens, revealed at the signature. When it is not, the page says so and names
-the path -- the catalog reports a path relative to the CLUSTER's tree, and a
-remote cluster is usually not the checkout you have open. When there is no file,
-the source is rendered on the page from what the cluster holds, labelled as
-living in the database. That last case is where a developer first meets the
-seeded-versus-trained distinction.
+`staged` is a sibling of `promoted` rather than a qualifier on it. The two
+differ in WHO can call the construct, which is the question every consumer of
+the field is asking -- and it is the reason the read-only rule treats them
+identically further down: neither lives in a sealed tree, and for both the file
+on disk is the author's own working copy.
+
+Jump-to-source has three answers rather than four -- a staged construct has no
+file either, so it shares promoted's -- and one of the three changed. When the
+file is in your workspace it opens, revealed at the signature. When there is no
+file at all, the source is rendered on the page from what the cluster holds,
+labelled as living in the database -- the case where a developer first meets
+the seeded-versus-trained distinction.
+
+**The answer in between used to be a dead end and is now an action.** The
+catalog reports a path relative to the CLUSTER's tree, and a remote cluster is
+usually not the checkout you have open, so the page named the path and stopped
+there. But the cluster that loaded the construct also serves the file, over its
+pack browser -- so the page offers **View source from cluster**, which opens it
+as a read-only `memql-cluster://` document: at the signature, badged `RO`, with
+one header lens back to these details.
+
+That document gets `memql` highlighting and **no diagnostics**, which is
+deliberate rather than incomplete. The language server is an offline process
+over a workspace directory, and the file it is being shown is not in one; the
+imports a cluster document names resolve against the cluster's tree, not
+against yours, so analysing it would fill the screen with unresolved references
+to somebody else's checkout. It is a reading surface.
+
+A cluster document also names its own cluster, and the lens refuses rather than
+guesses: a document opened from one cluster does not resolve its construct
+against a different one you have since connected to.
+
+### A concept's rows
+
+A **concept** is a schema, so its detail page carries one more action nothing
+else does: **Browse rows in portal**, which opens that concept's rows at
+`/concepts/<id>` in the cluster's own portal. It is the return leg of the
+handoff: the portal hands a definition to the editor, and the editor hands a
+concept's rows back. The address is resolved the same way **Open Portal**
+resolves it -- from the portal's own site row when there is a connection to read
+it over, composed from the cluster's domain when there is not. No other kind has
+rows, so no other kind draws the button; the absence is the statement, exactly
+as it is for Run below.
+
+The Data view is still where rows are browsed inside the editor. This is a
+door, not a replacement for it.
 
 ### Running from the catalog
 
@@ -324,16 +375,26 @@ visible. The full model is in
 
 The language server owns the state. It parses the document, hashes each
 construct's source, compares against the cluster's catalog, and reports one of
-`untrained` / `drifted` / `trained` / `staged` / `seeded` / `unknown`. The extension
-renders; it never computes a state, because a client re-deriving drift would be
-a second opinion about the one question the surface exists to answer.
+`untrained` / `drifted` / `trained` / `staged` / `seeded` / `edited` / `unknown`.
+The extension renders; it never computes a state, because a client re-deriving
+drift would be a second opinion about the one question the surface exists to
+answer.
 
-**A gutter icon** beside each construct's signature. Three marks, not six,
+**`edited` is the seventh, and it is not `drifted`.** Drift is defined against a
+promotion -- the cluster knows this construct, and you have moved past the
+version that was promoted. A construct the cluster loaded **from disk** and
+whose source has since moved was never promoted at all, so there is nothing to
+promote over: what applies it is a rollout, which on a local cluster is
+**Rebuild from checkout** and on a remote one happens in a pipeline this editor
+has no hand in.
+
+**A gutter icon** beside each construct's signature. Three marks, not seven,
 because the gutter answers one question -- *does what I am looking at match
-what runs?* -- and that question has three answers: `untrained`, `drifted`, and
-live (`trained`, `staged` and `seeded` alike). They are distinguishable without
-relying on colour. Who can CALL a live construct is a question about actions,
-and the lens is where it is answered.
+what runs?* -- and that question has three answers: `untrained`, `drifted`
+(which `edited` shares, the answer being the same *no*), and live (`trained`,
+`staged` and `seeded` alike). They are distinguishable without relying on
+colour. Who can CALL a live construct is a question about actions, and the lens
+is where it is answered.
 
 `unknown` gets **no mark at all**. Not a grey icon, not a question mark: at
 sixteen pixels, a mark meaning "we do not know" is indistinguishable from one
@@ -349,21 +410,34 @@ drifted     Dry-run   Try in session   Stage   Promote (updates the trained vers
 staged      Re-stage   Train (make it live for everyone)   Demote
 trained     Demote
 seeded      (no action -- changing it needs a rollout)
+edited      Rebuild from checkout   (a local cluster only; a remote one needs a rollout)
 ```
 
 The order on the first two rows is the **escalation**: a session that ends, a
 private one that does not, and one everybody gets.
+
+**`edited` is the one state whose lens depends on the cluster rather than on
+the construct.** The other six describe what the cluster knows; this one
+describes what would apply the difference, and the answer differs by locality.
+So its sentence names the cluster -- "seeded constructs change by rollout" is
+abstract until it says which cluster is going to need one -- and its only
+button, on a local cluster, is the Deployments command `Rebuild from checkout`
+rather than a seventh training action. A remote cluster gets the words and no
+button: a disabled control would suggest the editor could do it if only
+something were different.
 
 The state label is not a command. It is a fact about the construct, and making
 it clickable would leave a developer wondering what clicking it does. A
 `seeded` construct gets no disabled buttons either -- a control that cannot
 work is not drawn.
 
-**A status-bar item** for the active document: `3 untrained · 1 drifted`. It
-reports only what needs attention, so a file whose constructs are all trained
-shows nothing -- an item that is always present saying "12 trained" is one you
-stop reading, and it would take the warning with it. Its hover is where
-*saving does not promote anything* is said in words.
+**A status-bar item** for the active document: `3 untrained · 1 drifted · 2
+edited`. It reports only what needs attention, so a file whose constructs are
+all trained shows nothing -- an item that is always present saying "12 trained"
+is one you stop reading, and it would take the warning with it. `edited` is in
+the reported set because it is the same complaint about a different tier: *I
+changed this and the cluster is still running what it booted with.* Its hover
+is where *saving does not promote anything* is said in words.
 
 **Nothing runs automatically.** No promote-on-save, no train-on-save. The
 extension already holds that line for runs, and a promotion is a strictly
@@ -408,12 +482,50 @@ named and the override alongside it.
 
 ### Read-only files
 
-Some `.memql` files are marked read-only, under one rule: **a file is read-only
-exactly when editing it cannot change what the cluster runs.** Core engine DSL
-is sealed by the engine's core-first invariant. A product bundle is editable
-against a local cluster and read-only against a remote one, because a remote
-cluster loads its bundle from its own image. A **new file is never blocked** --
-adding one is how training starts.
+Some `.memql` files are marked read-only, under one rule whose words have not
+changed: **a file is read-only exactly when editing it cannot change what the
+cluster runs.** What changed is the answer the rule gives on a local cluster,
+because **Rebuild from checkout** made an edit to one real.
+
+| File | Connected cluster | Editable |
+|---|---|---|
+| any origin, core included | **local** | yes |
+| core engine `dsl/` | remote | no -- badge `C` |
+| product bundle `dsl/` | remote | no -- badge `R` |
+| promoted or staged | any | yes -- it lives in the database, not in a tree |
+| a new file | any | yes -- this is the training path |
+
+**A local cluster locks nothing, for any origin.** It is rebuilt from a checkout
+on this machine, so an edit to any file it loaded -- core included -- is an edit
+the next rebuild compiles, and the condition for read-only is not met. Nothing
+about it is a permission: the safe direction is the developer's own file staying
+writable.
+
+**Against a remote cluster the two locked rows have different ways out.** A
+remote cluster loads its bundle from its own image, so editing a local checkout
+of that bundle changes nothing there -- select the local cluster and work in the
+checkout it rebuilds from. Core constructs are additionally sealed against
+promotion by the engine's core-first invariant, so on a cluster nothing here is
+rebuilt into, an edit to one changes nothing it runs.
+
+A **new file is never blocked**, on any cluster. Adding one is how training
+starts, and a path the catalog has never heard of is the degenerate case of
+that -- so the rule holds by construction rather than by a guard.
+
+**Which clone the cluster rebuilds from is a hint, not a lock.** The install
+receipt records one directory. With a local cluster selected and a *different*
+clone of the same repository open, every file stays editable -- it is your file
+-- and the ones that cluster loaded carry an `L` badge whose hover says this is
+not the folder it rebuilds from. Locking them instead would be the editor
+deciding which of your checkouts is the real one, which is not its decision to
+make.
+
+**A cluster document is read-only by construction**, which is a different
+mechanism rather than a stricter setting. The bytes behind `memql-cluster://`
+are served from the cluster's own pack browser and there is no file on this
+machine to write back to, so the answer depends on no catalog and waits for
+none. It carries the badge `RO` and a hover naming the cluster it came from;
+`files.readonlyInclude` is not involved, because there is nothing to forbid.
 
 The classification comes from the cluster's own `origin` for each construct,
 not from the shape of the path: guessing by matching a directory called `dsl/`
