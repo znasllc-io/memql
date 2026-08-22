@@ -63,6 +63,7 @@ import {
   recordedProvider,
   recordedProviderKeyFile,
   recordedCheckout,
+  recordedImageSource,
   recordedStackDir,
   recordedStackTag,
   type Receipt,
@@ -2011,7 +2012,19 @@ ${this.sharedToolsHtml()}
       os.homedir(),
     );
     if (this.disposed || this.state.action !== action || this.state.screen !== "collect") return;
-    this.preflight = preflightItems({ action, graph, sudoFree, recordedKeyPath });
+    this.preflight = preflightItems({
+      action,
+      graph,
+      sudoFree,
+      recordedKeyPath,
+      // WHICH LANE THIS MACHINE IS IN, from the same receipt every other fact
+      // here comes from (memql#4246). A run over a cluster on checkout-built
+      // images returns it to released ones, and this is what makes the
+      // checklist say so before Start rather than leaving it to be noticed in
+      // the Deployments row afterwards.
+      imageSource: recordedImageSource(receipt),
+      releasedTag: recordedCheckout(receipt).tag,
+    });
     this.render();
   }
 

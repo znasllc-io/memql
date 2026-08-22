@@ -166,6 +166,21 @@ export function graphDocumentPath(kind: GraphKind, repoRoot: string): string {
   return path.join(repoRoot, "scripts", "install", "graph", `${kind}.json`);
 }
 
+/**
+ * The rebuild-from-checkout document (memql#4246).
+ *
+ * NAMED SEPARATELY BECAUSE IT IS NOT A KIND. `GraphKind` is install|uninstall
+ * -- the two DIRECTIONS a graph runs -- and rebuild.json declares itself
+ * `"install"` because it runs forward, verifies, and records a receipt entry
+ * like every other install-direction step. A third kind would have bought a
+ * parallel validation path, a third `graphDocumentPath` branch and a third
+ * `loadGraphFor` case for one document with one step; a path function buys
+ * nothing but the path.
+ */
+export function rebuildGraphPath(repoRoot: string): string {
+  return path.join(repoRoot, "scripts", "install", "graph", "rebuild.json");
+}
+
 export async function loadGraphFile(file: string): Promise<Graph> {
   let text: string;
   try {

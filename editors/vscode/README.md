@@ -116,6 +116,7 @@ replicas and image digest a deployment declared.
 |---|---|---|---|
 | Create deployment | the full install graph | move to another release tag | deploy |
 | Repair | -- | re-run the graph | -- |
+| Rebuild from checkout | -- | k3d.dev over the recorded checkout | -- |
 | Uninstall | -- | the uninstall graph, behind its preview | -- |
 | Cut version / Promote / Rollout / Roll back | -- | -- | by role |
 
@@ -126,6 +127,15 @@ is missing, and a deployment to another tag moves the checkout and reconciles.
 Before it starts, the page shows which steps will actually change something --
 usually two of fifteen -- because a run reporting fifteen steps looks like a
 reinstall to whoever is watching it.
+
+**Rebuild from checkout is a fourth, separate one-step graph.** A wizard install
+runs released images pulled at a tag; the checkout it cloned is inert until
+something builds from it. Rebuild does: it builds the node images from that
+checkout, imports them, points the cluster's Application at them (keeping the
+database operand where it is), and restarts. From then on the instance row reads
+`checkout <commit> (<n> uncommitted)` instead of a version, and the Connection
+page says so. An install, upgrade or repair returns the cluster to released
+images -- and says so before it runs.
 
 **Choosing a version never happens by itself.** The tag list comes from the
 checkout's origin, newest first, and nothing is pre-selected: a version somebody

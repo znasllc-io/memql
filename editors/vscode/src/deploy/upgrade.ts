@@ -222,12 +222,25 @@ function displayFrom(from: string): string {
  */
 function confirmationMessage(instance: Instance, target: UpgradeTarget): string {
   const head = `Move ${target.instanceName} from ${displayFrom(target.from)} to ${target.to}.`;
-  return target.flow === "upgradeToTag"
-    ? `${head} This re-runs the install graph at the new tag on this machine: it moves the ` +
+  const body =
+    target.flow === "upgradeToTag"
+      ? `${head} This re-runs the install graph at the new tag on this machine: it moves the ` +
         `pinned checkout and reconciles the local overlay. Every other step verifies first and ` +
         `skips.`
-    : `${head} This cuts a deployment record at ${target.to} on the cluster and ships it. ` +
+      : `${head} This cuts a deployment record at ${target.to} on the cluster and ships it. ` +
         `The cluster decides whether you may; a refusal comes back naming the role required.`;
+  // THE LANE CROSSING, IN THE CONFIRMATION AN OPERATOR ACTUALLY READS
+  // (memql#4246). A move over a cluster running checkout-built images returns
+  // it to released ones -- `clusterUp` rewrites the Application's image
+  // overrides -- and nothing else on this path would say so. The Deployments
+  // row afterwards simply stops naming a commit, which is not a notice.
+  //
+  // APPENDED rather than woven in, so the sentence about WHICH MACHINERY RUNS
+  // keeps its place: that is the part people leave out, and it is the one that
+  // decides whether the run is let through at all.
+  return instance.imageSource === "checkout"
+    ? `${body} This returns ${instance.name} to released images; it runs a checkout build today.`
+    : body;
 }
 
 /**

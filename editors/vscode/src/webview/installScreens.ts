@@ -139,8 +139,15 @@ export interface CollectScreenInput {
   preflight?: readonly PreflightItem[];
 }
 
-/** The preflight checklist, above the actions so Start is an informed click. */
-function renderPreflight(items: readonly PreflightItem[] | undefined): string {
+/**
+ * The preflight checklist, above the actions so Start is an informed click.
+ *
+ * EXPORTED since memql#4246: the rebuild screen renders the same list, from
+ * state/rebuildPreflight.ts, and a second renderer would be a second answer to
+ * what a warning LOOKS LIKE in this extension. The two checklists share
+ * `PreflightItem` precisely so they can share this.
+ */
+export function renderPreflight(items: readonly PreflightItem[] | undefined): string {
   if (items === undefined || items.length === 0) return "";
   const rows = items
     .map(
@@ -234,6 +241,53 @@ ${renderPreflight(input.preflight)}
 }
 
 // ---------------------------------------------------------------------------
+// rebuild from checkout (memql#4246)
+// ---------------------------------------------------------------------------
+
+export interface RebuildScreenInput {
+  /** The checkout the images are built FROM -- named, never assumed. */
+  checkoutDir: string;
+  /** Comma-separated node types, or "" for all app nodes. */
+  nodes: string;
+  /**
+   * The rebuild checklist (state/rebuildPreflight.ts). Absent while the panel
+   * is still gathering it -- git and the Docker probe are both async -- and the
+   * screen renders without, exactly as the collect screen does.
+   */
+  preflight?: readonly PreflightItem[];
+}
+
+/**
+ * The one thing a rebuild asks before it runs.
+ *
+ * ONE FIELD, AND IT IS OPTIONAL. Everything else a rebuild needs is already
+ * recorded -- where the checkout is, which Application, which cluster -- and a
+ * form that asked again would invite an answer that disagrees with the machine.
+ * The node list is the exception because it is not a fact about the machine: it
+ * is what the developer wants built THIS time, and an empty box means "all of
+ * them", which is the script's own default rather than a value invented here.
+ *
+ * The checklist above it is where the lane crossing is stated. That is the
+ * whole reason this screen exists instead of the button running immediately.
+ */
+export function renderRebuildScreen(input: RebuildScreenInput): string {
+  return `<h1>Rebuild from checkout</h1>
+<p class="lede">Builds the node images from ${escapeHtml(
+    input.checkoutDir,
+  )}, imports them into the cluster, points its Application at them, and restarts.</p>
+<div class="field">
+  <label for="f-nodes">Node types to rebuild (comma-separated; empty = all app nodes)</label>
+  <input id="f-nodes" data-field="nodes" value="${escapeHtml(input.nodes)}">
+  <div class="hint">For example: bff, agent. Leave it empty to rebuild every app node.</div>
+</div>
+${renderPreflight(input.preflight)}
+<div class="actions">
+  <button class="primary" type="button" data-act="beginRebuild">Start</button>
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // running
 // ---------------------------------------------------------------------------
 
@@ -245,7 +299,7 @@ ${renderPreflight(input.preflight)}
  * is what the operator asked for, and a heading that said "Installing" over a
  * deployment to another tag would describe a reinstall of their machine.
  */
-export type RunMode = "install" | "repair" | "deploy";
+export type RunMode = "install" | "repair" | "deploy" | "rebuild";
 
 export interface RunningScreenInput {
   steps: readonly StepProgress[];
@@ -258,6 +312,7 @@ const RUN_HEADING: Readonly<Record<RunMode, string>> = {
   install: "Installing a local cluster",
   repair: "Repairing the local cluster",
   deploy: "Deploying to the local cluster",
+  rebuild: "Rebuilding the local cluster from its checkout",
 };
 
 const RUN_LEDE: Readonly<Record<RunMode, string>> = {
@@ -268,6 +323,11 @@ const RUN_LEDE: Readonly<Record<RunMode, string>> = {
   // reconcile have work to do when nothing but the tag has changed.
   deploy:
     "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs.",
+  // NOT the verify-then-skip sentence, because a rebuild does not: it is one
+  // step that always does its work. What it needs to say instead is the SHAPE
+  // of that work, since it is a single progress row that takes minutes.
+  rebuild:
+    "Build, import, point the cluster at the images, restart. Each step reports as it goes.",
 };
 
 /**

@@ -179,6 +179,23 @@ test("the training lens offers the four actions, and each one is contributed AND
     assert.equal(palette.get(id), "false", `${id} must be hidden from the command palette`);
   }
 
+  // The `edited` lens's action is the same three-halves claim, and it sits HERE
+  // rather than in the loop above because it differs on the third (memql#4246).
+  // It takes no {uri, name} payload -- it acts on the local cluster, which a
+  // machine always has exactly one of -- so it is a palette entry an operator
+  // can reach without a lens, gated on workspace trust like the rest of the
+  // Deployments surface. The constant is COMMAND_REBUILD, defined beside the
+  // training ids because the lens that posts it is a training lens.
+  assert.ok(
+    declared.has("memql.deployments.rebuildFromCheckout"),
+    "memql.deployments.rebuildFromCheckout is not contributed",
+  );
+  assert.ok(
+    activation?.text.includes("registerCommand(COMMAND_REBUILD") === true,
+    "memql.deployments.rebuildFromCheckout is contributed but never registered in extension.ts",
+  );
+  assert.equal(palette.get("memql.deployments.rebuildFromCheckout"), "isWorkspaceTrusted");
+
   // The fifth is the status bar's click-through (design §4). It IS in the
   // palette, and the difference is exactly why it can be: it navigates and
   // submits nothing, and it takes no argument that could be missing.

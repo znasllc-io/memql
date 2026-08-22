@@ -185,7 +185,19 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-const RUN_KINDS = new Set<string>(["install", "upgrade", "repair", "uninstall", "rollout"]);
+// The parse allowlist, and it is separate from `RunKind` on purpose -- an
+// unrecognised kind reads back as `install` rather than refusing the record. So
+// a kind this extension WRITES and cannot READ is silently reclassified: a
+// rebuild run (memql#4246) would be filed under "I installed a cluster", in the
+// one list an operator scans to answer which of the two happened.
+const RUN_KINDS = new Set<string>([
+  "install",
+  "upgrade",
+  "repair",
+  "uninstall",
+  "rebuild",
+  "rollout",
+]);
 const RUN_STATUSES = new Set<string>([
   "running",
   "succeeded",

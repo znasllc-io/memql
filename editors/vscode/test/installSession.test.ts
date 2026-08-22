@@ -25,6 +25,7 @@ import {
   graphDocumentPath,
   loadGraph,
   loadGraphFile,
+  rebuildGraphPath,
   type Graph,
   type Step,
 } from "../src/install/graph.js";
@@ -33,7 +34,9 @@ import {
   installPlan,
   installSessionOptions,
   previewUninstall,
+  rebuildPlan,
   runInstall,
+  runRebuild,
   runUninstall,
   type SessionOptions,
 } from "../src/install/session.js";
@@ -243,6 +246,107 @@ test("runUninstall removes what the receipt recorded", async () => {
     report.outcomes.map((o) => o.status),
     ["ok", "ok"],
   );
+});
+
+// -----------------------------------------------------------------------------
+// rebuild from checkout (memql#4246)
+// -----------------------------------------------------------------------------
+
+/** A runner whose envelope satisfies rebuild.json's own verify predicate. */
+function rebuildRunner(): { run: RunScript; seen: Record<string, string>[] } {
+  const seen: Record<string, string>[] = [];
+  const run: RunScript = async ({ params }) => {
+    seen.push(params);
+    return {
+      argv: [],
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      envelope: {
+        ok: true,
+        capability: "k3d.dev",
+        changed: true,
+        result: { imageSource: "checkout", commit: "abc1234def", nodes: "bff agent", dirtyCount: 2 },
+        error: null,
+      },
+    };
+  };
+  return { run, seen };
+}
+
+test("the rebuild plan names the checkout, the Application and the nodes", () => {
+  const plan = rebuildPlan(
+    options({ stackDir: "/home/me/.memql/src", appName: "memql-local", nodes: "bff,agent" }),
+  );
+  const step: Step = {
+    id: "rebuildFromCheckout",
+    script: "k3d.dev",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "resultEquals", field: "result.imageSource", value: "checkout" },
+  };
+  assert.deepEqual(plan(step), {
+    action: "run",
+    params: {
+      "repo-root": "/home/me/.memql/src",
+      "app-name": "memql-local",
+      node: "bff,agent",
+    },
+  });
+
+  // AN EMPTY NODE LIST IS NOT A FLAG. `present()` drops it, so the script keeps
+  // its own default -- every app node -- rather than being handed `--node=`,
+  // which it refuses as an unknown node type (exit 2).
+  const all = rebuildPlan(options({ stackDir: "/src", nodes: "" }))(step);
+  assert.equal(all.action, "run");
+  if (all.action !== "run") return;
+  assert.equal("node" in all.params, false);
+  assert.equal("app-name" in all.params, false);
+
+  // Anything that is not the rebuild step is skipped rather than run with a
+  // rebuild's params: this plan is the one-step graph's, and a caller who
+  // handed it another document must not get a k3d.dev invocation out of it.
+  assert.equal(plan({ ...step, id: "clusterUp" }).action, "skip");
+});
+
+test("runRebuild runs the shipped one-step graph, under its pinned image-source", async () => {
+  // The REAL document, loaded from the path rebuildGraphPath composes -- so a
+  // graph that moved, or a step id that was renamed, fails here rather than at
+  // the first operator who clicks Rebuild.
+  const { run, seen } = rebuildRunner();
+  const report = await runRebuild(
+    options({ root: REPO_ROOT, stackDir: "/home/me/.memql/src", nodes: "bff" }),
+    { run },
+  );
+
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.outcomes.map((o) => `${o.id}:${o.status}`), ["rebuildFromCheckout:ok"]);
+  assert.equal(seen.length, 1);
+  // The graph pins the lane and the plan supplies the run inputs. The pin WINS
+  // by construction (executor.ts merges graph params last): what the graph
+  // states is policy, and a caller does not get to rebuild "released" images
+  // through the button labelled Rebuild from checkout.
+  assert.deepEqual(seen[0], {
+    "image-source": "checkout",
+    "repo-root": "/home/me/.memql/src",
+    node: "bff",
+  });
+});
+
+test("the rebuild graph document is where rebuildGraphPath says it is", async () => {
+  const doc = await loadGraphFile(rebuildGraphPath(REPO_ROOT));
+  // `kind: "install"` deliberately: loadGraph's kinds are install|uninstall, and
+  // a rebuild is a forward-running graph. A third kind would have bought a
+  // parallel validation path for one document.
+  assert.equal(doc.kind, "install");
+  assert.deepEqual(doc.steps.map((s) => s.id), ["rebuildFromCheckout"]);
+  assert.equal(doc.steps[0]?.script, "k3d.dev");
+  assert.equal(doc.steps[0]?.params?.["image-source"], "checkout");
 });
 
 // -----------------------------------------------------------------------------

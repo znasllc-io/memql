@@ -66,6 +66,52 @@ test("uninstall is offered only where there is something to remove", () => {
   assert.equal(offersAction(local("installed-unreachable"), "uninstall"), true);
 });
 
+// -----------------------------------------------------------------------------
+// rebuild from checkout (memql#4246)
+// -----------------------------------------------------------------------------
+
+/** An installed local cluster whose install recorded where it cloned the code. */
+function withCheckout(presence: Instance["presence"]): Instance {
+  return { ...local(presence), checkout: "/home/me/.memql/src" };
+}
+
+test("an installed cluster with a checkout is offered a rebuild, in both orders", () => {
+  // It sits after Repair rather than beside Create deployment: an operator on
+  // this row is choosing between "move to a release" and "run my own code", and
+  // the second is the specialised one.
+  assert.deepEqual(
+    instanceActions(withCheckout("installed-healthy")).map((a) => a.id),
+    ["createDeployment", "repair", "rebuildFromCheckout", "uninstall"],
+  );
+  // The unreachable ordering still leads with repair, and the rebuild keeps its
+  // place relative to the other three.
+  assert.deepEqual(
+    instanceActions(withCheckout("installed-unreachable")).map((a) => a.id),
+    ["repair", "createDeployment", "rebuildFromCheckout", "uninstall"],
+  );
+});
+
+test("a rebuild reaches the rebuild graph and nothing else", () => {
+  const rebuild = instanceActions(withCheckout("installed-healthy")).find(
+    (a) => a.id === "rebuildFromCheckout",
+  );
+  // Named for the machinery, like every other flow: a rebuild that routed into
+  // `installGraph` would reinstall a working machine.
+  assert.equal(rebuild?.flow, "rebuildGraph");
+  assert.equal(rebuild?.tier, undefined);
+});
+
+test("no recorded checkout means no rebuild -- there is nothing to build from", () => {
+  // `local()` builds from a null receipt, so `checkout` is absent: a machine
+  // registered by hand, or an install that never reached the clone step. An
+  // offered button whose only outcome is a refusal teaches the wrong thing.
+  assert.equal(offersAction(local("installed-healthy"), "rebuildFromCheckout"), false);
+  assert.equal(offersAction(local("installed-unreachable"), "rebuildFromCheckout"), false);
+  // And never where nothing is installed, for the reason install is never
+  // offered over a cluster that exists: there is no cluster to roll onto them.
+  assert.equal(offersAction({ ...local("absent"), checkout: "/src" }, "rebuildFromCheckout"), false);
+});
+
 test("no local action carries a cluster role", () => {
   for (const presence of ["absent", "installed-healthy", "installed-unreachable"] as const) {
     for (const action of instanceActions(local(presence))) {
