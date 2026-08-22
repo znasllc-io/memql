@@ -47,7 +47,7 @@ func newTestServiceWithEngine(t *testing.T, exec Executor, audit identity.AuditL
 	svc, err := NewService(Options{
 		Logger:   quietLogger(),
 		Audit:    audit,
-		RepoRoot: t.TempDir(),
+		RepoRoot: repoRootWithOverlay(t),
 		Executor: exec,
 		Engine:   eng,
 	})

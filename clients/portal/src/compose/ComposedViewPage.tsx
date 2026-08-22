@@ -7,7 +7,7 @@ import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton } from "../ui";
+import { Container, EmptyState, PageHeader, Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
 import { ArrangementBands } from "./ArrangementBands";
 import { PopulationMeta, SectionHeader } from "./ComposeLayout";
@@ -41,13 +41,12 @@ export function ComposedViewPage(): ReactNode {
   if (loading) return <Skeleton variant="rows" rows={4} />;
   if (missing || view === null) {
     return (
-      <section className="mx-auto max-w-2xl">
-        <h1 className="text-xl font-semibold tracking-tight">No such view</h1>
-        <p className="mt-2 text-sm text-muted">
-          You have no saved view with that id. Composed views are owned rows, so a
-          link to somebody else&rsquo;s view will land here too.
-        </p>
-      </section>
+      <Container>
+        <section className="flex flex-col gap-6">
+          <PageHeader title="No such view" />
+          <EmptyState statement="You have no saved view with that id. Composed views are owned rows, so a link to somebody else's view lands here too." />
+        </section>
+      </Container>
     );
   }
 

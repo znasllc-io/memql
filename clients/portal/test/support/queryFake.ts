@@ -41,5 +41,22 @@ export function asQueryClient<T extends object>(stub: T): QueryClient & T {
       };
     };
   }
+  // The NAV RAIL reads composed views now (memql#4264), so every test that
+  // renders the shell makes this call whether or not it is about saved views.
+  // Left to the prototype it would dispatch into the test's own executeNamed,
+  // and a fake that answers every call with the same rows would fill the rail's
+  // Custom section with them -- duplicating that test's fixture text into the
+  // chrome and breaking assertions that have nothing to do with the composer.
+  //
+  // So the default is an EMPTY list. A test about saved views provides its own.
+  if (typeof s.composedViews !== "function") {
+    s.composedViews = async () => ({
+      rows: () => [],
+      rawNodes: () => [],
+      single: () => null,
+      meta: () => null,
+    });
+  }
+
   return Object.setPrototypeOf(stub, QueryClient.prototype) as QueryClient & T;
 }

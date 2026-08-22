@@ -1,7 +1,12 @@
-// The console home (memql#4182): / renders the landing surface (the old
-// /concepts redirect is gone), tiles skeleton-load and settle into honest
-// counts (a full page renders with a trailing plus), and the audit tile is
+// The console (memql#4182, memql#4263): / renders the landing surface (the old
+// /concepts redirect is gone), tiles settle into EXACT counts from the engine's
+// `count` directive rather than the length of a page, and the audit tile is
 // LIVE -- a CDC event re-reads it without any poll.
+//
+// The fake below answers two shapes per tile because the surface makes two
+// reads: `count(concept==X)` for the number, and a bounded page only for the
+// tiles that list recent rows underneath. That split is the fix -- counting a
+// page capped every number at the page size and rendered "100+" forever.
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
@@ -42,6 +47,21 @@ describe("the console home", () => {
         clusterRole: "reader",
       })),
       executeNamed: vi.fn(async (_name: string, call: string) => {
+        // The count directive: answered with the aggregate envelope, never
+        // with rows. 137 is deliberately past any page size -- a surface that
+        // went back to counting a page would render "100+" and fail here.
+        if (call.startsWith("count(")) {
+          const total = call.includes("v1:identity:auditEvent")
+            ? auditCount
+            : call.includes("v1:identity:user")
+              ? 137
+              : 0;
+          return {
+            rawNodes: () => [],
+            single: () => ({ count: total }),
+            meta: () => ({ count: total }),
+          };
+        }
         let rows: unknown[] = [];
         if (call.includes("v1:identity:auditEvent")) {
           rows = Array.from({ length: auditCount }, (_, i) => auditRow(i));
@@ -84,9 +104,18 @@ describe("the console home", () => {
       </MemoryRouter>,
     );
 
-    // The home renders in place of the old redirect, with the tile labels.
+    // The console renders in place of the old redirect, with a tile per
+    // population the rail offers -- customers included, which was missing.
     await waitFor(() => expect(screen.getByText("audit events")).toBeTruthy());
+    for (const label of ["people", "agents", "customers", "sites", "deployments"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
     await waitFor(() => expect(screen.getByText("audit_action_0")).toBeTruthy());
+
+    // The number is the engine's count, not the length of a page: 137 is past
+    // any page size this surface ever fetched.
+    await waitFor(() => expect(screen.getByText("137")).toBeTruthy());
+    expect(screen.queryByText("137+")).toBeNull();
 
     // A CDC arrival on the audit concept re-reads the tile: live, no poll.
     auditCount = 2;

@@ -5,6 +5,8 @@ import { ClusterBadge } from "../components/ClusterBadge";
 import { RailMark } from "../components/RailMark";
 import { SidebarProfile } from "../components/SidebarProfile";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { composedViewPath } from "../compose/urls";
+import { useSavedViews } from "../compose/useSavedViews";
 import { CONCEPTS_ROOT } from "../concepts/urls";
 import {
   Bot,
@@ -13,9 +15,11 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Globe,
-  House,
+  Inbox,
+  Gauge,
   LayoutGrid,
   Plug,
+  Plus,
   Rocket,
   ScrollText,
   Shield,
@@ -66,39 +70,69 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
   audit: ScrollText,
 };
 
-const OPERATE: readonly NavItem[] = VIEWS.filter((view) => view.group === "operate").map(
-  (view) => ({
-    to: viewPath(view.id),
-    label: view.label,
-    icon: VIEW_ICONS[view.id] ?? Boxes,
-  }),
-);
+// ============================================================================
+// THE RAIL (memql#4264)
+// ============================================================================
+//
+// Three groups, and the names are the decision:
+//
+//   VIEWS    the DATA in this cluster, as screens. The five that ship with the
+//            product, then the ones this operator composed.
+//   BUILD    the substrate those screens are made of -- the concept registry
+//            and the modules that declare concepts.
+//   CLUSTER  the cluster ITSELF rather than the data in it.
+//
+// What this replaced was Operate / Explore / Administer, and it was wrong in a
+// specific way: "Administer" is where a person goes looking to ADD someone, so
+// People appeared twice -- once as the population under Operate and again as
+// the change surface under Administer -- with the "By role" band rendering in
+// both, and a third time on the admin overview. Two doors to one thing is a
+// question an operator has to answer before they can work.
+//
+// "Views" is also the composer's own word (it saves v1:portalviews:view rows
+// and calls them saved views), so the rail, the composer and the concept now
+// agree on one noun.
 
-// Explore is the SUBSTRATE: the whole concept registry, plus the composer that
-// turns any concept in it into a view without code.
-const EXPLORE: readonly NavItem[] = [
-  { to: CONCEPTS_ROOT, label: "Concepts", icon: Boxes },
-  { to: "/compose", label: "Compose", icon: LayoutGrid },
-];
+const PREDEFINED_VIEWS: readonly NavItem[] = VIEWS.filter(
+  (view) => view.group === "operate",
+).map((view) => ({
+  to: viewPath(view.id),
+  label: view.label,
+  icon: VIEW_ICONS[view.id] ?? Boxes,
+}));
 
-// Administer is the cluster ITSELF rather than the data in it. Kept apart
-// from Operate because an operator visits these occasionally and
-// deliberately, where Operate is where they live.
-const ADMINISTER: readonly NavItem[] = [
+// Build is the SUBSTRATE: the whole concept registry, plus the modules that
+// declare what is in it. Modules is owner/admin territory (memql#4191) --
+// below that access the item is HIDDEN rather than shown-and-refused, because
+// the engine refuses the reads anyway and the rail should not advertise a door
+// that will not open.
+const BUILD: readonly NavItem[] = [{ to: CONCEPTS_ROOT, label: "Concepts", icon: Boxes }];
+const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
+
+// Cluster is the machine, not its contents. The admin surfaces are listed
+// individually rather than behind an "Administration" entry with its own tab
+// strip: one level of nesting for five destinations bought nothing except a
+// landing page that duplicated the console.
+const CLUSTER: readonly NavItem[] = [
   { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/admin", label: "Administration", icon: Shield },
   { to: "/sites", label: "Sites", icon: Globe },
 ];
+// People is NOT here. It is one of the views, and the verbs an admin needs
+// live on the row detail there (memql#4264) -- which is what removed the
+// second door.
+const CLUSTER_ADMIN: readonly NavItem[] = [
+  { to: "/admin/tokens", label: "Sessions and tokens", icon: Inbox },
+  { to: "/admin/keys", label: "Signing keys", icon: Shield },
+  { to: "/admin/settings", label: "Settings", icon: Shield },
+];
 
-// Modules is owner/admin territory (memql#4191): below that access the item
-// is HIDDEN rather than shown-and-refused -- the engine refuses the reads
-// anyway; the rail just declines to advertise a door that will not open.
-const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
-const CLUSTER_OPS_ITEM: NavItem = { to: "/cluster-ops", label: "Cluster ops", icon: Rocket };
-
-// Home is the rail's first destination: the landing surface every group
-// hangs under (memql#4182). `end` matching keeps it inactive on deep routes.
-const HOME_ITEM: NavItem = { to: "/", label: "Home", icon: House };
+// The console is the rail's first destination: the landing surface every group
+// hangs under (memql#4182). It is called Console because that is what the page
+// it opens has always called itself -- the rail said "Home" and the heading
+// said "Console", and a rail that disagrees with its own destination is the
+// kind of small wrongness that makes a product feel unfinished (memql#4263).
+// `end` matching keeps it inactive on deep routes.
+const CONSOLE_ITEM: NavItem = { to: "/", label: "Console", icon: Gauge };
 
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
@@ -182,7 +216,22 @@ export function AppShell(): ReactNode {
   const [rail, setRail] = useState<"expanded" | "collapsed">(() => readStoredRail());
   const collapsed = rail === "collapsed";
   const { canAdminister } = useAdminAccess();
-  const administer = canAdminister ? [...ADMINISTER, MODULES_ITEM, CLUSTER_OPS_ITEM] : ADMINISTER;
+  const build = canAdminister ? [...BUILD, MODULES_ITEM] : BUILD;
+  const cluster = canAdminister ? [...CLUSTER, ...CLUSTER_ADMIN] : CLUSTER;
+
+  // The operator's own composed views, live: a view saved a moment ago is in
+  // the rail without a reload (useSavedViews subscribes). They are listed by
+  // NAME because that is what the person called them -- the composer stores a
+  // free-text name and this is where it earns its keep.
+  const saved = useSavedViews();
+  const custom: readonly NavItem[] = [
+    ...saved.views.map((view) => ({
+      to: composedViewPath(view.id),
+      label: view.name,
+      icon: LayoutGrid,
+    })),
+    { to: "/compose", label: "New view", icon: Plus },
+  ];
 
   function toggleRail(): void {
     const next = collapsed ? "expanded" : "collapsed";
@@ -192,7 +241,13 @@ export function AppShell(): ReactNode {
 
   return (
     <div className="flex h-full flex-col bg-bg text-fg">
-      <header className="flex h-12 items-center gap-4 border-b border-line bg-surface px-4">
+      {/* Named, because a page renders its own <header> too and "the chrome
+          header" should be addressable by what it IS rather than by which
+          words happen to be unique in the document today. */}
+      <header
+        aria-label="Cluster and session"
+        className="flex h-12 items-center gap-4 border-b border-line bg-surface px-4"
+      >
         <ClusterBadge />
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
@@ -242,10 +297,16 @@ export function AppShell(): ReactNode {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-            <NavGroup items={[HOME_ITEM]} collapsed={collapsed} end />
-            <NavGroup label="Operate" items={OPERATE} collapsed={collapsed} />
-            <NavGroup label="Explore" items={EXPLORE} collapsed={collapsed} />
-            <NavGroup label="Administer" items={administer} collapsed={collapsed} />
+            <NavGroup items={[CONSOLE_ITEM]} collapsed={collapsed} end />
+            <NavGroup label="Views" items={PREDEFINED_VIEWS} collapsed={collapsed} />
+            {/* The composer's own output, under the same caption as the views
+                that ship with the product -- because to the person reading the
+                rail they are the same kind of thing. "Custom" is the only word
+                distinguishing them, and the last entry is always the door to
+                making another one. */}
+            <NavGroup label="Custom" items={custom} collapsed={collapsed} />
+            <NavGroup label="Build" items={build} collapsed={collapsed} />
+            <NavGroup label="Cluster" items={cluster} collapsed={collapsed} />
           </div>
 
           <SidebarProfile collapsed={collapsed} />

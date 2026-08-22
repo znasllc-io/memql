@@ -313,7 +313,10 @@ func (s *Service) resolveInstallationProvider(ctx context.Context) (provider, so
 // digest: a repair changes no version, so an empty value is an unknown, not
 // a fault.
 func (s *Service) repairTargetVersion(ctx context.Context) (version, digest string) {
-	version, _, _ = s.currentVersion(ctx)
+	// Best-effort here: repair is about restoring what is deployed, and a node
+	// that cannot read an overlay can still repair. An unreadable version is
+	// left empty rather than failing the repair over metadata.
+	version, _, _, _ = s.currentVersion(ctx)
 	if version == "" {
 		version = s.clusterRowField(ctx, "version")
 	}

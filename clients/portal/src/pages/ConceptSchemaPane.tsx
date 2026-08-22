@@ -39,7 +39,7 @@ export function ConceptSchemaPane(): ReactNode {
   const cardDeclared = concept.displayCard !== undefined;
 
   return (
-    <div className="flex max-w-4xl flex-col gap-6 pb-6">
+    <div className="flex flex-col gap-6 pb-6">
       {/* The registry metadata -- id, domain, entity, version, node type,
           description -- is NOT repeated here. ConceptPage's header already
           carries all of it, on every tab; a second copy on one tab is noise

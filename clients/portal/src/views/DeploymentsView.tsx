@@ -19,6 +19,7 @@ import {
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
+import { overlayAbsenceOf, overlayAbsenceStatement } from "../deploy/noOverlay";
 import { ErrorMessage } from "../components/StatusMessage";
 import { DataText } from "../ui";
 import { ViewElement } from "./ViewElement";
@@ -59,6 +60,8 @@ export function DeploymentsView({
 
   const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId, busy } =
     console_;
+  // Which of the two "no overlay" situations this node is in, "" when neither.
+  const overlayAbsence = overlayAbsenceOf(error);
   const selection = selectedRowId ? { selectedRowId } : {};
   const legs = gateLegRows(status);
   const images = componentRows(status);
@@ -94,7 +97,16 @@ export function DeploymentsView({
             mirror -- a tinted panel with full-contrast text, never coloured
             small text: --memql-ok on the page ground is about 3.4:1 in light
             mode, under the floor for 13px. */}
-        {error ? (
+        {/* A PRECONDITION is not a fault: a local cluster has nothing to
+            deploy, and a node with no checkout cannot read what is pinned.
+            Both are true statements about how this installation runs, so they
+            are stated plainly rather than rendered as a failed read
+            (memql#4265). */}
+        {overlayAbsence !== "" ? (
+          <p className="mt-3 rounded border border-line bg-raised px-3 py-2 text-sm text-muted">
+            {overlayAbsenceStatement(overlayAbsence)}
+          </p>
+        ) : error ? (
           <div className="mt-3">
             <ErrorMessage>Could not read the deployment: {error}</ErrorMessage>
           </div>
@@ -117,7 +129,28 @@ export function DeploymentsView({
         ) : null}
       </Band>
 
-      {permissions.canShip || permissions.canRollBack ? (
+      {/* The owner-only operations surface, reached from HERE rather than from
+          its own rail entry (memql#4264). Deployments is the one door in the
+          rail; repair and the full deployment timeline live one click deeper,
+          where an owner goes deliberately.
+
+          The remaining half of that consolidation -- folding the operations
+          verbs into this view's Ship band so there is one surface rather than
+          two -- is tracked on memql#4264. Linking is what removes the DUPLICATE
+          today without rushing a merge of two deploy consoles. */}
+      {permissions.canRollBack ? (
+        <p className="text-sm text-muted">
+          <Link to="/cluster-ops" className="text-accent hover:underline">
+            Operations
+          </Link>{" "}
+          carries repair and the full deployment timeline.
+        </p>
+      ) : null}
+
+      {/* Ship is hidden, not disabled, when the overlay cannot be read: every
+          one of these actions reads the same missing file, so offering them
+          would be offering a refusal. */}
+      {overlayAbsence === "" && (permissions.canShip || permissions.canRollBack) ? (
         <Band
           title="Ship"
           meta={
@@ -307,6 +340,9 @@ function ReleaseReading({
     return <p className="text-sm text-muted">Reading the deployment…</p>;
   }
   if (version === "") {
+    // Only when the overlay WAS read and promotes nothing. When it could not be
+    // read at all the band is not rendered, because "nothing is pinned" would
+    // be a claim about a file this node never opened.
     return <p className="text-sm text-subtle">Nothing is pinned in the overlay.</p>;
   }
   return (
