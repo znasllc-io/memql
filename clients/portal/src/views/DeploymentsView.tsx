@@ -16,6 +16,7 @@ import {
   gateLegRows,
   rolloutRows,
 } from "../deploy/rows";
+import { DeploymentOps } from "../deploy/DeploymentOps";
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
@@ -23,7 +24,7 @@ import { overlayAbsenceOf, overlayAbsenceStatement } from "../deploy/noOverlay";
 import { ErrorMessage } from "../components/StatusMessage";
 import { DataText } from "../ui";
 import { ViewElement } from "./ViewElement";
-import { Band, MetaButton, type ViewProps } from "./ViewLayout";
+import { Band, type ViewProps } from "./ViewLayout";
 
 // Deployments: what is running, what shipped before it, and whether it is
 // safe to ship again.
@@ -58,11 +59,27 @@ export function DeploymentsView({
 }: ViewProps): ReactNode {
   const console_ = useDeployConsole();
 
-  const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId, busy } =
+  const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId } =
     console_;
   // Which of the two "no overlay" situations this node is in, "" when neither.
   const overlayAbsence = overlayAbsenceOf(error);
   const selection = selectedRowId ? { selectedRowId } : {};
+
+  // Whether the SELECTED deployment is a legitimate rollback target
+  // (memql#4264). The retired cluster-ops timeline enforced this per row --
+  // `entry.status === "succeeded" && entry.kind !== "repair" && !isCurrent` --
+  // and the rule has to survive the move, because it is a safety property
+  // rather than a cosmetic one:
+  //
+  //   a REPAIR record pins no version. It re-converges the cluster onto what is
+  //   already committed, so "roll back to this repair" names nothing to roll to.
+  //   a record that did not SUCCEED never put that version anywhere.
+  //   the CURRENT deployment is where the cluster already is.
+  //
+  // Computed here rather than inside DeploymentOps because the view is what
+  // holds the rows.
+  const selectedRow = rows.find((row) => row.id === selectedRowId);
+  const canRollBackToSelection = isRollbackTarget(selectedRow, status?.version ?? "");
   const legs = gateLegRows(status);
   const images = componentRows(status);
   const rollouts = rolloutRows(status);
@@ -125,32 +142,33 @@ export function DeploymentsView({
             className="mt-3 rounded border border-ok bg-ok-subtle px-3 py-2 text-sm text-fg"
           >
             {actionMessage}
+            {/* The audit id on SUCCESS too, not only on a refusal
+                (memql#4264). The retired cluster-ops page showed both; this
+                band showed it only when the action was blocked. An operator
+                reconciling "what did I just do to this cluster" against the
+                audit trail needs the id of the thing that HAPPENED at least as
+                much as the id of the thing that did not. */}
+            {actionAuditEventId === "" ? null : (
+              <>
+                {" "}
+                (audit <DataText kind="id">{actionAuditEventId}</DataText>)
+              </>
+            )}
           </p>
         ) : null}
       </Band>
 
-      {/* The owner-only operations surface, reached from HERE rather than from
-          its own rail entry (memql#4264). Deployments is the one door in the
-          rail; repair and the full deployment timeline live one click deeper,
-          where an owner goes deliberately.
-
-          The remaining half of that consolidation -- folding the operations
-          verbs into this view's Ship band so there is one surface rather than
-          two -- is tracked on memql#4264. Linking is what removes the DUPLICATE
-          today without rushing a merge of two deploy consoles. */}
-      {permissions.canRollBack ? (
-        <p className="text-sm text-muted">
-          <Link to="/cluster-ops" className="text-accent hover:underline">
-            Operations
-          </Link>{" "}
-          carries repair and the full deployment timeline.
-        </p>
-      ) : null}
-
       {/* Ship is hidden, not disabled, when the overlay cannot be read: every
           one of these actions reads the same missing file, so offering them
-          would be offering a refusal. */}
-      {overlayAbsence === "" && (permissions.canShip || permissions.canRollBack) ? (
+          would be offering a refusal.
+
+          This IS the operations surface now (memql#4264). There used to be a
+          second one at /cluster-ops with the same four verbs, and the two
+          disagreed about how dangerous they are: these buttons fired deploy
+          and roll back on a single click, while that page confirmed every one
+          of them. An operator's protection depended on which door they had
+          walked through. The careful set won; DeploymentOps carries it. */}
+      {overlayAbsence === "" && (permissions.canShip || permissions.canRollBack || permissions.canRepair) ? (
         <Band
           title="Ship"
           meta={
@@ -159,33 +177,11 @@ export function DeploymentsView({
               : "Select a deployment below to deploy or roll back to it"
           }
         >
-          <div className="flex flex-wrap items-center gap-2">
-            {permissions.canShip ? (
-              <>
-                <MetaButton onClick={() => console_.cut("patch")} disabled={busy}>
-                  Cut a patch version
-                </MetaButton>
-                <MetaButton onClick={() => console_.cut("minor")} disabled={busy}>
-                  Cut a minor version
-                </MetaButton>
-                <MetaButton
-                  onClick={() => console_.ship(selectedRowId)}
-                  disabled={busy || selectedRowId === ""}
-                >
-                  Deploy the selected version
-                </MetaButton>
-              </>
-            ) : null}
-            {permissions.canRollBack ? (
-              <MetaButton
-                tone="danger"
-                onClick={() => console_.rollBack(selectedRowId)}
-                disabled={busy || selectedRowId === ""}
-              >
-                Roll back to the selected version
-              </MetaButton>
-            ) : null}
-          </div>
+          <DeploymentOps
+            console_={console_}
+            selectedRowId={selectedRowId}
+            canRollBackToSelection={canRollBackToSelection}
+          />
         </Band>
       ) : null}
 
@@ -363,4 +359,32 @@ function ReleaseReading({
       {health ? <span className="text-muted">{health}</span> : null}
     </p>
   );
+}
+
+// isRollbackTarget answers "may the cluster be rolled back to this record".
+//
+// A repair is a deployment record too -- same concept, same history -- marked
+// by the engine with a "repair:" note prefix. That prefix is the ONLY thing
+// distinguishing the two; it is defined once in
+// component/deploycontrol/repair.go and mirrored in
+// src/clusterops/useDeploymentTimeline.ts, which is where this constant comes
+// from.
+const REPAIR_NOTE_PREFIX = "repair:";
+
+function isRollbackTarget(row: Row | undefined, runningVersion: string): boolean {
+  if (row === undefined) return false;
+  const field = (key: string): string => {
+    const v = (row as Record<string, unknown>)[key];
+    return typeof v === "string" ? v : "";
+  };
+  if (field("status") !== "succeeded") return false;
+  if (field("notes").trimStart().startsWith(REPAIR_NOTE_PREFIX)) return false;
+  // Rolling back to the version already running is a no-op that reads as a
+  // deploy. The old timeline expressed this as `!isCurrent` against its own
+  // newest entry; comparing against what the cluster REPORTS it is running is
+  // the same rule with a better source.
+  const version = field("engineVersion") || field("version");
+  if (version !== "" && runningVersion !== "" && version === runningVersion) return false;
+  const id = typeof row.id === "string" ? row.id : "";
+  return id !== "";
 }

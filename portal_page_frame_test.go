@@ -77,6 +77,9 @@ var pageFrameExemptions = map[string]string{
 // Roots that must render inside Container. Not every page -- panes and frames
 // compose into a page that already has one -- but every ROUTED page body.
 var mustUseContainer = []string{
+	// ClusterOpsPage retired in memql#4264: the Deployments view carries its
+	// four verbs now, with the confirmations that page had and the view's Ship
+	// band did not.
 	"clients/portal/src/home/HomePage.tsx",
 	"clients/portal/src/pages/ConceptsPage.tsx",
 	"clients/portal/src/integrations/IntegrationsPage.tsx",
@@ -86,7 +89,6 @@ var mustUseContainer = []string{
 	"clients/portal/src/sites/SiteDetailPage.tsx",
 	"clients/portal/src/modules/ModulesPage.tsx",
 	"clients/portal/src/modules/ModuleDetailPage.tsx",
-	"clients/portal/src/clusterops/ClusterOpsPage.tsx",
 }
 
 func TestPortalPagesCarryNoWidthOfTheirOwn(t *testing.T) {

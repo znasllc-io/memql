@@ -358,6 +358,24 @@ The audit trail and deployments are **not** here either: they are populations,
 and they live in the predefined views at `/views/audit` and
 `/views/deployments`.
 
+### Deployments, and the operations on them
+
+One surface (memql#4264). There used to be two — this view's Ship band and a
+separate Cluster ops page — and they did not merely duplicate each other, they
+**disagreed about how dangerous the actions are**: the view fired deploy and
+roll back on a single click, while the page confirmed every one and made repair
+type-to-confirm. An operator's protection depended on which door they had
+walked through, and the rail offered both.
+
+The careful set won. Every verb states what will happen before it happens, and
+the progress afterwards is the deployment RECORD's status — the History band is
+graph state re-read live, not a client-side guess. `/cluster-ops` redirects here.
+
+A **repair record is never a rollback target**: a repair pins no version (it
+re-converges the cluster onto what is already committed), so "roll back to this
+repair" names nothing to roll to. Nor is a record that did not succeed, nor the
+version already running.
+
 ### Inviting somebody
 
 An owner or admin invites a person from the **People view's** header, not from a

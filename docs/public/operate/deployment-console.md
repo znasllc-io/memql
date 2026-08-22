@@ -370,10 +370,13 @@ Notes that hold on both surfaces:
 on the Overview panel (deploy / promote), next to the version
 (rollback), and in the Rollouts table (per-rollout promote / abort).
 Destructive actions render an inline type-to-confirm field.
-`/cluster-ops` is the operations end of the same surface: cut, deploy and
-roll back from the deployment timeline, and the Repair control
-(memql#4209), which is offered to the cluster owner only and armed by
-typing `repair`.
+There is ONE surface (memql#4264). `/cluster-ops` was the operations end
+of the same thing and redirects here; its four verbs -- cut, deploy, roll
+back and Repair (memql#4209, cluster-owner only and armed by typing
+`repair`) -- moved onto this view's Ship band, along with the
+confirmations that page had and this band did not. A repair record is
+never offered as a rollback target: a repair pins no version, so there is
+nothing to roll to.
 
 The portal's own bundle is served by the edge (site #1, memql#3711), but
 the RPC itself still crosses to a bff -- through the edge's `/_memql/*`

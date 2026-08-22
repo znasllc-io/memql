@@ -95,6 +95,15 @@ MemQL/
 │   └── _reference/    Per-construct authoring reference skeletons
 │                      (_concept / _shape / _spec / _trait / _agent)
 ├── integrations/      External services + DSL-callable capabilities (Go)
+├── brand/             The product's visual identity, as plain CSS custom
+│                   properties: tokens, the Tailwind v4 @theme bridge, the
+│                   three self-hosted faces, the mark and the favicon. Imported
+│                   by BOTH clients/portal (Vite) and component/identity/web
+│                   (the standalone Tailwind CLI, embedded in the Go binary) --
+│                   they share no package manager, and CSS variables are the
+│                   one format both consume. Never copied: brand_shared_source_test.go
+│                   fails the build on a --memql-* token, an @theme block or an
+│                   @font-face defined outside it (memql#4266)
 ├── clients/           Surfaces built ON the platform -- the mirror of
 │   │                  integrations/ (which points outward). One directory per
 │   │                  client; the engine carries exactly one, which is the
