@@ -602,6 +602,42 @@ connection page answers "what does this editor dial, and as whom".
       **preserved**, is left on the machine, and appears as `preserved` in the
       run record afterwards
 
+### 5cc. Rebuild from checkout on a wizard-installed cluster (memql#4246)
+
+Needs a local cluster the wizard installed, so there is a recorded checkout and
+the cluster is running RELEASED images. A rebuild takes minutes and changes
+which images the cluster runs -- do not run it against a parity cluster
+somebody else is using.
+
+- [ ] **Rebuild from checkout** appears on the installed local instance and on
+      no other row; a machine with no recorded checkout does not offer it
+- [ ] The preflight shows all six lines -- Docker, Checkout, Git state, Nodes,
+      Image source, Duration -- and each one names a fact you can check
+- [ ] **Image source** is a NOTE on a released-lane cluster and says it switches
+      to checkout-built images; run it a second time and the same line is quiet
+- [ ] Editing something under `deploy/` in the checkout turns **Git state** into
+      a note saying manifests do not ride a rebuild
+- [ ] Stop Docker: **Docker** becomes a note naming the fix, before anything runs
+- [ ] Leaving the node field empty rebuilds every app node; typing `bff, agent`
+      rebuilds those two, and the toast afterwards names what was actually built
+- [ ] The run reports through the same progress rows an install does, and the
+      heading says *Rebuilding the local cluster from its checkout*
+- [ ] Afterwards the instance row reads `checkout <commit>` (with the
+      uncommitted count when there is one) instead of a version, and the
+      Connection page's **image source** says `checkout (built locally)`
+- [ ] A construct you edited before the rebuild stops reading `edited` without
+      touching the file -- the catalog refreshed
+- [ ] Now open **Repair**: its preflight carries an **Image source** note saying
+      the run returns the cluster to released images. The same sentence appears
+      in the confirmation for **Upgrade to \<version\>**
+- [ ] A failed rebuild lands on the failure screen with the step's own reason,
+      and **Retry** re-runs the REBUILD -- not a deployment. There is no
+      *Switch to guided* control: guided is a wizard concept, and a rebuild is
+      one unprivileged step
+- [ ] **Create deployment** on a checkout-mode cluster states, above its Start
+      button, that the move returns the cluster to released images -- the tag
+      path crosses the lane too, and asks for no confirmation
+
 ### 5d. A remote instance
 
 - [ ] Its runs read from the cluster, newest first, and their items are labelled

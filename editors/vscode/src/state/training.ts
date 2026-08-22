@@ -32,12 +32,16 @@ import type { LspRange } from "../constructs/runnable.js";
 // -----------------------------------------------------------------------------
 
 /**
- * The six states, from design §2 plus memql#3928.
+ * The seven states, from design §2 plus memql#3928.
  *
  * `seeded` is distinct from `trained` and the distinction is the point: a
  * seeded construct was loaded from disk at boot, so the cluster HAS it but it
  * was never promoted -- and it cannot be, short of a rollout. Collapsing the
  * two would offer a Demote on something there is nothing to demote.
+ *
+ * `edited` is seeded, and the buffer no longer matches what the cluster
+ * loaded. Not `drifted`: drift is defined against a promotion. A rollout
+ * applies it -- locally, Rebuild from checkout.
  *
  * `staged` is distinct from `trained` on the same kind of argument: it is
  * durable on the cluster and callable BY ITS AUTHOR ALONE, and it is the only
@@ -45,12 +49,20 @@ import type { LspRange } from "../constructs/runnable.js";
  * cluster runs something only one person can call; collapsing it into
  * `untrained` would deny that the cluster has it at all, and offer a Promote
  * that is really a Train.
+ *
+ * NO COMMENT WITH A COMMA INSIDE THIS ARRAY LITERAL. The acceptance gate
+ * (`TestTrainingWireNamesMatchTheExtension` in
+ * cmd/memql-lsp/training_acceptance_test.go) reads this array as TEXT and
+ * splits its bracket contents on `,` without stripping comments first, so a
+ * comma inside an in-array comment is indistinguishable to it from an element
+ * separator. Explanations for a state belong up here, in the doc comment.
  */
 export const TRAINING_STATES = [
   "untrained",
   "drifted",
   "trained",
   "seeded",
+  "edited",
   "staged",
   "unknown",
 ] as const;
@@ -153,14 +165,14 @@ function parsePosition(raw: unknown): { line: number; character: number } | unde
 // -----------------------------------------------------------------------------
 
 /**
- * What the gutter distinguishes. THREE, not five.
+ * What the gutter distinguishes. THREE, not seven.
  *
  * The gutter answers one question -- *does what I am looking at match what
- * runs?* -- and that question has three answers. `trained` and `seeded` are the
- * same answer to it (yes), and differ only in how the cluster came to have the
- * construct, which is a question about ACTIONS and belongs on the lens. Giving
- * them separate near-identical icons would spend the gutter's very limited
- * legibility on a distinction the gutter is not being asked about.
+ * runs?* -- and that question has three answers. `trained`, `seeded` and
+ * `staged` are the same answer to it (yes), and differ only in how the cluster
+ * came to have the construct, which is a question about ACTIONS and belongs on
+ * the lens. Giving them separate near-identical icons would spend the gutter's
+ * very limited legibility on a distinction the gutter is not being asked about.
  *
  * `unknown` is absent from this type on purpose: it has no mark at all.
  */
@@ -172,6 +184,11 @@ export function gutterMarkFor(state: TrainingState): GutterMark | undefined {
     case "untrained":
       return "untrained";
     case "drifted":
+      return "drifted";
+    // The gutter's one question is answered "no", and that is the drifted
+    // mark. HOW it gets applied -- rollout, not promote -- is the lens's
+    // business.
+    case "edited":
       return "drifted";
     case "trained":
     case "seeded":
@@ -211,6 +228,17 @@ export const COMMAND_DEMOTE = "memql.training.demote";
  * which act it means through its title.
  */
 export const COMMAND_STAGE = "memql.training.stage";
+/**
+ * Rebuild a LOCAL cluster from its checkout (memql#4244).
+ *
+ * NOT a training command, and it is named for the surface that owns it -- the
+ * Deployments view -- rather than for the lens that offers it. Promote, stage
+ * and demote submit ONE construct to a cluster; this rebuilds the cluster's
+ * images from the whole checkout, which is the only way a seeded construct's
+ * edit ever takes effect. A `memql.training.*` name would have implied it acts
+ * on the construct beside it.
+ */
+export const COMMAND_REBUILD = "memql.deployments.rebuildFromCheckout";
 
 export interface TrainingAction {
   title: string;
@@ -238,6 +266,17 @@ export interface TrainingLensOptions {
    * is the half this issue exists for.
    */
   offerActions?: boolean;
+  /**
+   * The selected cluster, when there is one.
+   *
+   * Only `edited` reads it, and it has to: a seeded construct's edit is applied
+   * by a REBUILD, and a rebuild is something only a local cluster has. Absent
+   * means no cluster is selected -- which is not "remote", so the wording stays
+   * the general one and no action is offered. Offering Rebuild against a
+   * cluster this editor cannot say is local is how a click reaches a command
+   * that has nothing to build.
+   */
+  cluster?: { name: string; local: boolean };
 }
 
 /**
@@ -253,14 +292,50 @@ export function trainingLensPlans(
   const out: TrainingLensPlan[] = [];
   for (const construct of constructs) {
     if (construct.state === "unknown") continue;
+    // `edited` is the one state answered from the CLUSTER as well as from the
+    // state, so it is routed past the two per-state tables rather than folded
+    // into them -- `detailFor` is also what the status bar's list renders, and
+    // that surface has no cluster to be told about.
+    const edited = construct.state === "edited";
     out.push({
       construct,
       label: construct.state,
-      detail: detailFor(construct.state),
-      actions: options.offerActions === true ? actionsFor(construct.state) : [],
+      detail: edited ? editedDetail(options.cluster) : detailFor(construct.state),
+      actions:
+        options.offerActions !== true
+          ? []
+          : edited
+            ? editedActions(options.cluster)
+            : actionsFor(construct.state),
     });
   }
   return out;
+}
+
+/**
+ * What `edited` says, which depends on the cluster and on nothing else.
+ *
+ * THE ONE STATE WHOSE SENTENCE IS NOT A PROPERTY OF THE CONSTRUCT. The other
+ * six describe what the cluster knows; this one describes what would APPLY the
+ * difference, and the answer differs by locality -- a rebuild here, a rollout
+ * there. Naming the cluster is what makes the remote sentence land: "seeded
+ * constructs change by rollout" is abstract until it says which cluster is
+ * going to need one.
+ */
+function editedDetail(cluster: TrainingLensOptions["cluster"]): string {
+  if (cluster === undefined) return detailFor("edited");
+  return cluster.local
+    ? `Your source differs from what ${cluster.name} loaded. Rebuild from checkout applies it.`
+    : `Your source differs from what ${cluster.name} runs -- seeded constructs change by rollout.`;
+}
+
+function editedActions(cluster: TrainingLensOptions["cluster"]): TrainingAction[] {
+  // A REMOTE cluster gets words and no button, deliberately: what applies the
+  // edit there is a rollout, which happens in a pipeline this editor has no
+  // hand in. A disabled control would suggest the editor could do it if only
+  // something were different.
+  if (cluster === undefined || !cluster.local) return [];
+  return [{ title: "Rebuild from checkout", command: COMMAND_REBUILD }];
 }
 
 /** The sentence behind the one-word label, for the states where it is not obvious. */
@@ -275,6 +350,8 @@ function detailFor(state: TrainingState): string {
     case "seeded":
       // The one state whose whole content is why there is nothing to do.
       return "Loaded from disk when the cluster booted, rather than promoted -- so there is nothing here to demote, and changing it needs a rollout.";
+    case "edited":
+      return "Loaded from disk when the cluster booted, and your source no longer matches what it loaded. Nothing here can be promoted -- a seeded construct changes by rollout.";
     case "staged":
       return "Staged on this cluster: persisted and replayed at boot, and callable by you and by nobody else. Train it to make it live for everyone.";
     case "unknown":
@@ -319,6 +396,14 @@ function actionsFor(state: TrainingState): TrainingAction[] {
         { title: "Train (make it live for everyone)", command: COMMAND_PROMOTE },
         { title: "Demote", command: COMMAND_DEMOTE },
       ];
+    case "edited":
+      // NOT ANSWERED HERE. `edited` is the one state whose actions depend on
+      // the cluster -- Rebuild from checkout on a local one, nothing on a
+      // remote one -- so `trainingLensPlans` routes it to `editedActions`
+      // before reaching this switch. The case stays, with nothing in it, so
+      // that a caller reaching this function directly gets the conservative
+      // answer rather than falling off a switch that is meant to be total.
+      return [];
     case "seeded":
     case "unknown":
       // NO ACTION, and rendered as the absence of one rather than as a disabled
@@ -346,11 +431,19 @@ export interface TrainingCounts {
   drifted: number;
   trained: number;
   seeded: number;
+  edited: number;
   staged: number;
 }
 
 export function countStates(constructs: readonly TrainingConstruct[]): TrainingCounts {
-  const counts: TrainingCounts = { untrained: 0, drifted: 0, trained: 0, seeded: 0, staged: 0 };
+  const counts: TrainingCounts = {
+    untrained: 0,
+    drifted: 0,
+    trained: 0,
+    seeded: 0,
+    edited: 0,
+    staged: 0,
+  };
   for (const c of constructs) {
     if (c.state !== "unknown") counts[c.state] += 1;
   }
@@ -360,11 +453,17 @@ export function countStates(constructs: readonly TrainingConstruct[]): TrainingC
 /**
  * The status-bar text, or "" when there is nothing to say.
  *
- * REPORTS ONLY WHAT NEEDS ATTENTION -- untrained and drifted. A file whose
- * constructs are all trained gets an empty status bar, which is the correct
- * report: the item exists to make "I saved but did not promote" impossible to
- * miss, and an item that is always present saying "12 trained" is one a
- * developer stops reading, taking the warning with it.
+ * REPORTS ONLY WHAT NEEDS ATTENTION -- untrained, drifted and edited. A file
+ * whose constructs are all trained gets an empty status bar, which is the
+ * correct report: the item exists to make "I saved but did not promote"
+ * impossible to miss, and an item that is always present saying "12 trained" is
+ * one a developer stops reading, taking the warning with it.
+ *
+ * `edited` is in that set because it is the same complaint about a different
+ * tier -- "I changed this and the cluster is still running what it booted with"
+ * -- and it differs from `drifted` only in which act applies it. It is also the
+ * set `trainingListEntries` renders, and the number has to be a claim about the
+ * rows it clicks through to.
  *
  * Zero counts are omitted rather than shown as `0 drifted`, for the same
  * reason.
@@ -373,6 +472,7 @@ export function statusBarText(counts: TrainingCounts): string {
   const parts: string[] = [];
   if (counts.untrained > 0) parts.push(`${counts.untrained} untrained`);
   if (counts.drifted > 0) parts.push(`${counts.drifted} drifted`);
+  if (counts.edited > 0) parts.push(`${counts.edited} edited`);
   return parts.join(" · ");
 }
 
@@ -385,6 +485,9 @@ export function statusBarTooltip(counts: TrainingCounts): string {
   }
   if (counts.drifted > 0) {
     lines.push(`${counts.drifted} construct(s) the cluster knows in an older version.`);
+  }
+  if (counts.edited > 0) {
+    lines.push(`${counts.edited} construct(s) whose source no longer matches what the cluster loaded.`);
   }
   return lines.join("\n");
 }
@@ -418,10 +521,12 @@ export interface TrainingListEntry {
  * The constructs the status bar is counting, as a list.
  *
  * SAME SET, SAME MODULE, and that is the whole reason this lives here rather
- * than next to the picker that renders it. `statusBarText` reports untrained and
- * drifted and deliberately nothing else, so a list clicking through to any other
- * set would turn the number into a lie the moment somebody counted the rows. The
- * two derivations sit beside each other and read the same two states.
+ * than next to the picker that renders it. `statusBarText` reports untrained,
+ * drifted and edited and deliberately nothing else, so a list clicking through
+ * to any other set would turn the number into a lie the moment somebody counted
+ * the rows. The two derivations sit beside each other and read the same three
+ * states -- which is a property to CHECK when a state is added, not one the
+ * types enforce: they were briefly out of step over `edited` (memql#4244).
  *
  * DOCUMENT ORDER, not grouped by state. The list is a way back to a place in a
  * file; a developer scanning for the one they were just looking at knows roughly
@@ -432,7 +537,12 @@ export function trainingListEntries(
 ): TrainingListEntry[] {
   const out: TrainingListEntry[] = [];
   for (const construct of constructs) {
-    if (construct.state !== "untrained" && construct.state !== "drifted") continue;
+    if (
+      construct.state !== "untrained" &&
+      construct.state !== "drifted" &&
+      construct.state !== "edited"
+    )
+      continue;
     out.push({
       construct,
       label: `${construct.kind} ${construct.name}`,

@@ -92,6 +92,52 @@ test("a repair states whether the recorded key path is usable", () => {
   assert.equal(missing.find((i) => i.label === "Provider key file")?.state, "attention");
 });
 
+test("a run over a checkout-mode cluster says it returns to released images", () => {
+  // THE OTHER HALF OF THE LANE STATEMENT (memql#4246). The rebuild preflight
+  // says a rebuild switches to checkout-built images; this says what the three
+  // released-lane verbs switch back, and it is said BEFORE the run rather than
+  // discovered afterwards in the Deployments row. Crossing a lane is never
+  // silent in either direction.
+  const crossing = preflightItems({
+    action: "repair",
+    graph: GRAPH_OK,
+    sudoFree: true,
+    recordedKeyPath: "~/keys/anthropic.txt",
+    imageSource: "checkout",
+    releasedTag: "v0.17.0",
+  });
+  const lane = crossing.find((i) => i.label === "Image source");
+  assert.equal(lane?.state, "attention");
+  assert.match(lane?.detail ?? "", /returns local to released v0\.17\.0 images/);
+  assert.match(lane?.detail ?? "", /Rebuild from checkout brings them back/);
+
+  // A cluster already on released images is not crossing anything, so nothing
+  // is said: a line that appeared on every install would be noise, and noise is
+  // what makes the one that matters unreadable.
+  assert.equal(
+    preflightItems({
+      action: "repair",
+      graph: GRAPH_OK,
+      sudoFree: true,
+      recordedKeyPath: "",
+      imageSource: "released",
+      releasedTag: "v0.17.0",
+    }).some((i) => i.label === "Image source"),
+    false,
+  );
+  // And an install on a machine whose image source is unknown says nothing
+  // either -- "" is no evidence, never "released".
+  assert.equal(
+    preflightItems({
+      action: "install",
+      graph: GRAPH_OK,
+      sudoFree: true,
+      recordedKeyPath: "",
+    }).some((i) => i.label === "Image source"),
+    false,
+  );
+});
+
 test("the collect screen renders the checklist above Start", () => {
   const html = renderCollectScreen({
     action: "install",

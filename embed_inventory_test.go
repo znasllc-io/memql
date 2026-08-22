@@ -105,7 +105,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/reviewspack":   5,   // all:dsl (memql#4139)
 	"github.com/znasllc-io/memql/examples/shopifypack":   6,   // all:dsl -- memql#4138 attach/secrets/sync
 	"github.com/znasllc-io/memql/integrations":           1,   // *.json
-	"github.com/znasllc-io/memql/scripts/install/graph":  2,   // install.json uninstall.json (memql#3369)
+	"github.com/znasllc-io/memql/scripts/install/graph":  3,   // install.json uninstall.json (memql#3369; +rebuild.json memql#4245)
 }
 
 // embedModulePath is the selector root. Spelled as the module pattern, not

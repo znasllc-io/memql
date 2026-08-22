@@ -155,6 +155,72 @@ test("the registry domain wins over the one the receipt recorded", () => {
 });
 
 // -----------------------------------------------------------------------------
+// which lane set the running images (memql#4246)
+// -----------------------------------------------------------------------------
+
+test("a checkout-mode receipt fills imageSource, checkout and rebuild", () => {
+  const instance = localInstance({
+    presence: "installed-healthy",
+    receipt: receiptWith([
+      entry({ stepId: "stackCheckout", params: { tag: "v0.17.0", dest: "/home/me/.memql/src" } }),
+      entry({
+        stepId: "clusterUp",
+        script: "k3d.up",
+        receipt: "cluster",
+        params: { "image-tag": "v0.17.0" },
+        result: {},
+        recordedAt: "2026-08-20T10:00:00.000Z",
+      }),
+      entry({
+        stepId: "rebuildFromCheckout",
+        script: "k3d.dev",
+        receipt: "rebuild",
+        params: { "image-source": "checkout" },
+        result: {
+          imageSource: "checkout",
+          commit: "abc1234def",
+          ref: "tag:v0.17.0",
+          dirtyCount: 4,
+          nodes: "bff agent",
+        },
+        recordedAt: "2026-08-21T10:00:00.000Z",
+      }),
+    ]),
+    connected: true,
+  });
+  assert.equal(instance.imageSource, "checkout");
+  assert.equal(instance.checkout, "/home/me/.memql/src");
+  assert.equal(instance.rebuild?.commit, "abc1234def");
+});
+
+test("a released receipt has an imageSource and no rebuild", () => {
+  const instance = localInstance({
+    presence: "installed-healthy",
+    receipt: receiptWith([
+      entry({ stepId: "stackCheckout", params: { tag: "v0.17.0", dest: "/home/me/.memql/src" } }),
+      entry({
+        stepId: "clusterUp",
+        script: "k3d.up",
+        receipt: "cluster",
+        params: { "image-tag": "v0.17.0" },
+        result: {},
+        recordedAt: "2026-08-20T10:00:00.000Z",
+      }),
+    ]),
+    connected: true,
+  });
+  assert.equal(instance.imageSource, "released");
+  assert.equal(instance.rebuild, undefined);
+});
+
+test("a null receipt yields neither an imageSource nor a rebuild", () => {
+  const instance = localInstance({ presence: "absent", receipt: null, connected: false });
+  assert.equal(instance.imageSource, undefined);
+  assert.equal(instance.checkout, undefined);
+  assert.equal(instance.rebuild, undefined);
+});
+
+// -----------------------------------------------------------------------------
 // remote instances
 // -----------------------------------------------------------------------------
 

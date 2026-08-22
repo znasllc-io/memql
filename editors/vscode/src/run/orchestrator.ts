@@ -101,6 +101,18 @@ export interface RunCluster {
    * ordinary case and produces no hint rather than a guess.
    */
   version?: string;
+  /**
+   * The directory the install receipt says this machine's checkout landed in,
+   * or "" when it records none (memql#4244).
+   *
+   * A FACT ABOUT THE MACHINE, not about the cluster, and only meaningful
+   * PAIRED with `local`: a local cluster is rebuilt from this directory, so a
+   * workspace that is this directory can change what it runs, and a second
+   * clone of the same repository cannot. `""` means unknown -- never
+   * "somewhere else" -- because a surface that read it as a mismatch would tell
+   * every developer their checkout is the wrong one.
+   */
+  checkout?: string;
 }
 
 export interface RunDeps {

@@ -35,6 +35,14 @@
 // into it. So the page's own script is the ONE part modelled by hand here --
 // `send()` posts what a click would post -- and everything below it, message
 // handling included, is the real panel.
+//
+// AND THE FILE DECORATION SURFACE (memql#4244). `ReadonlyMarker` decides
+// nothing -- constructs/readonly.ts does -- but the decoration it BUILDS is the
+// half an operator sees, and the editor drops a decoration whose badge is too
+// long rather than rendering it, so "there is a badge, and it is short enough"
+// is a claim worth an assertion rather than an eyeball. That needs
+// `FileDecoration`, `ThemeColor`, the two workspace path helpers and a
+// `files.readonlyInclude` that can be read back, so they are modelled below.
 
 export interface StubDisposable {
   dispose(): void;
@@ -340,6 +348,29 @@ export class Uri {
   }
 }
 
+/**
+ * The decoration shape, WITHOUT the editor's validation.
+ *
+ * Deliberately: the real class throws on a badge longer than two code points
+ * and the extension host then drops the decoration and logs a warning, which is
+ * a failure a test must be able to SEE rather than inherit. So this records
+ * what was built and readonly.test.ts asserts the length rule against
+ * `reasonBadge` directly.
+ */
+export class FileDecoration {
+  propagate?: boolean;
+
+  constructor(
+    readonly badge?: string,
+    public tooltip?: string,
+    readonly color?: ThemeColor
+  ) {}
+}
+
+export class ThemeColor {
+  constructor(readonly id: string) {}
+}
+
 export class RelativePattern {
   constructor(
     readonly base: Uri,
@@ -389,6 +420,43 @@ export const DiagnosticSeverity = {
   Hint: 3,
 } as const;
 
+/** What `getConfiguration(section).update(key, value)` wrote, by `section.key`. */
+const written = new Map<string, unknown>();
+
+/**
+ * Every `update` call, in order -- INCLUDING the ones that remove a key.
+ *
+ * Kept separately from the values because "wrote nothing" and "wrote the same
+ * thing again" are different facts about somebody's `.vscode/settings.json`,
+ * and a store that only remembers the last value cannot tell them apart. The
+ * second is a modified tracked file (memql#4244).
+ */
+const writes: { sectionKey: string; value: unknown }[] = [];
+
+/** Read a written setting back, count the writes, or clear both between cases. */
+export const writtenSettings = {
+  get(sectionKey: string): unknown {
+    return written.get(sectionKey);
+  },
+  set(sectionKey: string, value: unknown): void {
+    written.set(sectionKey, value);
+  },
+  /** Every update call so far, oldest first. A removal has `value: undefined`. */
+  writes(): readonly { sectionKey: string; value: unknown }[] {
+    return writes;
+  },
+  clear(): void {
+    written.clear();
+    writes.length = 0;
+  },
+};
+
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
+
 export const workspace = {
   // Mutable: a case sets the trust state it wants before calling activate().
   isTrusted: true,
@@ -403,7 +471,42 @@ export const workspace = {
       inspect(key: string): ConfigurationValues | undefined {
         return settings.get(`${section}.${key}`);
       },
+      // Read/write, for the one caller that owns a settings key rather than
+      // reading one: ReadonlyMarker rewrites `files.readonlyInclude`. Stored
+      // whole so a case can assert what was written AND that a key the fake
+      // operator added by hand survived.
+      get(key: string): unknown {
+        return written.get(`${section}.${key}`);
+      },
+      // `undefined` REMOVES the setting, as the real one does -- so a case can
+      // tell "we deleted our key" from "we never wrote".
+      update(key: string, value: unknown): Promise<void> {
+        const sectionKey = `${section}.${key}`;
+        writes.push({ sectionKey, value });
+        if (value === undefined) written.delete(sectionKey);
+        else written.set(sectionKey, value);
+        return Promise.resolve();
+      },
     };
+  },
+
+  /**
+   * The folder a file belongs to, matched by path prefix.
+   *
+   * Prefix rather than exact, because that is the question the real one
+   * answers, and undefined for a file outside every folder -- which is a case
+   * ReadonlyMarker treats as unclassifiable rather than as editable.
+   */
+  getWorkspaceFolder(uri: Uri): { uri: Uri } | undefined {
+    return (workspace.workspaceFolders ?? []).find(
+      (f) => uri.fsPath === f.uri.fsPath || uri.fsPath.startsWith(`${f.uri.fsPath}/`)
+    );
+  },
+
+  asRelativePath(uri: Uri, _includeWorkspaceFolder?: boolean): string {
+    const folder = workspace.getWorkspaceFolder(uri);
+    if (folder === undefined) return uri.fsPath;
+    return uri.fsPath.slice(folder.uri.fsPath.length).replace(/^\//, '');
   },
 
   createFileSystemWatcher(pattern: RelativePattern): StubDisposable & {

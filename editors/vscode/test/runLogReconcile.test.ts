@@ -93,6 +93,20 @@ test("interrupted survives a round trip through the parser", async () => {
   assert.equal(second?.status, "interrupted");
 });
 
+test("every run kind the recorder can mint reads back as itself", async () => {
+  // The parse allowlist is separate from the type, exactly as the status case
+  // above records -- and an unrecognised KIND reads back as `install`. A rebuild
+  // run (memql#4246) written by the Deployments page and read back as an install
+  // would file "I ran my own code" under "I installed a cluster", in the one
+  // list an operator scans to answer which of the two happened.
+  const dir = await tmpdir();
+  const kinds: Run["kind"][] = ["install", "upgrade", "repair", "uninstall", "rebuild", "rollout"];
+  for (const kind of kinds) await writeRun(dir, run(`r-${kind}`, "succeeded", { kind }));
+  for (const kind of kinds) {
+    assert.equal((await readRun(runFilePath(dir, `r-${kind}`)))?.kind, kind);
+  }
+});
+
 test("runs that already reached a verdict are left exactly alone", async () => {
   const dir = await tmpdir();
   const settled: RunStatus[] = ["succeeded", "failed", "cancelled", "superseded", "rolled_back"];

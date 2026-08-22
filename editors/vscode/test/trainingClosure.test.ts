@@ -126,6 +126,19 @@ test("a seeded dependency is left out -- it is on the cluster and cannot be prom
   assert.deepEqual(included(bundle), ["/w/queries.memql"]);
 });
 
+test("an edited dependency is left out -- the engine refuses a core shadow regardless of the edit", async () => {
+  const ws = workspace({
+    "/w/queries.memql": {
+      text: "query q { }\n",
+      imports: ["/core/traits.memql"],
+      constructs: [construct("q", "untrained")],
+    },
+    "/core/traits.memql": { text: "trait core { }\n", constructs: [construct("core", "edited")] },
+  });
+  const bundle = await assembleClosure("/w/queries.memql", "query q { }\n", ws);
+  assert.deepEqual(included(bundle), ["/w/queries.memql"]);
+});
+
 test("a drifted dependency joins -- the cluster has a different version of it", async () => {
   const ws = workspace({
     "/w/queries.memql": {

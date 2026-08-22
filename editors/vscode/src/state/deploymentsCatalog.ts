@@ -289,7 +289,27 @@ export function instanceRowStatus(
   // `v0.18.0 - v0.19.0 available` -- and is otherwise just the version. Taking
   // the wording from there rather than re-composing it is what keeps this row
   // and the Clusters tree from saying "available" two different ways.
-  const versionText = described.short === "" ? version : described.short;
+  let versionText = described.short === "" ? version : described.short;
+  // A CHECKOUT-MODE INSTANCE NAMES THE CHECKOUT, NOT THE RECORDED RELEASE
+  // (memql#4246). `instance.version` is still whichever tag the ORIGINAL
+  // install checked out -- a repair or upgrade would replay it -- but that is
+  // not what is running right now. Printing it here would tell an operator
+  // their v0.17.0 cluster is healthy while it is actually serving whatever
+  // was in the checkout at the last rebuild, uncommitted edits included.
+  let checkoutTooltip = "";
+  if (instance.imageSource === "checkout" && instance.rebuild !== undefined) {
+    const { rebuild } = instance;
+    const shortCommit = rebuild.commit.slice(0, 7);
+    // A count the envelope did not carry is LEFT OUT, never invented: printing
+    // "0 uncommitted files" from an unreported field is a claim that the tree
+    // was clean.
+    const dirty = rebuild.dirtyCount;
+    versionText = `checkout ${shortCommit}${dirty !== undefined && dirty > 0 ? ` (${dirty} uncommitted)` : ""}`;
+    checkoutTooltip =
+      `\nRunning images built from the checkout at ${shortCommit}` +
+      (dirty === undefined ? ". " : ` (${dirty} uncommitted files when it was built). `) +
+      "An install, upgrade or repair returns it to released images.";
+  }
   // The presence verdict stays FIRST in the tooltip. It is what an operator
   // opened the row for; the version is context beneath it, and a tooltip that
   // led with the version would bury the reason the row is amber.
@@ -301,13 +321,14 @@ export function instanceRowStatus(
         (instance.kind === "local"
           ? `A local cluster is installed but is not answering. Version ${version}.`
           : `${instance.name} is not answering. Version ${version}.`) +
-        `\n${described.sentence}`,
+        `\n${described.sentence}` +
+        checkoutTooltip,
     };
   }
   return {
     icon: "healthy",
     description: `healthy - ${versionText}`,
-    tooltip: `${instance.name} is healthy. Version ${version}.\n${described.sentence}`,
+    tooltip: `${instance.name} is healthy. Version ${version}.\n${described.sentence}` + checkoutTooltip,
   };
 }
 

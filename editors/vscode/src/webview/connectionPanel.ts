@@ -38,6 +38,14 @@ import type { ClusterConfig } from "../clusters/model.js";
 import { connectionView, type ConnectionView } from "../clusters/connectionView.js";
 import { SITE_CONCEPT, portalTarget } from "../clusters/portalUrl.js";
 import type { ConnectionManager } from "../connection/manager.js";
+import {
+  defaultReceiptPath,
+  readReceipt,
+  recordedImageSource,
+  recordedRebuild,
+  recordedStackDir,
+  type ImageSource,
+} from "../install/receipt.js";
 
 /** How often the token countdown is redrawn while the page is open. */
 const TICK_MS = 30_000;
@@ -58,6 +66,13 @@ export class ConnectionPanel {
   private view: ConnectionView | undefined;
   private identity: { email: string; role: string } | undefined;
   private expiresAt: number | undefined;
+  /**
+   * The local checkout the receipt records, when there is one (memql#4246).
+   * Undefined for a remote cluster and for a local one whose receipt records
+   * none -- the two facts and the "Open Checkout" button both key off this
+   * being present, not off `cluster.local` alone.
+   */
+  private checkout: { path: string; ref: string; imageSource: ImageSource | "" } | undefined;
   private portal = "";
   private error = "";
   private disposed = false;
@@ -117,6 +132,7 @@ export class ConnectionPanel {
     this.clusterName = clusterName;
     this.identity = undefined;
     this.expiresAt = undefined;
+    this.checkout = undefined;
     this.portal = "";
     this.error = "";
     void this.load();
@@ -141,6 +157,30 @@ export class ConnectionPanel {
     if (this.cluster === undefined) {
       this.render();
       return;
+    }
+
+    // THE RECORDED CHECKOUT, read off the install receipt rather than the
+    // live connection (memql#4246) -- `local: true` is the ONLY condition, so
+    // this page answers the same way whether or not a session is up, exactly
+    // like the version fact above it. `ref` comes from the last RECORDED
+    // REBUILD rather than from the install's own tag/commit: a checkout
+    // directory says WHERE, and the rebuild's own git ref says what it was
+    // last built FROM, which is the fact the "image source" row beside it is
+    // about. Undefined -- not "" -- when the receipt records no rebuild, so
+    // the checkout row still renders with a blank note rather than a false one.
+    this.checkout = undefined;
+    if (this.cluster.local === true) {
+      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      if (this.disposed) return;
+      const dir = recordedStackDir(receipt);
+      this.checkout =
+        dir === ""
+          ? undefined
+          : {
+              path: dir,
+              ref: recordedRebuild(receipt)?.ref ?? "",
+              imageSource: recordedImageSource(receipt),
+            };
     }
 
     this.expiresAt = await this.deps.readExpiry(this.clusterName).catch(() => undefined);
@@ -200,6 +240,12 @@ export class ConnectionPanel {
       case "openPortal":
         await this.openPortal();
         return;
+      case "openCheckout":
+        // The same shared command the done screen and the tree row use
+        // (memql#4246) -- one implementation of "where is the checkout",
+        // not three.
+        await vscode.commands.executeCommand("memql.deployments.openCheckout");
+        return;
       case "signOut":
         await vscode.commands.executeCommand("memql.clusters.signOut", node);
         return;
@@ -242,6 +288,7 @@ export class ConnectionPanel {
             state: this.deps.connections.state,
             ...(this.identity !== undefined ? { identity: this.identity } : {}),
             ...(this.expiresAt !== undefined ? { expiresAtEpochSeconds: this.expiresAt } : {}),
+            ...(this.checkout !== undefined ? { checkout: this.checkout } : {}),
             nowMs: Date.now(),
           });
     this.panel.webview.html = this.html(nonce);
@@ -257,9 +304,17 @@ export class ConnectionPanel {
       return `<h1>${escapeHtml(this.clusterName)}</h1>
 <p class="lede">This cluster is no longer in your list.</p>`;
     }
+    // "Open Checkout" rides beside "Open Portal" and offers only when there is
+    // a recorded checkout to open -- unlike Open Portal, which is always shown
+    // and reports its own failure on click, this button has nothing useful to
+    // do without one (memql#4246).
+    const openCheckout =
+      this.checkout === undefined
+        ? ""
+        : `<button class="secondary" type="button" data-act="openCheckout">Open Checkout</button>`;
     return `${brandHeader(
       `Cluster: ${view.title}`,
-      `<button class="secondary" type="button" data-act="openPortal">Open Portal</button>`,
+      `<button class="secondary" type="button" data-act="openPortal">Open Portal</button>${openCheckout}`,
     )}
 <p class="lede">${escapeHtml(view.summary)}</p>
 <h2>Connection</h2>

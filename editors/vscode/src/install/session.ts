@@ -37,11 +37,13 @@ import {
 import {
   graphDocumentPath,
   loadGraphFile,
+  rebuildGraphPath,
   type Elevation,
   type Graph,
   type GraphKind,
   type Step,
 } from "./graph.js";
+import { normalizeNodeList } from "./nodeList.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, withInstalledTools, type RunScript } from "./runner.js";
 import {
@@ -153,6 +155,25 @@ export interface SessionOptions {
    * impossible.
    */
   stackDir?: string;
+  /**
+   * Which node types a REBUILD builds, comma-separated. "" is every app node.
+   *
+   * Read by `rebuildPlan` only. Empty is not the same as absent to `k3d.dev`:
+   * `--node=` is an unknown node type and exits 2, so `present()` dropping the
+   * empty value is what lets the script apply its own default -- the same
+   * distinction every other optional param here turns on (memql#4246).
+   */
+  nodes?: string;
+  /**
+   * The ArgoCD Application a REBUILD patches, when it is not the default.
+   *
+   * Also read by `rebuildPlan` only, and also honestly optional: `k3d.dev`
+   * defaults to `$MEMQL_K3D_APP_NAME` or `memql-local`, and a name no
+   * Application answers to is REFUSED (exit 4) rather than read as "there was
+   * nothing to patch" -- so passing a guess would be worse than passing
+   * nothing.
+   */
+  appName?: string;
   /**
    * Extra environment for every step's child process.
    *
@@ -573,6 +594,51 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
 }
 
 /**
+ * The rebuild plan: where to build from, which Application, which nodes.
+ *
+ * ONE STEP, AND THE PLAN SAYS SO. Anything that is not `rebuildFromCheckout` is
+ * skipped rather than run with a rebuild's params -- a caller who handed this
+ * the install document must not get a `k3d.dev` invocation out of it, and the
+ * switch-with-a-default shape `installPlan` uses would give them one.
+ *
+ * WHAT IT DOES NOT PASS IS THE POINT. `--image-source=checkout` is pinned by
+ * the GRAPH, not supplied here, and the executor merges graph params LAST -- so
+ * the lane is policy the document states and no caller can rewrite. A plan that
+ * passed it would make "rebuild, but keep running released images" reachable
+ * through the button labelled Rebuild from checkout.
+ *
+ * `--repo-root` is `resolveStackDir`, the same derivation `stackCheckout` and
+ * `clusterUp` share, so the images are built from the directory the install
+ * actually cloned into rather than from wherever the packaged script sits.
+ *
+ * AND `--node` IS NORMALISED HERE, by the rule the screen words its Nodes line
+ * with (install/nodeList.ts). The hint under that field says "bff, agent" and
+ * dev.sh splits on commas only, so forwarding the operator's typing raw handed
+ * it " agent" and it exited 2 -- with guidance that blames MemQL, for the
+ * example text MemQL printed.
+ */
+export function rebuildPlan(opts: SessionOptions): (step: Step) => StepPlan {
+  const stackDir = resolveStackDir(opts);
+  return (step: Step): StepPlan => {
+    if (opts.skip.has(step.id)) return { action: "skip", reason: `skipped: ${step.id}` };
+    if (step.id !== "rebuildFromCheckout") {
+      return { action: "skip", reason: `not a rebuild step: ${step.id}` };
+    }
+    return {
+      action: "run",
+      params: {
+        ...present({
+          "repo-root": stackDir,
+          "app-name": opts.appName,
+          node: normalizeNodeList(opts.nodes ?? ""),
+        }),
+        ...(opts.stepParams[step.id] ?? {}),
+      },
+    };
+  };
+}
+
+/**
  * The uninstall plan: read straight off the receipt.
  *
  * Two facts only the install knows, and both come back from here:
@@ -640,6 +706,31 @@ export async function runInstall(
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFor("install", opts));
   return execute(graph, installPlan(opts), opts, hooks, opts.receiptFile);
+}
+
+/**
+ * Runs the rebuild graph: build this machine's checkout, import, roll onto it
+ * (memql#4246).
+ *
+ * THE SAME MACHINERY AS EVERY OTHER RUN, deliberately. It goes through
+ * `execute` -> `executeGraph`, so the progress events, the receipt entry and
+ * the failure screen come for free and behave exactly as they do for an
+ * install. A bespoke "just spawn k3d.dev" path would have been shorter and
+ * would have had to reinvent every one of those -- and would have been a second
+ * answer to what a run IS, which is the divergence this module exists to
+ * prevent.
+ *
+ * The receiptFile IS passed: a rebuild is a forward change to the machine, and
+ * `recordedImageSource` reads the entry it writes to decide which lane set the
+ * images last. Without the record nothing downstream could tell an operator
+ * their cluster is running their own code.
+ */
+export async function runRebuild(
+  opts: SessionOptions,
+  hooks: SessionHooks = {},
+): Promise<ExecutionReport> {
+  const graph = hooks.graph ?? (await loadGraphFile(rebuildGraphPath(opts.root)));
+  return execute(graph, rebuildPlan(opts), opts, hooks, opts.receiptFile);
 }
 
 /**

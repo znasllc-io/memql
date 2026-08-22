@@ -19,6 +19,7 @@
 import { classifyToken } from "../connection/credentials.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
 import type { ConnectionState } from "../connection/manager.js";
+import type { ImageSource } from "../install/receipt.js";
 import { briefMessage } from "../state/diagnostics.js";
 import type { ClusterConfig } from "./model.js";
 import { describeVersion } from "../version/describe.js";
@@ -51,6 +52,15 @@ export interface ConnectionViewInput {
    * an error or, worse, as "up to date".
    */
   listing?: ReleaseListing;
+  /**
+   * The local checkout the receipt records, when there is one (memql#4246).
+   *
+   * Absent for a remote cluster and for a local one whose receipt records no
+   * checkout -- the two facts below render only when this is present, because
+   * there is nothing honest to say about a checkout this editor has no
+   * evidence of.
+   */
+  checkout?: { path: string; ref: string; imageSource: ImageSource | "" };
 }
 
 export interface ConnectionView {
@@ -109,6 +119,32 @@ export function connectionView(input: ConnectionViewInput): ConnectionView {
       note: version.sentence,
     },
   ];
+
+  // THE RECORDED CHECKOUT, two facts appended after version (memql#4246).
+  // Where it is, and which lane -- released or checkout -- actually set the
+  // images this cluster is running right now. The second is not implied by
+  // the first: a checkout can sit there unused while the cluster runs a
+  // released install, and this is the row that says so rather than letting
+  // the directory's mere presence be read as "your edits are live".
+  if (input.checkout !== undefined) {
+    const { checkout } = input;
+    connection.push(
+      { key: "checkout", value: checkout.path, note: checkout.ref },
+      {
+        key: "image source",
+        value:
+          checkout.imageSource === "checkout"
+            ? "checkout (built locally)"
+            : checkout.imageSource === "released"
+              ? "released"
+              : "unknown",
+        note:
+          checkout.imageSource === "checkout"
+            ? "an install, upgrade or repair returns it to released images"
+            : "",
+      },
+    );
+  }
 
   return {
     title: cluster.name,

@@ -97,6 +97,25 @@ test("the confirmation names the instance, the move, and the machinery", () => {
   assert.match(verdict.confirmation, /verifies first and\s+skips|verifies first and skips/);
 });
 
+test("a move over a checkout-mode cluster says it returns to released images", () => {
+  // The lane crossing, stated in the confirmation the operator reads (memql#4246).
+  // Without it the only notice is the Deployments row afterwards, which stops
+  // saying `checkout <commit>` and starts saying a version -- a developer whose
+  // edits quietly stopped running has no reason to look there.
+  const verdict = verdictFor(
+    { ...local("v0.17.1"), imageSource: "checkout" },
+    PRE_BARRIER,
+  );
+  if (verdict.kind !== "offer") return assert.fail("expected an offer");
+  assert.match(verdict.confirmation, /returns local to released images/);
+  assert.match(verdict.confirmation, /runs a checkout build today/);
+
+  // Said only when it is true: a released-lane cluster crosses nothing.
+  const plain = verdictFor(local("v0.17.1"), PRE_BARRIER);
+  if (plain.kind !== "offer") return assert.fail("expected an offer");
+  assert.doesNotMatch(plain.confirmation, /returns local to released images/);
+});
+
 test("the remote confirmation names the OTHER machinery", () => {
   const verdict = verdictFor(remote("v0.17.1"), PRE_BARRIER);
   if (verdict.kind !== "offer") return assert.fail("expected an offer");

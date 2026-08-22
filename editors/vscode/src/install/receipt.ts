@@ -747,6 +747,88 @@ export function recordedDomain(receipt: Receipt | null): string {
   return "";
 }
 
+// ---------------------------------------------------------------------------
+// which lane set the running images (memql#4246)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which lane set the node images that are running right now.
+ *
+ * `released` is what install, upgrade and repair leave -- `clusterUp
+ * --image-tag`, pinned to a published release. `checkout` is what a
+ * `k3d.dev` rebuild-from-checkout run leaves -- images built from whatever a
+ * developer's own repo-root currently contains, edits included. The two are
+ * not a spectrum: a cluster is running one or the other, never both, because
+ * the last one to run is what the pods are actually executing.
+ */
+export type ImageSource = "released" | "checkout";
+
+/** The last rebuild's facts, read back for display. */
+export interface RecordedRebuild {
+  commit: string;
+  ref: string;
+  /** Absent when the envelope did not report it -- never defaulted to 0. */
+  dirtyCount?: number;
+  nodes: string;
+  recordedAt: string;
+}
+
+/**
+ * The last rebuild, when its envelope says the cluster was pointed at
+ * checkout images (memql#4246).
+ *
+ * THE ENVELOPE'S OWN VERDICT, not merely "a rebuild step ran". There is no
+ * `--image-source=released` for it to be distinguishing: the script's set is
+ * closed to "" or "checkout" and anything else is a bad param, exit 2. What
+ * this guard actually rejects is a run whose result does not say `checkout` at
+ * all -- a rebuild that FAILED before it patched the Application emits no
+ * `imageSource`, and reading that as "the cluster is in checkout mode" would
+ * claim a crossing that never happened.
+ *
+ * A run that patched and then failed DOES say `checkout`, and should: by then
+ * the Application is in that lane whatever happened afterwards, which is why
+ * dev.sh records the field at the patch rather than at the end of the run.
+ */
+export function recordedRebuild(receipt: Receipt | null): RecordedRebuild | undefined {
+  if (!receipt) return undefined;
+  const entry = entryFor(receipt, "rebuildFromCheckout");
+  if (entry === undefined || entry.result?.imageSource !== "checkout") return undefined;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  // `typeof`, not a coercion -- the same rule `rebuiltMessage` states at
+  // length. `Number(undefined)` is NaN, which renders "NaN uncommitted"; and
+  // `Number(null)` is 0, which renders "0 uncommitted files when it was built"
+  // -- a CLAIM that the tree was clean, made from a field never reported.
+  const dirty = entry.result.dirtyCount;
+  return {
+    commit: str(entry.result.commit),
+    ref: str(entry.result.ref),
+    ...(typeof dirty === "number" && Number.isFinite(dirty) ? { dirtyCount: dirty } : {}),
+    nodes: str(entry.result.nodes),
+    recordedAt: entry.recordedAt,
+  };
+}
+
+/**
+ * Which lane set the node images last. `released` is what install, upgrade
+ * and repair leave (clusterUp --image-tag); `checkout` is what a rebuild
+ * leaves. Decided by recordedAt, because both entries survive in the receipt
+ * -- a rebuild does not erase the clusterUp entry that preceded it, and a
+ * later repair does not erase the rebuild -- so only the ORDER says which
+ * one the cluster is actually running.
+ *
+ * "" means neither lane has ever run: a receipt that predates a clusterUp
+ * entry entirely, or none at all. Never guessed at as `released` -- a
+ * machine this editor knows nothing about is not evidence that released
+ * images are what it runs.
+ */
+export function recordedImageSource(receipt: Receipt | null): ImageSource | "" {
+  if (!receipt) return "";
+  const up = entryFor(receipt, "clusterUp");
+  const rebuild = recordedRebuild(receipt);
+  if (rebuild !== undefined && (up === undefined || rebuild.recordedAt > up.recordedAt)) return "checkout";
+  return up === undefined ? "" : "released";
+}
+
 /** The cluster owner a previous run bootstrapped. Empty strings when unrecorded. */
 export interface RecordedOwner {
   email: string;

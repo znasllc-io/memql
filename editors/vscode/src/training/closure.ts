@@ -19,6 +19,7 @@
 //
 //   untrained / drifted  -> the cluster does not have this version. IN.
 //   trained / seeded     -> the cluster already has it. OUT.
+//   edited               -> on the cluster from disk; the engine refuses a core shadow. OUT.
 //
 // The unit of INCLUSION is the file, because the engine compiles source text and
 // a construct's `use` imports resolve at file scope; the unit of DECISION is the
@@ -321,6 +322,10 @@ function classify(path: string, states: TrainingConstruct[] | undefined): Closur
   // persisted row for it -- the same thing a re-promote does -- and the entry
   // supersedes in place. A redundant carry is recoverable; an omitted one lands
   // something broken.
+  //
+  // `edited` is deliberately absent below: still seeded, and the engine
+  // refuses a core shadow regardless of the edit, so carrying it would offer a
+  // dependency this closure can only ever fail to land.
   const needed = constructs.some(
     (c) => c.state === "untrained" || c.state === "drifted" || c.state === "staged",
   );

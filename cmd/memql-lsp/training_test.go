@@ -558,34 +558,44 @@ func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 	}
 }
 
-// ORIGIN DECIDES THE TIER BEFORE THE HASH DECIDES ANYTHING: a seeded construct
-// stays seeded when the local source differs, because drift is defined against a
-// promotion and a seeded construct has none.
-//
-// The consequence this protects is an affordance, not a label. `drifted` carries
-// a Promote lens; the engine refuses to let a promoted construct shadow a core
-// name, so a locally-edited core construct rendered as drifted would offer an
-// action that can only ever be refused. `seeded` offers none, which is the
-// honest answer: what this needs is a rollout.
-func TestTrainingState_SeededStaysSeededWhenTheLocalSourceDiffers(t *testing.T) {
+// ORIGIN DECIDES THE TIER, THEN THE HASH DECIDES WHETHER THE TIER IS CURRENT. A
+// seeded construct whose local source differs from what the cluster loaded is
+// `edited`: the gutter's one question -- does what I am looking at match what
+// runs? -- is answered "no", and on a local cluster there is now an action for
+// it (Rebuild from checkout). On a remote cluster the lens says a rollout is
+// the way; the state is the same because the fact is the same.
+func TestTrainingState_SeededBecomesEditedWhenTheLocalSourceDiffers(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	const uri = "file:///w/dsl/cognition/queries.memql"
-	const doc = "query participant coreQuery {\n  filter  isActiveRecord && status==\"edited\"\n}\n"
+	const doc = "query participant coreQuery {\n  filter  isActiveRecord && status==\"moved\"\n}\n"
 	openDoc(t, s, uri, doc)
 
 	for _, origin := range []string{"core", "bundle"} {
 		pushCatalog(t, h, fmt.Sprintf(
 			`[{"name":"coreQuery","kind":"query","origin":%q,"sourceHash":"1111111111111111111111111111111111111111111111111111111111111111"}]`,
 			origin))
+		if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateEdited {
+			t.Errorf("an edited %s construct = %q; want %q", origin, got, trainingStateEdited)
+		}
+		// The same construct with a MATCHING hash is plainly seeded.
+		pushCatalog(t, h, fmt.Sprintf(
+			`[{"name":"coreQuery","kind":"query","origin":%q,"sourceHash":%q}]`,
+			origin, localHashOf(t, doc, "coreQuery")))
 		if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateSeeded {
-			t.Errorf("an edited %s construct = %q; want %q", origin, got, trainingStateSeeded)
+			t.Errorf("a matching %s construct = %q; want %q", origin, got, trainingStateSeeded)
 		}
 	}
 
-	// An unrecognised origin degrades the same way, on purpose: `seeded` is the
-	// one state that offers no action, so a client bug costs a missing
-	// affordance rather than a refused one.
-	pushCatalog(t, h, `[{"name":"coreQuery","kind":"query","origin":"","sourceHash":"1111"}]`)
+	// AN EMPTY CATALOG HASH IS A MISSING ANSWER, NOT A MISMATCH (hashesAgree's
+	// doctrine): a seeded construct the cluster could not hash stays seeded.
+	pushCatalog(t, h, `[{"name":"coreQuery","kind":"query","origin":"core","sourceHash":""}]`)
+	if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateSeeded {
+		t.Errorf("a seeded construct with no catalog hash = %q; want %q", got, trainingStateSeeded)
+	}
+
+	// An unrecognised origin still degrades to seeded: a client bug costs a
+	// missing affordance rather than a refused one.
+	pushCatalog(t, h, `[{"name":"coreQuery","kind":"query","origin":"","sourceHash":"1111111111111111111111111111111111111111111111111111111111111111"}]`)
 	if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateSeeded {
 		t.Errorf("a catalog entry with an unrecognised origin = %q; want %q", got, trainingStateSeeded)
 	}

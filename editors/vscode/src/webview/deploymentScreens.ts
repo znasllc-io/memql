@@ -18,7 +18,9 @@ import { displayVersion, type Instance, type Run } from "../state/deployments.js
 import { instanceRowStatus, runRowStatus } from "../state/deploymentsCatalog.js";
 import type { PipelineState } from "../deploy/pipelineState.js";
 import type { TagListing } from "../install/tags.js";
+import { returnsToReleasedImages } from "../state/imageLane.js";
 import type { PlannedStepView } from "../state/upgradePlan.js";
+import { renderPreflight } from "./installScreens.js";
 import { latestRelease, type ReleaseListing } from "../version/releaseCache.js";
 
 /**
@@ -226,6 +228,28 @@ export function renderChooseTag(input: ChooseTagInput): string {
           )
           .join("")}</ul>`;
 
+  // THE LANE CROSSING, ON THE PATH THAT WOULD OTHERWISE MAKE IT SILENTLY
+  // (memql#4246). This screen is reached from the same row as Rebuild from
+  // checkout, it re-runs `clusterUp` -- which rewrites the Application's image
+  // overrides back to released ones -- and unlike Repair and Upgrade it asks
+  // for no confirmation. So it is the likeliest place a developer's own build
+  // stops running without anything having said so.
+  //
+  // Rendered through `renderPreflight` with a one-item list rather than as a
+  // bespoke paragraph, so it looks like every other thing this extension states
+  // before a run, and worded by the shared helper, so it cannot drift from what
+  // the other three surfaces say.
+  const laneNote =
+    input.instance.imageSource === "checkout"
+      ? renderPreflight([
+          {
+            label: "Image source",
+            state: "attention",
+            detail: returnsToReleasedImages(input.instance.name, input.target),
+          },
+        ])
+      : "";
+
   return `<h1>Create deployment</h1>
 <p class="lede">This cluster is on ${escapeHtml(
     current,
@@ -235,6 +259,7 @@ ${picker}
 ${typed}
 ${sameNote}
 ${plan}
+${laneNote}
 <div class="actions">
   <button class="primary" type="button" data-act="beginDeploy"${
     input.target === "" || input.tagError !== "" ? " disabled" : ""

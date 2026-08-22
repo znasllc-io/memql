@@ -1,0 +1,25 @@
+{
+  "name": "rebuild",
+  "kind": "install",
+  "description": "Rebuild a local cluster's node images from the recorded checkout, import them, and roll the cluster onto them.",
+  "steps": [
+    {
+      "id": "rebuildFromCheckout",
+      "script": "k3d.dev",
+      "description": "Build the node images from the checkout, import them into k3d, point the Application at them, and restart the Deployments.",
+      "params": {
+        "image-source": "checkout"
+      },
+      "dependsOn": [],
+      "elevation": "none",
+      "receipt": "rebuild",
+      "preExistingPath": "none",
+      "timeoutSeconds": 2700,
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.imageSource",
+        "value": "checkout"
+      }
+    }
+  ]
+}

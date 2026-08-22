@@ -2,14 +2,15 @@
 //
 // One table, read off design §5.2:
 //
-//   Action             local, absent   local, installed        remote
-//   Create deployment  install graph   stackCheckout + up      deploy-control Deploy
-//   Repair             --              re-run graph            --
-//   Uninstall          --              uninstall graph         --
-//   Cut version        --              --                      developer+
-//   Promote            --              --                      admin+
-//   Rollout action     --              --                      admin+
-//   Rollback           --              --                      owner only
+//   Action                 local, absent  local, installed          remote
+//   Create deployment      install graph  stackCheckout + up        deploy-control Deploy
+//   Repair                 --             re-run graph              --
+//   Rebuild from checkout  --             k3d.dev over the checkout --
+//   Uninstall              --             uninstall graph           --
+//   Cut version            --             --                        developer+
+//   Promote                --             --                        admin+
+//   Rollout action         --             --                        admin+
+//   Rollback               --             --                        owner only
 //
 // TWO RULES DECIDE EVERY CELL.
 //
@@ -50,6 +51,7 @@ import type { Instance } from "../state/deployments.js";
 export type InstanceActionId =
   | "createDeployment"
   | "repair"
+  | "rebuildFromCheckout"
   | "uninstall"
   | "cutVersion"
   | "rolloutAction"
@@ -69,6 +71,8 @@ export type InstanceActionFlow =
   | "upgradeToTag"
   /** The install graph again: every step verifies first and skips when satisfied. */
   | "repairGraph"
+  /** The one-step rebuild graph: k3d.dev over the recorded checkout, image-source=checkout. */
+  | "rebuildGraph"
   /** The uninstall graph, behind its removal preview. */
   | "uninstallGraph"
   /** A deploy-control RPC against the target cluster. */
@@ -116,6 +120,26 @@ const REPAIR: InstanceAction = {
   // second implementation that could disagree with it.
   detail: "Re-run the install steps. Anything already in place is left alone.",
   flow: "repairGraph",
+};
+
+/**
+ * "Rebuild from checkout" (memql#4246) -- the only action that takes a cluster
+ * OFF released images.
+ *
+ * A wizard install runs released images pulled at a tag, and the checkout it
+ * cloned sits there inert. This is what makes it run: build the node images
+ * from that checkout, import them, point the Application at them, restart.
+ *
+ * It is NOT a fourth "Create deployment" flow, and the label says so. The other
+ * three move a cluster BETWEEN releases -- same lane, different version; this
+ * changes which lane the cluster is in, which is a different question and gets
+ * its own name rather than hiding inside a verb that means "move to a version".
+ */
+const REBUILD: InstanceAction = {
+  id: "rebuildFromCheckout",
+  label: "Rebuild from checkout",
+  detail: "Build images from the recorded checkout, import them, and roll the cluster onto them.",
+  flow: "rebuildGraph",
 };
 
 const UNINSTALL: InstanceAction = {
@@ -176,6 +200,13 @@ export function instanceActions(
   visibility?: RoleVisibility,
 ): InstanceAction[] {
   if (instance.kind === "local") {
+    // A REBUILD NEEDS SOMETHING TO BUILD FROM, and that is the whole gate on it
+    // (memql#4246). `checkout` is `recordedStackDir`, which is "" for a machine
+    // registered by hand and for an install that never reached the clone step.
+    // Offering a button whose only possible outcome is a refusal teaches an
+    // operator that the extension is broken.
+    const hasCheckout = (instance.checkout ?? "") !== "";
+    const rebuild = hasCheckout ? [REBUILD] : [];
     return instance.presence === "absent"
       ? [CREATE_LOCAL_ABSENT]
       : // `installed-unreachable` gets the same set as `installed-healthy`:
@@ -183,8 +214,8 @@ export function instanceActions(
         // action for the one that is not answering. Ordering puts it first
         // there, since an operator looking at a broken cluster came to fix it.
         instance.presence === "installed-unreachable"
-        ? [REPAIR, CREATE_LOCAL_INSTALLED, UNINSTALL]
-        : [CREATE_LOCAL_INSTALLED, REPAIR, UNINSTALL];
+        ? [REPAIR, CREATE_LOCAL_INSTALLED, ...rebuild, UNINSTALL]
+        : [CREATE_LOCAL_INSTALLED, REPAIR, ...rebuild, UNINSTALL];
   }
 
   if (visibility === undefined || visibility.kind === "indeterminate") {

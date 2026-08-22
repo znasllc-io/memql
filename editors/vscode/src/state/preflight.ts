@@ -12,6 +12,9 @@
 // receipt read) and this module only words them, so the wording is testable
 // under bare `node --test` (cmd/memql-lsp/vscodeimportrule_test.go).
 
+import type { ImageSource } from "../install/receipt.js";
+import { returnsToReleasedImages } from "./imageLane.js";
+
 export interface PreflightItem {
   label: string;
   /** "ok" renders quiet; "attention" renders emphasised. Never a blocker -- the run itself enforces. */
@@ -27,6 +30,16 @@ export interface PreflightInputs {
   sudoFree: boolean;
   /** The receipt's usable provider-key path, "" when none is recorded. */
   recordedKeyPath: string;
+  /**
+   * Which lane set this machine's node images last (memql#4246).
+   *
+   * `checkout` is the only value that produces a line, because it is the only
+   * one where this run CROSSES a lane. "" is no evidence -- a machine with no
+   * `clusterUp` entry -- and is never read as `released`.
+   */
+  imageSource?: ImageSource | "";
+  /** The release the cluster is returned to. Empty renders as "release". */
+  releasedTag?: string;
 }
 
 export function preflightItems(inputs: PreflightInputs): PreflightItem[] {
@@ -87,6 +100,31 @@ export function preflightItems(inputs: PreflightInputs): PreflightItem[] {
       label: "Provider key file",
       state: "ok",
       detail: "You name a PATH to a file holding the key, below. The key itself never leaves that file.",
+    });
+  }
+
+  // THE LANE CROSSING, IN THE OTHER DIRECTION (memql#4246).
+  //
+  // state/rebuildPreflight.ts says a rebuild switches this machine to
+  // checkout-built images; this says what an install, upgrade or repair
+  // switches back, and it is said BEFORE the run for the same reason. The only
+  // notice otherwise is the Deployments row afterwards, which stops saying
+  // `checkout <commit>` and starts saying a version -- and a developer whose
+  // own edits quietly stopped running has no reason to go and look there.
+  //
+  // Only when it is actually a crossing. A cluster already on released images
+  // crosses nothing, and a line on every install would be the noise that makes
+  // the one that matters unreadable.
+  if (inputs.imageSource === "checkout") {
+    items.push({
+      label: "Image source",
+      state: "attention",
+      // The shared sentence (state/imageLane.ts), plus the one clause only this
+      // surface can offer: the way back.
+      detail: `${returnsToReleasedImages(
+        "local",
+        inputs.releasedTag ?? "",
+      )} Rebuild from checkout brings them back.`,
     });
   }
 

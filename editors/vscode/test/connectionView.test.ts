@@ -385,3 +385,54 @@ test("the page works with no listing supplied at all", () => {
   const view = connectionView({ cluster: cluster({ version: "v0.17.0" }), state: DISCONNECTED, nowMs: NOW });
   assert.equal(factOf(view.connection, "version").value, "v0.17.0");
 });
+
+// -----------------------------------------------------------------------------
+// the recorded checkout (memql#4246)
+// -----------------------------------------------------------------------------
+//
+// Two facts, present only for a local cluster whose receipt records a
+// checkout: where it is, and which lane -- released or checkout -- set the
+// images this cluster is actually running.
+
+test("a checkout in checkout mode names the directory and says images are built locally", () => {
+  const view = connectionView({
+    cluster: cluster(),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    checkout: { path: "/home/me/.memql/src", ref: "tag:v0.17.0", imageSource: "checkout" },
+  });
+  assert.deepEqual(factOf(view.connection, "checkout"), {
+    key: "checkout",
+    value: "/home/me/.memql/src",
+    note: "tag:v0.17.0",
+  });
+  assert.deepEqual(factOf(view.connection, "image source"), {
+    key: "image source",
+    value: "checkout (built locally)",
+    note: "an install, upgrade or repair returns it to released images",
+  });
+});
+
+test("a checkout in released mode names the lane and offers no reassurance", () => {
+  const view = connectionView({
+    cluster: cluster(),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    checkout: { path: "/home/me/.memql/src", ref: "tag:v0.17.0", imageSource: "released" },
+  });
+  const fact = factOf(view.connection, "image source");
+  assert.equal(fact.value, "released");
+  assert.equal(fact.note, "");
+});
+
+test("with no recorded checkout, neither row appears", () => {
+  const view = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
+  assert.equal(
+    view.connection.some((f) => f.key === "checkout"),
+    false,
+  );
+  assert.equal(
+    view.connection.some((f) => f.key === "image source"),
+    false,
+  );
+});

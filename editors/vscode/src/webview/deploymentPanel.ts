@@ -32,6 +32,8 @@
 // Refs: #3739 #3733
 
 import { randomBytes } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 import * as vscode from "vscode";
 
@@ -60,8 +62,15 @@ import { instanceActions, type InstanceActionId } from "../deploy/instanceAction
 import { upgradeVerdict, type UpgradeTarget, type UpgradeVerdict } from "../deploy/upgrade.js";
 import { describeVersion } from "../version/describe.js";
 import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
+import { readCheckoutState } from "../install/checkoutState.js";
 import type { ExecutionReport } from "../install/executor.js";
-import { installSessionOptions, runInstall, type SessionHooks } from "../install/session.js";
+import { capabilityScriptPath, runCapabilityScript } from "../install/runner.js";
+import {
+  installSessionOptions,
+  runInstall,
+  runRebuild,
+  type SessionHooks,
+} from "../install/session.js";
 import { listReleaseTags, tagProblem, type TagListing } from "../install/tags.js";
 import type { ReleaseCache } from "../version/releaseCache.js";
 import {
@@ -71,19 +80,55 @@ import {
 } from "../state/addCluster.js";
 import type { Instance, Run } from "../state/deployments.js";
 import { buildCatalog, type CatalogInputs } from "../state/deploymentsCatalog.js";
-import { recordedDomain, recordedProvider, recordedProviderKeyFile, readReceipt } from "../install/receipt.js";
+import {
+  recordedCheckout,
+  recordedDomain,
+  recordedProvider,
+  recordedProviderKeyFile,
+  readReceipt,
+} from "../install/receipt.js";
+import { rebuiltMessage } from "../state/imageLane.js";
+import { rebuildPreflightItems, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
 import { RunRecorder } from "../state/runRecorder.js";
 import { defaultRunsDir } from "../state/runLog.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
 import { graphDocumentPath, loadGraphFile, type Graph } from "../install/graph.js";
 import { DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
 import { renderChooseTag, renderInstanceOverview, renderRemoteInstance } from "./deploymentScreens.js";
-import { renderFailedScreen, renderRunningScreen } from "./installScreens.js";
+import {
+  renderFailedScreen,
+  renderRebuildScreen,
+  renderRunningScreen,
+  type RunMode,
+} from "./installScreens.js";
 
 /** The same DEFAULT ceiling the wizard gives a step; a step's own `timeoutSeconds` in the graph outranks it (memql#4076) -- see addClusterPanel.ts for the full note. */
 const STEP_TIMEOUT_MS = 600_000;
 
-type Screen = "overview" | "chooseTag" | "running" | "failedStep";
+/**
+ * The rebuild's own ceiling: 45 minutes, matching rebuild.json's
+ * `timeoutSeconds` (memql#4246).
+ *
+ * The step's declared value outranks this anyway -- that is memql#4076's whole
+ * mechanism -- so the number here is what a run would fall back to, and a
+ * default sized to kill a wedged step in ten minutes would kill a first build
+ * that is going perfectly well. Nine node images from a cold Docker cache is
+ * structurally more than ten minutes.
+ */
+const REBUILD_TIMEOUT_MS = 2_700_000;
+
+/**
+ * How long the Docker gate is given before the checklist says it is not
+ * answering.
+ *
+ * Short on purpose. This is a read-only classification on a checklist, not a
+ * step of the run: a Docker that takes half a minute to answer is a Docker the
+ * operator wants told about, and the run itself blocks on the same gate with
+ * the graph's own budget.
+ */
+const DOCKER_PROBE_TIMEOUT_MS = 15_000;
+
+type Screen = "overview" | "chooseTag" | "rebuildPreflight" | "running" | "failedStep";
 
 export interface DeploymentPanelDeps {
   /** Everything buildCatalog needs, minus what this panel resolves itself. */
@@ -183,6 +228,29 @@ export class DeploymentPanel {
   private plan: PlannedStepView[] = [];
   /** The install graph, read once per visit to the tag screen. */
   private graph: Graph | undefined;
+  /** The node types the next rebuild builds; "" is every app node (memql#4246). */
+  private rebuildNodes = "";
+  /**
+   * The rebuild checklist's FACTS, undefined while they are being gathered.
+   *
+   * The facts, not the rendered items, and `nodes` is deliberately not among
+   * them: it is the one input on that screen the operator can still change, so
+   * the list is worded at RENDER time from these plus whatever is in the field
+   * now. Storing the finished items would leave a checklist saying "all app
+   * nodes" above a box reading `bff` -- a line that is wrong about the one
+   * thing the screen asked for.
+   */
+  private rebuildFacts: Omit<RebuildPreflightInputs, "nodes"> | undefined;
+  /**
+   * Which run the progress screen is describing.
+   *
+   * A field rather than a constant since memql#4246: this page now drives two
+   * kinds of run, and a screen headed "Deploying to the local cluster" over a
+   * rebuild would name the one thing the operator did not ask for.
+   */
+  private runMode: RunMode = "deploy";
+  /** The in-flight read `pointAt` started, for a caller that must act on it. */
+  private loading: Promise<void> = Promise.resolve();
   private error = "";
   private disposed = false;
   /** Non-undefined exactly while a run is in flight; also the cancel handle. */
@@ -213,6 +281,36 @@ export class DeploymentPanel {
     return panel;
   }
 
+  /**
+   * Opens the page for the local instance and takes one of its actions
+   * (memql#4246).
+   *
+   * WHY IT WAITS FOR THE LOAD `show` STARTED. Every other caller only needs the
+   * page to paint, so `pointAt` fires the read and does not wait -- but `choose`
+   * narrows the requested id against `instanceActions(instance)`, and an
+   * instance that has not been read yet offers nothing at all. Acting before it
+   * lands would open the page and silently do nothing, which is exactly the "a
+   * click that does nothing teaches a developer the extension is broken"
+   * failure the training surface guards against.
+   *
+   * The action is still NARROWED. This is a shortcut to a control the page
+   * draws, not a second authority: a machine with no recorded checkout offers
+   * no rebuild here either, and the command lands on the overview.
+   */
+  static async openAction(
+    context: vscode.ExtensionContext,
+    deps: DeploymentPanelDeps,
+    id: InstanceActionId,
+  ): Promise<void> {
+    await DeploymentPanel.show(context, deps).takeAction(id);
+  }
+
+  private async takeAction(id: InstanceActionId): Promise<void> {
+    await this.loading;
+    if (this.disposed) return;
+    await this.choose(id);
+  }
+
   private pointAt(instanceName: string): void {
     if (instanceName !== this.instanceName) {
       // A different instance is a different page: nothing carried over from the
@@ -223,7 +321,9 @@ export class DeploymentPanel {
       this.outcome = "";
       this.error = "";
     }
-    void this.load();
+    // Kept so `takeAction` can wait for THIS read rather than starting a second
+    // one beside it. Still fire-and-forget for every other caller.
+    this.loading = this.load();
   }
 
   private constructor(
@@ -346,6 +446,11 @@ export class DeploymentPanel {
       // Recorded and NOT repainted, like every field on the wizard's forms: a
       // repaint replaces the whole document and would take the caret with it.
       if (field === "tag" && typeof text === "string") this.target = text.trim();
+      if (field === "nodes" && typeof text === "string") this.rebuildNodes = text.trim();
+      return;
+    }
+    if (type === "beginRebuild") {
+      await this.startRebuild();
       return;
     }
     if (type === "beginDeploy") {
@@ -360,10 +465,19 @@ export class DeploymentPanel {
     if (type === "retry") {
       this.state.retry();
       this.render();
-      await this.startDeploy();
+      // RETRY RE-RUNS WHAT FAILED, not whatever this page's older half runs. The
+      // failure screen is shared by both kinds of run, so a retry that always
+      // called startDeploy would answer a failed rebuild by moving the cluster
+      // to a release tag -- silently, from a button labelled "Retry this step".
+      await (this.runMode === "rebuild" ? this.startRebuild() : this.startDeploy());
       return;
     }
     if (type === "guided") {
+      // The rebuild failure screen draws no guided control (installScreens.ts
+      // says why), so this is a message the page never rendered -- dropped, the
+      // same call `choose` makes for an action an instance does not offer,
+      // rather than run as a second Retry.
+      if (this.runMode === "rebuild") return;
       this.state.switchToGuided();
       this.render();
       await this.startDeploy();
@@ -397,6 +511,14 @@ export class DeploymentPanel {
     }
     if (id === "uninstall") {
       this.deps.openInstallFlow("uninstall");
+      return;
+    }
+    if (id === "rebuildFromCheckout") {
+      // NOT RE-PARENTED INTO THE WIZARD, unlike repair and uninstall. Those are
+      // flows the wizard already drives end to end; a rebuild asks one optional
+      // question and needs facts about THIS instance -- its checkout, its image
+      // source -- which the wizard has no screen for and no reason to learn.
+      await this.openRebuild();
       return;
     }
     if (id !== "createDeployment") return;
@@ -469,6 +591,196 @@ export class DeploymentPanel {
   }
 
   // -------------------------------------------------------------------------
+  // rebuild from checkout (memql#4246)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Opens the rebuild screen and gathers the facts its checklist states.
+   *
+   * PAINTS FIRST, THEN GATHERS. Docker's probe spawns a script and the git
+   * reads spawn three more, so a screen that waited for all of them would sit
+   * blank after a click. It renders with the field and no checklist -- the same
+   * shape the wizard's collect screen takes -- and repaints when the answers
+   * land.
+   *
+   * The staleness guard is the same one `computePreflight` uses: the facts are
+   * only adopted if this page is STILL on the rebuild screen when they arrive.
+   * An operator who clicked Back is not shown a checklist about a run they
+   * abandoned.
+   */
+  private async openRebuild(): Promise<void> {
+    const instance = this.instance;
+    if (instance === undefined) return;
+    this.screen = "rebuildPreflight";
+    this.error = "";
+    this.rebuildFacts = undefined;
+    this.render();
+
+    const dir = instance.checkout ?? "";
+    const [dockerReachable, checkoutIsMemql, state] = await Promise.all([
+      this.dockerReachable(),
+      isMemqlCheckout(dir),
+      readCheckoutState(dir),
+    ]);
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    if (this.disposed || this.screen !== "rebuildPreflight") return;
+    this.rebuildFacts = {
+      dockerReachable,
+      checkoutDir: dir,
+      checkoutIsMemql,
+      ...(state === undefined ? {} : { state }),
+      // Off the INSTANCE, which derives it from the same receipt every other
+      // local fact comes from -- rather than a second read that could disagree
+      // with the row the operator is looking at.
+      imageSource: instance.imageSource ?? "",
+      releasedTag: recordedCheckout(receipt).tag,
+    };
+    this.render();
+  }
+
+  /**
+   * Whether Docker answers, asked with the install graph's own gate.
+   *
+   * `install.dockerAccess` is READ-ONLY by design -- its header says so at
+   * length -- and it is the same classification the install graph blocks on, so
+   * the checklist and the run cannot disagree about the same machine. Anything
+   * other than a clean exit is "not reachable": the script reports a missing
+   * daemon, a stopped one and one refusing this user all as exit 4, and each of
+   * those is a rebuild that will fail at its first command.
+   */
+  private async dockerReachable(): Promise<boolean> {
+    const run = this.deps.runScript ?? runCapabilityScript;
+    try {
+      const outcome = await run({
+        scriptPath: capabilityScriptPath("install.dockerAccess", this.deps.installRoot),
+        params: {},
+        capability: "install.dockerAccess",
+        timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+      });
+      return outcome.exitCode === 0;
+    } catch {
+      // The probe is a courtesy on a checklist. A probe that could not be
+      // spawned says "not reachable", which is the fail-closed direction and
+      // costs an operator one sentence they can check for themselves.
+      return false;
+    }
+  }
+
+  /**
+   * Rebuilds this cluster's images from its checkout.
+   *
+   * THE SAME RUN MACHINERY AS EVERY OTHER RUN ON THIS PAGE: `runRebuild` goes
+   * through `executeGraph`, so the progress rows, the receipt entry and the
+   * failure screen are the ones `startDeploy` already gets. What differs is the
+   * graph document, three params, and the wording.
+   *
+   * NO RECEIPT-DERIVED ANSWERS TO COLLECT. A deployment needs the provider key,
+   * the domain and the owner because it re-runs the install graph; a rebuild
+   * runs one step that takes a directory, an Application name and a node list.
+   * So there is no `providerKeyFile` refusal here -- there is nothing it could
+   * be missing for.
+   */
+  private async startRebuild(): Promise<void> {
+    if (this.runAbort !== undefined) return;
+    const instance = this.instance;
+    const checkout = instance?.checkout ?? "";
+    if (instance === undefined || checkout === "") {
+      // The action is not offered without a checkout, so this is a message the
+      // page never rendered -- refused rather than run against a guessed path.
+      this.error =
+        "MemQL has no record of a checkout for this cluster, so there is nothing to build from. " +
+        "Repair the install to clone one.";
+      this.screen = "overview";
+      this.render();
+      return;
+    }
+
+    this.error = "";
+    this.runMode = "rebuild";
+    this.screen = "running";
+    this.render();
+
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: instance.name,
+      kind: "rebuild",
+      entropy: randomBytes(4).toString("hex"),
+    });
+    // The tree reads the run log, so it can show this run before its first step
+    // reports -- a rebuild is minutes long, and that is a long time for a click
+    // to have left no trace.
+    this.deps.refreshTree();
+
+    const controller = new AbortController();
+    this.runAbort = controller;
+
+    let report: ExecutionReport | undefined;
+    let failure: string | undefined;
+    try {
+      report = await runRebuild(
+        {
+          root: this.deps.installRoot,
+          receiptFile: this.deps.receiptFile,
+          skip: new Set<string>(),
+          // Not read by `rebuildPlan`, and required by the type: a rebuild
+          // touches no AI provider, so naming one would be an assertion about
+          // this machine that this run has no business making.
+          provider: "",
+          stepParams: {},
+          stackDir: checkout,
+          nodes: this.rebuildNodes,
+          timeoutMs: REBUILD_TIMEOUT_MS,
+        },
+        {
+          onEvent: (event) => {
+            this.state.apply(event);
+            void recorder.apply(event);
+            this.render();
+          },
+          signal: controller.signal,
+          ...(this.deps.runScript !== undefined ? { run: this.deps.runScript } : {}),
+        },
+      );
+    } catch (err) {
+      // A THROW IS NOT A FAILED STEP -- the same distinction startDeploy draws.
+      failure = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.runAbort = undefined;
+    }
+
+    const cancelled = controller.signal.aborted;
+    const ok = !cancelled && failure === undefined && report?.ok === true;
+    await recorder.finish(cancelled ? "cancelled" : ok ? "succeeded" : "failed");
+    this.deps.refreshTree();
+
+    if (this.disposed) return;
+    if (failure !== undefined) {
+      this.error = failure;
+      this.state.finish({ ok: false });
+    } else {
+      this.state.finish({ ok: report?.ok === true });
+    }
+
+    if (ok) {
+      // THE CONSTRUCT CATALOG IS NOW STALE, and nothing else would notice. The
+      // cluster loaded a new DSL tree seconds ago, so every construct's
+      // training state was decided against the tree that is no longer there --
+      // which is the state the `edited` lens reads to offer this very button.
+      void vscode.commands.executeCommand("memql.constructs.refresh");
+      void vscode.window.showInformationMessage(
+        rebuiltMessage(
+          instance.name,
+          report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
+        ),
+      );
+    }
+
+    this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
+    if (this.screen === "overview") await this.load();
+    else this.render();
+  }
+
+  // -------------------------------------------------------------------------
   // the run
   // -------------------------------------------------------------------------
 
@@ -487,6 +799,7 @@ export class DeploymentPanel {
     if (target === "" || this.tagError !== "") return;
 
     this.error = "";
+    this.runMode = "deploy";
     this.screen = "running";
     this.render();
 
@@ -871,6 +1184,19 @@ export class DeploymentPanel {
           summary: this.plan.length === 0 ? "" : upgradeSummary(this.plan),
           sameVersion: isSameVersion(instance.version ?? "", this.target),
         });
+      case "rebuildPreflight":
+        return renderRebuildScreen({
+          checkoutDir: instance.checkout ?? "",
+          nodes: this.rebuildNodes,
+          ...(this.rebuildFacts === undefined
+            ? {}
+            : {
+                preflight: rebuildPreflightItems({
+                  ...this.rebuildFacts,
+                  nodes: this.rebuildNodes,
+                }),
+              }),
+        });
       case "running":
         return renderRunningScreen(this.runScreenInput(this.state.steps));
       case "failedStep":
@@ -914,10 +1240,10 @@ export class DeploymentPanel {
 
   private runScreenInput(steps: StepProgress[]): {
     steps: StepProgress[];
-    mode: "deploy";
+    mode: RunMode;
     running: boolean;
   } {
-    return { steps, mode: "deploy", running: this.runAbort !== undefined };
+    return { steps, mode: this.runMode, running: this.runAbort !== undefined };
   }
 
   private render(): void {
@@ -1030,6 +1356,32 @@ ${this.bodyHtml()}
  */
 function nonceValue(): string {
   return randomBytes(16).toString("base64");
+}
+
+/**
+ * Whether a directory is a MemQL checkout, by the two files `k3d.dev` itself
+ * gates on (memql#4246).
+ *
+ * THE SAME TWO, deliberately: the script refuses a repo-root with no
+ * `Dockerfile` or no `deploy/k8s/overlays/local/kustomization.yaml` with exit 4,
+ * so a checklist testing anything else would pass a directory the run then
+ * refuses -- which is the one thing a preflight must not do.
+ */
+async function isMemqlCheckout(dir: string): Promise<boolean> {
+  if (dir === "") return false;
+  const required = [
+    path.join(dir, "Dockerfile"),
+    path.join(dir, "deploy", "k8s", "overlays", "local", "kustomization.yaml"),
+  ];
+  const found = await Promise.all(
+    required.map((file) =>
+      fs
+        .access(file)
+        .then(() => true)
+        .catch(() => false),
+    ),
+  );
+  return found.every((ok) => ok);
 }
 
 /**

@@ -319,6 +319,43 @@ test("an absent instance says not installed rather than an unknown version", () 
   assert.equal(status.description, "not installed");
 });
 
+// -----------------------------------------------------------------------------
+// checkout mode (memql#4246)
+// -----------------------------------------------------------------------------
+
+test("a checkout-mode instance's row names the checkout, not the recorded version", () => {
+  const status = instanceRowStatus({
+    name: "local",
+    kind: "local",
+    presence: "installed-healthy",
+    version: "v0.17.0",
+    connected: false,
+    imageSource: "checkout",
+    rebuild: {
+      commit: "abc1234def",
+      ref: "tag:v0.17.0",
+      dirtyCount: 4,
+      nodes: "bff agent",
+      recordedAt: "2026-08-21T10:00:00.000Z",
+    },
+  }, undefined);
+  assert.equal(status.description, "healthy - checkout abc1234 (4 uncommitted)");
+  assert.match(status.tooltip, /built from the checkout/);
+  assert.match(status.tooltip, /returns it to released images/);
+});
+
+test("released mode leaves the row exactly as it was before checkout mode existed", () => {
+  const status = instanceRowStatus({
+    name: "local",
+    kind: "local",
+    presence: "installed-healthy",
+    version: "v0.17.0",
+    connected: false,
+    imageSource: "released",
+  }, undefined);
+  assert.equal(status.description, "healthy - v0.17.0");
+});
+
 test("a run row names the verb, the transition, the status and when", () => {
   const run: Run = {
     ...newLocalRun({

@@ -7,8 +7,10 @@ package main
 //	untrained  the cluster has no record of it
 //	drifted    the cluster has it, promoted, and its source no longer matches
 //	trained    the cluster has it, promoted, and its source matches
-//	seeded     the cluster has it from disk -- never promoted, and not
-//	           promotable without a rollout
+//	staged     durable on the cluster, callable by its author alone
+//	seeded     the cluster has it from disk, and the source matches what it loaded
+//	edited     the cluster has it from disk, and the source no longer matches --
+//	           a rollout (locally: Rebuild from checkout) is what applies it
 //	unknown    nothing can be said
 //
 // It is the sibling of runnable.go and is built the same way, for the same
@@ -85,7 +87,7 @@ package main
 // so, and it says so in the engine, next to the kind vocabulary itself.
 //
 // The wire shape below is a FIXED contract shared with the TypeScript consumer.
-// Field names, the five-value `state` set, and the "empty array, never null"
+// Field names, the seven-value `state` set, and the "empty array, never null"
 // rule for `constructs` are load-bearing; changing any of them means changing
 // both sides in the same commit.
 
@@ -104,7 +106,7 @@ import (
 // `capabilities.experimental` so a client can feature-detect the request instead
 // of calling it blind and handling MethodNotFound.
 //
-// Both names, and the five `state` values below, are the extension's -- posted
+// Both names, and the seven `state` values below, are the extension's -- posted
 // on memql#3761 before this side existed, precisely so the two could be checked
 // against each other while a rename was still one constant. That side has since
 // SHIPPED the rendering against them, so these are no longer this file's to
@@ -126,7 +128,7 @@ const capabilityTrainingState = "memqlTrainingState"
 // a pair of flags that can disagree.
 const methodClusterCatalog = "memql/clusterCatalog"
 
-// The six states. Fixed vocabulary, defined in the design's §2, extended by
+// The seven states. Fixed vocabulary, defined in the design's §2, extended by
 // epic memql#3928, and named here exactly as the wire carries them.
 const (
 	// trainingStateUnknown is the state of a construct nothing can be said
@@ -145,6 +147,13 @@ const (
 	// never promoted; changing what the cluster runs needs a rollout, not a
 	// promote.
 	trainingStateSeeded = "seeded"
+	// trainingStateEdited: loaded from disk at boot, and the local source no
+	// longer matches what the cluster loaded. Not `drifted`: drift is defined
+	// against a promotion and this construct has none. Its way onto the cluster
+	// is a rollout -- on a local cluster, Rebuild from checkout -- and the state
+	// exists so the gutter can answer "no" to its one question instead of
+	// reporting a seeded construct as current.
+	trainingStateEdited = "edited"
 	// trainingStateStaged: durable on the cluster and callable BY ITS AUTHOR
 	// ALONE (epic memql#3928). The middle tier -- persisted and replayed at boot
 	// like `trained`, private like a session define.
@@ -239,7 +248,7 @@ type trainingConstruct struct {
 	// SignatureRange is the same range `memql/runnableConstructs` carries, so a
 	// training decoration and a Run lens anchor to the same place.
 	SignatureRange protocol.Range `json:"signatureRange"`
-	// State is one of the five constants above.
+	// State is one of the seven constants above.
 	State string `json:"state"`
 	// Origin is the matched catalog entry's origin, passed straight through.
 	// Absent unless a catalog entry was matched, which is what makes it usable:
@@ -424,23 +433,13 @@ func (c clusterCatalog) find(declared sense.ConstructHash, domain string) (catal
 
 // trainingStateFor is the state machine, in the order the rules resolve.
 //
-// ORIGIN DECIDES THE TIER BEFORE THE HASH DECIDES ANYTHING, and that ordering is
-// the one judgement in this file worth arguing about. A `seeded` construct --
-// core or bundle -- stays seeded even when its local source differs from what
-// the cluster loaded. Three reasons, and they agree:
-//
-//   - Drift is DEFINED against a promotion (design §2: "a construct the cluster
-//     knows, whose local source no longer matches what was promoted"). A seeded
-//     construct has no promoted version, so there is nothing for it to have
-//     drifted from.
-//   - The states exist to pick an ACTION SET (design §4), and `seeded` has none
-//     -- "no action; needs a rollout". Rendering an edited core construct as
-//     `drifted` would put a Promote lens on it, and the engine refuses to let a
-//     promoted construct shadow a core name, so the affordance could only ever
-//     fail.
-//   - Nothing is lost by it. `seeded` already means "not live without a
-//     rollout", which is exactly what an edited seeded construct needs to be
-//     told.
+// ORIGIN DECIDES THE TIER, THEN THE HASH DECIDES WHETHER THAT TIER IS CURRENT.
+// Drift is defined against a promotion, so a promoted construct whose source
+// moved is `drifted`; a seeded construct -- core or bundle -- whose source moved
+// is `edited`, a different state because its way onto the cluster is a rollout
+// rather than a promote (locally, Rebuild from checkout; remotely, a new
+// image). A seeded construct the cluster could not hash stays `seeded`: an
+// empty catalog hash is a missing answer, not a mismatch (see hashesAgree).
 func trainingStateFor(declared sense.ConstructHash, entry catalogConstruct, answer catalogAnswer) string {
 	switch answer {
 	case catalogSilent:
@@ -468,9 +467,13 @@ func trainingStateFor(declared sense.ConstructHash, entry catalogConstruct, answ
 	}
 	if entry.Origin != memql.ConstructOriginPromoted {
 		// core, bundle -- and anything a client sends that is neither, which
-		// degrades here on purpose: an unrecognised origin is a client bug, and
-		// `seeded` is the one state that offers no action, so a wrong guess
-		// costs a missing affordance rather than a refused one.
+		// degrades to `seeded` on purpose: an unrecognised origin is a client
+		// bug, and `seeded` offers no action, so a wrong guess costs a missing
+		// affordance rather than a refused one.
+		seededOrigin := entry.Origin == memql.ConstructOriginCore || entry.Origin == memql.ConstructOriginBundle
+		if seededOrigin && entry.SourceHash != "" && !hashesAgree(entry.SourceHash, declared.SourceHash) {
+			return trainingStateEdited
+		}
 		return trainingStateSeeded
 	}
 	if !hashesAgree(entry.SourceHash, declared.SourceHash) {
