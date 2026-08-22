@@ -513,7 +513,9 @@ Two things to know before flipping it on:
   the very last step, with nothing in identity's own logs to explain why.
 
 Every LIVE hosted site also gets `GET /runtime-config.json` for free -- not
-an opt-in, unlike the proxy -- carrying the cluster's identity URL and
+an opt-in, unlike the proxy -- carrying the cluster's identity URL, its
+configured `domain` (`MEMQL_DOMAIN`, so a client that has to NAME this
+cluster somewhere else need not reverse-engineer it out of the issuer), and
 (matched by the requesting hostname against the cluster's registered OAuth
 clients) the site's own client id. An unregistered site still gets a `200`
 with an empty client id rather than an error: the honest answer for "this

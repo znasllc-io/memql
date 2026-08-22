@@ -75,7 +75,7 @@ appears in a URL.**
      |                              |                         |
      |-- GET / --------------------->|                        |
      |-- GET /runtime-config.json -->|  (*)                   |
-     |<-- {identityUrl, oauthClientId, authEnabled} ----------|
+     |<-- {identityUrl, oauthClientId, authEnabled, domain} --|
      |                                                        |
      |== top-level navigation ================================>|
      |   GET /authorize?response_type=code&client_id=portal    |
@@ -105,6 +105,17 @@ not a portal branch: the cluster-wide fields (`identityUrl`,
 (`oauthClientId`) is looked up by matching the requesting site's own hostname
 against `MEMQL_IDENTITY_REGISTERED_CLIENTS` -- an unregistered site still
 gets a 200, just with an empty client id.
+
+`domain` (memql#4249) is the fifth field and the one exception to "derived":
+it is `MEMQL_DOMAIN` itself, the value every other derivation starts from,
+published so that a client which has to **name this cluster** does not have to
+reverse-engineer it back out of `identityUrl`. The portal's *Open definition in
+VS Code* link is the reason it exists: the domain is the one value the VS Code
+extension records for a cluster -- endpoint and issuer compose from it -- so it
+is what a link naming a cluster has to carry. Additive, like every field here:
+an older node omits it and the portal falls back to the `identity.` label of
+`identityUrl`, which is exact rather than a guess because every role host is a
+single label under the domain (memql#3767).
 
 ### Token storage, and the threat model
 
@@ -178,16 +189,25 @@ against local, staging and a customer install.
 ```json
 {
   "identityUrl": "https://identity.example.com",
-  "identityApiBaseUrl": "https://identity.example.com",
+  "identityApiBaseUrl": "",
   "oauthClientId": "portal",
-  "authEnabled": true
+  "authEnabled": true,
+  "domain": "example.com"
 }
 ```
 
-Every field is public: an OIDC issuer URL, a public OAuth client id (RFC 6749
-public clients have no secret -- that is why PKCE is mandatory), and whether
-this cluster enforces auth. The document is served unauthenticated, on the same
-public path as the bundle.
+Every field is public: an OIDC issuer URL, an XHR base that is **empty** so the
+four identity JSON calls stay same-origin (the edge proxies them; see
+[identity-service.md](auth/identity-service.md#browser-side-routing-of-identity-xhr)),
+a public OAuth client id (RFC 6749 public clients have no secret -- that is why
+PKCE is mandatory), whether this cluster enforces auth, and the cluster's own
+domain. The document is served unauthenticated, on the same public path as the
+bundle.
+
+`domain` is the one field that is not about talking to this cluster but about
+**naming it somewhere else** -- see [above](#how-the-portal-authenticates).
+Nothing has to be set for it: it is `MEMQL_DOMAIN`, which the cluster already
+has.
 
 ### On the node serving the portal (the edge)
 
@@ -199,10 +219,10 @@ row's `bundleRef` (`dsl/platform/seeds.memql`), not an env var --
 those four variables used to configure are no longer configuration at all:
 they are DERIVED, per request, by `component/edge/runtimeconfig.go` from the
 same domain-wide env `component/envregistry/domain.go` already sets
-(`identityUrl` / `identityApiBaseUrl` / `authEnabled`) plus a lookup of the
+(`identityUrl` / `identityApiBaseUrl` / `authEnabled`), plus a lookup of the
 requesting site's own hostname against `MEMQL_IDENTITY_REGISTERED_CLIENTS`
-(`oauthClientId`). There is nothing left for an operator to set on the edge
-node for this.
+(`oauthClientId`) and a read of `MEMQL_DOMAIN` itself (`domain`). There is
+nothing left for an operator to set on the edge node for this.
 
 ### On the identity service
 

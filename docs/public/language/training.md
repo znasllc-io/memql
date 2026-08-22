@@ -557,6 +557,14 @@ an edit to one changes nothing it runs.
 
 A **new file is never blocked**. Adding one is how training starts.
 
+**A cluster document is read-only by construction**, which is a different
+mechanism rather than a stricter setting. When a construct's file is not on this
+machine at all, the editor can serve it from the cluster that loaded it
+(**View source from cluster**, on the construct's detail page) as a
+`memql-cluster://` document — bytes from the cluster's own pack browser, badged
+`RO`. There is no file to write back to, so nothing forbids the edit; there is
+simply nowhere for it to go. `files.readonlyInclude` is not involved.
+
 Two clarifications that are easy to get backwards:
 
 - **The classification comes from the cluster, not from the path.** A

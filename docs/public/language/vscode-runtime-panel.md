@@ -240,8 +240,13 @@ question that already has one.
 
 The catalog reports a path relative to the **cluster's** tree, which is
 not obliged to be the checkout you have open -- for a remote cluster it
-usually is not. When the path does not resolve here the page says so and
-names it, rather than opening nothing.
+usually is not. When the path does not resolve here the page names it and
+offers **View source from cluster**: the cluster that loaded the construct
+also serves the file, over its pack browser, so the source opens as a
+read-only `memql-cluster://` document at the signature. Highlighting and
+nothing else -- a file that is not on this machine gets no diagnostics,
+because the imports it names resolve against the cluster's tree rather
+than yours.
 
 The `promoted` case is where an operator first meets the seeded-versus-trained
 distinction: a construct that exists on the cluster and in no repository.

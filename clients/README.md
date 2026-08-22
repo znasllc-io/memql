@@ -43,6 +43,21 @@ in what the portal does:
 - **Deployed through the same GitOps path as everything else** — a component
   under `deploy/k8s/`, the same manifests locally and in the cloud.
 
+**And it hands off to the editor rather than growing one.** A concept page in
+the portal carries *Open definition in VS Code*, which is a link and nothing
+more: `vscode://znasllc.memql/open?v=1&cluster=<domain>&kind=<kind>&name=<id>`,
+composed from the concept's own id and the `domain` the node publishes in
+`GET /runtime-config.json`. The portal renders no `.memql` source, holds no
+catalog of constructs, and knows nothing about `clusters.yaml`, the editor's
+credentials, or whether the extension is installed at all — which is why the
+install pointer sits permanently beside the link rather than appearing when it
+is needed. Everything after the click is the extension's: matching that domain
+against a registered cluster, connecting it through the ordinary sign-in, and
+landing on the construct. That is the boundary the two surfaces keep — the
+extension owns what is on your machine and what it can reach, the portal owns
+what is inside a cluster — and the link shape is open to any client that knows
+its cluster's domain, which is the point of serving the domain at all.
+
 ## Rules for anything added here
 
 1. **Never name a downstream product.** The engine is product-neutral and
