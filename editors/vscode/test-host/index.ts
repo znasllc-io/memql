@@ -516,7 +516,12 @@ smoke("every webview surface opens without throwing", async () => {
       browseRowsInPortal: () => {
         throw new Error("no portal browse in the smoke lane");
       },
-    }
+    },
+    // The cluster this record was "read from" (memql#4253). The smoke lane has
+    // no connection, so "" is the honest answer -- and it is the value that
+    // makes the two deps above refuse rather than fire, which is what keeps
+    // them unreachable here.
+    ""
   );
   expected.push("Construct: trainedResponder");
 

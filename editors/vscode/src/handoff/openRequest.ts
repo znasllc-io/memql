@@ -34,7 +34,13 @@ export interface OpenRequest {
 export type OpenRequestError = { error: string };
 
 export function parseOpenRequest(uri: { path: string; query: string }): OpenRequest | OpenRequestError {
-  if (uri.path !== "/open") return { error: `unsupported path ${uri.path}; this extension opens constructs at /open` };
+  // TRUNCATED, because this string is rendered into a TOAST and the path is
+  // attacker-supplied by the same route the query is -- which is capped on the
+  // next line. 64 characters is enough to recognise the link that was clicked
+  // and far short of anything worth pasting into a notification.
+  if (uri.path !== "/open") {
+    return { error: `unsupported path ${uri.path.slice(0, 64)}; this extension opens constructs at /open` };
+  }
   if (uri.query.length > MAX_QUERY) return { error: "the query is longer than this handler accepts" };
   const params = new URLSearchParams(uri.query);
   const one = (key: string): string | OpenRequestError => {

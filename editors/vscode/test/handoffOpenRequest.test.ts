@@ -42,3 +42,16 @@ test("every malformed input is refused by name", () => {
   const wrongPath = parseOpenRequest({ path: "/run", query: "v=1&cluster=a.test&kind=query&name=x" });
   assert.ok("error" in wrongPath && /\/run/.test(wrongPath.error));
 });
+
+test("a hostile path is named in the refusal but not echoed whole", () => {
+  // The refusal is rendered into a TOAST, and the path is attacker-supplied by
+  // exactly the same route the query is -- but only the query was capped. A
+  // megabyte of `/aaaa...` would be pasted into the notification verbatim.
+  const long = parseOpenRequest({ path: `/${"a".repeat(5000)}`, query: "v=1&cluster=a.test&kind=query&name=x" });
+  assert.ok("error" in long);
+  assert.ok(long.error.length < 200, `the refusal echoed ${long.error.length} characters`);
+  // Still says enough to debug the link: the start of the path, and where the
+  // handler does listen.
+  assert.match(long.error, /\/aaa/);
+  assert.match(long.error, /\/open/);
+});

@@ -15,6 +15,7 @@ import {
   CLUSTER_DOCUMENT_SCHEME,
   clusterDocumentUri,
   detailsRefusal,
+  panelClusterRefusal,
   fetchFailedNotice,
   notConnectedNotice,
   packLocator,
@@ -94,4 +95,36 @@ test("the fetch-failed notice points at the channel and carries no raw error", (
   for (const line of notice.split("\n").filter((l) => l !== "")) {
     assert.match(line, /^\/\//, `"${line}" is not a comment line`);
   }
+});
+
+// memql#4253. The construct PANEL is a singleton that outlives any one
+// connection, so the two buttons that reach into a cluster have the same defect
+// the lens had: a record opened under `staging` would be served by whatever is
+// connected when the button is pressed. This is that decision, composed from
+// detailsRefusal so there is exactly ONE cluster comparison in the tree.
+test("a panel action is refused when the connection is not the panel's own cluster", () => {
+  // The cluster the record came from IS the connected one: act.
+  assert.equal(panelClusterRefusal("staging", "staging", "read its source"), undefined);
+
+  // A different cluster: the mismatch wins, and names both.
+  const crossed = String(panelClusterRefusal("staging", "prod", "read its source"));
+  assert.match(crossed, /staging/);
+  assert.match(crossed, /prod/);
+
+  // Nothing connected, and the panel knows its cluster: the more specific
+  // "reconnect to staging" wins over the generic offer.
+  const gone = String(panelClusterRefusal("staging", undefined, "read its source"));
+  assert.match(gone, /staging/);
+  assert.equal(/connect to a cluster to/.test(gone), false);
+
+  // Nothing connected and NO claim to check: fall back to naming what is
+  // needed, in the caller's own words.
+  assert.equal(
+    panelClusterRefusal("", undefined, "browse its rows in the portal"),
+    "MemQL: connect to a cluster to browse its rows in the portal.",
+  );
+
+  // A panel with no claim, over a live connection, is never refused -- the
+  // same "" rule detailsRefusal applies.
+  assert.equal(panelClusterRefusal("", "prod", "read its source"), undefined);
 });

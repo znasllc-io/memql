@@ -183,7 +183,11 @@ import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
 import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
-import { CLUSTER_DOCUMENT_SCHEME, detailsRefusal } from './constructs/clusterDocument.js';
+import {
+  CLUSTER_DOCUMENT_SCHEME,
+  detailsRefusal,
+  panelClusterRefusal,
+} from './constructs/clusterDocument.js';
 import {
   ClusterDocumentLens,
   ClusterDocumentProvider,
@@ -374,6 +378,14 @@ function startLanguageClient(context: ExtensionContext): void {
   const clientOptions: LanguageClientOptions = {
     // `scheme: 'file'` (memql#4248): cluster documents (`memql-cluster:`) must
     // not receive import-resolution diagnostics for files that are not on disk.
+    //
+    // IT COSTS MORE THAN IT LOOKS LIKE, and deliberately. The narrowing is by
+    // scheme rather than by exclusion, so it also drops `untitled:` MemQL
+    // buffers (a new unsaved file gets no completion or hover until it is
+    // saved) and `git:` documents (no language features in a diff view).
+    // Stated here so the next reader recognises it as the price of the rule
+    // rather than as a bug -- widening the selector puts the diagnostics back
+    // on cluster documents, which is the defect this fixed.
     documentSelector: [{ language: 'memql', scheme: 'file' }],
     synchronize: {
       // The server rebuilds its registry on watched .memql changes so a concept
@@ -493,7 +505,10 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   const registry = await readClustersFileSafe(surface.clustersPath);
   if (!registry.ok) {
     window.showErrorMessage(`MemQL: ${registry.error}`);
-    noteDiagnostic(connectionOutput, 'Handoff refused', registry.error);
+    // 'Handoff from portal', not 'Handoff refused': the link was fine and the
+    // REGISTRY was not, which is the outcome this returns. A headline naming
+    // the other outcome sends a reader looking for a malformed link.
+    noteDiagnostic(connectionOutput, 'Handoff from portal', `the cluster registry could not be read: ${registry.error}`);
     return { outcome: 'noCluster', detail: 'the cluster registry could not be read' };
   }
   const match = matchCluster(registry.file.clusters, request.domain, registry.file.selectedCluster);
@@ -621,7 +636,9 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       case 'detailPage':
         // Promoted: there is no file anywhere, and the page renders the source
         // the cluster holds.
-        ConstructPanel.open(surface.context, toCatalogConstruct(found), surface.constructPanelDeps());
+        // `cluster.name` is the cluster this catalog was listed from, which is
+        // what the panel's buttons must be measured against later.
+        ConstructPanel.open(surface.context, toCatalogConstruct(found), surface.constructPanelDeps(), cluster.name);
         return { outcome: 'opened', detail: landing.kind };
 
       case 'workspaceFile':
@@ -713,7 +730,7 @@ async function openCheckoutFor(
   if (mode === 'thisWindow') {
     // Nothing is open, so there is nothing to disturb and nothing to ask about.
     // This one really does restart the host; the replay finishes it.
-    await commands.executeCommand('vscode.openFolder', Uri.file(checkout), { forceNewWindow: false });
+    await openFolderOrUnpark(surface, Uri.file(checkout), false);
     return { outcome: 'opened', detail: 'openCheckout' };
   }
   // MODAL, because the alternatives are mutually exclusive and both rearrange
@@ -726,7 +743,7 @@ async function openCheckoutFor(
     'Add to this workspace'
   );
   if (pick === 'Open in new window') {
-    await commands.executeCommand('vscode.openFolder', Uri.file(checkout), { forceNewWindow: true });
+    await openFolderOrUnpark(surface, Uri.file(checkout), true);
     return { outcome: 'opened', detail: 'openCheckout' };
   }
   if (pick === 'Add to this workspace') {
@@ -747,6 +764,29 @@ async function openCheckoutFor(
   // Nothing opened, and `refused` is reserved for a link this extension would
   // not act on at all -- a caller must be able to tell the two apart.
   return { outcome: 'notLoaded', detail: 'cancelled' };
+}
+
+/**
+ * Opens a folder, taking the parked request back out if the command rejects.
+ *
+ * The request is parked BEFORE the call because a successful open destroys this
+ * extension host mid-statement -- there is no "after" to park it in. That makes
+ * a FAILED open the leak: nothing reloads, so nothing replays, and a live
+ * request sits in profile-wide globalState for the rest of its TTL where an
+ * unrelated window's activation will consume it and open a construct nobody
+ * asked that window for. The same shape the add-to-workspace branch closes,
+ * arriving by the other door.
+ *
+ * Rethrows: the caller's own catch classifies it, and swallowing it here would
+ * report a handoff as `opened` when no folder ever opened.
+ */
+async function openFolderOrUnpark(surface: HandoffSurface, folder: Uri, forceNewWindow: boolean): Promise<void> {
+  try {
+    await commands.executeCommand('vscode.openFolder', folder, { forceNewWindow });
+  } catch (err) {
+    await takePending(surface.context.globalState, Date.now());
+    throw err;
+  }
 }
 
 /**
@@ -1259,20 +1299,33 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       void offerDetails('error', connectionOutput, 'MemQL: a cluster document could not be read from its cluster.');
     },
   });
-  // ONE FACTORY, TWO CALL SITES: both commands open the same singleton panel
-  // and must hand it the same behaviour. The closure reads `connections` when
-  // the BUTTON IS PRESSED rather than when the panel was opened, which is the
-  // only reading that can be right -- the panel outlives any one cluster.
+  // ONE FACTORY, THREE CALL SITES: they all open the same singleton panel and
+  // must hand it the same behaviour. The closure reads `connections` when the
+  // BUTTON IS PRESSED rather than when the panel was opened, which is the only
+  // reading that can see a connection that has since changed.
+  //
+  // BUT IT IS NOT THE READING THAT DECIDES (memql#4253). Seeing the current
+  // connection is what lets these refuse; it is not permission to USE it. The
+  // panel hands back the cluster its record came from, and a mismatch is
+  // refused through `panelClusterRefusal` -- the same comparison the
+  // cluster-document lens makes, for the same reason. Serving `prod`'s bytes
+  // under a record read from `staging`, or opening `prod`'s portal for a
+  // concept picked out of `staging`'s catalog, is the failure both prevent.
   const constructPanelDeps = (): ConstructPanelDeps => ({
-    viewSourceFromCluster: async (construct) => {
+    viewSourceFromCluster: async (construct, panelCluster) => {
       const state = connections?.state;
-      if (state?.status !== 'connected') {
-        void window.showInformationMessage('MemQL: connect to a cluster to read its source.');
+      const connected = state?.status === 'connected' ? state.clusterName : undefined;
+      const refusal = panelClusterRefusal(panelCluster, connected, 'read its source');
+      if (refusal !== undefined) {
+        void window.showInformationMessage(refusal);
         return;
       }
+      // Defined whenever there was no refusal: panelClusterRefusal answers with
+      // the connect offer when nothing is connected.
+      const clusterName = connected!;
       try {
         await openClusterDocument({
-          cluster: state.clusterName,
+          cluster: clusterName,
           originPath: construct.originPath,
           kind: construct.kind,
           name: construct.name,
@@ -1281,8 +1334,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // The information policy (memql#4194): the raw text goes to the
         // channel, never into the document and never into the toast.
         const detail = err instanceof Error ? err.message : String(err);
-        noteDiagnostic(connectionOutput, `reading ${construct.originPath} from "${state.clusterName}" failed`, detail);
-        void offerDetails('error', connectionOutput, `MemQL: ${state.clusterName} could not serve that file.`);
+        noteDiagnostic(connectionOutput, `reading ${construct.originPath} from "${clusterName}" failed`, detail);
+        void offerDetails('error', connectionOutput, `MemQL: ${clusterName} could not serve that file.`);
       }
     },
     // Rows live inside the cluster, not on this machine, so this hands off to
@@ -1292,22 +1345,37 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // the connected cluster's NAME (`clusterName`) -- ConnectionManager has no
     // getter for the ClusterConfig it dialled with -- so the name is what
     // resolves back to a full config.
-    browseRowsInPortal: async (construct) => {
+    browseRowsInPortal: async (construct, panelCluster) => {
       const state = connections?.state;
-      if (state?.status !== 'connected') {
-        void window.showInformationMessage('MemQL: connect to a cluster to browse its rows in the portal.');
+      const connected = state?.status === 'connected' ? state.clusterName : undefined;
+      const refusal = panelClusterRefusal(panelCluster, connected, 'browse its rows in the portal');
+      if (refusal !== undefined) {
+        void window.showInformationMessage(refusal);
         return;
       }
-      const result = await readClustersFileSafe(clustersPath);
-      const cluster = result.ok ? result.file.clusters.find((c) => c.name === state.clusterName) : undefined;
-      const root = cluster === undefined ? '' : await portalUrlForCluster(cluster);
-      if (root === '') {
-        void window.showErrorMessage(
-          'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
-        );
-        return;
+      const clusterName = connected!;
+      // WRAPPED, unlike its sibling above, which had a try/catch from the
+      // start: three of the four calls here can reject (the registry read, the
+      // site-row lookup inside portalUrlForCluster, and openExternal), the
+      // panel dispatches messages as `void this.onMessage(...)`, and an
+      // unattached rejection is an extension-host log line the operator never
+      // sees. Same classification as every other failure in this file.
+      try {
+        const result = await readClustersFileSafe(clustersPath);
+        const cluster = result.ok ? result.file.clusters.find((c) => c.name === clusterName) : undefined;
+        const root = cluster === undefined ? '' : await portalUrlForCluster(cluster);
+        if (root === '') {
+          void window.showErrorMessage(
+            'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+          );
+          return;
+        }
+        await env.openExternal(Uri.parse(portalConceptUrl(root, construct.name)));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        noteDiagnostic(connectionOutput, `opening the portal for ${construct.name} on "${clusterName}" failed`, detail);
+        void offerDetails('error', connectionOutput, `MemQL: the portal for ${clusterName} could not be opened.`);
       }
-      await env.openExternal(Uri.parse(portalConceptUrl(root, construct.name)));
     },
   });
 
@@ -1335,7 +1403,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (node?.kind !== 'construct') {
         return;
       }
-      ConstructPanel.open(context, node.construct, constructPanelDeps());
+      // The tree's rows come from the connected cluster's catalog, so that is
+      // the cluster this record was read from. "" when nothing is connected --
+      // the tree cannot have rows then, but the panel is told the truth rather
+      // than a name that happens to be current.
+      const state = connections?.state;
+      ConstructPanel.open(
+        context,
+        node.construct,
+        constructPanelDeps(),
+        state?.status === 'connected' ? state.clusterName : ''
+      );
     }),
     // The cluster document's lens posts this: the way BACK from source to the
     // detail page. Palette-hidden for the same reason as `open` -- it takes a
@@ -1375,7 +1453,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           void window.showInformationMessage(`MemQL: the cluster has no ${key.kind} ${key.name} loaded.`);
           return;
         }
-        ConstructPanel.open(context, toCatalogConstruct(found), constructPanelDeps());
+        // `key.cluster` is the lens's own claim, already checked against the
+        // connection by detailsRefusal above -- so it is both the cluster this
+        // record came from and a value the panel can be held to.
+        ConstructPanel.open(context, toCatalogConstruct(found), constructPanelDeps(), key.cluster ?? '');
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `listing constructs for ${key.kind} ${key.name} failed`, detail);

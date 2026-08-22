@@ -105,7 +105,51 @@ export function detailsRefusal(
   return `MemQL: this document came from ${documentCluster}; you are connected to ${connectedCluster}. Reconnect to ${documentCluster} to open its details.`;
 }
 
-function safeDecode(value: string): string {
+/**
+ * The refusal for a CONSTRUCT PANEL action, or undefined when it may run.
+ *
+ * THE SAME DEFECT AS THE LENS, ONE SURFACE ALONG (memql#4253). The panel is a
+ * singleton that outlives the connection its record was read over: open a
+ * construct on `staging`, switch to `prod`, and its "view source" / "browse
+ * rows" buttons would resolve against `prod` -- serving one cluster's bytes
+ * under another's record, and opening one cluster's portal for a concept picked
+ * from another's catalog. Nothing re-points the panel on a state change, so the
+ * cluster has to travel WITH the record, exactly as it does through the lens.
+ *
+ * COMPOSED FROM detailsRefusal RATHER THAN REPEATING IT. There is one cluster
+ * comparison in this tree and this is a caller of it, not a sibling: a second
+ * copy would be free to disagree about what "" means or about which cluster to
+ * name, and the disagreement would surface as one surface refusing what another
+ * allowed.
+ *
+ * What it ADDS is the second question a panel button has to ask and the lens
+ * does not: `detailsRefusal` answers "is this the right cluster", which is
+ * vacuously fine when the panel makes no claim (`""`) and nothing is connected.
+ * A button still cannot run there, so `need` names the action in the caller's
+ * own words for that one case.
+ */
+export function panelClusterRefusal(
+  panelCluster: string,
+  connectedCluster: string | undefined,
+  need: string,
+): string | undefined {
+  const mismatch = detailsRefusal(panelCluster, connectedCluster);
+  if (mismatch !== undefined) return mismatch;
+  if (connectedCluster === undefined) return `MemQL: connect to a cluster to ${need}.`;
+  return undefined;
+}
+
+/**
+ * `decodeURIComponent` that answers "" instead of throwing.
+ *
+ * EXPORTED because a percent sign in a cluster name is not this module's
+ * problem alone (memql#4253): the read-only badge decodes the same authority
+ * from the same uris, and a bare decodeURIComponent there throws `URIError`
+ * INSIDE a FileDecorationProvider -- the badge silently vanishes and the only
+ * trace is an extension-host log nobody is reading. One tolerant decoder, used
+ * by everything that reads one of these uris.
+ */
+export function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);
   } catch {

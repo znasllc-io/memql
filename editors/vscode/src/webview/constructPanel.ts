@@ -65,10 +65,18 @@ import { workspaceCandidates } from "../handoff/resolve.js";
  * concept's ROWS to the portal rather than fetching or rendering them here --
  * the extension owns what is on this machine and what it can reach, the
  * portal owns what is inside a cluster.
+ *
+ * BOTH TAKE THE PANEL'S CLUSTER, and neither may read the connected one in its
+ * place (memql#4253). This panel is a singleton that outlives the connection
+ * its record was read over, and nothing re-points it when the connection
+ * changes -- so a construct opened on `staging` would have these buttons served
+ * by `prod` after a switch, with nothing on the page saying so. The cluster
+ * travels with the record for the same reason the cluster-document lens carries
+ * it (memql#4248); the host compares the two through `panelClusterRefusal`.
  */
 export interface ConstructPanelDeps {
-  viewSourceFromCluster: (construct: CatalogConstruct) => Promise<void>;
-  browseRowsInPortal: (construct: CatalogConstruct) => Promise<void>;
+  viewSourceFromCluster: (construct: CatalogConstruct, cluster: string) => Promise<void>;
+  browseRowsInPortal: (construct: CatalogConstruct, cluster: string) => Promise<void>;
 }
 
 /**
@@ -110,26 +118,41 @@ export class ConstructPanel {
   private readonly disposables: vscode.Disposable[] = [];
   private construct: CatalogConstruct;
   private deps: ConstructPanelDeps;
+  /**
+   * The cluster this panel's record was read from, or "" when the opener could
+   * not say. Re-pointed with the construct, never read off the connection.
+   */
+  private cluster: string;
   private fileUri: vscode.Uri | undefined;
   private error = "";
   private disposed = false;
 
+  /**
+   * `cluster` is the cluster the construct was resolved FROM -- "" when the
+   * opener genuinely cannot say. It is a parameter rather than a lookup because
+   * only the opener knows: every call site already holds it, and reading it
+   * back off the live connection is precisely the bug this closes.
+   */
   static open(
     context: vscode.ExtensionContext,
     construct: CatalogConstruct,
     deps: ConstructPanelDeps,
+    cluster: string,
   ): ConstructPanel {
     const existing = ConstructPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
       // Re-pointed along with the construct. The panel is a SINGLETON reused
       // across opens, so what it holds must be what THIS opener supplied,
-      // rather than whatever the first one happened to hand over.
+      // rather than whatever the first one happened to hand over. The cluster
+      // goes with them: a reused panel showing a new construct is showing a new
+      // cluster's record as often as not.
       existing.deps = deps;
+      existing.cluster = cluster;
       existing.pointAt(construct);
       return existing;
     }
-    const panel = new ConstructPanel(context, construct, deps);
+    const panel = new ConstructPanel(context, construct, deps, cluster);
     ConstructPanel.open_ = panel;
     return panel;
   }
@@ -138,9 +161,11 @@ export class ConstructPanel {
     _context: vscode.ExtensionContext,
     construct: CatalogConstruct,
     deps: ConstructPanelDeps,
+    cluster: string,
   ) {
     this.construct = construct;
     this.deps = deps;
+    this.cluster = cluster;
     this.panel = vscode.window.createWebviewPanel(
       "memqlConstruct",
       `Construct: ${construct.name}`,
@@ -212,11 +237,11 @@ export class ConstructPanel {
       return;
     }
     if (type === "viewSourceFromCluster") {
-      await this.deps.viewSourceFromCluster(this.construct);
+      await this.deps.viewSourceFromCluster(this.construct, this.cluster);
       return;
     }
     if (type === "browseRows") {
-      await this.deps.browseRowsInPortal(this.construct);
+      await this.deps.browseRowsInPortal(this.construct, this.cluster);
       return;
     }
     if (type !== "openFile") return;

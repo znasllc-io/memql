@@ -30,7 +30,7 @@
 
 import * as vscode from "vscode";
 
-import { CLUSTER_DOCUMENT_SCHEME } from "./clusterDocument.js";
+import { CLUSTER_DOCUMENT_SCHEME, safeDecode } from "./clusterDocument.js";
 import {
   constructsByPath,
   readonlyPatterns,
@@ -83,7 +83,10 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
     if (uri.scheme === CLUSTER_DOCUMENT_SCHEME) {
       return {
         badge: "RO",
-        tooltip: `Served from ${decodeURIComponent(uri.authority)} -- read-only. The file is not on this machine; this is the source the cluster loaded.`,
+        // safeDecode, not decodeURIComponent: a cluster named with a literal
+        // `%` makes the bare call throw URIError, and a throw inside a
+        // FileDecorationProvider takes the badge with it silently.
+        tooltip: `Served from ${safeDecode(uri.authority)} -- read-only. The file is not on this machine; this is the source the cluster loaded.`,
         propagate: false,
       };
     }
