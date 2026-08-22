@@ -19,7 +19,7 @@ import (
 // those two are pinned to each other by test/fixtures/discovery-endpoint-contract.json.
 //
 // Neither says anything about the HOST, and the host is where memql#3399
-// actually lived: the local cluster advertised bff.local.znas.io, a name with no
+// actually lived: the local cluster advertised a `bff.<domain>` name with no
 // ingress anywhere in the overlay. Which host is right is a deployment fact, so
 // it is asserted here, against the manifests -- the shape (the env var exists at
 // all) in base, the value per overlay, per the parity rule in CLAUDE.md.

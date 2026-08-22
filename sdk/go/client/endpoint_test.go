@@ -14,9 +14,9 @@ func TestParseClusterEndpoint(t *testing.T) {
 		{"bare host gets default gRPC port", "localhost", "localhost:50051", false, false},
 		{"grpc scheme plaintext", "grpc://localhost:50050", "localhost:50050", false, false},
 		{"http scheme plaintext", "http://localhost:50050", "localhost:50050", false, false},
-		{"https scheme TLS default 443", "https://bff.local.znas.io", "bff.local.znas.io:443", true, false},
-		{"https scheme TLS explicit port", "https://bff.local.znas.io:50443", "bff.local.znas.io:50443", true, false},
-		{"grpcs scheme TLS default 443", "grpcs://bff.local.znas.io", "bff.local.znas.io:443", true, false},
+		{"https scheme TLS default 443", "https://bff.local.example.com", "bff.local.example.com:443", true, false},
+		{"https scheme TLS explicit port", "https://bff.local.example.com:50443", "bff.local.example.com:50443", true, false},
+		{"grpcs scheme TLS default 443", "grpcs://bff.local.example.com", "bff.local.example.com:443", true, false},
 		{"empty", "", "", false, true},
 		{"unsupported scheme", "ssh://host:22", "", false, true},
 	}

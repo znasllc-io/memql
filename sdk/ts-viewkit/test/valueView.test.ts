@@ -220,14 +220,14 @@ test("terminates on a self-referential payload instead of recursing forever", ()
 });
 
 test("a non-cyclic object reused by two siblings renders in full both times", () => {
-  const shared = { host: "api.local.znas.io", port: 443 };
+  const shared = { host: "api.local.example.com", port: 443 };
   const out = html({ primary: shared, mirror: shared });
   assert.doesNotMatch(
     out,
     /vk-vv-cycle/,
     "a shared sibling is finite, not circular -- marking it would hide real data",
   );
-  assert.equal(out.match(/vk-vv-value">api\.local\.znas\.io</g)?.length, 2);
+  assert.equal(out.match(/vk-vv-value">api\.local\.example\.com</g)?.length, 2);
 });
 
 test("a shared sibling deeper in the tree is still not mistaken for a cycle", () => {

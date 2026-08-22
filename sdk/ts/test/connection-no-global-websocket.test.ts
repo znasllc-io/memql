@@ -95,7 +95,7 @@ test("Connection.dial succeeds with an injected socket and no global WebSocket",
   let socket: InjectedSocket | undefined;
 
   const dialing = Connection.dial({
-    endpoint: "wss://api.local.znas.io:443/memql/ws",
+    endpoint: "wss://api.local.example.com:443/memql/ws",
     auth: { bearer: "mql_pat_test" },
     clientId: "memql-vscode",
     sdkName: "memql-vscode",
@@ -124,7 +124,7 @@ test("Connection.dial waits for a CONNECTING injected socket to open", async () 
   let socket: InjectedSocket | undefined;
 
   const dialing = Connection.dial({
-    endpoint: "wss://api.local.znas.io:443/memql/ws",
+    endpoint: "wss://api.local.example.com:443/memql/ws",
     webSocketFactory: (url, protocols) => {
       socket = new InjectedSocket(url, protocols);
       socket.readyState = 0; // CONNECTING
@@ -153,7 +153,7 @@ test("a send on a closed socket reports socket-not-open, not a missing global", 
   let socket: InjectedSocket | undefined;
 
   const dialing = Connection.dial({
-    endpoint: "wss://api.local.znas.io:443/memql/ws",
+    endpoint: "wss://api.local.example.com:443/memql/ws",
     webSocketFactory: (url, protocols) => {
       socket = new InjectedSocket(url, protocols);
       return socket as unknown as WebSocket;

@@ -6,7 +6,7 @@
     "(component/identity/discovery.go). Clients read that field and turn it into a",
     "connection -- editors/vscode/src/connection/endpoint.ts lifts it to a /memql/ws URL.",
     "Nothing in the build links the two, so for the whole life of memql#3399 the cluster",
-    "advertised 'https://bff.local.znas.io': a URL form the parser refuses outright, at a",
+    "advertised a 'https://bff.<domain>' URL: a form the parser refuses outright, at a",
     "host with no ingress. Both halves were individually tested and green.",
     "",
     "This file is the single statement both halves are tested against. 'advertised' is what",
@@ -21,11 +21,11 @@
   ],
   "cases": [
     {
-      "name": "the deployed local value: the api front door, explicit 443",
-      "configured": "api.local.znas.io:443",
-      "identityUrl": "https://identity.local.znas.io",
-      "advertised": "api.local.znas.io:443",
-      "webSocketUrl": "wss://api.local.znas.io/memql/ws"
+      "name": "a dev-wildcard api front door with an explicit 443",
+      "configured": "api.local.example.com:443",
+      "identityUrl": "https://identity.local.example.com",
+      "advertised": "api.local.example.com:443",
+      "webSocketUrl": "wss://api.local.example.com/memql/ws"
     },
     {
       "name": "the deployed cloud value: base's placeholder front door, patched per overlay",
@@ -36,10 +36,10 @@
     },
     {
       "name": "memql#3399 regression: a scheme-ful operator value is normalized, never republished as a URL",
-      "configured": "https://bff.local.znas.io",
-      "identityUrl": "https://identity.local.znas.io",
-      "advertised": "bff.local.znas.io:443",
-      "webSocketUrl": "wss://bff.local.znas.io/memql/ws"
+      "configured": "https://bff.local.example.com",
+      "identityUrl": "https://identity.local.example.com",
+      "advertised": "bff.local.example.com:443",
+      "webSocketUrl": "wss://bff.local.example.com/memql/ws"
     },
     {
       "name": "scheme plus an explicit non-default port keeps the port",
@@ -99,8 +99,8 @@
     }
   ],
   "rejected": [
-    "https://bff.local.znas.io",
-    "https://api.local.znas.io:443",
+    "https://bff.local.example.com",
+    "https://api.local.example.com:443",
     "http://localhost:8081",
     "grpc://api.example.com:443"
   ]
