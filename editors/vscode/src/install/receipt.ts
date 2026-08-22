@@ -774,6 +774,78 @@ export function recordedDomain(receipt: Receipt | null): string {
   return "";
 }
 
+// ---------------------------------------------------------------------------
+// which lane set the running images (memql#4246)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which lane set the node images that are running right now.
+ *
+ * `released` is what install, upgrade and repair leave -- `clusterUp
+ * --image-tag`, pinned to a published release. `checkout` is what a
+ * `k3d.dev` rebuild-from-checkout run leaves -- images built from whatever a
+ * developer's own repo-root currently contains, edits included. The two are
+ * not a spectrum: a cluster is running one or the other, never both, because
+ * the last one to run is what the pods are actually executing.
+ */
+export type ImageSource = "released" | "checkout";
+
+/** The last rebuild's facts, read back for display. */
+export interface RecordedRebuild {
+  commit: string;
+  ref: string;
+  dirtyCount: number;
+  nodes: string;
+  recordedAt: string;
+}
+
+/**
+ * The last rebuild, when its envelope says the cluster was pointed at
+ * checkout images (memql#4246).
+ *
+ * THE ENVELOPE'S OWN VERDICT, not merely "a rebuild step ran" -- `k3d.dev`
+ * also supports `--image-source=released` (rebuild the binaries, keep
+ * running released images), which leaves an entry here too. Reading that as
+ * "the cluster is in checkout mode" would be wrong in the one case a
+ * developer most needs this to be right: right after they deliberately
+ * asked NOT to run their own edits.
+ */
+export function recordedRebuild(receipt: Receipt | null): RecordedRebuild | undefined {
+  if (!receipt) return undefined;
+  const entry = entryFor(receipt, "rebuildFromCheckout");
+  if (entry === undefined || entry.result?.imageSource !== "checkout") return undefined;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const n = Number(entry.result.dirtyCount);
+  return {
+    commit: str(entry.result.commit),
+    ref: str(entry.result.ref),
+    dirtyCount: Number.isFinite(n) ? n : 0,
+    nodes: str(entry.result.nodes),
+    recordedAt: entry.recordedAt,
+  };
+}
+
+/**
+ * Which lane set the node images last. `released` is what install, upgrade
+ * and repair leave (clusterUp --image-tag); `checkout` is what a rebuild
+ * leaves. Decided by recordedAt, because both entries survive in the receipt
+ * -- a rebuild does not erase the clusterUp entry that preceded it, and a
+ * later repair does not erase the rebuild -- so only the ORDER says which
+ * one the cluster is actually running.
+ *
+ * "" means neither lane has ever run: a receipt that predates a clusterUp
+ * entry entirely, or none at all. Never guessed at as `released` -- a
+ * machine this editor knows nothing about is not evidence that released
+ * images are what it runs.
+ */
+export function recordedImageSource(receipt: Receipt | null): ImageSource | "" {
+  if (!receipt) return "";
+  const up = entryFor(receipt, "clusterUp");
+  const rebuild = recordedRebuild(receipt);
+  if (rebuild !== undefined && (up === undefined || rebuild.recordedAt > up.recordedAt)) return "checkout";
+  return up === undefined ? "" : "released";
+}
+
 /** The cluster owner a previous run bootstrapped. Empty strings when unrecorded. */
 export interface RecordedOwner {
   email: string;

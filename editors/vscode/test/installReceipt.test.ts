@@ -28,7 +28,9 @@ import {
   entryFor,
   parseReceipt,
   readReceipt,
+  recordedImageSource,
   recordedOwner,
+  recordedRebuild,
   recordedStackDir,
   removalParams,
   serializeReceipt,
@@ -607,4 +609,85 @@ test("recordedStackDir reads the checkout directory the clone step reported", ()
   assert.equal(recordedStackDir(r), "/home/me/.memql/src");
   assert.equal(recordedStackDir(null), "");
   assert.equal(recordedStackDir(emptyReceipt("install")), "");
+});
+
+// -----------------------------------------------------------------------------
+// WHICH lane set the running images (memql#4246)
+//
+// clusterUp (install, upgrade, repair) and rebuildFromCheckout (k3d.dev) both
+// leave an entry on the same receipt, and only their recordedAt order says
+// which one the cluster is actually running right now -- a rebuild can follow
+// an install, and a later repair can follow a rebuild and return the cluster
+// to released images.
+// -----------------------------------------------------------------------------
+
+test("the image source is whichever lane ran last", () => {
+  const r = emptyReceipt("install");
+  assert.equal(recordedImageSource(r), "");
+  r.entries.push(
+    entry({
+      stepId: "clusterUp",
+      script: "k3d.up",
+      receipt: "cluster",
+      params: { "image-tag": "v0.17.0" },
+      result: {},
+      recordedAt: "2026-08-20T10:00:00.000Z",
+    }),
+  );
+  assert.equal(recordedImageSource(r), "released");
+  r.entries.push(
+    entry({
+      stepId: "rebuildFromCheckout",
+      script: "k3d.dev",
+      receipt: "rebuild",
+      params: { "image-source": "checkout" },
+      result: {
+        imageSource: "checkout",
+        commit: "abc1234def",
+        ref: "tag:v0.17.0",
+        dirtyCount: 4,
+        nodes: "bff agent",
+      },
+      recordedAt: "2026-08-21T10:00:00.000Z",
+    }),
+  );
+  assert.equal(recordedImageSource(r), "checkout");
+  assert.deepEqual(recordedRebuild(r), {
+    commit: "abc1234def",
+    ref: "tag:v0.17.0",
+    dirtyCount: 4,
+    nodes: "bff agent",
+    recordedAt: "2026-08-21T10:00:00.000Z",
+  });
+  // A later repair returns it to released images.
+  r.entries = r.entries.map((e) => (e.stepId === "clusterUp" ? { ...e, recordedAt: "2026-08-22T10:00:00.000Z" } : e));
+  assert.equal(recordedImageSource(r), "released");
+});
+
+test("a rebuild entry that did NOT point at checkout images is not a recorded rebuild", () => {
+  // A rebuild can also run with `--image-source=released` (rebuild the
+  // binaries, keep the release images) -- see k3d.dev. That leaves an entry
+  // on the receipt too, and it must not be read as "the cluster is in
+  // checkout mode" -- the whole reason `recordedImageSource` checks the
+  // envelope's OWN verdict rather than merely "a rebuild step ran".
+  const r = emptyReceipt("install");
+  r.entries.push(
+    entry({
+      stepId: "rebuildFromCheckout",
+      script: "k3d.dev",
+      receipt: "rebuild",
+      params: { "image-source": "released" },
+      result: { imageSource: "released" },
+      recordedAt: "2026-08-21T10:00:00.000Z",
+    }),
+  );
+  assert.equal(recordedRebuild(r), undefined);
+  assert.equal(recordedImageSource(r), "");
+});
+
+test("no receipt and an empty receipt both answer with nothing to go on", () => {
+  assert.equal(recordedImageSource(null), "");
+  assert.equal(recordedRebuild(null), undefined);
+  assert.equal(recordedImageSource(emptyReceipt("install")), "");
+  assert.equal(recordedRebuild(emptyReceipt("install")), undefined);
 });

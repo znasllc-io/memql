@@ -63,7 +63,9 @@ import {
   recordedProvider,
   recordedProviderKeyFile,
   recordedCheckout,
+  recordedStackDir,
   recordedStackTag,
+  type Receipt,
 } from "../install/receipt.js";
 import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
 import {
@@ -312,6 +314,16 @@ export class AddClusterPanel {
   private runAbort: AbortController | undefined;
   /** Why the run could not be attempted at all. Not a step failure. */
   private runError = "";
+  /**
+   * The receipt read once the run settles, so `doneHtml` needs no I/O of its
+   * own (memql#4246). Read at the SAME moment `runError`, the hand-off and
+   * the recovery-key facts are captured -- see `startRun` and
+   * `reconnectLocal`, its two writers -- for the reason the recovery-key
+   * comment nearby gives: `report` and a fresh read are both local to those
+   * methods, and the done screen re-renders on its own (a click on Reveal,
+   * for one) with no run in flight to read either from again.
+   */
+  private doneReceipt: Receipt | null = null;
   /**
    * Whether the operator has clicked through the recovery-key reveal
    * (memql#4194, audit 1). The plaintext renders only after a deliberate
@@ -641,6 +653,9 @@ export class AddClusterPanel {
     }
     if (type === "claimCluster") {
       void this.claimCluster();
+    }
+    if (type === "openCheckout") {
+      void this.openCheckout();
     }
     if (type === "copyRecoveryKey") {
       void this.copyRecoveryKey();
@@ -998,6 +1013,13 @@ export class AddClusterPanel {
     );
     this.deps.refreshTree();
 
+    if (this.disposed) return;
+
+    // THE CHECKOUT, read once here (memql#4246). Every branch `doneHtml` can
+    // reach from this point on -- the refused start, the failed hand-off,
+    // the successful one, and the plain terminal -- reads `this.doneReceipt`
+    // synchronously instead of doing its own I/O.
+    this.doneReceipt = await readReceipt(this.deps.receiptFile).catch(() => null);
     if (this.disposed) return;
 
     if (failure !== undefined) {
@@ -2215,6 +2237,9 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   private async reconnectLocal(): Promise<void> {
     const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
     if (this.disposed) return;
+    // The same receipt this call already read, held for `doneHtml` (memql#4246)
+    // -- see `doneReceipt`'s own comment for why it is not read a second time.
+    this.doneReceipt = receipt;
     const plan = planLocalReconnect(receipt);
     await this.handOffAfterInstall(plan.domain);
   }
@@ -2314,6 +2339,33 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       cluster: handoff.cluster,
       selected: true,
     });
+  }
+
+  /**
+   * Opens the local checkout the install cloned (memql#4246).
+   *
+   * Delegates to the shared command rather than reading the receipt and
+   * opening the folder itself -- the same reason `enrolPasskey` delegates to
+   * `memql.clusters.takeOwnership` rather than minting its own link: the
+   * done screen, the Connection page and the Deployments tree must all open
+   * the exact same directory the exact same way, not three implementations
+   * of "where is the checkout".
+   */
+  private async openCheckout(): Promise<void> {
+    await vscode.commands.executeCommand("memql.deployments.openCheckout");
+  }
+
+  /**
+   * The done screen's "Open source checkout" button, offered wherever
+   * `doneHtml` renders a terminal state (memql#4246) -- exactly the
+   * `handoff.ok` branch and the plain terminal below it, per the receipt
+   * read once in `startRun` / `reconnectLocal`. Empty when the receipt
+   * records no checkout: a cluster registered by hand, or one whose install
+   * never reached the clone step, has nowhere for the button to open.
+   */
+  private openCheckoutButton(): string {
+    if (recordedStackDir(this.doneReceipt) === "") return "";
+    return `<button class="secondary" type="button" data-act="openCheckout">Open source checkout</button>`;
   }
 
   private doneHtml(): string {
@@ -2417,6 +2469,7 @@ ${claimNote}
   ${enrol}
   ${claim}
   ${signIn}
+  ${this.openCheckoutButton()}
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
     }
@@ -2430,6 +2483,7 @@ ${claimNote}
         : "Nothing further to do.",
     )}</p>
 <div class="actions">
+  ${this.openCheckoutButton()}
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
   }

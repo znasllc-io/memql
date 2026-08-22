@@ -1185,6 +1185,33 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // has.
       node?.kind === 'instance' ? node.instance.name : '');
     }),
+    // "Open Local Checkout" (memql#4246) -- the ONE place this editor opens
+    // the directory the install cloned, shared by the instance row's inline
+    // icon, the Connection page and the install wizard's done screen. All
+    // three post `openCheckout` and land here rather than each resolving the
+    // path and calling `vscode.openFolder` itself.
+    commands.registerCommand('memql.deployments.openCheckout', async () => {
+      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const dir = recordedStackDir(receipt);
+      // "" is UNKNOWN, never "somewhere else" -- recordedStackDir's own rule,
+      // restated at the one call site that turns it into an action rather
+      // than a hint. A machine registered by hand, or an install that never
+      // reached the clone step, has nothing here to open.
+      if (dir === '') {
+        void window.showInformationMessage(
+          'MemQL: no checkout is recorded for the local cluster. Install or repair it to clone one.'
+        );
+        return;
+      }
+      // A NEW WINDOW ONLY WHEN ONE IS ALREADY OPEN. With nothing open, this IS
+      // the window the operator is looking at, and forcing a second one would
+      // leave this one sitting empty. With something open, replacing it in
+      // place would discard whatever they were doing there.
+      const hasWorkspace = (workspace.workspaceFolders ?? []).length > 0;
+      await commands.executeCommand('vscode.openFolder', Uri.file(dir), {
+        forceNewWindow: hasWorkspace,
+      });
+    }),
   );
   // The connection decides a remote instance's version and its history, so a
   // connect or a drop changes what this tree can say.

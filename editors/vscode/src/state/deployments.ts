@@ -35,7 +35,16 @@
 // Refs: #3736 #3733
 
 import type { PresenceVerdict } from "../clusters/presence.js";
-import { recordedDomain, recordedStackTag, type Receipt } from "../install/receipt.js";
+import {
+  recordedDomain,
+  recordedImageSource,
+  recordedRebuild,
+  recordedStackDir,
+  recordedStackTag,
+  type ImageSource,
+  type Receipt,
+  type RecordedRebuild,
+} from "../install/receipt.js";
 import {
   indexDeployments,
   resolveTierVersion,
@@ -89,16 +98,31 @@ export interface Instance {
    * always and wrong for whichever operator loses a race with a second cut.
    */
   pendingDeploymentId?: string;
+  /**
+   * Local only (memql#4246). `checkout` is the directory the install cloned
+   * (`recordedStackDir`); `imageSource` is which lane set the images last,
+   * `released` or `checkout` (`recordedImageSource`); `rebuild` is the last
+   * rebuild's own facts, present exactly when `imageSource === "checkout"`
+   * (`recordedRebuild`). All three are DERIVED from the same receipt every
+   * other local fact comes from -- there is no second place that decides a
+   * local instance's image source.
+   */
+  imageSource?: ImageSource;
+  checkout?: string;
+  rebuild?: RecordedRebuild;
 }
 
 /**
  * What kind of change a run made.
  *
  * The first four are local: an install graph run under one of its four verbs.
- * `rollout` is every remote run, because a remote instance's runs are read from
- * `v1:cluster:deployment` and that concept records one kind of event.
+ * `rebuild` is also local, and outside the install graph entirely -- a
+ * `k3d.dev` rebuild-from-checkout run (memql#4246), which is how a local
+ * cluster starts running a developer's own edits instead of a release.
+ * `rollout` is every remote run, because a remote instance's runs are read
+ * from `v1:cluster:deployment` and that concept records one kind of event.
  */
-export type RunKind = "install" | "upgrade" | "repair" | "uninstall" | "rollout";
+export type RunKind = "install" | "upgrade" | "repair" | "uninstall" | "rebuild" | "rollout";
 
 /**
  * Where a run ended up.
@@ -228,6 +252,9 @@ export function localInstance(input: LocalInstanceInput): Instance {
   const registeredName = (input.registered?.name ?? "").trim();
   const domain = (input.registered?.domain ?? "").trim() || recordedDomain(input.receipt);
   const version = recordedStackTag(input.receipt);
+  const checkout = recordedStackDir(input.receipt);
+  const imageSource = recordedImageSource(input.receipt);
+  const rebuild = recordedRebuild(input.receipt);
   return {
     name: registeredName !== "" ? registeredName : LOCAL_INSTANCE_NAME,
     kind: "local",
@@ -235,6 +262,9 @@ export function localInstance(input: LocalInstanceInput): Instance {
     presence: input.presence,
     ...(version !== "" ? { version } : {}),
     connected: input.connected,
+    ...(checkout !== "" ? { checkout } : {}),
+    ...(imageSource !== "" ? { imageSource } : {}),
+    ...(rebuild !== undefined ? { rebuild } : {}),
   };
 }
 

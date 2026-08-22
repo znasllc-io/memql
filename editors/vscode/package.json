@@ -212,6 +212,11 @@
         "icon": "$(server)"
       },
       {
+        "command": "memql.deployments.openCheckout",
+        "title": "MemQL: Open Local Checkout",
+        "icon": "$(folder-opened)"
+      },
+      {
         "command": "memql.clusters.repair",
         "title": "MemQL: Repair Local Cluster"
       },
@@ -353,6 +358,10 @@
         },
         {
           "command": "memql.deployments.open",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.openCheckout",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -550,6 +559,11 @@
         {
           "command": "memql.deployments.createDeployment",
           "when": "view == memqlDeployments && viewItem == memqlLocalInstanceAbsent",
+          "group": "inline@1"
+        },
+        {
+          "command": "memql.deployments.openCheckout",
+          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
           "group": "inline@1"
         },
         {
