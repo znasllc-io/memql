@@ -111,6 +111,33 @@ test('the runtime commands are registered, so a cluster can be selected and conn
   }
 });
 
+test('a portal link can activate the extension, and reaches a handler when it does', () => {
+  // memql#4251 -- two halves of one premise, both invisible to every other test.
+  //
+  // `onUri` is what starts the extension when an operator clicks a portal link.
+  // `workspaceContains:**/*.memql` is what starts it in the window that OPENING
+  // THE CHECKOUT just produced: the handoff parks its request in globalState and
+  // replays it from activation, so without this entry a freshly-opened checkout
+  // waits for the operator to open a .memql file or click into the MemQL view,
+  // and the parked request silently expires after its two-minute TTL if they do
+  // neither. package.json is strict JSON and cannot carry that reasoning, so it
+  // lives here, next to the assertion that keeps the entry.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')
+  ) as { activationEvents?: string[] };
+  for (const event of ['onUri', 'workspaceContains:**/*.memql']) {
+    assert.ok(
+      manifest.activationEvents?.includes(event),
+      `${event} is not in activationEvents: ${JSON.stringify(manifest.activationEvents)}`
+    );
+  }
+
+  // And the handler is there the moment activate() returns. The untrusted half
+  // of this claim is asserted in activationGates.test.ts, which is the window
+  // where it could plausibly have been skipped.
+  assert.equal(recorded.uriHandlers, 1);
+});
+
 test('the memql-cluster scheme is claimed, so a cluster document has something to open with', () => {
   // memql#4248. A `memql-cluster:` uri with no registered content provider does
   // not fail loudly -- openTextDocument rejects with "cannot open", which reads

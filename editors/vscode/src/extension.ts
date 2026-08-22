@@ -303,7 +303,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   context.subscriptions.push(
     window.registerUriHandler({
       handleUri: (uri) => {
-        void handleOpenUri(uri);
+        void handleOpenUri(uri).catch(noteHandoffFailure);
       },
     })
   );
@@ -417,6 +417,26 @@ export interface HandoffOutcome {
 /** How long a handoff waits for the cluster it just asked to be selected. */
 const HANDOFF_CONNECT_TIMEOUT_MS = 30_000;
 
+/** How long a handoff waits for a folder it just added to appear in the workspace. */
+const HANDOFF_ADD_FOLDER_TIMEOUT_MS = 5_000;
+
+/**
+ * Where a DETACHED handoff promise's failure goes.
+ *
+ * Three call sites hand a promise to nobody -- the uri handler VS Code calls
+ * (whose return value it ignores), the replay after a reload, and the
+ * add-a-cluster offer -- and an unattached rejection in any of them is an
+ * extension-host log line the operator never sees. A throw out of
+ * `memql.clusters.select` is the realistic one, and today it showed them
+ * nothing at all. Same shape as `void client.start().catch(...)` above: the raw
+ * text to the channel through the redactor, a sentence to the operator.
+ */
+function noteHandoffFailure(err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err);
+  noteDiagnostic(connectionOutput, 'Handoff from portal failed', detail);
+  void offerDetails('error', connectionOutput, 'MemQL: the portal handoff could not be completed.');
+}
+
 /**
  * Opens what a portal link names, in four steps: READ the link, MATCH a
  * registered cluster, CONNECT to it, LAND on the construct.
@@ -451,6 +471,16 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   if (connections === undefined || surface === undefined) {
     // Not an error: an untrusted window is a deliberate state, and the remedy
     // is one click in the workbench rather than anything about the link.
+    //
+    // LOGGED LIKE EVERY OTHER OUTCOME. The channel is created in activate(), so
+    // it exists here even though the runtime surface does not -- and this is
+    // the outcome most likely to be reported as "the link did nothing", which
+    // is exactly the report a missing line cannot be answered from.
+    noteDiagnostic(
+      connectionOutput,
+      'Handoff from portal',
+      `${request.domain} ${request.kind} ${request.name} -> untrusted workspace`
+    );
     window.showWarningMessage('MemQL: trust this workspace to open constructs from the portal.');
     return { outcome: 'untrusted', detail: 'the runtime surface is not registered' };
   }
@@ -495,7 +525,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       if (edited) {
         await writeCluster(surface.clustersTree, () => addCluster(surface.clustersPath, edited));
       }
-    })();
+    })().catch(noteHandoffFailure);
     return { outcome: 'noCluster', detail: `no registered cluster for ${request.domain}` };
   }
   const cluster = match.cluster;
@@ -610,7 +640,35 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
         return { outcome: 'opened', detail: landing.kind };
 
       case 'openCheckout':
-        return await openCheckoutFor(surface, request, landing.checkout, landing.mode);
+        // The inline finish is built HERE, beside the other landings, because
+        // it IS one: once the checkout is part of this workspace the answer is
+        // the workspaceFile landing, and failing that the clusterDocument one.
+        // openCheckoutFor decides how the folder arrives, not what to do with
+        // the construct afterwards.
+        return await openCheckoutFor(surface, request, landing.checkout, landing.mode, async () => {
+          const nowIn = await findInWorkspace(found.originPath);
+          if (nowIn !== undefined) {
+            await openFileAtSignature(nowIn.uri, found.kind, found.name);
+            noteDiagnostic(
+              connectionOutput,
+              'Handoff from portal',
+              `${cluster.name} ${request.kind} ${request.name} -> workspaceFile (after adding the checkout)`
+            );
+            return { outcome: 'opened', detail: 'workspaceFile' };
+          }
+          await openClusterDocument({
+            cluster: cluster.name,
+            originPath: found.originPath,
+            kind: found.kind,
+            name: found.name,
+          });
+          noteDiagnostic(
+            connectionOutput,
+            'Handoff from portal',
+            `${cluster.name} ${request.kind} ${request.name} -> clusterDocument (the added checkout does not hold it)`
+          );
+          return { outcome: 'opened', detail: 'clusterDocument' };
+        });
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -625,22 +683,36 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
 /**
  * Opens the local cluster's checkout, having PARKED the request first.
  *
- * Both routes restart the extension host -- opening a folder in this window
- * obviously, and adding one to a single-folder workspace because that converts
- * it to a multi-root workspace -- so the request goes into globalState BEFORE
- * either is taken, and registerRuntimeSurface replays it once on the far side.
- * A cancelled prompt takes it straight back out: a request nobody acted on must
- * not surface in the next window the operator happens to open.
+ * PARKED BECAUSE A RESTART IS POSSIBLE; FINISHED INLINE BECAUSE IT IS NOT
+ * GUARANTEED. Opening a folder in this window certainly restarts the extension
+ * host, so the request has to be in globalState before that call or it dies
+ * with the host. Adding a folder is the opposite case and used to be treated as
+ * the same one: `updateWorkspaceFolders` only terminates the extensions when
+ * the FIRST folder changes, and this adds at the end -- so in a window that
+ * already has folders nothing reloads, nothing replays, and the construct never
+ * opened at all while the outcome still said `opened`. The parked request then
+ * sat live in globalState for the whole TTL, where the next window to activate
+ * would consume it.
+ *
+ * So the add branch takes the request straight back out and lands the construct
+ * itself. If a restart DOES happen first, this code never runs and the replay
+ * is the one that finishes the job; the two cannot both fire, because the take
+ * is exactly-once.
+ *
+ * A cancelled prompt takes it back out too: a request nobody acted on must not
+ * surface in the next window the operator happens to open.
  */
 async function openCheckoutFor(
   surface: HandoffSurface,
   request: OpenRequest,
   checkout: string,
-  mode: 'thisWindow' | 'ask'
+  mode: 'thisWindow' | 'ask',
+  landInThisWindow: () => Promise<HandoffOutcome>
 ): Promise<HandoffOutcome> {
   await storePending(surface.context.globalState, request, Date.now());
   if (mode === 'thisWindow') {
     // Nothing is open, so there is nothing to disturb and nothing to ask about.
+    // This one really does restart the host; the replay finishes it.
     await commands.executeCommand('vscode.openFolder', Uri.file(checkout), { forceNewWindow: false });
     return { outcome: 'opened', detail: 'openCheckout' };
   }
@@ -658,15 +730,47 @@ async function openCheckoutFor(
     return { outcome: 'opened', detail: 'openCheckout' };
   }
   if (pick === 'Add to this workspace') {
-    workspace.updateWorkspaceFolders(workspace.workspaceFolders?.length ?? 0, 0, {
-      uri: Uri.file(checkout),
-    });
-    return { outcome: 'opened', detail: 'openCheckout' };
+    const folder = Uri.file(checkout);
+    workspace.updateWorkspaceFolders(workspace.workspaceFolders?.length ?? 0, 0, { uri: folder });
+    // updateWorkspaceFolders returns a "was it started" boolean, not a promise:
+    // the folder appears when onDidChangeWorkspaceFolders fires. Waiting is
+    // what makes the lookup below see it.
+    await waitForWorkspaceFolder(folder.fsPath, HANDOFF_ADD_FOLDER_TIMEOUT_MS);
+    // Still running, so nothing reloaded and nothing is going to replay this.
+    await takePending(surface.context.globalState, Date.now());
+    // No branch for "the folder never arrived": the lookup simply does not find
+    // the file, and landing on the cluster's own copy is a better answer than
+    // an error about a folder the operator can see is missing.
+    return await landInThisWindow();
   }
   await takePending(surface.context.globalState, Date.now());
   // Nothing opened, and `refused` is reserved for a link this extension would
   // not act on at all -- a caller must be able to tell the two apart.
   return { outcome: 'notLoaded', detail: 'cancelled' };
+}
+
+/**
+ * Waits for a folder to be present in the workspace, or for the wait to expire.
+ *
+ * Resolves either way -- the caller's next step is a filesystem lookup that
+ * answers the question properly, so a timeout here is a hint about how long to
+ * bother waiting rather than a verdict.
+ */
+function waitForWorkspaceFolder(fsPath: string, timeoutMs: number): Promise<void> {
+  const present = (): boolean => (workspace.workspaceFolders ?? []).some((f) => f.uri.fsPath === fsPath);
+  if (present()) return Promise.resolve();
+  return new Promise((resolve) => {
+    let subscription: { dispose(): void } | undefined;
+    const finish = (): void => {
+      clearTimeout(timer);
+      subscription?.dispose();
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    subscription = workspace.onDidChangeWorkspaceFolders(() => {
+      if (present()) finish();
+    });
+  });
 }
 
 /**
@@ -681,9 +785,13 @@ async function openCheckoutFor(
 async function findInWorkspace(
   originPath: string
 ): Promise<{ folder: string; relativePath: string; uri: Uri } | undefined> {
-  if (originPath === '') return undefined;
+  // NO CANDIDATES MEANS NOT HERE. workspaceCandidates refuses a path that
+  // escapes its folder (a `..` segment, an absolute path) by returning none at
+  // all, so this is where that refusal becomes an answer rather than a probe.
+  const candidates = workspaceCandidates(originPath);
+  if (candidates.length === 0) return undefined;
   for (const folder of workspace.workspaceFolders ?? []) {
-    for (const candidate of workspaceCandidates(originPath)) {
+    for (const candidate of candidates) {
       const uri = Uri.joinPath(folder.uri, candidate);
       try {
         await workspace.fs.stat(uri);
@@ -1913,6 +2021,31 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   registerRunSurface(context, clustersPath, connections);
+
+  // A handoff that survived a window reload (memql#4251). Opening the local
+  // checkout can restart the extension host, so the request was parked in
+  // globalState on the way out and is taken exactly once here -- expired ones
+  // are dropped rather than replayed, which is what stops a link clicked an
+  // hour ago from opening a file in a window nobody aimed it at.
+  //
+  // HERE rather than in registerRunSurface, which is scoped to the run
+  // affordances and would be the wrong place for it to live even though it is
+  // that function that runs last.
+  //
+  // Replayed as a URI so the ONE handler decides again: this window may have a
+  // different workspace, a different connection and a different answer, and a
+  // shortcut into the landing step would be a second copy of that decision.
+  void takePending(context.globalState, Date.now())
+    .then((req) => {
+      if (req === undefined) return;
+      return handleOpenUri(
+        Uri.parse(
+          `vscode://znasllc.memql/open?v=1&cluster=${encodeURIComponent(req.domain)}` +
+            `&kind=${encodeURIComponent(req.kind)}&name=${encodeURIComponent(req.name)}`
+        )
+      ).then(() => undefined);
+    })
+    .catch(noteHandoffFailure);
 }
 
 // registerRunSurface wires memql#3309: CodeLens run affordances, the run
@@ -2442,25 +2575,6 @@ function registerRunSurface(
       runsTree.refresh();
     })
   );
-
-  // A handoff that survived a window reload (memql#4251). Opening the local
-  // checkout restarts the extension host, so the request was parked in
-  // globalState on the way out and is taken exactly once here -- expired ones
-  // are dropped rather than replayed, which is what stops a link clicked an
-  // hour ago from opening a file in a window nobody aimed it at.
-  //
-  // Replayed as a URI so the ONE handler decides again: this window may have a
-  // different workspace, a different connection and a different answer, and a
-  // shortcut into the landing step would be a second copy of that decision.
-  void takePending(context.globalState, Date.now()).then((req) => {
-    if (req === undefined) return;
-    void handleOpenUri(
-      Uri.parse(
-        `vscode://znasllc.memql/open?v=1&cluster=${encodeURIComponent(req.domain)}` +
-          `&kind=${encodeURIComponent(req.kind)}&name=${encodeURIComponent(req.name)}`
-      )
-    );
-  });
 }
 
 // clustersRegistryChanged refreshes the tree AND drops the write-confirmation

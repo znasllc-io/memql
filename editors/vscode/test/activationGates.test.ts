@@ -70,6 +70,14 @@ test('an untrusted workspace registers no runtime surface', () => {
   assert.deepEqual(recorded.commands, []);
   assert.deepEqual(recorded.watched, []);
   assert.equal(recorded.fileDecorationProviders, 0);
+
+  // ...but the URI HANDLER IS REGISTERED, and that contrast is the premise the
+  // portal handoff rests on (memql#4251). `onUri` is what ACTIVATES the
+  // extension, so a handler put behind the trust gate would not exist for the
+  // very link that woke the editor -- VS Code delivers the uri to whatever
+  // handler is there when activate() returns. The gate protects the ACTION
+  // instead: handleOpenUri finds no runtime surface and answers `untrusted`.
+  assert.equal(recorded.uriHandlers, 1);
 });
 
 test('an untrusted workspace still arms the one-shot trust listener', () => {

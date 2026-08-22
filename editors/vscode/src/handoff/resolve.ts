@@ -23,6 +23,14 @@ export type ClusterMatch =
 
 export function matchCluster(clusters: readonly ClusterConfig[], domain: string, selected: string): ClusterMatch {
   const wanted = normalizeDomain(domain).toLowerCase();
+  // AN EMPTY DOMAIN NAMES NOTHING, and saying so first is what stops it from
+  // naming EVERYTHING. An entry registered before domains were recorded
+  // normalises to "" too, and composeEndpointFromDomain("") is "" by the same
+  // rule -- so both arms of the filter below match every such entry, and a
+  // blank domain would "resolve" to whichever legacy cluster happened to be
+  // first. Unreachable through parseOpenRequest, which refuses an empty
+  // cluster; guarded here because this module trusts nothing it is handed.
+  if (wanted === "") return { kind: "none" };
   const endpoint = composeEndpointFromDomain(wanted);
   const matches = clusters.filter(
     (c) => normalizeDomain(c.domain ?? "").toLowerCase() === wanted || c.endpoint.trim().toLowerCase() === endpoint,
@@ -57,8 +65,32 @@ export function landingFor(input: {
   return { kind: "clusterDocument" };
 }
 
-/** Where a catalog path may sit inside a workspace folder: a checkout keeps the tree under dsl/. */
+/**
+ * Where a catalog path may sit inside a workspace folder: a checkout keeps the
+ * tree under dsl/, so both layouts are tried.
+ *
+ * AN ESCAPING PATH IS REFUSED, NOT REPAIRED. The catalog is served by the
+ * CLUSTER, so `originPath` is not this editor's own value, and `Uri.joinPath`
+ * NORMALISES `..` -- which means a path like `../../.ssh/id_rsa` resolves
+ * cleanly outside the workspace folder and stats successfully. Returning no
+ * candidates at all is the honest answer ("this is not a path inside a
+ * folder"), and it reads at the call site as the file simply not being here:
+ * the handoff falls through to the cluster document and the construct page
+ * says the file is not in this workspace. Rewriting the path instead would
+ * invent a location the cluster never named.
+ *
+ * An empty path is refused for a quieter reason: it joins to the FOLDER, and a
+ * directory stats successfully, so an empty originPath would otherwise report
+ * the workspace root as the construct's file.
+ *
+ * `..` inside a segment (`a..b`) is an ordinary name and is left alone.
+ */
 export function workspaceCandidates(originPath: string): string[] {
-  const bare = originPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^dsl\//, "");
+  const normalized = originPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalized === "" || normalized === "/") return [];
+  // Absolute in either spelling: a rooted POSIX path, or a Windows drive.
+  if (normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized)) return [];
+  if (normalized.split("/").some((segment) => segment === "..")) return [];
+  const bare = normalized.replace(/^dsl\//, "");
   return [`dsl/${bare}`, bare];
 }

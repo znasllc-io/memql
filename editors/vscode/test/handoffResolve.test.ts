@@ -52,7 +52,40 @@ test("the landing follows the design table", () => {
   assert.deepEqual(landingFor({ construct: c, clusterLocal: true, checkout: "", workspaceFolderCount: 1 }), { kind: "clusterDocument" });
 });
 
+test("an empty domain matches nothing", () => {
+  // An entry with no recorded domain normalises to "", and composeEndpointFromDomain("")
+  // is "" as well -- so an empty wanted domain matched EVERY legacy entry.
+  // Unreachable through the parser, which refuses an empty cluster; guarded
+  // here because this module trusts nothing it is handed.
+  const legacy = cluster({ name: "legacy", endpoint: "" });
+  const blank = cluster({ name: "blank" });
+  assert.equal(matchCluster([legacy, blank], "", "").kind, "none");
+  assert.equal(matchCluster([legacy, blank], "   ", "").kind, "none");
+  assert.equal(matchCluster([legacy, blank], ".", "").kind, "none");
+});
+
 test("workspace candidates try the checkout layout first", () => {
   assert.deepEqual(workspaceCandidates("cognition/queries.memql"), ["dsl/cognition/queries.memql", "cognition/queries.memql"]);
   assert.deepEqual(workspaceCandidates("dsl/cognition/queries.memql"), ["dsl/cognition/queries.memql", "cognition/queries.memql"]);
+});
+
+test("a candidate path that escapes its folder is refused outright", () => {
+  // The catalog is served by the CLUSTER, so originPath is not ours. Uri.joinPath
+  // normalises `..`, which would resolve outside the workspace folder entirely.
+  for (const escaping of [
+    "../etc/passwd",
+    "cognition/../../etc/passwd",
+    "..",
+    "./../x.memql",
+    "dsl/../../x.memql",
+    "..\\windows\\system32",
+    "/etc/passwd",
+    "/",
+    "C:/Windows/system32",
+    "",
+  ]) {
+    assert.deepEqual(workspaceCandidates(escaping), [], escaping);
+  }
+  // A path with `..` inside a SEGMENT is an ordinary name, not a traversal.
+  assert.deepEqual(workspaceCandidates("a..b/q.memql"), ["dsl/a..b/q.memql", "a..b/q.memql"]);
 });

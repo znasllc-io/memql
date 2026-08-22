@@ -19,7 +19,8 @@
   "activationEvents": [
     "onLanguage:memql",
     "onView:memqlClusters",
-    "onUri"
+    "onUri",
+    "workspaceContains:**/*.memql"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
