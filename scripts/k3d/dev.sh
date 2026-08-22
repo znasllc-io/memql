@@ -203,6 +203,11 @@ RESTARTED=false
 INFRA_PULLED=false
 DB_IMAGE_IMPORTED=false
 OVERRIDES_PATCHED=false
+# Which of the built nodes the patch actually removed an override for, space
+# separated. ArgoCD rolls a Deployment only when its image REF changes, so this
+# is exactly the set the sync will roll -- and its complement, the nodes that
+# were already on :local, is the set main() has to restart itself.
+DROPPED_OVERRIDE_NODES=""
 # What was BUILT, for the envelope. A caller that asked for a rebuild of a
 # checkout it named has no other way to learn which commit it got -- and a
 # dirty tree is exactly the case where the ref alone is not the answer.
@@ -688,6 +693,25 @@ function first_unparseable_override_entry() {
     done <<< "$raw"
 }
 
+# nodes_overridden_in <entries> <node...> -- of the given nodes, the ones the
+# list actually carries an override for, one per line. Computed in the CALLER's
+# shell: filter_node_image_overrides runs inside a command substitution, so a
+# global it set there would never reach main().
+function nodes_overridden_in() {
+    local raw="${1:-}"; shift
+    local node entry
+    for node in "$@"; do
+        while IFS= read -r entry; do
+            entry="${entry%$'\r'}"
+            [[ -z "${entry//[[:space:]]/}" ]] && continue
+            if override_entry_targets_built_node "$entry" "$node"; then
+                printf '%s\n' "$node"
+                break
+            fi
+        done <<< "$raw"
+    done
+}
+
 # has_built_node_override <entries> <node...> -- true when at least one entry
 # overrides a node THIS RUN built, i.e. there is something for the patch to
 # remove. A list that overrides only the operand, or only nodes this run did
@@ -770,6 +794,7 @@ function point_application_at_local_images() {
         return 0
     fi
     filtered="$(filter_node_image_overrides "$current" "${built[@]}")"
+    DROPPED_OVERRIDE_NODES="$(nodes_overridden_in "$current" "${built[@]}" | tr '\n' ' ')"
     info "Removing the overrides of the nodes this run built (keeping the database operand's, and any node it did not build)..."
     kubectl -n "${ARGOCD_NAMESPACE}" patch application "${APP_NAME}" --type=merge \
         -p "{\"spec\":{\"source\":{\"kustomize\":{\"images\":${filtered}}}}}" >&2 \
@@ -788,9 +813,52 @@ function point_application_at_local_images() {
     # Set HERE and not also in the tail: cap_result_set APPENDS (measured -- two
     # calls put the key in the object twice), so main() skips these two when the
     # patch already recorded them.
+    # All FIVE of the fields that describe the rebuild, not just the lane: the
+    # tail never runs on a failure, and a rebuild entry recording `checkout`
+    # with an empty commit/ref/nodes renders as "checkout " and "...from the
+    # checkout at .". Every one of these is known long before the patch --
+    # checkout_facts read them before the first image was built.
     cap_result_set     imageSource      "${IMAGE_SOURCE:-unchanged}"
     cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
+    cap_result_set     commit           "$CHECKOUT_COMMIT"
+    cap_result_set     ref              "$CHECKOUT_REF"
+    cap_result_set     nodes            "${built[*]}"
     wait_for_application_synced
+}
+
+# node_override_was_dropped <node> -- true when this run's patch removed that
+# node's image override, i.e. ArgoCD's sync is what rolls it.
+function node_override_was_dropped() {
+    local node="$1" dropped
+    for dropped in ${DROPPED_OVERRIDE_NODES}; do
+        if [[ "$dropped" == "$node" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# restart_nodes_the_patch_did_not_move <node...> -- roll the built nodes whose
+# image REF did not change, because nothing else will.
+#
+# THE GAP THIS CLOSES (memql#4245). Making the patch per-node made the restart
+# decision per-node too, and it was left all-or-nothing. Rebuild `bff`: its
+# override is dropped, the ref changes, ArgoCD rolls it. Now edit bff AND agent
+# and rebuild both: agent's override is dropped and agent rolls, but bff's ref
+# is ALREADY memql-bff:local, so ArgoCD sees no diff, rolls nothing, and the
+# image wait passes on its first poll because the ref it checks is already
+# right. The bff pod keeps serving the PREVIOUS rebuild's image -- a rebuilt
+# node running stale code, reported as success. The content changed and the
+# reference did not, which is the same reason a plain `make dev` restarts.
+function restart_nodes_the_patch_did_not_move() {
+    local node
+    for node in "$@"; do
+        if node_override_was_dropped "$node"; then
+            continue
+        fi
+        info "${node} was already on its :local image -- the sync rolls nothing, so restarting it."
+        restart_deployment "$node"
+    done
 }
 
 # wait_for_application_synced -- ArgoCD has reconciled the patched Application.
@@ -973,6 +1041,10 @@ function main() {
         if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
             point_application_at_local_images "${nodes_to_build[@]}"
             if [[ "$OVERRIDES_PATCHED" == true ]]; then
+                # The patch moves only the nodes whose override it dropped; a
+                # built node already on :local changes no REF, so ArgoCD rolls
+                # nothing and only a restart picks up the new image CONTENT.
+                restart_nodes_the_patch_did_not_move "${nodes_to_build[@]}"
                 # Synced is ArgoCD's own bookkeeping and can be a stale read;
                 # the pods' image refs are the fact the patch was for.
                 wait_for_local_images "${nodes_to_build[@]}"
@@ -998,23 +1070,23 @@ function main() {
 
     cap_result_set     cluster     "$CLUSTER_NAME"
     cap_result_set     namespace   "$NAMESPACE"
-    cap_result_set     nodes       "${nodes_to_build[*]}"
     cap_result_set_raw rebuilt     "$REBUILT_COUNT"
     cap_result_set_raw restarted   "$RESTARTED"
     cap_result_set_raw infraPulled "$INFRA_PULLED"
     cap_result_set_raw dbImageImported "$DB_IMAGE_IMPORTED"
-    # Skipped when the patch already emitted them (see
+    cap_result_set     repoRoot    "$REPO_ROOT"
+    cap_result_set_raw dirtyCount  "${CHECKOUT_DIRTY:-0}"
+    cap_result_set     appName     "$APP_NAME"
+    # The five the patch already emitted are skipped here (see
     # point_application_at_local_images): cap_result_set appends, so setting a
     # key twice puts it in the object twice.
     if [[ "$OVERRIDES_PATCHED" != true ]]; then
+        cap_result_set     nodes            "${nodes_to_build[*]}"
         cap_result_set     imageSource      "${IMAGE_SOURCE:-unchanged}"
         cap_result_set_raw overridesPatched "$OVERRIDES_PATCHED"
+        cap_result_set     commit           "$CHECKOUT_COMMIT"
+        cap_result_set     ref              "$CHECKOUT_REF"
     fi
-    cap_result_set     repoRoot    "$REPO_ROOT"
-    cap_result_set     commit      "$CHECKOUT_COMMIT"
-    cap_result_set     ref         "$CHECKOUT_REF"
-    cap_result_set_raw dirtyCount  "${CHECKOUT_DIRTY:-0}"
-    cap_result_set     appName     "$APP_NAME"
     cap_ok
 }
 

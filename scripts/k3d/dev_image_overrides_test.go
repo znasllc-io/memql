@@ -124,6 +124,9 @@ case "$*" in
   *"patch application"*)
     printf '%s\n' "$*" >> "$FAKE_PATCH_LOG"
     exit 0 ;;
+  *"rollout restart"*)
+    printf '%s\n' "$*" >> "$FAKE_RESTART_LOG"
+    exit 0 ;;
 esac
 exit 0
 `
@@ -157,6 +160,10 @@ func runPointApplication(t *testing.T, f pointAppFake) (string, int, []string) {
 		"source \"" + filepath.Join(root, "scripts", "k3d", "dev.sh") + "\"\n" +
 		"APP_NAME=memql-local\n" +
 		"IMAGE_SOURCE=checkout\n" +
+		// checkout_facts runs before the first image is built, so these are
+		// known long before the patch -- which is the point of emitting them
+		// there rather than in main()'s tail.
+		"CHECKOUT_COMMIT=abc1234def5678\nCHECKOUT_REF=branch:main\n" +
 		// A regression that reaches the sync wait must FAIL, not hang: against a
 		// fake that never answers "Synced" the real 300s budget would stall the
 		// package for five minutes and report a timeout naming nothing.
@@ -181,6 +188,7 @@ func runPointApplication(t *testing.T, f pointAppFake) (string, int, []string) {
 		"FAKE_IMAGES_READ_FAILS="+readFails,
 		"FAKE_SYNC_STATUS="+f.syncod,
 		"FAKE_PATCH_LOG="+patchLog,
+		"FAKE_RESTART_LOG="+filepath.Join(tmp, "restarts"),
 		"MEMQL_K3D_SYNC_TIMEOUT=1",
 	)
 	out, err := cmd.CombinedOutput()
@@ -418,16 +426,26 @@ func TestPointApplicationRecordsTheLaneEvenWhenTheSyncWaitFails(t *testing.T) {
 	if len(patches) != 1 {
 		t.Fatalf("want the patch to have happened, got %d: %v", len(patches), patches)
 	}
-	for _, want := range []string{`"imageSource":"checkout"`, `"overridesPatched":true`} {
+	// All five, not just the lane: a rebuild entry that says `checkout` with an
+	// empty commit/ref/nodes renders as "checkout " and "...from the checkout
+	// at ." -- a row that names a lane it cannot describe.
+	for _, want := range []string{
+		`"imageSource":"checkout"`,
+		`"overridesPatched":true`,
+		`"commit":"abc1234def5678"`,
+		`"ref":"branch:main"`,
+		`"nodes":"`,
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the failure envelope does not carry %s -- the Application is patched and "+
 				"nothing records it:\n%s", want, out)
 		}
 	}
-	// Emitted once, at the patch. cap_result_set APPENDS, so a second set in
-	// main()'s tail would put the key in the object twice.
-	if n := strings.Count(out, `"imageSource"`); n != 1 {
-		t.Errorf(`"imageSource" appears %d times in the envelope, want 1:\n%s`, n, out)
+	// Emitted once each: cap_result_set appends, so main()'s tail skips all five.
+	for _, key := range []string{`"imageSource"`, `"overridesPatched"`, `"commit"`, `"ref"`, `"nodes"`} {
+		if n := strings.Count(out, key); n != 1 {
+			t.Errorf("%s appears %d times in the envelope, want 1:\n%s", key, n, out)
+		}
 	}
 }
 
@@ -566,5 +584,116 @@ func TestWaitForLocalImagesSkipsAnAbsentDeployment(t *testing.T) {
 	}
 	if !strings.Contains(out, "nothing to wait for") {
 		t.Errorf("output does not report the skip:\n%s", out)
+	}
+}
+
+// --------------------------------------------------------------------------
+// the built nodes the patch did not move must still be restarted
+// --------------------------------------------------------------------------
+
+// runPatchThenRestart runs the two steps main() runs in the patched branch --
+// point_application_at_local_images, then restart_nodes_the_patch_did_not_move
+// -- and reports which Deployments were patched and which were restarted.
+func runPatchThenRestart(t *testing.T, images string, built ...string) (out string, patches, restarts []string) {
+	t.Helper()
+	root := repoRoot(t)
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "kubectl"), []byte(fakeKubectlApplication), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	patchLog, restartLog := filepath.Join(tmp, "patches"), filepath.Join(tmp, "restarts")
+	harness := filepath.Join(tmp, "harness.sh")
+	body := "set -euo pipefail\n" +
+		"source \"" + filepath.Join(root, "scripts", "k3d", "dev.sh") + "\"\n" +
+		"APP_NAME=memql-local\nNAMESPACE=memql\nIMAGE_SOURCE=checkout\n" +
+		"function sleep() { :; }\n" +
+		"point_application_at_local_images " + strings.Join(built, " ") + "\n" +
+		"restart_nodes_the_patch_did_not_move " + strings.Join(built, " ") + "\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", harness)
+	cmd.Env = append(os.Environ(),
+		"PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"FAKE_APP_EXISTS=1",
+		"FAKE_IMAGES="+images,
+		"FAKE_IMAGES_READ_FAILS=0",
+		"FAKE_SYNC_STATUS=Synced",
+		"FAKE_PATCH_LOG="+patchLog,
+		"FAKE_RESTART_LOG="+restartLog,
+		"MEMQL_K3D_SYNC_TIMEOUT=1",
+	)
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("harness failed: %v\n%s", err, b)
+	}
+	read := func(path string) []string {
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		var lines []string
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		return lines
+	}
+	return string(b), read(patchLog), read(restartLog)
+}
+
+// THE MIXED CASE. Rebuild bff alone, and its override is dropped -- so on the
+// NEXT rebuild of bff and agent, only agent still has an override to drop.
+// ArgoCD rolls a Deployment when its image REF changes, and bff's ref is
+// already memql-bff:local, so the sync rolls nothing for bff and the image
+// wait passes on its first poll against a ref that was already right. Without
+// an explicit restart the bff pod keeps serving the PREVIOUS rebuild's image,
+// and the run reports success.
+func TestPatchedRunRestartsTheBuiltNodesItDidNotMove(t *testing.T) {
+	images := "memql-agent=ghcr.io/znasllc-io/memql-agent:v0.17.0\n" + operandOverride
+	out, patches, restarts := runPatchThenRestart(t, images, "bff", "agent")
+
+	if len(patches) != 1 {
+		t.Fatalf("want one patch, got %d: %v\n%s", len(patches), patches, out)
+	}
+	if strings.Contains(patches[0], "memql-agent=") {
+		t.Errorf("agent was built and overridden, so its override must go: %s", patches[0])
+	}
+	if !strings.Contains(patches[0], operandOverride) {
+		t.Errorf("the patch dropped the database operand override: %s", patches[0])
+	}
+
+	// agent's ref changed, so the sync rolls it -- restarting it too would be a
+	// second, redundant roll.
+	for _, r := range restarts {
+		if strings.Contains(r, "deployment/agent") {
+			t.Errorf("agent's override was dropped, so ArgoCD rolls it; restarting is redundant: %v", restarts)
+		}
+	}
+	// bff's ref did not change, so nothing else will ever roll it.
+	found := false
+	for _, r := range restarts {
+		if strings.Contains(r, "deployment/bff") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("bff was rebuilt but had no override to drop, so its image REF did not change and "+
+			"the sync rolls nothing -- without a restart the pod keeps running the previous "+
+			"rebuild's image. restarts=%v\n%s", restarts, out)
+	}
+}
+
+// The whole-cluster case must not gain redundant restarts: every built node's
+// override was dropped, so ArgoCD's sync rolls all of them.
+func TestPatchedRunRestartsNothingWhenEveryBuiltNodeMoved(t *testing.T) {
+	_, patches, restarts := runPatchThenRestart(t, releasedOverrides(), allAppNodes...)
+	if len(patches) != 1 {
+		t.Fatalf("want one patch, got %d: %v", len(patches), patches)
+	}
+	if len(restarts) != 0 {
+		t.Errorf("every built node's ref changed, so the sync rolls them all; these restarts are "+
+			"redundant rolls: %v", restarts)
 	}
 }
