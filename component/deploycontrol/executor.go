@@ -59,6 +59,29 @@ type Executor interface {
 	// catalog promote; only the name is shared.
 	RunRolloutAction(ctx context.Context, rollout, action string) (output string, err error)
 
+	// RunRepair asks ArgoCD to re-converge this installation onto its
+	// committed overlay (memql#4209): a hard refresh of the installation's
+	// Application (re-fetch the manifests, discarding the repo-server cache)
+	// followed by an explicit sync operation with prune, both through
+	// `kubectl -n argocd ... app <the installation's Application>` -- the
+	// command deploy/argocd/README.md documents for an operator-triggered
+	// sync, not a new dialect and never a direct apply.
+	//
+	// marker is stamped into the Operation's info list under
+	// repairOperationInfoName, which is how the watcher tells THIS sync apart
+	// from whatever operation the Application last ran: ArgoCD echoes the
+	// executed Operation on status.operationState, so a "Succeeded" observed
+	// before the controller has picked the new operation up is recognisable
+	// as the previous one's verdict rather than this one's.
+	//
+	// Provider-neutral by construction: the local k3d cluster and the cloud
+	// cluster reconcile through the same Application (environment parity),
+	// so the effect is one command on both. What differs is only what it
+	// undoes -- on the cloud the Application is on MANUAL sync, so this is
+	// the one act that re-applies drift at all; locally it is the immediate
+	// form of the selfHeal the Application already carries.
+	RunRepair(ctx context.Context, marker string) (output string, err error)
+
 	// KubectlJSON runs `kubectl <args...>` and returns stdout. Used for
 	// the read paths (argo app / rollouts / analysisruns -o json).
 	KubectlJSON(ctx context.Context, args ...string) ([]byte, error)
@@ -95,6 +118,27 @@ func (e *execExecutor) RunRollback(ctx context.Context, sha string) (string, err
 
 func (e *execExecutor) RunRolloutAction(ctx context.Context, rollout, action string) (string, error) {
 	return e.run(ctx, e.repoRoot, "kubectl", "argo", "rollouts", action, rollout, "-n", clusterNamespace)
+}
+
+func (e *execExecutor) RunRepair(ctx context.Context, marker string) (string, error) {
+	// Hard refresh first, so the sync that follows diffs against manifests
+	// fetched now rather than against a cached render of them -- a stale
+	// repo-server cache is one of the states a repair exists to leave.
+	refresh, err := e.run(ctx, e.repoRoot, "kubectl", "-n", argoNamespace, "annotate", "app", argoApplication,
+		"argocd.argoproj.io/refresh=hard", "--overwrite")
+	if err != nil {
+		return refresh, fmt.Errorf("hard refresh of application %s: %w", argoApplication, err)
+	}
+	patch, err := repairSyncPatch(marker)
+	if err != nil {
+		return refresh, err
+	}
+	sync, err := e.run(ctx, e.repoRoot, "kubectl", "-n", argoNamespace, "patch", "app", argoApplication,
+		"--type", "merge", "-p", patch)
+	if err != nil {
+		return refresh + sync, fmt.Errorf("sync operation on application %s: %w", argoApplication, err)
+	}
+	return refresh + sync, nil
 }
 
 func (e *execExecutor) KubectlJSON(ctx context.Context, args ...string) ([]byte, error) {

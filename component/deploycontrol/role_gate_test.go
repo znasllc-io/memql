@@ -118,11 +118,52 @@ func TestDeveloperGate(t *testing.T) {
 		}
 	})
 
+	// repair is OWNER-ONLY too (memql#4209): the RollbackDeployment floor,
+	// not Deploy's. A developer or admin who may ship forward may not
+	// re-converge a running cluster, and the refusal is audited.
+	for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleAdmin} {
+		role := role
+		t.Run(string(role)+" is REJECTED on repair", func(t *testing.T) {
+			eng := &fakeEngine{}
+			audit := &fakeAudit{}
+			exec := &fakeExecutor{}
+			svc := newTestServiceWithEngine(t, exec, audit, eng)
+
+			_, err := svc.Repair(ctxWithRole(role), &memqlv1.RepairRequest{})
+			if status.Code(err) != codes.PermissionDenied {
+				t.Fatalf("%s repair code = %v, want PermissionDenied", role, status.Code(err))
+			}
+			if len(eng.queries) != 0 || len(exec.repairCalls) != 0 {
+				t.Errorf("denied repair must touch neither the engine nor the executor, got queries=%v repairs=%v",
+					eng.queries, exec.repairCalls)
+			}
+			if len(audit.events) != 1 || audit.events[0].Outcome != "blocked" {
+				t.Errorf("want one blocked audit event, got %+v", audit.events)
+			}
+		})
+	}
+
+	t.Run("owner may repair", func(t *testing.T) {
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
+			fullDeploymentNode(map[string]any{"provider": "azure", "version": "1.2.0", "status": "succeeded"}),
+		}}
+		exec := &fakeExecutor{}
+		svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
+
+		res, err := svc.Repair(ctxWithRole(auth.RoleOwner), &memqlv1.RepairRequest{})
+		if err != nil {
+			t.Fatalf("owner Repair: %v", err)
+		}
+		if !res.GetOk() {
+			t.Fatalf("ok = false: %q", res.GetMessage())
+		}
+	})
+
 	// writer + reader are read-only: rejected on every write action,
 	// including the forward-deploy ones.
 	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleReader} {
 		role := role
-		t.Run("read-only role "+string(role)+" rejected on cut/deploy/rollback", func(t *testing.T) {
+		t.Run("read-only role "+string(role)+" rejected on cut/deploy/rollback/repair", func(t *testing.T) {
 			svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
 
 			if _, err := svc.CutVersion(ctxWithRole(role), &memqlv1.CutVersionRequest{Bump: "patch"}); status.Code(err) != codes.PermissionDenied {
@@ -136,6 +177,9 @@ func TestDeveloperGate(t *testing.T) {
 			}
 			if _, err := svc.RollbackDeployment(ctxWithRole(role), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "d1"}); status.Code(err) != codes.PermissionDenied {
 				t.Errorf("%s RollbackDeployment code = %v, want PermissionDenied", role, status.Code(err))
+			}
+			if _, err := svc.Repair(ctxWithRole(role), &memqlv1.RepairRequest{}); status.Code(err) != codes.PermissionDenied {
+				t.Errorf("%s Repair code = %v, want PermissionDenied", role, status.Code(err))
 			}
 		})
 	}

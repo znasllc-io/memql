@@ -73,6 +73,13 @@ const (
 	OpHas        ComparisonOperator = "has"
 	OpMissing    ComparisonOperator = "== nil"
 	OpNotMissing ComparisonOperator = "!= nil"
+	// OpStartsWith is the string-prefix comparison (memql#4208):
+	// `<field> startsWith <prefix>`, where the right-hand side is a string
+	// literal, a list of string literals, or an args.<field> reference that
+	// resolves to either at call time. A list means "starts with ANY of".
+	// Compiles to a parameterized `^@ ANY(text[])` in SQL; an empty list, and
+	// a blank prefix, match nothing.
+	OpStartsWith ComparisonOperator = "startsWith"
 )
 
 // SortDirection enumerates supported sort directions.

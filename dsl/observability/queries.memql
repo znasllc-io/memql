@@ -1,0 +1,56 @@
+// Per-construct DSL layout: every <kind>s.memql file in a domain
+// holds every construct of that kind in the domain. This domain's
+// concepts live in concepts.memql; this file carries its reads.
+
+// ---- codeMetricsInWindow (memql#4208) ----
+//
+// The client read over the continuous-aggregate rollups: one bucket, one
+// [windowStart, windowEnd) range, selected by codeReference PREFIX (a
+// module's fqnPrefixes -- "starts with ANY of") or by one exact
+// codeReference. Before this existed the portal's per-module drill-in
+// walked the generic concept browse newest-first under a 3 x 200 cap and
+// joined client-side; on a busy cluster a module's history scrolled out
+// of the cap. This is the server-side read that cap stood in for.
+//
+// Selection, never a pass-through. `codeReference startsWith
+// args.prefixes` matches nothing for an empty list and for a list of
+// blanks (the engine rule, component/memql/executor_filter.go), and the
+// exact key is a when()-guarded equality, so a call with no prefixes and
+// no codeReference returns an EMPTY result rather than a cluster-wide
+// scan. prefixes is REQUIRED precisely so that an absent list is a refused
+// call and never an unconstrained one; an empty list is accepted.
+//
+// Authz: codeMetric declares no @rowAuthz tier and carries no user-scope
+// field. This read carries the same gate the generic concept browse gives
+// the concept today -- any authenticated caller -- by design (memql#4208:
+// "same read gate as codeMetric today"). It lands in the conformance
+// "other" bucket beside the cluster-topology reads and is listed on the
+// undeclared-tier ratchet under its own issue.
+//
+// Order: rows come back in row.createdAt order under a keyset cursor (a
+// payload sort key is not keyset-eligible), which is what lets a client
+// walk the whole window to exhaustion with no cap; the caller orders by
+// windowStart. The caller aligns windowStart / windowEnd to the bucket.
+
+/// codeMetric rows for one bucket inside [windowStart, windowEnd), selected by codeReference
+/// prefix (ANY of prefixes) or by the exact codeReference. An empty prefixes list with no
+/// codeReference returns nothing. Keyset-paged in row.createdAt order; order by windowStart
+/// client-side.
+query codeMetric codeMetricsInWindow {
+  args {
+    /// codeReference prefixes to match (a module's fqnPrefixes). Required so an absent list is
+    /// refused; an empty list matches nothing.
+    prefixes       []string!
+    /// Optional exact codeReference, matched in addition to the prefixes.
+    codeReference  string
+    /// Which continuous aggregate the rows came from.
+    bucket         enum("1m", "1h")!
+    /// Inclusive window start, aligned to the bucket by the caller.
+    windowStart    datetime!
+    /// Exclusive window end, aligned to the bucket by the caller.
+    windowEnd      datetime!
+  }
+  filter  bucket==args.bucket && windowStart>=args.windowStart && windowStart<args.windowEnd && (when(args.codeReference) { codeReference==args.codeReference } || codeReference startsWith args.prefixes)
+  sort     "row.createdAt", "asc"
+  paginate 500
+}

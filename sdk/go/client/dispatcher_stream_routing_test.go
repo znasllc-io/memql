@@ -52,6 +52,7 @@ var routedFamilies = map[string]string{
 	"agent_generate_turn_complete":  "agent turn streaming: the terminal",
 	"voice_agent_turn_delta":        "voice-agent turn streaming: deltas",
 	"voice_agent_turn_complete":     "voice-agent turn streaming: the terminal",
+	"concepts_registry_delta":       "concept-registry follow: a snapshot then one frame per registry change (memql#4238)",
 	"query_result":                  "QueryResultChunk carries `done`; a chunked contract even where the engine emits one",
 	"query_error":                   "the error terminal that can end any of the above in place of its normal terminal",
 }

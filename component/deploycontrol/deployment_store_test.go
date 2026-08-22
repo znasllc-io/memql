@@ -54,6 +54,7 @@ func newTestServiceWithEngine(t *testing.T, exec Executor, audit identity.AuditL
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
+	stubRepairWatch(svc)
 	return svc
 }
 

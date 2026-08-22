@@ -45,9 +45,10 @@ type BareRowIntrinsic struct {
 //     scanner makes a form the engine actually compiles;
 //   - group 4 requires a comparison or membership operator, so a bare word in
 //     a spec call does not match. `in` is included: `filter id in args.ids`
+//     -- and so is `startsWith` (memql#4208): `filter id startsWith "v1:"`
 //     is a real predicate shape.
 var bareRowIntrinsicRE = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])(?:((?i:id|concept|type|createdAt|createdBy))|((?i:provenance)\.[A-Za-z_][A-Za-z0-9_]*))[ \t]*(==|!=|<=|>=|<|>|\bin\b)`)
+	`(^|[^A-Za-z0-9_.])(?:((?i:id|concept|type|createdAt|createdBy))|((?i:provenance)\.[A-Za-z_][A-Za-z0-9_]*))[ \t]*(==|!=|<=|>=|<|>|\bin\b|\bstartsWith\b)`)
 
 // canonicalScalarIntrinsic maps a lower-cased scalar intrinsic to the
 // spelling the suggestion should use. Mirrors

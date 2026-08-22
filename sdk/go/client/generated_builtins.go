@@ -14,6 +14,97 @@ var (
 	_ = strings.Builder{}
 )
 
+// CampaignPauseSend -- Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.
+type CampaignPauseSendArgs struct {
+	// The campaign to pause. The caller must own it.
+	CampaignId string
+}
+
+// CampaignPauseSend calls the engine builtin campaignPauseSend.
+func (qc *QueryClient) CampaignPauseSend(ctx context.Context, args CampaignPauseSendArgs) (*Result, error) {
+	call := CampaignPauseSendBuild(args)
+	return qc.executeNamed(ctx, "campaignPauseSend", call)
+}
+
+func CampaignPauseSendBuild(args CampaignPauseSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignPauseSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignResumeSend -- Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal.
+type CampaignResumeSendArgs struct {
+	// The campaign to resume. The caller must own it.
+	CampaignId string
+}
+
+// CampaignResumeSend calls the engine builtin campaignResumeSend.
+func (qc *QueryClient) CampaignResumeSend(ctx context.Context, args CampaignResumeSendArgs) (*Result, error) {
+	call := CampaignResumeSendBuild(args)
+	return qc.executeNamed(ctx, "campaignResumeSend", call)
+}
+
+func CampaignResumeSendBuild(args CampaignResumeSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignResumeSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignScheduleSend -- Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand.
+type CampaignScheduleSendArgs struct {
+	// The campaign to schedule. The caller must own it.
+	CampaignId string
+	// When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC.
+	ScheduledAt string
+}
+
+// CampaignScheduleSend calls the engine builtin campaignScheduleSend.
+func (qc *QueryClient) CampaignScheduleSend(ctx context.Context, args CampaignScheduleSendArgs) (*Result, error) {
+	call := CampaignScheduleSendBuild(args)
+	return qc.executeNamed(ctx, "campaignScheduleSend", call)
+}
+
+func CampaignScheduleSendBuild(args CampaignScheduleSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignScheduleSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("scheduledAt: ")
+	b.WriteString(quoteMemQL(args.ScheduledAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through.
+type CampaignStartSendArgs struct {
+	// The campaign to send. The caller must own it.
+	CampaignId string
+}
+
+// CampaignStartSend calls the engine builtin campaignStartSend.
+func (qc *QueryClient) CampaignStartSend(ctx context.Context, args CampaignStartSendArgs) (*Result, error) {
+	call := CampaignStartSendBuild(args)
+	return qc.executeNamed(ctx, "campaignStartSend", call)
+}
+
+func CampaignStartSendBuild(args CampaignStartSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignStartSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
@@ -115,6 +206,29 @@ func HarnessTraceBuild(args HarnessTraceArgs) string {
 	b.WriteString("builtin harnessTrace(")
 	b.WriteString("planId: ")
 	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// IntegrationStatus -- Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only.
+type IntegrationStatusArgs struct {
+	Probe    bool
+	ProbeSet bool // set true to send probe; required because zero-value bool is ambiguous
+}
+
+// IntegrationStatus calls the engine builtin integrationStatus.
+func (qc *QueryClient) IntegrationStatus(ctx context.Context, args IntegrationStatusArgs) (*Result, error) {
+	call := IntegrationStatusBuild(args)
+	return qc.executeNamed(ctx, "integrationStatus", call)
+}
+
+func IntegrationStatusBuild(args IntegrationStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin integrationStatus(")
+	if args.ProbeSet {
+		b.WriteString("probe: ")
+		b.WriteString(fmt.Sprintf("%v", args.Probe))
+	}
 	b.WriteString(")")
 	return b.String()
 }

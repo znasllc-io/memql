@@ -215,7 +215,11 @@ export type DeployControlRequestPayload =
   | { rolloutAction: DeployControlRolloutActionPayload }
   | { cutVersion: DeployControlCutVersionPayload }
   | { deploy: DeployControlDeployPayload }
-  | { rollbackDeployment: DeployControlRollbackDeploymentPayload };
+  | { rollbackDeployment: DeployControlRollbackDeploymentPayload }
+  // Repair (memql#4209) takes no argument either: it operates on THIS
+  // installation and names no version (a repair that installs a different
+  // version is an upgrade wearing a repair's name).
+  | { repair: DeployControlEmptyPayload };
 
 export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
 
@@ -609,16 +613,19 @@ export interface ConceptsListResultPayload {
   systemTopics?: string[];
 }
 
-// ConceptsSubscribeMsg is the CDC-filter CATALOG, not a registry stream: the
-// engine answers ONE reply grouping node.created.<concept> filters by domain
-// (component/grpc/concepts_handlers.go). A client uses it to discover the
-// per-domain filters it can hand to SubscriptionManager instead of composing
-// topic strings itself. It does NOT deliver registry deltas -- there is no
-// engine-side concept-registry change stream (memql#4233 records the gap).
+// ConceptsSubscribeMsg has two modes. follow=false (the default) is the
+// one-shot CDC-filter CATALOG: the engine answers ONE reply grouping
+// node.created.<concept> filters by domain (component/grpc/concepts_handlers.go),
+// which a client uses to discover the per-domain filters it hands to
+// SubscriptionManager. follow=true (memql#4238) is the registry-DELTA stream: a
+// snapshot then live add/remove deltas, so a client's concept registry stays
+// live without a reconnect. See QueryClient.subscribeConceptRegistry.
 export interface ConceptsSubscribePayload {
   requestId?: string;
-  // Optional: restrict the catalog to these domains.
+  // Optional: restrict the catalog to these domains (follow=false only).
   domains?: string[];
+  // follow=true switches to the registry-delta stream (memql#4238).
+  follow?: boolean;
 }
 
 export interface DomainSubscriptionWire {
@@ -629,6 +636,19 @@ export interface DomainSubscriptionWire {
 export interface ConceptsSubscribeResultPayload {
   requestId?: string;
   domains?: DomainSubscriptionWire[];
+}
+
+// ConceptsRegistryDelta is one message on a follow-mode ConceptsSubscribeMsg
+// stream (memql#4238). The first (reset=true) carries the whole concept set in
+// `added`; every later one is incremental. `generation` is a uint64, which
+// protojson encodes as a STRING.
+export interface ConceptsRegistryDeltaPayload {
+  requestId?: string;
+  generation?: string;
+  added?: ConceptInfoWire[];
+  removed?: string[];
+  reset?: boolean;
+  subscriptionId?: string;
 }
 
 export interface DisplayCardWire {
@@ -1398,6 +1418,7 @@ type ServerPayload =
   | { heartbeat: HeartbeatPayload }
   | { conceptsListResult: ConceptsListResultPayload }
   | { conceptsSubscribeResult: ConceptsSubscribeResultPayload }
+  | { conceptsRegistryDelta: ConceptsRegistryDeltaPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { modulesListResult: ModulesListResultPayload }
   | { moduleDetailResult: ModuleDetailResultPayload }
@@ -1448,6 +1469,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "heartbeat"; value: HeartbeatPayload }
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
   | { kind: "conceptsSubscribeResult"; value: ConceptsSubscribeResultPayload }
+  | { kind: "conceptsRegistryDelta"; value: ConceptsRegistryDeltaPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "modulesListResult"; value: ModulesListResultPayload }
   | { kind: "moduleDetailResult"; value: ModuleDetailResultPayload }
@@ -1499,6 +1521,11 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "conceptsSubscribeResult",
       value: m.conceptsSubscribeResult as ConceptsSubscribeResultPayload,
+    };
+  if (m.conceptsRegistryDelta)
+    return {
+      kind: "conceptsRegistryDelta",
+      value: m.conceptsRegistryDelta as ConceptsRegistryDeltaPayload,
     };
   if (m.myAccessResult)
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
@@ -1675,6 +1702,11 @@ export function streamRequestId(msg: ServerMessage): string {
   // emits exactly one frame today. Costless for current callers, which use
   // sendAndWait and are served by correlateTo.
   if (m.queryResult?.requestId) return m.queryResult.requestId;
+  // Concept-registry follow stream (memql#4238). One ConceptsSubscribeMsg with
+  // follow=true yields a snapshot frame then one per registry change, all
+  // carrying that request id. The follow=false catalog reply is a single reply
+  // served by correlateTo in the tier above and is unaffected.
+  if (m.conceptsRegistryDelta?.requestId) return m.conceptsRegistryDelta.requestId;
   // The error terminal for any of the above. See the coverage rule.
   if (m.queryError?.requestId) return m.queryError.requestId;
   return "";

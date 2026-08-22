@@ -116,7 +116,7 @@ single bridged envelope pair, `DeployControlMsg` /
 `DeployControlResult`, whose inner `oneof` carries the
 `DeployControlService` request messages verbatim. `sdk/ts` exposes it as
 `DeployControlClient` (`@znasllc-io/memql-sdk-core/deploy`) with the
-same nine methods as the Go client.
+same eight methods as the Go client.
 
 Two properties an operator should know:
 
@@ -153,6 +153,7 @@ streamed path and the unary path ever answer a role differently.
 | Revert an overlay commit | `Rollback` | owner, admin |
 | Rollout promote / abort | `RolloutAction` | owner, admin |
 | Roll back to a prior deployment | `RollbackDeployment` | **owner only -- not even admin** |
+| Repair this installation | `Repair` | **owner only -- not even admin** |
 
 `writer` and `reader` get nothing on this surface. Every RPC refuses
 them with `PermissionDenied` and writes a blocked audit event. So does an
@@ -196,7 +197,7 @@ been, on `ActionResult.audit_event_id`.
 
 ### The gate runs before argument validation (memql#3457, memql#3505)
 
-**Every RPC on this surface** -- all seven actions and both reads --
+**Every RPC on this surface** -- all six actions and both reads --
 checks the role floor **first** and validates its arguments only
 afterwards. They used to do it the other way round, and that left one
 hole in "every denied attempt is audited": a caller below the floor who
@@ -233,6 +234,8 @@ most:
 - `GetDeploymentStatus` and `SuggestNextVersion` now take no argument at all
   (their only one was the environment, removed by epic memql#3943), so there is
   nothing left to probe them with -- the gate is the only thing they answer to.
+  `Repair` (memql#4209) is the same shape: its request is empty, because a
+  repair operates on this installation and names no version.
 
 A caller who *cleared* the floor sees exactly what they saw before, on
 every RPC: same code, same message, and still no audit event, because the
@@ -340,10 +343,11 @@ of them bypass Git or the reconciler:
 | **Deploy** | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | Deployment id required. |
 | **Roll back** | `git revert` of the overlay commit; Argo CD reconciles back to the prior digest set. | **Type-to-confirm** (re-enter the commit SHA, or `rollback`). |
 | **Rollout promote / abort** | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. | `abort` is **type-to-confirm**; `promote` is immediate. |
+| **Repair** | Asks ArgoCD to hard-refresh and re-sync this installation's Application from the committed overlay (prune included) and watches it until it is synced and healthy; records the repair on the deployment timeline. Nothing changes version. See [Repair](#repair-memql4209). | **Type-to-confirm** (type `repair`). Owner only. |
 
 Notes that hold on both surfaces:
 
-- **Confirmation.** Rollback and Rollout abort require an explicit
+- **Confirmation.** Rollback, Rollout abort and Repair require an explicit
   type-to-confirm step. A mismatched confirmation is rejected and the
   action is never invoked.
 - **Audit.** Every action (and every denied attempt) writes a
@@ -366,6 +370,10 @@ Notes that hold on both surfaces:
 on the Overview panel (deploy / promote), next to the version
 (rollback), and in the Rollouts table (per-rollout promote / abort).
 Destructive actions render an inline type-to-confirm field.
+`/cluster-ops` is the operations end of the same surface: cut, deploy and
+roll back from the deployment timeline, and the Repair control
+(memql#4209), which is offered to the cluster owner only and armed by
+typing `repair`.
 
 The portal's own bundle is served by the edge (site #1, memql#3711), but
 the RPC itself still crosses to a bff -- through the edge's `/_memql/*`
@@ -465,6 +473,95 @@ ArgoCD reports synced AND healthy, and in `failed` when it does not.
 > unconditional. The cutover was verified live on 2026-06-24; step 6 (this
 > retirement) lands the cleanup.
 
+## Repair (memql#4209)
+
+`Repair` is the vision's third verb beside update and restore, and the one
+a browser could not have until it existed on the wire: a cluster must not
+be shelled into from a portal, so the portal rendered an honest "not
+exposed from the cluster yet" line until the RPC landed.
+
+### What a repair does
+
+A repair **re-converges this installation onto its committed overlay**.
+The identity node asks ArgoCD to **hard-refresh** the installation's
+Application (re-fetch the manifests, discarding the repo-server's cached
+render) and then to run an explicit **sync with prune**, and it **watches
+the Application until it reports synced AND healthy**. Drifted or
+hand-edited resources are re-applied, deleted ones are recreated, and
+tracked resources Git no longer describes are pruned. **Nothing changes
+version**: a repair that installs a different version is an upgrade
+wearing a repair's name (memql#3605), so the request carries none.
+
+The effect is the command `deploy/argocd/README.md` documents for an
+operator-triggered sync (`kubectl -n argocd patch app memql --type merge
+-p '{"operation":{"sync":{}}}'`), issued through the deploy-control
+`Executor` on the identity node and stamped with the repair's record id,
+never a direct `kubectl apply`.
+
+### Per provider
+
+The provider is read off the graph -- the `v1:cluster:cluster` row, then
+the newest `v1:cluster:deployment` record -- never off an environment
+variable (epic memql#3943). The local cluster and the cloud reconcile
+through the **same** ArgoCD Application (environment parity), so both
+providers have the repair above; what differs is only what it undoes:
+
+| Provider | What a repair does | What it does not do |
+|---|---|---|
+| `docker-local` (k3d) | The cluster-side half of the VS Code extension's repair -- the part of the install graph that reconciles the overlay and waits for the workloads -- run now, from inside the cluster, as an immediate form of the `selfHeal` the local Application already carries. | The host-side half of the extension's repair: the pinned k3d / kubectl / mkcert binaries, the hosts-file block, the browser-trusted local CA, the source checkout, re-creating the k3d cluster itself, re-seeding secrets from the operator's key file. None of that is reachable from a pod, and the cluster it would recreate is the one the identity node runs in. That half stays the extension's guided flow. |
+| `azure` (AKS) | The Application is on **manual sync** (`deploy/argocd/apps/memql.yaml`), so nothing re-applies drift on its own; this is the operator's converge act, owner-gated and audited, from the portal instead of a terminal. | Move the overlay, change pins, or touch anything outside the Application's reconciled set. |
+| anything else | **Refused**: the engine cannot claim the Application is that topology's reconciliation path, so the call answers `ok=false` with `repair is not defined for this provider` (`details.reason = repair_undefined_for_provider`), audited as a failure with its audit id on the result -- rather than half-run. | |
+
+An installation whose graph says nothing about its provider takes the
+same default every other deployment record takes (`azure`).
+
+### The owner floor, and what a refusal looks like
+
+Repair is **owner only -- not even admin**, the `RollbackDeployment`
+floor rather than `Deploy`'s: it mutates a running cluster with no Git
+revert trail. The gate runs first (there is no argument to validate
+after it), on every transport -- unary, the `DeployControlMsg` stream
+bridge, and the bff-to-identity mesh forward, where the **originating
+human's** role decides (`component/grpc/deploy_control_forward_test.go`
+pins that a forwarded admin is refused and audited as that admin, and a
+forwarded owner is admitted).
+
+Every refusal carries its audit id back, by the mechanism that fits the
+refusal:
+
+| Refusal | Where | Audit id |
+|---|---|---|
+| Below the owner floor / unauthenticated | `PERMISSION_DENIED` / `UNAUTHENTICATED` (a `RefusalInfo` detail unary, `DeployControlResult.audit_event_id` streamed) | the blocked event's |
+| Provider with no defined repair, a sync already running on the Application, a repair already in flight on this node, a kick-off that failed | `ActionResult.ok = false` with `details.reason` | the failure event's, on `ActionResult.audit_event_id` |
+
+The portal shows the id beside the outcome either way.
+
+### Honest progress: the repair record
+
+`ok = true` means **accepted and kicked off**, not "repaired". The RPC
+writes a `v1:cluster:deployment` record at `in_progress` **before** the
+kick-off -- its `notes` start with `repair:` and it carries the version in
+force -- so the timeline the portal already renders shows the repair from
+its first instant (marked `repair`). A kick-off that fails lands the
+record at `failed` in the same call. Otherwise a watcher on the identity
+node resolves it from what it **observes** on the Application:
+
+| Observation | Record |
+|---|---|
+| The operation stamped with this record's id has run and the Application is `Synced` + `Healthy` | `succeeded` |
+| That operation ended `Failed` / `Error`, or succeeded onto a `Degraded` Application | `failed` |
+| The Application could not be read five times in a row, or did not converge within 15 minutes | `failed` |
+
+Until the controller has picked the repair's own operation up, the
+Application's previous `Succeeded` is not read as this repair's verdict
+-- the stamped operation id is what tells them apart. Poll the record (the
+portal's timeline is live on the concept) or `GetDeploymentStatus` for
+the Argo sync / health it reports; there is no progress stream.
+
+One repair runs at a time per identity node, and a sync already running
+on the Application -- whoever started it -- refuses a new repair until it
+finishes.
+
 ## References
 
 - Automation-driven deploy cutover: znasllc-io/memql#2115 (Epic 2
@@ -475,6 +572,7 @@ ArgoCD reports synced AND healthy, and in `failed` when it does not.
 - Supervised live cutovers: #712.
 - Cluster role model: [`docs/public/operate/auth/access-model.md`](auth/access-model.md).
 - Deploy-control stream bridge: znasllc-io/memql#3311.
+- Repair verb: znasllc-io/memql#4209 (the portal gap it closes: #4193).
 - Role-matrix reconciliation (the read gate is owner/admin, the code is
   authoritative): znasllc-io/memql#3332.
 - Machine identity the gate uses: [`docs/public/operate/auth/service-account-jwt.md`](auth/service-account-jwt.md), #691.

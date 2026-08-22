@@ -89,11 +89,26 @@ func (s *Service) transitionDeployment(ctx context.Context, deploymentID, status
 	}
 }
 
-// renderDeploymentArgs turns a flat arg map into a MemQL object literal
-// ({key: "val", ...}) with bare identifier keys and JSON-escaped
-// values. Mirrors renderQueryArgs in component/grpc. Keys are emitted in
-// sorted order so the rendered query is deterministic (stable logs +
-// testability).
+// renderDeploymentArgs turns a flat arg map into the NAMED-ARGUMENT list a
+// MemQL call takes -- `key: "val", key2: 3` -- with bare identifier keys and
+// JSON-escaped values, for a caller to place directly inside the parens:
+// `deploymentById(` + renderDeploymentArgs(...) + `)`. An empty map renders
+// "", which is the empty call `name()`. Keys are emitted in sorted order so
+// the rendered query is deterministic (stable logs + testability).
+//
+// It used to wrap the list in braces, rendering `name({k: v})` -- the legacy
+// object-literal argument wrapper the parser REJECTS since Story 9 of
+// memql#2335 ("object-literal call args are removed; pass named args
+// directly"). Every engine call in this package went through it, so every
+// deployment record write (CutVersion, Deploy, RollbackDeployment, the status
+// transitions) and every record read (deploymentById, deploymentsForCluster)
+// had been failing at parse in production, invisibly: the package's tests
+// drive a fake engine that records query strings and parses nothing, which
+// is the failure mode component/grpc/voice_agent_real_engine_test.go
+// describes. Found by memql#4209's end-to-end test against a live engine
+// (component/grpc/deploy_control_repair_db_test.go); the DB-free guard that
+// now runs every verb's strings through the real parser is
+// component/grpc/deploy_control_parse_test.go.
 func renderDeploymentArgs(args map[string]any) string {
 	keys := make([]string, 0, len(args))
 	for k := range args {
@@ -101,7 +116,6 @@ func renderDeploymentArgs(args map[string]any) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteByte('{')
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")
@@ -111,6 +125,5 @@ func renderDeploymentArgs(args map[string]any) string {
 		vb, _ := json.Marshal(args[k])
 		b.Write(vb)
 	}
-	b.WriteByte('}')
 	return b.String()
 }

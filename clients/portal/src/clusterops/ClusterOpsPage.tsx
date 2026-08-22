@@ -9,30 +9,41 @@ import {
   ConfirmDialog,
   Container,
   DataText,
+  Field,
   PageHeader,
   Skeleton,
+  TextInput,
   type StatusTone,
 } from "../ui";
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { useDeploymentTimeline, type DeploymentEntry } from "./useDeploymentTimeline";
 
-// Cluster operations (memql#4193): update and restore/rollback, riding the
-// existing DeployControlService path (identity node; the bff forwards with
-// the caller as a verified ForwardedAuthority, so the owner-only rollback
-// gate runs against the human -- component/grpc/deploy_control_forward.go).
-// NOT install: a cluster must exist before its portal does.
+// Cluster operations (memql#4193): update, repair and restore/rollback,
+// riding the existing DeployControlService path (identity node; the bff
+// forwards with the caller as a verified ForwardedAuthority, so the
+// owner-only rollback and repair gates run against the human --
+// component/grpc/deploy_control_forward.go). NOT install: a cluster must
+// exist before its portal does.
 //
 // Every action states exactly what will happen in a ConfirmDialog, and
 // progress afterwards is the deployment RECORD's status -- the timeline
 // below is graph state re-read live, not a client-side guess.
 //
-// REPAIR IS ABSENT ON PURPOSE. The vision names update / repair / restore,
-// and the deploy-control surface exposes no repair RPC today (its verbs:
-// getDeploymentStatus, suggestNextVersion, cutVersion, deploy, rollback,
-// rollbackDeployment, rolloutAction). Repair of a LOCAL cluster lives in
-// the VS Code extension's capability scripts; a cluster-side repair RPC is
-// an engine gap filed upstream, and this page says so rather than shelling
-// around it.
+// REPAIR (memql#4209) is the cluster-side half of the extension's repair:
+// the identity node asks ArgoCD to hard-refresh and re-sync this
+// installation's Application from the committed overlay (prune included)
+// and watches it until it is synced and healthy. Nothing changes version.
+// It is owner-only, type-to-confirm, and its progress is a REPAIR RECORD on
+// the same timeline (a deployment row with a "repair:" note), resolved to
+// succeeded or failed from what the node observes. The host-side half --
+// tools, hosts file, local CA, checkout, the k3d cluster itself -- is not
+// reachable from inside the cluster and stays with the VS Code extension.
+// This page does not shell around its own wire contract.
+
+// The phrase an owner types to arm the repair verb. Lower-case, the verb
+// itself: the point is a deliberate keystroke, not a password.
+const REPAIR_CONFIRM_PHRASE = "repair";
+
 export function ClusterOpsPage(): ReactNode {
   const console_ = useDeployConsole();
   const timeline = useDeploymentTimeline(console_.permissions.canView);
@@ -40,8 +51,10 @@ export function ClusterOpsPage(): ReactNode {
     | { kind: "update" }
     | { kind: "ship"; deploymentId: string; version: string }
     | { kind: "rollback"; deploymentId: string; version: string }
+    | { kind: "repair" }
     | null
   >(null);
+  const [repairPhrase, setRepairPhrase] = useState("");
 
   if (!console_.permissions.canView) {
     return (
@@ -58,6 +71,11 @@ export function ClusterOpsPage(): ReactNode {
   const status = console_.status;
   const canAct = console_.permissions.canShip;
   const canRollBack = console_.permissions.canRollBack;
+  const canRepair = console_.permissions.canRepair;
+  const closeRepair = () => {
+    setConfirming(null);
+    setRepairPhrase("");
+  };
 
   return (
     <Container variant="data">
@@ -115,15 +133,38 @@ export function ClusterOpsPage(): ReactNode {
         {console_.actionMessage !== "" ? (
           <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
             {console_.actionMessage}
+            {console_.actionAuditEventId !== "" ? (
+              <>
+                {" "}
+                (audit <DataText kind="id">{console_.actionAuditEventId}</DataText>)
+              </>
+            ) : null}
           </p>
         ) : null}
 
-        <Band title="Repair">
+        <Band
+          title="Repair"
+          meta={
+            canRepair ? (
+              <Button
+                size="xs"
+                tone="danger"
+                onClick={() => setConfirming({ kind: "repair" })}
+                disabled={console_.busy}
+              >
+                Repair this installation
+              </Button>
+            ) : undefined
+          }
+        >
           <p className="text-sm text-muted">
-            Not exposed from the cluster yet: the deploy-control surface carries no repair verb,
-            and this console does not shell around its own wire contract. Repairing a LOCAL
-            cluster is the VS Code extension's guided flow; a cluster-side repair action is filed
-            as an engine gap.
+            Re-converges this installation onto its committed overlay: the identity node asks
+            ArgoCD to re-fetch the manifests and sync the application (pruning tracked resources
+            Git no longer describes), then watches it until it is synced and healthy. Nothing
+            changes version. Progress lands on the timeline below as a repair record.
+            {canRepair
+              ? " Owner-only and type-to-confirm."
+              : " Owner-only: the control is offered to the cluster owner, and the cluster refuses it below that role."}
           </p>
         </Band>
 
@@ -211,6 +252,32 @@ export function ClusterOpsPage(): ReactNode {
           </DataText>{" "}
           and supersedes the current deployment; the timeline records both sides of the move.
         </ConfirmDialog>
+        <ConfirmDialog
+          open={confirming?.kind === "repair"}
+          title="Repair this installation?"
+          confirmLabel="Repair"
+          tone="danger"
+          busy={console_.busy}
+          confirmDisabled={repairPhrase.trim() !== REPAIR_CONFIRM_PHRASE}
+          onConfirm={() => {
+            if (confirming?.kind === "repair") console_.repair();
+            closeRepair();
+          }}
+          onCancel={closeRepair}
+        >
+          <p>
+            Owner-only, enforced against you personally on the identity node. ArgoCD re-fetches
+            the committed manifests and syncs this installation's application, pruning tracked
+            resources Git no longer describes; drifted or deleted workloads are re-applied.
+            Nothing changes version. A repair record lands on the timeline at in_progress and is
+            resolved to succeeded or failed from what the node observes -- not from this button.
+          </p>
+          <div className="mt-3">
+            <Field label={`Type "${REPAIR_CONFIRM_PHRASE}" to confirm`}>
+              <TextInput value={repairPhrase} onChange={setRepairPhrase} placeholder={REPAIR_CONFIRM_PHRASE} />
+            </Field>
+          </div>
+        </ConfirmDialog>
       </section>
     </Container>
   );
@@ -253,6 +320,11 @@ function TimelineRow({
       <DataText kind="id" title={entry.deploymentId}>
         {entry.engineVersion || entry.deploymentId}
       </DataText>
+      {entry.kind === "repair" ? (
+        <span title={entry.notes}>
+          <Badge tone="neutral">repair</Badge>
+        </span>
+      ) : null}
       <Badge tone={statusTone(entry.status)}>{entry.status || "unknown"}</Badge>
       {isCurrent ? <span className="text-xs text-subtle">newest</span> : null}
       <DataText kind="time">{entry.createdAt}</DataText>
@@ -269,7 +341,7 @@ function TimelineRow({
             Deploy
           </Button>
         ) : null}
-        {canRollBack && !isCurrent && entry.status === "succeeded" ? (
+        {canRollBack && !isCurrent && entry.status === "succeeded" && entry.kind !== "repair" ? (
           <Button size="xs" tone="danger" onClick={onRollBack} disabled={busy}>
             Roll back to this
           </Button>

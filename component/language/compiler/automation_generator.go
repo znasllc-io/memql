@@ -1203,7 +1203,7 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// Keyword operators need spacing
 		opStr := string(e.Operator)
 		switch e.Operator {
-		case parser.OpIn, parser.OpOut, parser.OpHas:
+		case parser.OpIn, parser.OpOut, parser.OpHas, parser.OpStartsWith:
 			return fmt.Sprintf("%s %s %v", e.Field.Raw, opStr, c.valueToString(e.Value))
 		default:
 			return fmt.Sprintf("%s%s%v", e.Field.Raw, opStr, c.valueToString(e.Value))
@@ -2529,7 +2529,7 @@ func (c *Compiler) expressionToJSONExpr(expr parser.ExpressionNode) string {
 		}
 		opStr := string(e.Operator)
 		switch e.Operator {
-		case parser.OpIn, parser.OpOut, parser.OpHas:
+		case parser.OpIn, parser.OpOut, parser.OpHas, parser.OpStartsWith:
 			return fmt.Sprintf("%s %s %v", e.Field.Raw, opStr, c.valueToString(e.Value))
 		default:
 			return fmt.Sprintf("%s%s%v", e.Field.Raw, opStr, c.valueToString(e.Value))

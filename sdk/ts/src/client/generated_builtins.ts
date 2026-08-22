@@ -5,6 +5,97 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
+export interface CampaignPauseSendArgs {
+  /** The campaign to pause. The caller must own it. */
+  campaignId: string;
+}
+
+export function buildCampaignPauseSend(args: CampaignPauseSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "builtin campaignPauseSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignPauseSend(args: CampaignPauseSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignPauseSend = function (this: QueryClient, args: CampaignPauseSendArgs = {} as CampaignPauseSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignPauseSend", buildCampaignPauseSend(args), opts);
+};
+
+/** Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal. */
+export interface CampaignResumeSendArgs {
+  /** The campaign to resume. The caller must own it. */
+  campaignId: string;
+}
+
+export function buildCampaignResumeSend(args: CampaignResumeSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "builtin campaignResumeSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignResumeSend(args: CampaignResumeSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignResumeSend = function (this: QueryClient, args: CampaignResumeSendArgs = {} as CampaignResumeSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignResumeSend", buildCampaignResumeSend(args), opts);
+};
+
+/** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand. */
+export interface CampaignScheduleSendArgs {
+  /** The campaign to schedule. The caller must own it. */
+  campaignId: string;
+  /** When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC. */
+  scheduledAt: string;
+}
+
+export function buildCampaignScheduleSend(args: CampaignScheduleSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("scheduledAt: " + renderMemQLValue(args.scheduledAt));
+  return "builtin campaignScheduleSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignScheduleSend(args: CampaignScheduleSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignScheduleSend = function (this: QueryClient, args: CampaignScheduleSendArgs = {} as CampaignScheduleSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignScheduleSend", buildCampaignScheduleSend(args), opts);
+};
+
+/** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through. */
+export interface CampaignStartSendArgs {
+  /** The campaign to send. The caller must own it. */
+  campaignId: string;
+}
+
+export function buildCampaignStartSend(args: CampaignStartSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "builtin campaignStartSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignStartSend(args: CampaignStartSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignStartSend = function (this: QueryClient, args: CampaignStartSendArgs = {} as CampaignStartSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignStartSend", buildCampaignStartSend(args), opts);
+};
+
 /** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
@@ -62,6 +153,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.harnessTrace = function (this: QueryClient, args: HarnessTraceArgs = {} as HarnessTraceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("harnessTrace", buildHarnessTrace(args), opts);
+};
+
+/** Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only. */
+export interface IntegrationStatusArgs {
+  probe?: boolean;
+}
+
+export function buildIntegrationStatus(args: IntegrationStatusArgs): string {
+  const parts: string[] = [];
+  if (args.probe !== undefined) parts.push("probe: " + renderMemQLValue(args.probe));
+  return "builtin integrationStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    integrationStatus(args: IntegrationStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.integrationStatus = function (this: QueryClient, args: IntegrationStatusArgs = {} as IntegrationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
 /** Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight. */

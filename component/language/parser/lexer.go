@@ -45,28 +45,29 @@ const (
 	TokenKeywordBuiltin    // Builtin
 
 	// Keywords - Go-like control flow
-	TokenKeywordFunc     // func
-	TokenKeywordFor      // for
-	TokenKeywordRange    // range
-	TokenKeywordIf       // if
-	TokenKeywordElse     // else
-	TokenKeywordSwitch   // switch
-	TokenKeywordCase     // case
-	TokenKeywordDefault  // default
-	TokenKeywordContinue // continue
-	TokenKeywordBreak    // break
-	TokenKeywordReturn   // return
-	TokenKeywordNil      // nil
-	TokenKeywordRetry    // retry
-	TokenKeywordWhen     // when (conditional step execution)
-	TokenKeywordAs       // as (forEach iteration variable, use alias)
-	TokenKeywordWhere    // where (forEach filter)
-	TokenKeywordUse      // use (concept import declaration)
-	TokenKeywordImport   // import (file-import block; new model)
-	TokenKeywordConcept  // concept (concept definition)
-	TokenKeywordIn       // in (membership operator)
-	TokenKeywordHas      // has (containment operator)
-	TokenKeywordNot      // not (negation, used in "not in")
+	TokenKeywordFunc       // func
+	TokenKeywordFor        // for
+	TokenKeywordRange      // range
+	TokenKeywordIf         // if
+	TokenKeywordElse       // else
+	TokenKeywordSwitch     // switch
+	TokenKeywordCase       // case
+	TokenKeywordDefault    // default
+	TokenKeywordContinue   // continue
+	TokenKeywordBreak      // break
+	TokenKeywordReturn     // return
+	TokenKeywordNil        // nil
+	TokenKeywordRetry      // retry
+	TokenKeywordWhen       // when (conditional step execution)
+	TokenKeywordAs         // as (forEach iteration variable, use alias)
+	TokenKeywordWhere      // where (forEach filter)
+	TokenKeywordUse        // use (concept import declaration)
+	TokenKeywordImport     // import (file-import block; new model)
+	TokenKeywordConcept    // concept (concept definition)
+	TokenKeywordIn         // in (membership operator)
+	TokenKeywordHas        // has (containment operator)
+	TokenKeywordNot        // not (negation, used in "not in")
+	TokenKeywordStartsWith // startsWith (string-prefix comparison operator, memql#4208)
 )
 
 // Token represents a lexical token.
@@ -204,6 +205,8 @@ func (t TokenType) String() string {
 		return "has"
 	case TokenKeywordNot:
 		return "not"
+	case TokenKeywordStartsWith:
+		return "startsWith"
 	default:
 		return fmt.Sprintf("unknown-token(%d)", int(t))
 	}
@@ -898,6 +901,11 @@ func (l *Lexer) scanIdentifier(start, startLine, startColumn int) (Token, error)
 		tokenType = TokenKeywordHas
 	case "not":
 		tokenType = TokenKeywordNot
+	case "startsWith":
+		// The string-prefix comparison operator (memql#4208): the prefix
+		// sibling of `in`, keyworded the same way so `<field> startsWith
+		// <prefix>` is identifier-led like every other comparison.
+		tokenType = TokenKeywordStartsWith
 	// "concept" is intentionally NOT a keyword — it's used as a field name
 	// in queries (concept==v1:cognition:participant). Will be added as a
 	// contextual keyword in Phase 3 (concept definition parser).

@@ -146,6 +146,7 @@ context:
 | `!=` | Not equal | `status!="archived"` |
 | `>` `>=` `<` `<=` | Comparisons | `count>=10` |
 | `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
+| `startsWith` | String prefix (ANY of a list); an empty list and a blank prefix match nothing ([authoring rules §32](authoring-rules.md)) | `codeReference startsWith "integration."`, `codeReference startsWith args.prefixes` |
 | `&&` | Logical AND | `spaceId==args.spaceId && isActiveRecord` |
 | `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
 | `( )` | Grouping (Go precedence: comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |

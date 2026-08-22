@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -57,6 +58,10 @@ import (
 const (
 	clusterNamespace = "memql"
 	argoApplication  = "memql"
+	// argoNamespace is where the Application lives: ArgoCD's own namespace,
+	// which deploy/argocd/bootstrap installs and every Application manifest
+	// in deploy/argocd/apps names.
+	argoNamespace = "argocd"
 )
 
 // overlayDir is the cloud kustomize overlay, relative to the repo root. The
@@ -86,6 +91,14 @@ type Options struct {
 	// resolves. Optional -- nil leaves the deploy path unchanged (no
 	// persistence), which is what unit tests + engineless binaries get.
 	Engine identity.EngineExecutor
+	// RepairPollInterval and RepairCeiling bound the repair watcher
+	// (memql#4209): how often the identity node re-reads the ArgoCD
+	// Application after a repair kick-off, and how long it waits for the
+	// sync to land synced AND healthy before the repair record is resolved
+	// to failed. Zero selects the defaults (defaultRepairPollInterval /
+	// defaultRepairCeiling).
+	RepairPollInterval time.Duration
+	RepairCeiling      time.Duration
 }
 
 // Service implements memqlv1.DeployControlServiceServer.
@@ -98,6 +111,24 @@ type Service struct {
 	exec     Executor
 	clock    func() time.Time
 	engine   identity.EngineExecutor
+
+	// The repair watcher's knobs + the one-repair-at-a-time guard
+	// (memql#4209; repair.go).
+	repairPoll    time.Duration
+	repairCeiling time.Duration
+	repairMu      sync.Mutex
+	repairBusy    bool
+	repairActive  string
+	// startRepairWatch owns the repair record after a successful kick-off:
+	// it observes the Application until the record can be resolved, then
+	// releases the guard. It receives the RPC's context for its values (the
+	// caller's identity), never for its lifetime. Defaults to goWatchRepair;
+	// a test substitutes a recorder so the RPC's own contract is asserted
+	// without a goroutine.
+	startRepairWatch func(rpcCtx context.Context, deploymentID string)
+	// onRepairResolved, when set, is called after the watcher has written the
+	// record's terminal status -- a test seam for the asynchronous path.
+	onRepairResolved func(deploymentID, status, reason string)
 }
 
 // NewService constructs the deploy-control service.
@@ -124,14 +155,26 @@ func NewService(opts Options) (*Service, error) {
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &Service{
-		logger:   opts.Logger,
-		audit:    opts.Audit,
-		repoRoot: repoRoot,
-		exec:     executor,
-		clock:    clock,
-		engine:   opts.Engine,
-	}, nil
+	poll := opts.RepairPollInterval
+	if poll <= 0 {
+		poll = defaultRepairPollInterval
+	}
+	ceiling := opts.RepairCeiling
+	if ceiling <= 0 {
+		ceiling = defaultRepairCeiling
+	}
+	s := &Service{
+		logger:        opts.Logger,
+		audit:         opts.Audit,
+		repoRoot:      repoRoot,
+		exec:          executor,
+		clock:         clock,
+		engine:        opts.Engine,
+		repairPoll:    poll,
+		repairCeiling: ceiling,
+	}
+	s.startRepairWatch = s.goWatchRepair
+	return s, nil
 }
 
 // Register attaches the DeployControlService implementation to the
@@ -444,7 +487,7 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, _ *memqlv1.GetDeploym
 	}
 
 	// Argo CD app status (best-effort: a kubectl failure leaves argocd nil).
-	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", argoApplication, "-o", "json"); aerr == nil {
+	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", argoNamespace, "get", "app", argoApplication, "-o", "json"); aerr == nil {
 		if argo, merr := MapArgoStatus(argoRaw); merr == nil {
 			out.Argocd = argo
 		}

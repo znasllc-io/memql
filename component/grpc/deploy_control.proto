@@ -61,6 +61,30 @@ service DeployControlService {
   // and runs it through the driver, landing in rolled_back on success.
   // Owner/admin gated; emits an audit event.
   rpc RollbackDeployment(RollbackDeploymentRequest) returns (ActionResult);
+
+  // Repair re-converges THIS installation onto its committed overlay
+  // (memql#4209): it asks ArgoCD to hard-refresh and sync the installation's
+  // Application -- prune included -- through the same Executor boundary every
+  // other write uses, never a direct apply. Nothing changes version: a repair
+  // returns a drifted, half-applied or hand-edited cluster to the state Git
+  // already describes, which is the cluster-side half of what the VS Code
+  // extension's install-graph replay does for a local cluster. The host-side
+  // half (tools, hosts file, local CA, checkout, the k3d cluster itself) is
+  // not reachable from inside the cluster and stays with the extension.
+  //
+  // ASYNC. ok=true means accepted AND kicked off, not "repaired": a
+  // v1:cluster:deployment record (notes prefixed "repair:") is written at
+  // in_progress and resolved to succeeded | failed as the reconciliation is
+  // OBSERVED, so callers poll GetDeploymentStatus / the deployment concept for
+  // the terminal state. There is no progress stream.
+  //
+  // OWNER ONLY -- the RollbackDeployment floor, not Deploy's: a repair mutates
+  // a running cluster with no Git revert trail. Refusals are audited and carry
+  // their audit id on both transports. A provider with no defined repair
+  // (anything other than docker-local | azure, both of which reconcile through
+  // the one ArgoCD Application) is refused INSIDE the ActionResult with
+  // "repair is not defined for this provider" rather than half-run.
+  rpc Repair(RepairRequest) returns (ActionResult);
 }
 
 // -----------------------------------------------------------------------------
@@ -123,6 +147,16 @@ message RollbackDeploymentRequest {
   // digest is redeployed. A new deployment record is created for the
   // rollback (previousDeploymentId -> this id); the original is untouched.
   string to_deployment_id = 1;
+}
+
+// RepairRequest is deliberately empty: a repair operates on THIS installation
+// (there is nothing to select) and carries no version -- a repair that
+// installs a different version is an upgrade wearing a repair's name
+// (memql#3605). Field 1 is reserved as on every other request here (epic
+// memql#3943).
+message RepairRequest {
+  reserved 1;
+  reserved "env";
 }
 
 // -----------------------------------------------------------------------------

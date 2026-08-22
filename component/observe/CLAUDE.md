@@ -8,6 +8,7 @@
 - TimescaleDB hypertable `code_invocation` (migration `20260515000000_observability_hypertable.up.sql`)
 - Continuous aggregates `code_invocation_1m` and `code_invocation_1h`
 - Concepts under `dsl/observability/`: `codeProfile`, `invocation`, `codeMetric`
+- The client read over the rollups: `codeMetricsInWindow` (`dsl/observability/queries.memql`, memql#4208) -- one bucket, one `[windowStart, windowEnd)` range, `codeReference startsWith` any of the caller's prefixes or equal to an exact key
 
 ---
 

@@ -6,9 +6,40 @@ import (
 
 	"google.golang.org/grpc/codes"
 
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
+
+// conceptInfoFromConcept projects a registry Concept onto the wire ConceptInfo,
+// including the @displayCard(...) rendering hints (memql#160). Shared by the
+// one-shot ConceptsListMsg and the follow-mode registry-delta stream (memql#4238)
+// so the two can never disagree on the descriptor a client sees.
+func conceptInfoFromConcept(c *memoryNodes.Concept) *memqlv1.ConceptInfo {
+	if c == nil {
+		return nil
+	}
+	version, domain, entity := parseConceptId(c.Name)
+	info := &memqlv1.ConceptInfo{
+		Id:          c.Name,
+		Version:     version,
+		Domain:      domain,
+		Entity:      entity,
+		Description: c.Description,
+		Type:        c.NodeType,
+	}
+	if c.DisplayCard != nil {
+		info.DisplayCard = &memqlv1.DisplayCard{
+			Primary:   c.DisplayCard.Primary,
+			Secondary: c.DisplayCard.Secondary,
+			Tertiary:  c.DisplayCard.Tertiary,
+			Status:    c.DisplayCard.Status,
+		}
+	}
+	return info
+}
 
 // handleConceptsList returns metadata for all registered concepts and available event topics.
 func (s *streamSession) handleConceptsList(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.ConceptsListMsg) error {
@@ -26,27 +57,7 @@ func (s *streamSession) handleConceptsList(envelope *memqlv1.MemqlClientMessage,
 	concepts := s.service.conceptRegistry.List()
 	infos := make([]*memqlv1.ConceptInfo, 0, len(concepts))
 	for _, c := range concepts {
-		version, domain, entity := parseConceptId(c.Name)
-		info := &memqlv1.ConceptInfo{
-			Id:          c.Name,
-			Version:     version,
-			Domain:      domain,
-			Entity:      entity,
-			Description: c.Description,
-			Type:        c.NodeType,
-		}
-		// Surface the per-concept rendering hints when the concept
-		// declared `@displayCard(...)`. memql#160 -- concept-agnostic
-		// browsers consume this to render row cards uniformly.
-		if c.DisplayCard != nil {
-			info.DisplayCard = &memqlv1.DisplayCard{
-				Primary:   c.DisplayCard.Primary,
-				Secondary: c.DisplayCard.Secondary,
-				Tertiary:  c.DisplayCard.Tertiary,
-				Status:    c.DisplayCard.Status,
-			}
-		}
-		infos = append(infos, info)
+		infos = append(infos, conceptInfoFromConcept(c))
 	}
 
 	s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
@@ -80,6 +91,12 @@ func (s *streamSession) handleConceptsSubscribe(envelope *memqlv1.MemqlClientMes
 	if s.service.conceptRegistry == nil {
 		s.sendQueryError(requestId, correlate, codes.Unavailable, "concept registry not configured")
 		return nil
+	}
+
+	// follow mode (memql#4238): snapshot + live registry-change deltas, instead
+	// of the one-shot CDC-filter catalog below.
+	if msg.GetFollow() {
+		return s.handleConceptsFollow(requestId, correlate)
 	}
 
 	concepts := s.service.conceptRegistry.List()
@@ -132,6 +149,88 @@ func (s *streamSession) handleConceptsSubscribe(envelope *memqlv1.MemqlClientMes
 		},
 	})
 	return nil
+}
+
+// handleConceptsFollow opens a registry-DELTA subscription (memql#4238): it
+// answers with a snapshot delta (reset=true, the whole concept set at the
+// current generation) and then streams add/remove deltas from the engine's
+// in-process broadcaster until the client unsubscribes by the returned
+// subscription_id or the stream closes.
+//
+// The subscription is registered in s.unsubscribers under that id, so BOTH an
+// explicit UnsubscribeMsg (handleUnsubscribe) and stream teardown (shutdown()
+// ranges s.unsubscribers) stop delivery -- the same lifecycle the CDC
+// subscriptions use.
+func (s *streamSession) handleConceptsFollow(requestId, correlate string) error {
+	if s.service.engine == nil {
+		s.sendQueryError(requestId, correlate, codes.FailedPrecondition,
+			"concept registry follow requires an engine on this node")
+		return nil
+	}
+
+	sub := s.service.engine.SubscribeConceptRegistry()
+	subscriptionId := id.NewShortId()
+	s.unsubscribers.Store(subscriptionId, sub.Unsubscribe)
+
+	added := make([]*memqlv1.ConceptInfo, 0, len(sub.Snapshot))
+	for _, c := range sub.Snapshot {
+		added = append(added, conceptInfoFromConcept(c))
+	}
+
+	// The snapshot. reset=true tells the client to replace its whole registry
+	// with `added`. Correlated to the request's message id so a caller can pair
+	// the first reply; every delta also carries request_id, which is what the
+	// SDK matches on across the whole stream.
+	if err := s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
+		Payload: &memqlv1.MemqlServerMessage_ConceptsRegistryDelta{
+			ConceptsRegistryDelta: &memqlv1.ConceptsRegistryDelta{
+				RequestId:      requestId,
+				Generation:     sub.Generation,
+				Added:          added,
+				Reset_:         true,
+				SubscriptionId: subscriptionId,
+			},
+		},
+	}); err != nil {
+		sub.Unsubscribe()
+		s.unsubscribers.Delete(subscriptionId)
+		return err
+	}
+
+	go s.forwardConceptRegistryDeltas(subscriptionId, requestId, sub.Deltas)
+	return nil
+}
+
+// forwardConceptRegistryDeltas relays deltas from the engine broadcaster to the
+// client as ConceptsRegistryDelta pushes (correlate "" -- unsolicited, matched
+// client-side by request_id) until the stream closes or the channel is closed
+// by the unsubscribe. Mirrors forwardEvents' closeChan discipline.
+func (s *streamSession) forwardConceptRegistryDeltas(subscriptionId, requestId string, deltas <-chan memqlengine.ConceptRegistryDelta) {
+	for {
+		select {
+		case <-s.closeChan:
+			return
+		case delta, ok := <-deltas:
+			if !ok {
+				return
+			}
+			added := make([]*memqlv1.ConceptInfo, 0, len(delta.Added))
+			for _, c := range delta.Added {
+				added = append(added, conceptInfoFromConcept(c))
+			}
+			_ = s.sendServerMessage("", &memqlv1.MemqlServerMessage{
+				Payload: &memqlv1.MemqlServerMessage_ConceptsRegistryDelta{
+					ConceptsRegistryDelta: &memqlv1.ConceptsRegistryDelta{
+						RequestId:      requestId,
+						Generation:     delta.Generation,
+						Added:          added,
+						Removed:        delta.Removed,
+						SubscriptionId: subscriptionId,
+					},
+				},
+			})
+		}
+	}
 }
 
 // parseConceptId splits a concept ID like "v1:cognition:space" into version, domain, and entity.

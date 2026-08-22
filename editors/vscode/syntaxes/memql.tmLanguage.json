@@ -66,7 +66,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.memql",
-      "match": "\\b(?:accept|args|auth|body|else|filter|for|if|in|insert|params|range|return|shape|stamp|update|when)\\b"
+      "match": "\\b(?:accept|args|auth|body|else|filter|for|if|in|insert|params|range|return|shape|stamp|startsWith|update|when)\\b"
     },
     "import-keywords": {
       "name": "keyword.control.import.memql",
@@ -82,7 +82,7 @@
     },
     "operators-word": {
       "name": "keyword.operator.word.memql",
-      "match": "\\b(?:in)\\b"
+      "match": "\\b(?:in|startsWith)\\b"
     },
     "reserved-words": {
       "name": "variable.language.memql",

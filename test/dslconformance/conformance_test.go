@@ -1095,7 +1095,7 @@ func splitFilterRef(pred string) (string, string) {
 }
 
 func hasFilterOperator(pred string) bool {
-	for _, op := range []string{"==", "!=", "<=", ">=", " has ", " in ", " not "} {
+	for _, op := range []string{"==", "!=", "<=", ">=", " has ", " in ", " not ", " startsWith "} {
 		if strings.Contains(pred, op) {
 			return true
 		}

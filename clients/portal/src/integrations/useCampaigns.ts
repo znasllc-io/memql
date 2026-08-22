@@ -3,7 +3,6 @@ import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
-import { runBuiltin } from "./calls";
 
 // Campaign authoring against the cluster (memql#3323).
 //
@@ -50,6 +49,8 @@ export interface CampaignsState {
   // the refusals it produces -- "template is not ready", "no email sender is
   // registered on this node", "one-click unsubscribe is not configured" --
   // arrive here as the rejected promise's message and land in actionError.
+  // All four ride the generated typed methods (memql#4239), exactly as the
+  // mutations do.
   startSend: (campaignId: string) => void;
   pauseSend: (campaignId: string) => void;
   resumeSend: (campaignId: string) => void;
@@ -125,8 +126,10 @@ export function useCampaigns(): CampaignsState {
 
   // run funnels every write through one place so the busy flag, the message
   // handling and the follow-up re-read cannot be forgotten on the fifth one.
-  // Promise<unknown>: a generated mutation resolves to a Result this hook has
-  // no use for -- the success signal is the resolution itself.
+  // Promise<unknown>: a generated mutation or builtin resolves to a Result
+  // this hook has no use for -- the success signal is the resolution itself,
+  // and a builtin's refusal ("template is not ready", "no email sender is
+  // registered on this node") arrives as the rejected promise's message.
   const run = useCallback((what: Promise<unknown> | null, done: string) => {
     if (what === null) return;
     setBusy(true);
@@ -207,7 +210,7 @@ export function useCampaigns(): CampaignsState {
         // asked of an owned-tier concept at all, so the schedule has to be
         // recorded on the engine's own send job -- and only Go holding a
         // campaign it read under the caller's actor may write that.
-        query ? runBuiltin(query, "campaignScheduleSend", input) : null,
+        query ? query.campaignScheduleSend(input) : null,
         // Now says what actually happens. The preflight has already passed at
         // this point -- template ready, sender configured, audience sane --
         // so the remaining uncertainty is the provider's, not ours.
@@ -225,7 +228,7 @@ export function useCampaigns(): CampaignsState {
   const startSend = useCallback(
     (campaignId: string) =>
       run(
-        query ? runBuiltin(query, "campaignStartSend", { campaignId }) : null,
+        query ? query.campaignStartSend({ campaignId }) : null,
         // Deliberately not "Sent." The engine has ACCEPTED the send; the
         // messages leave over the following minutes, paced by the send rate
         // and by whatever the provider allows.
@@ -237,7 +240,7 @@ export function useCampaigns(): CampaignsState {
   const pauseSend = useCallback(
     (campaignId: string) =>
       run(
-        query ? runBuiltin(query, "campaignPauseSend", { campaignId }) : null,
+        query ? query.campaignPauseSend({ campaignId }) : null,
         "Paused. The delivery ledger is untouched, so resuming continues where it stopped.",
       ),
     [query, run],
@@ -245,7 +248,7 @@ export function useCampaigns(): CampaignsState {
 
   const resumeSend = useCallback(
     (campaignId: string) =>
-      run(query ? runBuiltin(query, "campaignResumeSend", { campaignId }) : null, "Resumed."),
+      run(query ? query.campaignResumeSend({ campaignId }) : null, "Resumed."),
     [query, run],
   );
 

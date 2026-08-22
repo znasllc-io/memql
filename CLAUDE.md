@@ -897,7 +897,7 @@ Everything below lives on `MemqlService.Stream`; cross-node proxying rides
 | **AI service-to-service** | `AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg` (space / group / agent) | `ai_handlers.go` |
 | **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Voice via `AiForwardRouter.ForwardContinuation` |
 | **Polyphon internal** | `PolyphonRoomTokenMsg`, `PolyphonStatusMsg`, `PolyphonUtteranceMsg` | `polyphon_handlers.go` |
-| **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` | `concepts_handlers.go` |
+| **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` (+ `follow=true` -> `ConceptsRegistryDelta` stream, memql#4238) | `concepts_handlers.go` |
 | **Guest invites** | `SendGuestInviteMsg`, `ResolveGuestInviteMsg`, `ResendGuestInviteEmailMsg`, `CancelGuestInviteMsg` | `guest_handlers.go` |
 
 ### For AI Agents and Developers
@@ -1409,9 +1409,12 @@ node-type binary (`make identity`) and owns:
   on-disk overlay checkout and so exists only on the identity node, but
   a bff FORWARDS the deploy RPCs here over `NodeService.Stream`
   (`DeployControlForwardRequest` / `Response`), carrying the caller as a
-  verified `ForwardedAuthority` so the owner-only rollback gate runs
-  against the originating human rather than the relaying node
-  (`component/grpc/deploy_control_forward.go`).
+  verified `ForwardedAuthority` so the owner-only rollback and repair gates
+  run against the originating human rather than the relaying node
+  (`component/grpc/deploy_control_forward.go`). Repair (memql#4209) is an
+  owner-only, observed re-sync of the installation's ArgoCD Application
+  through the same Executor, recorded on the deployment timeline
+  (`component/deploycontrol/repair.go`).
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 
@@ -1896,6 +1899,12 @@ concept id.
   the AST converter runs, write the `!=` comparison form instead.
 - Membership is the single `in` operator: `args.x in list`
   or `kind in ["a", "b"]` (payload props bare).
+- Prefix selection is `<field> startsWith <prefix>` (memql#4208): a string
+  literal, a list of string literals (starts with ANY of), or an
+  `args.<field>` resolving to either. Parameterized `^@ ANY(text[])` in
+  SQL; an EMPTY list and a BLANK prefix match nothing -- a selection,
+  never a pass-through (authoring-rules.md §32). Filters and spec bodies
+  only; the automations condition grammar refuses it by name.
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
   if `args.x` is absent the guarded block AND its connective are
   dropped as if never written (unambiguous under `||`).
@@ -2326,7 +2335,7 @@ Runtime side of the architecture framework (dsl/observability/; infrastructure m
 See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
 - `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
 - `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
-- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
+- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node). Clients read it through `codeMetricsInWindow` (`dsl/observability/queries.memql`, memql#4208): one bucket, one `[windowStart, windowEnd)` range, `codeReference startsWith` any of the caller's prefixes or equal to an exact key -- the prefix-scoped read the portal's module drill-in uses instead of a capped client-side walk.
 
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads)
