@@ -66,7 +66,7 @@ func main() {
 	layout := func(title, path string, scripts ...string) webtempl.LayoutData {
 		return webtempl.LayoutData{
 			Title:             title,
-			BrandName:         "Znasllc",
+			BrandName:         "Acme",
 			BrandPrimaryColor: "#0433ff",
 			Year:              time.Now().UTC().Year(),
 			NavLinks:          nav,
@@ -85,7 +85,7 @@ func main() {
 	publicLayout := func(title string) webtempl.LayoutData {
 		return webtempl.LayoutData{
 			Title:             title,
-			BrandName:         "Znasllc",
+			BrandName:         "Acme",
 			BrandPrimaryColor: "#0433ff",
 			Year:              time.Now().UTC().Year(),
 			NavLinks:          publicNav,
