@@ -314,7 +314,7 @@ type Config struct {
 	// BaseURL is the public origin the identity service is reachable
 	// at. Used as the JWT `iss` claim, in redirect targets, and in
 	// links emitted into magic-link / invitation emails.
-	// Env: MEMQL_IDENTITY_BASE_URL (e.g. "https://auth.znasllc.io")
+	// Env: MEMQL_IDENTITY_BASE_URL (e.g. "https://identity.example.com")
 	BaseURL string
 
 	// JWTAudience is the value placed in the JWT `aud` claim.

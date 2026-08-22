@@ -70,7 +70,7 @@ its `v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
 (`frontdoor.PortalHost`). The exact rule is a TLS artefact, not a second way to
 serve the portal: ingress-nginx builds a certificate-bearing server block per
 **rule** host, never per `tls` host, so a `tls.hosts` entry alone would have
-changed nothing — which is why the ops workaround on the first keep-it cluster
+changed nothing — which is why the ops workaround on the first entry-shape cluster
 was an extra Ingress, and why that is now the generated shape.
 
 (The set was once the product of role × ENVIRONMENT, with a label that

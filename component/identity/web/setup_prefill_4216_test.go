@@ -7,7 +7,7 @@ package web
 // envregistry.ApplyDomainDerivations copies MEMQL_DOMAIN onto that name
 // set-if-absent, so the pin wins. handleSetupGet then prefills from
 // Bootstrap.Domain and the operator sees example.com (or an empty box)
-// on a keep-it install that already patched MEMQL_DOMAIN.
+// on an entry install that already patched MEMQL_DOMAIN.
 //
 // The running install domain is MEMQL_DOMAIN (envFrom memql-domain).
 // /setup must prefer that over the placeholder. A local install still
@@ -59,7 +59,7 @@ func domainInputValue(body string) string {
 	return rest
 }
 
-// TestSetupPrefillsDomainFromMEMQLDomain is the keep-it case: the base
+// TestSetupPrefillsDomainFromMEMQLDomain is the entry-install case: the base
 // placeholder is still on Bootstrap.Domain, MEMQL_DOMAIN is the install
 // patch. The form must show the install domain.
 func TestSetupPrefillsDomainFromMEMQLDomain(t *testing.T) {

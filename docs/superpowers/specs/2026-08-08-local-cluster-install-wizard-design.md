@@ -1,5 +1,13 @@
 # Local Cluster Install & Uninstall Wizard
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 **Date:** 2026-08-08
 **Status:** Design approved; ready for implementation planning
 **Surfaces:** VS Code extension (`editors/vscode`), memQL Cockpit (`memql-cockpit` repo)
@@ -178,8 +186,8 @@ forbids.
   receipt so uninstall removes exactly those lines. mkcert issues and trusts the
   cert. No domain ownership, no DNS, no third party.
 - **Advanced:** bring your own domain. A wildcard A record to `127.0.0.1`,
-  verified to resolve before the run proceeds. `local.znas.io` continues to work
-  through this path and must remain supported.
+  verified to resolve before the run proceeds. The vendor domain in use at the
+  time continues to work through this path and must remain supported.
 - **Rejected:** magic wildcard DNS (`nip.io` / `sslip.io`). Consumer routers'
   DNS-rebinding protection blocks public names resolving to `127.0.0.1`, so it
   fails intermittently and confusingly.

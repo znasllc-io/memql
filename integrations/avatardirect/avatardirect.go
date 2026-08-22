@@ -218,7 +218,7 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 	}
 
 	// browserURL is what the browser connects with: POLYPHON_LIVEKIT_PUBLIC_URL
-	// (e.g. wss://livekit.local.znas.io), or the internal URL as a fallback.
+	// (e.g. wss://livekit.<domain>), or the internal URL as a fallback.
 	browserURL := i.lk.LiveKitPublicURL
 	if browserURL == "" {
 		browserURL = i.lk.LiveKitURL
@@ -328,8 +328,8 @@ func (i *Integration) handleEngageVendor(ctx context.Context, args map[string]an
 		if isDevTunnelURL(engineURL) && isMediaTimeoutErr(err) {
 			return nil, fmt.Errorf("avatardirect.engageVendor: %s cloud avatar joined LiveKit signaling but could not establish WebRTC media to the local dev LiveKit over the ngrok TURN relay -- local cloud-avatar VIDEO is not supported on the dev cluster (the cloud engine and the dockerized LiveKit only exchange unreachable host ICE candidates; the cloud engine forms no relay candidate from the advertised TURN server). Run the direct avatar audio-only locally; cloud-avatar video is validated on staging (memql#784), where LiveKit is directly reachable. See docs/internal/design/voice-turn-relay.md. (underlying: %w)", vendor, err)
 		}
-		// A local-only engine URL (the *.local.znas.io front door, localhost,
-		// or an in-cluster service name) is unreachable from the vendor's
+		// A local-only engine URL (a `.localhost` front-door host, a loopback
+		// literal, or an in-cluster service name) is unreachable from the vendor's
 		// cloud BY CONSTRUCTION -- the engine never even joins signaling. Name
 		// the misconfiguration instead of surfacing the vendor's dial timeout
 		// (memql#1336): on the dev cluster this is the documented no-tunnel
@@ -632,15 +632,22 @@ func isDevTunnelURL(engineURL string) bool {
 }
 
 // isLocalOnlyURL reports whether engineURL can only resolve/route on the
-// developer's machine or LAN -- localhost, the docker service name, or the
-// *.local.znas.io dev front door -- i.e. a URL a vendor's CLOUD engine can
-// never dial. Used to name the misconfiguration instead of surfacing the
-// vendor's opaque dial timeout (memql#1336).
+// developer's machine or LAN -- a loopback literal, a `.localhost` name, or
+// the docker service name -- i.e. a URL a vendor's CLOUD engine can never
+// dial. Used to name the misconfiguration instead of surfacing the vendor's
+// opaque dial timeout (memql#1336).
+//
+// The `localhost` substring is what covers the local cluster's front door,
+// because the default local domain IS memql.localhost -- an RFC 6761 loopback
+// name, so `livekit.memql.localhost` is unroutable from anywhere else BY
+// SPECIFICATION rather than by convention (memql#3593). A `--domain` the
+// operator brings is a real, routable name and is deliberately not guessed at
+// here: an operator-chosen host may well be reachable, and refusing it would
+// be wrong more often than the timeout this exists to explain.
 func isLocalOnlyURL(engineURL string) bool {
 	s := strings.ToLower(engineURL)
 	return strings.Contains(s, "localhost") ||
 		strings.Contains(s, "127.0.0.1") ||
-		strings.Contains(s, ".local.znas.io") ||
 		strings.Contains(s, "//livekit:")
 }
 

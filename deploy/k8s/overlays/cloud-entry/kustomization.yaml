@@ -1,10 +1,10 @@
-# CLOUD-ENTRY overlay -- keep-it / client install (memql#4203).
+# CLOUD-ENTRY overlay -- the entry / client install shape (memql#4203).
 #
 # A SECOND INSTANCE overlay, not a staging/prod split. overlays/cloud stays
 # on cnpg-db/presets/top + mesh 2 and is what deploy/argocd/apps/memql.yaml
 # points at. This directory is what a ZNAS (or client) Argo in its OWN
 # cluster reconciles: same base, same cnpg-db shape, entry sizes, mesh 1,
-# voice-off. Do not apply overlays/cloud to rg-znas-memql.
+# voice-off. Do not apply overlays/cloud to an entry install's resource group.
 #
 # Voice-off is first-class replicas 0 on voice / voice-agent / livekit /
 # livekit-sip / mcp (and livekit-redis, which exists only for the sip
@@ -76,8 +76,8 @@ patches:
   # VOICE-OFF, PART TWO: NO PUBLIC IPs (memql#4225). Replicas 0 above stops
   # the pods; it does not stop Azure allocating a public IP for every
   # LoadBalancer Service base declares for the media plane (livekit-rtc)
-  # and the SIP plane (livekit-sip). Keep-it converted both to ClusterIP by
-  # hand, and the next Argo sync of this overlay was refused:
+  # and the SIP plane (livekit-sip). The first entry install converted both
+  # to ClusterIP by hand, and the next Argo sync of this overlay was refused:
   #
   #   Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid
   #   value: "Local": may only be set for externally-accessible services

@@ -53,7 +53,7 @@ func clusterSettingsNode(bootstrappedAt string) *memqlv1.MemoryNode {
 		Id: "v1:identity:clusterSettings:cluster",
 		Payload: &structpb.Struct{Fields: map[string]*structpb.Value{
 			"bootstrappedAt": structpb.NewStringValue(bootstrappedAt),
-			"bootstrapEmail": structpb.NewStringValue("znas@znas.io"),
+			"bootstrapEmail": structpb.NewStringValue("owner@example.com"),
 		}},
 	}
 }

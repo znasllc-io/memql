@@ -31,7 +31,7 @@
 // there is one installation shape, and a second environment is a second
 // install with its own domain and its own front door. Two instance overlays
 // remain -- overlays/cloud (in-cluster Application, top) and
-// overlays/cloud-entry (keep-it / client, memql#4204) -- and kustomize will
+// overlays/cloud-entry (the entry / client install, memql#4204) -- and kustomize will
 // not load a sibling generated file, so each overlay owns its own copy.
 //
 // # What is generated and what is not

@@ -27,7 +27,7 @@ func TestIsSingleProcessHostIsLoopbackNamesOnly(t *testing.T) {
 		"identity.memql.localhost",
 		"api.memql.localhost",
 		"memql.localhost",
-		"identity.local.znas.io",
+		"identity.local.example.com",
 		"identity.example.com",
 	}
 	for _, host := range notSingle {

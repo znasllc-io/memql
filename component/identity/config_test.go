@@ -18,8 +18,8 @@ func TestIsLocalHost(t *testing.T) {
 		{"foo.localhost", true},
 		{"identity.localhost", true},
 		// Dev wildcard convention: *.local.<domain>.
-		{"identity.local.znas.io", true},
-		{"app.local.znas.io", true},
+		{"identity.local.example.com", true},
+		{"app.local.example.com", true},
 		{"bff.local.acme.test", true},
 		// Production-shaped hostnames must NOT be treated as local --
 		// they pair with a real cert and require the encryption key.

@@ -1,5 +1,13 @@
 # VS Code Runtime Panel — Increment B1 Implementation Plan
 
+> **Historical record, with one redaction.** This document originally named the
+> vendor domain the project used before memql#3593. memql#4217 removed that name
+> from the repository, so it is gone from here too: illustrative fixtures now use
+> RFC 2606 reserved names, while passages asserting what a cluster actually served
+> -- or quoting the literal as the string being removed -- are worded descriptively
+> rather than given a substitute domain, since a different literal there would
+> assert a past that did not happen. Nothing else has changed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the memQL VS Code extension an activity-bar presence that connects to a cluster, lists clusters from `~/.memql/clusters.yaml`, and browses every concept's rows and detail — with the rendering done by a new framework-agnostic package the portal will reuse.
@@ -1353,9 +1361,9 @@ async function tempFile(contents: string): Promise<string> {
 const SAMPLE = `# my clusters
 clusters:
   - name: local
-    display_name: local.znas.io
-    domain: local.znas.io
-    endpoint: cockpit.local.znas.io:443
+    display_name: local.example.com
+    domain: local.example.com
+    endpoint: cockpit.local.example.com:443
     pat: mql_pat_abc
   - name: staging
     domain: example.com
@@ -1371,8 +1379,8 @@ test("reads clusters and the selected cluster", async () => {
   assert.equal(parsed.clusters.length, 2);
   assert.equal(parsed.selectedCluster, "local");
   assert.equal(parsed.clusters[0]?.name, "local");
-  assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(parsed.clusters[0]?.displayName, "local.example.com");
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.example.com:443");
   assert.equal(parsed.clusters[0]?.pat, "mql_pat_abc");
   assert.equal(parsed.clusters[1]?.clientId, "cockpit");
 });
@@ -1448,7 +1456,7 @@ test("upsertCluster preserves unknown keys on the updated cluster", async () => 
 test("writes create the file and its parent directory when absent", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
   const f = path.join(dir, "nested", "clusters.yaml");
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" });
+  await upsertCluster(f, { name: "local", endpoint: "cockpit.local.example.com:443" });
   assert.equal((await readClustersFile(f)).clusters[0]?.name, "local");
 });
 
@@ -1842,22 +1850,22 @@ import { webSocketUrlFor } from "../src/connection/endpoint.js";
 
 test("derives a wss URL from a host:port endpoint", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:443" }),
-    "wss://cockpit.local.znas.io/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.example.com:443" }),
+    "wss://cockpit.local.example.com/memql/ws",
   );
 });
 
 test("preserves a non-standard port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:8443" }),
-    "wss://cockpit.local.znas.io:8443/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.example.com:8443" }),
+    "wss://cockpit.local.example.com:8443/memql/ws",
   );
 });
 
 test("handles an endpoint with no port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io" }),
-    "wss://cockpit.local.znas.io/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.example.com" }),
+    "wss://cockpit.local.example.com/memql/ws",
   );
 });
 
@@ -2499,7 +2507,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   }
 
   const domain = await window.showInputBox({
-    prompt: 'Domain (e.g. local.znas.io). The endpoint is composed as cockpit.<domain>:443.',
+    prompt: 'Domain (e.g. local.example.com). The endpoint is composed as cockpit.<domain>:443.',
     value: existing?.domain ?? '',
     ignoreFocusOut: true,
   });

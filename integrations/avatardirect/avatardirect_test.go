@@ -370,10 +370,10 @@ func TestEngageVendor_DevTunnelMediaTimeoutSurfacesDeterminationHint(t *testing.
 
 func TestEngageVendor_LocalOnlyURLNamesTheMisconfiguration(t *testing.T) {
 	// memql#1336: with no LIVEKIT_PUBLIC_URL the engine URL falls back to the
-	// browser URL -- on the dev cluster that's the *.local.znas.io front door,
+	// browser URL -- on the dev cluster that is the memql.localhost front door,
 	// which a vendor's CLOUD engine can never dial. Name the misconfiguration
 	// (and the supported paths) instead of surfacing the vendor's dial timeout.
-	t.Setenv("LIVEKIT_PUBLIC_URL", "wss://livekit.local.znas.io")
+	t.Setenv("LIVEKIT_PUBLIC_URL", "wss://livekit.memql.localhost")
 	eng := &fakeEngine{vendor: "simli", personaId: "face-1"}
 	client := &stubVendorClient{err: errors.New("simli: livekit agent: dial tcp: i/o timeout")}
 	i := newTestIntegration(eng, client)

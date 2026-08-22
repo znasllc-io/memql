@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/vendorname"
 )
 
 // The ten node Deployments the local mesh runs. Listed rather than discovered,
@@ -49,11 +51,18 @@ func render(t *testing.T) string {
 // After memql#3593 the overlay states the RELATIONSHIP to the domain and never
 // the value -- except the two Ingress hosts, which are Kubernetes API objects
 // and carry the committed default.
+//
+// The names come from core/vendorname, which the repo-wide sweep
+// (TestNoVendorDomainLiterals) also reads. Two tests asking one question used
+// to spell the answer twice, and a second copy of a fact is a copy that can be
+// updated alone -- this one would then keep passing over a rendered manifest
+// carrying a name the sweep had already learned to refuse.
 func TestRenderedOverlayCarriesNoVendorDomain(t *testing.T) {
 	rendered := render(t)
 
-	if strings.Contains(rendered, "znas.io") {
-		t.Error("the rendered overlay still names znas.io")
+	if name, ok := vendorname.FirstIn(rendered); ok {
+		t.Errorf("the rendered overlay names %q (%s) -- the domain is a value, "+
+			"delivered through MEMQL_DOMAIN", name.Text, name.What)
 	}
 	if strings.Contains(rendered, "local-znas-tls") {
 		t.Error("the rendered overlay still names the old TLS secret")
@@ -93,7 +102,7 @@ func TestEveryNodeReadsTheDomainConfigMap(t *testing.T) {
 //
 // This is the check that was missing, and its absence shipped a broken install.
 // The earlier version asserted only that `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`
-// was gone and that no `znas.io` survived -- and the base manifests set FIVE more
+// was gone and that no vendor domain survived -- and the base manifests set FIVE more
 // domain-bearing values on identity, all to the placeholder domain, which is
 // neither of those things.
 //

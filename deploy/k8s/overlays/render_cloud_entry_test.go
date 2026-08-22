@@ -1,6 +1,6 @@
 // Render gates on the cloud-entry overlay (memql#4203).
 //
-// overlays/cloud stays top + mesh 2. This overlay is the keep-it / client
+// overlays/cloud stays top + mesh 2. This overlay is the entry / client
 // instance: entry CNPG, mesh 1, voice-off as replicas 0. A second
 // Application next to deploy/argocd/apps/memql.yaml would be the staging
 // split epic memql#3943 removed -- ZNAS Argo lives in its own cluster and
@@ -132,7 +132,7 @@ func TestCloudEntryHasNoFailOpenVoicePins(t *testing.T) {
 
 func TestCloudStaysOnTopAndTheInClusterAppIsUnchanged(t *testing.T) {
 	// overlays/cloud is not this PR. The in-cluster Application must keep
-	// pointing at it -- ZNAS Argo for rg-znas-memql is a different cluster.
+	// pointing at it -- an entry install's own Argo is a different cluster.
 	app := readApplication(t, cloudApp)
 	if want := "deploy/k8s/overlays/" + cloudOverlay; app.Spec.Source.Path != want {
 		t.Errorf("in-cluster Application path is %q, want %q -- do not retarget it at cloud-entry", app.Spec.Source.Path, want)
@@ -231,7 +231,7 @@ func servicesByName(t *testing.T, rendered string) map[string]resource {
 // voice-off Service hold (memql#4225); livekit_entry_voice_off_test.go is the
 // text-level half that cannot skip.
 //
-// The failure this catches reconciles at first and then does not: keep-it
+// The failure this catches reconciles at first and then does not: an entry install
 // converted these Services to ClusterIP by hand, and the next Argo sync of
 // the overlay -- still LoadBalancer + externalTrafficPolicy=Local -- was
 // refused by the API server ("may only be set for externally-accessible

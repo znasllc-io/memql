@@ -21,8 +21,8 @@ import (
 // useTLS=false. Nothing in the build links the emitter to that parser, and
 // neither half was wrong on its own: the server produced a legitimate dial
 // address, and the parser applied its documented default. Together they
-// dialled api.local.znas.io:443 in plaintext, putting an `mql_wkr_`
-// bearer token on the wire before the handshake failed.
+// dialled the cluster's `api.<domain>:443` front door in plaintext, putting an
+// `mql_wkr_` bearer token on the wire before the handshake failed.
 //
 // These tests are the join. They live in the root package because it is the
 // only module that requires both component/identity and sdk/go -- the same
@@ -52,15 +52,15 @@ func TestPairingReplyTellsTheWorkerToUseTLS(t *testing.T) {
 		wantTLS      bool
 	}{
 		{
-			name:         "the local front door -- the exact value that dialled :443 in the clear",
-			storedOrigin: "https://api.local.znas.io",
-			wantEndpoint: "api.local.znas.io:443",
+			name:         "the front-door origin -- the shape that dialled :443 in the clear",
+			storedOrigin: "https://api.local.example.com",
+			wantEndpoint: "api.local.example.com:443",
 			wantTLS:      true,
 		},
 		{
 			name:         "the SPA origin a pairing code is actually minted from",
-			storedOrigin: "https://app.local.znas.io",
-			wantEndpoint: "app.local.znas.io:443",
+			storedOrigin: "https://app.local.example.com",
+			wantEndpoint: "app.local.example.com:443",
 			wantTLS:      true,
 		},
 		{

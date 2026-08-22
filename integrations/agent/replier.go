@@ -652,7 +652,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	//      end-user JWT).
 	//
 	// Both are validated via looksLikeCanonicalUserId. Bare emails or
-	// system-actor strings (e.g. "znas@znas.io",
+	// system-actor strings (e.g. "owner@example.com",
 	// "system:planner-integration") are rejected so they never
 	// propagate downstream into ownerUserId-shaped fields where SQL
 	// filters compare against the canonical

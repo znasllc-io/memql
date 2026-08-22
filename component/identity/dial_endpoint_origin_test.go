@@ -45,11 +45,11 @@ func TestDialEndpointFromOrigin_IsSeparableFromTheEnvLookup(t *testing.T) {
 	// The wrapper still prefers the environment; only the mapping is pure.
 	overridingEnv := func(k string) string {
 		if k == "MEMQL_DISCOVERY_GRPC_ENDPOINT" {
-			return "api.local.znas.io:443"
+			return "api.local.example.com:443"
 		}
 		return ""
 	}
-	if got := deriveGRPCEndpoint("https://app.acme.com", overridingEnv); got != "api.local.znas.io:443" {
+	if got := deriveGRPCEndpoint("https://app.acme.com", overridingEnv); got != "api.local.example.com:443" {
 		t.Errorf("deriveGRPCEndpoint with override = %q, want the override", got)
 	}
 }

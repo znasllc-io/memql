@@ -43,8 +43,8 @@ func TestRelyingParty_DerivesFromBaseURL(t *testing.T) {
 		wantRPID   string
 		wantOrigin string
 	}{
-		{"https", "https://identity.znas.io", "identity.znas.io", "https://identity.znas.io"},
-		{"trailing slash", "https://identity.znas.io/", "identity.znas.io", "https://identity.znas.io"},
+		{"https", "https://identity.example.com", "identity.example.com", "https://identity.example.com"},
+		{"trailing slash", "https://identity.example.com/", "identity.example.com", "https://identity.example.com"},
 		// The port belongs to the origin, not to the RP id: the RP id is
 		// a domain. That split is what makes a localhost dev deployment
 		// work without a special case.
@@ -61,7 +61,7 @@ func TestRelyingParty_DerivesFromBaseURL(t *testing.T) {
 }
 
 func TestRelyingParty_RefusesUnusableBaseURL(t *testing.T) {
-	for _, bad := range []string{"", "   ", "identity.znas.io", "ftp://identity.znas.io"} {
+	for _, bad := range []string{"", "   ", "identity.example.com", "ftp://identity.example.com"} {
 		_, _, err := RelyingParty(bad)
 		require.Error(t, err, "base url %q must be refused", bad)
 	}

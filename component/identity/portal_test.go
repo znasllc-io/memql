@@ -17,7 +17,7 @@ func TestPortalHomeURLFromIdentityBaseURL(t *testing.T) {
 }
 
 func TestPortalHomeURLEmptyWhenUnnameable(t *testing.T) {
-	if got := PortalHomeURL("", "https://auth.znasllc.io"); got != "" {
+	if got := PortalHomeURL("", "https://auth.example.com"); got != "" {
 		t.Fatalf("unnameable origin must not invent a portal host; got %q", got)
 	}
 	if got := PortalHomeURL("", ""); got != "" {
@@ -29,7 +29,7 @@ func TestDefaultPostLoginLandingNeverAdmin(t *testing.T) {
 	if got := DefaultPostLoginLanding("memql.localhost", ""); got == "/admin/" || got == "" {
 		t.Fatalf("named cluster must land on the portal, got %q", got)
 	}
-	if got := DefaultPostLoginLanding("", "https://auth.znasllc.io"); got != "/me" {
+	if got := DefaultPostLoginLanding("", "https://auth.example.com"); got != "/me" {
 		t.Fatalf("unnameable portal falls back to /me, not /admin/; got %q", got)
 	}
 	if got := DefaultPostLoginLanding("", ""); got != "/me" {
