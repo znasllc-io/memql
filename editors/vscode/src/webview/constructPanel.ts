@@ -8,10 +8,12 @@
 // JUMP-TO-SOURCE HAS THREE OUTCOMES, and each is a different sentence:
 //
 //   the file is in this workspace  -> open it, revealed at the signature
-//   the file is NOT in this workspace -> say so, naming the path. The catalog
-//       reports a path relative to the CLUSTER's tree, and the cluster is not
-//       obliged to be the checkout this editor has open -- a remote cluster
-//       usually is not.
+//   the file is NOT in this workspace -> say so, naming the path, AND offer to
+//       read it from the cluster (memql#4248). The catalog reports a path
+//       relative to the CLUSTER's tree, and the cluster is not obliged to be
+//       the checkout this editor has open -- a remote cluster usually is not.
+//       This used to be the end of the road; it is not, because the cluster
+//       that loaded the construct serves the file too.
 //   there is no file at all -> the construct is PROMOTED. Its source is in the
 //       page already, rendered from what the cluster holds, and labelled as
 //       living in the database. That is the honest rendering, and it is where
@@ -28,7 +30,7 @@
 // state/constructCatalog.ts and webview/constructScreens.ts, under bare
 // `node --test`.
 //
-// Refs: #3752 #3747
+// Refs: #4248 #3752 #3747
 
 import { randomBytes } from "node:crypto";
 
@@ -48,6 +50,66 @@ import {
 } from "../constructs/catalogTarget.js";
 import { COMMAND_RUN, COMMAND_RUN_AUTOMATION, COMMAND_RUN_WITH } from "../constructs/runnable.js";
 import { signatureLine } from "../constructs/signature.js";
+import { workspaceCandidates } from "../handoff/resolve.js";
+
+/**
+ * What the page needs from the host that it cannot reach itself.
+ *
+ * Two entries, both INJECTED rather than imported, because each needs the
+ * live connection -- which lives in extension.ts and which a webview module
+ * has no business reading. The panel posts an intent; the host decides
+ * whether there is a cluster to serve it.
+ *
+ * `browseRowsInPortal` (memql#4252) is the other half of `viewSourceFromCluster`:
+ * that dep reads a construct's DEFINITION from the cluster, this one hands a
+ * concept's ROWS to the portal rather than fetching or rendering them here --
+ * the extension owns what is on this machine and what it can reach, the
+ * portal owns what is inside a cluster.
+ *
+ * BOTH TAKE THE PANEL'S CLUSTER, and neither may read the connected one in its
+ * place (memql#4253). This panel is a singleton that outlives the connection
+ * its record was read over, and nothing re-points it when the connection
+ * changes -- so a construct opened on `staging` would have these buttons served
+ * by `prod` after a switch, with nothing on the page saying so. The cluster
+ * travels with the record for the same reason the cluster-document lens carries
+ * it (memql#4248); the host compares the two through `panelClusterRefusal`.
+ */
+export interface ConstructPanelDeps {
+  viewSourceFromCluster: (construct: CatalogConstruct, cluster: string) => Promise<void>;
+  browseRowsInPortal: (construct: CatalogConstruct, cluster: string) => Promise<void>;
+}
+
+/**
+ * Opens a file on disk and reveals the construct's declaration.
+ *
+ * EXPORTED so the portal handoff (memql#4251) lands on a construct the same way
+ * a click on this page does. The two arrived at the same file by different
+ * routes -- one from a webview message, one from a `vscode://` link -- and a
+ * second copy of "open, find the signature, reveal" is a second answer to where
+ * the cursor ends up, which is the whole visible behaviour of both.
+ *
+ * A signature the search does not find opens the file at the top rather than
+ * guessing, for the reason this module's header gives: landing on the wrong
+ * line is worse than landing on the first one.
+ */
+export async function openFileAtSignature(
+  uri: vscode.Uri,
+  kind: string,
+  name: string,
+): Promise<vscode.TextEditor> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const line = signatureLine(document.getText(), kind, name);
+  const editor = await vscode.window.showTextDocument(document, {
+    viewColumn: vscode.ViewColumn.One,
+    preview: false,
+  });
+  if (line >= 0) {
+    const at = new vscode.Position(line, 0);
+    editor.selection = new vscode.Selection(at, at);
+    editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
+  }
+  return editor;
+}
 
 export class ConstructPanel {
   private static open_: ConstructPanel | undefined;
@@ -55,24 +117,55 @@ export class ConstructPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private construct: CatalogConstruct;
+  private deps: ConstructPanelDeps;
+  /**
+   * The cluster this panel's record was read from, or "" when the opener could
+   * not say. Re-pointed with the construct, never read off the connection.
+   */
+  private cluster: string;
   private fileUri: vscode.Uri | undefined;
   private error = "";
   private disposed = false;
 
-  static open(context: vscode.ExtensionContext, construct: CatalogConstruct): ConstructPanel {
+  /**
+   * `cluster` is the cluster the construct was resolved FROM -- "" when the
+   * opener genuinely cannot say. It is a parameter rather than a lookup because
+   * only the opener knows: every call site already holds it, and reading it
+   * back off the live connection is precisely the bug this closes.
+   */
+  static open(
+    context: vscode.ExtensionContext,
+    construct: CatalogConstruct,
+    deps: ConstructPanelDeps,
+    cluster: string,
+  ): ConstructPanel {
     const existing = ConstructPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
+      // Re-pointed along with the construct. The panel is a SINGLETON reused
+      // across opens, so what it holds must be what THIS opener supplied,
+      // rather than whatever the first one happened to hand over. The cluster
+      // goes with them: a reused panel showing a new construct is showing a new
+      // cluster's record as often as not.
+      existing.deps = deps;
+      existing.cluster = cluster;
       existing.pointAt(construct);
       return existing;
     }
-    const panel = new ConstructPanel(context, construct);
+    const panel = new ConstructPanel(context, construct, deps, cluster);
     ConstructPanel.open_ = panel;
     return panel;
   }
 
-  private constructor(_context: vscode.ExtensionContext, construct: CatalogConstruct) {
+  private constructor(
+    _context: vscode.ExtensionContext,
+    construct: CatalogConstruct,
+    deps: ConstructPanelDeps,
+    cluster: string,
+  ) {
     this.construct = construct;
+    this.deps = deps;
+    this.cluster = cluster;
     this.panel = vscode.window.createWebviewPanel(
       "memqlConstruct",
       `Construct: ${construct.name}`,
@@ -113,14 +206,23 @@ export class ConstructPanel {
     this.fileUri = undefined;
     const rel = this.construct.originPath;
     if (rel !== "") {
-      for (const folder of vscode.workspace.workspaceFolders ?? []) {
-        const candidate = vscode.Uri.joinPath(folder.uri, rel);
-        try {
-          await vscode.workspace.fs.stat(candidate);
-          this.fileUri = candidate;
-          break;
-        } catch {
-          // Not in this folder; try the next.
+      // TWO LAYOUTS PER FOLDER (memql#4251). The catalog's path is relative to
+      // the DSL TREE ROOT (`cognition/queries.memql`) and a repository checkout
+      // keeps that tree under `dsl/`, so trying only the path as reported makes
+      // an engine checkout -- the folder a local cluster's operator most likely
+      // has open -- look like a machine that does not have the file. The
+      // candidate list is the handoff's, deliberately: the page and the portal
+      // link must not disagree about whether a file is in this workspace.
+      outer: for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        for (const relative of workspaceCandidates(rel)) {
+          const candidate = vscode.Uri.joinPath(folder.uri, relative);
+          try {
+            await vscode.workspace.fs.stat(candidate);
+            this.fileUri = candidate;
+            break outer;
+          } catch {
+            // Not in this folder under this layout; try the next.
+          }
         }
       }
     }
@@ -132,6 +234,14 @@ export class ConstructPanel {
     const { type } = message as { type?: unknown };
     if (type === "run" || type === "runWith") {
       await this.run(type === "runWith");
+      return;
+    }
+    if (type === "viewSourceFromCluster") {
+      await this.deps.viewSourceFromCluster(this.construct, this.cluster);
+      return;
+    }
+    if (type === "browseRows") {
+      await this.deps.browseRowsInPortal(this.construct, this.cluster);
       return;
     }
     if (type !== "openFile") return;
@@ -171,6 +281,14 @@ export class ConstructPanel {
     await vscode.commands.executeCommand(withArguments ? COMMAND_RUN_WITH : COMMAND_RUN, target);
   }
 
+  /**
+   * Opens the file from disk, or says why it could not.
+   *
+   * The not-in-workspace sentence is UNCHANGED and still true -- what changed
+   * is that it is no longer the end of the conversation: the page draws the
+   * cluster-source button beside it (memql#4248), so the reader is told what
+   * happened and offered the other route in the same breath.
+   */
   private async openFile(): Promise<void> {
     const uri = this.fileUri;
     if (uri === undefined) {
@@ -181,17 +299,7 @@ export class ConstructPanel {
       this.render();
       return;
     }
-    const document = await vscode.workspace.openTextDocument(uri);
-    const line = signatureLine(document.getText(), this.construct.kind, this.construct.name);
-    const editor = await vscode.window.showTextDocument(document, {
-      viewColumn: vscode.ViewColumn.One,
-      preview: false,
-    });
-    if (line >= 0) {
-      const at = new vscode.Position(line, 0);
-      editor.selection = new vscode.Selection(at, at);
-      editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
-    }
+    await openFileAtSignature(uri, this.construct.kind, this.construct.name);
   }
 
   private render(): void {
@@ -202,6 +310,10 @@ export class ConstructPanel {
       fileInWorkspace: this.fileUri !== undefined,
       offerRun: offersRun(this.construct),
       automationRun: isAutomationRun(this.construct),
+      // There IS a file and it is not here -- the one situation the cluster can
+      // answer. Whether a cluster is actually connected is the host's question,
+      // asked when the button is pressed rather than guessed at render time.
+      offerClusterSource: this.construct.originPath !== "" && this.fileUri === undefined,
       error: this.error,
     });
     this.panel.webview.html = `<!DOCTYPE html>

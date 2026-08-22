@@ -18,7 +18,9 @@
   ],
   "activationEvents": [
     "onLanguage:memql",
-    "onView:memqlClusters"
+    "onView:memqlClusters",
+    "onUri",
+    "workspaceContains:**/*.memql"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -191,6 +193,10 @@
         "title": "MemQL: Open Construct"
       },
       {
+        "command": "memql.constructs.showDetails",
+        "title": "MemQL: Show Construct Details"
+      },
+      {
         "command": "memql.deployments.refresh",
         "title": "MemQL: Refresh Deployments",
         "icon": "$(refresh)"
@@ -331,6 +337,10 @@
         },
         {
           "command": "memql.constructs.open",
+          "when": "false"
+        },
+        {
+          "command": "memql.constructs.showDetails",
           "when": "false"
         },
         {

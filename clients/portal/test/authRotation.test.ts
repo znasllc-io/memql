@@ -31,6 +31,7 @@ const CONFIG: PortalRuntimeConfig = {
   identityApiBaseUrl: "https://identity.example.com",
   oauthClientId: "portal",
   authEnabled: true,
+  domain: "",
 };
 
 // The SDK's factory signature requires a global WebSocket to exist for its

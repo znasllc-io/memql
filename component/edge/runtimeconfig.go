@@ -60,6 +60,13 @@ type RuntimeConfig struct {
 	// read and write a site's own application performs is still gated
 	// server-side on whatever stream it dials.
 	AuthEnabled bool `json:"authEnabled"`
+	// Domain is the cluster's configured MEMQL_DOMAIN -- the value every
+	// role host (api., identity., mcp.) is derived from (memql#3767). Served
+	// so a client can compose an address that names THIS cluster (the
+	// portal's "open in VS Code" link carries it as the cluster key) without
+	// reverse-engineering it from identityUrl. Empty, never omitted, when
+	// the node has no domain configured.
+	Domain string `json:"domain"`
 }
 
 // serveRuntimeConfig answers GET /runtime-config.json for site. Every live
@@ -94,6 +101,7 @@ func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool)
 		IdentityAPIBaseURL: "",
 		OAuthClientID:      clientIDForHostname(hostname, env("MEMQL_IDENTITY_REGISTERED_CLIENTS")),
 		AuthEnabled:        authEnabled,
+		Domain:             domainFromEnv(env),
 	}
 }
 
@@ -154,6 +162,15 @@ func identityURLFromEnv(env func(string) string) string {
 		env("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"),
 		env("MEMQL_IDENTITY_BASE_URL"),
 	)
+}
+
+// domainFromEnv reads MEMQL_DOMAIN through the injected env, trimmed. It
+// deliberately does not import component/envregistry: that package derives
+// OTHER variables from the domain and never exposes the domain itself, and
+// this file's existing identityURLFromEnv already reads the derived values
+// the same way.
+func domainFromEnv(env func(string) string) string {
+	return strings.TrimSpace(env("MEMQL_DOMAIN"))
 }
 
 // firstNonEmpty returns the first argument that is non-blank after

@@ -26,6 +26,7 @@ const CONFIG: PortalRuntimeConfig = {
   identityApiBaseUrl: "https://identity.example.com",
   oauthClientId: "portal",
   authEnabled: true,
+  domain: "",
 };
 
 const REDIRECT_URI = "https://api.example.com/portal/auth/callback";
@@ -407,6 +408,7 @@ describe("the callback", () => {
       identityApiBaseUrl: "",
       oauthClientId: "portal",
       authEnabled: true,
+      domain: "",
     });
 
     await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());

@@ -20,6 +20,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 function moduleWire(fqnPrefixes: string[], codeReference: string) {

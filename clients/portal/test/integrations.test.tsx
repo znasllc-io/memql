@@ -32,6 +32,7 @@ const AUTH_DISABLED_CLUSTER = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: false,
+  domain: "",
 };
 
 // A recognisable value planted where a credential value would be if the server

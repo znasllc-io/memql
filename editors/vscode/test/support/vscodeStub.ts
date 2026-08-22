@@ -60,6 +60,10 @@ export const recorded = {
   treeViews: [] as string[],
   /** How many times window.registerFileDecorationProvider was called. */
   fileDecorationProviders: 0,
+  /** How many times window.registerUriHandler was called (memql#4251). */
+  uriHandlers: 0,
+  /** Uri schemes passed to workspace.registerTextDocumentContentProvider. */
+  contentProviderSchemes: [] as string[],
   /** Command ids passed to commands.registerCommand. */
   commands: [] as string[],
   /** File-system watcher globs, as `<base>/<pattern>`. */
@@ -417,6 +421,14 @@ export const workspace = {
     };
   },
 
+  // Registration only, and the SCHEME is what is recorded: nothing in this lane
+  // opens a document, so the provider is never asked for content -- what a unit
+  // test can see about it is that activation claimed the scheme at all.
+  registerTextDocumentContentProvider(scheme: string, _provider: unknown): StubDisposable {
+    recorded.contentProviderSchemes.push(scheme);
+    return { dispose: () => undefined };
+  },
+
   onDidGrantWorkspaceTrust(listener: () => void): StubDisposable {
     trustListener = listener;
     return {
@@ -528,6 +540,17 @@ export const window = {
   // src/constructs/readonly.ts, which is the point of the split.
   registerFileDecorationProvider(_provider: unknown): StubDisposable {
     recorded.fileDecorationProviders += 1;
+    return { dispose: () => undefined };
+  },
+
+  // The portal handoff's entry point (memql#4251). Counted rather than driven:
+  // WHEN it is registered is an activation fact and belongs here -- it has to
+  // happen outside the trust gate, or the link that woke the editor arrives
+  // before any handler exists. What the handler DECIDES is unit-tested away
+  // from `vscode` in src/handoff/, and driven end to end in the host lane,
+  // which is the only place a real `vscode.Uri` and a real globalState exist.
+  registerUriHandler(_handler: unknown): StubDisposable {
+    recorded.uriHandlers += 1;
     return { dispose: () => undefined };
   },
 

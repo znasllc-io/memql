@@ -487,20 +487,42 @@ smoke("every webview surface opens without throwing", async () => {
   // and which is where a developer first meets the seeded-versus-trained
   // distinction. It is also the case that would throw if the page assumed a
   // file existed.
-  ConstructPanel.open(context, {
-    name: "trainedResponder",
-    kind: "logic",
-    namespace: "",
-    origin: "promoted",
-    originPath: "",
-    description: "host smoke fixture",
-    runnable: true,
-    runnableKind: "logic",
-    args: [{ name: "spaceId", type: "string", required: true }],
-    boundConcept: "",
-    sourceHash: "abc123",
-    source: "logic trainedResponder {\n  body { return 1 }\n}",
-  });
+  ConstructPanel.open(
+    context,
+    {
+      name: "trainedResponder",
+      kind: "logic",
+      namespace: "",
+      origin: "promoted",
+      originPath: "",
+      description: "host smoke fixture",
+      runnable: true,
+      runnableKind: "logic",
+      args: [{ name: "spaceId", type: "string", required: true }],
+      boundConcept: "",
+      sourceHash: "abc123",
+      source: "logic trainedResponder {\n  body { return 1 }\n}",
+    },
+    {
+      // Rejecting rather than pretending, like the two hosts above: nothing
+      // here clicks the cluster-source button, and a stub that resolved would
+      // let a page that reached for the cluster on OPEN sail through.
+      viewSourceFromCluster: () => {
+        throw new Error("no cluster source in the smoke lane");
+      },
+      // Same reasoning, and doubly unreachable here: the fixture's kind is
+      // "logic", so the page draws no browse-rows button to click in the
+      // first place (memql#4252).
+      browseRowsInPortal: () => {
+        throw new Error("no portal browse in the smoke lane");
+      },
+    },
+    // The cluster this record was "read from" (memql#4253). The smoke lane has
+    // no connection, so "" is the honest answer -- and it is the value that
+    // makes the two deps above refuse rather than fire, which is what keeps
+    // them unreachable here.
+    ""
+  );
   expected.push("Construct: trainedResponder");
 
   // The instance page (memql#3739). Opened against a machine with NO local
@@ -619,6 +641,108 @@ smoke("the remote instance page renders all three pipeline states", async () => 
       entry.dispose();
     }
   }
+});
+
+// -----------------------------------------------------------------------------
+// Cluster documents (memql#4248)
+// -----------------------------------------------------------------------------
+
+// TWO THINGS ONLY A HOST CAN ANSWER, and both are decided by machinery this
+// process does not own: whether the workbench routes a NON-file uri to the
+// registered content provider at all, and whether the language client -- whose
+// selector this task narrowed to `scheme: 'file'` -- leaves that document
+// alone. A unit test can assert the selector literal and nothing more.
+//
+// THE POSITIVE CONTROL IS THE POINT OF THE FIRST HALF. "No diagnostics" is
+// true of a language server that never started, so this first proves the
+// instrument moves: a deliberately broken .memql ON DISK must be diagnosed. If
+// that fails, the second assertion was never going to mean anything.
+//
+// No cluster is required and none is used: the uri names a cluster nothing is
+// connected to, so the provider answers with its not-connected notice, which is
+// the state a reader hits most often anyway.
+smoke("a cluster document opens read-only with no language-server diagnostics", async () => {
+  const ext = extension();
+  await ext.activate();
+
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(folder !== undefined, "no workspace folder, so the language server has no root to serve");
+  const brokenPath = path.join(folder.uri.fsPath, "cluster-document-control.memql");
+  // The shape cmd/memql-lsp's own TestPublishDiagnostics_CleanAndBroken uses:
+  // a logic missing its mandatory body, which is a lowering error.
+  fs.writeFileSync(brokenPath, "logic oops {\n", "utf8");
+
+  try {
+    const broken = vscode.Uri.file(brokenPath);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(broken));
+    await waitFor(
+      "the language server to diagnose a broken .memql on disk (the control: without it, 'no diagnostics' below proves nothing)",
+      () => vscode.languages.getDiagnostics(broken).length > 0,
+      20_000
+    );
+    info("control: the language server is attached and diagnosing file: documents");
+
+    const uri = vscode.Uri.parse("memql-cluster://nowhere/cognition/queries.memql?kind=query&name=x");
+    const doc = await vscode.workspace.openTextDocument(uri);
+    assert.match(doc.getText(), /Not connected to nowhere/);
+    // The lens is registered for `{ scheme, language: 'memql' }`, so a document
+    // the workbench types as plaintext would silently draw no header lens.
+    assert.equal(
+      doc.languageId,
+      "memql",
+      "the cluster document is not typed as memql, so its header lens would never render"
+    );
+
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(vscode.languages.getDiagnostics(uri).length, 0, "the LSP must not diagnose a cluster document");
+  } finally {
+    await closeAllTabs();
+    fs.rmSync(brokenPath, { force: true });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// The portal handoff (memql#4251)
+// -----------------------------------------------------------------------------
+
+// WHAT ONLY A HOST CAN ANSWER: that activate() returns the api at all, that a
+// real `vscode.Uri` parses into the path and query the handler reads, and --
+// the one that matters -- that a link naming a cluster nobody registered
+// changes NOTHING on disk. The parse rules and the landing decision are
+// unit-tested away from `vscode` in src/handoff/; what those tests structurally
+// cannot see is the file the handler is one prompt away from writing.
+//
+// The runner points HOME at a temp directory, so `~/.memql/clusters.yaml` below
+// is that one and not the developer's own.
+//
+// NOTHING CLICKS "Add cluster...". The offer is a non-modal
+// showInformationMessage, which resolves undefined when nothing answers it, so
+// the handler falls through to `noCluster` and the byte-for-byte comparison is
+// the assertion: a link may offer to add a cluster, and may never add one.
+
+smoke("a portal link for an unregistered cluster is refused without side effects", async () => {
+  const ext = extension();
+  const api = (await ext.activate()) as { handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string }> };
+  const file = path.join(os.homedir(), ".memql", "clusters.yaml");
+  const before = await fs.promises.readFile(file, "utf8").catch(() => "");
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=1&cluster=nowhere.test&kind=query&name=x")
+  );
+  assert.equal(result.outcome, "noCluster");
+  const after = await fs.promises.readFile(file, "utf8").catch(() => "");
+  assert.equal(after, before, "a link must not write clusters.yaml");
+});
+
+smoke("a malformed portal link is refused by name", async () => {
+  const ext = extension();
+  const api = (await ext.activate()) as {
+    handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string; detail: string }>;
+  };
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=9&cluster=a.test&kind=query&name=x")
+  );
+  assert.equal(result.outcome, "refused");
+  assert.match(result.detail, /v=9/);
 });
 
 // -----------------------------------------------------------------------------

@@ -10,6 +10,7 @@ export {
   Building2,
   ChevronsLeft,
   ChevronsRight,
+  ExternalLink,
   Globe,
   House,
   Inbox,

@@ -39,24 +39,25 @@ const vscodeExtensionSrcDir = "../../editors/vscode/src"
 // and rowProjection.ts were split out of src/webview/ and conceptsCache.ts
 // out of src/views/.
 var vscodeImportAllowList = []string{
-	"auth/deviceCodeUi.ts",       // progress / clipboard / openExternal adapter over auth/deviceCode.ts
-	"constructs/lensProvider.ts", // CodeLensProvider adapter over constructs/runnable.ts
-	"constructs/decorations.ts",  // gutter + signature decoration + status bar, over state/training.ts
-	"constructs/trainingLens.ts", // CodeLensProvider adapter over state/training.ts
+	"auth/deviceCodeUi.ts",              // progress / clipboard / openExternal adapter over auth/deviceCode.ts
+	"constructs/lensProvider.ts",        // CodeLensProvider adapter over constructs/runnable.ts
+	"constructs/decorations.ts",         // gutter + signature decoration + status bar, over state/training.ts
+	"constructs/trainingLens.ts",        // CodeLensProvider adapter over state/training.ts
 	"constructs/readonlyDecorations.ts", // FileDecorationProvider + files.readonlyInclude adapter over constructs/readonly.ts
-	"extension.ts",               // activation, command registration, LSP client wiring
-	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
-	"views/dataTree.ts",          // TreeDataProvider adapter over state/conceptsCache.ts
-	"views/constructsTree.ts",    // TreeDataProvider adapter over state/constructCatalog.ts
-	"views/deploymentsTree.ts",   // TreeDataProvider adapter over state/deploymentsCatalog.ts
-	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
-	"webview/addClusterPanel.ts", // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
-	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
-	"webview/connectionPanel.ts", // WebviewPanel adapter over clusters/connectionView.ts + clusters/portalUrl.ts
-	"webview/constructPanel.ts",  // WebviewPanel adapter over webview/constructScreens.ts + constructs/signature.ts
-	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
-	"webview/deploymentPanel.ts", // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
-	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
+	"constructs/clusterDocuments.ts",    // TextDocumentContentProvider + CodeLens adapter over constructs/clusterDocument.ts
+	"extension.ts",                      // activation, command registration, LSP client wiring
+	"views/clustersTree.ts",             // TreeDataProvider adapter over clusters/ + connection/
+	"views/dataTree.ts",                 // TreeDataProvider adapter over state/conceptsCache.ts
+	"views/constructsTree.ts",           // TreeDataProvider adapter over state/constructCatalog.ts
+	"views/deploymentsTree.ts",          // TreeDataProvider adapter over state/deploymentsCatalog.ts
+	"views/runsTree.ts",                 // TreeDataProvider adapter over run/runConfig.ts
+	"webview/addClusterPanel.ts",        // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
+	"webview/automationPanel.ts",        // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
+	"webview/connectionPanel.ts",        // WebviewPanel adapter over clusters/connectionView.ts + clusters/portalUrl.ts
+	"webview/constructPanel.ts",         // WebviewPanel adapter over webview/constructScreens.ts + constructs/signature.ts
+	"webview/conceptPanel.ts",           // WebviewPanel adapter over state/conceptPanelState.ts
+	"webview/deploymentPanel.ts",        // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
+	"webview/runPanel.ts",               // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
 }
 
 // vscodeImportPattern matches every spelling of a `vscode` module reference

@@ -67,6 +67,10 @@ export interface PortalRuntimeConfig {
   // component/grpc's verifier interceptors. A browser that lies to itself
   // about this field gains exactly nothing.
   authEnabled: boolean;
+  // The cluster's configured domain (MEMQL_DOMAIN), served by the node since
+  // memql#4249. Empty when an older node omits it or none is configured;
+  // src/cluster/editorLink.ts derives a fallback from identityUrl.
+  domain: string;
 }
 
 // FALLBACK, not a default. Used only when the document cannot be read, so the
@@ -78,6 +82,7 @@ export const UNKNOWN_RUNTIME_CONFIG: PortalRuntimeConfig = {
   identityApiBaseUrl: "",
   oauthClientId: "",
   authEnabled: true,
+  domain: "",
 };
 
 // isRuntimeConfigReady is the gate for anything that posts to identity
@@ -133,6 +138,7 @@ export function normalizeRuntimeConfig(raw: unknown): PortalRuntimeConfig {
     // truncated document) means "assume enforcement", for the same
     // fail-closed reason as UNKNOWN_RUNTIME_CONFIG.
     authEnabled: doc.authEnabled !== false,
+    domain: asString(doc.domain),
   };
 }
 
