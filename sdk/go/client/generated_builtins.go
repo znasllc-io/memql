@@ -327,6 +327,58 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	return b.String()
 }
 
+// LibraryAddArtifactLabel -- Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.
+type LibraryAddArtifactLabelArgs struct {
+	ArtifactId string
+	Label      string
+}
+
+// LibraryAddArtifactLabel calls the engine builtin libraryAddArtifactLabel.
+func (qc *QueryClient) LibraryAddArtifactLabel(ctx context.Context, args LibraryAddArtifactLabelArgs) (*Result, error) {
+	call := LibraryAddArtifactLabelBuild(args)
+	return qc.executeNamed(ctx, "libraryAddArtifactLabel", call)
+}
+
+func LibraryAddArtifactLabelBuild(args LibraryAddArtifactLabelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryAddArtifactLabel(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryRemoveArtifactLabel -- Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel.
+type LibraryRemoveArtifactLabelArgs struct {
+	ArtifactId string
+	Label      string
+}
+
+// LibraryRemoveArtifactLabel calls the engine builtin libraryRemoveArtifactLabel.
+func (qc *QueryClient) LibraryRemoveArtifactLabel(ctx context.Context, args LibraryRemoveArtifactLabelArgs) (*Result, error) {
+	call := LibraryRemoveArtifactLabelBuild(args)
+	return qc.executeNamed(ctx, "libraryRemoveArtifactLabel", call)
+}
+
+func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryRemoveArtifactLabel(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Recall -- Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
 type RecallArgs struct {
 	Text     string

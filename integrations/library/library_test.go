@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -32,21 +33,52 @@ type stubEngine struct {
 	// row, in append order. Nothing is ever removed -- the test asserts
 	// the count grows by one per edit.
 	versions []map[string]any
+	// artifacts is the v1:library:artifact index-row store, keyed by the
+	// row's own id (artifactIdForSourceRef(sourceConceptRef), mirroring
+	// createArtifact's `id: concat("artifact-", hash(args.sourceConceptRef))`
+	// derivation). createArtifact REPLACES the row at that id wholesale --
+	// modelling the real engine's bare `insert{}` semantics (D3: a version
+	// carries only the fields THIS call names, nothing carried over from the
+	// prior version) -- which is exactly the shape the label-loss regression
+	// test below needs to be able to fail against.
+	artifacts map[string]map[string]any
 	// calls records every mutation/query string for assertion.
 	calls []string
 }
 
 func newStubEngine() *stubEngine {
-	return &stubEngine{doc: map[string]map[string]any{}}
+	return &stubEngine{doc: map[string]map[string]any{}, artifacts: map[string]map[string]any{}}
 }
 
 func (s *stubEngine) seedDocument(d map[string]any) {
 	s.doc[d["id"].(string)] = d
 }
 
+// seedArtifact seeds the library index row backing a document, keyed the
+// same way createArtifact derives it, so a lookup by
+// artifactIdForSourceRef(sourceConceptRef) finds it.
+func (s *stubEngine) seedArtifact(a map[string]any) {
+	s.artifacts[a["id"].(string)] = a
+}
+
 // argRe extracts `key: value` pairs from a `name({...})` call. Values
 // are quoted strings or bare numbers.
 var argRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*):\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+))`)
+
+// listArgRe extracts `key: [ ... ]` array-literal arguments -- the shape a
+// []string arg (labels) renders as. argRe above only matches scalar
+// (quoted-string / bare-number) values, so an array value needs its own
+// pass. Captured as []any (not []string) so it round-trips through
+// structpb.NewStruct (bundleOf) identically to how the real engine's
+// AsMap() decodes a JSONB string array.
+var listArgRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*):\s*\[([^\[\]]*)\]`)
+var quotedItemRe = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+
+// boolArgRe extracts `key: true` / `key: false` bare-boolean arguments
+// (e.g. live: %t in writeArtifactLabels / touchArtifact) -- argRe's value
+// alternation only covers quoted strings and bare numbers, so an unquoted
+// true/false falls through it entirely and the arg silently vanishes.
+var boolArgRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*):\s*(true|false)\b`)
 
 func parseCall(q string) (name string, args map[string]any) {
 	args = map[string]any{}
@@ -58,8 +90,26 @@ func parseCall(q string) (name string, args map[string]any) {
 			name = fields[len(fields)-1]
 		}
 	}
+	for _, m := range listArgRe.FindAllStringSubmatch(q, -1) {
+		key := m[1]
+		items := []any{}
+		for _, im := range quotedItemRe.FindAllStringSubmatch(m[2], -1) {
+			items = append(items, unescape(im[1]))
+		}
+		args[key] = items
+	}
+	for _, m := range boolArgRe.FindAllStringSubmatch(q, -1) {
+		key := m[1]
+		if _, already := args[key]; already {
+			continue
+		}
+		args[key] = m[2] == "true"
+	}
 	for _, m := range argRe.FindAllStringSubmatch(q, -1) {
 		key := m[1]
+		if _, already := args[key]; already {
+			continue
+		}
 		if m[3] != "" {
 			var n int
 			fmt.Sscanf(m[3], "%d", &n)
@@ -122,7 +172,27 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			}
 		}
 		return bundleOf(nil), nil
+	case "libraryArtifactById":
+		id, _ := args["artifactId"].(string)
+		if a, ok := s.artifacts[id]; ok {
+			return bundleOf([]map[string]any{a}), nil
+		}
+		return bundleOf(nil), nil
 	case "createArtifact":
+		sourceRef, _ := args["sourceConceptRef"].(string)
+		id := artifactIdForSourceRef(sourceRef)
+		// Full replace, not merge: mirrors createArtifact's bare `insert{}`
+		// body (D3) -- a re-version carries only the fields THIS call names.
+		// A field this call omits is ABSENT from the new version, not
+		// carried over from whatever s.artifacts[id] held before. Modelling
+		// this any other way (e.g. shallow-merging onto the prior row) would
+		// make the label-loss regression test pass even without the fix.
+		row := map[string]any{}
+		for k, v := range args {
+			row[k] = v
+		}
+		row["id"] = id
+		s.artifacts[id] = row
 		return bundleOf(nil), nil
 	}
 	return bundleOf(nil), nil
@@ -292,6 +362,58 @@ func TestEditDocument_TwoEditsRetainBothVersions(t *testing.T) {
 	// Latest pointer reflects newest content.
 	if got := eng.doc["doc-1"]["body"]; got != "edited twice" {
 		t.Fatalf("backing body = %v, want 'edited twice'", got)
+	}
+}
+
+// TestTouchArtifact_PreservesLabelsAcrossEdit is the D3 regression test: the
+// one place this feature can lose user data. touchArtifact re-versions the
+// v1:library:artifact index row by re-calling createArtifact with a FIXED
+// argument list; createArtifact's insert body is a bare `insert{}` block, so
+// MemQL's insert-versioning means the new version carries only the fields
+// THIS call names. Before the fix, touchArtifact never named `labels`, so
+// every document edit silently dropped the artifact's labels -- nothing
+// errors, nothing logs. This must fail against the unfixed touchArtifact.
+func TestTouchArtifact_PreservesLabelsAcrossEdit(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedDocument(seededDoc())
+
+	// Seed the artifact index row the way indexGeneratedOutputOnCreate would
+	// have already promoted it, carrying labels a person or an earlier agent
+	// turn put on it before this edit.
+	sourceRef := "v1:library:generatedOutput:doc-1"
+	artifactId := artifactIdForSourceRef(sourceRef)
+	eng.seedArtifact(map[string]any{
+		"id":               artifactId,
+		"sourceConceptRef": sourceRef,
+		"ownerUserId":      "user-a",
+		"lens":             "artifact",
+		"kind":             "generated_output",
+		"source":           "agent_generated",
+		"title":            "Birds",
+		"summary":          "A list of birds",
+		"labels":           []any{"reports", "q3"},
+	})
+
+	i := NewIntegration(eng)
+	ctx := context.Background()
+
+	// Edit the document -- handleEditDocument calls touchArtifact at the end
+	// to re-stamp the index row's updatedAt watermark.
+	if _, err := i.handleEditDocument(ctx, map[string]any{
+		"documentId": "doc-1",
+		"content":    "edited once",
+		"authorKind": "user",
+		"authorId":   "user-a",
+	}, 0); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	got := stringSliceField(eng.artifacts[artifactId], "labels")
+	want := []string{"reports", "q3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("artifact labels after document edit = %v, want %v (unchanged) -- "+
+			"touchArtifact must read the current row's labels and pass them through "+
+			"the createArtifact re-version call, or an edit silently wipes them", got, want)
 	}
 }
 
@@ -555,6 +677,304 @@ func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 					len(eng.versions)-before, 0)
 			}
 		})
+	}
+}
+
+// --- addArtifactLabel / removeArtifactLabel ---
+
+// unwrapLabel decodes the single result MemoryNode the label handlers
+// return into an artifactLabelResult.
+func unwrapLabel(t *testing.T, nodes []memorynodes.MemoryNode) artifactLabelResult {
+	t.Helper()
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 result node, got %d", len(nodes))
+	}
+	var r artifactLabelResult
+	if err := json.Unmarshal(nodes[0].Payload, &r); err != nil {
+		t.Fatalf("unmarshal label result: %v", err)
+	}
+	return r
+}
+
+// testArtifactId is the id createArtifact would actually assign the
+// backing doc-1 generatedOutput's index row (artifactIdForSourceRef
+// mirrors createArtifact's own `concat("artifact-", hash(sourceConceptRef))`
+// derivation). seededArtifact's "id" MUST equal this: writeArtifactLabels
+// re-derives the id from sourceConceptRef on every write-back (it never
+// passes an explicit id: arg, exactly like touchArtifact), so a seeded row
+// whose id does not match its own sourceConceptRef would have its
+// write-back land at a different stub key than the one a test reads back
+// from -- silently validating nothing.
+var testArtifactId = artifactIdForSourceRef("v1:library:generatedOutput:doc-1")
+
+// seededArtifact returns a fully-populated artifact row, every field a
+// distinct sentinel value, so a test that round-trips it through
+// writeArtifactLabels can assert nothing but labels changed.
+func seededArtifact() map[string]any {
+	return map[string]any{
+		"id":                   testArtifactId,
+		"sourceConceptRef":     "v1:library:generatedOutput:doc-1",
+		"ownerUserId":          "user-a",
+		"lens":                 "artifact",
+		"kind":                 "generated_output",
+		"source":               "agent_generated",
+		"title":                "Birds",
+		"summary":              "A list of birds",
+		"format":               "markdown",
+		"mimeType":             "text/markdown",
+		"live":                 false,
+		"scope":                "private",
+		"labels":               []any{"reports", "q3"},
+		"partitionId":          "space-1",
+		"agentId":              "agent-1",
+		"producedByPlanId":     "plan-1",
+		"producedByWorkerId":   "worker-1",
+		"producedByWorkerName": "MacBook-Pro",
+		"validationStatus":     "validated",
+	}
+}
+
+func countCalls(eng *stubEngine, name string) int {
+	n := 0
+	for _, q := range eng.calls {
+		if callName, _ := parseCall(q); callName == name {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAddArtifactLabel_AddsNewLabel(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	out, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId,
+		"label":      "urgent",
+	}, 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	r := unwrapLabel(t, out)
+	if !r.Changed {
+		t.Fatalf("Changed = false, want true (new label)")
+	}
+	want := []string{"reports", "q3", "urgent"}
+	if !slices.Equal(r.Labels, want) {
+		t.Fatalf("result Labels = %v, want %v", r.Labels, want)
+	}
+	if got := stringSliceField(eng.artifacts[testArtifactId], "labels"); !slices.Equal(got, want) {
+		t.Fatalf("stored labels = %v, want %v", got, want)
+	}
+}
+
+func TestAddArtifactLabel_IdempotentOnExistingLabel(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	out, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId,
+		"label":      "reports", // already present
+	}, 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	r := unwrapLabel(t, out)
+	if r.Changed {
+		t.Fatalf("Changed = true, want false (label already present -- must be a no-op)")
+	}
+	want := []string{"reports", "q3"}
+	if !slices.Equal(r.Labels, want) {
+		t.Fatalf("result Labels = %v, want %v (unchanged)", r.Labels, want)
+	}
+	// A true no-op: nothing was written back, so no re-version happened
+	// and the row's other fields / version were never touched.
+	if n := countCalls(eng, "createArtifact"); n != 0 {
+		t.Fatalf("createArtifact called %d times on an idempotent add, want 0", n)
+	}
+}
+
+func TestRemoveArtifactLabel_RemovesExistingLabel(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	out, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId,
+		"label":      "reports",
+	}, 0)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	r := unwrapLabel(t, out)
+	if !r.Changed {
+		t.Fatalf("Changed = false, want true (label was present)")
+	}
+	want := []string{"q3"}
+	if !slices.Equal(r.Labels, want) {
+		t.Fatalf("result Labels = %v, want %v", r.Labels, want)
+	}
+	if got := stringSliceField(eng.artifacts[testArtifactId], "labels"); !slices.Equal(got, want) {
+		t.Fatalf("stored labels = %v, want %v", got, want)
+	}
+}
+
+func TestRemoveArtifactLabel_IdempotentOnAbsentLabel(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	out, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId,
+		"label":      "not-there",
+	}, 0)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	r := unwrapLabel(t, out)
+	if r.Changed {
+		t.Fatalf("Changed = true, want false (label was never present -- must be a no-op)")
+	}
+	want := []string{"reports", "q3"}
+	if !slices.Equal(r.Labels, want) {
+		t.Fatalf("result Labels = %v, want %v (unchanged)", r.Labels, want)
+	}
+	if n := countCalls(eng, "createArtifact"); n != 0 {
+		t.Fatalf("createArtifact called %d times on an idempotent remove, want 0", n)
+	}
+}
+
+func TestArtifactLabel_RefusesBlankLabel(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"add empty", func() error {
+			_, err := i.handleAddArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
+			return err
+		}},
+		{"add whitespace", func() error {
+			_, err := i.handleAddArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": "   "}, 0)
+			return err
+		}},
+		{"remove empty", func() error {
+			_, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Fatal("blank label was accepted; it must be refused")
+			}
+		})
+	}
+	if n := countCalls(eng, "createArtifact"); n != 0 {
+		t.Fatalf("a refused blank-label call still wrote, createArtifact called %d times, want 0", n)
+	}
+}
+
+// TestArtifactLabel_RefusesUnknownOrOwnerlessArtifact covers "labelling an
+// artifact the caller does not own is refused". The Go-level stub does not
+// model the real engine's per-row authz gate (libraryArtifactById's
+// ownerUserId==actor.userId filter, which makes another user's row simply
+// not come back from the load) -- so, mirroring how this file's existing
+// TestEditDocument_RefusesOwnerlessDocument stands in for the same real
+// gate, "not visible to this caller" is modelled as "the row is not in the
+// store" (unknown artifactId) and "the row carries no owner to attribute
+// the change to" (ownerUserId blank). Both must refuse for both add and
+// remove, and neither may write.
+func TestArtifactLabel_RefusesUnknownOrOwnerlessArtifact(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seed func(*stubEngine)
+	}{
+		{"unknown artifactId", func(eng *stubEngine) {}},
+		{"ownerless artifact", func(eng *stubEngine) {
+			a := seededArtifact()
+			a["ownerUserId"] = ""
+			eng.seedArtifact(a)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newStubEngine()
+			tc.seed(eng)
+			i := NewIntegration(eng)
+
+			if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+				"artifactId": testArtifactId, "label": "x",
+			}, 0); err == nil {
+				t.Fatal("addArtifactLabel accepted an inaccessible artifact; it must refuse")
+			}
+			if _, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+				"artifactId": testArtifactId, "label": "x",
+			}, 0); err == nil {
+				t.Fatal("removeArtifactLabel accepted an inaccessible artifact; it must refuse")
+			}
+			if n := countCalls(eng, "createArtifact"); n != 0 {
+				t.Fatalf("a refused label change still wrote, createArtifact called %d times, want 0", n)
+			}
+		})
+	}
+}
+
+// TestArtifactLabel_OwnerThreadedFromRow proves the write is attributed to
+// the ARTIFACT ROW's own owner, never to whatever actor is on the inbound
+// ctx -- the same guarantee TestEditDocument_OwnerThreadedFromRow proves
+// for the document-edit path, and the mechanism that makes "you cannot
+// label someone else's artifact" true without a new authorization check:
+// the row simply will not resolve to any owner other than its own.
+func TestArtifactLabel_OwnerThreadedFromRow(t *testing.T) {
+	eng := newStubEngine()
+	a := seededArtifact()
+	a["ownerUserId"] = "real-owner"
+	eng.seedArtifact(a)
+	i := NewIntegration(eng)
+
+	// The inbound ctx carries a DIFFERENT actor entirely.
+	ctx := auth.ContextWithUserActor(context.Background(), "someone-else")
+
+	if _, err := i.handleAddArtifactLabel(ctx, map[string]any{
+		"artifactId": testArtifactId, "label": "urgent",
+	}, 0); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if got := stringField(eng.artifacts[testArtifactId], "ownerUserId"); got != "real-owner" {
+		t.Fatalf("written artifact ownerUserId = %q, want %q (the row's own owner, not the inbound caller)", got, "real-owner")
+	}
+}
+
+// TestArtifactLabel_PreservesOtherFieldsOnWrite guards writeArtifactLabels
+// against reproducing the exact D3 hazard for a DIFFERENT set of fields:
+// createArtifact's insert body is a full replace, so any field
+// writeArtifactLabels forgets to thread through would silently vanish on
+// the very first label change. Every field on seededArtifact is a distinct
+// sentinel value; only labels may differ after the write.
+func TestArtifactLabel_PreservesOtherFieldsOnWrite(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedArtifact(seededArtifact())
+	i := NewIntegration(eng)
+
+	if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+		"artifactId": testArtifactId, "label": "urgent",
+	}, 0); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	got := eng.artifacts[testArtifactId]
+	want := seededArtifact()
+	for field, wantVal := range want {
+		if field == "labels" || field == "id" {
+			continue
+		}
+		if got[field] != wantVal {
+			t.Fatalf("field %q = %v, want %v (unrelated field must survive a label write untouched)", field, got[field], wantVal)
+		}
 	}
 }
 

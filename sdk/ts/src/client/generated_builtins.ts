@@ -234,6 +234,52 @@ QueryClient.prototype.knowledgeAugmentDomainGenerate = function (this: QueryClie
   return this.executeNamed("knowledgeAugmentDomainGenerate", buildKnowledgeAugmentDomainGenerate(args), opts);
 };
 
+/** Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own. */
+export interface LibraryAddArtifactLabelArgs {
+  artifactId: string;
+  label: string;
+}
+
+export function buildLibraryAddArtifactLabel(args: LibraryAddArtifactLabelArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("label: " + renderMemQLValue(args.label));
+  return "builtin libraryAddArtifactLabel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryAddArtifactLabel(args: LibraryAddArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryAddArtifactLabel = function (this: QueryClient, args: LibraryAddArtifactLabelArgs = {} as LibraryAddArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryAddArtifactLabel", buildLibraryAddArtifactLabel(args), opts);
+};
+
+/** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */
+export interface LibraryRemoveArtifactLabelArgs {
+  artifactId: string;
+  label: string;
+}
+
+export function buildLibraryRemoveArtifactLabel(args: LibraryRemoveArtifactLabelArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("label: " + renderMemQLValue(args.label));
+  return "builtin libraryRemoveArtifactLabel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryRemoveArtifactLabel(args: LibraryRemoveArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, args: LibraryRemoveArtifactLabelArgs = {} as LibraryRemoveArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
+};
+
 /** Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
 export interface RecallArgs {
   text: string;

@@ -47,3 +47,35 @@ builtin restoreDocumentVersion {
   versionId   string!
   authorId    string
 }
+
+// ---- artifact labels (memql artifacts-labels D2) ----
+//
+// Add/remove rather than set-the-whole-array: MemQL has no array append, and
+// a caller that must send the FULL new label list would clobber whatever
+// another agent or the person themselves added concurrently -- the expected
+// case, not a rare race. Each capability loads the artifact row, merges the
+// single label in or out, and writes back; both are idempotent (adding a
+// label already present, or removing one absent, succeeds and changes
+// nothing). @sdk: the portal calls these same builtins directly (via the
+// generated SDK), and the agent tool (dsl/library/tools.memql) wraps them
+// too -- one implementation serves both callers, unlike the editDocument
+// pair above which needs two builtins because the user/assistant paths
+// differ in authorKind attribution.
+
+@sdk
+@executor("integration.library.addArtifactLabel")
+@args(profile="object")
+@description("Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.")
+builtin libraryAddArtifactLabel {
+  artifactId  string!
+  label       string!
+}
+
+@sdk
+@executor("integration.library.removeArtifactLabel")
+@args(profile="object")
+@description("Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel.")
+builtin libraryRemoveArtifactLabel {
+  artifactId  string!
+  label       string!
+}

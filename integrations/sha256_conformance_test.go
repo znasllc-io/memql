@@ -36,9 +36,28 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	// Allow-list: filename -> reason. Empty for now; every existing
-	// sha256 site was migrated to core/id helpers per memql#102.
-	allow := map[string]string{}
+	// Allow-list: filename -> reason. Empty until the artifacts-labels
+	// feature; every OTHER existing sha256 site was migrated to core/id
+	// helpers per memql#102.
+	allow := map[string]string{
+		// library/library.go's artifactIdForSourceRef reproduces
+		// createArtifact's OWN id derivation
+		// (`id: concat("artifact-", hash(args.sourceConceptRef))`,
+		// dsl/library/mutations.memql) so touchArtifact / the label
+		// capabilities can look up the CURRENT v1:library:artifact row
+		// before re-versioning it. hash() (component/memql/mutation_
+		// templates.go's evalHash) is plain hex(sha256(input)) -- wire-
+		// format interop with a SPECIFIC DSL expression, not a fresh id
+		// this package is minting. core/id's helpers are NOT a substitute
+		// here: Engine.FromString/FromBytes/MustFromMap run a bespoke
+		// commutative/idempotent byte-by-byte Merkle-combine scheme
+		// (core/id/id.go), which produces a completely different digest
+		// than plain SHA-256 hex for the same input. Routing through it
+		// would silently compute the WRONG artifact id -- the lookup
+		// would never find the row, and label preservation would always
+		// see "no labels" instead of failing loudly.
+		"library/library.go": "reproduces createArtifact's hash()-derived id (plain SHA-256 hex) for a lookup; core/id's Engine uses an unrelated Merkle-combine scheme and would compute a non-matching id",
+	}
 
 	type violation struct {
 		path string
