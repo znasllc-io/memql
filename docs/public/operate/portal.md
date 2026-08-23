@@ -427,6 +427,34 @@ The audit trail and deployments are **not** here either: they are populations,
 and they live in the predefined views at `/views/audit` and
 `/views/deployments`.
 
+### What the Audit Trail shows, and what it deliberately does not
+
+`/views/audit` is a generic concept walk over `v1:identity:auditEvent` with no
+filter of any kind -- which is what makes it trustworthy and also what made it
+unreadable while routine mechanics shared that concept. The Trail shows
+**decisions and security signals**: a sign-in, a session created or revoked, a
+role change, an admin action, a detected refresh-token replay.
+
+Routine **mechanics** -- refresh-token rotations, the blocked ones,
+grace-window accepts, PAT-authenticated requests -- live on
+`v1:identity:authActivity` and render in the concept browser like any other
+concept (memql#4328). They are two orders of magnitude more numerous: one row
+per rotation per open tab, and one per PAT-authenticated request. The Trail is
+clean **by construction** rather than by a filter every reader has to remember,
+which also means no client-side hiding to break the walk's pagination.
+
+Who sees which: the audit trail is owner-or-admin. Activity is the cluster
+owner's for everyone, and **every user's own for themselves** -- "a device I do
+not recognise refreshed my session" is a signal the account holder is best
+placed to spot. The full split, the closed action enum, the rotation cadence and
+the reuse-detection limits are in
+[auth/identity-service.md](auth/identity-service.md#two-logs-decisions-and-mechanics).
+
+One consequence worth stating: **clicking around this console no longer writes
+rows in it.** The portal's session probe ran on every route change, and each
+probe is a real refresh-token rotation server-side, so browsing the Trail
+appended to the Trail. It now runs once per cold load (memql#4327).
+
 ### Deployments, and the operations on them
 
 One surface (memql#4264). There used to be two — this view's Ship band and a

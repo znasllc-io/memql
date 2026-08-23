@@ -2390,7 +2390,19 @@ Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata eve
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
 - `v1:identity:authSession` -- per-token session record (used for revocation)
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
-- `v1:identity:auditEvent` -- append-only audit trail for the identity service
+- `v1:identity:auditEvent` -- append-only audit trail for the identity service: DECISIONS and
+  SECURITY SIGNALS only since memql#4328 (sign-in, session created/revoked, role change, admin
+  action, `refresh_token_reuse_detected`). `action` stays an unconstrained string -- many writers,
+  and a closed enum would refuse a new decision at insert time
+- `v1:identity:authActivity` -- routine authentication MECHANICS, split out of `auditEvent`
+  (memql#4328): refresh-token rotations, the blocked ones, grace-window accepts,
+  PAT-authenticated requests. Two orders of magnitude more numerous, so the Trail is clean by
+  construction rather than by a filter. Four writers and a CLOSED `action` enum;
+  `@rowAuthz(owner="actorUserId", clusterOwner)` -- the first composite tier in the tree, which is
+  what lets a person read their own activity and a cluster owner read everyone's. Its
+  `retiredTokenHash` is the evidence refresh-token reuse detection keys on (memql#4329), and REAL
+  retention applies: `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS` (default 30), hard-deleted daily
+  from Go by `component/identity/authactivity` -- so detection reaches back exactly that far
 - `v1:identity:accessRequest` -- waitlist-mode access request
 - `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
 - `v1:identity:enrolmentToken` -- single-use, TTL'd credential authorizing exactly one action:

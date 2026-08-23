@@ -834,6 +834,92 @@ every request.
 - Audit events for every auth lifecycle moment land in
   `v1:identity:auditEvent` (in addition to slog). Retention is
   controlled by `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS` (default 365).
+  Routine mechanics land on a SECOND concept -- see below.
+
+## Two logs: decisions, and mechanics
+
+The identity service writes to two concepts, and the split is the difference
+between an audit trail an operator can read and one they scroll past
+(memql#4328).
+
+| | `v1:identity:auditEvent` | `v1:identity:authActivity` |
+|---|---|---|
+| **What it records** | decisions and security signals: a sign-in, a session created or revoked, a role change, an admin action, a detected token replay | routine mechanics: refresh-token rotations, the blocked ones, grace-window accepts, PAT-authenticated requests |
+| **`action`** | an unconstrained string. Many writers across the service; a closed enum here would refuse a new decision at insert time | a CLOSED enum of four values. Four writers, and it will not grow by convention |
+| **Volume** | one row per lifecycle moment | one row per rotation (~every 10.5 minutes per open tab) and one per PAT-authenticated request |
+| **Retention** | `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`, default 365. The daily sweep only COUNTS -- MemQL has no `delete()` | `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`, default 30, HARD-DELETED daily by a Go job on the identity node |
+| **Who can read it** | cluster owner or admin (`recentAuditEvents` carries `requiresOwnerOrAdmin`) | the cluster owner sees everything (`recentAuthActivity`); **every user sees their own** (`authActivityForSelf`) |
+| **Where it renders** | the portal's Audit Trail at `/views/audit` | the concept browser, like any concept |
+
+**Why the reads split that way.** `authActivity` declares
+`@rowAuthz(owner="actorUserId", clusterOwner)` -- the owner, or a cluster owner.
+The escape is the `owner` ROLE specifically, so a read gated
+`requiresOwnerOrAdmin` would pass for an admin and then be narrowed by the tier
+to that admin's own rows: a confidently wrong answer dressed as a roll-up. So
+the operator roll-up is cluster-owner-only and the per-user read is available to
+everyone. A non-owner admin uses the second one and sees exactly what it says.
+
+Giving a person their own activity is the point of the tier, not a side effect:
+"a device I do not recognise refreshed my session" is a signal the account
+holder is best placed to spot, and it does not need an operator's help.
+
+### The rotation cadence, and why it used to be a storm
+
+One `session_refreshed` row is one **refresh-token rotation**: a client
+presented the `memql_refresh` cookie (or a `refresh_token` grant) to
+`POST /auth/refresh` or `POST /oauth/token` and got a new access token plus a
+brand-new refresh token. It is not a heartbeat. Nothing else writes it -- not
+JWT verification, not a WebSocket reconnect, not the verifier's five-minute JWKS
+refresh, not node bootstrap.
+
+The designed cadence is **once per ~70% of the access-token TTL, per open tab**
+-- about every 10.5 minutes at the default 900-second TTL -- with a **30-second
+floor**. The SDK computes the delay from the token's OWN lifetime:
+
+    delay = max(30s, 0.7 * (exp - iat)) - (now - receivedAt)
+
+`exp` and `iat` are both stamped by the identity service, so their difference
+carries no clock skew; `now` and `receivedAt` are both the browser's, so theirs
+does not either. The formula only ever subtracts same-clock pairs.
+
+It used to be `0.7 * (exp - Date.now())`, which compares the identity service's
+clock with the browser's. A browser running ahead by a little less than the TTL
+saw every freshly minted token as nearly expired and rotated **every few
+seconds, indefinitely**; ahead by more than the TTL, the delay was zero and it
+rotated at network speed. A second amplifier sat in the portal, whose session
+probe ran on every route change rather than once per cold load -- so clicking a
+row in the Audit Trail wrote a row in the Audit Trail. Both are fixed
+(memql#4326, memql#4327); the floor is what makes a pathological token harmless
+even if some future arithmetic goes wrong again.
+
+If you see rotations far more often than the cadence above, the client is the
+place to look, not the server.
+
+### Refresh-token reuse detection
+
+Each rotation records the SHA-256 of the token it RETIRED on its activity row.
+A presented token matching neither the current hash nor an in-grace previous one
+is looked up against those retired hashes (memql#4329):
+
+- **Hit** -- the token was issued by this cluster and has since been rotated
+  away, so it can only have been replayed. The whole session is revoked with
+  `revokedReason=reuse_detected`, a `refresh_token_reuse_detected` row lands on
+  `auditEvent` with the presenting IP and User-Agent, the user is notified, and
+  the caller gets 401.
+- **Miss** -- an ordinary stale cookie. Refused as before, with no revoke and no
+  signal. Revoking on an ambiguous signal would be a self-inflicted denial of
+  service.
+- **Inside the 30-second grace window** -- a legitimate mid-rotation retry (the
+  SPA hard-refresh race). Accepted, recorded as `grace_window_accept`, never
+  treated as reuse.
+
+**Detection reaches back exactly as far as the activity retention window.** Past
+it the row has been pruned and a replay degrades to `session_not_found`. The
+default 30 days exceeds both the 14-day idle timeout and the 30-day
+refresh-token TTL, so a token older than the window is already dead on its own
+account -- which is what makes the limit safe. Lowering
+`MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS` below either of those TTLs opens a
+real gap, and nothing warns about it.
 
 ## Related
 
