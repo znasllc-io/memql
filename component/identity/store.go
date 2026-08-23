@@ -205,6 +205,9 @@ func (s *Store) CreateMagicLinkRequest(
 	return nil
 }
 
+// errNoEngine is what a Store with no engine returns instead of panicking.
+var errNoEngine = errors.New("identity.store: no engine wired")
+
 // Sentinel outcomes of the two guarded magic-link writes. Callers branch
 // on these rather than on an error string; both are ordinary, expected
 // results of a race, not failures.
@@ -1690,6 +1693,14 @@ func (s *Store) HasClaimedOwner(ctx context.Context) (bool, error) {
 // access tokens (which then broke the GA-auto-join chain because
 // hash(actor) diverged from hash(email)).
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
+	// A nil Store or a Store with no engine is a WIRING state, not a caller
+	// error: several handlers run in binaries that never got an engine, and
+	// they are written to treat "no rows" as the answer. Panicking here would
+	// turn a missing dependency into a 500 from a nil-pointer dereference,
+	// several frames from anything that names the dependency.
+	if s == nil || s.Engine == nil {
+		return nil, errNoEngine
+	}
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
