@@ -124,6 +124,20 @@ appended a version), the edit is rejected as a conflict rather than
 appending on top of a stale base. The history itself is never lost; the
 caller re-reads the latest and retries.
 
+### Artifact labels survive edits and restores
+
+`v1:library:artifact` rows can carry free-text
+[labels](../operate/portal.md#artifacts) the owner or their agents add
+through the portal or the `artifactAddLabel` / `artifactRemoveLabel`
+tools. Labels live on the index row, not on any one version, so they play
+no part in which content is latest -- but the index row itself gets
+re-versioned every time `editDocument` or `restoreDocumentVersion` runs
+(`touchArtifact` in `integrations/library/` bumps its `updatedAt`
+watermark). MemQL's insert-versioning means a re-versioned row carries
+only the fields that call names, so `touchArtifact` reads the row's
+current labels first and threads them through -- an edit or a restore
+never silently empties an artifact's labels.
+
 ## Authoring vs. document versioning
 
 This is distinct from

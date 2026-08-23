@@ -340,6 +340,55 @@ See [per-row-authz-audit.md](auth/per-row-authz-audit.md).
 
 ---
 
+## Artifacts
+
+`/artifacts` is the portal's browse surface for the Library: every
+`v1:library:artifact` index row the signed-in user owns -- uploaded
+documents, generated outputs, and the structured records the assistant
+manages (notes, to-dos, calendar events, memories), plus live-data sources.
+Like the rest of the portal the row set is owner-scoped -- the two reads
+backing this page (`libraryArtifacts`, `libraryArtifactsByLabel`) gate on
+`ownerUserId==actor.userId` -- so a caller only ever sees their own rows
+(see [per-row-authz-audit.md](auth/per-row-authz-audit.md)).
+
+Drilling into a row (`/artifacts/:artifactId`) opens its detail plus a
+label editor. **Labels are editable by the person, and by any agent they
+are talking to.** A person types a label into the editor; an agent calls
+the `artifactAddLabel` / `artifactRemoveLabel` tool. Both paths reach the
+same two Go capabilities (`integration.library.addArtifactLabel` /
+`removeArtifactLabel`), so there is no way to tell from a label alone
+whether the person or their agent added it -- unlike a document version, a
+label carries no author. Adding a label that is already there, or removing
+one that is not, succeeds and changes nothing: both are idempotent,
+because an agent retry and a person's double-click both need to land
+safely.
+
+**The filter narrows to one label at a time, and it lives in the URL**
+(`/artifacts?label=<value>`) rather than in component state -- the same
+rule every portal destination follows. That makes a filtered view an
+ordinary link: paste "here's everything labelled onboarding" to a
+colleague, reload the page without losing the filter, or use the back
+button to undo a filter click the way it undoes any other navigation.
+
+**Creating from the portal records an artifact; it does not upload a
+file.** The "New artifact" form on `/artifacts` takes a title, an optional
+summary, and an optional markdown body, and mints a
+`v1:library:generatedOutput` row -- the same concept an agent's own
+deliverables land in. The existing `indexGeneratedOutputOnCreate`
+automation promotes that row into a `v1:library:artifact` index row on the
+same path any other generated output takes; the portal never writes the
+index row directly. Uploading bytes from the portal is out of scope --
+that remains the existing attachment path.
+
+**A namesake to not confuse:** `v1:library:artifact.labels` is a
+`[]string` of free-text display labels -- what this page renders as
+chips. It is unrelated to `v1:worker:registration.labels` or
+`v1:cluster:node.labels`, which are `object` key=value maps used for
+machine routing (e.g. `has-blender=true`) and carry no display meaning.
+Same field name, different type, different job.
+
+---
+
 ## Administration
 
 `/admin` is the operator console: the cluster's own state, rather than
