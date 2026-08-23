@@ -218,12 +218,32 @@ func TestRealtimeToolCalls_PendingCap(t *testing.T) {
 			return "", true, ctx.Err()
 		}
 	}
-	_, rt := newToolTestExecutor(t, transport, func(e *RealtimeExecutor) {
+	exec, rt := newToolTestExecutor(t, transport, func(e *RealtimeExecutor) {
 		e.ConfigureToolCalls(0, 1)
 	})
 
 	rt.events <- callEvent("call_1", "toolA")
 	rt.events <- callEvent("call_2", "toolB")
+
+	// BOTH calls must reach the dispatcher BEFORE toolA is released, and this
+	// wait is what makes that true rather than likely (memql#4403).
+	//
+	// toolA blocks on releaseA, so for as long as that holds it provably
+	// OCCUPIES the single slot -- which is the precondition the cap is being
+	// tested against. Closing releaseA first made it a SCHEDULING ASSUMPTION:
+	// toolA could finish and free the slot before call_2 was dispatched, and
+	// then toolB really ran. That is what failed on main under CI load, and
+	// the three assertions that broke were exactly the three below asserting
+	// it had not.
+	//
+	// The queue, not the RESULT: results inject in FIFO call order, so
+	// call_2's cannot land until call_1 is done -- and call_1 is what this is
+	// about to release. Waiting on the result would deadlock.
+	require.Eventually(t, func() bool {
+		exec.toolMu.Lock()
+		defer exec.toolMu.Unlock()
+		return len(exec.toolQueue) == 2
+	}, 2*time.Second, 10*time.Millisecond, "both calls dispatched while toolA still holds the slot")
 
 	close(releaseA)
 	require.Eventually(t, func() bool {
