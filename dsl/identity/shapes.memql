@@ -149,6 +149,26 @@ shape authSession authSessionFull {
   row.createdAt
 }
 
+/// Self-service projection of v1:identity:authSession -- what a person may see about their own
+/// sessions (memql#4306).
+///
+/// NO TOKEN HASHES, and that is the whole reason this shape exists rather than reusing
+/// authSessionFull. A session list is a page a signed-in person loads; authSessionFull carries
+/// tokenHash, refreshTokenHash and previousRefreshTokenHash, and a projection that reaches a
+/// browser must not carry the digests the auth hot path looks rows up BY. They are not the plaintext
+/// -- but they are the lookup key, and there is no reason for a device list to know them.
+@row
+shape authSession authSessionSelf {
+  row.id
+  source
+  clientLabel
+  firstAuthenticatedAt
+  lastActivityAt
+  lastRefreshedAt
+  expiresAt
+  row.createdAt
+}
+
 /// Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster
 /// configuration row.
 @row
@@ -250,6 +270,10 @@ shape magicLinkRequest magicLinkRequestFull {
   sourceIP
   userAgent
   invitationId
+  bindingHash
+  approvedAt
+  approvedFromIP
+  approvedUserAgent
   row.createdAt
 }
 
@@ -365,6 +389,8 @@ shape user userFull {
   lastSeenAt
   activePartitionId
   revocationEpoch
+  sharedMailbox
+  signInPolicy
   row.createdAt
 }
 

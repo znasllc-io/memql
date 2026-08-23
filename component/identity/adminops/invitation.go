@@ -51,6 +51,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/invitation"
+	"github.com/znasllc-io/memql/component/identity/registration"
 )
 
 // UserInvitation is the issue request.
@@ -91,6 +92,21 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	role := strings.ToLower(strings.TrimSpace(in.Role))
 	detail := map[string]any{"email": email, "role": role}
+
+	// THE SHARED-MAILBOX SIGNAL IS RECORDED HERE AND STAMPED ELSEWHERE
+	// (memql#4304). An invitation creates no user row -- the row is minted
+	// when the invitee first consumes a magic link, and the heuristic runs
+	// there, in the ONE place an account comes into existence. Duplicating
+	// the stamp onto the invitation would give two writers for one fact and
+	// no way to tell which was right when they disagreed.
+	//
+	// What belongs here is the SIGNAL: an admin inviting `team@example.com`
+	// is about to create an account whose sign-in surface is a mailbox
+	// several people read, and the audit trail should say so at the moment
+	// they chose to.
+	if registration.LooksLikeSharedMailbox(email) {
+		detail["sharedMailbox"] = true
+	}
 
 	act, refusal, allowed := s.authorize(ctx, "issuing a user invitation", detail)
 	if !allowed {

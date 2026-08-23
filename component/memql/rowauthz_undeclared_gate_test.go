@@ -252,6 +252,44 @@ const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lo
 // most one row and only for a caller who already holds the plaintext.
 const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-actor by construction (the token IS the credential), so no owner tier can be compared against"
 
+// undeclared4301MagicLinkByIdReason covers the by-id read the device-bound
+// magic-link flow added.
+//
+// v1:identity:magicLinkRequest CANNOT declare a tier, for the reason its two
+// existing reads were grandfathered under and one more that is specific to it.
+// The pre-actor argument first: every read of this row happens BEFORE anyone is
+// authenticated -- the poll and the finish are STEPS OF SIGNING IN, not things
+// a signed-in person does -- so an owner tier would compare the row against
+// actor.userId == "" and match nothing, turning every sign-in into a silent
+// "invalid". The additional one: the row has no user pointer to scope BY. A
+// magic-link request names an EMAIL ADDRESS, and on a first-time registration
+// no v1:identity:user exists for it until the link is consumed, so there is no
+// field an owner tier could name even in principle.
+//
+// What authorizes the read instead is the memql_ml binding cookie, compared
+// against the row's bindingHash in Go before the handler acts on anything --
+// and the query carries @serverOnly, so it is not reachable from the wire at
+// all.
+// undeclared4306SelfSessionsReason covers the self-service sessions read.
+//
+// THE CONSTRUCT IS ALREADY CALLER-SCOPED -- it filters userId==actor.userId
+// and takes no argument at all, so there is no way to point it at another
+// person. What is missing is a tier on the CONCEPT, and v1:identity:authSession
+// cannot carry one: authSessionByTokenHash is the auth middleware's hot path
+// and authSessionByRefreshTokenHash is rotation's, both PRE-ACTOR by
+// construction. An owner tier would AND userId==actor.userId into the lookup
+// that BUILDS the actor, so every authenticated request would fail to find its
+// own session. It is the same shape as v1:identity:identity's recorded
+// decision, one concept over.
+//
+// The right fix is the one written on v1:identity:identity: a read-path escape
+// mirroring rowAuthzWriteEscape, so the pre-actor reads survive injection. Until
+// that exists, this construct's own filter is the enforcement, and it is a
+// stronger one than most entries here can claim.
+const undeclared4306SelfSessionsReason = "memql#4306 -- self-scoped by its own filter (userId==actor.userId, no arguments); the CONCEPT cannot carry a tier because authSessionByTokenHash is the pre-actor read that builds the actor"
+
+const undeclared4301MagicLinkByIdReason = "memql#4301 -- device-bound flow's by-id read; pre-actor by construction AND the row names an email rather than a user, so no owner field exists to compare; @serverOnly, authorized by the binding cookie in Go"
+
 // undeclared4270InvitationReason covers the console read memql#4270 added when
 // user invitations gained an issuing side.
 //
@@ -588,6 +626,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"authSessionByRefreshTokenHash":         {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionByTokenHash":                {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionsForSubject":                {"v1:identity:authSession", undeclaredGrandfatherReason},
+	"authSessionsForSelf":                   {"v1:identity:authSession", undeclared4306SelfSessionsReason},
 
 	// v1:identity:clusterSettings
 	"clusterSettingsCurrent": {"v1:identity:clusterSettings", undeclaredGrandfatherReason},
@@ -637,6 +676,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	// v1:identity:magicLinkRequest
 	"expiredMagicLinkRequests":    {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},
 	"magicLinkRequestByTokenHash": {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},
+	"magicLinkRequestById":        {"v1:identity:magicLinkRequest", undeclared4301MagicLinkByIdReason},
 
 	// v1:identity:oauthClient
 	"oAuthClientByClientId": {"v1:identity:oauthClient", undeclaredGrandfatherReason},

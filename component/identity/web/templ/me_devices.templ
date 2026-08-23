@@ -1,5 +1,7 @@
 package webtempl
 
+import "time"
+
 // MeDevicesData drives /me/devices. Sessions are populated client-side
 // from /me/devices.json by app.js.
 //
@@ -28,6 +30,16 @@ type MeDevicesData struct {
 	// revoke. It is what makes the last-credential case explicit
 	// instead of silent.
 	RevokeWarning *MePasskeyRevokeWarning
+
+	// Sessions is the caller's own live sessions, and SessionsAvailable
+	// says whether that list is REAL (memql#4306).
+	//
+	// The two fields are separate because a listing error is not an empty
+	// list. An empty table reads as "nothing else can reach my account",
+	// which is the reassuring answer, and rendering it after a failed read
+	// would be reassuring somebody about something we did not check.
+	Sessions          []MeSessionRow
+	SessionsAvailable bool
 
 	// RoutesSummary is a plain sentence naming what the user can
 	// currently sign in with. Rendered above the list so the answer to
@@ -82,24 +94,7 @@ templ MeDevices(data MeDevicesData) {
 		<div class="me-shell">
 			@meSidebar("devices", false)
 			<section>
-				<div class="card card-wide">
-					<h1 class="card-title">Active sessions</h1>
-					<p class="card-subtitle">
-						Each row is a browser or app currently signed in to your account.
-						Revoke any session you don't recognize, or sign out everywhere
-						to revoke all of them at once.
-					</p>
-					<div data-content="devices">
-						<p class="text-muted"><span class="spinner"></span> Loading your sessions&hellip;</p>
-					</div>
-					<hr/>
-					<form method="POST" action="/me/devices/revoke-all" data-submit-once>
-						@CSRFField(data.Layout.CSRFToken)
-						<button type="submit" class="btn btn-danger">
-							Sign out everywhere
-						</button>
-					</form>
-				</div>
+				@meSessionsCard(data)
 				if data.PasskeysEnabled {
 					@mePasskeysCard(data)
 				}
@@ -230,5 +225,101 @@ templ mePasskeyRevokeWarning(warn MePasskeyRevokeWarning, csrfToken string) {
 			</button>
 			<a class="btn btn-secondary" href="/me/devices">Keep it</a>
 		</form>
+	</div>
+}
+
+// MeSessionRow is one session as the "Active sessions" table shows it
+// (memql#4306). No token hashes reach here -- the shape behind it does not
+// project them.
+type MeSessionRow struct {
+	ID     string
+	Label  string
+	Origin string
+
+	FirstSeen string
+	LastSeen  string
+	Expires   string
+
+	// ThisDevice marks the session the caller is currently using, resolved
+	// from the `sid` claim in their own token rather than by matching user
+	// agents -- two tabs of one browser share a user agent and hold
+	// different sessions, and marking the wrong row invites somebody to
+	// revoke the session they are sitting in.
+	ThisDevice bool
+
+	// SortFallbck orders the table. Not rendered.
+	SortFallbck time.Time
+}
+
+// meSessionsCard is the panel that was a permanent spinner until memql#4306.
+templ meSessionsCard(data MeDevicesData) {
+	<div class="card card-wide">
+		<h1 class="card-title">Active sessions</h1>
+		<p class="card-subtitle">
+			Each row is a browser or app currently signed in to your account. End any
+			session you don't recognise, or sign out everywhere at once.
+		</p>
+		if !data.SessionsAvailable {
+			<p class="text-muted">
+				We couldn't load your sessions just now. Reload the page to try again --
+				this is not a statement that you have none.
+			</p>
+		} else if len(data.Sessions) == 0 {
+			<p class="text-muted">No active sessions.</p>
+		} else {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Client</th>
+						<th>Signed in</th>
+						<th>Last seen</th>
+						<th>Expires</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, row := range data.Sessions {
+						<tr>
+							<td>
+								<div>{ row.Label }</div>
+								<div class="text-small text-subtle">
+									{ row.Origin }
+									if row.ThisDevice {
+										&middot; this device
+									}
+								</div>
+							</td>
+							<td class="text-small">{ row.FirstSeen }</td>
+							<td class="text-small">{ row.LastSeen }</td>
+							<td class="text-small">{ row.Expires }</td>
+							<td>
+								<form method="POST" action="/me/devices/sessions/revoke" data-submit-once>
+									@CSRFField(data.Layout.CSRFToken)
+									<input type="hidden" name="id" value={ row.ID }/>
+									<button type="submit" class="btn btn-small">
+										if row.ThisDevice {
+											Sign out here
+										} else {
+											End session
+										}
+									</button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		<hr/>
+		<form method="POST" action="/me/devices/revoke-all" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			<button type="submit" class="btn btn-danger">
+				Sign out everywhere
+			</button>
+		</form>
+		<p class="text-small text-subtle mt-2">
+			Signing out everywhere ends this session too -- you will be asked to sign
+			in again.
+		</p>
 	</div>
 }

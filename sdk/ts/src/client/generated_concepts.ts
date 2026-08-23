@@ -202,6 +202,7 @@ export const BoundConcepts = {
   authSessionByPreviousRefreshTokenHash: "v1:identity:authSession",
   authSessionByRefreshTokenHash: "v1:identity:authSession",
   authSessionByTokenHash: "v1:identity:authSession",
+  authSessionsForSelf: "v1:identity:authSession",
   authSessionsForSubject: "v1:identity:authSession",
   authoringBundleById: "v1:authoring:bundle",
   authoringBundleForPlan: "v1:authoring:bundle",

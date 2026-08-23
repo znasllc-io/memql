@@ -54,7 +54,10 @@ Worker tokens are revoked by flipping `active=false` on the identity row; expiry
 | `/.well-known/jwks.json` | GET | none | intentional public; key distribution |
 | `/login` | GET, POST | none (entry point) | magic-link request |
 | `/auth/magic-link` | POST | none (entry point) | magic-link mint |
-| `/auth/complete` | GET | none (link consume) | magic-link redeem |
+| `/auth/complete` | GET | none (link inspect) | magic-link landing page. **Renders only; writes nothing** (memql#4302) |
+| `/auth/landing` | POST | the emailed token in the body | approve (no cookie) or finish (cookie matches `bindingHash`) |
+| `/auth/magic-link/status` | GET | `memql_ml` binding cookie | the requesting tab's poll; `404` for anyone without the cookie |
+| `/auth/magic-link/finish` | POST | `memql_ml` cookie + `approvedAt` | consumes exactly once and mints |
 | `/oauth/token` | POST | code | OAuth-style code exchange |
 | `/auth/refresh` | POST | Bearer | refresh-token rotation |
 | `/auth/logout` | POST | Bearer | session revocation |
@@ -109,8 +112,15 @@ For each surface above, the audit walks this checklist. Findings tracked on #86.
 | Cross-tenant write | Same per-row authz, enforced on `mutationX` |
 | Worker-token escape to non-worker RPC | Surface pinning at the worker interceptor (rejected with `PermissionDenied`); #97 added regression tests |
 | Voice-agent token used on non-voice RPC | Surface-pinned `VoiceAgent*` payload-type gating; `subtle.ConstantTimeCompare` on the secret (F4) |
-| Magic-link replay | Single-use, hash-stored on `v1:identity:magiclink`, expiry enforced |
-| Refresh-token reuse | One-time-use refresh tokens, rotated on every `/auth/refresh` |
+| Magic-link replay | Single-use, hash-stored on `v1:identity:magicLinkRequest`, expiry enforced. Consume is a compare-and-swap under a Postgres advisory lock (memql#4301), so N concurrent finishers produce exactly one success -- load-bearing now that a request has two legitimate finishers (the poller and a same-device click) |
+| **Group-alias race** -- somebody else on a shared mailbox clicks your link first | **Before:** they got the session. On the `/authorize` path both parties were locked out; on the identity path the clicker got a first-party `memql_admin` cookie with no PKCE and no device check, from which they could enrol their own passkey and hold permanent, mailbox-independent access -- invisible to you, and unrevocable. **After (memql#4302):** their click only *approves*; the browser holding the `memql_ml` binding cookie finishes, so the session lands on the device that asked. The row records the approving IP and the trail carries `magic_link_approved` |
+| **Mail-scanner prefetch** -- SafeLinks/Gmail proxy/security appliance fetches the URL | **Before:** the GET consumed the link, so the scanner burned it before a human saw it (and on the identity path was handed a session cookie it discarded). **After (memql#4302):** a GET renders a page and writes nothing; the state change is a POST from a page a human is looking at |
+| **Challenge-less authorization code** | **Before:** `/oauth/token` verified PKCE only when the code carried a challenge, so a code minted without one (the `/login`-without-`/authorize` path) redeemed for whoever presented it -- and `plain` was accepted, which puts the verifier in the challenge. **After (memql#4303):** a code with no challenge is refused (`auth_code_redemption_blocked{no_pkce}`), `plain` is refused (`{plain_not_allowed}`), and `POST /login` refuses a matched client that sent none |
+| **Unbound browser session** | **Before:** `startBrowserSession` minted a cookie and wrote no row, so the session was unlistable, unrevocable and unnotifiable. **After (memql#4303):** every session gets a `v1:identity:authSession` row (`source=oidc_cookie`), which is what makes `/me/devices`, revoke-all and the new-sign-in email work at all |
+| **Shared mailbox as a shared account** | NOT closed by the race fix, and not claimed to be: whoever can read the mailbox can request their OWN link. Mitigated by policy (`signInPolicy=passkey_only` -- no link is ever sent) and by visibility (`sharedMailbox` copy, plus the new-sign-in email landing in the same mailbox). See [access-model.md](../../public/operate/auth/access-model.md) |
+| **Stolen `memql_ml` binding cookie** | Worth one completion of one request inside its TTL, and only together with the emailed token or an approval. Host-only, `HttpOnly`, `Path=/auth` |
+| **Forged approval POST** | Requires the token from the email. The path is CSRF-exempt because that token IS the proof of possession; a forged cross-site POST without it approves nothing |
+| Refresh-token reuse | Refresh tokens are ROTATED on every `/auth/refresh` (with a short grace window for the interrupted-rotation case). Rotation is not DETECTION: presenting a stale token does not today revoke the session or raise a signal, and nothing emits `refresh_token_theft_detected`. Designing that lifecycle is sub-project D of the 2026-08-22 backlog brief, not something this row can claim |
 | Cross-origin WebSocket smuggling | Origin allow-list (F3, configurable via `MEMQL_WS_ORIGIN_PATTERNS`) |
 | Plaintext credential on the wire (pair codes) | `requireSecureRequest` on `/pair/codes` and `/pair/redeem` (F5) |
 | Credential leak via claims-map logging | Guest interceptor stores `tokenHash`, not plain token (F9 in #98); worker identity claim mirrors the hash-only pattern |

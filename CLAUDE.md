@@ -799,7 +799,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against. `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against. `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP. The three magic-link routes added by memql#4302 are the same category, and the owner approved them explicitly (design D8): `POST /auth/landing` is the browser form post that a GET used to do -- a GET now renders and never changes state, so mail scanners stop burning links; `GET /auth/magic-link/status` is the requesting tab's poll, gated on the `memql_ml` binding cookie and 404 to anyone without it; `POST /auth/magic-link/finish` is that tab completing its own sign-in, which has to be a real form POST because the reply is a 303 the tab must NAVIGATE (a fetch would follow it and strand the auth code). All three are declared on the identity server's own route table, not `component/server`'s, so the bff front-door path generator is untouched |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -1373,7 +1373,37 @@ The in-house **identity service** (`component/identity`) is the
 authentication provider for the cluster. It runs as its own
 node-type binary (`make identity`) and owns:
 
-- Magic-link auth as the primary login path.
+- Magic-link auth as the primary login path, **device-bound and
+  approve-on-click** (epic memql#4300). Issue mints a 32-byte nonce alongside
+  the token, stores only its digest as `magicLinkRequest.bindingHash`, and
+  hands the plaintext to the requesting browser as `memql_ml`
+  (`HttpOnly; Secure; SameSite=Lax; Path=/auth`). A link only COMPLETES in a
+  browser holding that cookie; a click anywhere else only APPROVES the
+  request, and the requesting tab -- sitting on `/check-email` -- polls, sees
+  `approved`, and finishes itself. **A session can only ever land on the
+  device that asked for it: if B clicks A's link, A signs in and B gets
+  nothing.** That closes the group-alias race, where whoever read a shared
+  mailbox first got the session -- on the identity path, a first-party cookie
+  with no PKCE and no device check, enough to enrol their own passkey and hold
+  permanent, mailbox-independent access A could neither see nor revoke.
+  `GET /auth/complete` renders and writes nothing (so prefetchers are
+  harmless), and consume is a compare-and-swap under a Postgres advisory lock
+  -- load-bearing, because approve-on-click gives one request two legitimate
+  finishers. What it does NOT fix is a colleague requesting their OWN link to
+  the same mailbox; `signInPolicy` below is the answer to that.
+- `sharedMailbox` + `signInPolicy` on `v1:identity:user` (memql#4304). The
+  first is a hint set by a local-part heuristic
+  (`component/identity/registration/shared_mailbox.go`) that gates nothing and
+  drives copy. The second is `any` (default) or `passkey_only`, which disables
+  sign-in LINKS: a request writes no row, sends no link, redirects identically
+  (no enumeration signal) and mails a notice instead. Enabling it requires an
+  active passkey, server-enforced. Owners and admins can RESET it to `any`
+  over `IdentityAdminMsg` -- one direction only, so an admin cannot lock a
+  colleague out of their own account.
+- A new-sign-in email on every `authSession` row, fired from the one seam that
+  creates them (memql#4305). No action link, deliberately: an unauthenticated
+  revoke link mailed to a shared mailbox is a denial-of-service handle for
+  everyone who can read it. Refresh rotations never send it.
 - WebAuthn passkey **registration** (`POST /auth/webauthn/register/{begin,finish}`,
   memql#3406). Ceremony logic in `component/identity/webauthn/`; the RP id
   derives from `MEMQL_IDENTITY_BASE_URL`, challenges are single-use and

@@ -738,6 +738,53 @@ query authSession authSessionsForSubject {
   shape   authSessionFull
 }
 
+// ---- queries/v1/identity/authSessionsForSelf.memql ----
+
+// authSessionsForSelf - The caller's own live sessions
+// =====================================================
+//
+// The self-service read behind the "Active sessions" panel (memql#4306).
+// Every other authSession query in this file is a SERVER read: by token
+// hash for the auth hot path, by refresh hash for rotation, by subject for
+// the revoke fan-out. This one is a PERSON read, and it is shaped and
+// filtered differently for that reason.
+//
+// OWNED TIER. userId==actor.userId, so the query answers about the caller
+// and nobody else -- there is no argument to point it at another person,
+// which is what makes it safe to reach from a browser at all.
+//
+// WHY userId AND NOT subject. authSessionsForSubject keys on `subject`
+// because it runs BEFORE anything is certain about the user row: a session
+// is written at token-issuance time, which can race ahead of the first-login
+// user insert. This query runs for a signed-in caller, so actor.userId is
+// populated by definition. The concept's own description says subject is the
+// canonical key and userId is "optional because rows are written at
+// token-issuance time" -- so a row whose userId never landed is invisible
+// here. That is the honest trade: showing rows this caller might not own,
+// by matching a subject that is not gated by the row-authz tier, would be
+// the worse failure.
+//
+// LIVE ONLY. Revoked and expired rows are excluded -- the panel's purpose is
+// "what can currently enter my account", and a list padded with dead rows
+// makes the live ones harder to see. Revocation history belongs to the audit
+// trail, which is where it already is.
+//
+// Arguments:
+//   none -- the caller IS the argument
+//
+// Returns:
+//   Zero or more session rows in authSessionSelf shape (no token hashes).
+//
+
+/// Returns the caller's own live auth-session rows. No token hashes; revoked and expired excluded.
+@actor
+query authSession authSessionsForSelf {
+  filter  userId==actor.userId && revokedAt=="" && expiresAt>now
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   authSessionSelf
+}
+
 // ---- queries/v1/identity/clusterSettingsCurrent.memql ----
 
 // clusterSettingsCurrent - Read the active cluster-settings row
@@ -1114,6 +1161,59 @@ query magicLinkRequest magicLinkRequestByTokenHash {
     tokenHash  string!
   }
   filter  tokenHash==args.tokenHash
+  shape   magicLinkRequestFull
+}
+
+// ---- queries/v1/identity/magicLinkRequestById.memql ----
+
+// magicLinkRequestById - Look up a magic-link request by node id
+// ==============================================================
+//
+// The by-id twin of magicLinkRequestByTokenHash, added with the
+// device-bound flow (memql#4301). Two callers need it and neither
+// holds the token:
+//
+//   - GET /auth/magic-link/status, the poll the requesting tab runs.
+//     It is handed a requestId by the page it is sitting on and proves
+//     itself with the memql_ml cookie, whose digest is on the row.
+//   - Store.ConsumeMagicLinkRequest / ApproveMagicLinkRequest, which
+//     re-read the row INSIDE the advisory lock to decide whether this
+//     caller is the one that gets to write. That re-read is the
+//     compare half of the compare-and-swap and cannot go through the
+//     token-hash query, because the finish path never sees the token.
+//
+// The id is not a credential and is deliberately rendered on the
+// check-email page. The cookie is what authorizes; the id only names
+// the row. Returns the row whatever its state -- expired, approved and
+// consumed are all answers the poller needs to distinguish.
+//
+// Arguments:
+//   requestId (string) - v1:identity:magicLinkRequest node id
+//
+// Returns:
+//   Zero or one magic-link request row in magicLinkRequestFull shape.
+//
+
+/// Returns the magic-link request with the given id. Zero or one result.
+///
+/// @serverOnly because the row carries a credential digest and the device binding that authorizes
+/// it. Its callers are the identity service's own handlers, which check the presented memql_ml
+/// cookie against bindingHash in Go before they act; a wire-reachable read by id would hand an
+/// arbitrary caller the state of somebody else's pending sign-in.
+///
+/// actor.userId scoping is not the fix, for the reason its sibling approveMagicLinkRequest gives at
+/// length: every read of this row happens BEFORE the caller is authenticated -- the poller and the
+/// finish handler are steps of signing in, not things a signed-in person does -- so actor.userId is
+/// empty for every legitimate caller and a self-scoped filter would match zero rows. The row carries
+/// no user pointer to scope by either: it names an email address, and on a first-time registration
+/// no user row exists until the link is consumed.
+@serverOnly
+@unbounded("magic-link request by primary id -- bounded to a single row by construction")
+query magicLinkRequest magicLinkRequestById {
+  args {
+    requestId  string!
+  }
+  filter  row.id==args.requestId
   shape   magicLinkRequestFull
 }
 

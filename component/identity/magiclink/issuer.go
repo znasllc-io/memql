@@ -59,6 +59,24 @@ var (
 // plug-in at call time; tests pass an in-memory recorder.
 type Sender interface {
 	SendMagicLink(ctx context.Context, in SendInput) error
+	// SendSignInDisabledNotice delivers the message a passkey-only account
+	// gets INSTEAD of a link (memql#4304). Informative to the account holder,
+	// useless to anyone else reading the same mailbox.
+	SendSignInDisabledNotice(ctx context.Context, in NoticeInput) error
+}
+
+// NoticeInput is the rendered "sign-in links are off for this account"
+// message.
+//
+// IT CARRIES NO LINK AND NO TOKEN, which is the entire point: on a shared
+// mailbox this message lands in front of everyone who can read the address,
+// and it has to be worth nothing to all of them. What it tells the account
+// holder is that somebody asked, and what to do instead.
+type NoticeInput struct {
+	Email             string
+	BrandName         string
+	BrandPrimaryColor string
+	BrandLogoDataURI  string
 }
 
 // SendInput is the rendered email request the Sender consumes.
@@ -129,6 +147,29 @@ type IssueInput struct {
 	// not propagated from request bodies.
 	ExistingUser bool
 
+	// Unbound=true issues a link with NO device binding, for a caller that
+	// has no browser to bind to (memql#4302).
+	//
+	// Exactly one caller sets it: the boot-time env auto-bootstrap, which
+	// emails the configured owner a claim link from a goroutine with nobody
+	// at a keyboard. Every other path issues in response to a request from a
+	// browser, hands that browser the nonce, and gets the device binding.
+	//
+	// WHY IT HAS TO EXIST. A bound link completes only in the browser holding
+	// the cookie. Issue one where no browser was handed a cookie and the link
+	// can be approved from anywhere and completed nowhere -- which for this
+	// path means an env-bootstrapped cluster nobody can claim. Refusing to
+	// have a flag would not make that safer; it would make the cluster
+	// unusable and send the operator to /setup, where they would get a bound
+	// link and the same outcome by a longer route.
+	//
+	// WHAT IT COSTS. An unbound link completes for whoever opens it -- the
+	// pre-memql#4302 behaviour, for this one link. That is the same trust
+	// this path always had: it is emailed to the address the operator
+	// configured, on a cluster with no owner credential yet. Server-stamped;
+	// no HTTP handler may propagate it from a request body.
+	Unbound bool
+
 	// AdminSession=true marks the request as an identity-admin
 	// sign-in (no relying-party OAuth callback; the click should
 	// land in /admin/, not bounce out to a client app). The web
@@ -140,28 +181,47 @@ type IssueInput struct {
 	AdminSession bool
 }
 
-// Issue runs the full issuance pipeline. Returns nil on success; the
-// HTTP handler responds 200 regardless of whether a magic link was
-// actually sent (the access-request path also returns nil) so it
+// IssueResult is what the caller needs in order to BIND the link to the
+// browser that asked for it (memql#4302, design D2).
+//
+// BindingNonce is the plaintext the HTTP layer writes into the `memql_ml`
+// cookie; only its SHA-256 digest reaches the row, so a database read
+// cannot reconstruct it. RequestId names the row the requesting tab then
+// polls -- not a credential, and deliberately rendered on the check-email
+// page, because the cookie is what authorizes and the id only names.
+//
+// Both are empty on the paths that mint no row (waitlist, policy refusal),
+// and a caller that sets no cookie simply produces a link that can be
+// approved but never finished -- the safe direction to degrade in.
+type IssueResult struct {
+	RequestId    string
+	BindingNonce string
+	ExpiresAt    time.Time
+}
+
+// Issue runs the full issuance pipeline. Returns a zero IssueResult and nil
+// on success; the HTTP handler responds 200 regardless of whether a magic
+// link was actually sent (the access-request path also returns nil) so it
 // doesn't leak whether a given email is registered.
 //
 // On policy reject, returns ErrEmailNotAllowed; the handler still
 // responds 200 to the caller (don't leak), but emits an audit row
 // and a slog warning.
-func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
+func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) {
+	var out IssueResult
 	if i == nil {
-		return errors.New("magiclink: nil issuer")
+		return out, errors.New("magiclink: nil issuer")
 	}
 	if i.Store == nil {
-		return errors.New("magiclink: nil store")
+		return out, errors.New("magiclink: nil store")
 	}
 
 	email := strings.TrimSpace(in.Email)
 	if email == "" {
-		return errors.New("magiclink: email required")
+		return out, errors.New("magiclink: email required")
 	}
 	if !strings.Contains(email, "@") {
-		return errors.New("magiclink: malformed email")
+		return out, errors.New("magiclink: malformed email")
 	}
 
 	// Bootstrap gate. Pre-bootstrap (no users), only the /setup wizard
@@ -183,7 +243,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 			Outcome:       identity.AuditOutcomeBlocked,
 			FailureReason: "cluster_not_bootstrapped",
 		})
-		return ErrClusterNotBootstrapped
+		return out, ErrClusterNotBootstrapped
 	}
 
 	// Admin-session sign-ins bypass the client-redirect gate: there
@@ -193,16 +253,16 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	// can't smuggle in attacker-supplied targets via the magic link).
 	if !in.AdminSession {
 		if in.ClientId == "" {
-			return ErrUnknownClient
+			return out, ErrUnknownClient
 		}
 		// Resolve through the unified resolver so dynamically-registered
 		// (RFC 7591) clients in the store work exactly like static
 		// MEMQL_IDENTITY_REGISTERED_CLIENTS.
 		if identity.ResolveClient(ctx, i.Cfg, i.Store, in.ClientId) == nil {
-			return ErrUnknownClient
+			return out, ErrUnknownClient
 		}
 		if in.RedirectURI == "" || !identity.ClientAllowsRedirectURI(ctx, i.Cfg, i.Store, in.ClientId, in.RedirectURI) {
-			return ErrRedirectMismatch
+			return out, ErrRedirectMismatch
 		}
 	}
 
@@ -245,30 +305,69 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 				Outcome:       identity.AuditOutcomeBlocked,
 				FailureReason: decision.Reason,
 			})
-			return ErrEmailNotAllowed
+			return out, ErrEmailNotAllowed
 		}
 	}
 
 	switch decision.Action {
 	case registration.ActionCreateAccessRequest:
-		return i.handleAccessRequest(ctx, email, in)
+		return out, i.handleAccessRequest(ctx, email, in)
 
 	case registration.ActionIssueMagicLink:
 		// fall through
 
 	default:
 		// Reject (handled above) or unknown action.
-		return ErrEmailNotAllowed
+		return out, ErrEmailNotAllowed
+	}
+
+	// PASSKEY-ONLY ACCOUNTS GET A NOTICE, NOT A LINK (memql#4304, design D6).
+	//
+	// Resolved here, after the registration-mode gate and before anything is
+	// minted, because the policy is a property of an EXISTING account: an
+	// address with no user row is a registration and is unaffected.
+	//
+	// What the caller sees is IDENTICAL either way -- same nil return, same
+	// redirect to /check-email, same page. That is not politeness, it is the
+	// absence of an enumeration oracle: if a passkey-only account answered
+	// differently from any other address, the difference would be a way to
+	// discover which accounts are hardened. The only thing that differs is
+	// which message arrives, and only the mailbox sees that.
+	if user, lookupErr := i.Store.LookupUserByEmail(ctx, email); lookupErr == nil && user.PasskeyOnly() {
+		i.sendSignInDisabledNotice(ctx, email)
+		i.audit(ctx, identity.AuditEvent{
+			Category:      identity.AuditCategoryAuth,
+			Action:        "magic_link_refused_policy",
+			TargetType:    "user",
+			TargetId:      user.ID,
+			TargetEmail:   email,
+			SourceIP:      in.SourceIP,
+			UserAgent:     in.UserAgent,
+			CorrelationId: in.CorrelationId,
+			Outcome:       identity.AuditOutcomeBlocked,
+			FailureReason: "passkey_only",
+			Detail:        map[string]any{"signInPolicy": "passkey_only"},
+		})
+		return out, nil
+	} else if lookupErr != nil && i.Logger != nil {
+		// A lookup failure FALLS THROUGH to the ordinary path rather than
+		// refusing. The alternative -- treating an unreadable user row as
+		// passkey-only -- would turn a transient database blip into a
+		// cluster-wide sign-in outage, and the policy is a hardening measure
+		// rather than a containment one.
+		i.Logger.Warn("magiclink: sign-in policy lookup failed; issuing normally",
+			slog.String("email", email),
+			slog.String("error", lookupErr.Error()))
 	}
 
 	// Mint token + request id.
 	plainToken, tokenHash, err := newMagicLinkToken()
 	if err != nil {
-		return fmt.Errorf("magiclink: generate token: %w", err)
+		return out, fmt.Errorf("magiclink: generate token: %w", err)
 	}
 	requestId, err := identity.NewRandomId("")
 	if err != nil {
-		return fmt.Errorf("magiclink: generate request id: %w", err)
+		return out, fmt.Errorf("magiclink: generate request id: %w", err)
 	}
 
 	ttl := i.Cfg.MagicLinkTTL
@@ -302,6 +401,24 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	}
 	oauthCtxJSON, _ := json.Marshal(oauthCtx)
 
+	// THE DEVICE BINDING (design D2). A 32-byte CSPRNG nonce whose digest
+	// is all that reaches the row; the plaintext goes to the requesting
+	// browser as the memql_ml cookie and nowhere else. This is what makes
+	// the session land on the device that asked: a click from any other
+	// browser can APPROVE the request but can never complete it.
+	//
+	// Skipped for an Unbound issue, where there is no browser to hand the
+	// nonce to. See IssueInput.Unbound -- a bound link nobody holds the
+	// cookie for is a link nobody can complete.
+	var bindingNonce, bindingHash string
+	if !in.Unbound {
+		var err error
+		bindingNonce, bindingHash, err = newBindingNonce()
+		if err != nil {
+			return out, fmt.Errorf("magiclink: generate binding nonce: %w", err)
+		}
+	}
+
 	if err := i.Store.CreateMagicLinkRequest(
 		ctx,
 		requestId,
@@ -312,11 +429,13 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		in.UserAgent,
 		string(oauthCtxJSON),
 		in.InvitationId,
+		bindingHash,
 	); err != nil {
-		return fmt.Errorf("magiclink: persist request: %w", err)
+		return out, fmt.Errorf("magiclink: persist request: %w", err)
 	}
+	out = IssueResult{RequestId: requestId, BindingNonce: bindingNonce, ExpiresAt: expiresAt}
 
-	linkURL := buildMagicLinkURL(i.Cfg.BaseURL, plainToken, in.State)
+	linkURL := buildMagicLinkURL(i.Cfg.BaseURL, plainToken)
 
 	if i.Sender != nil {
 		brandName := i.Cfg.BrandName
@@ -360,7 +479,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		},
 	})
 
-	return nil
+	return out, nil
 }
 
 // handleAccessRequest creates a v1:identity:accessRequest row instead
@@ -426,7 +545,14 @@ func newMagicLinkToken() (plain, hash string, err error) {
 // buildMagicLinkURL constructs the link the user clicks in their
 // email. The token rides as a query param so existing email clients
 // don't garble it.
-func buildMagicLinkURL(baseURL, plainToken, state string) string {
+//
+// `state` NO LONGER TRAVELS IN THE URL (memql#4302). It lives on the row's
+// oauthCtx and is echoed to the relying party at finish, exactly as before;
+// what changed is that it is no longer printed into an email, where it was
+// only ever proof that the reader had the email. The finisher now proves
+// itself with the binding cookie instead -- possession of a value only the
+// requesting browser holds.
+func buildMagicLinkURL(baseURL, plainToken string) string {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/auth/complete")
 	if err != nil {
 		// Defensive: build by string concat if baseURL is malformed,
@@ -435,11 +561,31 @@ func buildMagicLinkURL(baseURL, plainToken, state string) string {
 	}
 	q := u.Query()
 	q.Set("ml", plainToken)
-	if state != "" {
-		q.Set("state", state)
-	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// newBindingNonce mints the device-binding nonce: 32 CSPRNG bytes as
+// URL-safe base64 (the cookie value), plus its SHA-256 hex digest (the only
+// half that is persisted). Same construction as the magic-link token itself
+// -- there is no reason for the two credentials on one row to be minted
+// differently.
+func newBindingNonce() (plain, hash string, err error) {
+	const nonceBytes = 32
+	buf := make([]byte, nonceBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	plain = base64.RawURLEncoding.EncodeToString(buf)
+	return plain, HashBindingNonce(plain), nil
+}
+
+// HashBindingNonce hashes a presented memql_ml cookie value the way the
+// issuer hashed the one it minted. Exposed because the comparison happens in
+// the web layer, which must not be free to invent its own digest.
+func HashBindingNonce(plain string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
+	return hex.EncodeToString(sum[:])
 }
 
 // HashMagicLinkToken hashes a plaintext magic-link token with the
@@ -523,4 +669,27 @@ func (i *Issuer) resolveInvitation(ctx context.Context, in IssueInput, email str
 	}
 
 	return &registration.Invitation{Id: row.ID, Email: row.Email, Role: row.Role}
+}
+
+// sendSignInDisabledNotice delivers the passkey-only message. Delivery
+// failure is logged, never returned: the caller's response must not differ
+// from the ordinary path, and a mail outage is not the requester's business.
+func (i *Issuer) sendSignInDisabledNotice(ctx context.Context, email string) {
+	if i == nil || i.Sender == nil {
+		return
+	}
+	brandName := i.Cfg.BrandName
+	if brandName == "" {
+		brandName = "MemQL"
+	}
+	if err := i.Sender.SendSignInDisabledNotice(ctx, NoticeInput{
+		Email:             email,
+		BrandName:         brandName,
+		BrandPrimaryColor: i.Cfg.BrandPrimaryColor,
+		BrandLogoDataURI:  i.Cfg.BrandLogoDataURI,
+	}); err != nil && i.Logger != nil {
+		i.Logger.Warn("magiclink: sign-in-disabled notice failed",
+			slog.String("email", email),
+			slog.String("error", err.Error()))
+	}
 }

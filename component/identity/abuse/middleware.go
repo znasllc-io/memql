@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,9 +32,18 @@ const (
 // legitimate JSON payload for this endpoint.
 const peekRequestBody = 16 * 1024
 
-// magicLinkPath is the only path the middleware actively gates today.
-// Other auth routes pass straight through.
+// magicLinkPath is the API issue route, gated since the stack was written.
 const magicLinkPath = "/auth/magic-link"
+
+// webLoginPath is the BROWSER issue route, gated since memql#4303.
+//
+// It was not, and that was the whole hole: the abuse stack is a middleware
+// wrapped around one route rather than a property of the issuer, and the web
+// form posted straight past it. Turnstile, the disposable-domain blocklist,
+// the MX check and the per-IP velocity limit all applied to the JSON API and
+// to nothing a person could reach with a browser -- which is the surface a
+// human abuser actually uses.
+const webLoginPath = "/login"
 
 // Middleware wraps the magic-link handler with the abuse stack.
 // Construct once at startup and call Wrap to chain it onto the
@@ -51,6 +61,15 @@ type Middleware struct {
 	// processing (e.g. health checks). Optional; nil means "process
 	// every gated path."
 	SkipPaths map[string]struct{}
+
+	// RenderReject replaces the JSON rejection envelope for callers whose
+	// route answers a browser (memql#4303). The web /login form posts HTML
+	// and gets HTML back; the JSON API keeps the envelope its clients parse.
+	// Nil keeps the JSON envelope, which is what the API path wants.
+	//
+	// The hook receives the already-written status and the failure reason so
+	// the renderer can decide how much to say. It must write the response.
+	RenderReject func(w http.ResponseWriter, r *http.Request, status int, reason string)
 }
 
 // magicLinkPeek mirrors the JSON shape POST /auth/magic-link expects.
@@ -113,10 +132,12 @@ func (m *Middleware) Wrap(next http.Handler) http.Handler {
 
 		var peek magicLinkPeek
 		if !oversize && len(body) > 0 {
-			if err := json.Unmarshal(body, &peek); err != nil {
-				// Malformed JSON: pass through and let the handler
-				// emit a structured invalid_request error.
-				m.logDebug("magic_link_body_unparseable", slog.String("error", err.Error()))
+			var perr error
+			peek, perr = peekBody(r.Header.Get("Content-Type"), body)
+			if perr != nil {
+				// Unparseable body: pass through and let the handler emit
+				// its own, more specific, error.
+				m.logDebug("magic_link_body_unparseable", slog.String("error", perr.Error()))
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -215,7 +236,12 @@ func (m *Middleware) shouldGate(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
-	if r.URL == nil || r.URL.Path != magicLinkPath {
+	if r.URL == nil {
+		return false
+	}
+	switch r.URL.Path {
+	case magicLinkPath, webLoginPath:
+	default:
 		return false
 	}
 	if _, skip := m.SkipPaths[r.URL.Path]; skip {
@@ -257,6 +283,11 @@ func (m *Middleware) reject(
 		m.Audit.Log(r.Context(), ev)
 	}
 
+	if m.RenderReject != nil {
+		m.RenderReject(w, r, status, reason)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -264,6 +295,50 @@ func (m *Middleware) reject(
 		"errorId": errorId,
 		"message": "Your request couldn't be processed.",
 	})
+}
+
+// peekBody extracts the email and Turnstile token from whichever encoding
+// the gated route uses.
+//
+// TWO ENCODINGS, ONE STACK. The JSON API sends a body the middleware has
+// always understood; the browser form sends
+// application/x-www-form-urlencoded. Gating /login without teaching the peek
+// about forms would have looked like it worked -- the per-IP limiter runs
+// before the body is read -- while Turnstile, the disposable-domain
+// blocklist and the MX check silently saw an empty email and passed
+// everything. That is a worse outcome than not gating the route at all,
+// because it reads as covered.
+func peekBody(contentType string, body []byte) (magicLinkPeek, error) {
+	var peek magicLinkPeek
+	mediaType := strings.TrimSpace(strings.ToLower(contentType))
+	if idx := strings.IndexByte(mediaType, ';'); idx >= 0 {
+		mediaType = strings.TrimSpace(mediaType[:idx])
+	}
+	if mediaType == "application/x-www-form-urlencoded" {
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return peek, err
+		}
+		peek.Email = values.Get("email")
+		// The login form's Turnstile widget posts under the vendor's own
+		// field name; the JSON API names it `turnstile`. Accept both so one
+		// verifier serves both routes.
+		peek.Turnstile = firstNonBlank(values.Get("cf-turnstile-response"), values.Get("turnstile"))
+		return peek, nil
+	}
+	if err := json.Unmarshal(body, &peek); err != nil {
+		return peek, err
+	}
+	return peek, nil
+}
+
+func firstNonBlank(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (m *Middleware) logDebug(msg string, attrs ...any) {

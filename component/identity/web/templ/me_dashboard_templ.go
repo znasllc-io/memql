@@ -13,6 +13,14 @@ import templruntime "github.com/a-h/templ/runtime"
 // /auth/refresh and friends.
 type MeDashboardData struct {
 	Layout LayoutData
+
+	// SharedMailboxNotice is true when this account's address is flagged as
+	// a shared mailbox and sign-in links are still on (memql#4304).
+	//
+	// BOTH CONDITIONS, because the notice is a call to action and there is
+	// nothing left to do once links are off. Showing it to somebody who has
+	// already turned them off would train them to ignore it.
+	SharedMailboxNotice bool
 }
 
 func MeDashboard(data MeDashboardData) templ.Component {
@@ -56,7 +64,17 @@ func MeDashboard(data MeDashboardData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<section><div class=\"card card-wide\"><h1 class=\"card-title\">Your account</h1><div data-content=\"overview\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your account&hellip;</p></div></div></section></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<section>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.SharedMailboxNotice {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"alert alert-warning\">This account's address looks like a shared mailbox. Anyone who can read it can request a sign-in link and enter this account. <a href=\"/me/settings\">Consider turning sign-in links off</a> and using a passkey.</div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"card card-wide\"><h1 class=\"card-title\">Your account</h1><div data-content=\"overview\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your account&hellip;</p></div></div></section></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

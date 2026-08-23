@@ -136,21 +136,42 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PKCE (RFC 7636): when a challenge was bound to the code, a matching
-	// verifier is REQUIRED. Validated before the code is consumed.
-	if row.CodeChallenge != "" {
-		if err := verifyPKCE(row.CodeChallenge, row.CodeChallengeMethod, body.CodeVerifier); err != nil {
-			s.audit(r, identity.AuditEvent{
-				Category:      identity.AuditCategoryAuth,
-				Action:        "auth_code_redemption_blocked",
-				TargetType:    "authCode",
-				TargetId:      row.ID,
-				Outcome:       identity.AuditOutcomeBlocked,
-				FailureReason: "pkce_failed",
-			})
-			s.writeJSONError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
-			return
+	// PKCE (RFC 7636) IS UNCONDITIONAL (memql#4303).
+	//
+	// This used to read `if row.CodeChallenge != ""`, which meant a code
+	// minted WITHOUT a challenge redeemed for whoever presented it. That is
+	// not a theoretical gap: /login without /authorize produced exactly such
+	// a code, so a magic link that reached the wrong hands was redeemable by
+	// them with no second factor of any kind. Pre-release, the right thing
+	// to break is the client that skipped /authorize.
+	if strings.TrimSpace(row.CodeChallenge) == "" {
+		s.audit(r, identity.AuditEvent{
+			Category:      identity.AuditCategoryAuth,
+			Action:        "auth_code_redemption_blocked",
+			TargetType:    "authCode",
+			TargetId:      row.ID,
+			Outcome:       identity.AuditOutcomeBlocked,
+			FailureReason: "no_pkce",
+		})
+		s.writeJSONError(w, http.StatusBadRequest, "invalid_grant",
+			"authorization codes must be bound to a PKCE code_challenge; start the flow at /authorize")
+		return
+	}
+	if err := verifyPKCE(row.CodeChallenge, row.CodeChallengeMethod, body.CodeVerifier); err != nil {
+		reason := "pkce_failed"
+		if errors.Is(err, errPKCEPlainNotAllowed) {
+			reason = "plain_not_allowed"
 		}
+		s.audit(r, identity.AuditEvent{
+			Category:      identity.AuditCategoryAuth,
+			Action:        "auth_code_redemption_blocked",
+			TargetType:    "authCode",
+			TargetId:      row.ID,
+			Outcome:       identity.AuditOutcomeBlocked,
+			FailureReason: reason,
+		})
+		s.writeJSONError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
+		return
 	}
 
 	// Consume the code BEFORE minting tokens so a concurrent replay
@@ -318,6 +339,12 @@ func constantTimeEq(a, b string) bool {
 // base64url(sha256(verifier)) (no padding) to the challenge in constant
 // time; "plain" compares the verifier directly. Any other method, or an
 // empty verifier, is an error.
+//
+// errPKCEPlainNotAllowed is its own sentinel so the caller can audit the
+// refusal under the reason it actually happened for rather than folding it
+// into a generic mismatch.
+var errPKCEPlainNotAllowed = errors.New("code_challenge_method=plain is not accepted")
+
 func verifyPKCE(challenge, method, verifier string) error {
 	verifier = strings.TrimSpace(verifier)
 	if verifier == "" {
@@ -325,6 +352,9 @@ func verifyPKCE(challenge, method, verifier string) error {
 	}
 	switch strings.TrimSpace(method) {
 	case "", "S256":
+		// The empty method still means S256 -- RFC 7636 §4.3 makes S256 the
+		// default when the parameter is absent, and /authorize requires the
+		// parameter be S256 anyway.
 		sum := sha256.Sum256([]byte(verifier))
 		computed := base64.RawURLEncoding.EncodeToString(sum[:])
 		if subtle.ConstantTimeCompare([]byte(computed), []byte(challenge)) != 1 {
@@ -332,10 +362,12 @@ func verifyPKCE(challenge, method, verifier string) error {
 		}
 		return nil
 	case "plain":
-		if subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) != 1 {
-			return errors.New("code_verifier does not match code_challenge")
-		}
-		return nil
+		// REFUSED (memql#4303). `plain` puts the verifier in the challenge,
+		// so anyone who can read the authorization request can redeem the
+		// code -- it defeats the entire purpose of PKCE while looking, in a
+		// log or a config, exactly like PKCE is on. RFC 7636 §7.2 says a
+		// server SHOULD reject it; no MemQL client uses it.
+		return errPKCEPlainNotAllowed
 	default:
 		return fmt.Errorf("unsupported code_challenge_method %q", method)
 	}

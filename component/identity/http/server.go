@@ -52,6 +52,13 @@ type Server struct {
 	Audit      identity.AuditLogger
 	Logger     *slog.Logger
 
+	// SignInNotifier delivers the new-sign-in email (memql#4305), fired
+	// from createSessionRow -- the one place a v1:identity:authSession row
+	// is created, so every factor is covered by one hook. Nil disables the
+	// message; a delivery failure is logged and audited and NEVER blocks a
+	// sign-in, because a mail outage must not lock people out.
+	SignInNotifier identity.SignInNotifier
+
 	// Abuse is the anti-abuse middleware stack (Phase 4). When
 	// non-nil, it wraps POST /auth/magic-link and emits audit events
 	// for blocked requests. Nil keeps the legacy "no abuse layer"
@@ -224,7 +231,10 @@ func (s *Server) Mount(mux *http.ServeMux) {
 
 	mux.Handle("POST /auth/magic-link", wrapHandler(magicLinkHandler))
 	mux.HandleFunc("OPTIONS /auth/magic-link", wrap(s.cors(s.handleOptions)))
-	mux.HandleFunc("GET /auth/complete", wrap(s.handleComplete))
+	// GET /auth/complete is mounted by component/identity/web now
+	// (memql#4302). It renders a confirmation page rather than consuming a
+	// credential, and both muxes are served by ONE http.ServeMux -- so a
+	// registration left here would panic at boot rather than shadow.
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/registration"
 )
 
 // Sentinel errors the HTTP layer translates to user-facing messages.
@@ -21,7 +22,6 @@ var (
 	ErrInvalidToken      = errors.New("magiclink: invalid token")
 	ErrTokenExpired      = errors.New("magiclink: token expired")
 	ErrTokenAlreadyUsed  = errors.New("magiclink: token already consumed")
-	ErrStateMismatch     = errors.New("magiclink: state parameter does not match issuance context")
 	ErrOAuthCtxCorrupted = errors.New("magiclink: oauth context unparseable")
 )
 
@@ -70,34 +70,105 @@ type VerifyResult struct {
 	AdminSession bool
 }
 
-// Verify consumes a magic-link token end-to-end:
+// Inspect looks a magic-link token up and reports whether it is usable.
+// IT WRITES NOTHING (memql#4302, design D3).
 //
-//  1. Hash plaintext, look up the row.
-//  2. Reject if not found / expired / already consumed.
-//  3. Stamp consumedAt (single-use guarantee).
-//  4. Decode oauthCtx; verify state param if both sides have it.
-//  5. Ensure-or-create the v1:identity:user (+ identity row).
-//  6. Mint a one-time auth code.
-//  7. Audit the consume.
+// This is the read half that GET /auth/complete needs. A GET used to
+// consume the link before any human had interacted with it, which is what
+// let Outlook SafeLinks, Gmail's proxy and every mail-security appliance
+// burn a link by scanning it -- and what let the recipient of a shared
+// mailbox spend a link somebody else had asked for. The click now renders a
+// page; the state change is a POST from a page a human is looking at.
 //
-// The returned VerifyResult.AuthCode is the plaintext code the HTTP
-// handler appends to the redirect URL; the row is keyed by codeHash so
-// the /oauth/token redemption handler hashes it again at lookup time.
-func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, error) {
+// Returns the row on success and one of ErrInvalidToken / ErrTokenExpired /
+// ErrTokenAlreadyUsed otherwise. Note there is no audit row on the happy
+// path: rendering a page is not an event, and auditing every prefetch would
+// bury the clicks that matter.
+func (v *Verifier) Inspect(ctx context.Context, plainToken, sourceIP, userAgent string) (*identity.MagicLinkRow, error) {
 	if v == nil {
 		return nil, errors.New("magiclink: nil verifier")
 	}
 	if v.Store == nil {
 		return nil, errors.New("magiclink: nil store")
 	}
-
-	plain := strings.TrimSpace(in.PlainToken)
+	plain := strings.TrimSpace(plainToken)
 	if plain == "" {
 		return nil, ErrInvalidToken
 	}
-	tokenHash := HashMagicLinkToken(plain)
+	in := VerifyInput{PlainToken: plain, SourceIP: sourceIP, UserAgent: userAgent}
 
-	row, err := v.Store.LookupMagicLinkByTokenHash(ctx, tokenHash)
+	row, err := v.Store.LookupMagicLinkByTokenHash(ctx, HashMagicLinkToken(plain))
+	if err != nil {
+		return nil, fmt.Errorf("magiclink: lookup: %w", err)
+	}
+	if row == nil {
+		v.auditFailure(ctx, "magic_link_inspect", in, "token_not_found")
+		return nil, ErrInvalidToken
+	}
+	now := time.Now().UTC()
+	if !row.ExpiresAt.IsZero() && now.After(row.ExpiresAt) {
+		v.auditFailure(ctx, "magic_link_inspect", in, "expired")
+		return nil, ErrTokenExpired
+	}
+	if !row.ConsumedAt.IsZero() {
+		v.auditFailure(ctx, "magic_link_inspect", in, "already_consumed")
+		return nil, ErrTokenAlreadyUsed
+	}
+	return row, nil
+}
+
+// FinishInput names the request that completes a sign-in.
+//
+// It carries a request ID rather than a token because the finisher is the
+// REQUESTING browser, which never saw the token -- it holds the binding
+// cookie and the request id rendered on its own /check-email page. The
+// caller has already checked the cookie against the row's bindingHash; this
+// function's job is the exactly-once consume and everything downstream of
+// it.
+type FinishInput struct {
+	RequestId string
+	SourceIP  string
+	UserAgent string
+	// CrossDevice records whether this completion followed an approval from
+	// a different device. Audit only -- it changes no behaviour, and exists
+	// so an operator reading the trail can tell "I clicked my own link" from
+	// "somebody else clicked and I finished".
+	CrossDevice bool
+}
+
+// Finish consumes a magic-link request end-to-end:
+//
+//  1. Re-read the row by id.
+//  2. Reject if not found / expired / already consumed.
+//  3. Consume EXACTLY ONCE (Store.ConsumeMagicLinkRequest is a
+//     compare-and-swap under an advisory lock -- memql#4301).
+//  4. Decode oauthCtx.
+//  5. Ensure-or-create the v1:identity:user (+ identity row).
+//  6. Mint a one-time auth code.
+//  7. Audit the consume and the completion.
+//
+// The returned VerifyResult.AuthCode is the plaintext code the handler
+// appends to the redirect URL; the row is keyed by codeHash so the
+// /oauth/token redemption handler hashes it again at lookup time.
+//
+// THE `state` COMPARISON IS GONE, and its absence is the design rather than
+// an omission. `state` used to ride in the emailed URL and be compared
+// against the row, which proved only that the clicker had the link. It no
+// longer travels in the email at all: the row keeps it, and the finisher
+// proves itself with the binding cookie -- possession of a value only the
+// requesting browser holds, which is strictly stronger than echoing back a
+// value that was printed in the email. `state` is still echoed to the
+// relying party, unchanged.
+func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, error) {
+	if v == nil {
+		return nil, errors.New("magiclink: nil verifier")
+	}
+	if v.Store == nil {
+		return nil, errors.New("magiclink: nil store")
+	}
+	in := VerifyInput{SourceIP: fin.SourceIP, UserAgent: fin.UserAgent}
+
+	row, err := v.Store.LookupMagicLinkById(ctx, strings.TrimSpace(fin.RequestId))
 	if err != nil {
 		return nil, fmt.Errorf("magiclink: lookup: %w", err)
 	}
@@ -116,34 +187,24 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 		return nil, ErrTokenAlreadyUsed
 	}
 
-	// Stamp consumedAt FIRST so a double-click race condition can't
-	// double-issue auth codes. If a concurrent verify already consumed
-	// the row, the second verify still proceeds here (because we read
-	// consumedAt above as zero) but its CreateAuthCode will mint a
-	// distinct codeId — both codes work but each consumes once at
-	// /oauth/token. The narrow race is acceptable for v1; the proper
-	// fix is a CAS-style consume mutation.
-	if err := v.Store.ConsumeMagicLinkRequest(ctx, row.ID, in.SourceIP); err != nil {
+	// EXACTLY ONCE. The store re-reads the row inside an advisory lock and
+	// writes only if consumedAt is still empty, so the loser of a race
+	// between the poller and a same-device click is TOLD it lost rather than
+	// quietly minting a second auth code from one link (memql#4301).
+	if err := v.Store.ConsumeMagicLinkRequest(ctx, row.ID, fin.SourceIP); err != nil {
+		if errors.Is(err, identity.ErrMagicLinkAlreadyConsumed) {
+			v.auditFailure(ctx, "magic_link_consume", in, "already_consumed")
+			return nil, ErrTokenAlreadyUsed
+		}
 		v.auditFailure(ctx, "magic_link_consume", in, "consume_mutation_failed")
 		return nil, fmt.Errorf("magiclink: stamp consumedAt: %w", err)
 	}
 
 	// Decode the OAuth ctx.
-	clientId, redirectURI, issuedState, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
+	clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
 	if err != nil {
 		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
 		return nil, ErrOAuthCtxCorrupted
-	}
-
-	// State param check: if BOTH sides have it, they must match.
-	// Missing on either side is fine (older clients don't send state).
-	if issuedState != "" && in.State != "" && issuedState != in.State {
-		v.auditFailure(ctx, "magic_link_consume", in, "state_mismatch")
-		return nil, ErrStateMismatch
-	}
-	state := issuedState
-	if state == "" {
-		state = in.State
 	}
 
 	// Validate the registered redirect URI is still kosher (defensive:
@@ -200,7 +261,14 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 		// to re-type everything from /admin/users/detail. Failure is
 		// non-fatal -- worst case the operator fills the fields in via
 		// the admin UI.
-		seed := identity.UserProfileSeed{}
+		// THE SHARED-MAILBOX HINT, STAMPED AT CREATION (memql#4304). The
+		// heuristic runs exactly once, here, at the moment the account comes
+		// into existence -- so the flag is right from the first sign-in
+		// rather than appearing later and looking like an accusation. It
+		// blocks nothing; the user or an admin can clear it in one click.
+		seed := identity.UserProfileSeed{
+			SharedMailbox: registration.LooksLikeSharedMailbox(row.Email),
+		}
 		if bootstrap {
 			if cs, err := v.Store.ReadClusterSettings(ctx); err == nil && cs != nil {
 				seed.FirstName = cs.BootstrapFirstName
@@ -343,6 +411,31 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 		Detail: map[string]any{
 			"clientId": clientId,
 			"newUser":  newUser,
+		},
+	})
+
+	// magic_link_completed is the SECOND row, and it is not redundant with
+	// magic_link_consumed. Consumed says the credential was spent; completed
+	// says which shape of flow spent it. `cross_device` means somebody else
+	// clicked and the requesting browser finished -- the alias case the
+	// design exists for. An operator reading a trail wants to see that
+	// without joining two tables.
+	completionMode := "same_device"
+	if fin.CrossDevice {
+		completionMode = "cross_device"
+	}
+	v.audit(ctx, identity.AuditEvent{
+		Category:    identity.AuditCategoryAuth,
+		Action:      "magic_link_completed",
+		TargetType:  "magicLinkRequest",
+		TargetId:    row.ID,
+		TargetEmail: row.Email,
+		ActorUserId: userId,
+		SourceIP:    in.SourceIP,
+		UserAgent:   in.UserAgent,
+		Outcome:     identity.AuditOutcomeSuccess,
+		Detail: map[string]any{
+			"mode": completionMode,
 		},
 	})
 

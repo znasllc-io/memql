@@ -20,6 +20,12 @@ type LoginData struct {
 	Stage              string
 	AllowedDomainsHint string
 	PrefillEmail       string
+
+	// SharedMailboxHint is true when PrefillEmail looks like a shared
+	// mailbox (memql#4304). Derived from the ADDRESS by the public heuristic,
+	// never from the account row -- reading the row here would tell an
+	// unauthenticated visitor whether a given address has an account.
+	SharedMailboxHint bool
 	// ReturnTo is the post-sign-in landing path the relying-party SPA
 	// wants to send the user to after the OAuth code-flow completes.
 	// Threaded through unchanged.
@@ -186,6 +192,13 @@ templ loginFormEmail(data LoginData) {
 			if data.Mode == "domain_restricted" && data.AllowedDomainsHint != "" {
 				<span class="help">
 					Registration on this cluster is limited to: { data.AllowedDomainsHint }. Existing users from any domain can still sign in.
+				</span>
+			}
+			if data.SharedMailboxHint {
+				<span class="help">
+					That address looks like a shared mailbox. Anyone who can read it can
+					use the sign-in link, so it signs in as this account rather than as
+					you personally.
 				</span>
 			}
 			<span id="email-hint" class="help"></span>

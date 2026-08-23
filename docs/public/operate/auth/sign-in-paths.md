@@ -69,21 +69,46 @@ an identity-issued JWT access token.
 
 The default, and the one every other path is measured against.
 
-- Issued by `POST /auth/magic-link`, consumed by `GET /auth/complete`.
+- Issued by `POST /auth/magic-link` or `POST /login`. The click lands on
+  `GET /auth/complete`, which **renders a confirmation page and writes
+  nothing**; the state change is the POST that follows.
 - Single-use, token-hashed at rest, 10-minute default TTL
-  (`MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS`, default 600).
+  (`MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS`, default 600). Consume is a
+  compare-and-swap under a Postgres advisory lock, so exactly one finisher
+  wins.
+- **Device-bound.** Issue also mints a 32-byte nonce, stores only its digest
+  on the row, and hands the plaintext to the requesting browser as the
+  `memql_ml` cookie. A link COMPLETES only in a browser holding that cookie;
+  a click anywhere else can only APPROVE the request, and the requesting tab
+  (sitting on `/check-email`) polls, notices, and finishes itself. **If
+  somebody else clicks your link, you sign in and they get nothing.**
 - The row carries the in-flight OAuth context -- `clientId`, `redirectURI`,
-  `state`, `codeChallenge`, `codeChallengeMethod` -- so consuming the link mints
-  an auth code for the client that started the flow.
-- `POST /auth/magic-link` is the one route wrapped in the anti-abuse stack:
-  per-IP rate limit, Turnstile, disposable-domain blocklist, MX validation, risk
-  scoring. See [identity-service.md](identity-service.md).
+  `state`, `codeChallenge`, `codeChallengeMethod` -- so finishing mints an
+  auth code for the client that started the flow. `state` no longer travels
+  in the emailed URL: it stayed on the row, and the cookie replaced what
+  echoing it proved.
+- **Both** issue routes are wrapped in the anti-abuse stack: per-IP rate
+  limit, Turnstile, disposable-domain blocklist, MX validation, risk scoring.
+  See [identity-service.md](identity-service.md).
+- **It can be turned off per account.** `signInPolicy=passkey_only` makes a
+  request for a link send a notice instead. See
+  [access-model.md](access-model.md#shared-mailboxes-and-passkey-only-sign-in).
 
-It needs one thing the other paths do not: **outbound mail**. With neither
+It needs two things the other paths do not.
+
+**Outbound mail.** With neither
 Microsoft Graph nor SMTP configured, the `email` integration falls back to a log
 sender, which writes the message body -- link included -- to the identity pod's
 log instead of delivering it. That is exactly the situation the enrolment link
 exists for, and it is also what the install wizard's `magicLink` step reads.
+
+**A mailbox only you read.** Anyone who can read the address can request a
+link for the account, and no amount of device binding changes that -- binding
+stops somebody riding *your* link, not somebody asking for their own. On a
+group alias (`team@`, `support@`) the account's sign-in surface is the
+mailbox's reader list. The `sharedMailbox` hint makes that visible and
+`passkey_only` closes it; both are in
+[access-model.md](access-model.md#shared-mailboxes-and-passkey-only-sign-in).
 
 ## Passkey
 

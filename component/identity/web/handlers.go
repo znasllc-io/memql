@@ -2,18 +2,20 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/registration"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
-
-func nowNano() int64 { return time.Now().UnixNano() }
 
 // handleRoot redirects bare / to /login (or /setup if pre-bootstrap).
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +233,17 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	// Only carry the PKCE challenge when the relying-party client matched;
 	// the admin-session path never mints an OAuth code.
 	if clientMatched {
+		// A MATCHED CLIENT MUST BRING A CHALLENGE (memql#4303). /oauth/token
+		// no longer redeems a code without one, so accepting the submission
+		// here would mint a code this client could never exchange -- a
+		// sign-in that appears to work and dead-ends at the callback. Refuse
+		// it at the door, and say which parameter is missing: the caller's
+		// fix is to start at /authorize, which requires it.
+		if formCodeChallenge == "" {
+			s.renderError(w, r, http.StatusBadRequest,
+				"This sign-in request is missing its PKCE code_challenge. Start again from the application you were signing in to -- it must begin the flow at /authorize.")
+			return
+		}
 		in.CodeChallenge = formCodeChallenge
 		in.CodeChallengeMethod = formCodeChallengeMethod
 	}
@@ -259,6 +272,9 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		}
 		next, existingUser := s.routeLoginEmail(r, email, returnTo)
 		if next != nil {
+			// The hint travels with the re-rendered form (memql#4304), from
+			// the address the visitor typed rather than from any row.
+			next.SharedMailboxHint = registration.LooksLikeSharedMailbox(email)
 			s.render(w, r, "login", webtempl.Login(*next))
 			return
 		}
@@ -269,7 +285,8 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		in.ExistingUser = existingUser
 	}
 
-	if err := s.IssueMagicLink(r.Context(), in); err != nil {
+	res, err := s.IssueMagicLink(r.Context(), in)
+	if err != nil {
 		s.Logger.Warn("identity-web: issue magic link failed",
 			"error", err, "form", formKind, "remote", clientIP(r))
 		// Generic message — don't leak per-mode rejection reason.
@@ -277,7 +294,54 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/check-email?email="+strings.ReplaceAll(email, "+", "%2B"), http.StatusSeeOther)
+	// BIND THE LINK TO THIS BROWSER (memql#4302). The nonce is set here and
+	// held nowhere else; the row keeps only its digest. Without this cookie
+	// the link that is about to be emailed can be APPROVED from anywhere and
+	// COMPLETED nowhere, which is what stops a shared mailbox from being a
+	// first-come-first-served credential.
+	s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
+	http.Redirect(w, r, checkEmailURL(email, res.RequestId), http.StatusSeeOther)
+}
+
+// checkEmailURL builds the post-issue redirect. The request id rides along so
+// the page can poll for its own approval; it is not secret.
+func checkEmailURL(email, requestId string) string {
+	q := url.Values{}
+	q.Set("email", email)
+	if strings.TrimSpace(requestId) != "" {
+		q.Set("request", requestId)
+	}
+	return "/check-email?" + q.Encode()
+}
+
+// bindingLifetime is how long the cookie should live: until the ROW expires.
+//
+// Derived from the issuer's own answer rather than re-read from config, so
+// the binding dies exactly when the credential it binds does. Two independent
+// reads of MagicLinkTTL would agree today and diverge the first time either
+// side learns to consult a runtime override -- and the divergence would be
+// silent in the worse direction: a cookie that expires early turns every
+// same-device click into a cross-device approval, which reads as "the link
+// stopped working on my own machine".
+//
+// Falls back to the configured TTL when the issuer returned no expiry (the
+// paths that mint no row, where there is no cookie to set either).
+func (s *Server) bindingLifetime(res IssueMagicLinkResult) time.Duration {
+	if !res.ExpiresAt.IsZero() {
+		if d := time.Until(res.ExpiresAt); d > 0 {
+			return d
+		}
+	}
+	return s.magicLinkTTL()
+}
+
+// magicLinkTTL is the configured link lifetime, used as the fallback above
+// and as the poller's stop time.
+func (s *Server) magicLinkTTL() time.Duration {
+	if s != nil && s.Cfg.MagicLinkTTL > 0 {
+		return s.Cfg.MagicLinkTTL
+	}
+	return 10 * time.Minute
 }
 
 // routeLoginEmail decides what to do with a step-1 email submission.
@@ -397,11 +461,29 @@ func (s *Server) handleCheckEmail(w http.ResponseWriter, r *http.Request) {
 	if action == "" {
 		action = "magic_link_sent"
 	}
+	// The poller only renders when this page names a live request AND the
+	// flow is actually mounted -- rendering a poll against routes that do
+	// not exist would leave a page that says "waiting" forever.
+	requestId := ""
+	pollSeconds := 0
+	if s.magicLinkMounted() {
+		if id := strings.TrimSpace(r.URL.Query().Get("request")); id != "" {
+			requestId = id
+			pollSeconds = int(s.magicLinkTTL() / time.Second)
+		}
+	}
 	data := webtempl.CheckEmailData{
-		Layout:    s.LayoutData(r, "Check your email", false, nil, nil),
-		Email:     email,
-		ExpiresIn: expiresIn,
-		Action:    action,
+		Layout:      s.LayoutData(r, "Check your email", false, nil, nil),
+		Email:       email,
+		ExpiresIn:   expiresIn,
+		Action:      action,
+		RequestId:   requestId,
+		PollSeconds: pollSeconds,
+		// From the TYPED ADDRESS, never from the account row (memql#4304).
+		// The heuristic is public knowledge; the row is not, and reading it
+		// here would tell an unauthenticated visitor that a given address
+		// has an account.
+		SharedMailboxHint: registration.LooksLikeSharedMailbox(email),
 	}
 	s.render(w, r, "check_email", webtempl.CheckEmail(data))
 }
@@ -564,6 +646,11 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 		ClientID:    strings.TrimSpace(r.URL.Query().Get("client_id")),
 		RedirectURI: strings.TrimSpace(r.URL.Query().Get("redirect_uri")),
 		OAuthState:  strings.TrimSpace(r.URL.Query().Get("state")),
+		// The PKCE challenge rides through too (memql#4303). /oauth/token no
+		// longer redeems a code without one, so dropping it here would mint a
+		// code the relying party could never exchange.
+		CodeChallenge:       strings.TrimSpace(r.URL.Query().Get("code_challenge")),
+		CodeChallengeMethod: strings.TrimSpace(r.URL.Query().Get("code_challenge_method")),
 	}
 	s.render(w, r, "setup_wizard", webtempl.SetupWizard(data))
 }
@@ -628,6 +715,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	// running setup hasn't been able to add themselves to any allow-list
 	// yet) and the bootstrap-state gate (clusterSettings was just written
 	// above; the issuer would race its own stamp otherwise).
+	requestId := ""
 	if s.IssueMagicLink != nil {
 		// Wizard owner-mint. Two callers reach here:
 		//   1. Admin web /setup with no relying-party in scope --
@@ -660,6 +748,29 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			Bootstrap:    true,
 			AdminSession: !clientMatched,
 		}
+		if clientMatched {
+			issue.CodeChallenge = strings.TrimSpace(r.PostForm.Get("code_challenge"))
+			issue.CodeChallengeMethod = strings.TrimSpace(r.PostForm.Get("code_challenge_method"))
+			// A MATCHED CLIENT THAT BROUGHT NO CHALLENGE FALLS BACK to the
+			// admin-session path rather than being refused (memql#4303).
+			//
+			// The /login handler answers 400 for this, and is right to: the
+			// caller can start again at /authorize. The wizard cannot. An
+			// operator mid-bootstrap has just typed a page of settings that
+			// were persisted a few lines above, and a 400 here strands them
+			// on a cluster that is now claimed with no way in. Signing them
+			// into the identity console instead costs the relying party its
+			// automatic hand-back and nothing else.
+			if issue.CodeChallenge == "" {
+				issue.ClientId, issue.RedirectURI = "", ""
+				issue.AdminSession = true
+				issue.State = "setup"
+				if s.Logger != nil {
+					s.Logger.Warn("identity-web: setup matched a client with no PKCE challenge; issuing an admin-session link instead",
+						"client_id", clientId)
+				}
+			}
+		}
 		if !clientMatched {
 			// Preserve the pre-existing "setup" state marker on the
 			// admin-only path so audit logs / verifier traces still
@@ -667,12 +778,19 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			// sign-ins.
 			issue.State = "setup"
 		}
-		if err := s.IssueMagicLink(r.Context(), issue); err != nil && s.Logger != nil {
+		res, err := s.IssueMagicLink(r.Context(), issue)
+		if err != nil && s.Logger != nil {
 			s.Logger.Warn("identity-web: wizard issue magic link failed",
 				"error", err, "email", in.OwnerEmail)
 		}
+		// The wizard's browser gets the same binding as any other requester,
+		// so the claim link completes on the machine that ran /setup. It is
+		// the one flow where the operator is provably at the keyboard, and
+		// binding it costs nothing.
+		s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
+		requestId = res.RequestId
 	}
-	http.Redirect(w, r, "/check-email?email="+strings.ReplaceAll(in.OwnerEmail, "+", "%2B"), http.StatusSeeOther)
+	http.Redirect(w, r, checkEmailURL(in.OwnerEmail, requestId), http.StatusSeeOther)
 }
 
 // handleLegalTOS renders the TOS markdown wrapped in the legal_view
@@ -732,6 +850,14 @@ func (s *Server) handleMeDashboard(w http.ResponseWriter, r *http.Request) {
 	data := webtempl.MeDashboardData{
 		Layout: s.LayoutData(r, "Dashboard", true, meNavLinks(), extra),
 	}
+	// The shared-mailbox notice is rendered server-side from the caller's own
+	// row (memql#4304), unlike the rest of this page. It says something about
+	// who can enter the account, which is not a thing to hydrate later.
+	if claims := s.optionalUser(r); claims != nil && s.Store != nil {
+		if user, err := s.Store.LookupUserById(r.Context(), claims.Subject); err == nil && user != nil {
+			data.SharedMailboxNotice = user.SharedMailbox && !user.PasskeyOnly()
+		}
+	}
 	s.render(w, r, "me/dashboard", webtempl.MeDashboard(data))
 }
 
@@ -740,6 +866,14 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	data := webtempl.MeSettingsData{
 		Layout:               s.LayoutData(r, "Settings", true, meNavLinks(), extra),
 		DeletionCooldownDays: int(s.Cfg.DeletionCooldown / (24 * time.Hour)),
+		Flash:                flashFromQuery(r),
+	}
+	// The sign-in-security card needs the caller (memql#4304). Unlike the
+	// rest of this page, which is client-hydrated, these two controls change
+	// who can enter the account -- so they are rendered server-side from the
+	// caller's own row, and simply absent when there is no caller to read.
+	if claims := s.optionalUser(r); claims != nil {
+		data.SignInSecurity = s.signInSecurityCard(r, claims)
 	}
 	s.render(w, r, "me/settings", webtempl.MeSettings(data))
 }
@@ -861,19 +995,27 @@ func (s *Server) pickOAuthCtx(ctx context.Context, clientId, redirectURI, fallba
 	return "", "", state, false
 }
 
-// randomState returns a short random string for the OAuth state param.
-// Used only when the form doesn't supply one. Not a security primitive
-// — the security-relevant state validation lives on the magic-link
-// completion path which checks against the persisted oauthCtx.
+// randomState returns a short random string for the OAuth state param,
+// used only when the form doesn't supply one.
+//
+// crypto/rand, not the seeded LCG this replaced (memql#4302). The old one
+// was a linear congruential generator seeded from the wall clock, which
+// makes every value it produces predictable to anyone who knows roughly when
+// the page was served. That was defensible while `state` was compared
+// against the row on consume and the comment here said so -- and it is not
+// the security boundary now either, since the binding cookie is. It is
+// simply not worth a reader having to reconstruct that argument to satisfy
+// themselves that a hand-rolled PRNG in an auth path is fine.
+//
+// On the (impossible in practice) failure of the system entropy source this
+// returns the empty string, and pickOAuthCtx treats an empty state exactly
+// as it treats a caller that supplied none.
 func randomState() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 12)
-	now := nowNano()
-	for i := range b {
-		now = now*1103515245 + 12345
-		b[i] = charset[int(uint64(now)>>16)%len(charset)]
+	buf := make([]byte, 9) // 12 base64url chars, no padding
+	if _, err := rand.Read(buf); err != nil {
+		return ""
 	}
-	return string(b)
+	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 // EncodeJSON helper used by future endpoints (kept here because the
