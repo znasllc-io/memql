@@ -138,6 +138,10 @@ func (s *Server) meDevicesData(r *http.Request, claims *identity.AccessTokenClai
 		return data
 	}
 	data.RoutesSummary = currentRoutesSentence(routes)
+	// The sessions panel (memql#4306). Rendered from the caller's own
+	// self-scoped read; a failure leaves SessionsAvailable false and the card
+	// says so, rather than showing an empty table.
+	data.Sessions, data.SessionsAvailable = s.meSessionRows(r, claims)
 	return data
 }
 

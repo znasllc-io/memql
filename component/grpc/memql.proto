@@ -158,6 +158,15 @@ message MemqlClientMessage {
     // owned by the caller as revoked. Use this when the user suspects
     // a session is compromised.
     RevokeAllSessionsMsg revoke_all_sessions = 52;
+    // Revoke ONE named session of the caller's own (memql#4319). The
+    // id is resolved against the caller's own session list before
+    // anything is written, so this cannot be aimed at a stranger's row
+    // -- see RevokeSessionMsg.
+    RevokeSessionMsg revoke_session = 112;
+    // Self-service sign-in policy (memql#4319). The caller's OWN
+    // account only; the target is the verified subject, never an
+    // argument. See SetSignInPolicyMsg.
+    SetSignInPolicyMsg set_sign_in_policy = 113;
     // Worker-token issuance. The frontend's AddWorkerModal calls
     // this to mint an mql_wkr_<...> credential the user pastes into
     // their cockpit-worker config. Plain token is returned in the
@@ -434,6 +443,10 @@ message MemqlServerMessage {
     // Session-revocation replies (see RevokeCurrentSessionMsg / RevokeAllSessionsMsg).
     RevokeCurrentSessionResult revoke_current_session_result = 91;
     RevokeAllSessionsResult revoke_all_sessions_result = 92;
+    // Single-session revoke reply (see RevokeSessionMsg).
+    RevokeSessionResult revoke_session_result = 135;
+    // Self-service sign-in policy reply (see SetSignInPolicyMsg).
+    SetSignInPolicyResult set_sign_in_policy_result = 136;
     // Worker-token mint / revoke replies.
     CreateWorkerTokenResult create_worker_token_result = 93;
     RevokeWorkerTokenResult revoke_worker_token_result = 94;
@@ -2064,6 +2077,39 @@ message MyAccessResult {
   UserRole cluster_role = 4;
   reserved 5;
   reserved "partitions";
+  // session_id is the v1:identity:authSession row backing THIS connection,
+  // read off the verified claims (memql#4306).
+  //
+  // It exists so a client can mark "this device" in a sessions list without
+  // decoding the JWT. The portal refuses to decode tokens by standing rule
+  // (clients/portal/src/cluster/useMyAccess.ts) -- a client that parses a
+  // bearer starts making decisions from claims the server never promised it
+  // -- so without this field the only way to identify the current session
+  // would be to break that rule or to guess by user agent. Guessing is worse
+  // than it sounds: two tabs of one browser share a user agent and hold
+  // different sessions, so a wrong guess invites somebody to revoke the
+  // session they are sitting in.
+  //
+  // Empty when the caller's credential carries no session (a PAT, an
+  // operator key, a service account), which is not an error -- those are
+  // bearers with no session row to name.
+  string session_id = 6;
+  // display_name is the person's name off their v1:identity:user row
+  // (memql#4317), resolved server-side by the same IdentityResolver read
+  // that already produces primary_email and cluster_role.
+  //
+  // It is here rather than read from the JWT for the reason session_id is:
+  // the portal renders the signed-in person on EVERY shell paint and refuses
+  // to decode its own bearer, so a name that only exists in a claim is a name
+  // the shell cannot have. It is also the more honest of the two -- a claim
+  // is what was true when the token was minted, while this is what the row
+  // says now, and a rename that never reaches the rail is a console
+  // disagreeing with the account page next to it.
+  //
+  // Empty when no user row resolved (a first request racing the
+  // registration insert, a PAT with no provisioned user). Not an error: a
+  // client renders the email instead, which it already holds.
+  string display_name = 7;
 }
 
 // -----------------------------------------------------------------------------
@@ -2546,6 +2592,96 @@ message RevokeAllSessionsResult {
   string request_id = 1;
   bool success = 2;
   int32 revoked_count = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+
+// RevokeSessionMsg revokes ONE named session belonging to the caller
+// (memql#4319). It is what a sessions list needs and the two messages
+// above cannot express: "current" is the row you are sitting in and
+// "all" takes you out with it, so neither can end the session on the
+// laptop you left at the office.
+//
+// THE ID IS CHECKED AGAINST THE CALLER'S OWN SESSIONS, not merely
+// passed to the mutation. revokeAuthSession takes a caller-supplied
+// sessionId and carries no owner predicate of its own -- `filter` is a
+// read construct and a mutation cannot hold one -- so a handler that
+// forwarded the argument would let any authenticated caller revoke any
+// session in the cluster by id. The handler therefore lists the
+// caller's own rows by verified subject first and refuses an id that
+// is not among them, which is the same shape identity's own
+// /me/devices revoke uses.
+message RevokeSessionMsg {
+  string request_id = 1;
+  // The v1:identity:authSession row id, as returned by
+  // authSessionsForSelf. Never another user's -- see above.
+  string session_id = 2;
+}
+
+// RevokeSessionResult - error_code values:
+//   ""                -- success
+//   "not_found"       -- no live session of the caller's has that id
+//                        (already revoked, expired, or never theirs).
+//                        Deliberately the same answer for "not yours"
+//                        as for "does not exist": distinguishing them
+//                        would turn this into an oracle for whether a
+//                        given session id is real.
+//   "invalid"         -- empty session_id
+//   "unauthenticated" -- the caller has no resolved subject
+message RevokeSessionResult {
+  string request_id = 1;
+  bool success = 2;
+  string session_id = 3;
+  // True when the revoked row is the one backing THIS connection, so a
+  // client knows to clear its local credential and land on sign-in
+  // rather than re-reading a list it can no longer read.
+  bool was_current = 4;
+  string error_code = 5;
+  string error_message = 6;
+}
+
+// SetSignInPolicyMsg sets the CALLER'S OWN sign-in policy (memql#4304
+// supplies the field; memql#4319 renders the control in the portal).
+//
+// There is no user id on this message and that is the authorization.
+// setUserSignInPolicy is @serverOnly precisely because its other caller
+// -- an owner resetting somebody else's account to `any` -- is a
+// legitimate write against a row the actor does not own, which no
+// actor-scoped filter can express. The self-service half gets its
+// scoping from having no target to aim: the row written is the verified
+// subject's.
+//
+// The precondition lives with the write, not with the control.
+// Switching to passkey_only without an enrolled passkey locks a person
+// out of their own account, so the server counts the caller's active
+// passkeys and refuses -- and FAILS CLOSED when the count cannot be
+// read, because a transport blip and "no passkeys" must not produce the
+// same decision when the difference is a lockout. The portal renders
+// the switch disabled in that state too; a disabled control is a
+// suggestion and this is not one.
+message SetSignInPolicyMsg {
+  string request_id = 1;
+  // "any" | "passkey_only".
+  string policy = 2;
+}
+
+// SetSignInPolicyResult - error_code values:
+//   ""                  -- success (including a no-op re-set)
+//   "invalid"           -- policy is not one of any|passkey_only
+//   "no_passkey"        -- passkey_only requested with zero active
+//                          passkeys enrolled. error_message is the
+//                          sentence to show the person.
+//   "precondition_unknown" -- the passkey list could not be read, so
+//                          the change was refused rather than made
+//                          blind.
+//   "unauthenticated"   -- the caller has no resolved subject
+//   "unavailable"       -- no engine / gate wired on this node
+message SetSignInPolicyResult {
+  string request_id = 1;
+  bool success = 2;
+  // The policy in force after the call -- what the client should render,
+  // rather than what it optimistically assumed.
+  string policy = 3;
   string error_code = 4;
   string error_message = 5;
 }
@@ -3513,6 +3649,8 @@ message IdentityAdminMsg {
     RotateRecoveryKeyRequest rotate_recovery_key = 19;
     IssueUserInvitationRequest issue_user_invitation = 20;
     RevokeUserInvitationRequest revoke_user_invitation = 21;
+    ResetSignInPolicyRequest reset_sign_in_policy = 22;
+    SetUserSharedMailboxRequest set_user_shared_mailbox = 23;
   }
 }
 
@@ -3677,6 +3815,40 @@ message SetUserSuspendedRequest {
   bool suspended = 2;
   // Recorded on the row and in the audit detail. Ignored when reinstating.
   string reason = 3;
+}
+
+// ResetSignInPolicyRequest puts a user's sign-in policy back to "any"
+// (memql#4304).
+//
+// RESET ONLY, in one direction. An owner or admin can turn sign-in links back
+// ON for somebody who turned them off and then lost their passkey; they
+// cannot turn them off for somebody else. Enabling passkey_only on another
+// person's account would let an admin lock a colleague out of their own
+// account with one call, and there is no operational need for it -- the
+// control belongs to the person whose passkey it is.
+//
+// The one-directional shape is why this is not a "set policy" message: a
+// message with a policy field would need a rule about which values an admin
+// may send, and a rule is a thing that can be got wrong. A message with no
+// field cannot express the wrong thing.
+//
+// It is the same trust level as issuing an enrolment token for the user,
+// which admins can already do, and it is audited as
+// sign_in_policy_reset_by_admin.
+message ResetSignInPolicyRequest {
+  string user_id = 1;
+}
+
+// SetUserSharedMailboxRequest sets or clears the shared-mailbox hint on a
+// user (memql#4304).
+//
+// BOTH DIRECTIONS, unlike the policy above, because the flag gates nothing.
+// It drives copy: a warning on the account holder's own settings page, and a
+// signal in the People view. The heuristic that seeds it is a guess, so an
+// admin has to be able to correct it either way.
+message SetUserSharedMailboxRequest {
+  string user_id = 1;
+  bool shared = 2;
 }
 
 // RevokeUserTokenRequest deactivates a personal access token. Replaces

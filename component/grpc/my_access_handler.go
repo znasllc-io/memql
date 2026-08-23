@@ -1,6 +1,9 @@
 package memql
 
 import (
+	"context"
+	"strings"
+
 	"google.golang.org/grpc/codes"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -30,7 +33,13 @@ func (s *streamSession) handleMyAccess(envelope *memqlv1.MemqlClientMessage, msg
 		RequestId:    requestId,
 		UserId:       ac.UserId,
 		PrimaryEmail: ac.PrimaryEmail,
-		ClusterRole:  roleToProto(ac.Role),
+		// From the user row the resolver already read (memql#4317) -- the
+		// same read that produced PrimaryEmail, so the name costs no extra
+		// query. Empty when no row resolved; a client falls back to the
+		// email it is holding anyway.
+		DisplayName: ac.DisplayName,
+		ClusterRole: roleToProto(ac.Role),
+		SessionId:   sessionIdFromClaims(ctx),
 	}
 
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
@@ -57,4 +66,26 @@ func roleToProto(r auth.Role) memqlv1.UserRole {
 	default:
 		return memqlv1.UserRole_USER_ROLE_UNSPECIFIED
 	}
+}
+
+// sessionIdFromClaims reads the `sid` claim off the VERIFIED token
+// (memql#4306).
+//
+// Verified is the operative word: these claims were attached by the identity
+// verifier after checking the signature, so this is the server reporting what
+// it already believes rather than trusting anything the client said. That is
+// the whole reason the field exists -- the portal refuses to decode JWTs by
+// standing rule, and a client that parsed its own bearer to find the session
+// id would be making decisions from claims nobody promised it.
+//
+// Empty for a credential that carries no session -- a PAT, an operator key, a
+// service-account token. Not an error: those bearers have no session row to
+// name, and a client marking "this device" simply marks nothing.
+func sessionIdFromClaims(ctx context.Context) string {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	sid, _ := claims["sid"].(string)
+	return strings.TrimSpace(sid)
 }

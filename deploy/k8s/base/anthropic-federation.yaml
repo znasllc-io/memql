@@ -1,0 +1,65 @@
+# Anthropic workload identity federation -- the workload's identity, as ONE
+# SHAPE EVERYWHERE (epic memql#4333, decision D4).
+#
+# The engine used to reach Anthropic with a static API key on the hand-seeded
+# `memql-secrets` Secret that every pod envFroms. It never rotated, it sat in
+# every engine pod's environment, and anyone who could read the Secret could
+# spend against the account from anywhere. Federation replaces it: the pod
+# presents the OIDC token Kubernetes projects for it, Anthropic exchanges that
+# for a one-hour bearer, and nothing long-lived is at rest.
+#
+# WHAT IS SHAPE AND WHAT IS VALUE, because this is the whole reason the local
+# cluster and the cloud can run the same YAML (docs/public/operate/environment-parity.md):
+#
+#   SHAPE (here, in the base, everywhere): the ServiceAccount, the projected
+#   token volume on every engine Deployment, the mount path, and the
+#   MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE that names it.
+#
+#   VALUE (the ConfigMap below): the four ids that identify objects in one
+#   Anthropic organization. The cloud overlay patches in the real ones; the
+#   local overlay leaves them empty and `make up` keeps booting on the key.
+#
+# The engine reads all four or none: a PARTIAL configuration refuses boot
+# rather than falling back to a key the cutover is about to delete
+# (component/memql/ai_anthropic_federation.go). Empty strings here count as
+# unset, which is what makes the empty ConfigMap a working local default
+# rather than a half-configuration.
+#
+# Runbook (Console setup, cutover, key removal):
+# docs/public/operate/auth/anthropic-federation.md
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memql-engine
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+# NO RoleBinding, deliberately, and none should ever be added here. This
+# account's whole purpose is to be an IDENTITY Anthropic can verify -- the
+# federation rule matches on the subject `system:serviceaccount:memql:memql-engine`
+# and nothing else. It needs no Kubernetes API privilege to serve that purpose,
+# and a grant attached to it would be inherited by every engine node at once.
+# The identity node's deploy-console RBAC is on a DIFFERENT account
+# (memql-deploy, deploy/k8s/base/identity-rbac.yaml) for exactly that reason.
+---
+# The four ids, empty. Every engine Deployment envFroms this with
+# optional: true, so a cluster that has not applied it still boots.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-anthropic-federation
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+data:
+  # fdrl_... -- the OIDC federation rule the exchange names.
+  MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID: ""
+  # The Anthropic organization UUID the rule belongs to.
+  MEMQL_AI_ANTHROPIC_ORGANIZATION_ID: ""
+  # svac_... -- the service account the federated token is minted for.
+  MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID: ""
+  # wrkspc_..., or the literal "default". OPTIONAL even when federating:
+  # Anthropic needs it only when the rule spans more than one workspace, and
+  # answers workspace_id_required when it does. Leaving it empty is correct
+  # for a single-workspace organization.
+  MEMQL_AI_ANTHROPIC_WORKSPACE_ID: ""

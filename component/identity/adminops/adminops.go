@@ -749,6 +749,13 @@ type userRow struct {
 	Active          bool
 	SuspendedAt     string
 	SuspendedReason string
+
+	// SharedMailbox / SignInPolicy are the two magic-link hardening fields
+	// (memql#4304). Read here so writeUser's read-merge-write does not blank
+	// them: updateUser takes a payload splat, and a field this row does not
+	// carry is a field the next admin edit silently resets.
+	SharedMailbox bool
+	SignInPolicy  string
 }
 
 // userById reads one person by id.
@@ -803,6 +810,12 @@ func (s *Service) userById(ctx context.Context, userID string) (*userRow, error)
 		Active:          boolean("active", true),
 		SuspendedAt:     str("suspendedAt"),
 		SuspendedReason: str("suspendedReason"),
+		SharedMailbox:   boolean("sharedMailbox", false),
+		// signInPolicy defaults to "any" on the concept; a row written before
+		// the field existed carries nothing, and the safe reading of a missing
+		// policy is the permissive one -- treating absence as passkey_only
+		// would lock out every account that predates the field.
+		SignInPolicy: str("signInPolicy"),
 	}, nil
 }
 
@@ -825,6 +838,11 @@ func (s *Service) writeUser(ctx context.Context, u *userRow) error {
 		"role":         u.Role,
 		"internal":     u.Internal,
 		"active":       u.Active,
+		// Written back unconditionally so an ordinary profile edit cannot
+		// silently clear them. updateUser is a payload splat: a field absent
+		// from the map is a field the write resets.
+		"sharedMailbox": u.SharedMailbox,
+		"signInPolicy":  signInPolicyOrDefault(u.SignInPolicy),
 	}
 	// Written unconditionally, including empty, so lifting a suspension
 	// actually clears the stamp rather than leaving a reinstated account
@@ -859,3 +877,110 @@ func (s *Service) writeUser(ctx context.Context, u *userRow) error {
 // One helper, so one edit fixed all eleven call sites; that is the only good
 // thing about having had it.
 func quote(s string) string { return langparser.QuoteString(s) }
+
+// ResetSignInPolicy puts one user's sign-in policy back to "any"
+// (memql#4304).
+//
+// # The rescue path, and only that
+//
+// passkey_only disables sign-in LINKS for an account. Its whole value is
+// that a shared mailbox stops being a way in -- and its whole risk is that
+// somebody turns it on, loses their passkey, and has nothing left. The
+// enrolment token and the owner recovery key are the designed answers to
+// that, but this is the cheap one: turn links back on and let the person
+// sign in the ordinary way.
+//
+// # One direction, deliberately
+//
+// There is no admin path to turn passkey_only ON for somebody else. That
+// call would let an admin lock a colleague out of their own account, and
+// nothing operational needs it: the control belongs to the person whose
+// passkey it is. Expressing only the reset in the message shape means the
+// wrong direction is not a rule that can be got wrong -- it is not
+// representable.
+//
+// Trust level: the same as issuing an enrolment token for the user, which
+// owners and admins already can.
+func (s *Service) ResetSignInPolicy(ctx context.Context, userId string) Result {
+	userID := strings.TrimSpace(userId)
+	const action = "sign_in_policy_reset_by_admin"
+	detail := map[string]any{"userId": userID, "to": "any"}
+
+	act, refusal, allowed := s.authorize(ctx, "resetting a sign-in policy", detail)
+	if !allowed {
+		return refusal
+	}
+	if userID == "" {
+		return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, action,
+			act, "", "", detail, identity.AuditOutcomeFailure, "missing_user_id"),
+			"identity admin: userId is required")
+	}
+	user, err := s.userById(ctx, userID)
+	if err != nil || user == nil {
+		return s.notFound(ctx, action, act, userID, detail, err)
+	}
+	detail["from"] = user.SignInPolicy
+	if user.SignInPolicy != "passkey_only" {
+		// Already permissive. Reported as success rather than refused: the
+		// caller asked for a state, the state holds, and an operator running
+		// this against the wrong account should not be told "failed" when
+		// nothing was wrong.
+		return ok(s.emit(ctx, identity.AuditCategoryAdmin, action, act, userID, user.PrimaryEmail,
+			detail, identity.AuditOutcomeSuccess, ""),
+			"Sign-in links were already on for this account.")
+	}
+
+	user.SignInPolicy = "any"
+	return s.finish(ctx, identity.AuditCategoryAdmin, action, act, userID, user.PrimaryEmail,
+		detail, "Sign-in links turned back on.", s.writeUser(ctx, user))
+}
+
+// SetUserSharedMailbox sets or clears the shared-mailbox hint (memql#4304).
+//
+// The flag gates nothing -- it drives copy -- so both directions are
+// available, unlike the policy above. The heuristic that seeds it at
+// registration is a guess (`info@` belongs to plenty of solo operators), and
+// an admin has to be able to correct it either way.
+func (s *Service) SetUserSharedMailbox(ctx context.Context, userId string, shared bool) Result {
+	userID := strings.TrimSpace(userId)
+	const action = "shared_mailbox_changed"
+	detail := map[string]any{"userId": userID, "by": "admin", "to": shared}
+
+	act, refusal, allowed := s.authorize(ctx, "changing a shared-mailbox flag", detail)
+	if !allowed {
+		return refusal
+	}
+	if userID == "" {
+		return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, action,
+			act, "", "", detail, identity.AuditOutcomeFailure, "missing_user_id"),
+			"identity admin: userId is required")
+	}
+	user, err := s.userById(ctx, userID)
+	if err != nil || user == nil {
+		return s.notFound(ctx, action, act, userID, detail, err)
+	}
+	detail["from"] = user.SharedMailbox
+
+	user.SharedMailbox = shared
+	message := "Marked as a shared mailbox."
+	if !shared {
+		message = "No longer marked as a shared mailbox."
+	}
+	return s.finish(ctx, identity.AuditCategoryAdmin, action, act, userID, user.PrimaryEmail,
+		detail, message, s.writeUser(ctx, user))
+}
+
+// signInPolicyOrDefault normalizes a missing policy to the permissive one.
+//
+// The concept declares @default("any"), but a default is not applied on
+// insert or on a payload-splat update -- so writing an empty string back
+// would store an empty string, and every later reader would have to know
+// that empty means "any". Normalizing here keeps that knowledge in one
+// place.
+func signInPolicyOrDefault(policy string) string {
+	policy = strings.TrimSpace(policy)
+	if policy != "passkey_only" {
+		return "any"
+	}
+	return policy
+}

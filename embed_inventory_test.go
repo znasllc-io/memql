@@ -96,7 +96,7 @@ var embedInventory = map[string]int{
 	// and this count is only reachable after `make identity-tailwind`, which is
 	// the point (memql#4268). +6 over that: app.css, favicon.svg, 5 fonts, less
 	// the one the old pin was already missing.
-	"github.com/znasllc-io/memql/component/identity/web": 20,  // static/* (incl. generated app.css, favicon.svg, fonts/) + legal/*.md
+	"github.com/znasllc-io/memql/component/identity/web": 21,  // static/* (incl. generated app.css, favicon.svg, fonts/, check-email.js -- memql#4302) + legal/*.md
 	"github.com/znasllc-io/memql/component/mcp":          1,   // icon.svg
 	"github.com/znasllc-io/memql/docs":                   1,   // public/language/memql.md
 	"github.com/znasllc-io/memql/dsl":                    242, // all:<domain> x37 (+observability queries -- memql#4208; +shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711; +library tools -- artifact labels, memql#4290)

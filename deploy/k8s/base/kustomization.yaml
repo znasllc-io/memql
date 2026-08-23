@@ -53,6 +53,12 @@ resources:
   # whole mesh stays under the database's max_connections during a rollout
   # (znasllc-io/memql#1858).
   - db-pool-config.yaml
+  # The engine's workload identity: the memql-engine ServiceAccount every
+  # engine Deployment runs as, and the (empty) ConfigMap the cloud overlay
+  # fills with the four Anthropic federation ids (memql#4336). Listed before
+  # the Deployments that reference it for readability only -- kustomize does
+  # not order-apply.
+  - anthropic-federation.yaml
   - identity.yaml
   # RBAC for the deploy console's in-cluster substrate (memql#4257).
   - identity-rbac.yaml

@@ -32,9 +32,16 @@ import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
 import {
   mintAccountToken,
   revokeAccountToken,
+  revokeAllSessions,
+  revokeSession,
+  setSignInPolicy,
   type AccountTokenMintResult,
   type AccountTokenRevokeResult,
   type MintAccountTokenArgs,
+  type RevokeAllSessionsResult,
+  type RevokeSessionResult,
+  type SetSignInPolicyResult,
+  type SignInPolicy,
 } from "@znasllc-io/memql-sdk-core/identity";
 import { IdentityAdminClient } from "@znasllc-io/memql-sdk-core/identityadmin";
 
@@ -61,6 +68,13 @@ export interface ClusterClients {
   // stream.
   mintAccountToken: (args: MintAccountTokenArgs) => Promise<AccountTokenMintResult>;
   revokeAccountToken: (identityId: string, signal?: AbortSignal) => Promise<AccountTokenRevokeResult>;
+  // The /me page's two writes (memql#4319), bound to the stream for the same
+  // reason the pair above is: the Dispatcher never leaves this module, so a
+  // page reaches a wire operation only through a named function somebody had
+  // to add here on purpose.
+  revokeSession: (sessionId: string, signal?: AbortSignal) => Promise<RevokeSessionResult>;
+  revokeAllSessions: (signal?: AbortSignal) => Promise<RevokeAllSessionsResult>;
+  setSignInPolicy: (policy: SignInPolicy, signal?: AbortSignal) => Promise<SetSignInPolicyResult>;
   // Structured-output suggestion (the composer's arrangement suggester).
   suggest: (
     domain: string,
@@ -206,6 +220,9 @@ export function ClusterProvider({
                 mintAccountToken: (args) => mintAccountToken(transport, args),
                 revokeAccountToken: (identityId, signal) =>
                   revokeAccountToken(transport, identityId, signal),
+                revokeSession: (sessionId, signal) => revokeSession(transport, sessionId, signal),
+                revokeAllSessions: (signal) => revokeAllSessions(transport, signal),
+                setSignInPolicy: (policy, signal) => setSignInPolicy(transport, policy, signal),
                 suggest: (domain, payload, opts) => aiSuggest(transport, domain, payload, opts),
               },
         );

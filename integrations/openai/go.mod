@@ -107,6 +107,7 @@ require (
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
@@ -180,3 +181,5 @@ replace github.com/znasllc-io/memql/docs => ../../docs
 replace github.com/znasllc-io/memql/dsl => ../../dsl
 
 replace github.com/znasllc-io/memql/component/frontdoor => ../../component/frontdoor
+
+replace github.com/znasllc-io/memql/component/metrics => ../../component/metrics

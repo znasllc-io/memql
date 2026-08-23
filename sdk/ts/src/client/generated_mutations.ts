@@ -2377,6 +2377,7 @@ export interface CreateMagicLinkRequestArgs {
   userAgent?: string;
   oauthCtxJSON?: string;
   invitationId?: string;
+  bindingHash?: string;
 }
 
 export function buildCreateMagicLinkRequest(args: CreateMagicLinkRequestArgs): string {
@@ -2389,6 +2390,7 @@ export function buildCreateMagicLinkRequest(args: CreateMagicLinkRequestArgs): s
   if (args.userAgent !== undefined) parts.push("userAgent: " + renderMemQLValue(args.userAgent));
   if (args.oauthCtxJSON !== undefined) parts.push("oauthCtxJSON: " + renderMemQLValue(args.oauthCtxJSON));
   if (args.invitationId !== undefined) parts.push("invitationId: " + renderMemQLValue(args.invitationId));
+  if (args.bindingHash !== undefined) parts.push("bindingHash: " + renderMemQLValue(args.bindingHash));
   return "mutation createMagicLinkRequest(" + parts.join(", ") + ")";
 }
 
@@ -3369,6 +3371,7 @@ export interface CreateUserOnFirstLoginArgs {
   // Enum: owner | admin | developer | writer | reader
   role?: string;
   internal: boolean;
+  sharedMailbox?: boolean;
   groupIds?: Record<string, unknown>;
   preferences?: Record<string, unknown>;
 }
@@ -3386,6 +3389,7 @@ export function buildCreateUserOnFirstLogin(args: CreateUserOnFirstLoginArgs): s
   if (args.birthdate !== undefined) parts.push("birthdate: " + renderMemQLValue(args.birthdate));
   if (args.role !== undefined) parts.push("role: " + renderMemQLValue(args.role));
   parts.push("internal: " + renderMemQLValue(args.internal));
+  if (args.sharedMailbox !== undefined) parts.push("sharedMailbox: " + renderMemQLValue(args.sharedMailbox));
   if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
   if (args.preferences !== undefined) parts.push("preferences: " + renderMemQLValue(args.preferences));
   return "mutation createUserOnFirstLogin(" + parts.join(", ") + ")";

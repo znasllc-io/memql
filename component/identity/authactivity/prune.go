@@ -254,6 +254,19 @@ func (p *Pruner) log() *slog.Logger {
 // pgDeleter is the real storage operation.
 type pgDeleter struct{ db *sql.DB }
 
+// staged-data: MUST-NOT-GATE -- a staged row omitted here becomes PERMANENTLY
+// UNPRUNABLE. This sweep is the only thing that ever deletes from
+// v1:identity:authActivity (the DSL has no delete() mutation), so a row it
+// cannot see is a row nothing will ever remove: the log grows without bound,
+// and the retention window that memql#4329's reuse-detection limit rests on
+// silently stops holding while the counter still reports work being done.
+//
+// It is also moot, and saying so matters as much as the bug: authActivity is
+// engine-owned and written by exactly one Go sink on the authentication path
+// (component/identity.ActivitySink). It is not a promoted authoring concept,
+// nothing stages its rows, and there is no seam through which a staged one
+// could arrive. Gating would therefore buy nothing and cost the above.
+//
 // selectExpiredIDs picks a bounded set of row ids whose activity is past the
 // cutoff.
 //
@@ -284,6 +297,11 @@ SELECT DISTINCT id
         END) < $2
  LIMIT $3`
 
+// staged-data: MUST-NOT-GATE -- see selectExpiredIDs above. This half deletes
+// exactly the ids that one selected, so a gate here could only ever DISAGREE
+// with it: ids chosen by an ungated select and then filtered by a gated delete
+// would leave the sweep looping on rows it re-selects and never removes.
+//
 // deleteExpiredByIDs builds `DELETE ... WHERE concept = $1 AND id IN ($2,...)`.
 //
 // An explicit placeholder list rather than `id = ANY($2)` with an array

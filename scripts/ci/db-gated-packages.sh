@@ -50,13 +50,28 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 
 # DB_GATED_TREES is the canonical set. Keep in sync with the db-tests step in
 # .github/workflows/ci.yml -- enforced by TestDBGatedTreesMatchTheDBTestsLane.
+#
+# memql#4301 WIDENED `component/identity/recoverykey` to `component/identity`.
+# The magic-link consume became a compare-and-swap under a Postgres advisory
+# lock, and the test pinning "N concurrent consumers, exactly one success" has
+# to run against a real Postgres or it proves nothing: a fake serialises
+# because the fake serialises, which is the assumption the race was made of.
+# That test exercises identity.Store and so lives in component/identity itself,
+# and a db-gated test outside this lane only ever runs on the machine of
+# whoever happened to have Postgres up.
+#
+# What the complement now means, having looked: every component/identity/...
+# package moves from go-checks to db-tests. None is lost -- the lane runs whole
+# packages, not just gated cases -- and only two of them touch dbtest at all
+# (the root and recoverykey), so the rest are ordinary unit tests that now
+# happen to run beside a database they ignore. The tree took about two seconds
+# of the step's 180s budget when measured.
 readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
 	"component/backup"
 	"component/grpc"
-	"component/identity/authactivity"
-	"component/identity/recoverykey"
+	"component/identity"
 	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"

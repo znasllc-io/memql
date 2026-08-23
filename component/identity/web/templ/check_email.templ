@@ -1,5 +1,7 @@
 package webtempl
 
+import "strconv"
+
 // CheckEmailData drives the post-submission "check your email" page.
 // `Action` is one of "magic_link_sent" (default) or
 // "access_request_created", which switches the body copy.
@@ -8,6 +10,30 @@ type CheckEmailData struct {
 	Email     string
 	ExpiresIn string
 	Action    string
+
+	// RequestId names the magic-link row this tab is waiting on. Rendered
+	// into the page so the poller can ask about it, and NOT a credential:
+	// the memql_ml cookie this browser holds is what authorizes the poll,
+	// and the status endpoint 404s for anybody who lacks it. Empty on the
+	// waitlist branch and on any path that minted no row, which simply
+	// leaves the poller unrendered.
+	RequestId string
+
+	// PollSeconds is the request's remaining lifetime. The poller stops
+	// there rather than running forever in an abandoned tab.
+	PollSeconds int
+
+	// SharedMailboxHint is true when the address just entered LOOKS like a
+	// shared mailbox (memql#4304).
+	//
+	// DERIVED FROM THE TYPED ADDRESS, never from the stored flag, and the
+	// difference is the whole reason it is safe to render here. The
+	// heuristic is public knowledge -- anybody can see that `team@` reads
+	// like a team inbox -- so saying so leaks nothing. Rendering the account
+	// ROW's flag would be an enumeration oracle: it would tell an
+	// unauthenticated visitor that a given address has an account and that
+	// somebody has looked at it.
+	SharedMailboxHint bool
 }
 
 templ CheckEmail(data CheckEmailData) {
@@ -33,7 +59,54 @@ templ CheckEmail(data CheckEmailData) {
 					few minutes, check your spam folder or
 					<a href="/login">request a new link</a>.
 				</p>
+				if data.SharedMailboxHint {
+					<p class="text-small text-subtle mt-2">
+						That address looks like a shared mailbox. Anyone who can read it
+						can use the link we just sent. If it is a team inbox, consider
+						signing in with a passkey and turning sign-in links off for the
+						account from Settings.
+					</p>
+				}
+				if data.RequestId != "" {
+					@checkEmailPoller(data)
+				}
 			}
 		</div>
 	}
+}
+
+// checkEmailPoller is the half of the device-bound flow that lives in this
+// tab (memql#4302).
+//
+// It asks /auth/magic-link/status every two seconds. On `approved` -- which
+// is what a click from ANY device produces -- it submits the form below, and
+// the sign-in completes HERE, in the browser that asked for the link and
+// holds the client's PKCE state. That is the whole mechanism by which "B
+// clicked, A signs in" works.
+//
+// A REAL FORM POST, not fetch(). The finish responds 303 to the relying
+// party's callback (or to the post-login landing); fetch would follow that
+// redirect itself and strand the auth code in a response nobody navigates
+// to. The form is also why the flow degrades honestly with JavaScript off:
+// the person still gets a link that works, they just have to open it on the
+// device they started from.
+templ checkEmailPoller(data CheckEmailData) {
+	<form id="ml-finish" method="POST" action="/auth/magic-link/finish" hidden>
+		@CSRFField(data.Layout.CSRFToken)
+		<input type="hidden" name="request" value={ data.RequestId }/>
+	</form>
+	<p id="ml-status" class="text-small text-subtle mt-2" data-request={ data.RequestId } data-window={ data.PollWindow() }>
+		Waiting for you to open the link. You can open it on any device -- this
+		page will finish signing you in.
+	</p>
+	<script src={ data.Layout.Asset("/static/check-email.js") } defer></script>
+}
+
+// PollWindow renders the poller's stop time in seconds, as a string, so the
+// template never formats a number inline.
+func (d CheckEmailData) PollWindow() string {
+	if d.PollSeconds <= 0 {
+		return "600"
+	}
+	return strconv.Itoa(d.PollSeconds)
 }

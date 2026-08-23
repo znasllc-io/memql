@@ -107,11 +107,17 @@ the security-headers middleware.
 |---|---|---|
 | `GET`/`POST /login` | none | Email-first sign-in. Carries the "Sign in with a passkey" control when a relying party is in scope |
 | `GET`/`POST /setup` | none, pre-bootstrap only | First-owner wizard. 404s once any user exists |
-| `GET /authorize`, `/check-email`, `/logout-complete`, `/error` | none | Flow pages |
+| `GET /authorize`, `/check-email`, `/logout-complete`, `/error` | none | Flow pages. `/check-email` polls for its own request's approval (memql#4302) |
+| `GET /auth/complete?ml=<token>` | none (the token) | The magic-link landing page. **Renders only -- a GET never changes state** |
+| `POST /auth/landing` | the token in the form body | Approve (no binding cookie) or finish (cookie matches). CSRF-exempt: the token IS the proof of possession |
+| `GET /auth/magic-link/status?request=<id>` | the `memql_ml` binding cookie | The requesting tab's poll. `404` -- indistinguishably -- for an unknown id and for a cookie that does not match |
+| `POST /auth/magic-link/finish` | the `memql_ml` cookie + a recorded approval | Consumes the request exactly once and mints |
 | `GET /legal/tos`, `/legal/privacy` | none | Legal pages |
 | `GET /enroll?code=mql_enr_<...>` | the enrolment token | Redeem an enrolment link and render the passkey registration page. Mounts only when the validator and audit sink are both wired (memql#3408) |
 | `GET`/`POST /device` | signed-in user | RFC 8628 verification page. A signed-out visitor is bounced through `/login` and returned here with the code. Mounts only when the device flow is wired (memql#3410) |
-| `GET /me/`, `/me/settings`, `/me/devices`, `/me/export`, `/me/deletion-pending` | client-side | Self-service shells. `/me/devices` lists **sessions**, not passkeys |
+| `GET /me/`, `/me/settings`, `/me/devices`, `/me/export`, `/me/deletion-pending` | client-side, plus server-rendered cards | Self-service. `/me/devices` lists **active sessions** (server-rendered from `authSessionsForSelf`, memql#4306) and passkeys; `/me/settings` carries the sign-in-security card |
+| `POST /me/devices/sessions/revoke`, `POST /me/devices/revoke-all` | Bearer or admin cookie | End one session, or all of them. The target is resolved from the caller's OWN session list, so a caller-supplied id cannot reach another person's row |
+| `POST /me/settings/sign-in-policy`, `POST /me/settings/shared-mailbox` | Bearer or admin cookie | The two magic-link hardening controls (memql#4304). Enabling `passkey_only` is refused server-side unless the caller holds an active passkey |
 | `GET`/`POST /me/tokens`, `POST /me/tokens/revoke` | Bearer or admin cookie | PAT issuance and revocation. Mounts only when the PAT adapter is wired |
 | `GET /admin/*` | admin session | The sign-in pages, and an `/admin/` root that answers `410 Gone`; every page moved to the portal |
 | `GET /static/` | none | Cached UI assets |
@@ -353,6 +359,36 @@ Each rejection emits an audit event with `category=auth`,
 specific defense (`rate_limit` / `disposable_email` / `mx_invalid`
 / `turnstile` / `risk_threshold`). Surface these in your log
 pipeline to tune thresholds.
+
+**Both issue paths run this stack** (memql#4303). It wraps
+`POST /auth/magic-link` and `POST /login` -- the browser form -- because
+the controls are a property of the ROUTE rather than of the issuer, and
+until memql#4303 they guarded only the JSON API, which takes a client
+library to reach. The peek that extracts the address understands both JSON
+and `application/x-www-form-urlencoded`; without that, gating `/login`
+would have *looked* done (the per-IP limiter runs before the body is read)
+while Turnstile, the blocklist and the MX check silently saw an empty
+address.
+
+### Audit actions the magic-link flow emits
+
+| Action | Outcome | Carries |
+|---|---|---|
+| `magic_link_issued` | success | requesting IP + UA, clientId, redirectURI |
+| `magic_link_approved` | success | the APPROVING device's IP + UA, `detail.crossDevice` |
+| `magic_link_approval_denied` | blocked | `failureReason`: `already_approved` |
+| `magic_link_consumed` | success | clientId, `newUser` |
+| `magic_link_completed` | success | `detail.mode`: `same_device` / `cross_device` |
+| `magic_link_finish_blocked` | blocked | `failureReason`: `not_approved`, `consumed`, `expired`, `cookie_mismatch` |
+| `magic_link_refused_policy` | blocked | the account is `passkey_only` |
+| `auth_code_redemption_blocked` | blocked | `failureReason`: `no_pkce`, `plain_not_allowed`, `pkce_failed`, `code_replay` |
+| `sign_in_notification_sent` | success / failure | the session id |
+| `sign_in_policy_changed` / `sign_in_policy_reset_by_admin` | success | `by`, `from`, `to` |
+| `shared_mailbox_changed` | success | `by`, `from`, `to` |
+
+`magic_link_approved` is the row that names the person who clicked a link
+they did not request. On a shared mailbox it is the only place that fact is
+recorded.
 
 ## Passkey, enrolment and device-code knobs
 

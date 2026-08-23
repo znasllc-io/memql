@@ -150,6 +150,15 @@ var (
 		Name:      "activity_pruned_total",
 		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this at a constant 0 because only the identity node runs the sweep. Rows hard-deleted from v1:identity:authActivity by the daily retention job, past MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default 30). Unlike v1:identity:auditEvent's observe-only sweep, this one really deletes, so the counter measures work done rather than work identified. A steady non-zero rate is NORMAL and is what the job existing looks like. Alert on a FLAT ZERO over more than a day on a cluster that authenticates anyone -- that means the sweep is not running, and the first thing to break is refresh-token REUSE DETECTION, which reaches back exactly as far as this window and degrades silently to \"stale cookie\" when the rows it keys on are neither pruned nor present.",
 	})
+	aiFederationExchanges = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "ai",
+			Name:      "federation_exchanges_total",
+			Help:      "Anthropic workload identity federation token exchanges (POST /v1/oauth/token), labelled by outcome: ok, denied (Anthropic refused the assertion -- 4xx; the reason is in the warn log and in the Console's authentication-events tab), error (the exchange never got an answer, or got a 5xx). This is NOT an LLM call: it is deliberately outside the guard's fingerprint, so it counts toward no rate ceiling and no cost budget (memql#4335). A steady low rate of `ok` is the healthy shape -- the SDK re-exchanges as a one-hour token nears expiry, so roughly one per token lifetime per client. ANY sustained `denied` means the cluster is running on a credential Anthropic will not renew: alert on it, because the last good token keeps working until it expires and the outage arrives up to an hour after the cause.",
+		},
+		[]string{"outcome"},
+	)
 
 	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
@@ -172,6 +181,7 @@ func init() {
 		identitySigningKeyRotationSupported,
 		subscriptionRowsDenied,
 		authActivityPruned,
+		aiFederationExchanges,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about
@@ -198,6 +208,17 @@ func init() {
 	identitySigningKeyCreatedTimestamp.Set(0)
 	identitySigningKeyAgeKnown.Set(0)
 	identitySigningKeyRotationSupported.Set(0)
+	// All three federation outcomes exist at 0 from boot, for the reason the
+	// keyset gauges above do -- and here it is load-bearing rather than tidy.
+	// The runbook tells operators to ALERT ON `denied`, and a Prometheus rule
+	// over a series that does not exist yet evaluates to no data, not to zero:
+	// on a cluster where the exchange has never once been refused, the alert
+	// is silently unarmed, which is precisely the state it is meant to watch
+	// for. A CounterVec creates a child only on first Inc, so without these
+	// three lines `denied` first appears at the moment it is too late.
+	aiFederationExchanges.WithLabelValues(FederationExchangeOK).Add(0)
+	aiFederationExchanges.WithLabelValues(FederationExchangeDenied).Add(0)
+	aiFederationExchanges.WithLabelValues(FederationExchangeError).Add(0)
 }
 
 // SubscriptionRowDenied records one graph-subscription event dropped at
@@ -355,7 +376,6 @@ func KeysetFingerprint(kids []string) float64 {
 	return float64(v)
 }
 
-
 // AuthActivityPruned records rows hard-deleted from v1:identity:authActivity
 // by the retention job (memql#4330).
 //
@@ -376,4 +396,41 @@ func AuthActivityPrunedValue() float64 {
 		return 0
 	}
 	return m.GetCounter().GetValue()
+}
+
+// Federation-exchange outcomes (memql#4335). Closed set: an outcome label is
+// a dimension of an alert, so it is these three and never a free string.
+const (
+	FederationExchangeOK     = "ok"
+	FederationExchangeDenied = "denied"
+	FederationExchangeError  = "error"
+)
+
+// AIFederationExchange records one Anthropic federation token exchange.
+//
+// Labelled by OUTCOME and by nothing else. The tempting extra labels -- the
+// federation rule id, the service account, the HTTP status -- are all either
+// unbounded or an identifier of a credential, and this series is scraped into
+// a store that is usually read more widely than the config is. The reason a
+// denial happened belongs in the warn log beside it, which carries Anthropic's
+// own error body.
+func AIFederationExchange(outcome string) {
+	aiFederationExchanges.WithLabelValues(outcome).Inc()
+}
+
+// AIFederationExchangesValue returns the current count for one outcome, for
+// tests.
+func AIFederationExchangesValue(outcome string) float64 {
+	var m dto.Metric
+	c, err := aiFederationExchanges.GetMetricWithLabelValues(outcome)
+	if err != nil {
+		return 0
+	}
+	if err := c.(prometheus.Metric).Write(&m); err != nil {
+		return 0
+	}
+	if m.Counter == nil {
+		return 0
+	}
+	return m.Counter.GetValue()
 }

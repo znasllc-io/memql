@@ -4303,6 +4303,7 @@ type CreateMagicLinkRequestArgs struct {
 	UserAgent    string
 	OauthCtxJSON string
 	InvitationId string
+	BindingHash  string
 }
 
 // CreateMagicLinkRequest calls the engine mutation createMagicLinkRequest.
@@ -4358,6 +4359,13 @@ func CreateMagicLinkRequestBuild(args CreateMagicLinkRequestArgs) string {
 		}
 		b.WriteString("invitationId: ")
 		b.WriteString(quoteMemQL(args.InvitationId))
+	}
+	if args.BindingHash != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bindingHash: ")
+		b.WriteString(quoteMemQL(args.BindingHash))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6294,10 +6302,12 @@ type CreateUserOnFirstLoginArgs struct {
 	Gender       string
 	Birthdate    string
 	// Enum: owner | admin | developer | writer | reader
-	Role        string
-	Internal    bool
-	GroupIds    map[string]any
-	Preferences map[string]any
+	Role             string
+	Internal         bool
+	SharedMailbox    bool
+	SharedMailboxSet bool // set true to send sharedMailbox; required because zero-value bool is ambiguous
+	GroupIds         map[string]any
+	Preferences      map[string]any
 }
 
 // CreateUserOnFirstLogin calls the engine mutation createUserOnFirstLogin.
@@ -6375,6 +6385,13 @@ func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 	}
 	b.WriteString("internal: ")
 	b.WriteString(fmt.Sprintf("%v", args.Internal))
+	if args.SharedMailboxSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sharedMailbox: ")
+		b.WriteString(fmt.Sprintf("%v", args.SharedMailbox))
+	}
 	if args.GroupIds != nil {
 		if b.Len() > 32 {
 			b.WriteString(", ")

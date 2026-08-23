@@ -1115,6 +1115,51 @@ variables:
 
   # --- ai ---
 
+  # --- Anthropic workload identity federation (memql#4333) ---
+  #
+  # NAMES, NOT SECRETS. Each one identifies an object in the Anthropic Console
+  # (a rule, an organization, a service account, a workspace) or a path on the
+  # pod; the credential itself is the projected Kubernetes token, which is
+  # never an env var. So they are VARIABLES and travel in a ConfigMap
+  # (deploy/k8s/base/anthropic-federation-config.yaml), not in memql-secrets.
+  #
+  # ALL FOUR OF rule / organization / service account / token file, OR NONE.
+  # A partial configuration REFUSES BOOT rather than falling back to
+  # MEMQL_AI_ANTHROPIC_API_KEY -- see component/memql/ai_anthropic_federation.go
+  # and docs/public/operate/auth/anthropic-federation.md. They are per-cluster
+  # values: a re-created cluster has a new OIDC issuer and needs new ones.
+
+  - name: MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "Anthropic OIDC federation rule id (fdrl_...) the token exchange names. One of the four that together select federation instead of MEMQL_AI_ANTHROPIC_API_KEY; setting some but not all refuses boot."
+
+  - name: MEMQL_AI_ANTHROPIC_ORGANIZATION_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "UUID of the Anthropic organization the federation rule belongs to. One of the four federation values; see MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID."
+
+  - name: MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "Anthropic service account id (svac_...) the federated token is minted for -- the identity the engine acts as. One of the four federation values."
+
+  - name: MEMQL_AI_ANTHROPIC_WORKSPACE_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "Anthropic workspace id (wrkspc_..., or the literal 'default') to scope the federated token to. OPTIONAL EVEN WHEN FEDERATING: Anthropic requires it only when the rule spans more than one workspace, and answers workspace_id_required when it needs one."
+
+  - name: MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE
+    component: ai
+    scope: node
+    optional: true
+    default: "/var/run/secrets/anthropic.com/token"
+    description: "Path to the projected Kubernetes service-account token presented to Anthropic's token endpoint. Written by the anthropic-identity projected volume with audience https://api.anthropic.com; the base manifests set it on every engine Deployment. One of the four federation values."
+
   - name: MEMQL_DEFAULT_AGENT_PROVIDER
     component: ai
     scope: node

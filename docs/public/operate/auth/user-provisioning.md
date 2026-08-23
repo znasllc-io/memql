@@ -32,34 +32,82 @@ them).
 
 ## Magic-link flow (the primary path)
 
-1. User visits the identity web app and enters their email at
-   `/login`.
-2. The form posts to `/auth/magic-link`. The handler runs the
-   anti-abuse middleware (per-IP rate limit, optional Cloudflare
-   Turnstile, disposable-email blocklist, MX-record validation,
-   risk score). On rejection an audit event with
-   `action=magic_link_blocked` and a `failureReason` is recorded
-   and the form returns a generic message.
-3. The magic-link issuer mints a single-use token, stores its
-   SHA-256 hash on a fresh `v1:identity:magiclink` row, and sends
-   the email via the `email` integration plug-in.
-4. The user clicks the link, landing at `/auth/complete?token=...`.
-5. The verifier consumes the token atomically (sets `consumedAt`),
-   resolves the underlying email, and either:
-   - **Existing user**: looks up `v1:identity:user` by email,
-     issues a new access + refresh token pair, and creates a
-     `v1:identity:authSession` row.
-   - **New user**: provisions `v1:identity:user` and
-     `v1:identity:identity` (`identityType="magic_link"`), then
-     issues tokens. Internal-domain users get
-     `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`; external users get the
-     default cluster-wide role, `reader`. There is no per-partition
-     grant of any kind -- partitioning was retired in #56, and what
-     bounds every user, internal or external, is the per-row check on
-     each concept they read (see
-     [access-model.md](access-model.md#what-the-role-actually-decides)).
-6. Browser receives the access JWT and starts using it as
-   `Authorization: Bearer ...` against bff/voice/etc.
+The flow is **device-bound** and **approve-on-click** (memql#4300, design
+`docs/superpowers/specs/2026-08-22-magic-link-hardening-design.md`). One
+sentence describes it:
+
+> A session can only ever land on the device that asked for it.
+
+If somebody else opens your link -- a colleague reading the same shared
+mailbox, or a mail scanner -- they cannot sign in with it. What their click
+does is *approve* the request, and the browser that asked finishes the
+sign-in itself.
+
+### The steps
+
+1. The user enters their email at `/login` (or a client posts
+   `/auth/magic-link`). Both paths run the anti-abuse middleware -- per-IP
+   rate limit, optional Cloudflare Turnstile, disposable-email blocklist,
+   MX-record validation, risk score. On rejection an audit event with
+   `action=magic_link_blocked` and a `failureReason` is recorded and the
+   caller gets a generic message.
+2. The issuer mints the single-use token AND a 32-byte binding nonce. Only
+   digests are stored: `tokenHash` and `bindingHash` on the
+   `v1:identity:magicLinkRequest` row. The nonce goes to the requesting
+   browser as `memql_ml` (`HttpOnly; Secure; SameSite=Lax; Path=/auth`,
+   `Max-Age` = the link's TTL) and nowhere else.
+3. The browser lands on `/check-email`, which renders the request id and
+   starts polling `GET /auth/magic-link/status`. The id is not a credential
+   -- the cookie is, and the status endpoint answers `404` to anybody who
+   does not hold it.
+4. The user opens the emailed link at `/auth/complete?ml=<token>`. **This
+   renders a confirmation page and writes nothing.** A GET never changes
+   state, which is what makes mail scanners and link prefetchers harmless.
+5. The user presses **Continue**, posting `/auth/landing`:
+   - **The browser holds the matching `memql_ml` cookie** (the same-device
+     case -- a mail client opened a new tab of the same profile): the
+     sign-in finishes right there.
+   - **It does not** (the cross-device case): the request is stamped
+     `approvedAt` with the approving device's IP and user agent, and the
+     page says to go back to the device where the link was requested. The
+     clicker is handed nothing: no cookie, no code, no session.
+6. The waiting tab's poll sees `approved` and posts
+   `/auth/magic-link/finish`. That consumes the request **exactly once**
+   (compare-and-swap under a Postgres advisory lock) and mints what the
+   row's OAuth context calls for: an auth code bound to the stored PKCE
+   challenge when a client is named, otherwise a first-party browser
+   session -- which now creates a `v1:identity:authSession` row with
+   `source=oidc_cookie`, so it is listable and revocable like any other.
+7. First-time addresses provision `v1:identity:user` +
+   `v1:identity:identity` (`identityType="magic_link"`) at this point.
+   Internal-domain users get `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`;
+   external users get the default cluster-wide role, `reader`. There is no
+   per-partition grant of any kind -- partitioning was retired in #56, and
+   what bounds every user is the per-row check on each concept they read
+   (see [access-model.md](access-model.md#what-the-role-actually-decides)).
+
+### The cases that need spelling out
+
+| Case | What happens |
+|---|---|
+| **Cross-device: request on the laptop, click on the phone** | Works as users expect. The phone approves; the laptop's `/check-email` tab notices within ~2 seconds and signs in. |
+| **Somebody else on a shared mailbox clicks first** | They approve. *You* sign in, on your machine. The row records their IP under `approvedFromIP`, and the audit trail carries `magic_link_approved` naming it. |
+| **The requesting tab was closed before the click** | The approval succeeds and nothing polls; the request expires at its TTL. The page says: request a new link from the device you want to use. |
+| **A mail scanner or link prefetcher fetches the URL** | The page renders. Nothing changes. The link stays usable. |
+| **The user requests a second link from the same browser** | The new cookie overwrites the old one, so the older link behaves as a no-cookie click -- approve only. Accepted and documented. |
+| **JavaScript is off** | The poller does not run. The link still works; it has to be opened in the browser that asked for it, where the same-device branch finishes it directly. |
+| **Two identity replicas** | No affinity is needed. The row is the state and the cookie's digest is on the row, so approve, poll and finish can each be served by a different pod. |
+| **The env auto-bootstrap claim link** | Issued **unbound**, and completes for whoever opens it. It is emailed from a boot-time goroutine with no browser to bind to, so a binding would make it approvable from anywhere and completable nowhere — a cluster nobody can claim. Same trust this path always had: the address is the one the operator configured, on a cluster with no owner credential yet. Every other issue path answers a browser and is bound. |
+
+### What still is not solved, and is not pretended to be
+
+Device binding stops somebody riding *your* link. It does nothing about
+somebody requesting *their own* link to a shared address they can also
+read. Nothing does -- if you can read the mailbox, you can ask for a link.
+The answers to that are the two controls in
+[access-model.md](access-model.md#shared-mailboxes-and-passkey-only-sign-in):
+the `sharedMailbox` flag makes the fact visible, and `passkey_only` makes
+sign-in links stop working for the account.
 
 ## First-user-is-owner
 

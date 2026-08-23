@@ -81,6 +81,11 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 	case *memqlv1.IdentityAdminMsg_SetUserSuspended:
 		p := req.SetUserSuspended
 		res = svc.SetUserSuspended(ctx, p.GetUserId(), p.GetSuspended(), p.GetReason())
+	case *memqlv1.IdentityAdminMsg_ResetSignInPolicy:
+		res = svc.ResetSignInPolicy(ctx, req.ResetSignInPolicy.GetUserId())
+	case *memqlv1.IdentityAdminMsg_SetUserSharedMailbox:
+		p := req.SetUserSharedMailbox
+		res = svc.SetUserSharedMailbox(ctx, p.GetUserId(), p.GetShared())
 	case *memqlv1.IdentityAdminMsg_RevokeUserToken:
 		res = svc.RevokePersonalAccessToken(ctx, req.RevokeUserToken.GetIdentityId())
 	case *memqlv1.IdentityAdminMsg_RevokeNodeToken:

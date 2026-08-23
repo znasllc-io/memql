@@ -249,6 +249,49 @@ the process env. Seed it with `make secret-set NAME=MEMQL_OPENAI_API_KEY
 VALUE=... SCOPE=global` (or `variable-set` for non-sensitive values)
 ```
 
+#### The one exception: Anthropic's credential is optional at every layer
+
+Six placeholders resolve to ABSENT instead of failing when no layer holds
+them (`optionalAuthEnvNames`, memql#4334):
+
+```
+MEMQL_AI_ANTHROPIC_API_KEY
+MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID
+MEMQL_AI_ANTHROPIC_ORGANIZATION_ID
+MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID
+MEMQL_AI_ANTHROPIC_WORKSPACE_ID
+MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE
+```
+
+They are Anthropic's credential, and it is the one case where an absence is a
+legitimate configuration rather than a mistake -- in both directions. The four
+federation ids are unset on every local cluster, and the API key is unset in
+the cloud once the federation cutover finishes. Left non-optional, either state
+would take every Claude provider out of the registry with a WARNING rather than
+an error -- which, locally, is a log line nobody reads.
+
+So the absence is not decided here. `anthropicCredential`
+(`component/memql/ai_anthropic_federation.go`) is the one place that knows
+which combination is meaningful, and it decides:
+
+| What is set | Result |
+|---|---|
+| all four federation values | federate |
+| none | require `MEMQL_AI_ANTHROPIC_API_KEY`, as before |
+| both | federate; one warning that the key is ignored |
+| one, two or three | **refuse to boot**, naming the missing names |
+
+The seeding hint the resolver would have printed moves with the decision: the
+no-credential error names `MEMQL_AI_ANTHROPIC_API_KEY` and the `make secret-set`
+line for it.
+
+Optionality is an ALLOW-LIST of exactly these six, not a new default; every
+other placeholder still fails its provider with the message above.
+`MEMQL_AI_ANTHROPIC_WORKSPACE_ID` is optional even when federating -- Anthropic
+needs it only when the rule spans more than one workspace.
+
+Runbook: [auth/anthropic-federation.md](auth/anthropic-federation.md).
+
 For partition-scoped resolvers (DSL `resolveSecret(...)` /
 `resolveVariable(...)`) the chain is:
 

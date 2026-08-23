@@ -17,8 +17,13 @@ export {
 export {
   revokeCurrentSession,
   revokeAllSessions,
+  revokeSession,
+  setSignInPolicy,
   type RevokeCurrentSessionResult,
   type RevokeAllSessionsResult,
+  type RevokeSessionResult,
+  type SetSignInPolicyResult,
+  type SignInPolicy,
 } from "./session.js";
 export {
   createWorkerToken,

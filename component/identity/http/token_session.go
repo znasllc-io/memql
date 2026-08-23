@@ -110,17 +110,18 @@ func (s *Server) issueSessionForUser(w http.ResponseWriter, r *http.Request, in 
 	// middleware's revocation check; the refresh-token hash rolls
 	// forward via rotateAuthSession on every /auth/refresh.
 	expiresAt := now.Add(live.RefreshTokenTTL).Format(time.RFC3339Nano)
-	if err := s.Store.CreateAuthSession(
-		r.Context(),
-		sessionId,
-		in.UserId, // subject for now is the userId
-		hashCode(access),
-		source,
-		in.UserId,
-		in.IdentityId,
-		r.Header.Get("User-Agent"),
-		expiresAt,
-	); err != nil {
+	if err := s.createSessionRow(r.Context(), r, sessionRowInput{
+		SessionId:   sessionId,
+		Subject:     in.UserId, // subject for now is the userId
+		UserId:      in.UserId,
+		IdentityId:  in.IdentityId,
+		TokenHash:   hashCode(access),
+		Source:      source,
+		ClientLabel: r.Header.Get("User-Agent"),
+		ExpiresAt:   expiresAt,
+		Email:       tokenInput.Email,
+		Now:         now,
+	}); err != nil {
 		return out, fmt.Errorf("session persist: %w", err)
 	}
 

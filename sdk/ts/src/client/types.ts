@@ -31,6 +31,29 @@ export interface AccessSummary {
   userId: string;
   primaryEmail: string;
   clusterRole: Role;
+  // sessionId names the v1:identity:authSession row backing THIS connection,
+  // read by the server off the verified token (memql#4306).
+  //
+  // It is what lets a sessions list mark "this device" without decoding the
+  // JWT -- which clients must not do: a client that parses its own bearer
+  // starts making decisions from claims the server never promised it. Empty
+  // for a credential with no session behind it (a PAT, an operator key, a
+  // service account), which is not an error; there is simply no row to name.
+  sessionId: string;
+  // displayName is the person's name off their v1:identity:user row
+  // (memql#4317), resolved server-side by the same read that produces
+  // primaryEmail.
+  //
+  // It is here rather than decoded from the JWT for the reason sessionId is:
+  // a client that parses its own bearer starts making decisions from claims
+  // the server never promised it. It is also the fresher of the two -- a
+  // claim is what was true when the token was minted, this is what the row
+  // says now.
+  //
+  // Empty when no user row resolved (a first request racing the registration
+  // insert, a PAT with no provisioned user). Render the email instead; a
+  // caller holds that already.
+  displayName: string;
 }
 
 // DisplayCard carries the per-concept rendering hints declared via
@@ -313,6 +336,8 @@ export function accessSummaryFromWire(p: MyAccessResultPayload | undefined): Acc
     userId: p.userId ?? "",
     primaryEmail: p.primaryEmail ?? "",
     clusterRole: roleFromWire(p.clusterRole),
+    sessionId: p.sessionId ?? "",
+    displayName: p.displayName ?? "",
   };
 }
 

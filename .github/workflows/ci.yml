@@ -1082,6 +1082,12 @@ jobs:
         with:
           go-version: '1.26.6'
           cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      # Needed here since memql#4302, when the cross-replica magic-link gate
+      # started importing that package -- vet fails with "pattern
+      # static/app.css: no matching files found" without it, which names the
+      # missing file but not the missing build step.
+      - uses: ./.github/actions/identity-css
       - name: go vet -tags clustere2e
         run: go vet -tags clustere2e ./test/clustere2e/
       - name: go test -tags clustere2e -c (compile only, never run)
@@ -1464,7 +1470,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/authactivity/... ./component/identity/recoverykey/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the

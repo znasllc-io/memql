@@ -35,12 +35,23 @@
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
 #
+# FEDERATION (memql#4335). Once a cluster authenticates to Anthropic by
+# workload identity federation there IS no key to verify: the credential is a
+# projected Kubernetes token that exists only inside a pod and is exchanged for
+# a one-hour bearer. Handing this script a key file would then verify a
+# credential the cluster does not use -- a green check on the wrong thing,
+# which is worse than no check. So --federation-deploy switches the probe to
+# `kubectl exec <deploy> -- memql provider-auth check`, which asks the running
+# pod what it is really using. --key-file is not required in that mode and is
+# ignored if passed.
+#
 # Usage:
 #   scripts/install/verify-provider-key.sh --provider=anthropic --key-file=/run/secrets/anthropic
 #   scripts/install/verify-provider-key.sh --provider=openai --key-file=./k --base-url=http://127.0.0.1:8080
+#   scripts/install/verify-provider-key.sh --provider=anthropic --federation-deploy=agent --namespace=memql
 #   scripts/install/verify-provider-key.sh --print-spec
 #
-# Refs: #3364 #3357 #2221
+# Refs: #3364 #3357 #2221 #4335
 
 set -euo pipefail
 
@@ -49,12 +60,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "install.verifyProviderKey" \
-    "Verify an AI-provider API key with an authenticated, token-free GET /v1/models."
+    "Verify an AI-provider credential: an API key by an authenticated, token-free GET /v1/models, or Anthropic workload identity federation by running provider-auth check inside a pod."
 cap_spec_param "provider"          "provider to verify: anthropic | openai"
-cap_spec_param_required "key-file"          "path to a file containing the API key (never a flag -- argv is public)"
+# NOT cap_spec_param_required: a federation check has no key to point at. The
+# key-mode branch still requires it, via cap_require below, so the only thing
+# that changed is WHERE the requirement is enforced -- and with it the error a
+# federated caller gets, which is now nothing instead of "key-file is required"
+# for a cluster that correctly has no key.
+cap_spec_param "key-file"          "path to a file containing the API key (never a flag -- argv is public). Required unless --federation-deploy is given."
 cap_spec_param "base-url"          "API base URL override (default: the provider's public endpoint)"
 cap_spec_param "timeout"           "per-request timeout in seconds (default 15)"
 cap_spec_param "anthropic-version" "anthropic-version header value (default 2023-06-01)"
+# No backticks in this description: it is a double-quoted bash argument, so a
+# backtick would be COMMAND SUBSTITUTION -- which is how --print-spec came to
+# run "memql provider-auth check" on the operator's machine and print
+# "memql: command not found" beside the spec.
+cap_spec_param "federation-deploy" "verify Anthropic workload identity federation instead of a key: the Deployment to exec 'memql provider-auth check' in (e.g. agent)"
+cap_spec_param "namespace"         "Kubernetes namespace holding --federation-deploy (default memql)"
+cap_spec_param "memql-binary"      "path to the memql binary inside the pod (default /app/memql)"
 
 # Private working directory holding the 0600 curl config. Set by setup_workdir.
 _VPK_WORKDIR=""
@@ -250,6 +273,70 @@ function probe() {
 }
 
 #=============================================================================
+# THE FEDERATION PROBE -- ask the pod, because the credential is the pod's
+#=============================================================================
+
+# probe_federation <deployment> <namespace> <memql-binary> <timeout>
+#
+# Runs `memql provider-auth check` inside a running pod and reports its exit
+# code with the same three-way meaning the key probe uses:
+#
+#   0  the pod authenticated to Anthropic and listed models
+#   3  REFUSED -- the pod ran the check and Anthropic did not accept it (the
+#      credential is wrong: rule, subject prefix, audience, service account).
+#      This is the federation analogue of a 401 on a key, and it is what the
+#      operator re-does step 2 of the runbook for.
+#   4  kubectl is absent
+#   5  the check could not be RUN (no such deployment, no cluster, exec
+#      refused). Says nothing about the credential.
+#
+# The distinction between 3 and 5 is the whole reason this is not one exit
+# code: "your federation rule does not match" and "you are pointed at the
+# wrong cluster" ask for opposite next actions, and kubectl exec collapses
+# both into a non-zero exit unless the two are told apart deliberately. They
+# are told apart by whether the command RAN: kubectl exec returns the
+# command's own exit status, and `provider-auth check` uses 1 for a refusal,
+# so 1 is a refusal and anything else is a failure to run.
+function probe_federation() {
+    local deployment="$1" namespace="$2" binary="$3" timeout="$4"
+
+    if ! command -v kubectl &>/dev/null; then
+        cap_fail 4 "kubectl is not installed; cannot verify federation from outside the cluster"
+    fi
+
+    cap_step "kubectl exec -n ${namespace} deploy/${deployment} -- ${binary} provider-auth check"
+
+    local out="" rc=0
+    out="$(kubectl exec -n "$namespace" "deploy/${deployment}" -- \
+              "$binary" provider-auth check --timeout="${timeout}s" 2>&1)" || rc=$?
+
+    local note
+    note="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-600)"
+
+    cap_result_set     provider    "anthropic"
+    cap_result_set     credential  "federation"
+    cap_result_set     deployment  "${namespace}/${deployment}"
+    cap_result_set     detail      "$note"
+
+    case "$rc" in
+        0)
+            cap_result_set_raw valid true
+            cap_info "Federation verified in ${namespace}/${deployment}."
+            cap_ok
+            ;;
+        1)
+            cap_result_set_raw valid false
+            cap_error "The pod ran the check and Anthropic did not accept the federated credential."
+            cap_fail 3 "federation was refused: ${note}"
+            ;;
+        *)
+            cap_result_set_raw valid false
+            cap_fail 5 "could not run provider-auth check in ${namespace}/${deployment} (kubectl exit ${rc}); this says nothing about the credential: ${note}"
+            ;;
+    esac
+}
+
+#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -276,6 +363,21 @@ function main() {
         anthropic|openai) ;;
         *) cap_fail 2 "unknown provider: ${provider} (supported: anthropic, openai)" ;;
     esac
+
+    # FEDERATION MODE. Taken before anything touches a key file, because in
+    # this mode there is no key and asking for one would be the bug.
+    local federation_deploy namespace memql_binary
+    federation_deploy="$(cap_param federation-deploy)"
+    if [[ -n "$federation_deploy" ]]; then
+        if [[ "$provider" != "anthropic" ]]; then
+            cap_fail 2 "workload identity federation is Anthropic-only; ${provider} has no federation mechanism, so verify its key with --key-file"
+        fi
+        namespace="$(cap_param namespace memql)"
+        memql_binary="$(cap_param memql-binary /app/memql)"
+        probe_federation "$federation_deploy" "$namespace" "$memql_binary" "$timeout"
+        return
+    fi
+
     cap_require key-file "$key_file"
 
     base_url="$(cap_param base-url "$(default_base_url "$provider")")"
