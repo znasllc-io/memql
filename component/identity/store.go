@@ -15,6 +15,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -324,7 +325,20 @@ func (s *Store) LookupMagicLinkById(ctx context.Context, requestId string) (*Mag
 	// is the identity service acting on its own behalf -- checking the
 	// presented binding cookie against the row before anything happens --
 	// which is exactly the server-initiated work the annotation admits.
-	query := fmt.Sprintf(`query magicLinkRequestById(requestId: "%s")`, escapeMemQLString(requestId))
+	// langparser.QuoteString, NOT escapeMemQLString + hand-written quotes.
+	//
+	// It is the convention this package already uses for a by-id lookup
+	// (delegation_resolver.go), it is the MemQL lexer's own inverse, and it is
+	// STRICTER: escapeMemQLString handles \ " \n \r \t and passes every other
+	// byte through raw, so a control character in the argument reaches the
+	// lexer unescaped. QuoteString goes through encoding/json, which escapes
+	// the whole C0 range as \u00XX.
+	//
+	// It also supplies its own delimiters, which is why the format string has
+	// none -- interpolating a value between two literal quote characters is
+	// the shape CodeQL's unsafe-quoting query flags, and it is right to: the
+	// safety then depends on a sanitizer a reader has to go and find.
+	query := fmt.Sprintf(`query magicLinkRequestById(requestId: %s)`, langparser.QuoteString(requestId))
 	nodes, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup magic link by id: %w", err)
