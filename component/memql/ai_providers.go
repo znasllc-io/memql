@@ -852,25 +852,63 @@ func SetSystemSecretResolver(r SystemSecretResolverFunc) { systemSecretResolver 
 // rules as SetSystemSecretResolver.
 func SetSystemVariableResolver(r SystemVariableResolverFunc) { systemVariableResolver = r }
 
-// authConceptLookupNames returns the names to try in concept storage
-// for a given placeholder name, in priority order. Providers historically
-// reference `MEMQL_SI_<VENDOR>_API_KEY` (e.g. `MEMQL_AI_OPENAI_API_KEY`)
-// because that's the OS env var the bridge-agent / STT bootstrap also
-// reads. The dev workflow seeds the bare form (`MEMQL_OPENAI_API_KEY`,
-// `MEMQL_ANTHROPIC_API_KEY`, ...) because that's what engineers know.
+// authConceptLookupNames returns the names to try in concept storage for a
+// given placeholder name, in priority order.
 //
-// Rather than rename one side or the other -- which would force every
-// install to re-seed -- the resolver tries both:
+// Providers reference `MEMQL_AI_<VENDOR>_...` (dsl/providers/providers.memql)
+// because that is the OS env var the bridge-agent / STT bootstrap also reads,
+// while operators seed the SEAL-FLOOR form -- `MEMQL_OPENAI_API_KEY`,
+// `MEMQL_ANTHROPIC_API_KEY` -- because that is the name the manifest and the
+// docs give them. Rather than rename either side and force every install to
+// re-seed, the resolver tries both:
 //
 //	MEMQL_AI_OPENAI_API_KEY  (exact match for what the provider asked)
-//	MEMQL_OPENAI_API_KEY           (the dev-manifest seeded form)
+//	MEMQL_OPENAI_API_KEY     (the seal-floor seeded form)
 //
-// First non-empty match wins. Names that don't carry the prefix are
-// looked up verbatim (no synthesized fallback).
+// First non-empty match wins, and the EXACT name is always first: seeding the
+// precise name an operator was asked for must never be the losing option.
+//
+// # memql#4338
+//
+// This elided `MEMQL_SI_` and nothing else. Every provider in the tree asks
+// for `MEMQL_AI_...`, and `MEMQL_SI_` survives only as a deprecated alias
+// (component/envregistry/legacyalias.go) -- so the elision fired for NO
+// provider and the fallback it exists to provide never happened. A key seeded
+// under the documented `MEMQL_ANTHROPIC_API_KEY` was simply not found.
+//
+// The rename from `MEMQL_SI_` to `MEMQL_AI_` missed this constant, and three
+// places kept describing the behaviour it had lost: this comment (which named
+// `MEMQL_SI_` as the prefix and then gave a `MEMQL_AI_` example of it), the
+// OS-env fallback comment below, and docs/public/operate/env-vars.md, which
+// spells the mapping out literally. Documentation on three sides and code on
+// none is what makes this the code's bug.
+//
+// It also elided the WHOLE prefix, yielding a bare `OPENAI_API_KEY` rather
+// than the `MEMQL_OPENAI_API_KEY` every one of those three describes. Only the
+// `AI_` / `SI_` segment is dropped now; `MEMQL_` is part of the seal-floor
+// name.
+//
+// `MEMQL_SI_` is RETAINED rather than replaced, and its bare form is kept as a
+// third candidate: a product DSL bundle mounted at MEMQL_DSL_PATH is read from
+// disk at boot and may still declare the old prefix, so dropping either would
+// break exactly the installs the alias table exists to carry.
+//
+// Names carrying neither prefix are looked up verbatim -- a synthesized
+// fallback there would widen the search to a name nobody declared.
 func authConceptLookupNames(envKey string) []string {
-	const elidedPrefix = "MEMQL_SI_"
-	if strings.HasPrefix(envKey, elidedPrefix) {
-		return []string{envKey, strings.TrimPrefix(envKey, elidedPrefix)}
+	for _, prefix := range []string{"MEMQL_AI_", "MEMQL_SI_"} {
+		if !strings.HasPrefix(envKey, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(envKey, prefix)
+		names := []string{envKey, "MEMQL_" + rest}
+		if prefix == "MEMQL_SI_" {
+			// Backwards compatibility only: what this function returned for
+			// the old prefix before memql#4338. Last, so the documented name
+			// wins whenever both are seeded.
+			names = append(names, rest)
+		}
+		return names
 	}
 	return []string{envKey}
 }
@@ -970,8 +1008,19 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 				continue
 			}
 			return nil, fmt.Errorf(
-				"auth %q references %s but no value is in concept storage or OS env. Tried name(s) %s under v1:platform:globalSecret, v1:platform:globalVariable, and the process env. Seed it with `make secret-set NAME=%s VALUE=... SCOPE=global` (or `variable-set` for non-sensitive values)",
-				key, envKey, strings.Join(candidates, ", "), candidates[len(candidates)-1])
+				// NAMES REAL THINGS ONLY (memql#4338). This used to say
+				// `make secret-set` / `variable-set`; the Makefile has
+				// neither, and never has -- so the one line an operator
+				// reads at the moment of failure sent them to a command
+				// that does not exist.
+				"auth %q references %s but no value is in concept storage or OS env. "+
+					"Tried name(s) %s under v1:platform:globalSecret, v1:platform:globalVariable, "+
+					"and the process env. Seed ANY of those names: put it in the node's "+
+					"environment (locally `make secrets`; in a cluster, whichever secret store "+
+					"the deployment reads), or store a v1:platform:globalSecret row under it. "+
+					"The last name listed is the seal-floor form the manifest and "+
+					"docs/public/operate/env-vars.md use",
+				key, envKey, strings.Join(candidates, ", "))
 		}
 		if trimmed == "" {
 			return nil, fmt.Errorf("auth value %q is empty", key)

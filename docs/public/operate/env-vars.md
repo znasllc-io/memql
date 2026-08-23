@@ -208,11 +208,10 @@ When a `.memql` provider file references a placeholder like
 
 #### Prefix elision
 
-Provider `.memql` files historically reference
-`MEMQL_SI_<VENDOR>_API_KEY` while the dev manifest seeds the bare
-form (`MEMQL_OPENAI_API_KEY`, `MEMQL_ANTHROPIC_API_KEY`, ...). To bridge that
-gap without renaming either side, every layer of the chain tries
-**both** names in priority order:
+Provider `.memql` files reference `MEMQL_AI_<VENDOR>_...` while the manifest
+seeds the SEAL-FLOOR form (`MEMQL_OPENAI_API_KEY`, `MEMQL_ANTHROPIC_API_KEY`,
+...). To bridge that gap without renaming either side, every layer of the chain
+tries **both** names in priority order:
 
 ```
 authConceptLookupNames("MEMQL_AI_OPENAI_API_KEY")
@@ -222,6 +221,18 @@ authConceptLookupNames("MEMQL_AI_OPENAI_API_KEY")
 So a provider asking for `MEMQL_AI_OPENAI_API_KEY` will pick up a
 value seeded as `MEMQL_OPENAI_API_KEY` automatically. The same elision
 applies to the OS env fallback.
+
+Only the `AI_` segment is dropped -- `MEMQL_` is part of the seal-floor name.
+The deprecated `MEMQL_SI_` prefix elides the same way and additionally keeps
+its historical bare form (`OPENAI_API_KEY`) as a last candidate, so a product
+DSL bundle still declaring the old prefix does not regress.
+
+**This section described the behaviour before the code had it** (memql#4338).
+The elision was written against `MEMQL_SI_`, which no provider in the tree uses
+-- so it fired for none of them, and a key seeded under the documented
+seal-floor name was simply not found. `TestSealFloorSecretResolvesForAnMemqlAIPlaceholder`
+(`component/memql/ai_provider_auth_lookup_test.go`) is what now pins the
+mapping this block claims.
 
 #### Why OS env stays around
 
@@ -244,9 +255,11 @@ A miss at every layer produces:
 ```
 auth "apiKey" references MEMQL_AI_OPENAI_API_KEY but no value is in
 concept storage or OS env. Tried name(s) MEMQL_AI_OPENAI_API_KEY,
-MEMQL_OPENAI_API_KEY under v1:platform:globalSecret, v1:platform:globalVariable, and
-the process env. Seed it with `make secret-set NAME=MEMQL_OPENAI_API_KEY
-VALUE=... SCOPE=global` (or `variable-set` for non-sensitive values)
+MEMQL_OPENAI_API_KEY under v1:platform:globalSecret, v1:platform:globalVariable,
+and the process env. Seed ANY of those names: put it in the node's environment
+(locally `make secrets`; in a cluster, whichever secret store the deployment
+reads), or store a v1:platform:globalSecret row under it. The last name listed
+is the seal-floor form the manifest and docs/public/operate/env-vars.md use
 ```
 
 #### The one exception: Anthropic's credential is optional at every layer
@@ -282,8 +295,8 @@ which combination is meaningful, and it decides:
 | one, two or three | **refuse to boot**, naming the missing names |
 
 The seeding hint the resolver would have printed moves with the decision: the
-no-credential error names `MEMQL_AI_ANTHROPIC_API_KEY` and the `make secret-set`
-line for it.
+no-credential error names `MEMQL_AI_ANTHROPIC_API_KEY` and the seeding line for
+it.
 
 Optionality is an ALLOW-LIST of exactly these six, not a new default; every
 other placeholder still fails its provider with the message above.

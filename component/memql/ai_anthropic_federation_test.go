@@ -189,8 +189,19 @@ func TestAnthropicCredentialRefusesWithNoCredentialAtAll(t *testing.T) {
 	}
 	// The seeding hint the auth resolver used to print has to survive here,
 	// because the resolver no longer errors on this name.
-	if !strings.Contains(err.Error(), envAnthropicAPIKey) || !strings.Contains(err.Error(), "make secret-set") {
+	//
+	// Asserted as a PROPERTY -- names the variable, names a real destination --
+	// rather than as a literal `make secret-set`, which is what let this
+	// assertion keep passing while pointing operators at a target the Makefile
+	// has never had (memql#4338).
+	if !strings.Contains(err.Error(), envAnthropicAPIKey) {
+		t.Fatalf("no-credential error does not name the variable to seed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "globalSecret") {
 		t.Fatalf("no-credential error lost the seeding hint: %v", err)
+	}
+	if strings.Contains(err.Error(), "make secret-set") {
+		t.Fatalf("no-credential error cites `make secret-set`, which is not a Makefile target: %v", err)
 	}
 }
 
@@ -380,8 +391,13 @@ func TestNonOptionalPlaceholdersStillFail(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unset non-optional placeholder resolved silently")
 	}
-	if !strings.Contains(err.Error(), "make secret-set") {
+	// Same property, same reason as above (memql#4338): a real destination,
+	// and never a make target that does not exist.
+	if !strings.Contains(err.Error(), "globalSecret") {
 		t.Fatalf("the resolver's seeding hint was lost: %v", err)
+	}
+	if strings.Contains(err.Error(), "make secret-set") {
+		t.Fatalf("the resolver cites `make secret-set`, which is not a Makefile target: %v", err)
 	}
 }
 
