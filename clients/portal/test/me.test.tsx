@@ -452,6 +452,9 @@ describe("/me/security (memql#4318, #4319)", () => {
     // Never disabled: a policy whose owner cannot reverse it is not a
     // security control.
     expect(button.hasAttribute("disabled")).toBe(false);
-    expect(button.getAttribute("aria-pressed")).toBe("true");
+    // ...and it does NOT claim to be a toggle. The label says what the press
+    // will do and the Badge says what is true now; aria-pressed on top of a
+    // changing label announces "Turn sign-in links back on, pressed".
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
   });
 });

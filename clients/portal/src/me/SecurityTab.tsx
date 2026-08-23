@@ -73,9 +73,14 @@ export function SecurityTab({ me }: { me: MeState }): ReactNode {
             <Skeleton variant="text" width="w-56" />
           ) : (
             <div className="flex flex-wrap items-center gap-3">
+              {/* A COMMAND, not a toggle. Its label says what pressing it
+                  will DO, and the Badge beside it says what is true now --
+                  so `aria-pressed` on top of that would announce "Turn
+                  sign-in links back on, pressed", which is a contradiction.
+                  A toggle needs a stable label; this one is clearer with a
+                  changing one. */}
               <Button
                 tone={passkeyOnly ? "quiet" : "primary"}
-                pressed={passkeyOnly}
                 busy={me.policyBusy}
                 busyLabel="Saving"
                 disabled={!passkeyOnly && !canGoPasskeyOnly}
