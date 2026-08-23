@@ -150,20 +150,13 @@ integrations/
 └── workbench/         # Per-Plan sandboxed workspace -- dispatchHost, teardownDirectory
 
 # The coding agent is a SEAM, not an integration here: component/planner's
-# RegisterContainerExecutor takes a backend (the reserved name is
-# "nemoclaw"), and nothing in this repo registers one. The claw tool
-# definitions the prompt templates name are not in this repo's dsl/ tree
-# either -- see the root CLAUDE.md Coding Agent section (memql#4120).
+# RegisterContainerExecutor takes a backend (reserved name "nemoclaw") and
+# nothing in this repo registers one -- see the root CLAUDE.md (memql#4120).
 #
-# training/ (the per-agent "Train" pipeline: identity embedding + distilled
-# system prompt + just-in-time knowledge seeding) is a pack -- it lives in
-# the product repo as a thin Go module and self-registers via
-# memql.RegisterPlugin("training"), so engine-only core no longer carries
-# it. Under the consolidated platform (memql#2472) the engine ships
-# product-agnostic and product DSL rides in at runtime via MEMQL_DSL_PATH;
-# training is a still-shipped product-Go pack -- the transitional
-# exception, not yet absorbed into the engine or reduced to a data-only
-# bundle.
+# training/ (the per-agent "Train" pipeline) is a PACK: it lives in the
+# product repo as a thin Go module self-registering via
+# memql.RegisterPlugin("training"). It is the transitional product-Go
+# exception under memql#2472, not yet absorbed into the engine.
 ```
 
 ---
@@ -172,194 +165,81 @@ integrations/
 
 ### cognition/ -- routing + conductor + relay
 
-Owns the cognition pipeline on the cognition node. Capabilities
-registered: `cognitionScore` and `cognitionTrackPresence` -- the DSL
+Owns the cognition pipeline on the cognition node. The registered capability
+surface is just two: `cognitionScore` and `cognitionTrackPresence` (the DSL
 builtin names in `dsl/common/builtins.memql`, backed by
-`integration.cognition.scoreUtterance` and
-`integration.cognition.trackPresence` (`capabilities.go`). Those two are
-the whole surface; the cross-node `ClientToolCall` round trip below rides
-the graph event bus, not a capability.
+`integration.cognition.scoreUtterance` / `.trackPresence` in
+`capabilities.go`). The cross-node `ClientToolCall` round trip rides the graph
+event bus, not a capability.
 
-**Single LLM brain on the text path** (shipped 2026-04-26 in
-4249c0b). The conductor (`conductor_consult.go` +
-`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the routing
-decision (`fitScore`, `turnMode`, `handoff`, `severity`) and the
-per-agent plan (primary, sequence, chime-ins, instructions) in one
-structured-output call. The standalone router LLM call in
-`ai_router.go` only fires for voice utterances now (latency-
-sensitive). Fast-path mention dispatch
-(`tryFastPathDispatch`) bypasses both. Many older docs describing a
-two-brain (router + conductor) architecture for the text path are
-wrong about the current code.
+Routing behaviour -- the single-LLM-brain text path, capability-aware routing,
+conversational continuity, greet-on-join pacing and its cross-replica advisory-
+lock gate -- is described in the root CLAUDE.md's Cognition section. Two things
+that live only here:
 
-**Capability-aware routing.** Both the conductor and the voice-path
-router render each agent's tool list in their candidate block;
-tool-fit mismatch drops fitScore by 0.4+ and full tool gap routes to
-the general assistant with `turnMode=escalation_notice`. Prevents
-specialists like Vera (HR) from grabbing UI-driving asks ("guide me
-around the app") that need Sofia's `uiDescribe` / `uiClick` tools.
+- **Affirmation guard exempts corrections.** The
+  "affirmation/follow-up/farewell -- skip dispatch" guard exempts
+  correction-shaped utterances ("sorry I meant X", "actually no", "wait that's
+  wrong") so a user correcting the agent's previous action lands as actionable
+  rather than conversational.
+- **Older docs describing a two-brain (router + conductor) text path are wrong
+  about the current code.** The standalone router LLM call in `ai_router.go`
+  fires for voice utterances only.
 
-**Affirmation guard exempts corrections.** The
-"affirmation/follow-up/farewell -- skip dispatch" guard exempts
-correction-shaped utterances ("sorry I meant X", "actually no",
-"wait that's wrong", etc.) so a user correcting the agent's previous
-action lands as actionable instead of conversational.
+Key files: `cognition_handler.go` (event handler + dispatch flow),
+`conductor_consult.go` (conductor LLM call + lastResponder + plan->outcome
+adapter), `greet_on_join.go`, `ai_router.go`, `client_tool_relay.go`,
+`agent_forward.go`, `space_context_engine.go`, `prompt_context_cache.go`,
+`participant_presence.go`.
 
-**Conversational continuity.** The conductor receives an explicit
-`lastResponder` input (most-recent AI to speak before this human
-utterance), surfaced as its own field at the top of
-`conductorTurn.tmpl`. The "Conversational continuity"
-meta-principle requires the primary to stay with that agent when
-the user's turn is a follow-up shape ("ok cool", "btw", "what
-about", "tell me more") and there's no @-mention or domain pivot.
-Plugs the "GA jumps in to defer to the specialist" pattern --
-implicit follow-ups now route to the agent the user is mid-thread
-with instead of falling through to the general assistant.
-
-**Greet-on-join pacing.** `greet_on_join.go` serializes per-space
-greetings: 3s initial delay before the FIRST greeting fires (so
-the SPA finishes its modal-dismiss + route transition + first
-paint before the utterance lands), 4s minimum gap between
-consecutive greetings (so multi-`greetOnJoin` rooms don't fire a
-chorus). The greeting directive is "familiar" for ALL agents --
-every agent in the product is one the user created and named, so
-"Hi, I'm X" openers are forbidden across the board (no per-agent
-flag; the rule lives in the directive instruction text).
-
-**Greet-on-join cross-replica gate (#1386).** The `greetingPacing`
-mutex above is PROCESS-LOCAL -- it does nothing across replicas.
-The participant.created event is broadcast to BOTH cognition
-replicas, so without a cross-node guard both would greet (the
-greetingExists read-before-write check passes on both because
-neither inserts until after the initial-delay sleep + LLM call).
-`runGreetingTurn` takes `dispatchGate.tryGreet(spaceId, agentId)` --
-the same Postgres advisory-lock primitive as the utterance
-dispatch gate (`tryDispatch`), but keyed on (space, agent) under a
-distinct lock class (`greetGateLockClass`, "GRET") -- so exactly
-one replica greets. Held across the sleep + LLM call + insert,
-released on return; fails SAFE (proceeds) on any DB error, falling
-back to the greetingExists dedup. See `dispatch_gate.go`.
-
-Key files:
-- `cognition_handler.go` -- event handler + dispatch flow
-- `conductor_consult.go` -- conductor LLM call (+ lastResponder
-  computation) + plan -> outcome adapter
-- `greet_on_join.go` -- greetOnJoin handler with per-space
-  serialization + initial / inter-greeting delays + the
-  cross-replica greet gate (`dispatchGate.tryGreet`, #1386)
-- `ai_router.go` -- voice-path router + fast-path dispatch + tool list
-- `client_tool_relay.go` -- cross-node browser tool round-trip
-- `agent_forward.go` -- BFF/cognition -> agent gRPC forwarding
-- `space_context_engine.go`, `prompt_context_cache.go`,
-  `participant_presence.go`
-
-### `core/audio/` - Audio Processing (moved out of `integrations/`)
-**Purpose:** Audio streaming format conversion and resampling
+### `core/audio/` -- audio processing (NOT under `integrations/`)
 
 Not a DSL-callable integration -- a shared Go utility package, so it lives
-under `core/audio/` rather than `integrations/`.
+under `core/audio/`. PCM16 resampling (16kHz <-> 24kHz for Polyphon <-> OpenAI)
+with a persistent-filter streaming resampler (`resample.go`), WAV header
+generation + PCM chunking (`wav.go`), MP3 helpers (`mp3.go`).
 
-**What It Does:**
-- PCM16 sample rate resampling (16kHz <-> 24kHz for Polyphon <-> OpenAI)
-- Streaming resampler with persistent filter state
-- WAV header generation and PCM chunking for TTS delivery
-- MP3 helpers for file-based audio
+### openai/ -- OpenAI ASR + TTS for Polyphon
 
-**Key Files:**
-- `resample.go` - PCM16Resampler for Polyphon (16kHz) <-> OpenAI (24kHz)
-- `wav.go` - WAV header generation and PCM chunking
-- `mp3.go` - MP3 helpers
+Streaming ASR via the Realtime API in transcription-only mode (WebSocket), TTS
+via `/v1/audio/speech` with PCM16 output, automatic 16kHz <-> 24kHz resampling.
+Implements `polyphon.ASRProvider` / `TTSProvider`. Files: `openai.go` (config),
+`asr.go`, `tts.go`. Env: `MEMQL_POLYPHON_VOICE_PROVIDER=openai` (default),
+`MEMQL_POLYPHON_OPENAI_ASR_MODEL` (gpt-4o-transcribe),
+`..._TTS_MODEL` (gpt-4o-mini-tts), `..._TTS_VOICE` (alloy).
 
-### openai/ - OpenAI Voice Providers (Polyphon)
-**Purpose:** OpenAI ASR and TTS for the Polyphon multi-agent voice pipeline
+### stt/ -- speech-to-text
 
-**What It Does:**
-- Streaming ASR via OpenAI Realtime API in transcription-only mode (WebSocket)
-- TTS via OpenAI /v1/audio/speech HTTP API with PCM16 output
-- Automatic 16kHz <-> 24kHz resampling for Polyphon pipeline compatibility
-- Implements `polyphon.ASRProvider` and `polyphon.TTSProvider` interfaces
+Real-time streaming transcription over `MemqlService.Stream`
+(`AiTranscribeStreamStart` / `Chunk` / `End` -> `Delta` / `Complete`); the
+**voice** node owns the provider session and the BFF proxies through
+`AiForwardRouter.ForwardContinuation`. Single-shot batch via `AiTranscribeMsg`
+is still supported, plus the DSL capability `integration.stt.transcribe`.
 
-**Key Files:**
-- `openai.go` - Package config (APIKey, ASRModel, TTSModel, TTSVoice)
-- `asr.go` - ASRClient using Realtime API transcription-only mode
-- `tts.go` - TTSClient using /v1/audio/speech HTTP API
+Providers: **OpenAI Realtime** (default, true streaming WebSocket) or **OpenAI
+Whisper** (batch only; `whisper-1` transcribes verbatim and must be enabled for
+your OpenAI project).
 
-**Environment Variables:**
-- `MEMQL_POLYPHON_VOICE_PROVIDER=openai` (default) to select this provider
-- `MEMQL_POLYPHON_OPENAI_ASR_MODEL` (default: gpt-4o-transcribe)
-- `MEMQL_POLYPHON_OPENAI_TTS_MODEL` (default: gpt-4o-mini-tts)
-- `MEMQL_POLYPHON_OPENAI_TTS_VOICE` (default: alloy)
-
-### stt/ - Speech-to-Text
-**Purpose:** Convert audio to text transcriptions
-
-**DSL Capabilities:** `integration.stt.transcribe` -- Batch transcription from audio data
-
-**What It Does:**
-- Real-time streaming transcription over `MemqlService.Stream` via
-  `AiTranscribeStreamStart` / `Chunk` / `End` (client -> server) and
-  `AiTranscribeStreamDelta` / `Complete` (server -> client). Voice
-  node owns the provider session; BFF proxies through `AiForwardRouter.ForwardContinuation`.
-- Single-shot batch transcription via `AiTranscribeMsg` (still supported; used by callers that buffer the whole recording client-side).
-- Batch transcription capability callable from DSL.
-- Providers:
-  - **OpenAI Realtime** (default). True streaming WebSocket
-    via the Realtime API in transcription-only mode. Select via
-    `MEMQL_STT_PROVIDER=openai-realtime`.
-  - **OpenAI Whisper**. Batch-only via the transcriptions API.
-    `whisper-1` transcribes verbatim; override via `MEMQL_WHISPER_MODEL`
-    to use `gpt-4o-transcribe` or another model. Note: `whisper-1` must
-    be enabled for your OpenAI project.
-
-**Environment Variables:**
+Env:
 - `MEMQL_STT_PROVIDER` -- `openai-realtime` (default) or `openai-whisper`
-- `MEMQL_STT_LANGUAGE` -- hard-pinned streaming transcription language (default `en`); drives the OpenAI Realtime session config and overrides the client `language_hint`. Prevents wrong/mixed-language drift + short-word hallucination on noisy/short audio.
-- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/ai_transcribe_stream.go`.
-- `MEMQL_WHISPER_MODEL` -- OpenAI model name; defaults to `whisper-1`
+- `MEMQL_STT_LANGUAGE` -- hard-pinned streaming language (default `en`).
+  Overrides the client `language_hint`; prevents wrong/mixed-language drift and
+  short-word hallucination on noisy audio.
+- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`),
+  also gating a no-speech silence-hallucination denylist; `0` disables both.
+  Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in
+  `component/grpc/ai_transcribe_stream.go`.
+- `MEMQL_WHISPER_MODEL` -- defaults to `whisper-1`
 
-### auth/ - Authentication Capabilities
-**Purpose:** User identity operations callable from the MemQL DSL
+### The rest, in one line each
 
-**DSL Capabilities:**
-- `integration.auth.resolveUser` -- Resolve current authenticated user from context
-- `integration.auth.checkPermission` -- Check if user has a specific role
-
-Auth middleware (identity-issued JWT verification) stays in component/identity/verifier/ and component/auth/.
-
-### database/ - Database Management
-**Purpose:** Database management operations callable from the MemQL DSL
-
-**DSL Capabilities:**
-- `integration.database.healthCheck` -- Check database connectivity and response time
-- `integration.database.stats` -- Return connection pool statistics
-
-The database connection itself remains a core component. This integration exposes management operations.
-
-### fileprocessor/ - File Processing
-**Purpose:** Extract text from uploaded files
-
-**DSL Capabilities:**
-- `integration.files.extractText` -- Extract text from PDF, DOCX, images, text files
-
-Uses VisionAIProvider for image descriptions.
-
-### shopify/ - Shopify Storefront + Admin
-**Purpose:** Server-side product read and thin catalog index (memql#4136, #4137).
-First slice: GID, handle, `availableForSale`. Tokens stay off any
-browser-reachable surface. Checkout stays `cart.checkoutUrl`.
-
-**DSL Capabilities:**
-- `integration.shopify.fetchProduct` -- read GID / handle / availableForSale by Storefront GID or handle (Admin GraphQL if only an Admin token is set; GID required)
-- `integration.shopify.applyInboundProduct` -- webhook apply: fetch, then upsert the three fields or retire on a miss. Never invents.
-- `integration.shopify.reconcileProduct` / `reconcileIndex` -- re-fetch known GIDs. A miss retires; nothing new is invented.
-
-The plug-in always registers so inbound builtins exist. Fetch/persist no-op when `MEMQL_SHOPIFY_STORE_DOMAIN` plus a Storefront or Admin token is missing.
-
-### azureblob/ - Azure Blob Storage
-**Purpose:** Cloud storage file operations (registered as `storage`)
-
-**DSL Capabilities:**
-- `integration.storage.upload` -- Upload file data to Azure Blob Storage, returns the blob URL
+| Package | DSL capabilities |
+|---|---|
+| `auth/` | `resolveUser`, `checkPermission`. JWT verification itself stays in `component/identity/verifier/` + `component/auth/` |
+| `database/` | `healthCheck`, `stats`. The connection is a core component; this exposes management ops |
+| `fileprocessor/` | `files.extractText` -- PDF / DOCX / images (via VisionAIProvider) / text |
+| `azureblob/` | `storage.upload` -- returns the blob URL (registers under the name `storage`) |
+| `shopify/` | `fetchProduct`, `applyInboundProduct`, `reconcileProduct` / `reconcileIndex` (memql#4136-4137). First slice is GID / handle / `availableForSale`; tokens stay off any browser-reachable surface; checkout stays `cart.checkoutUrl`. **Never invents** -- a webhook or reconcile miss RETIRES the row. The plug-in always registers so inbound builtins exist; fetch/persist no-op without `MEMQL_SHOPIFY_STORE_DOMAIN` plus a token |
 
 ---
 
@@ -401,7 +281,7 @@ return full payloads; the `*CardSummary` domains generate canvas-card bodies;
 
 ---
 
-## START Adding New Integrations
+## Adding New Integrations
 
 MemQL's integration system has two registration paths:
 
@@ -511,31 +391,13 @@ kubectl logs -n memql deploy/bff -f | grep -iE "plug-in|<name>"
 
 ## Debugging Integrations
 
-### Check Integration Startup
 ```bash
 kubectl logs -n memql deploy/bff | grep "integration.*started"
+kubectl logs -n memql deploy/cognition -f | grep -E "cognition|turn state|ai.*response"
 ```
 
-### Watch Integration Activity
-```bash
-# Cognition integration
-kubectl logs -n memql deploy/cognition -f | grep "cognition"
-
-# Turn state
-kubectl logs -n memql deploy/cognition -f | grep "turn state"
-
-# AI responses
-kubectl logs -n memql deploy/cognition -f | grep "ai.*response"
-```
-
-### Common Issues
-
-1. **Not Starting** - Check dependencies (engine, event bus)
-2. **Events Not Firing** - Verify event subscription
-3. **API Errors** - Check API keys in .env
-4. **Performance** - Check cache hit rates in logs
-
----
+Common causes, in order: dependencies not up (engine, event bus); event
+subscription missing; API keys absent; cache hit rate (visible in the logs).
 
 ## Environment Variables
 

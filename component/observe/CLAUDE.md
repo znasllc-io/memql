@@ -15,43 +15,25 @@
 ## How it composes
 
 ```
-                                +--------------------------+
-                                | //memql:observe <level>  |  source marker
-                                +----------+---------------+
-                                           |  (parsed by extract/observe_markers.go)
-                                           v
-                                +--------------------------+
-                                | topology.model.json      |  static map (embedded)
-                                |   Method.Attrs[          |
-                                |     observe_level,       |
-                                |     redact_args,         |
-                                |     observable           |
-                                |   ]                      |
-                                +----------+---------------+
-                                           |
-                                           v
-+---------------------+        +-----------+--------------+        +---------------------+
-| MEMQL_OBSERVE_LEVEL +------->| observe.DefaultLevel     |<-------+ codeProfile concept |
-| (.env override)     |        +-----------+--------------+        | (live override)     |
-+---------------------+                    |                       +----------+----------+
-                                           |                                  |
-                                           v                                  v
-                                +--------------------------+        +---------------------+
-                                | observe.Method(ctx, fqn) |        | CodeProfileSubscriber|
-                                |   .Args(...).End(&err)   |        |  graph.node.created  |
-                                +-----------+--------------+        |  ...codeProfile      |
-                                            |                       +----------+----------+
-                                            v                                  |
-                                +--------------------------+                   |
-                                | TimescaleSink            |<------------------+
-                                |   buffered, drop-on-full |
-                                +-----------+--------------+
-                                            |
-                                            v
-                                +--------------------------+
-                                | code_invocation hypertable
-                                |  + 1m / 1h continuous aggs |
-                                +--------------------------+
+//memql:observe <level>            source marker
+   |  parsed by extract/observe_markers.go
+   v
+topology.model.json                static map (embedded)
+   Method.Attrs[observe_level, redact_args, observable]
+   |
+   v
+observe.DefaultLevel  <-- MEMQL_OBSERVE_LEVEL (.env override)
+   ^
+   +-- CodeProfileSubscriber  <-- v1:observability:codeProfile (live override,
+   |                              via graph.node.created ...codeProfile)
+   v
+observe.Method(ctx, fqn).Args(...).End(&err)
+   |
+   v
+TimescaleSink                      buffered, drop-on-full
+   |
+   v
+code_invocation hypertable  +  1m / 1h continuous aggregates
 ```
 
 ---
