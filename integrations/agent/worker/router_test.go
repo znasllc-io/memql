@@ -20,15 +20,24 @@ type fakeFleet struct {
 	machines []Candidate
 	policy   *Policy
 	touched  []string
+	// owner scopes the read the way workersForOwnerWithStatus's
+	// `filter ownerUserId==args.ownerUserId` does. Empty means "any owner",
+	// which most tests want; the hop tests set it, because a fake that
+	// returned every machine to every caller would let a receiver-side
+	// ownership check pass for the wrong reason.
+	owner string
 
 	readErr   error
 	policyErr error
 	touchErr  error
 }
 
-func (f *fakeFleet) WorkersForOwner(_ context.Context, _ string) ([]Candidate, error) {
+func (f *fakeFleet) WorkersForOwner(_ context.Context, ownerUserId string) ([]Candidate, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
+	}
+	if f.owner != "" && ownerUserId != f.owner {
+		return nil, nil
 	}
 	out := make([]Candidate, len(f.machines))
 	copy(out, f.machines)

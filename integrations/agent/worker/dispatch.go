@@ -29,6 +29,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/safety"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -111,6 +112,13 @@ type Request struct {
 	// the candidate set. PreferLabels only orders it.
 	RequireLabels map[string]string
 	PreferLabels  map[string]string
+
+	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
+	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
+	// whole result -- and carried here so a chunk that crosses a node hop has
+	// somewhere to land rather than being dropped at the boundary that was
+	// supposed to relay it.
+	OnStreamChunk func(*nodev1.WorkerForwardStream)
 
 	// ReroutedFrom records that this call is not where it was first sent:
 	// "workbench" when the workbench answered environment_mismatch

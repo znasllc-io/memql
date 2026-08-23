@@ -43,13 +43,44 @@ import (
 // dispatch never left this node, so the caller may try another machine.
 var ErrNoPeerForNode = errors.New("agent.worker: no reachable peer for the machine's replica")
 
+// PeerSender is "hand this envelope to the replica with this node id", and it
+// is a seam rather than a direct PeerManager call for one reason: a
+// *peerConnection is unexported, so without it the hop this file exists to
+// perform could only be tested against a live two-replica cluster. That is
+// exactly the shape of test that skips everywhere and therefore guards
+// nothing -- the argument test/clustere2e/automation_run_routing_test.go makes
+// at length about its own subject.
+//
+// It reports whether the envelope was handed off. False means no reachable
+// peer, which the caller turns into a refusal BEFORE START.
+type PeerSender interface {
+	Send(nodeId string, msg *nodev1.NodeClientMessage) bool
+}
+
 // ForwardRouter dispatches to a machine held by another agent replica.
 type ForwardRouter struct {
-	peerMgr *node.PeerManager
-	logger  *slog.Logger
+	sender PeerSender
+	self   func() (string, string)
+	logger *slog.Logger
 
 	mu       sync.Mutex
 	inflight map[string]*forwardCall
+}
+
+// peerManagerSender is the production PeerSender: look the replica up by node
+// id and send on its connection.
+type peerManagerSender struct{ peerMgr *node.PeerManager }
+
+func (p peerManagerSender) Send(nodeId string, msg *nodev1.NodeClientMessage) bool {
+	if p.peerMgr == nil {
+		return false
+	}
+	peer := p.peerMgr.Get(nodeId)
+	if peer == nil || peer.Connection == nil {
+		return false
+	}
+	peer.Connection.Send(msg)
+	return true
 }
 
 // forwardCall is one parked dispatch: where the answer goes, and where the
@@ -62,11 +93,26 @@ type forwardCall struct {
 // NewForwardRouter constructs an idle router bound to the agent node's
 // PeerManager.
 func NewForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *ForwardRouter {
+	self := func() (string, string) {
+		if peerMgr == nil {
+			return "", ""
+		}
+		return peerMgr.SelfNodeId(), peerMgr.SelfNodeType()
+	}
+	return newForwardRouter(peerManagerSender{peerMgr: peerMgr}, self, logger)
+}
+
+// newForwardRouter is the constructor the hop test uses with a fake sender.
+func newForwardRouter(sender PeerSender, self func() (string, string), logger *slog.Logger) *ForwardRouter {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if self == nil {
+		self = func() (string, string) { return "", "" }
+	}
 	return &ForwardRouter{
-		peerMgr:  peerMgr,
+		sender:   sender,
+		self:     self,
 		logger:   logger,
 		inflight: make(map[string]*forwardCall),
 	}
@@ -75,18 +121,20 @@ func NewForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *ForwardRo
 // SelfNodeId reports this replica's own id, for the audit-only origin stamp on
 // the forwarded authority.
 func (r *ForwardRouter) SelfNodeId() string {
-	if r == nil || r.peerMgr == nil {
+	if r == nil {
 		return ""
 	}
-	return r.peerMgr.SelfNodeId()
+	id, _ := r.self()
+	return id
 }
 
 // SelfNodeType reports this replica's node type, same purpose.
 func (r *ForwardRouter) SelfNodeType() string {
-	if r == nil || r.peerMgr == nil {
+	if r == nil {
 		return ""
 	}
-	return r.peerMgr.SelfNodeType()
+	_, t := r.self()
+	return t
 }
 
 // ForwardDispatch implements RemoteDispatcher.
@@ -104,11 +152,7 @@ func (r *ForwardRouter) ForwardDispatch(
 	capability string,
 	timeout time.Duration,
 ) (Result, ForwardOutcome, error) {
-	if r == nil || r.peerMgr == nil {
-		return Result{}, ForwardRefusedBeforeStart, ErrNoPeerForNode
-	}
-	peer := r.peerMgr.Get(nodeId)
-	if peer == nil || peer.Connection == nil {
+	if r == nil || r.sender == nil {
 		return Result{}, ForwardRefusedBeforeStart, ErrNoPeerForNode
 	}
 
@@ -146,7 +190,7 @@ func (r *ForwardRouter) ForwardDispatch(
 	}
 
 	requestId := id.NewShortId()
-	call := &forwardCall{resp: make(chan *nodev1.WorkerForwardResponse, 1)}
+	call := &forwardCall{resp: make(chan *nodev1.WorkerForwardResponse, 1), onChunk: req.OnStreamChunk}
 	r.mu.Lock()
 	r.inflight[requestId] = call
 	r.mu.Unlock()
@@ -175,12 +219,14 @@ func (r *ForwardRouter) ForwardDispatch(
 		TimeoutSec:     timeoutSec,
 		Authority:      node.ForwardedAuthorityToProto(authority, r.SelfNodeId(), r.SelfNodeType()),
 	}
-	peer.Connection.Send(&nodev1.NodeClientMessage{
+	if !r.sender.Send(nodeId, &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_WorkerForwardRequest{
 			WorkerForwardRequest: env,
 		},
-	})
+	}) {
+		return Result{}, ForwardRefusedBeforeStart, ErrNoPeerForNode
+	}
 
 	select {
 	case resp := <-call.resp:
@@ -188,7 +234,7 @@ func (r *ForwardRouter) ForwardDispatch(
 	case <-ctx.Done():
 		// Best-effort cancel. The receiving replica stops in-flight work and
 		// frees the machine's concurrency slot.
-		peer.Connection.Send(&nodev1.NodeClientMessage{
+		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_WorkerForwardCancel{
 				WorkerForwardCancel: &nodev1.WorkerForwardCancel{RequestId: requestId},
