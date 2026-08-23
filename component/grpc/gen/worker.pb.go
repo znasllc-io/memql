@@ -36,6 +36,8 @@ type WorkerClientMessage struct {
 	//	*WorkerClientMessage_ToolStream
 	//	*WorkerClientMessage_AuditEvent
 	//	*WorkerClientMessage_RotationRequest
+	//	*WorkerClientMessage_AppSessionChunk
+	//	*WorkerClientMessage_AppSessionEnd
 	Payload       isWorkerClientMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -153,6 +155,24 @@ func (x *WorkerClientMessage) GetRotationRequest() *RotationRequest {
 	return nil
 }
 
+func (x *WorkerClientMessage) GetAppSessionChunk() *AppSessionChunk {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerClientMessage_AppSessionChunk); ok {
+			return x.AppSessionChunk
+		}
+	}
+	return nil
+}
+
+func (x *WorkerClientMessage) GetAppSessionEnd() *AppSessionEnd {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerClientMessage_AppSessionEnd); ok {
+			return x.AppSessionEnd
+		}
+	}
+	return nil
+}
+
 type isWorkerClientMessage_Payload interface {
 	isWorkerClientMessage_Payload()
 }
@@ -181,6 +201,14 @@ type WorkerClientMessage_RotationRequest struct {
 	RotationRequest *RotationRequest `protobuf:"bytes,15,opt,name=rotation_request,json=rotationRequest,proto3,oneof"`
 }
 
+type WorkerClientMessage_AppSessionChunk struct {
+	AppSessionChunk *AppSessionChunk `protobuf:"bytes,16,opt,name=app_session_chunk,json=appSessionChunk,proto3,oneof"`
+}
+
+type WorkerClientMessage_AppSessionEnd struct {
+	AppSessionEnd *AppSessionEnd `protobuf:"bytes,17,opt,name=app_session_end,json=appSessionEnd,proto3,oneof"`
+}
+
 func (*WorkerClientMessage_Register) isWorkerClientMessage_Payload() {}
 
 func (*WorkerClientMessage_Heartbeat) isWorkerClientMessage_Payload() {}
@@ -192,6 +220,10 @@ func (*WorkerClientMessage_ToolStream) isWorkerClientMessage_Payload() {}
 func (*WorkerClientMessage_AuditEvent) isWorkerClientMessage_Payload() {}
 
 func (*WorkerClientMessage_RotationRequest) isWorkerClientMessage_Payload() {}
+
+func (*WorkerClientMessage_AppSessionChunk) isWorkerClientMessage_Payload() {}
+
+func (*WorkerClientMessage_AppSessionEnd) isWorkerClientMessage_Payload() {}
 
 type WorkerServerMessage struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -206,6 +238,8 @@ type WorkerServerMessage struct {
 	//	*WorkerServerMessage_Drain
 	//	*WorkerServerMessage_RotationResponse
 	//	*WorkerServerMessage_RegisterError
+	//	*WorkerServerMessage_AppSessionStart
+	//	*WorkerServerMessage_AppSessionControl
 	Payload       isWorkerServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -323,6 +357,24 @@ func (x *WorkerServerMessage) GetRegisterError() *RegisterError {
 	return nil
 }
 
+func (x *WorkerServerMessage) GetAppSessionStart() *AppSessionStart {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerServerMessage_AppSessionStart); ok {
+			return x.AppSessionStart
+		}
+	}
+	return nil
+}
+
+func (x *WorkerServerMessage) GetAppSessionControl() *AppSessionControl {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerServerMessage_AppSessionControl); ok {
+			return x.AppSessionControl
+		}
+	}
+	return nil
+}
+
 type isWorkerServerMessage_Payload interface {
 	isWorkerServerMessage_Payload()
 }
@@ -351,6 +403,14 @@ type WorkerServerMessage_RegisterError struct {
 	RegisterError *RegisterError `protobuf:"bytes,15,opt,name=register_error,json=registerError,proto3,oneof"`
 }
 
+type WorkerServerMessage_AppSessionStart struct {
+	AppSessionStart *AppSessionStart `protobuf:"bytes,16,opt,name=app_session_start,json=appSessionStart,proto3,oneof"`
+}
+
+type WorkerServerMessage_AppSessionControl struct {
+	AppSessionControl *AppSessionControl `protobuf:"bytes,17,opt,name=app_session_control,json=appSessionControl,proto3,oneof"`
+}
+
 func (*WorkerServerMessage_RegisterAck) isWorkerServerMessage_Payload() {}
 
 func (*WorkerServerMessage_ToolDispatch) isWorkerServerMessage_Payload() {}
@@ -362,6 +422,10 @@ func (*WorkerServerMessage_Drain) isWorkerServerMessage_Payload() {}
 func (*WorkerServerMessage_RotationResponse) isWorkerServerMessage_Payload() {}
 
 func (*WorkerServerMessage_RegisterError) isWorkerServerMessage_Payload() {}
+
+func (*WorkerServerMessage_AppSessionStart) isWorkerServerMessage_Payload() {}
+
+func (*WorkerServerMessage_AppSessionControl) isWorkerServerMessage_Payload() {}
 
 type Register struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -392,8 +456,14 @@ type Register struct {
 	// omit it register exactly as before; HEADLESS/COMPUTERUSE capability
 	// strings keep their scope-check semantics unchanged.
 	CapabilityDescriptorJson string `protobuf:"bytes,9,opt,name=capability_descriptor_json,json=capabilityDescriptorJson,proto3" json:"capability_descriptor_json,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// Local apps the cockpit found on this machine (memql#4359). The
+	// engine's runnable set is closed (claude-code, codex); an app the
+	// engine does not know is stored on the registration and never
+	// produces a routing label, so a cockpit may report more than the
+	// engine can drive without a coordinated release.
+	Apps          []*AppInfo `protobuf:"bytes,10,rep,name=apps,proto3" json:"apps,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Register) Reset() {
@@ -489,6 +559,101 @@ func (x *Register) GetCapabilityDescriptorJson() string {
 	return ""
 }
 
+func (x *Register) GetApps() []*AppInfo {
+	if x != nil {
+		return x.Apps
+	}
+	return nil
+}
+
+// AppInfo is one local app the cockpit detected. `allowed` is the
+// machine's own `policy.yaml apps.allow` verdict and `signed_in` is
+// the app's auth state as the cockpit can observe it; BOTH must be
+// true before the engine derives an `app:<id>` routing label, so a
+// machine that has the binary but cannot actually run it is never
+// selected.
+type AppInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the app's stable identifier: "claude-code" or "codex".
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// version is the CLI's own version string, reported verbatim.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// signed_in is the app's auth state as the cockpit can detect it.
+	SignedIn bool `protobuf:"varint,3,opt,name=signed_in,json=signedIn,proto3" json:"signed_in,omitempty"`
+	// subscription is what the app REPORTS -- "unknown", "none" or
+	// "present". Never inferred from anything else.
+	Subscription string `protobuf:"bytes,4,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	// allowed mirrors `policy.yaml apps.allow` on the machine.
+	Allowed       bool `protobuf:"varint,5,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppInfo) Reset() {
+	*x = AppInfo{}
+	mi := &file_worker_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppInfo) ProtoMessage() {}
+
+func (x *AppInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppInfo.ProtoReflect.Descriptor instead.
+func (*AppInfo) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AppInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AppInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *AppInfo) GetSignedIn() bool {
+	if x != nil {
+		return x.SignedIn
+	}
+	return false
+}
+
+func (x *AppInfo) GetSubscription() string {
+	if x != nil {
+		return x.Subscription
+	}
+	return ""
+}
+
+func (x *AppInfo) GetAllowed() bool {
+	if x != nil {
+		return x.Allowed
+	}
+	return false
+}
+
 type PlatformInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Os            string                 `protobuf:"bytes,1,opt,name=os,proto3" json:"os,omitempty"`
@@ -500,7 +665,7 @@ type PlatformInfo struct {
 
 func (x *PlatformInfo) Reset() {
 	*x = PlatformInfo{}
-	mi := &file_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +677,7 @@ func (x *PlatformInfo) String() string {
 func (*PlatformInfo) ProtoMessage() {}
 
 func (x *PlatformInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +690,7 @@ func (x *PlatformInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlatformInfo.ProtoReflect.Descriptor instead.
 func (*PlatformInfo) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{3}
+	return file_worker_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PlatformInfo) GetOs() string {
@@ -561,7 +726,7 @@ type PermissionStatus struct {
 
 func (x *PermissionStatus) Reset() {
 	*x = PermissionStatus{}
-	mi := &file_worker_proto_msgTypes[4]
+	mi := &file_worker_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +738,7 @@ func (x *PermissionStatus) String() string {
 func (*PermissionStatus) ProtoMessage() {}
 
 func (x *PermissionStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[4]
+	mi := &file_worker_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +751,7 @@ func (x *PermissionStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionStatus.ProtoReflect.Descriptor instead.
 func (*PermissionStatus) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{4}
+	return file_worker_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PermissionStatus) GetAccessibility() bool {
@@ -629,7 +794,7 @@ type RegisterAck struct {
 
 func (x *RegisterAck) Reset() {
 	*x = RegisterAck{}
-	mi := &file_worker_proto_msgTypes[5]
+	mi := &file_worker_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +806,7 @@ func (x *RegisterAck) String() string {
 func (*RegisterAck) ProtoMessage() {}
 
 func (x *RegisterAck) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[5]
+	mi := &file_worker_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +819,7 @@ func (x *RegisterAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterAck.ProtoReflect.Descriptor instead.
 func (*RegisterAck) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{5}
+	return file_worker_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RegisterAck) GetRegistrationId() string {
@@ -688,7 +853,7 @@ type RegisterError struct {
 
 func (x *RegisterError) Reset() {
 	*x = RegisterError{}
-	mi := &file_worker_proto_msgTypes[6]
+	mi := &file_worker_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -700,7 +865,7 @@ func (x *RegisterError) String() string {
 func (*RegisterError) ProtoMessage() {}
 
 func (x *RegisterError) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[6]
+	mi := &file_worker_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -713,7 +878,7 @@ func (x *RegisterError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterError.ProtoReflect.Descriptor instead.
 func (*RegisterError) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{6}
+	return file_worker_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RegisterError) GetCode() string {
@@ -735,13 +900,23 @@ type Heartbeat struct {
 	Ts                       *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=ts,proto3" json:"ts,omitempty"`
 	ActiveCallsTotal         uint32                 `protobuf:"varint,2,opt,name=active_calls_total,json=activeCallsTotal,proto3" json:"active_calls_total,omitempty"`
 	ActiveCallsPerCapability map[string]uint32      `protobuf:"bytes,3,rep,name=active_calls_per_capability,json=activeCallsPerCapability,proto3" json:"active_calls_per_capability,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// apps re-reports the local app inventory (memql#4359). A cockpit
+	// that signs into Claude Code mid-connection becomes routable on
+	// the next beat instead of on the next reconnect. Omitting the
+	// field leaves the registration's apps untouched -- an empty list
+	// is how a cockpit says "I now have none".
+	Apps []*AppInfo `protobuf:"bytes,4,rep,name=apps,proto3" json:"apps,omitempty"`
+	// apps_present distinguishes "I am reporting an empty inventory"
+	// from "I am not reporting apps at all", which proto3 repeated
+	// fields cannot express on their own.
+	AppsPresent   bool `protobuf:"varint,5,opt,name=apps_present,json=appsPresent,proto3" json:"apps_present,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_worker_proto_msgTypes[7]
+	mi := &file_worker_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -753,7 +928,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[7]
+	mi := &file_worker_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -766,7 +941,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{7}
+	return file_worker_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Heartbeat) GetTs() *timestamppb.Timestamp {
@@ -790,6 +965,20 @@ func (x *Heartbeat) GetActiveCallsPerCapability() map[string]uint32 {
 	return nil
 }
 
+func (x *Heartbeat) GetApps() []*AppInfo {
+	if x != nil {
+		return x.Apps
+	}
+	return nil
+}
+
+func (x *Heartbeat) GetAppsPresent() bool {
+	if x != nil {
+		return x.AppsPresent
+	}
+	return false
+}
+
 type ToolDispatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CallId        string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
@@ -809,7 +998,7 @@ type ToolDispatch struct {
 
 func (x *ToolDispatch) Reset() {
 	*x = ToolDispatch{}
-	mi := &file_worker_proto_msgTypes[8]
+	mi := &file_worker_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -821,7 +1010,7 @@ func (x *ToolDispatch) String() string {
 func (*ToolDispatch) ProtoMessage() {}
 
 func (x *ToolDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[8]
+	mi := &file_worker_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -834,7 +1023,7 @@ func (x *ToolDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolDispatch.ProtoReflect.Descriptor instead.
 func (*ToolDispatch) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{8}
+	return file_worker_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ToolDispatch) GetCallId() string {
@@ -910,7 +1099,7 @@ type ToolCancel struct {
 
 func (x *ToolCancel) Reset() {
 	*x = ToolCancel{}
-	mi := &file_worker_proto_msgTypes[9]
+	mi := &file_worker_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -922,7 +1111,7 @@ func (x *ToolCancel) String() string {
 func (*ToolCancel) ProtoMessage() {}
 
 func (x *ToolCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[9]
+	mi := &file_worker_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -935,7 +1124,7 @@ func (x *ToolCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCancel.ProtoReflect.Descriptor instead.
 func (*ToolCancel) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{9}
+	return file_worker_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ToolCancel) GetCallId() string {
@@ -962,7 +1151,7 @@ type Drain struct {
 
 func (x *Drain) Reset() {
 	*x = Drain{}
-	mi := &file_worker_proto_msgTypes[10]
+	mi := &file_worker_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -974,7 +1163,7 @@ func (x *Drain) String() string {
 func (*Drain) ProtoMessage() {}
 
 func (x *Drain) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[10]
+	mi := &file_worker_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -987,7 +1176,7 @@ func (x *Drain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Drain.ProtoReflect.Descriptor instead.
 func (*Drain) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{10}
+	return file_worker_proto_rawDescGZIP(), []int{11}
 }
 
 type ToolStream struct {
@@ -1005,7 +1194,7 @@ type ToolStream struct {
 
 func (x *ToolStream) Reset() {
 	*x = ToolStream{}
-	mi := &file_worker_proto_msgTypes[11]
+	mi := &file_worker_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1017,7 +1206,7 @@ func (x *ToolStream) String() string {
 func (*ToolStream) ProtoMessage() {}
 
 func (x *ToolStream) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[11]
+	mi := &file_worker_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1030,7 +1219,7 @@ func (x *ToolStream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolStream.ProtoReflect.Descriptor instead.
 func (*ToolStream) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{11}
+	return file_worker_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ToolStream) GetCallId() string {
@@ -1110,7 +1299,7 @@ type ToolResult struct {
 
 func (x *ToolResult) Reset() {
 	*x = ToolResult{}
-	mi := &file_worker_proto_msgTypes[12]
+	mi := &file_worker_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1122,7 +1311,7 @@ func (x *ToolResult) String() string {
 func (*ToolResult) ProtoMessage() {}
 
 func (x *ToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[12]
+	mi := &file_worker_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1135,7 +1324,7 @@ func (x *ToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
 func (*ToolResult) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{12}
+	return file_worker_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ToolResult) GetCallId() string {
@@ -1199,7 +1388,7 @@ type Success struct {
 
 func (x *Success) Reset() {
 	*x = Success{}
-	mi := &file_worker_proto_msgTypes[13]
+	mi := &file_worker_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1211,7 +1400,7 @@ func (x *Success) String() string {
 func (*Success) ProtoMessage() {}
 
 func (x *Success) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[13]
+	mi := &file_worker_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1224,7 +1413,7 @@ func (x *Success) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Success.ProtoReflect.Descriptor instead.
 func (*Success) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{13}
+	return file_worker_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Success) GetResultJson() []byte {
@@ -1283,7 +1472,7 @@ type Failure struct {
 
 func (x *Failure) Reset() {
 	*x = Failure{}
-	mi := &file_worker_proto_msgTypes[14]
+	mi := &file_worker_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1295,7 +1484,7 @@ func (x *Failure) String() string {
 func (*Failure) ProtoMessage() {}
 
 func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[14]
+	mi := &file_worker_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1308,7 +1497,7 @@ func (x *Failure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failure.ProtoReflect.Descriptor instead.
 func (*Failure) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{14}
+	return file_worker_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Failure) GetErrorCode() string {
@@ -1334,7 +1523,7 @@ type RotationRequest struct {
 
 func (x *RotationRequest) Reset() {
 	*x = RotationRequest{}
-	mi := &file_worker_proto_msgTypes[15]
+	mi := &file_worker_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1346,7 +1535,7 @@ func (x *RotationRequest) String() string {
 func (*RotationRequest) ProtoMessage() {}
 
 func (x *RotationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[15]
+	mi := &file_worker_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1359,7 +1548,7 @@ func (x *RotationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotationRequest.ProtoReflect.Descriptor instead.
 func (*RotationRequest) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{15}
+	return file_worker_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RotationRequest) GetCurrentTokenExpiresAt() *timestamppb.Timestamp {
@@ -1379,7 +1568,7 @@ type RotationResponse struct {
 
 func (x *RotationResponse) Reset() {
 	*x = RotationResponse{}
-	mi := &file_worker_proto_msgTypes[16]
+	mi := &file_worker_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1391,7 +1580,7 @@ func (x *RotationResponse) String() string {
 func (*RotationResponse) ProtoMessage() {}
 
 func (x *RotationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[16]
+	mi := &file_worker_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1404,7 +1593,7 @@ func (x *RotationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotationResponse.ProtoReflect.Descriptor instead.
 func (*RotationResponse) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{16}
+	return file_worker_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RotationResponse) GetNewToken() string {
@@ -1432,7 +1621,7 @@ type AuditEvent struct {
 
 func (x *AuditEvent) Reset() {
 	*x = AuditEvent{}
-	mi := &file_worker_proto_msgTypes[17]
+	mi := &file_worker_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1444,7 +1633,7 @@ func (x *AuditEvent) String() string {
 func (*AuditEvent) ProtoMessage() {}
 
 func (x *AuditEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[17]
+	mi := &file_worker_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1457,7 +1646,7 @@ func (x *AuditEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuditEvent.ProtoReflect.Descriptor instead.
 func (*AuditEvent) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{17}
+	return file_worker_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AuditEvent) GetAction() string {
@@ -1481,11 +1670,537 @@ func (x *AuditEvent) GetTs() *timestamppb.Timestamp {
 	return nil
 }
 
+// AppSessionStart opens a session. Server -> worker.
+type AppSessionStart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// session_id correlates every later message. Server-minted; it is
+	// the v1:worker:appSession row's short id.
+	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// app is one of the engine's closed ids ("claude-code", "codex").
+	App string `protobuf:"bytes,2,opt,name=app,proto3" json:"app,omitempty"`
+	// kind selects what opening the app means:
+	//
+	//	run    -- headless and autonomous; the engine reads the output.
+	//	open   -- launch it for the HUMAN with the workspace and prompt
+	//	          loaded; ends when the window closes, or immediately
+	//	          with a failure if the app cannot be opened.
+	//	attach -- stream a run the human started, named by app_session_ref.
+	Kind   string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Prompt string `protobuf:"bytes,4,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	// inputs are Library artifact ids the cockpit pulls with the
+	// session credential before the run starts.
+	Inputs []string `protobuf:"bytes,5,rep,name=inputs,proto3" json:"inputs,omitempty"`
+	// workspace is the absolute directory on the machine the app runs in.
+	Workspace string `protobuf:"bytes,6,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// credential is the per-run bearer for mcp_endpoint. Short-lived,
+	// user-scoped, revoked at end; the cockpit writes it into the app's
+	// MCP configuration and deletes that file when the session ends.
+	Credential string `protobuf:"bytes,7,opt,name=credential,proto3" json:"credential,omitempty"`
+	// mcp_endpoint is the streamable-HTTP MCP URL (https://mcp.<domain>/mcp).
+	McpEndpoint string `protobuf:"bytes,8,opt,name=mcp_endpoint,json=mcpEndpoint,proto3" json:"mcp_endpoint,omitempty"`
+	// limits carries the delegation policy's ceilings for this run.
+	Limits *AppSessionLimits `protobuf:"bytes,9,opt,name=limits,proto3" json:"limits,omitempty"`
+	// plan_id / task_id attribute the session for the portal and the ledger.
+	PlanId string `protobuf:"bytes,10,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	TaskId string `protobuf:"bytes,11,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// app_session_ref names the app's OWN session id on the kind=attach
+	// path. Empty for run and open.
+	AppSessionRef string `protobuf:"bytes,12,opt,name=app_session_ref,json=appSessionRef,proto3" json:"app_session_ref,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSessionStart) Reset() {
+	*x = AppSessionStart{}
+	mi := &file_worker_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionStart) ProtoMessage() {}
+
+func (x *AppSessionStart) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionStart.ProtoReflect.Descriptor instead.
+func (*AppSessionStart) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AppSessionStart) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetApp() string {
+	if x != nil {
+		return x.App
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetInputs() []string {
+	if x != nil {
+		return x.Inputs
+	}
+	return nil
+}
+
+func (x *AppSessionStart) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetCredential() string {
+	if x != nil {
+		return x.Credential
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetMcpEndpoint() string {
+	if x != nil {
+		return x.McpEndpoint
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetLimits() *AppSessionLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+func (x *AppSessionStart) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetAppSessionRef() string {
+	if x != nil {
+		return x.AppSessionRef
+	}
+	return ""
+}
+
+// AppSessionLimits are the policy ceilings a session runs under.
+type AppSessionLimits struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// credential_lifetime_seconds is when the bearer in AppSessionStart
+	// expires. The worker asks for a renewal before then; the engine
+	// sends AppSessionControl{action: "renew_credential"}.
+	CredentialLifetimeSeconds int64 `protobuf:"varint,1,opt,name=credential_lifetime_seconds,json=credentialLifetimeSeconds,proto3" json:"credential_lifetime_seconds,omitempty"`
+	// max_duration_seconds is the wall-clock ceiling, 0 for none.
+	MaxDurationSeconds int64 `protobuf:"varint,2,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
+	// max_transcript_bytes bounds what the engine will keep on the row.
+	MaxTranscriptBytes int64 `protobuf:"varint,3,opt,name=max_transcript_bytes,json=maxTranscriptBytes,proto3" json:"max_transcript_bytes,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *AppSessionLimits) Reset() {
+	*x = AppSessionLimits{}
+	mi := &file_worker_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionLimits) ProtoMessage() {}
+
+func (x *AppSessionLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionLimits.ProtoReflect.Descriptor instead.
+func (*AppSessionLimits) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AppSessionLimits) GetCredentialLifetimeSeconds() int64 {
+	if x != nil {
+		return x.CredentialLifetimeSeconds
+	}
+	return 0
+}
+
+func (x *AppSessionLimits) GetMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.MaxDurationSeconds
+	}
+	return 0
+}
+
+func (x *AppSessionLimits) GetMaxTranscriptBytes() int64 {
+	if x != nil {
+		return x.MaxTranscriptBytes
+	}
+	return 0
+}
+
+// AppSessionControl steers a running session. Server -> worker.
+type AppSessionControl struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// action is "cancel" or "renew_credential".
+	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// credential is the replacement bearer on the renew path.
+	Credential string `protobuf:"bytes,3,opt,name=credential,proto3" json:"credential,omitempty"`
+	// reason is free text carried into the transcript on cancel.
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSessionControl) Reset() {
+	*x = AppSessionControl{}
+	mi := &file_worker_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionControl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionControl) ProtoMessage() {}
+
+func (x *AppSessionControl) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionControl.ProtoReflect.Descriptor instead.
+func (*AppSessionControl) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AppSessionControl) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AppSessionControl) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AppSessionControl) GetCredential() string {
+	if x != nil {
+		return x.Credential
+	}
+	return ""
+}
+
+func (x *AppSessionControl) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// AppSessionChunk is one piece of session output. Worker -> server.
+type AppSessionChunk struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// stream is "stdout", "stderr" or "event". An "event" chunk carries
+	// a JSON body the engine maps to a planner ProgressEvent.
+	Stream string `protobuf:"bytes,2,opt,name=stream,proto3" json:"stream,omitempty"`
+	Data   []byte `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	// seq is monotonic per session; the engine drops out-of-order and
+	// duplicate chunks rather than corrupting the transcript.
+	Seq           uint64 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSessionChunk) Reset() {
+	*x = AppSessionChunk{}
+	mi := &file_worker_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionChunk) ProtoMessage() {}
+
+func (x *AppSessionChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionChunk.ProtoReflect.Descriptor instead.
+func (*AppSessionChunk) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AppSessionChunk) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AppSessionChunk) GetStream() string {
+	if x != nil {
+		return x.Stream
+	}
+	return ""
+}
+
+func (x *AppSessionChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *AppSessionChunk) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+// AppSessionEnd closes a session. Worker -> server.
+type AppSessionEnd struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExitCode  int32                  `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Usage     *AppSessionUsage       `protobuf:"bytes,3,opt,name=usage,proto3" json:"usage,omitempty"`
+	// app_session_ref is the app's own session id, so a later
+	// kind=attach can resume this run.
+	AppSessionRef string `protobuf:"bytes,4,opt,name=app_session_ref,json=appSessionRef,proto3" json:"app_session_ref,omitempty"`
+	// produced_artifact_ids are Library artifact ids the cockpit pushed.
+	ProducedArtifactIds []string `protobuf:"bytes,5,rep,name=produced_artifact_ids,json=producedArtifactIds,proto3" json:"produced_artifact_ids,omitempty"`
+	// error is empty on a clean end.
+	Error         string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSessionEnd) Reset() {
+	*x = AppSessionEnd{}
+	mi := &file_worker_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionEnd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionEnd) ProtoMessage() {}
+
+func (x *AppSessionEnd) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionEnd.ProtoReflect.Descriptor instead.
+func (*AppSessionEnd) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *AppSessionEnd) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AppSessionEnd) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *AppSessionEnd) GetUsage() *AppSessionUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *AppSessionEnd) GetAppSessionRef() string {
+	if x != nil {
+		return x.AppSessionRef
+	}
+	return ""
+}
+
+func (x *AppSessionEnd) GetProducedArtifactIds() []string {
+	if x != nil {
+		return x.ProducedArtifactIds
+	}
+	return nil
+}
+
+func (x *AppSessionEnd) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AppSessionUsage is what the app REPORTED about its own spend.
+// Never inferred: an app that reports nothing sets known=false and
+// leaves the counts at zero, which the ledger records as billing
+// "unknown" rather than as a free call.
+type AppSessionUsage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	InputTokens   int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens  int64                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	CostUsd       float64                `protobuf:"fixed64,3,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
+	Known         bool                   `protobuf:"varint,4,opt,name=known,proto3" json:"known,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSessionUsage) Reset() {
+	*x = AppSessionUsage{}
+	mi := &file_worker_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSessionUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSessionUsage) ProtoMessage() {}
+
+func (x *AppSessionUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSessionUsage.ProtoReflect.Descriptor instead.
+func (*AppSessionUsage) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *AppSessionUsage) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *AppSessionUsage) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *AppSessionUsage) GetCostUsd() float64 {
+	if x != nil {
+		return x.CostUsd
+	}
+	return 0
+}
+
+func (x *AppSessionUsage) GetKnown() bool {
+	if x != nil {
+		return x.Known
+	}
+	return false
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"\fworker.proto\x12\x17znasllc.memql.worker.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xab\x05\n" +
+	"\fworker.proto\x12\x17znasllc.memql.worker.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xd5\x06\n" +
 	"\x13WorkerClientMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -1500,11 +2215,13 @@ const file_worker_proto_rawDesc = "" +
 	"toolStream\x12F\n" +
 	"\vaudit_event\x18\x0e \x01(\v2#.znasllc.memql.worker.v1.AuditEventH\x00R\n" +
 	"auditEvent\x12U\n" +
-	"\x10rotation_request\x18\x0f \x01(\v2(.znasllc.memql.worker.v1.RotationRequestH\x00R\x0frotationRequest\x1a;\n" +
+	"\x10rotation_request\x18\x0f \x01(\v2(.znasllc.memql.worker.v1.RotationRequestH\x00R\x0frotationRequest\x12V\n" +
+	"\x11app_session_chunk\x18\x10 \x01(\v2(.znasllc.memql.worker.v1.AppSessionChunkH\x00R\x0fappSessionChunk\x12P\n" +
+	"\x0fapp_session_end\x18\x11 \x01(\v2&.znasllc.memql.worker.v1.AppSessionEndH\x00R\rappSessionEnd\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayload\"\xbb\x05\n" +
+	"\apayload\"\xf1\x06\n" +
 	"\x13WorkerServerMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -1517,11 +2234,13 @@ const file_worker_proto_rawDesc = "" +
 	"toolCancel\x126\n" +
 	"\x05drain\x18\r \x01(\v2\x1e.znasllc.memql.worker.v1.DrainH\x00R\x05drain\x12X\n" +
 	"\x11rotation_response\x18\x0e \x01(\v2).znasllc.memql.worker.v1.RotationResponseH\x00R\x10rotationResponse\x12O\n" +
-	"\x0eregister_error\x18\x0f \x01(\v2&.znasllc.memql.worker.v1.RegisterErrorH\x00R\rregisterError\x1a;\n" +
+	"\x0eregister_error\x18\x0f \x01(\v2&.znasllc.memql.worker.v1.RegisterErrorH\x00R\rregisterError\x12V\n" +
+	"\x11app_session_start\x18\x10 \x01(\v2(.znasllc.memql.worker.v1.AppSessionStartH\x00R\x0fappSessionStart\x12\\\n" +
+	"\x13app_session_control\x18\x11 \x01(\v2*.znasllc.memql.worker.v1.AppSessionControlH\x00R\x11appSessionControl\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayload\"\xdf\x04\n" +
+	"\apayload\"\x95\x05\n" +
 	"\bRegister\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\"\n" +
 	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12E\n" +
@@ -1531,13 +2250,21 @@ const file_worker_proto_rawDesc = "" +
 	"\vpermissions\x18\x06 \x01(\v2).znasllc.memql.worker.v1.PermissionStatusR\vpermissions\x12\x18\n" +
 	"\aversion\x18\a \x01(\tR\aversion\x12\x1b\n" +
 	"\tbuild_tag\x18\b \x01(\tR\bbuildTag\x12<\n" +
-	"\x1acapability_descriptor_json\x18\t \x01(\tR\x18capabilityDescriptorJson\x1a9\n" +
+	"\x1acapability_descriptor_json\x18\t \x01(\tR\x18capabilityDescriptorJson\x124\n" +
+	"\x04apps\x18\n" +
+	" \x03(\v2 .znasllc.memql.worker.v1.AppInfoR\x04apps\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a>\n" +
 	"\x10ConcurrencyEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01\"N\n" +
+	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01\"\x8e\x01\n" +
+	"\aAppInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
+	"\tsigned_in\x18\x03 \x01(\bR\bsignedIn\x12\"\n" +
+	"\fsubscription\x18\x04 \x01(\tR\fsubscription\x12\x18\n" +
+	"\aallowed\x18\x05 \x01(\bR\aallowed\"N\n" +
 	"\fPlatformInfo\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x12\x1a\n" +
@@ -1554,11 +2281,13 @@ const file_worker_proto_rawDesc = "" +
 	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\"=\n" +
 	"\rRegisterError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xb3\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x8c\x03\n" +
 	"\tHeartbeat\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x12,\n" +
 	"\x12active_calls_total\x18\x02 \x01(\rR\x10activeCallsTotal\x12\x7f\n" +
-	"\x1bactive_calls_per_capability\x18\x03 \x03(\v2@.znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntryR\x18activeCallsPerCapability\x1aK\n" +
+	"\x1bactive_calls_per_capability\x18\x03 \x03(\v2@.znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntryR\x18activeCallsPerCapability\x124\n" +
+	"\x04apps\x18\x04 \x03(\v2 .znasllc.memql.worker.v1.AppInfoR\x04apps\x12!\n" +
+	"\fapps_present\x18\x05 \x01(\bR\vappsPresent\x1aK\n" +
 	"\x1dActiveCallsPerCapabilityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01\"\x99\x02\n" +
@@ -1612,7 +2341,55 @@ const file_worker_proto_rawDesc = "" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1f\n" +
 	"\vdetail_json\x18\x02 \x01(\fR\n" +
 	"detailJson\x12*\n" +
-	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts2y\n" +
+	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\x84\x03\n" +
+	"\x0fAppSessionStart\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
+	"\x03app\x18\x02 \x01(\tR\x03app\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x16\n" +
+	"\x06prompt\x18\x04 \x01(\tR\x06prompt\x12\x16\n" +
+	"\x06inputs\x18\x05 \x03(\tR\x06inputs\x12\x1c\n" +
+	"\tworkspace\x18\x06 \x01(\tR\tworkspace\x12\x1e\n" +
+	"\n" +
+	"credential\x18\a \x01(\tR\n" +
+	"credential\x12!\n" +
+	"\fmcp_endpoint\x18\b \x01(\tR\vmcpEndpoint\x12A\n" +
+	"\x06limits\x18\t \x01(\v2).znasllc.memql.worker.v1.AppSessionLimitsR\x06limits\x12\x17\n" +
+	"\aplan_id\x18\n" +
+	" \x01(\tR\x06planId\x12\x17\n" +
+	"\atask_id\x18\v \x01(\tR\x06taskId\x12&\n" +
+	"\x0fapp_session_ref\x18\f \x01(\tR\rappSessionRef\"\xb6\x01\n" +
+	"\x10AppSessionLimits\x12>\n" +
+	"\x1bcredential_lifetime_seconds\x18\x01 \x01(\x03R\x19credentialLifetimeSeconds\x120\n" +
+	"\x14max_duration_seconds\x18\x02 \x01(\x03R\x12maxDurationSeconds\x120\n" +
+	"\x14max_transcript_bytes\x18\x03 \x01(\x03R\x12maxTranscriptBytes\"\x82\x01\n" +
+	"\x11AppSessionControl\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1e\n" +
+	"\n" +
+	"credential\x18\x03 \x01(\tR\n" +
+	"credential\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"n\n" +
+	"\x0fAppSessionChunk\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
+	"\x06stream\x18\x02 \x01(\tR\x06stream\x12\x12\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\x12\x10\n" +
+	"\x03seq\x18\x04 \x01(\x04R\x03seq\"\xfd\x01\n" +
+	"\rAppSessionEnd\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12>\n" +
+	"\x05usage\x18\x03 \x01(\v2(.znasllc.memql.worker.v1.AppSessionUsageR\x05usage\x12&\n" +
+	"\x0fapp_session_ref\x18\x04 \x01(\tR\rappSessionRef\x122\n" +
+	"\x15produced_artifact_ids\x18\x05 \x03(\tR\x13producedArtifactIds\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\x8a\x01\n" +
+	"\x0fAppSessionUsage\x12!\n" +
+	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x19\n" +
+	"\bcost_usd\x18\x03 \x01(\x01R\acostUsd\x12\x14\n" +
+	"\x05known\x18\x04 \x01(\bR\x05known2y\n" +
 	"\rWorkerService\x12h\n" +
 	"\x06Stream\x12,.znasllc.memql.worker.v1.WorkerClientMessage\x1a,.znasllc.memql.worker.v1.WorkerServerMessage(\x010\x01B8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
@@ -1628,69 +2405,84 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_worker_proto_goTypes = []any{
 	(*WorkerClientMessage)(nil),   // 0: znasllc.memql.worker.v1.WorkerClientMessage
 	(*WorkerServerMessage)(nil),   // 1: znasllc.memql.worker.v1.WorkerServerMessage
 	(*Register)(nil),              // 2: znasllc.memql.worker.v1.Register
-	(*PlatformInfo)(nil),          // 3: znasllc.memql.worker.v1.PlatformInfo
-	(*PermissionStatus)(nil),      // 4: znasllc.memql.worker.v1.PermissionStatus
-	(*RegisterAck)(nil),           // 5: znasllc.memql.worker.v1.RegisterAck
-	(*RegisterError)(nil),         // 6: znasllc.memql.worker.v1.RegisterError
-	(*Heartbeat)(nil),             // 7: znasllc.memql.worker.v1.Heartbeat
-	(*ToolDispatch)(nil),          // 8: znasllc.memql.worker.v1.ToolDispatch
-	(*ToolCancel)(nil),            // 9: znasllc.memql.worker.v1.ToolCancel
-	(*Drain)(nil),                 // 10: znasllc.memql.worker.v1.Drain
-	(*ToolStream)(nil),            // 11: znasllc.memql.worker.v1.ToolStream
-	(*ToolResult)(nil),            // 12: znasllc.memql.worker.v1.ToolResult
-	(*Success)(nil),               // 13: znasllc.memql.worker.v1.Success
-	(*Failure)(nil),               // 14: znasllc.memql.worker.v1.Failure
-	(*RotationRequest)(nil),       // 15: znasllc.memql.worker.v1.RotationRequest
-	(*RotationResponse)(nil),      // 16: znasllc.memql.worker.v1.RotationResponse
-	(*AuditEvent)(nil),            // 17: znasllc.memql.worker.v1.AuditEvent
-	nil,                           // 18: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
-	nil,                           // 19: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
-	nil,                           // 20: znasllc.memql.worker.v1.Register.LabelsEntry
-	nil,                           // 21: znasllc.memql.worker.v1.Register.ConcurrencyEntry
-	nil,                           // 22: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 24: google.protobuf.Duration
+	(*AppInfo)(nil),               // 3: znasllc.memql.worker.v1.AppInfo
+	(*PlatformInfo)(nil),          // 4: znasllc.memql.worker.v1.PlatformInfo
+	(*PermissionStatus)(nil),      // 5: znasllc.memql.worker.v1.PermissionStatus
+	(*RegisterAck)(nil),           // 6: znasllc.memql.worker.v1.RegisterAck
+	(*RegisterError)(nil),         // 7: znasllc.memql.worker.v1.RegisterError
+	(*Heartbeat)(nil),             // 8: znasllc.memql.worker.v1.Heartbeat
+	(*ToolDispatch)(nil),          // 9: znasllc.memql.worker.v1.ToolDispatch
+	(*ToolCancel)(nil),            // 10: znasllc.memql.worker.v1.ToolCancel
+	(*Drain)(nil),                 // 11: znasllc.memql.worker.v1.Drain
+	(*ToolStream)(nil),            // 12: znasllc.memql.worker.v1.ToolStream
+	(*ToolResult)(nil),            // 13: znasllc.memql.worker.v1.ToolResult
+	(*Success)(nil),               // 14: znasllc.memql.worker.v1.Success
+	(*Failure)(nil),               // 15: znasllc.memql.worker.v1.Failure
+	(*RotationRequest)(nil),       // 16: znasllc.memql.worker.v1.RotationRequest
+	(*RotationResponse)(nil),      // 17: znasllc.memql.worker.v1.RotationResponse
+	(*AuditEvent)(nil),            // 18: znasllc.memql.worker.v1.AuditEvent
+	(*AppSessionStart)(nil),       // 19: znasllc.memql.worker.v1.AppSessionStart
+	(*AppSessionLimits)(nil),      // 20: znasllc.memql.worker.v1.AppSessionLimits
+	(*AppSessionControl)(nil),     // 21: znasllc.memql.worker.v1.AppSessionControl
+	(*AppSessionChunk)(nil),       // 22: znasllc.memql.worker.v1.AppSessionChunk
+	(*AppSessionEnd)(nil),         // 23: znasllc.memql.worker.v1.AppSessionEnd
+	(*AppSessionUsage)(nil),       // 24: znasllc.memql.worker.v1.AppSessionUsage
+	nil,                           // 25: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	nil,                           // 26: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	nil,                           // 27: znasllc.memql.worker.v1.Register.LabelsEntry
+	nil,                           // 28: znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	nil,                           // 29: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	(*timestamppb.Timestamp)(nil), // 30: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 31: google.protobuf.Duration
 }
 var file_worker_proto_depIdxs = []int32{
-	18, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	25, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
 	2,  // 1: znasllc.memql.worker.v1.WorkerClientMessage.register:type_name -> znasllc.memql.worker.v1.Register
-	7,  // 2: znasllc.memql.worker.v1.WorkerClientMessage.heartbeat:type_name -> znasllc.memql.worker.v1.Heartbeat
-	12, // 3: znasllc.memql.worker.v1.WorkerClientMessage.tool_result:type_name -> znasllc.memql.worker.v1.ToolResult
-	11, // 4: znasllc.memql.worker.v1.WorkerClientMessage.tool_stream:type_name -> znasllc.memql.worker.v1.ToolStream
-	17, // 5: znasllc.memql.worker.v1.WorkerClientMessage.audit_event:type_name -> znasllc.memql.worker.v1.AuditEvent
-	15, // 6: znasllc.memql.worker.v1.WorkerClientMessage.rotation_request:type_name -> znasllc.memql.worker.v1.RotationRequest
-	19, // 7: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
-	5,  // 8: znasllc.memql.worker.v1.WorkerServerMessage.register_ack:type_name -> znasllc.memql.worker.v1.RegisterAck
-	8,  // 9: znasllc.memql.worker.v1.WorkerServerMessage.tool_dispatch:type_name -> znasllc.memql.worker.v1.ToolDispatch
-	9,  // 10: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
-	10, // 11: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
-	16, // 12: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
-	6,  // 13: znasllc.memql.worker.v1.WorkerServerMessage.register_error:type_name -> znasllc.memql.worker.v1.RegisterError
-	20, // 14: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
-	21, // 15: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
-	3,  // 16: znasllc.memql.worker.v1.Register.platform:type_name -> znasllc.memql.worker.v1.PlatformInfo
-	4,  // 17: znasllc.memql.worker.v1.Register.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
-	23, // 18: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
-	23, // 19: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
-	22, // 20: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	24, // 21: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
-	13, // 22: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
-	14, // 23: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
-	23, // 24: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
-	23, // 25: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
-	23, // 26: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
-	0,  // 27: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
-	1,  // 28: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
-	28, // [28:29] is the sub-list for method output_type
-	27, // [27:28] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	8,  // 2: znasllc.memql.worker.v1.WorkerClientMessage.heartbeat:type_name -> znasllc.memql.worker.v1.Heartbeat
+	13, // 3: znasllc.memql.worker.v1.WorkerClientMessage.tool_result:type_name -> znasllc.memql.worker.v1.ToolResult
+	12, // 4: znasllc.memql.worker.v1.WorkerClientMessage.tool_stream:type_name -> znasllc.memql.worker.v1.ToolStream
+	18, // 5: znasllc.memql.worker.v1.WorkerClientMessage.audit_event:type_name -> znasllc.memql.worker.v1.AuditEvent
+	16, // 6: znasllc.memql.worker.v1.WorkerClientMessage.rotation_request:type_name -> znasllc.memql.worker.v1.RotationRequest
+	22, // 7: znasllc.memql.worker.v1.WorkerClientMessage.app_session_chunk:type_name -> znasllc.memql.worker.v1.AppSessionChunk
+	23, // 8: znasllc.memql.worker.v1.WorkerClientMessage.app_session_end:type_name -> znasllc.memql.worker.v1.AppSessionEnd
+	26, // 9: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	6,  // 10: znasllc.memql.worker.v1.WorkerServerMessage.register_ack:type_name -> znasllc.memql.worker.v1.RegisterAck
+	9,  // 11: znasllc.memql.worker.v1.WorkerServerMessage.tool_dispatch:type_name -> znasllc.memql.worker.v1.ToolDispatch
+	10, // 12: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
+	11, // 13: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
+	17, // 14: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
+	7,  // 15: znasllc.memql.worker.v1.WorkerServerMessage.register_error:type_name -> znasllc.memql.worker.v1.RegisterError
+	19, // 16: znasllc.memql.worker.v1.WorkerServerMessage.app_session_start:type_name -> znasllc.memql.worker.v1.AppSessionStart
+	21, // 17: znasllc.memql.worker.v1.WorkerServerMessage.app_session_control:type_name -> znasllc.memql.worker.v1.AppSessionControl
+	27, // 18: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
+	28, // 19: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	4,  // 20: znasllc.memql.worker.v1.Register.platform:type_name -> znasllc.memql.worker.v1.PlatformInfo
+	5,  // 21: znasllc.memql.worker.v1.Register.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
+	3,  // 22: znasllc.memql.worker.v1.Register.apps:type_name -> znasllc.memql.worker.v1.AppInfo
+	30, // 23: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
+	30, // 24: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
+	29, // 25: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	3,  // 26: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
+	31, // 27: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
+	14, // 28: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
+	15, // 29: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
+	30, // 30: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
+	30, // 31: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
+	30, // 32: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
+	20, // 33: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
+	24, // 34: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
+	0,  // 35: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
+	1,  // 36: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
+	36, // [36:37] is the sub-list for method output_type
+	35, // [35:36] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }
@@ -1705,6 +2497,8 @@ func file_worker_proto_init() {
 		(*WorkerClientMessage_ToolStream)(nil),
 		(*WorkerClientMessage_AuditEvent)(nil),
 		(*WorkerClientMessage_RotationRequest)(nil),
+		(*WorkerClientMessage_AppSessionChunk)(nil),
+		(*WorkerClientMessage_AppSessionEnd)(nil),
 	}
 	file_worker_proto_msgTypes[1].OneofWrappers = []any{
 		(*WorkerServerMessage_RegisterAck)(nil),
@@ -1713,13 +2507,15 @@ func file_worker_proto_init() {
 		(*WorkerServerMessage_Drain)(nil),
 		(*WorkerServerMessage_RotationResponse)(nil),
 		(*WorkerServerMessage_RegisterError)(nil),
+		(*WorkerServerMessage_AppSessionStart)(nil),
+		(*WorkerServerMessage_AppSessionControl)(nil),
 	}
-	file_worker_proto_msgTypes[11].OneofWrappers = []any{
+	file_worker_proto_msgTypes[12].OneofWrappers = []any{
 		(*ToolStream_StdoutChunk)(nil),
 		(*ToolStream_StderrChunk)(nil),
 		(*ToolStream_DataChunk)(nil),
 	}
-	file_worker_proto_msgTypes[12].OneofWrappers = []any{
+	file_worker_proto_msgTypes[13].OneofWrappers = []any{
 		(*ToolResult_Success)(nil),
 		(*ToolResult_Failure)(nil),
 	}
@@ -1729,7 +2525,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   23,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

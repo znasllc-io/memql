@@ -60,6 +60,7 @@ concept registration {
   concurrency    object!  @description("Per-capability max-parallel limits, e.g. {HEADLESS: 8, COMPUTERUSE: 1}. Scheduler enforces; calls beyond cap queue (FIFO) up to the calling tool's timeout.")
   platformInfo   object  @description("os, arch, hostname snapshot at register time.")
   permissions    object  @description("TCC / X11 status snapshot at register time: {accessibility, screen_recording, x11_display, detail}. Surfaced in /me/workers; the worker re-registers on reconnect so this stays accurate.")
+  apps           []object  @description("Local apps the cockpit detected on this machine (memql#4359). Each entry is {id, version, signedIn, subscription, allowed}: `allowed` is the machine's own policy.yaml apps.allow verdict, `signedIn` is the app's auth state as the cockpit can observe it, and `subscription` is unknown|none|present as the app REPORTS it -- never inferred. Stored verbatim including ids this engine cannot drive; only an entry that is both allowed and signedIn, with an id in the engine's closed runnable set, derives an `app:<id>` routing label into `labels`.")
   version        string  @description("Cockpit binary version (e.g. v2026.5.4-computeruse).")
   buildTag       string  @description("Cockpit build flavor: 'computeruse' or 'headless'.")
   registeredAt   datetime!  @description("When the registration row was first created.")

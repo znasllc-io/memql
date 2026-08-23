@@ -64,11 +64,15 @@ type Worker struct {
 	SourceIP             string
 
 	dispatchFn   DispatchFunc
+	appSessionFn AppSessionFunc
 	cancelStream func()
 
 	mu           sync.Mutex
 	activePerCap map[string]uint32
 	queue        []chan struct{}
+	// apps is the reported local-app inventory. Guarded by mu
+	// because heartbeats rewrite it while dispatch reads it.
+	apps []AppInfo
 }
 
 // DispatchFunc is the worker-side dispatch hook owned by the
@@ -238,16 +242,120 @@ func (w *Worker) MatchesLabels(req map[string]string) bool {
 	if len(req) == 0 {
 		return true
 	}
-	if w == nil || w.Labels == nil {
+	if w == nil {
+		return false
+	}
+	// Read under the lock: SetApps rewrites Labels on every heartbeat
+	// that carries an app inventory, concurrently with dispatch-time
+	// selection reading it.
+	w.mu.Lock()
+	labels := w.Labels
+	w.mu.Unlock()
+	if labels == nil {
 		return false
 	}
 	for k, v := range req {
-		got, ok := w.Labels[k]
+		got, ok := labels[k]
 		if !ok || got != v {
 			return false
 		}
 	}
 	return true
+}
+
+// SetApps replaces the worker's app inventory and re-derives its
+// app: routing labels (memql#4359). Called on register and on every
+// heartbeat that carries an inventory, so signing into -- or out of
+// -- an app changes selection within one beat rather than at the
+// next reconnect. Operator-set labels are preserved; only the
+// app:-prefixed ones are rebuilt.
+func (w *Worker) SetApps(apps []AppInfo) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.apps = apps
+	w.Labels = mergeAppLabels(w.Labels, apps)
+}
+
+// Apps returns a copy of the worker's app inventory.
+func (w *Worker) Apps() []AppInfo {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.apps) == 0 {
+		return nil
+	}
+	out := make([]AppInfo, len(w.apps))
+	copy(out, w.apps)
+	return out
+}
+
+// LabelsSnapshot returns a copy of the worker's current labels,
+// including the derived app: ones.
+func (w *Worker) LabelsSnapshot() map[string]string {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.Labels) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(w.Labels))
+	for k, v := range w.Labels {
+		out[k] = v
+	}
+	return out
+}
+
+// App returns the reported entry for appId and whether it was found.
+func (w *Worker) App(appId string) (AppInfo, bool) {
+	for _, a := range w.Apps() {
+		if a.Id == appId {
+			return a, true
+		}
+	}
+	return AppInfo{}, false
+}
+
+// RunsApp reports whether this worker can actually run appId: the id
+// is one the engine drives, the machine allows it, and the app is
+// signed in.
+func (w *Worker) RunsApp(appId string) bool {
+	a, ok := w.App(appId)
+	return ok && a.Runnable()
+}
+
+// PickWorkerForApp selects an online worker owned by ownerUserId that
+// can run appId, honouring any additional label requirement
+// (memql#4359). Label matching is the same exact-match rule dispatch
+// already uses; the app: label is what makes "a machine with Claude
+// Code signed in" expressible as a routing requirement rather than a
+// post-selection check.
+//
+// require may name app: labels itself; the app's own label is added
+// with an empty value, which matches any reported version.
+func (r *Registry) PickWorkerForApp(ownerUserId, appId string, require map[string]string) (*Worker, error) {
+	if r == nil {
+		return nil, ErrNoWorkerAvailable
+	}
+	for _, w := range r.WorkersForUser(ownerUserId) {
+		if !w.SupportsCapability(CapabilityHeadless) {
+			continue
+		}
+		if !w.RunsApp(appId) {
+			continue
+		}
+		if !w.MatchesLabels(require) {
+			continue
+		}
+		return w, nil
+	}
+	return nil, ErrNoWorkerAvailable
 }
 
 // ConcurrencyCap returns the per-capability cap; 0 means unbounded.

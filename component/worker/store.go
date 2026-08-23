@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ func (s *EngineStore) CreateRegistration(ctx context.Context, row RegistrationRo
 		"permissions":          row.Permissions,
 		"version":              row.Version,
 		"buildTag":             row.BuildTag,
+		"apps":                 appsAsMaps(row.Apps),
 		"registeredAt":         row.RegisteredAt.UTC().Format(time.RFC3339Nano),
 		"lastSeenAt":           row.LastSeenAt.UTC().Format(time.RFC3339Nano),
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
@@ -84,6 +86,7 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 		"permissions":          row.Permissions,
 		"version":              row.Version,
 		"buildTag":             row.BuildTag,
+		"apps":                 appsAsMaps(row.Apps),
 		"lastSeenAt":           row.LastSeenAt.UTC().Format(time.RFC3339Nano),
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
 	}
@@ -117,6 +120,66 @@ func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId string,
 		return fmt.Errorf("worker.store: update lastSeen: %w", err)
 	}
 	return nil
+}
+
+// UpdateApps re-stamps the reported app inventory and the labels
+// derived from it (memql#4359). Separate from UpdateLastSeen because
+// an inventory change is a ROUTING change: it must land on the row
+// even when the heartbeat's lastSeenAt flush is inside its throttle
+// window.
+func (s *EngineStore) UpdateApps(ctx context.Context, registrationId string, apps []AppInfo, labels map[string]string, at time.Time, sourceIP string) error {
+	if s == nil || s.Engine == nil {
+		return nil
+	}
+	args := map[string]any{
+		"registrationId":      registrationId,
+		"apps":                appsAsMaps(apps),
+		"labels":              labels,
+		"lastSeenAt":          at.UTC().Format(time.RFC3339Nano),
+		"lastConnectedFromIP": sourceIP,
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("worker.store: marshal apps args: %w", err)
+	}
+	query := fmt.Sprintf("updateWorkerApps(%s)", string(body))
+	if _, err := s.Engine.Execute(ctx, query); err != nil {
+		return fmt.Errorf("worker.store: update apps: %w", err)
+	}
+	return nil
+}
+
+// appsAsMaps renders the app inventory for a DSL mutation argument.
+// A nil inventory serializes as an empty list, which is how a
+// machine says "I report no apps" -- distinct from not reporting.
+func appsAsMaps(apps []AppInfo) []map[string]any {
+	out := make([]map[string]any, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, map[string]any{
+			"id":           a.Id,
+			"version":      a.Version,
+			"signedIn":     a.SignedIn,
+			"subscription": a.Subscription,
+			"allowed":      a.Allowed,
+		})
+	}
+	return out
+}
+
+// auditAppDetail renders the inventory for an audit event: the id and
+// whether the engine can actually drive it, which is the pair a
+// security reader needs and the whole struct is not.
+func auditAppDetail(apps []AppInfo) []map[string]any {
+	out := make([]map[string]any, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, map[string]any{
+			"id":           a.Id,
+			"version":      a.Version,
+			"runnable":     a.Runnable(),
+			"subscription": a.Subscription,
+		})
+	}
+	return out
 }
 
 // RevokeRegistration stamps revokedAt on a registration.
@@ -275,6 +338,7 @@ func decodeRegistration(node *memqlv1.MemoryNode) *RegistrationRow {
 		Permissions:          g.anyMap("permissions"),
 		Version:              g.str("version"),
 		BuildTag:             g.str("buildTag"),
+		Apps:                 g.apps("apps"),
 		RegisteredAt:         g.time("registeredAt"),
 		LastSeenAt:           g.time("lastSeenAt"),
 		LastConnectedFromIP:  g.str("lastConnectedFromIP"),
@@ -426,6 +490,57 @@ func (g *workerFieldGetter) anyMap(key string) map[string]any {
 		}
 		out[k] = val.AsInterface()
 	}
+	return out
+}
+
+// apps decodes the reported local-app inventory. Malformed entries
+// are dropped rather than defaulted: an app with no id cannot be
+// routed to, and an entry that claims to be runnable without the
+// fields to prove it is exactly what must not be trusted.
+func (g *workerFieldGetter) apps(key string) []AppInfo {
+	if g == nil || g.node == nil || g.node.Payload == nil {
+		return nil
+	}
+	fields := g.node.Payload.GetFields()
+	if fields == nil {
+		return nil
+	}
+	v, ok := fields[key]
+	if !ok || v == nil {
+		return nil
+	}
+	list := v.GetListValue()
+	if list == nil {
+		return nil
+	}
+	out := make([]AppInfo, 0, len(list.GetValues()))
+	for _, item := range list.GetValues() {
+		stru := item.GetStructValue()
+		if stru == nil {
+			continue
+		}
+		raw, _ := stru.AsMap()["id"].(string)
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		m := stru.AsMap()
+		version, _ := m["version"].(string)
+		subscription, _ := m["subscription"].(string)
+		signedIn, _ := m["signedIn"].(bool)
+		allowed, _ := m["allowed"].(bool)
+		out = append(out, AppInfo{
+			Id:           id,
+			Version:      version,
+			SignedIn:     signedIn,
+			Subscription: NormalizeSubscription(subscription),
+			Allowed:      allowed,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
 	return out
 }
 

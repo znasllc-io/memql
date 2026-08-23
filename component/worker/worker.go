@@ -83,6 +83,12 @@ type Store interface {
 	// persisted descriptor -- the worker no longer advertises one.
 	RefreshRegistration(ctx context.Context, row RegistrationRow) error
 	UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error
+	// UpdateApps re-stamps the reported app inventory and the labels
+	// derived from it (memql#4359). Called out of band from the
+	// throttled lastSeenAt flush because an inventory change alters
+	// ROUTING, and a row whose app: labels disagree with the live
+	// registry entry is a split no reader can detect.
+	UpdateApps(ctx context.Context, registrationId string, apps []AppInfo, labels map[string]string, at time.Time, sourceIP string) error
 	RevokeRegistration(ctx context.Context, registrationId, revokedBy, reason string, at time.Time) error
 	WorkerByIdentityId(ctx context.Context, identityId string) (*RegistrationRow, error)
 	WorkersForUser(ctx context.Context, ownerUserId string) ([]RegistrationRow, error)
@@ -125,14 +131,18 @@ type RegistrationRow struct {
 	Concurrency          map[string]uint32
 	Platform             map[string]any
 	Permissions          map[string]any
-	Version              string
-	BuildTag             string
-	RegisteredAt         time.Time
-	LastSeenAt           time.Time
-	LastConnectedFromIP  string
-	RevokedAt            time.Time
-	RevokedBy            string
-	RevokeReason         string
+	// Apps is the local-app inventory the cockpit reported
+	// (memql#4359). Stored verbatim including apps the engine cannot
+	// drive; only runnable entries become routing labels.
+	Apps                []AppInfo
+	Version             string
+	BuildTag            string
+	RegisteredAt        time.Time
+	LastSeenAt          time.Time
+	LastConnectedFromIP string
+	RevokedAt           time.Time
+	RevokedBy           string
+	RevokeReason        string
 }
 
 // IsActive reports whether the registration is currently usable.

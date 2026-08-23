@@ -23,6 +23,17 @@ type fakeRegistrationStore struct {
 	lastSeen    []string
 	lastSeenAts []time.Time
 	lastSeenErr error
+
+	appUpdates []appUpdate
+	appsErr    error
+}
+
+// appUpdate records one UpdateApps call (memql#4359).
+type appUpdate struct {
+	registrationId string
+	apps           []AppInfo
+	labels         map[string]string
+	at             time.Time
 }
 
 var _ Store = (*fakeRegistrationStore)(nil)
@@ -34,6 +45,19 @@ func (f *fakeRegistrationStore) CreateRegistration(ctx context.Context, row Regi
 
 func (f *fakeRegistrationStore) RefreshRegistration(ctx context.Context, row RegistrationRow) error {
 	f.refreshed = append(f.refreshed, row)
+	return nil
+}
+
+func (f *fakeRegistrationStore) UpdateApps(ctx context.Context, registrationId string, apps []AppInfo, labels map[string]string, at time.Time, sourceIP string) error {
+	if f.appsErr != nil {
+		return f.appsErr
+	}
+	f.appUpdates = append(f.appUpdates, appUpdate{
+		registrationId: registrationId,
+		apps:           apps,
+		labels:         labels,
+		at:             at,
+	})
 	return nil
 }
 

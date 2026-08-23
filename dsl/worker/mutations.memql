@@ -89,6 +89,10 @@ mutate registration createWorkerRegistration {
     permissions          object
     version              string
     buildTag             string
+    /// Local-app inventory the cockpit reported (memql#4359): a list of
+    /// {id, version, signedIn, subscription, allowed}. Stored verbatim,
+    /// including apps this engine cannot drive.
+    apps                 array
     registeredAt         string!
     lastSeenAt           string
     lastConnectedFromIP  string
@@ -106,6 +110,7 @@ mutate registration createWorkerRegistration {
     permissions: args.permissions ?? {}
     version: args.version ?? ""
     buildTag: args.buildTag ?? ""
+    apps: args.apps ?? []
     args.registeredAt
     lastSeenAt: args.lastSeenAt ?? args.registeredAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
@@ -146,6 +151,10 @@ mutate registration refreshWorkerRegistration {
     permissions          object
     version              string
     buildTag             string
+    /// Local-app inventory from the latest Register (memql#4359). An
+    /// omitted list CLEARS the persisted one, the same way the
+    /// capability descriptor does: the worker no longer reports apps.
+    apps                 array
     lastSeenAt           string!
     lastConnectedFromIP  string
   }
@@ -160,6 +169,7 @@ mutate registration refreshWorkerRegistration {
     permissions: args.permissions ?? {}
     version: args.version ?? ""
     buildTag: args.buildTag ?? ""
+    apps: args.apps ?? []
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
@@ -309,6 +319,47 @@ mutate registration updateWorkerLastSeen {
   }
   update {
     id: args.registrationId
+    args.lastSeenAt
+    lastConnectedFromIP: args.lastConnectedFromIP ?? ""
+  }
+}
+
+// ---- mutations/v1/worker/updateWorkerApps.memql ----
+
+// updateWorkerApps
+// ================
+//
+// Re-stamps the reported local-app inventory and the labels derived
+// from it (memql#4359). Separate from updateWorkerLastSeen because an
+// inventory change is a ROUTING change, and routing must not wait for
+// the 60s heartbeat flush window: signing into Claude Code makes the
+// machine selectable on the next beat, and signing out removes it
+// just as fast.
+//
+// The two fields travel TOGETHER on purpose. `labels` carries the
+// derived `app:<id>` entries alongside whatever the operator set by
+// hand; writing the inventory without the labels would leave a row
+// whose apps say one thing and whose routing labels say another, and
+// nothing downstream could tell which was current.
+
+/// Re-stamp a worker's reported app inventory and its derived routing labels.
+mutate registration updateWorkerApps {
+  args {
+    registrationId       string!
+    /// The full reported inventory: {id, version, signedIn, subscription, allowed}.
+    /// An empty list is a machine reporting that it now has none.
+    apps                 array
+    /// The complete label set, operator-set labels included. Replaces
+    /// the stored one wholesale -- a merge here could not remove the
+    /// label of an app the user just signed out of.
+    labels               object
+    lastSeenAt           string!
+    lastConnectedFromIP  string
+  }
+  update {
+    id: args.registrationId
+    apps: args.apps ?? []
+    labels: args.labels ?? {}
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
