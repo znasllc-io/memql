@@ -31,3 +31,15 @@ func TestRenderMemQLValueQuotesHyphenatedLabelKeys(t *testing.T) {
 		t.Fatalf("renderMemQLValue = %s, want %s", got, want)
 	}
 }
+
+// Keys sort on their RAW name, before quoting. Sorting the quoted forms would
+// put every hyphenated key first and make this renderer disagree with the
+// TypeScript one on the same input -- the two are meant to produce identical
+// strings, and sdk/ts/test/memqlValue.test.ts asserts the same ordering.
+func TestObjectKeysSortBeforeTheyAreQuoted(t *testing.T) {
+	got := renderMemQLValue(map[string]any{"zeta": 1, "alpha": 2, "m-key": 3})
+	want := `{alpha: 2, "m-key": 3, zeta: 1}`
+	if got != want {
+		t.Fatalf("renderMemQLValue = %s, want %s", got, want)
+	}
+}
