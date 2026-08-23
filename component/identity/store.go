@@ -2,7 +2,9 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -756,6 +758,20 @@ func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
 		SignInPolicy:    g.str("signInPolicy"),
 		CreatedAt:       g.time("createdAt"),
 	}
+}
+
+// HashSessionToken hashes a bearer the way every writer of
+// v1:identity:authSession.tokenHash does.
+//
+// THREE COPIES OF THIS EXISTED before memql#4306 -- component/identity/http's
+// hashCode, component/grpc's HashBearerToken, and whatever a reader assumed.
+// They agree, and the agreement was undocumented, which is a fragile way for
+// a lookup key to be defined: a divergence would not fail anything loudly, it
+// would make revoked sessions un-findable and the revoke a no-op. This is the
+// canonical one, in the package that owns the row.
+func HashSessionToken(plain string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
+	return hex.EncodeToString(sum[:])
 }
 
 // SelfSessionRow is one of the caller's own sessions, as a person sees it.

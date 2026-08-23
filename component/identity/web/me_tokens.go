@@ -257,7 +257,45 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (*identity.
 		http.Redirect(w, r, "/login?flash=Your+session+expired&flash_kind=error&return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
 		return nil, err
 	}
+	// A REVOKED SESSION IS NOT A VALID ONE, even though its JWT still
+	// verifies (memql#4306).
+	//
+	// Signature and expiry say the token was minted and has not aged out.
+	// Neither says the person holding it has since pressed "sign out
+	// everywhere" -- that fact lives on the session row, which is why the row
+	// exists. Without this check, "sign out everywhere" would leave every
+	// /me/* page working for the rest of the access token's life, which is
+	// precisely the reassurance somebody reaches for it to get.
+	//
+	// One query per /me/* page load, on a handful of self-service pages. The
+	// mesh nodes enforce revocation by the epoch claim instead; this is the
+	// identity node's own cookie surface.
+	if s.sessionRevoked(r, raw) {
+		http.Redirect(w, r, "/login?flash=That+session+was+signed+out&flash_kind=error&return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
+		return nil, errors.New("session revoked")
+	}
 	return claims, nil
+}
+
+// sessionRevoked reports whether the presented bearer's session row has been
+// revoked.
+//
+// FAILS OPEN, deliberately. With no store wired, or on a read error, this
+// returns false and the caller proceeds on the JWT alone -- which is exactly
+// what happened before this check existed. Failing closed would turn a
+// database blip into "everybody is signed out of their own settings page",
+// and the token is still a validly-signed, unexpired credential in that case.
+// A token with NO row is also not revoked: the row may simply predate the
+// change, or belong to a credential class that has none.
+func (s *Server) sessionRevoked(r *http.Request, bearer string) bool {
+	if s == nil || s.Store == nil || strings.TrimSpace(bearer) == "" {
+		return false
+	}
+	row, err := s.Store.LookupAuthSessionByTokenHash(r.Context(), identity.HashSessionToken(bearer))
+	if err != nil || row == nil {
+		return false
+	}
+	return !row.RevokedAt.IsZero()
 }
 
 // extractUserToken accepts a token from (in priority order):

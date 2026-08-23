@@ -669,3 +669,84 @@ func TestCheckEmailRendersAWorkingPoller(t *testing.T) {
 		t.Error("a check-email page with no request id still loaded the poller")
 	}
 }
+
+// TestRevokedSessionIsRejectedOnMePages is memql#4303's acceptance clause
+// "after revoke the memql_admin bearer is rejected by the middleware".
+//
+// # Why it is not free
+//
+// The DSL comment on revokeAuthSession says the middleware's tokenHash lookup
+// rejects a revoked row, and on the mesh nodes revocation is enforced by the
+// epoch claim instead -- so on identity's OWN cookie surface, nothing was
+// consulting the row. A JWT that verifies and has not expired would have kept
+// every /me/* page working for the rest of its life after "sign out
+// everywhere", which is exactly the reassurance somebody presses it for.
+func TestRevokedSessionIsRejectedOnMePages(t *testing.T) {
+	const bearer = "a-signed-jwt"
+	revoked := false
+
+	eng := &revocationEngine{tokenHash: identity.HashSessionToken(bearer), revoked: &revoked}
+	s, err := NewServer(identity.Config{Enabled: true, BaseURL: "https://identity.test", JWTAudience: "memql"}, slog.Default(), nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	s.Store = &identity.Store{Engine: eng, Logger: slog.Default()}
+
+	req := httptest.NewRequest(http.MethodGet, "/me/devices", nil)
+	req.AddCookie(&http.Cookie{Name: "memql_admin", Value: bearer})
+
+	if s.sessionRevoked(req, bearer) {
+		t.Fatal("a live session was reported revoked")
+	}
+	revoked = true
+	if !s.sessionRevoked(req, bearer) {
+		t.Fatal("a REVOKED session was not reported revoked.\n" +
+			"Signature and expiry say the token was minted and has not aged out. Neither says the " +
+			"person has since signed out everywhere -- that fact is on the row, which is the reason " +
+			"the row exists.")
+	}
+
+	// FAILS OPEN on an unreadable store, so a database blip does not sign
+	// everybody out of their own settings page. The token is still a validly
+	// signed, unexpired credential in that case.
+	broken := &identity.Store{Engine: &revocationEngine{err: true}, Logger: slog.Default()}
+	s.Store = broken
+	if s.sessionRevoked(req, bearer) {
+		t.Error("an unreadable session store was treated as a revocation")
+	}
+	// And a bearer with no row at all is not revoked -- a PAT, or a row that
+	// predates the change.
+	s.Store = &identity.Store{Engine: &revocationEngine{tokenHash: "some-other-hash"}, Logger: slog.Default()}
+	if s.sessionRevoked(req, bearer) {
+		t.Error("a bearer with no session row was treated as revoked")
+	}
+}
+
+// revocationEngine answers authSessionByTokenHash for one known hash.
+type revocationEngine struct {
+	tokenHash string
+	revoked   *bool
+	err       bool
+}
+
+func (e *revocationEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	if e.err {
+		return nil, context.DeadlineExceeded
+	}
+	if !strings.HasPrefix(q, "query authSessionByTokenHash(") {
+		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+	}
+	if !strings.Contains(q, e.tokenHash) || e.tokenHash == "" {
+		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+	}
+	fields := map[string]*structpb.Value{
+		"id":        structpb.NewStringValue("sess-1"),
+		"tokenHash": structpb.NewStringValue(e.tokenHash),
+	}
+	if e.revoked != nil && *e.revoked {
+		fields["revokedAt"] = structpb.NewStringValue(time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{
+		Nodes: []*memqlv1.MemoryNode{{Id: "sess-1", Payload: &structpb.Struct{Fields: fields}}},
+	}}, nil
+}
