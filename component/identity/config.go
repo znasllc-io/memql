@@ -140,6 +140,27 @@ const (
 	// log retention applies there.
 	DefaultAuditLogRetentionDays = 365
 
+	// DefaultAuthActivityRetentionDays is the in-DB retention window for
+	// v1:identity:authActivity -- the routine-mechanics log (memql#4330).
+	//
+	// 30 days, and much shorter than the audit log's 365 on purpose: this is
+	// one row per refresh-token rotation and one per PAT-authenticated
+	// request, so it is two orders of magnitude larger and its value decays
+	// fast. It is not a compliance record.
+	//
+	// The floor is set by what depends on it. Refresh-token reuse detection
+	// (memql#4329) reaches back exactly this far, so the window must exceed
+	// both the 14-day idle timeout and the 30-day refresh-token TTL -- past
+	// either, a presented token is already dead on its own account and there
+	// is nothing left for detection to add.
+	DefaultAuthActivityRetentionDays = 30
+
+	// Bounds for the above. One day is the shortest window that still
+	// survives a weekend of nobody looking; a year is where "activity log"
+	// stops being a meaningful category apart from the audit log.
+	MinAuthActivityRetentionDays = 1
+	MaxAuthActivityRetentionDays = 365
+
 	// DefaultRiskThreshold is the score at which registration is
 	// blocked. Range 0-100; lower = stricter.
 	DefaultRiskThreshold = 50
@@ -429,6 +450,16 @@ type Config struct {
 	// in the database. Slog output is unbounded.
 	// Env: MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS (default 365)
 	AuditLogRetention time.Duration
+
+	// AuthActivityRetention is how long v1:identity:authActivity rows are
+	// kept before a daily Go-side job HARD-DELETES them (memql#4330).
+	//
+	// Unlike AuditLogRetention, which the DSL sweep only counts against
+	// ("MemQL has no delete()"), this one really deletes -- see
+	// component/identity/authactivity. Clamped to
+	// [MinAuthActivityRetentionDays, MaxAuthActivityRetentionDays].
+	// Env: MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default 30)
+	AuthActivityRetention time.Duration
 
 	// RegistrationMode — see RegistrationMode constants. Captured by
 	// first-run wizard if env unset.
@@ -724,6 +755,15 @@ func LoadConfigFromEnv() (Config, error) {
 	cfg.KeyRotationInterval = envDurationDays("MEMQL_IDENTITY_KEY_ROTATION_DAYS", DefaultKeyRotationDays)
 	cfg.JWKSOverlapWindow = envDurationHours("MEMQL_IDENTITY_JWKS_OVERLAP_HOURS", DefaultJWKSOverlapHours)
 	cfg.AuditLogRetention = envDurationDays("MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS", DefaultAuditLogRetentionDays)
+	// Clamped rather than validated: an out-of-range value here should not
+	// refuse boot, because the consequence of a silly number is a sweep that
+	// deletes too much or too little, not an unusable identity service. Every
+	// other TTL in this file that carries bounds is clamped the same way.
+	cfg.AuthActivityRetention = time.Duration(clampInt(
+		envInt("MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS", DefaultAuthActivityRetentionDays),
+		MinAuthActivityRetentionDays,
+		MaxAuthActivityRetentionDays,
+	)) * 24 * time.Hour
 	cfg.AccessRequestNotifyThrottle = envDurationMinutes("MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES", DefaultAccessRequestNotifyThrottleMinutes)
 	cfg.DataExportRateLimit = envDurationHours("MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS", DefaultDataExportRateLimitHours)
 	cfg.DeletionCooldown = envDurationDays("MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS", DefaultDeletionCooldownDays)
@@ -1205,4 +1245,21 @@ func envRegisteredClients(key string) ([]RegisteredClient, error) {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 	return clients, nil
+}
+
+// clampInt bounds v to [lo, hi].
+//
+// Used for the retention / TTL knobs whose out-of-range values should not
+// refuse boot: the consequence of a silly number is a sweep that deletes too
+// much or too little, not an unusable identity service. Contrast Validate(),
+// which fails fast on values that make the service structurally unable to do
+// its job.
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

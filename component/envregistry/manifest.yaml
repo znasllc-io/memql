@@ -2025,7 +2025,7 @@ variables:
   - name: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR
     component: identity
     scope: node
-    default: ""
+    default: "#0433ff"
     optional: true
     description: "Hex accent color used for HTML emails and the web UI primary button."
 
@@ -2261,6 +2261,13 @@ variables:
     default: "50"
     optional: true
     description: "Score from zero to one hundred at or above which registration is blocked; lower is stricter."
+
+  - name: MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS
+    component: identity
+    scope: node
+    default: "30"
+    optional: true
+    description: "Days of v1:identity:authActivity history kept before a daily job hard-deletes the rest; bounds one to three hundred and sixty five. Refresh-token reuse detection looks back exactly this far."
 
   - name: MEMQL_IDENTITY_SESSION_IDLE_DAYS
     component: identity

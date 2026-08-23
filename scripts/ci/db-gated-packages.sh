@@ -55,6 +55,7 @@ readonly DB_GATED_TREES=(
 	"component/automations"
 	"component/backup"
 	"component/grpc"
+	"component/identity/authactivity"
 	"component/identity/recoverykey"
 	"integrations/cognition"
 	"integrations/embedding"
