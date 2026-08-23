@@ -81,6 +81,22 @@ export interface Event {
   kind: string;
   timestamp: Date | null;
   payload: Record<string, unknown> | null;
+  // payloadOmitted marks an ID-ONLY notification: `payload` carries the
+  // row's identity ({concept, id, createdAt} plus the topic/eventKind that
+  // say which action fired) and NOT the row (memql#4309).
+  //
+  // It happens when the row's concept declares the `granted` row-authz
+  // tier, whose predicate is a relationship spec: deciding it needs a join
+  // the fan-out cannot perform against one row. RE-READ the row through
+  // the normal authorized read path and use what that returns; if the read
+  // refuses, you were not entitled to the row and the event should be
+  // dropped.
+  //
+  // Treating an id-only event as a full one yields a row whose fields are
+  // all undefined, so a consumer that ignores this flag degrades to
+  // rendering blanks rather than to leaking anything. Always false on an
+  // ordinary event.
+  payloadOmitted: boolean;
 }
 
 // GraphAction is a CDC verb a structured graph subscription filters on
@@ -314,6 +330,10 @@ export function eventFromWire(ev: EventPayload): Event {
       ev.payload && typeof ev.payload === "object" && !Array.isArray(ev.payload)
         ? (ev.payload as Record<string, unknown>)
         : null,
+    // Normalised to a real boolean: protojson omits a false bool, so the
+    // wire field is absent on every ordinary event and a consumer reading
+    // `ev.payloadOmitted` directly would be reading undefined.
+    payloadOmitted: ev.payloadOmitted === true,
   };
 }
 

@@ -3892,6 +3892,18 @@ type EventNotification struct {
 	Kind           EventKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=znasllc.memql.v1.EventKind" json:"kind,omitempty"`
 	Ts             *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=ts,proto3" json:"ts,omitempty"`
 	Payload        *structpb.Struct       `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	// payload_omitted marks an ID-ONLY notification: the row's concept
+	// declares the `granted` row-authz tier, whose predicate is a
+	// relationship spec that cannot be decided against a single row in
+	// isolation (memql#4309, design D3). The engine sends
+	// {concept, id, action, createdAt} and nothing else; the client must
+	// re-read the row through the authorized read path, which performs the
+	// join, and drop the event when that read refuses.
+	//
+	// Dropping such an event silently instead would make a future granted
+	// concept's live feed die without a trace. A client that ignores this
+	// flag sees an event whose payload carries only those four keys.
+	PayloadOmitted bool `protobuf:"varint,5,opt,name=payload_omitted,json=payloadOmitted,proto3" json:"payload_omitted,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3952,6 +3964,13 @@ func (x *EventNotification) GetPayload() *structpb.Struct {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *EventNotification) GetPayloadOmitted() bool {
+	if x != nil {
+		return x.PayloadOmitted
+	}
+	return false
 }
 
 type AiStreamChunk struct {
@@ -20127,12 +20146,13 @@ const file_memql_proto_rawDesc = "" +
 	"\aconcept\x18\x05 \x01(\tR\aconcept\x12;\n" +
 	"\aactions\x18\x06 \x03(\x0e2!.znasllc.memql.v1.GraphNodeActionR\aactions\"9\n" +
 	"\x0eUnsubscribeMsg\x12'\n" +
-	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"\xcc\x01\n" +
+	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"\xf5\x01\n" +
 	"\x11EventNotification\x12'\n" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\x12/\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1b.znasllc.memql.v1.EventKindR\x04kind\x12*\n" +
 	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x121\n" +
-	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\"\xac\x02\n" +
+	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x12'\n" +
+	"\x0fpayload_omitted\x18\x05 \x01(\bR\x0epayloadOmitted\"\xac\x02\n" +
 	"\rAiStreamChunk\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x1d\n" +

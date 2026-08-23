@@ -106,6 +106,32 @@ func AdminGateLeaf(pred string) bool { return AdminGateRe.MatchString(pred) }
 // polarity. Selection, not assertion -- see AdminGateMentionRe.
 func MentionsAdminGate(clause string) bool { return AdminGateMentionRe.MatchString(clause) }
 
+// CallerScopeLeaf reports whether a single predicate ties the row to THIS
+// CALLER at all -- either because the caller owns it, or because the caller
+// administers the cluster.
+//
+// It exists for the COMPOSITE row-authz tier (memql#4312), whose injected
+// predicate is `(<owner>==actor.userId)||(actor.isClusterOwner==true)`: "the
+// owner, or a cluster owner". Neither OwnerScopeLeaf nor AdminGateLeaf holds
+// on every arm of that disjunction, and ClauseGuarantees is right to say so
+// for each of them separately -- but the DISJUNCTION of the two is exactly
+// the floor the tier declares, and `ClauseGuarantees(clause, CallerScopeLeaf)`
+// is the question that has the right answer.
+//
+// WHY THIS DOES NOT REOPEN THE memql#2839 FAIL-OPEN. That gate refuses an
+// admin gate ORed with a SELECTION term:
+//
+//	fromE164==args.e164 || actor.isClusterOwner==true   // fail-open
+//	ownerUserId==actor.userId || actor.isClusterOwner==true   // the floor
+//
+// On the first, a false admin gate zeroes nothing -- any caller who supplies
+// `fromE164` still reads rows, which is the bypass. On the second, a false
+// admin gate leaves exactly the caller's own rows. The difference is entirely
+// in the OTHER arm, and this predicate is what reads it: `fromE164==args.e164`
+// satisfies neither half, so the fail-open shape is still refused. Composing
+// the two leaves rather than loosening either one is what keeps that true.
+func CallerScopeLeaf(pred string) bool { return OwnerScopeLeaf(pred) || AdminGateLeaf(pred) }
+
 // BlankComments removes BOTH comment forms -- `//` line and `/* */` block --
 // via the parser's own offset-preserving blanker, so a construct's structure
 // is read the way the lexer reads it.

@@ -126,6 +126,7 @@ restate it:
 | admin | `@rowAuthz(clusterOwner)` | `actor.isClusterOwner == true` |
 | public | `@rowAuthz(public)` | none — explicit and greppable |
 | granted | `@rowAuthz(via="<spec>")` | the relationship spec, gated on `actor.userId` |
+| owned + admin | `@rowAuthz(owner="<field>", clusterOwner)` | `(<field> == actor.userId) \|\| (actor.isClusterOwner == true)` |
 
 ```memql fragment
 @rowAuthz(owner="ownerUserId")
@@ -149,6 +150,29 @@ Rules:
   is a load error, and so is a second `@rowAuthz` on the same concept
   (the parser folds attributes in source order, so without that check a
   reader scanning top-down would see a tier the engine does not use).
+- **The COMPOSITE form is one tier, not two** (memql#4312).
+  `@rowAuthz(owner="<field>", clusterOwner)` is the only accepted
+  two-argument list, and its arguments are order-independent (an
+  attribute's argument list is a map, so there is no order to depend
+  on). Every other pair — `public, clusterOwner`, `owner=` with `via=` —
+  is refused at load, naming the accepted forms.
+
+  It is the **owned tier carrying a cluster-owner bypass**, not a fifth
+  tier, and that matters beyond taxonomy: the owner-field machinery
+  (the stamping requirement below, the actorless-read refusal, the
+  conformance authz bucket) all switch on the owned tier, and a new tier
+  value would have fallen silently out of every one of them.
+
+  Reach for it when an **operator console must read across users**. A
+  plain `owner=` tier has no cluster-owner bypass at all, so declaring
+  a live operator surface plain-owned hides every other user's rows
+  from the operator too — the wrong trade, and plausibly why so much of
+  the undeclared long tail stayed undeclared.
+
+  **The write guard ignores the second argument.** Reading a row as an
+  administrator is not authoring it. (The cluster-owner escape a write
+  already has is `rowAuthzWriteEscape`'s; it pre-dates this form and
+  applies to every declared tier alike.)
 - **`owner="<field>"` must name a field the concept declares**, with the
   one exception below. Checked at load, against the parsed property set,
   with the declared fields listed in the diagnostic.
@@ -184,7 +208,8 @@ one. Read the behaviour off these files, not off prose:
 | Mechanism | File | Covers |
 |---|---|---|
 | Filter injection | `component/memql/rowauthz_enforce.go` (`enforceRowAuthzOnPlan`) | every read whose plan has a **bound concept**; the predicate is ANDed at the **root**, so an author's `a \|\| b` becomes `((a) \|\| (b)) && (authz)` |
-| Row admission | same file (`rowAuthzAdmits`) | reads with **no** bound concept -- a raw client-supplied query string -- **and** graph expansion, which has no filter to AND anything into |
+| Row admission | same file (`rowAuthzAdmits`) | reads with **no** bound concept -- a raw client-supplied query string -- **and** graph expansion, which has no filter to AND anything into, **and** a top-level builtin call, whose rows come out of a Go handler rather than a query (memql#3982) |
+| Subscription fan-out | `component/memql/rowauthz_subscription.go` (`AdmitSubscriptionRow`), wired in `component/grpc/server.go` (`handleBusEvent`) | every `graph.node.*` event on its way to a subscribed stream -- see [Subscriptions are an egress](#subscriptions-are-an-egress-memql4309) |
 | Anonymous refusal | same file (`refuseRowAuthzWithoutActor`) | a read carrying no caller identity **errors** rather than comparing against `""` and returning rows owned by nobody |
 | Write guard | `component/memql/rowauthz_write_guard.go` | `update` / status-flip / a raw `insert(` onto an existing id -- the engine resolves the target row and refuses when its owner is not the actor |
 | Create stamping | `component/memql/rowauthz_insert_stamp.go` | the raw-`insert(` create path that bypasses accept/stamp |
@@ -211,6 +236,67 @@ boot **warning** naming every undeclared concept, and the undeclared
 population is pinned shrink-only by
 `component/memql/rowauthz_undeclared_gate_test.go`. Escalation to a load
 error is a later phase, once the tree is clean.
+
+### Subscriptions are an egress (memql#4309)
+
+A subscription DELIVERS ROWS, so it is an egress of rows in exactly the sense
+this page enumerates -- and until memql#4309 it was the one egress that never
+called `rowAuthzAdmits`. `handleBusEvent` matched an event's topic against each
+subscription's patterns and sent the whole flattened payload; `handleSubscribe`
+had no gate; and the event bus itself has "no AccessContext and no
+authorization hook of any kind" (`component/memql/executor_mutation.go`). For
+the concepts that declare a tier this was a real leak: the read path denied the
+row and the subscription delivered it.
+
+The gap was **unrecorded rather than accepted**. This page did not list
+subscriptions among the egresses at all, which is why it went unnoticed for as
+long as it did -- and why the fix comes with a doc gate rather than only with
+code. `TestSubscriptionFanOutAppliesTheRowGate` (`component/memql`) is named in
+`rowauthz_doc_gate_test.go`'s `docNamedTests`, so the `@rowAuthz` annotation doc
+must keep citing it, and a rename or deletion has to come back here.
+
+**The rule is the read path's rule.** Undeclared admits, declared enforces --
+one seam, not a second rulebook (design D1). A subscription that were stricter
+than a read would be a second authorization implementation, and it would drift
+from the first; a subscription looser than a read is the leak. The consequence
+worth stating plainly: for the ~90 concepts that declare no tier, a subscription
+still delivers every user's rows -- and so does a raw query, which is what makes
+that acceptable rather than a second finding. The hole closes concept by concept
+as tiers are declared.
+
+Three outcomes per event, one per admission verdict:
+
+| Verdict | What the stream receives |
+|---|---|
+| admit | the event, unchanged |
+| deny | nothing. The stream is not told the row exists -- being told that a row you may not read exists is itself a disclosure. The operator sees it: a debug log and `memql_subscription_rows_denied_total{concept}` |
+| undecided (`granted`) | an **id-only** notification: `{concept, id, action, createdAt}` with `payload_omitted=true` on the wire. The client re-reads the row through the authorized read path -- which performs the join a `granted` tier needs and a single row cannot answer -- and drops the event when that read refuses |
+
+The id-only path exists so a future `granted` concept's live feed cannot die
+without a trace. No concept declares `via=` today, so it is built against a
+fixture on purpose (design D3).
+
+Two further properties, neither obvious:
+
+- **Admission runs where the SUBSCRIBER is.** A forwarded mesh event is
+  re-published on the receiving node's bus and fanned out there, so two
+  subscribers on one receiving node get different answers to the same
+  forwarded event. No forwarding change was needed; the cross-node gate is
+  `component/grpc/subscription_rowauthz_mesh_test.go`.
+- **The subscription read is stamped UNBOUND**, which is what engages the
+  `@pii` narrowing on `v1:identity:user` (`rowauthz_pii_unbound.go`). Without
+  that stamp, subscribing to a concept that declares no tier but does declare
+  `@pii` would hand every user's PII fields to any signed-in stream --
+  memql#3350's generic-browse hole arriving through a different door.
+
+**Non-graph subscription kinds are owner/admin-only** (memql#4311).
+`TELEMETRY`, `MESSAGE` and `AI_STREAM` carry node-level events with no row
+owner to decide by, and `ALL` (`#`) carries every graph topic besides. They are
+refused at subscribe time below admin, with `PermissionDenied` and a reason. An
+`ALL` subscription an admin does hold still passes each graph event through
+fan-out admission -- the topic-prefix check keys on the EVENT, not on the
+subscription's kind, so `#` is not a way to reach rows `GRAPH_EVENTS` would be
+denied.
 
 ### Staged-data visibility (memql#3974)
 

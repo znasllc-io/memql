@@ -1769,6 +1769,26 @@ predicate gates on actor.userId), **admin** (cluster-owner spec), or
 `test/dslconformance/conformance_test.go` hard-fails on any new unclassified
 construct.
 
+**Row admission also gates SUBSCRIPTIONS** (memql#4309). A `graph.node.*`
+event reaches a subscribed stream only if the same function that admits the
+row on a read admits it for that stream's actor -- so a concept's declared
+tier decides what its live feed delivers, and a concept that declares
+nothing admits everyone on BOTH paths (which is the standing undeclared long
+tail, not a subscription defect). A `granted` row cannot be decided against
+one row, so it arrives id-only with `payload_omitted` for the client to
+re-read through the authorized path. Non-graph subscription kinds
+(`TELEMETRY` / `MESSAGE` / `AI_STREAM` / `ALL`) carry node-level events with
+no row owner to decide by and are owner/admin-only at subscribe time
+(memql#4311).
+
+A fifth declaration FORM composes two buckets:
+`@rowAuthz(owner="<field>", clusterOwner)` -- the owner, or a cluster owner
+(memql#4312). It is the owned tier with the admin gate ORed in, not a new
+tier, and it exists because a plain `owner=` tier has no cluster-owner
+bypass -- so declaring an operator surface plain-owned hides every other
+user's rows from the operator too. The write guard ignores the second
+argument.
+
 The partition dimension that historically gated tenant isolation is
 retired in #56 (phases 1-7 landed; phase 8 sweeps the remaining
 cross-repo stragglers + the DSL `partition="*"` automation kwarg). The

@@ -27,6 +27,7 @@ function graphEvent(kind: string, id: string, payload: Record<string, unknown> =
     subscriptionId: "sub-1",
     kind,
     timestamp: new Date("2026-08-08T10:00:00Z"),
+    payloadOmitted: false,
     payload: {
       id,
       nodeId: id,
@@ -99,7 +100,13 @@ describe("the live band", () => {
   });
 
   it("ignores an event carrying no row id, and an unknown kind", () => {
-    const noId: Event = { subscriptionId: "s", kind: "NODE_CREATED", timestamp: null, payload: {} };
+    const noId: Event = {
+      subscriptionId: "s",
+      kind: "NODE_CREATED",
+      timestamp: null,
+      payloadOmitted: false,
+      payload: {},
+    };
     expect(applyGraphEvent(EMPTY_LIVE_BAND, noId, ctx())).toBe(EMPTY_LIVE_BAND);
 
     const unknown = graphEvent("SOMETHING_ELSE", "a");
@@ -111,6 +118,7 @@ describe("the live band", () => {
       subscriptionId: "s",
       kind: "NODE_CREATED",
       timestamp: null,
+      payloadOmitted: false,
       payload: { nodeId: "aliased", concept: CONCEPT },
     };
     const band = applyGraphEvent(EMPTY_LIVE_BAND, aliased, ctx());

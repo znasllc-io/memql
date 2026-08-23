@@ -47,7 +47,9 @@ use identity.concepts.{ user }
 //
 // @rowAuthz declares the row-authorization tier ONCE on the concept, instead
 // of as an `actor.*` term every filter over it has to remember to carry.
-// Exactly one tier per concept; a second @rowAuthz is a load error.
+// Exactly one tier per concept; a second @rowAuthz is a load error. (The
+// composite form below carries two ARGUMENTS, not two tiers -- "the owner or
+// a cluster owner" is a single floor.)
 //
 //   @rowAuthz(public)            Globally readable by intent. Spelled
 //                                explicitly -- "no annotation" and "declared
@@ -63,6 +65,23 @@ use identity.concepts.{ user }
 //                                it would let a concept declare an owner
 //                                tier that is FALSE.
 //   @rowAuthz(via="<spec>")      A relationship spec grants visibility.
+//   @rowAuthz(owner="<field>", clusterOwner)
+//                                COMPOSITE (memql#4312): the owner, OR a
+//                                cluster owner. The only two-argument form,
+//                                and the arguments are order-independent. It
+//                                is the owned tier with the admin gate ORed
+//                                in -- not a fifth tier -- so everything that
+//                                depends on an owner field (the stamping
+//                                requirement below, the actorless-read
+//                                refusal, the conformance authz bucket)
+//                                applies to it unchanged. Reach for it when
+//                                an operator console has to read across
+//                                users: a plain owner= tier has NO
+//                                cluster-owner bypass, so it hides every
+//                                other user's rows from the operator too.
+//                                The WRITE guard ignores the second argument
+//                                -- reading a row as an administrator is not
+//                                authoring it.
 //
 // THE TIER IS ENFORCED (memql#3172), so declaring one CHANGES WHAT READS
 // RETURN: its predicate is ANDed into the plan of every read with a bound

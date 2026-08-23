@@ -59,7 +59,8 @@ partition-keyed.)
 > **Composing these topics is the SERVER's job.** Clients do NOT write
 > topic strings. A structured graph subscription carries a `concept` +
 > a set of `actions`, and the engine composes the bus topic (memql#2460).
-> See [Client Subscriptions](#client-subscriptions) below. The topic
+> See [Client Subscriptions](#client-subscriptions-are-authorized-per-row-memql4309)
+> and [Subscribing to Events](#subscribing-to-events) below. The topic
 > grammar in this table is documented for observability, not as a
 > client-authored wire string.
 
@@ -293,6 +294,58 @@ also rejected.
 
 **Free-text filter glob grammar** (non-graph kinds): `*` matches exactly
 one segment, `#` matches zero or more segments.
+
+### Client subscriptions are AUTHORIZED PER ROW (memql#4309)
+
+A subscription delivers rows, so it is an egress of rows and is gated like
+one. **A `graph.node.*` event reaches a stream only if the same function that
+admits the row on a read admits it for that stream's actor** -- one seam, not a
+second rulebook. Undeclared concepts admit everyone, declared concepts enforce
+their tier; that is exactly what their reads already do, so a subscription can
+neither see more than a read nor less.
+
+Until memql#4309 there was no gate here at all: a signed-in stream could
+subscribe to any concept and receive every user's rows.
+
+Three outcomes per event:
+
+| Verdict | What arrives |
+|---|---|
+| admitted | the event, unchanged |
+| denied | nothing. The stream is not told the row exists -- being told that a row you may not read exists is itself a disclosure |
+| undecided | an **ID-ONLY** notification (below) |
+
+**`payload_omitted`.** A concept declaring the `granted` tier
+(`@rowAuthz(via="<spec>")`) cannot be decided against one row: the predicate is
+a relationship spec, and deciding it needs the join a filter performs. Such an
+event is delivered with `EventNotification.payload_omitted = true` and a
+payload carrying only the row's identity:
+
+```json
+{
+  "id": "abc123",
+  "concept": "v1:agents:agent",
+  "eventKind": "node_created",
+  "createdAt": "2026-03-24T10:30:00Z"
+}
+```
+
+**Re-read the row through the normal read path and use what that returns; if
+the read refuses, drop the event.** The SDKs surface the flag as
+`event.payloadOmitted` (TypeScript) / `Event.PayloadOmitted` (Go). Ignoring it
+is safe but useless -- you get a row whose fields are absent, so a consumer
+degrades to rendering nothing rather than to leaking anything.
+
+**Non-graph kinds are owner/admin-only** (memql#4311). `TELEMETRY`, `MESSAGE`,
+`AI_STREAM` and `ALL` carry node-level events with no row owner to authorize
+against, and `ALL` (`#`) carries every graph topic besides. A caller below
+`admin` is refused at subscribe time with a `subscription-error` naming
+`PermissionDenied`; the subscription is not registered. An `ALL` subscription
+an admin does hold still passes each graph event through the per-row admission
+above -- the check keys on the EVENT's topic, not on the subscription's kind,
+so `ALL` is not a way to reach rows `GRAPH_EVENTS` would be denied.
+
+Full model: [per-row authorization audit](../operate/auth/per-row-authz-audit.md#subscriptions-are-an-egress-memql4309).
 
 ### Concept-registry subscriptions are a SEPARATE stream (memql#4238)
 

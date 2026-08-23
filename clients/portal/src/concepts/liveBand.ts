@@ -52,7 +52,11 @@ import type { Event, Row } from "@znasllc-io/memql-sdk-core/client";
 
 // The CDC verbs, as they appear on Event.kind after the SDK strips the
 // EVENT_KIND_ prefix (see sdk/ts/src/client/types.ts eventFromWire).
-const KIND_CREATED = "NODE_CREATED";
+// Exported because useConceptRows has to ask "is this a create?" when it
+// resolves an id-only notification -- a create with no row left to show is
+// dropped, an update or delete still counts. One spelling of the verb, so
+// the wiring and the policy cannot disagree about it.
+export const KIND_CREATED = "NODE_CREATED";
 const KIND_UPDATED = "NODE_UPDATED";
 const KIND_DELETED = "NODE_DELETED";
 
