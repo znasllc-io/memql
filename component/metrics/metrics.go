@@ -201,6 +201,17 @@ func init() {
 	identitySigningKeyCreatedTimestamp.Set(0)
 	identitySigningKeyAgeKnown.Set(0)
 	identitySigningKeyRotationSupported.Set(0)
+	// All three federation outcomes exist at 0 from boot, for the reason the
+	// keyset gauges above do -- and here it is load-bearing rather than tidy.
+	// The runbook tells operators to ALERT ON `denied`, and a Prometheus rule
+	// over a series that does not exist yet evaluates to no data, not to zero:
+	// on a cluster where the exchange has never once been refused, the alert
+	// is silently unarmed, which is precisely the state it is meant to watch
+	// for. A CounterVec creates a child only on first Inc, so without these
+	// three lines `denied` first appears at the moment it is too late.
+	aiFederationExchanges.WithLabelValues(FederationExchangeOK).Add(0)
+	aiFederationExchanges.WithLabelValues(FederationExchangeDenied).Add(0)
+	aiFederationExchanges.WithLabelValues(FederationExchangeError).Add(0)
 }
 
 // SubscriptionRowDenied records one graph-subscription event dropped at
