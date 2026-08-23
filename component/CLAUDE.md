@@ -10,7 +10,7 @@ intake "plugin" means pack. See
 
 ---
 
-## STRUCTURE Directory Structure
+## Directory Structure
 
 `component/` currently has 37 subdirectories (`ls component/`), including
 several not detailed below (actions, architecture, automations, backup,
@@ -31,7 +31,7 @@ component/
 │   ├── audiows/       # Audio WebSocket
 │   └── polyphonws/    # Polyphon WebSocket (multi-agent voice)
 ├── auth/              # Shared auth context helpers + RBAC + delegation
-├── identity/          # In-house identity service (magic-link, JWT, JWKS, admin UI, PAT)
+├── identity/          # In-house identity service (magic-link, passkeys, JWT, JWKS, PAT)
 │   └── verifier/      # Per-node JWT verifier (used by bff/voice/cognition/agent/planner)
 ├── polyphon/          # Polyphon multi-agent voice pipeline
 ├── fileprocessor/     # File processing (PDF, DOCX, images, text)
@@ -51,7 +51,7 @@ Component wiring and lifecycle now lives in `core/component/component.go`
 
 ---
 
-## TASKS Key Components
+## Key Components
 
 ### bus/ - **Component Communication Bus**
 **Purpose:** Channel-based inter-component communication with protobuf messages
@@ -163,8 +163,10 @@ core), pending engine-generic absorption or bundle delivery.
 **What It Does:**
 - Identity-issued JWT validation via per-node verifier
   (`identity/verifier`) on every non-identity binary
-- Magic-link auth, OAuth-style token endpoints, JWKS publishing,
-  and the admin web app (the identity binary itself)
+- Magic-link auth, WebAuthn passkeys, enrolment tokens, OAuth-style token
+  endpoints and JWKS publishing (the identity binary itself). The admin web
+  app is GONE -- `/admin/` answers 410 and the screens live in the MemQL
+  portal, gated by `component/identity/adminops` over `IdentityAdminMsg`
 - Personal Access Token (PAT) issuance for CLI clients
 - Identity / role context propagation (auth package helpers)
 - Per-row authorization is enforced inside DSL queries + mutations
@@ -188,7 +190,7 @@ core), pending engine-generic absorption or bundle delivery.
 
 ---
 
-## CONFIG Component Architecture
+## Component Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -217,7 +219,7 @@ core), pending engine-generic absorption or bundle delivery.
 
 ---
 
-## START MemQL Engine Deep Dive
+## MemQL Engine Deep Dive
 
 The heart of the system - executes all MemQL queries.
 
@@ -303,7 +305,7 @@ type IntegrationEngineAccess interface {
 
 ---
 
-## START Adding New Components
+## Adding New Components
 
 ### 1. Create Component Package
 ```bash
@@ -387,7 +389,7 @@ kubectl logs -n memql deploy/bff | grep "query.*ms"
 
 ---
 
-## DOCS See Also
+## See Also
 
 - [memql/arch.md](memql/arch.md) - MemQL engine architecture
 - [Architecture Overview](../docs/public/concepts/architecture.md) - System architecture
@@ -396,7 +398,7 @@ kubectl logs -n memql deploy/bff | grep "query.*ms"
 
 ---
 
-## CHECK Key Components Reference
+## Key Components Reference
 
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
@@ -404,7 +406,7 @@ kubectl logs -n memql deploy/bff | grep "query.*ms"
 | **database/** | Database layer | `memory-nodes/database.go` |
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
 | **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
-| **identity/** | In-house identity service (magic-link, JWT issuance, JWKS, admin UI, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
+| **identity/** | In-house identity service (magic-link, passkeys, JWT issuance, JWKS, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
 | **polyphon/** | Voice pipeline | `session.go`, `score_engine.go`, `state_machine.go` |
 | **fileprocessor/** | File processing | `processor.go` |
 | **events/** | Event bus | `bus.go` |
