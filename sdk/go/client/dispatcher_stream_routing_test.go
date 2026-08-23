@@ -104,6 +104,8 @@ var unroutedFamilies = map[string]string{
 	"resend_guest_invite_email_result":       "single-reply",
 	"revoke_current_session_result":          "single-reply",
 	"revoke_all_sessions_result":             "single-reply",
+	"revoke_session_result":                  "single-reply",
+	"set_sign_in_policy_result":              "single-reply",
 	"create_worker_token_result":             "single-reply",
 	"revoke_worker_token_result":             "single-reply",
 	"voice_agent_partial_ack":                "single-reply",

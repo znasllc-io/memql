@@ -148,9 +148,51 @@ type UserRow struct {
 	SignInPolicy string
 }
 
+// The two sign-in policies, and the two sentences a person is shown when the
+// stricter one is refused.
+//
+// THEY ARE HERE BECAUSE THE RULE HAS TWO ENFORCEMENT POINTS AND MUST NOT HAVE
+// TWO MEANINGS (memql#4319). Identity's own /me/settings enforces the
+// passkey precondition against its passkey adapter
+// (component/identity/web/me_signin_policy.go); a bff enforces the same
+// precondition against the engine, for the portal's Security tab
+// (component/identity/adminops/self_signin_policy.go). The two nodes cannot
+// share the READ -- they hold different adapters -- so what is shared is the
+// vocabulary and the copy, which is the half a person actually experiences.
+// A refusal that says one thing on one surface and another on the other is a
+// person being told two different stories about why they are locked out.
+const (
+	SignInPolicyAny         = "any"
+	SignInPolicyPasskeyOnly = "passkey_only"
+
+	// SignInPolicyNeedsPasskeyMessage is the refusal when the account holds
+	// no active passkey. It names the remedy first, because the reader's
+	// question is "what do I do", not "what went wrong".
+	SignInPolicyNeedsPasskeyMessage = "Add a passkey first. Turning off sign-in links with no passkey enrolled " +
+		"would leave you unable to sign in at all."
+	// SignInPolicyPrecheckFailedMessage is the refusal when the passkey list
+	// could not be READ. Deliberately distinct from the one above: "you have
+	// no passkeys" is a fact about the account, this is a fact about the
+	// moment, and the remedies are different (enrol one vs try again).
+	SignInPolicyPrecheckFailedMessage = "We couldn't check your passkeys just now. Please try again in a moment."
+)
+
+// SignInPolicyMessage is the one line a person is shown after the policy
+// changes -- written as what is TRUE NOW rather than as what happened,
+// because the reader's next question is "so how do I sign in".
+//
+// Here rather than on either surface for the reason the constants above are:
+// two enforcement points, one story.
+func SignInPolicyMessage(policy string) string {
+	if strings.TrimSpace(policy) == SignInPolicyPasskeyOnly {
+		return "Sign-in links are off. Use your passkey to sign in from now on."
+	}
+	return "Sign-in links are on for this account."
+}
+
 // PasskeyOnly reports whether sign-in links are disabled for this account.
 func (u *UserRow) PasskeyOnly() bool {
-	return u != nil && strings.TrimSpace(u.SignInPolicy) == "passkey_only"
+	return u != nil && strings.TrimSpace(u.SignInPolicy) == SignInPolicyPasskeyOnly
 }
 
 // AuthSessionRow projects a v1:identity:authSession row.

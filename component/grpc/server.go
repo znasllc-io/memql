@@ -1364,6 +1364,13 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		*memqlv1.MemqlClientMessage_RevokeBadge,
 		*memqlv1.MemqlClientMessage_RevokeCurrentSession,
 		*memqlv1.MemqlClientMessage_RevokeAllSessions,
+		*memqlv1.MemqlClientMessage_RevokeSession,
+		// Sign-in policy joins the list for the same reason the credential
+		// mints do: it changes how the ACCOUNT can be entered from now on,
+		// which outlives the grant's TTL containment by construction. A
+		// walked-away kiosk must not be able to turn the owner's sign-in
+		// links off.
+		*memqlv1.MemqlClientMessage_SetSignInPolicy,
 		*memqlv1.MemqlClientMessage_SendGuestInvite,
 		*memqlv1.MemqlClientMessage_CancelGuestInvite,
 		*memqlv1.MemqlClientMessage_ResendGuestInviteEmail,
@@ -1477,6 +1484,10 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.RevokeCurrentSession.GetRequestId()
 	case *memqlv1.MemqlClientMessage_RevokeAllSessions:
 		return p.RevokeAllSessions.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeSession:
+		return p.RevokeSession.GetRequestId()
+	case *memqlv1.MemqlClientMessage_SetSignInPolicy:
+		return p.SetSignInPolicy.GetRequestId()
 	case *memqlv1.MemqlClientMessage_CreateWorkerToken:
 		return p.CreateWorkerToken.GetRequestId()
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
@@ -1866,6 +1877,10 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleRevokeCurrentSession(envelope, payload.RevokeCurrentSession)
 	case *memqlv1.MemqlClientMessage_RevokeAllSessions:
 		return s.handleRevokeAllSessions(envelope, payload.RevokeAllSessions)
+	case *memqlv1.MemqlClientMessage_RevokeSession:
+		return s.handleRevokeSession(envelope, payload.RevokeSession)
+	case *memqlv1.MemqlClientMessage_SetSignInPolicy:
+		return s.handleSetSignInPolicy(envelope, payload.SetSignInPolicy)
 	case *memqlv1.MemqlClientMessage_CreateWorkerToken:
 		return s.handleCreateWorkerToken(envelope, payload.CreateWorkerToken)
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:

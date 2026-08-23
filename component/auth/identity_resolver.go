@@ -89,7 +89,11 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	return &AccessContext{
 		UserId:       userId,
 		PrimaryEmail: stringField(userRow, "primaryEmail"),
-		Role:         applyBadgeRoleCeiling(claims, Role(stringField(userRow, "role"))),
+		// Off the SAME row, on the read that has already happened. See the
+		// note on AccessContext.DisplayName for why it is not an
+		// authorization input and is not in the actor envelope.
+		DisplayName: stringField(userRow, "displayName"),
+		Role:        applyBadgeRoleCeiling(claims, Role(stringField(userRow, "role"))),
 	}, nil
 }
 
@@ -128,8 +132,34 @@ func FallbackFromClaims(claims map[string]any) *AccessContext {
 	return &AccessContext{
 		UserId:       subject,
 		PrimaryEmail: email,
-		Role:         applyBadgeRoleCeiling(claims, role),
+		// Best-effort, from the OIDC-style name claims the identity issuer
+		// stamps (component/identity/jwt.go). This path runs when there is no
+		// user row to read yet, so the claim is the only name that exists;
+		// when the row lands, LoadFromClaims takes over and the row wins.
+		// Empty is fine -- a client renders the email it already holds.
+		DisplayName: displayNameFromClaims(claims),
+		Role:        applyBadgeRoleCeiling(claims, role),
 	}
+}
+
+// displayNameFromClaims composes a name out of whatever the token carries.
+//
+// `name` first when the issuer stamped one, else given_name + family_name
+// joined -- the same convention v1:identity:user.displayName documents for
+// itself ("firstName + ' ' + lastName when both are populated"), so the
+// fallback and the row agree on what a name looks like rather than
+// producing two different renderings of one person.
+func displayNameFromClaims(claims map[string]any) string {
+	if name := stringClaim(claims, "name"); name != "" {
+		return name
+	}
+	parts := make([]string, 0, 2)
+	for _, key := range []string{"given_name", "family_name"} {
+		if v := stringClaim(claims, key); v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // --- result helpers ----------------------------------------------------

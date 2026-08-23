@@ -301,27 +301,51 @@ same-origin variant, so it always goes to the identity host directly.
 
 Where `MEMQL_IDENTITY_ENABLED=false` (troubleshooting only -- **never** in
 staging or production), `authEnabled` is `false`, the portal shows no sign-in,
-dials with no credential, and the header displays a persistent
-**"Authentication disabled"** warning. Every stream in that mode is admitted as
-the synthetic `local-dev` cluster owner, and an operator must not be able to
-mistake that for having authenticated.
+dials with no credential, and the rail shows a persistent
+**"Authentication disabled"** warning where the profile row would otherwise be.
+Every stream in that mode is admitted as the synthetic `local-dev` cluster
+owner, and an operator must not be able to mistake that for having
+authenticated. It takes the profile row's place rather than sitting beside it:
+there is no person to link to on a cluster that admits every dial as one
+synthetic owner, so a profile row there would be a link to a fiction.
 
 ---
 
 ## What the UI tells you
 
-The header answers the two questions an operations console must answer without
-a click:
+Four facts, and each is in the place a person looks for it (memql#4316,
+memql#4317). Three of them are in the rail, which reads top to bottom as
+**person, places, machine**.
 
-- **Which cluster** -- the origin host that served the page (the cluster's name
-  under the derive-from-origin decision), plus the node id and version of the
-  *replica* serving this stream, taken from the `ServerHello`. In a two-replica
-  mesh that is what tells you which pod you are looking at.
-- **Who you are** -- the email and cluster role, read from the cluster over
-  `MyAccessMsg`, not decoded from the token the browser holds. If the two ever
-  disagree -- a rotated token, a session revoked elsewhere, a role changed
-  since the token was minted -- the header shows what the cluster is actually
-  acting on.
+- **Which cluster -- the address bar.** The portal derives the cluster from the
+  origin that served the page, so the hostname in the browser's own address bar
+  IS the cluster's name. The header used to repeat it as "Cluster:
+  `<hostname>`", which spent the chrome's most prominent slot on the one fact
+  the reader could already see, and left nothing to anchor the header. The
+  header now carries the brand: the mark (which doubles as the connection
+  indicator, memql#4180) and the `MemQL Portal` wordmark, with the theme toggle
+  on the right.
+- **Which replica -- the rail footer.** Behind a `border-t`, the connection dot
+  labelled with the node id and the engine version beneath it, both from the
+  `ServerHello`. In a two-replica mesh that is what tells you which pod you are
+  looking at, and it is a different question from "which cluster". Green means
+  `connected` and nothing else -- connecting is red, because an amber "nearly"
+  would let a console that is reading nothing look like one that is. `Retry`
+  appears here when the stream errors or closes. This block carries the shell's
+  **only** `role="status"`; a second live region would announce every
+  transition twice.
+- **Who you are -- the profile row, at the top of the rail.** Initials, display
+  name over email, and the cluster role, linking to `/me`. Read from the
+  cluster over `MyAccessMsg`, never decoded from the token the browser holds.
+  If the two ever disagree -- a rotated token, a session revoked elsewhere, a
+  role changed since the token was minted -- the row shows what the cluster is
+  actually acting on. Collapsed, it is the avatar alone with the three facts in
+  its tooltip and its accessible name.
+- **Whether the rail folds -- the handle on its edge.** An 18px round tab
+  straddling the rail's right border, just below the header, `«` / `»`. It is
+  in the same spot collapsed: a control that relocates when you use it costs a
+  person the position they just learned. The preference persists in
+  `memql-portal-rail`, beside the theme key.
 
 ---
 
@@ -547,6 +571,42 @@ the portal is not.
 So the split is by audience, and it is settled: **operator surfaces move,
 self-service surfaces do not.** Nothing about `/me/*` is pending, and it is not
 waiting on a seam.
+
+#### The portal's own `/me` is a RENDERER, not a move
+
+The portal has a `/me` of its own (memql#4318), reached from the rail's profile
+row, and it does not contradict the paragraph above. It renders self-scoped
+data and links to identity for every change identity owns. Three routed tabs:
+
+| Tab | What it renders | What it links to |
+|---|---|---|
+| Account (`/me`) | display name, email, cluster role, member since, last seen -- read through `currentUser`, which takes no argument and resolves its row from `actor.userId`. Plus the shared-mailbox note when the account is flagged, pointing at the Security tab. | **Edit on identity** -> `/me/settings` |
+| Sessions (`/me/sessions`) | the caller's live sessions (`authSessionsForSelf`) -- device, source, signed in, last active -- with **this device** marked from `MyAccessResult.session_id`. Per-row **Revoke** and **Sign out everywhere**, both confirmed. | -- |
+| Security (`/me/security`) | enrolled passkeys (`passkeysForSelf`) with the backup posture that says whether losing the device loses the credential, and the passkey-only switch (`user.signInPolicy`). | **Manage passkeys** -> `/me/devices`; **Personal access tokens** -> `/me/tokens`; **Export your data** -> `/me/export`; **Account settings and deletion** -> `/me/settings` |
+
+**Sign out** is the page header's one primary action, confirmed. It left the
+rail footer with the rest of the person-facing block.
+
+Three properties are worth stating because each is a rule rather than a
+detail:
+
+- **Every identity link is composed from the CONFIGURED identity origin**
+  (`PortalRuntimeConfig.identityUrl`, derived per cluster from `MEMQL_DOMAIN`),
+  never a literal host. A hardcoded one would send an operator to somebody
+  else's cluster to manage their own passkeys. Where no identity origin is
+  configured -- the auth-disabled case -- the links are absent rather than
+  dead: a link to nowhere reads as a broken capability, not a missing one.
+- **The two controls the portal DOES render call the same server rules
+  identity's own pages call.** Revoking a session resolves the id against the
+  caller's own session list server-side before writing (`RevokeSessionMsg`), so
+  it cannot be aimed at a stranger's row. The passkey-only switch refuses when
+  no passkey is enrolled AND when the passkey list cannot be READ -- a
+  transport blip and "no passkeys" must not reach the same decision when the
+  difference is a lockout. The switch is disabled in the browser too, but that
+  is a courtesy: a disabled control is a suggestion, and this is not one.
+- **A read failure is never rendered as an empty list.** An empty sessions
+  table would read as "no other device can reach your account", which is the
+  one wrong answer that reassures.
 
 ---
 

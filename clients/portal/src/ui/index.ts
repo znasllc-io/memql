@@ -3,10 +3,12 @@
 // pass sweeps for. See README.md in this directory for the type scale and
 // the composition rules.
 
+export { Avatar, initialsFrom, type AvatarSize } from "./Avatar";
 export { Badge, StatusDot, type StatusTone } from "./Badge";
 export { Band, Panel } from "./Band";
 export { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 export { Button, ButtonLink, type ButtonSize, type ButtonTone } from "./Button";
+export { Callout } from "./Callout";
 export { Container } from "./Container";
 export { DataText, type DataKind } from "./DataText";
 export { ConfirmDialog, Dialog, type DialogSize } from "./Dialog";

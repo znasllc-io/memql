@@ -1,9 +1,11 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-import { ClusterBadge } from "../components/ClusterBadge";
+import { navClass } from "../components/navRow";
+import { RailHandle } from "../components/RailHandle";
 import { RailMark } from "../components/RailMark";
-import { SidebarProfile } from "../components/SidebarProfile";
+import { RailProfileLink } from "../components/RailProfileLink";
+import { RailStatus } from "../components/RailStatus";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { composedViewPath } from "../compose/urls";
 import { useSavedViews } from "../compose/useSavedViews";
@@ -13,8 +15,6 @@ import {
   Bot,
   Boxes,
   Building2,
-  ChevronsLeft,
-  ChevronsRight,
   Globe,
   Inbox,
   Gauge,
@@ -31,15 +31,27 @@ import { VIEWS } from "../views/registry";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { viewPath } from "../views/urls";
 
-// The routed layout: a branded nav rail, a quiet topbar, and an <Outlet>.
+// The routed layout: a branded header, a nav rail, and an <Outlet>.
 //
-// THE BRAND LIVES IN THE RAIL. The mark at its head doubles as the
+// THE BRAND LIVES IN THE HEADER (memql#4316). The mark doubles as the
 // connection indicator (memql#4180 drives its animation states), and the
-// wordmark beside it is the display face's one chrome appearance. The
-// collapse control sits on that same brand row -- quiet, icon-only -- so
-// the rail footer can own the session block (memql#4240): transport,
-// engine version, identity, sign-out. The topbar keeps the cluster host
-// (ClusterBadge) and the theme toggle.
+// wordmark beside it is the display face's one chrome appearance. It moved
+// out of the rail because the header had nothing to anchor it and the rail
+// had the brand, the collapse chevron and no profile -- exactly backwards.
+//
+// WHAT THE HEADER NO LONGER SAYS is "Cluster: <hostname>". That value was
+// window.location.host: the page's own origin, which is to say the address
+// bar, retyped one line lower. It was also the only thing on the left of the
+// header, so the chrome's most prominent slot carried its least informative
+// fact. The individual replica serving this stream is a DIFFERENT fact and it
+// still renders -- in the rail footer, where RailStatus labels the connection
+// dot with it.
+//
+// THE RAIL now reads top to bottom as person, places, machine:
+// RailProfileLink (who you are, linking to /me), the nav groups, then
+// RailStatus behind a border-t (which node, which version). The collapse
+// control is a tab on the rail's own edge (RailHandle) rather than a chevron
+// floating in a brand row it did not belong to.
 //
 // THE NAV IS GROUPED, and the grouping is a real distinction rather than
 // tidying. The predefined views are SURFACES an operator works in; the
@@ -164,20 +176,6 @@ function storeRail(state: "expanded" | "collapsed"): void {
   }
 }
 
-function navClass(isActive: boolean, collapsed: boolean): string {
-  return (
-    "flex items-center gap-2.5 rounded py-1.5 text-sm " +
-    (collapsed ? "justify-center px-0 " : "px-2.5 ") +
-    // The active edge: a 2px accent bar on the left plus a soft fill. The
-    // border is always present (transparent at rest) so activation never
-    // shifts the text.
-    "border-l-2 " +
-    (isActive
-      ? "border-accent bg-accent-subtle font-medium text-fg"
-      : "border-transparent text-muted hover:bg-raised hover:text-fg")
-  );
-}
-
 function NavGroup({
   label,
   items,
@@ -254,55 +252,39 @@ export function AppShell(): ReactNode {
           header" should be addressable by what it IS rather than by which
           words happen to be unique in the document today. */}
       <header
-        aria-label="Cluster and session"
+        aria-label="Portal header"
         className="flex h-12 items-center gap-4 border-b border-line bg-surface px-4"
       >
-        <ClusterBadge />
+        {/* The brand. The mark is the connection indicator (memql#4180 keys
+            its animation off the stream state); the wordmark is Squada One's
+            one appearance in the chrome. */}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <RailMark size={24} />
+          <span className="font-display text-lg leading-none tracking-wide">MemQL Portal</span>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
+        {/* `relative` is what lets the handle straddle this element's right
+            border. It is a child of the <nav> rather than a sibling because
+            it is part of the rail -- a control parked outside it would be
+            findable by neither the rail's landmark nor the main region's. */}
         <nav
           aria-label="Portal sections"
           className={
-            "flex shrink-0 flex-col gap-4 border-r border-line bg-surface p-2 " +
+            "relative flex shrink-0 flex-col gap-4 border-r border-line bg-surface p-2 " +
             (collapsed ? "w-14" : "w-56")
           }
         >
-          {/* The brand header. The mark is the connection indicator
-              (memql#4180 keys its animation off the stream state); the
-              wordmark is Squada One's one appearance in the chrome. */}
-          <div
-            className={
-              collapsed
-                ? "flex flex-col items-center gap-1 px-1.5 pt-1"
-                : "flex items-center gap-2.5 px-1.5 pt-1"
-            }
-          >
-            <RailMark size={24} />
-            {collapsed ? null : (
-              <span className="font-display text-lg leading-none tracking-wide">
-                MemQL Portal
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={toggleRail}
-              aria-expanded={!collapsed}
-              aria-label={collapsed ? "Expand the navigation rail" : "Collapse the navigation rail"}
-              className={
-                "rounded p-0.5 text-muted hover:bg-raised hover:text-fg " +
-                (collapsed ? "" : "ml-auto")
-              }
-            >
-              {collapsed ? (
-                <ChevronsRight size={14} aria-hidden="true" />
-              ) : (
-                <ChevronsLeft size={14} aria-hidden="true" />
-              )}
-            </button>
+          <RailHandle collapsed={collapsed} onToggle={toggleRail} />
+
+          {/* Who you are, before the places you can go. Absolutely first in
+              the rail, and not a group -- the flat-nav ruling stands. */}
+          <div className="pt-1">
+            <RailProfileLink collapsed={collapsed} />
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -318,7 +300,7 @@ export function AppShell(): ReactNode {
             <NavGroup label="Cluster" items={cluster} collapsed={collapsed} />
           </div>
 
-          <SidebarProfile collapsed={collapsed} />
+          <RailStatus collapsed={collapsed} />
         </nav>
 
         {/* min-h-0 on both axes so a long row list scrolls inside the main

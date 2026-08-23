@@ -12,15 +12,25 @@ import (
 //
 //	UserId         v1:identity:user.id
 //	PrimaryEmail   denormalized from the user record
+//	DisplayName    denormalized from the user record, alongside the email
 //	Role           cluster-wide role (owner / admin / developer / writer / reader)
 //	IdentityId     which v1:identity:identity the caller authenticated with
 //
 // Per-row authorization (see docs/public/operate/auth/per-row-authz-audit.md) is the
 // only gate post-#56; the partition-ACL dimension that previously
 // lived here was retired in phase 4.
+//
+// DISPLAYNAME IS NOT AN AUTHORIZATION INPUT and nothing may branch on it.
+// It rides here because it comes off the same user row PrimaryEmail does,
+// on a read that has already happened -- fetching it separately would be a
+// second query for a field the first one returned (memql#4317). It is not
+// projected by the actor envelope (`actor.*` in the DSL) for that reason:
+// a name is presentation, and adding it to the envelope would invite a
+// filter to key on one.
 type AccessContext struct {
 	UserId       string
 	PrimaryEmail string
+	DisplayName  string
 	Role         Role
 	IdentityId   string
 }
