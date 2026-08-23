@@ -133,3 +133,35 @@ func TestNonGraphSubscriptionIsRefusedForAnUnresolvedStream(t *testing.T) {
 	require.Equal(t, "error", status, "a stream with no resolved access context was granted ALL")
 	require.Zero(t, subscriptionCount(s))
 }
+
+// REGRESSION: the gate must resolve the identity, not read whatever has
+// been resolved so far.
+//
+// handleMessage does not call ensureAccess before dispatching, so a stream
+// whose FIRST message is a Subscribe has s.access == nil. A gate reading
+// currentAccess() there refuses a legitimate owner -- for the ORDER they
+// sent their messages in, which is not an authorization fact about them.
+// The first version of this gate did exactly that, and every test above
+// missed it because they all pre-populate s.access.
+func TestNonGraphSubscriptionResolvesTheIdentityRatherThanReadingIt(t *testing.T) {
+	rec := newRecordingClientStream(
+		auth.ContextWithClaims(context.Background(), map[string]any{
+			"sub": "u1", "email": "owner@example.com", "role": "owner",
+		}),
+	)
+	svc := &service{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := newTestStreamSession(svc, rec)
+	// Deliberately NOT pre-populating s.access: this is a stream that has
+	// dispatched nothing yet, which is the state handleMessage leaves it in.
+
+	require.NoError(t, s.handleSubscribe(
+		&memqlv1.MemqlClientMessage{MessageId: "m1"},
+		&memqlv1.SubscribeMsg{SubscriptionId: "sub-1", Kind: memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_ALL},
+	))
+
+	status, message := subscriptionOutcome(t, rec)
+	require.Equal(t, "subscribed", status,
+		"an owner whose FIRST stream message was the subscribe was refused (%s). The role is a "+
+			"fact about the caller, not about which message they sent first.", message)
+	require.Equal(t, 1, subscriptionCount(s))
+}

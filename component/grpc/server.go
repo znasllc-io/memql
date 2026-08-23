@@ -2106,8 +2106,20 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	// through row admission at fan-out: the topic-prefix check there keys
 	// on the EVENT, not on the subscription's kind, so `#` cannot be used
 	// to reach rows a GRAPH_EVENTS subscription would have been denied.
+	//
+	// RESOLVED with ensureAccess, not currentAccess. handleMessage does NOT
+	// resolve the identity before dispatching, so a stream whose FIRST
+	// message is a Subscribe has no access context yet -- and reading the
+	// unresolved value would refuse a legitimate owner or admin for the
+	// order they happened to send their messages in. ensureAccess is what
+	// every other role gate on this stream calls (the identity-admin and
+	// node-maintenance handlers both do), it caches for the life of the
+	// stream, and it is safe HERE because this runs on the request path.
+	// The fan-out gate deliberately does the opposite: handleBusEvent runs
+	// on the event pump, where a resolve would put a database round trip
+	// and a lock acquisition on the delivery path of every event.
 	if msg.GetKind() != memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS {
-		if !isOwnerOrAdmin(s.currentAccess()) {
+		if !isOwnerOrAdmin(s.ensureAccess(s.stream.Context())) {
 			if s.logger != nil {
 				s.logger.Info("subscription rejected: non-graph kind requires owner or admin",
 					"kind", msg.GetKind().String(),
