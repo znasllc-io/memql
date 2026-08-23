@@ -2039,7 +2039,7 @@ type CreateArtifactArgs struct {
 	Lens string
 	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source
 	Kind string
-	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | live
+	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
 	Source  string
 	Title   string
 	Summary string
@@ -3946,7 +3946,7 @@ type CreateGeneratedOutputArgs struct {
 	// Enum: markdown | document | pdf | spreadsheet | image | text | other
 	Format   string
 	MimeType string
-	// Enum: workbench_generated | computer_use | agent_generated | derived
+	// Enum: workbench_generated | computer_use | agent_generated | derived | user_created
 	Source               string
 	PartitionId          string
 	ProducedByPlanId     string
@@ -13707,7 +13707,7 @@ type UpdateGeneratedOutputContentArgs struct {
 	// Enum: markdown | document | pdf | spreadsheet | image | text | other
 	Format   string
 	MimeType string
-	// Enum: workbench_generated | computer_use | agent_generated | derived
+	// Enum: workbench_generated | computer_use | agent_generated | derived | user_created
 	Source            string
 	PartitionId       string
 	ProducedByPlanId  string

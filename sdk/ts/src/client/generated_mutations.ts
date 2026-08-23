@@ -1273,7 +1273,7 @@ export interface CreateArtifactArgs {
   lens: string;
   // Enum: document | generated_output | note | todo | calendar_event | memory | live_source
   kind: string;
-  // Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | live
+  // Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
   source: string;
   title: string;
   summary?: string;
@@ -2179,7 +2179,7 @@ export interface CreateGeneratedOutputArgs {
   // Enum: markdown | document | pdf | spreadsheet | image | text | other
   format?: string;
   mimeType?: string;
-  // Enum: workbench_generated | computer_use | agent_generated | derived
+  // Enum: workbench_generated | computer_use | agent_generated | derived | user_created
   source: string;
   partitionId?: string;
   producedByPlanId?: string;
@@ -7796,7 +7796,7 @@ export interface UpdateGeneratedOutputContentArgs {
   // Enum: markdown | document | pdf | spreadsheet | image | text | other
   format?: string;
   mimeType?: string;
-  // Enum: workbench_generated | computer_use | agent_generated | derived
+  // Enum: workbench_generated | computer_use | agent_generated | derived | user_created
   source: string;
   partitionId?: string;
   producedByPlanId?: string;
