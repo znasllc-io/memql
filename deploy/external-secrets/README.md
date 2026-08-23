@@ -2,11 +2,11 @@
 
 Retires the hand-edited / `kubectl patch secret` flow for the cluster-facing
 secret material. **External Secrets Operator** reconciles `memql-secrets` from
-`kv-memql-staging`, so the cluster's secret state is declarative + reconciled
+`kv-<install>`, so the cluster's secret state is declarative + reconciled
 (no operator drift) — the secrets analogue of what Phase 1/2 did for images.
 
 ```
-   kv-memql-staging (Azure Key Vault)
+   kv-<install> (Azure Key Vault)
       memql-master-key / memql-operator-key / memory-nodes-database-dsn
               │   (WorkloadIdentity: federated managed identity -> ESO SA)
               ▼
@@ -59,23 +59,23 @@ reconciles it to the cluster on the next refresh.
 | Path | What |
 |---|---|
 | `install/` | ESO v2.5.0 (Helm-rendered, pinned) controller + webhook + the cert-manager Issuer/Certificate for the webhook cert, in `external-secrets` ns. CRDs are managed out-of-band (already installed, serving `external-secrets.io/v1`). Additive. See `install/eso-values.yaml` for the render recipe. |
-| `secretstore.yaml` | `SecretStore` → `kv-memql-staging` via AKS **Workload Identity** (secret-less auth). |
+| `secretstore.yaml` | `SecretStore` → `kv-<install>` via AKS **Workload Identity** (secret-less auth). |
 | `externalsecret-memql.yaml` | The `external-secrets-kv` ServiceAccount + the `ExternalSecret` mapping the 3 Key Vault entries → `memql-secrets`. |
 
 ## Key Vault auth (Workload Identity — one-time)
 
 ```bash
 # 1. user-assigned managed identity + federated credential for the ESO SA:
-az identity create -g rg-memql-staging -n id-eso-memql
-CLIENT_ID="$(az identity show -g rg-memql-staging -n id-eso-memql --query clientId -o tsv)"
-OIDC="$(az aks show -g rg-memql-staging -n aks-memql-staging --query oidcIssuerProfile.issuerUrl -o tsv)"
-az identity federated-credential create -g rg-memql-staging \
+az identity create -g rg-<install> -n id-eso-memql
+CLIENT_ID="$(az identity show -g rg-<install> -n id-eso-memql --query clientId -o tsv)"
+OIDC="$(az aks show -g rg-<install> -n aks-<install> --query oidcIssuerProfile.issuerUrl -o tsv)"
+az identity federated-credential create -g rg-<install> \
   --identity-name id-eso-memql --name eso-memql \
   --issuer "$OIDC" --subject system:serviceaccount:memql:external-secrets-kv \
   --audiences api://AzureADTokenExchange
 # 2. grant it read on the vault's secrets:
 az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User" \
-  --scope "$(az keyvault show -n kv-memql-staging --query id -o tsv)"
+  --scope "$(az keyvault show -n kv-<install> --query id -o tsv)"
 # 3. put the client id on the SA annotation (externalsecret-memql.yaml).
 ```
 
@@ -97,9 +97,9 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 
 ```bash
 # 0. Ensure the 3 Key Vault entries exist:
-az keyvault secret set --vault-name kv-memql-staging --name memql-master-key --value "$MEMQL_MASTER_KEY"
-az keyvault secret set --vault-name kv-memql-staging --name memql-operator-key --value "$(openssl rand -hex 32)"  # memql#3519: NOT the master key
-az keyvault secret set --vault-name kv-memql-staging --name memory-nodes-database-dsn --value "$DSN"
+az keyvault secret set --vault-name kv-<install> --name memql-master-key --value "$MEMQL_MASTER_KEY"
+az keyvault secret set --vault-name kv-<install> --name memql-operator-key --value "$(openssl rand -hex 32)"  # memql#3519: NOT the master key
+az keyvault secret set --vault-name kv-<install> --name memory-nodes-database-dsn --value "$DSN"
 
 # 1. Install ESO (additive — doesn't touch memql-secrets yet). cert-manager
 #    issues the webhook cert, so the webhook is the readiness signal:

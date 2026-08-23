@@ -161,13 +161,15 @@ so each remint produces a fresh JWT against a freshly inserted
 3. Otherwise -> raise `RuntimeError` with the canonical
    "VOICE_AGENT_TOKEN unset" message + provisioning pointers.
 
-### Prod
+### Cloud install
 
-The deploy pipeline does the same dance:
+The deploy pipeline does the same dance. ("Cloud" is a deploy TARGET, not a
+tier: MemQL ships one installation shape, and a second environment is a second
+install — epic memql#3943.)
 
 1. Identity service comes up first (or is already up).
-2. The pipeline runs `voice-agent-token mint --instance-id=<env-instance-id>`
-   against the identity binary in the production cluster.
+2. The pipeline runs `voice-agent-token mint --instance-id=<instance-id>`
+   against the identity binary in that install's cluster.
 3. The minted JWT lands in the deploy pipeline's secret store --
    Azure Key Vault, synced into the cluster via External Secrets
    Operator (ESO) -- and is injected as `VOICE_AGENT_TOKEN` into the

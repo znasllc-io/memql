@@ -79,7 +79,7 @@ a password manager and paste per session. Do not put it in a dotfile.
 
 ```bash
 az keyvault secret set \
-  --vault-name kv-memql-staging \
+  --vault-name kv-<install> \
   --name memql-operator-key \
   --value "$(openssl rand -hex 32)"
 ```

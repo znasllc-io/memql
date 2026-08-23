@@ -515,7 +515,7 @@ components:
   # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive
-  # The database, as the SAME component staging, production and every tenant
+  # The database, as the SAME component every install and every tenant
   # deployment composes (epic memql#3842 / #3851). Local supplies its own values
   # rather than a tier preset: the presets describe what a customer buys, and a
   # developer laptop is not a tier -- entry alone would ask for 1 vCPU / 4 GiB
