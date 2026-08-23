@@ -196,8 +196,8 @@ func (r *Rotator) Rotate(ctx context.Context, in RotateInput) (*RotateResult, er
 			// ask whether any rotation ever RETIRED it -- because if one
 			// did, this token has been replayed and the session is
 			// compromised (memql#4329).
-			if res, handled := r.detectReuse(ctx, in, tokenHash, prev); handled {
-				return nil, res
+			if reuseErr, isReuse := r.detectReuse(ctx, in, tokenHash, prev); isReuse {
+				return nil, reuseErr
 			}
 			reason := "session_not_found"
 			sessionId := ""
