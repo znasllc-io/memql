@@ -38,6 +38,7 @@ type ParentConnector struct {
 	parentNodeId         string                       // learned from NodeWelcome
 	aiForwardSink        AiForwardResponseSink        // optional, set on BFF binaries
 	workbenchForwardSink WorkbenchForwardResponseSink // optional, set on agent binaries in cluster mode
+	workerForwardSink    WorkerForwardResponseSink    // optional, set on agent binaries (memql#4352)
 	// deployControlSink routes replies to deploy-control forwards this node
 	// started (memql#3380). Set on the bff, which is the node that serves the
 	// portal; nil elsewhere. Registered here as well as on the WorkerDialer
@@ -57,6 +58,18 @@ func (pc *ParentConnector) SetAiForwardResponseSink(sink AiForwardResponseSink) 
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	pc.aiForwardSink = sink
+}
+
+// SetWorkerForwardResponseSink registers a sink for inbound
+// WorkerForwardResponse / WorkerForwardStream messages arriving over the
+// parent connection (memql#4352). Set on agent binaries; nil elsewhere.
+func (pc *ParentConnector) SetWorkerForwardResponseSink(sink WorkerForwardResponseSink) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.workerForwardSink = sink
+	pc.mu.Unlock()
 }
 
 // SetWorkbenchForwardResponseSink registers a sink for inbound
@@ -311,6 +324,24 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 		pc.mu.Unlock()
 		if sink != nil {
 			sink.Dispatch(payload.WorkbenchForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkerForwardResponse:
+		// Reply to a machine dispatch this node forwarded (memql#4352).
+		pc.mu.Lock()
+		wsink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if wsink != nil {
+			wsink.Dispatch(payload.WorkerForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkerForwardStream:
+		// Streamed stdout / stderr from that machine, relayed across the hop.
+		pc.mu.Lock()
+		ssink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if ssink != nil {
+			ssink.DispatchStream(payload.WorkerForwardStream)
 		}
 
 	case *nodev1.NodeServerMessage_DeployControlForwardResponse:

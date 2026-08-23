@@ -161,6 +161,8 @@ type NodeClientMessage struct {
 	//	*NodeClientMessage_WorkbenchForwardRequest
 	//	*NodeClientMessage_WorkbenchForwardCancel
 	//	*NodeClientMessage_DeployControlForwardRequest
+	//	*NodeClientMessage_WorkerForwardRequest
+	//	*NodeClientMessage_WorkerForwardCancel
 	Payload       isNodeClientMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -350,6 +352,24 @@ func (x *NodeClientMessage) GetDeployControlForwardRequest() *DeployControlForwa
 	return nil
 }
 
+func (x *NodeClientMessage) GetWorkerForwardRequest() *WorkerForwardRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeClientMessage_WorkerForwardRequest); ok {
+			return x.WorkerForwardRequest
+		}
+	}
+	return nil
+}
+
+func (x *NodeClientMessage) GetWorkerForwardCancel() *WorkerForwardCancel {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeClientMessage_WorkerForwardCancel); ok {
+			return x.WorkerForwardCancel
+		}
+	}
+	return nil
+}
+
 type isNodeClientMessage_Payload interface {
 	isNodeClientMessage_Payload()
 }
@@ -410,6 +430,14 @@ type NodeClientMessage_DeployControlForwardRequest struct {
 	DeployControlForwardRequest *DeployControlForwardRequest `protobuf:"bytes,90,opt,name=deploy_control_forward_request,json=deployControlForwardRequest,proto3,oneof"`
 }
 
+type NodeClientMessage_WorkerForwardRequest struct {
+	WorkerForwardRequest *WorkerForwardRequest `protobuf:"bytes,100,opt,name=worker_forward_request,json=workerForwardRequest,proto3,oneof"`
+}
+
+type NodeClientMessage_WorkerForwardCancel struct {
+	WorkerForwardCancel *WorkerForwardCancel `protobuf:"bytes,101,opt,name=worker_forward_cancel,json=workerForwardCancel,proto3,oneof"`
+}
+
 func (*NodeClientMessage_NodeHello) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_Heartbeat) isNodeClientMessage_Payload() {}
@@ -438,6 +466,10 @@ func (*NodeClientMessage_WorkbenchForwardCancel) isNodeClientMessage_Payload() {
 
 func (*NodeClientMessage_DeployControlForwardRequest) isNodeClientMessage_Payload() {}
 
+func (*NodeClientMessage_WorkerForwardRequest) isNodeClientMessage_Payload() {}
+
+func (*NodeClientMessage_WorkerForwardCancel) isNodeClientMessage_Payload() {}
+
 type NodeServerMessage struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	MessageId   string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -458,6 +490,8 @@ type NodeServerMessage struct {
 	//	*NodeServerMessage_AiForwardResponse
 	//	*NodeServerMessage_WorkbenchForwardResponse
 	//	*NodeServerMessage_DeployControlForwardResponse
+	//	*NodeServerMessage_WorkerForwardResponse
+	//	*NodeServerMessage_WorkerForwardStream
 	Payload       isNodeServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -638,6 +672,24 @@ func (x *NodeServerMessage) GetDeployControlForwardResponse() *DeployControlForw
 	return nil
 }
 
+func (x *NodeServerMessage) GetWorkerForwardResponse() *WorkerForwardResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeServerMessage_WorkerForwardResponse); ok {
+			return x.WorkerForwardResponse
+		}
+	}
+	return nil
+}
+
+func (x *NodeServerMessage) GetWorkerForwardStream() *WorkerForwardStream {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeServerMessage_WorkerForwardStream); ok {
+			return x.WorkerForwardStream
+		}
+	}
+	return nil
+}
+
 type isNodeServerMessage_Payload interface {
 	isNodeServerMessage_Payload()
 }
@@ -694,6 +746,14 @@ type NodeServerMessage_DeployControlForwardResponse struct {
 	DeployControlForwardResponse *DeployControlForwardResponse `protobuf:"bytes,90,opt,name=deploy_control_forward_response,json=deployControlForwardResponse,proto3,oneof"`
 }
 
+type NodeServerMessage_WorkerForwardResponse struct {
+	WorkerForwardResponse *WorkerForwardResponse `protobuf:"bytes,100,opt,name=worker_forward_response,json=workerForwardResponse,proto3,oneof"`
+}
+
+type NodeServerMessage_WorkerForwardStream struct {
+	WorkerForwardStream *WorkerForwardStream `protobuf:"bytes,101,opt,name=worker_forward_stream,json=workerForwardStream,proto3,oneof"`
+}
+
 func (*NodeServerMessage_NodeWelcome) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_Heartbeat) isNodeServerMessage_Payload() {}
@@ -719,6 +779,10 @@ func (*NodeServerMessage_AiForwardResponse) isNodeServerMessage_Payload() {}
 func (*NodeServerMessage_WorkbenchForwardResponse) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_DeployControlForwardResponse) isNodeServerMessage_Payload() {}
+
+func (*NodeServerMessage_WorkerForwardResponse) isNodeServerMessage_Payload() {}
+
+func (*NodeServerMessage_WorkerForwardStream) isNodeServerMessage_Payload() {}
 
 // NodeHello is sent by a connecting node to identify itself.
 type NodeHello struct {
@@ -2333,12 +2397,462 @@ func (x *NodeShutdown) GetGraceSeconds() int32 {
 	return 0
 }
 
+// ---------------------------------------------------------------------------
+// Worker (cockpit machine) forwarding
+// ---------------------------------------------------------------------------
+//
+// THE STRUCTURAL FIX (memql#4352, epic memql#4349). A cockpit machine's
+// WorkerService stream terminates on exactly ONE agent replica. The turn that
+// wants to use it is served by whichever replica the mesh routed the request
+// to. With the default topology -- two agent replicas -- that is a coin flip,
+// and on the losing side the machine is simply not there: the in-memory
+// registry is per-node and is never rehydrated from the rows, so a turn on the
+// other replica found no worker and reported no_worker_available for a laptop
+// the user could see was online.
+//
+// This is the same bug class CLAUDE.md's multi-node section names for events
+// and session state -- memql#1448, #1412, #1388 -- arriving on the worker
+// surface. The fix is the same shape the workbench already uses: forward the
+// dispatch to the replica that holds the stream, named by the registration's
+// connectedNodeId, and route the answer back by request_id.
+//
+// `authority` is the mandatory authorization assertion (memql#3205). The GATES
+// run on the SENDER, before the pick -- per-task approval, the kill switch,
+// standing scope, the classifier -- so the receiver does not re-run them. What
+// the receiver DOES re-check is what only it can know: that the registration
+// exists, is owned by the principal this envelope asserts, and is not revoked.
+// Absence of an authority is refusal, not a default.
+type WorkerForwardRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The machine to dispatch to. Chosen by the sender's router; the receiver
+	// verifies ownership and revocation rather than re-choosing, because a
+	// second choice on the receiving side could land on a different machine than
+	// the one the consent card named.
+	RegistrationId string `protobuf:"bytes,2,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
+	OwnerUserId    string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	// HEADLESS / COMPUTERUSE. The receiver acquires the concurrency slot for
+	// this capability, which is a local fact about a local stream and therefore
+	// cannot be decided by the sender.
+	Capability    string `protobuf:"bytes,4,opt,name=capability,proto3" json:"capability,omitempty"`
+	Tool          string `protobuf:"bytes,5,opt,name=tool,proto3" json:"tool,omitempty"`
+	Action        string `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
+	ArgsJson      []byte `protobuf:"bytes,7,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
+	AgentId       string `protobuf:"bytes,8,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	PlanId        string `protobuf:"bytes,9,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	TaskId        string `protobuf:"bytes,10,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CorrelationId string `protobuf:"bytes,11,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	// Optional timeout hint; the receiver clamps to its own caps.
+	TimeoutSec    int32               `protobuf:"varint,12,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
+	Authority     *ForwardedAuthority `protobuf:"bytes,13,opt,name=authority,proto3" json:"authority,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerForwardRequest) Reset() {
+	*x = WorkerForwardRequest{}
+	mi := &file_node_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerForwardRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerForwardRequest) ProtoMessage() {}
+
+func (x *WorkerForwardRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerForwardRequest.ProtoReflect.Descriptor instead.
+func (*WorkerForwardRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *WorkerForwardRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetRegistrationId() string {
+	if x != nil {
+		return x.RegistrationId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetCapability() string {
+	if x != nil {
+		return x.Capability
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetTool() string {
+	if x != nil {
+		return x.Tool
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetArgsJson() []byte {
+	if x != nil {
+		return x.ArgsJson
+	}
+	return nil
+}
+
+func (x *WorkerForwardRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetTimeoutSec() int32 {
+	if x != nil {
+		return x.TimeoutSec
+	}
+	return 0
+}
+
+func (x *WorkerForwardRequest) GetAuthority() *ForwardedAuthority {
+	if x != nil {
+		return x.Authority
+	}
+	return nil
+}
+
+// WorkerForwardResponse carries the dispatch result back to the originating
+// replica. One message per request_id.
+type WorkerForwardResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	OutputJson    []byte                 `protobuf:"bytes,3,opt,name=output_json,json=outputJson,proto3" json:"output_json,omitempty"`
+	ErrorCode     string                 `protobuf:"bytes,4,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	BytesIn       uint64                 `protobuf:"varint,6,opt,name=bytes_in,json=bytesIn,proto3" json:"bytes_in,omitempty"`
+	BytesOut      uint64                 `protobuf:"varint,7,opt,name=bytes_out,json=bytesOut,proto3" json:"bytes_out,omitempty"`
+	OutputPreview string                 `protobuf:"bytes,8,opt,name=output_preview,json=outputPreview,proto3" json:"output_preview,omitempty"`
+	// refused_before_start IS THE RE-PICK PREDICATE, and it is the one field on
+	// this message that must never be guessed. True means the receiver is
+	// CERTAIN nothing executed on the machine -- it held no stream for the
+	// registration, or the machine was at its concurrency cap -- so the sender
+	// may try the next candidate under fallback=nextMatching. False means the
+	// dispatch reached the machine, and the sender must not re-pick even if the
+	// call failed: an exec that lost its stream mid-run may have run, and
+	// running it elsewhere is a second side effect rather than a retry
+	// (design D5).
+	RefusedBeforeStart bool `protobuf:"varint,9,opt,name=refused_before_start,json=refusedBeforeStart,proto3" json:"refused_before_start,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *WorkerForwardResponse) Reset() {
+	*x = WorkerForwardResponse{}
+	mi := &file_node_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerForwardResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerForwardResponse) ProtoMessage() {}
+
+func (x *WorkerForwardResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerForwardResponse.ProtoReflect.Descriptor instead.
+func (*WorkerForwardResponse) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *WorkerForwardResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *WorkerForwardResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *WorkerForwardResponse) GetOutputJson() []byte {
+	if x != nil {
+		return x.OutputJson
+	}
+	return nil
+}
+
+func (x *WorkerForwardResponse) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *WorkerForwardResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *WorkerForwardResponse) GetBytesIn() uint64 {
+	if x != nil {
+		return x.BytesIn
+	}
+	return 0
+}
+
+func (x *WorkerForwardResponse) GetBytesOut() uint64 {
+	if x != nil {
+		return x.BytesOut
+	}
+	return 0
+}
+
+func (x *WorkerForwardResponse) GetOutputPreview() string {
+	if x != nil {
+		return x.OutputPreview
+	}
+	return ""
+}
+
+func (x *WorkerForwardResponse) GetRefusedBeforeStart() bool {
+	if x != nil {
+		return x.RefusedBeforeStart
+	}
+	return false
+}
+
+// WorkerForwardStream relays one ToolStream chunk from the machine back to the
+// replica serving the turn, so streamed stdout / stderr crosses the hop
+// instead of stopping at the replica that happens to hold the stream. Ordered
+// per request_id by the underlying connection; chunks may arrive after the
+// response on a cancelled call and are dropped by the sender's router.
+type WorkerForwardStream struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*WorkerForwardStream_StdoutChunk
+	//	*WorkerForwardStream_StderrChunk
+	//	*WorkerForwardStream_DataChunk
+	Payload       isWorkerForwardStream_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerForwardStream) Reset() {
+	*x = WorkerForwardStream{}
+	mi := &file_node_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerForwardStream) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerForwardStream) ProtoMessage() {}
+
+func (x *WorkerForwardStream) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerForwardStream.ProtoReflect.Descriptor instead.
+func (*WorkerForwardStream) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *WorkerForwardStream) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *WorkerForwardStream) GetPayload() isWorkerForwardStream_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *WorkerForwardStream) GetStdoutChunk() []byte {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerForwardStream_StdoutChunk); ok {
+			return x.StdoutChunk
+		}
+	}
+	return nil
+}
+
+func (x *WorkerForwardStream) GetStderrChunk() []byte {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerForwardStream_StderrChunk); ok {
+			return x.StderrChunk
+		}
+	}
+	return nil
+}
+
+func (x *WorkerForwardStream) GetDataChunk() []byte {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerForwardStream_DataChunk); ok {
+			return x.DataChunk
+		}
+	}
+	return nil
+}
+
+type isWorkerForwardStream_Payload interface {
+	isWorkerForwardStream_Payload()
+}
+
+type WorkerForwardStream_StdoutChunk struct {
+	StdoutChunk []byte `protobuf:"bytes,2,opt,name=stdout_chunk,json=stdoutChunk,proto3,oneof"`
+}
+
+type WorkerForwardStream_StderrChunk struct {
+	StderrChunk []byte `protobuf:"bytes,3,opt,name=stderr_chunk,json=stderrChunk,proto3,oneof"`
+}
+
+type WorkerForwardStream_DataChunk struct {
+	DataChunk []byte `protobuf:"bytes,4,opt,name=data_chunk,json=dataChunk,proto3,oneof"`
+}
+
+func (*WorkerForwardStream_StdoutChunk) isWorkerForwardStream_Payload() {}
+
+func (*WorkerForwardStream_StderrChunk) isWorkerForwardStream_Payload() {}
+
+func (*WorkerForwardStream_DataChunk) isWorkerForwardStream_Payload() {}
+
+// WorkerForwardCancel mirrors WorkbenchForwardCancel. The tool loop fires it
+// when the turn upstream is cancelled; the receiving replica stops in-flight
+// work for the request_id and frees the concurrency slot.
+type WorkerForwardCancel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerForwardCancel) Reset() {
+	*x = WorkerForwardCancel{}
+	mi := &file_node_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerForwardCancel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerForwardCancel) ProtoMessage() {}
+
+func (x *WorkerForwardCancel) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerForwardCancel.ProtoReflect.Descriptor instead.
+func (*WorkerForwardCancel) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *WorkerForwardCancel) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"node.proto\x12\x15znasllc.memql.node.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb0\v\n" +
+	"node.proto\x12\x15znasllc.memql.node.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf7\f\n" +
 	"\x11NodeClientMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -2360,12 +2874,13 @@ const file_node_proto_rawDesc = "" +
 	"\x11ai_forward_cancel\x18G \x01(\v2&.znasllc.memql.node.v1.AiForwardCancelH\x00R\x0faiForwardCancel\x12l\n" +
 	"\x19workbench_forward_request\x18P \x01(\v2..znasllc.memql.node.v1.WorkbenchForwardRequestH\x00R\x17workbenchForwardRequest\x12i\n" +
 	"\x18workbench_forward_cancel\x18Q \x01(\v2-.znasllc.memql.node.v1.WorkbenchForwardCancelH\x00R\x16workbenchForwardCancel\x12y\n" +
-	"\x1edeploy_control_forward_request\x18Z \x01(\v22.znasllc.memql.node.v1.DeployControlForwardRequestH\x00R\x1bdeployControlForwardRequest\x1a;\n" +
+	"\x1edeploy_control_forward_request\x18Z \x01(\v22.znasllc.memql.node.v1.DeployControlForwardRequestH\x00R\x1bdeployControlForwardRequest\x12c\n" +
+	"\x16worker_forward_request\x18d \x01(\v2+.znasllc.memql.node.v1.WorkerForwardRequestH\x00R\x14workerForwardRequest\x12`\n" +
+	"\x15worker_forward_cancel\x18e \x01(\v2*.znasllc.memql.node.v1.WorkerForwardCancelH\x00R\x13workerForwardCancel\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayloadJ\x04\b<\x10=R\rquery_forward\"\xcb\n" +
-	"\n" +
+	"\apayloadJ\x04\b<\x10=R\rquery_forward\"\x95\f\n" +
 	"\x11NodeServerMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -2385,7 +2900,9 @@ const file_node_proto_rawDesc = "" +
 	"\rnode_shutdown\x182 \x01(\v2#.znasllc.memql.node.v1.NodeShutdownH\x00R\fnodeShutdown\x12Z\n" +
 	"\x13ai_forward_response\x18F \x01(\v2(.znasllc.memql.node.v1.AiForwardResponseH\x00R\x11aiForwardResponse\x12o\n" +
 	"\x1aworkbench_forward_response\x18P \x01(\v2/.znasllc.memql.node.v1.WorkbenchForwardResponseH\x00R\x18workbenchForwardResponse\x12|\n" +
-	"\x1fdeploy_control_forward_response\x18Z \x01(\v23.znasllc.memql.node.v1.DeployControlForwardResponseH\x00R\x1cdeployControlForwardResponse\x1a;\n" +
+	"\x1fdeploy_control_forward_response\x18Z \x01(\v23.znasllc.memql.node.v1.DeployControlForwardResponseH\x00R\x1cdeployControlForwardResponse\x12f\n" +
+	"\x17worker_forward_response\x18d \x01(\v2,.znasllc.memql.node.v1.WorkerForwardResponseH\x00R\x15workerForwardResponse\x12`\n" +
+	"\x15worker_forward_stream\x18e \x01(\v2*.znasllc.memql.node.v1.WorkerForwardStreamH\x00R\x13workerForwardStream\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
@@ -2535,7 +3052,50 @@ const file_node_proto_rawDesc = "" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"K\n" +
 	"\fNodeShutdown\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12#\n" +
-	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds*\xca\x01\n" +
+	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\xc9\x03\n" +
+	"\x14WorkerForwardRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fregistration_id\x18\x02 \x01(\tR\x0eregistrationId\x12\"\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12\x1e\n" +
+	"\n" +
+	"capability\x18\x04 \x01(\tR\n" +
+	"capability\x12\x12\n" +
+	"\x04tool\x18\x05 \x01(\tR\x04tool\x12\x16\n" +
+	"\x06action\x18\x06 \x01(\tR\x06action\x12\x1b\n" +
+	"\targs_json\x18\a \x01(\fR\bargsJson\x12\x19\n" +
+	"\bagent_id\x18\b \x01(\tR\aagentId\x12\x17\n" +
+	"\aplan_id\x18\t \x01(\tR\x06planId\x12\x17\n" +
+	"\atask_id\x18\n" +
+	" \x01(\tR\x06taskId\x12%\n" +
+	"\x0ecorrelation_id\x18\v \x01(\tR\rcorrelationId\x12\x1f\n" +
+	"\vtimeout_sec\x18\f \x01(\x05R\n" +
+	"timeoutSec\x12G\n" +
+	"\tauthority\x18\r \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\"\xbc\x02\n" +
+	"\x15WorkerForwardResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x1f\n" +
+	"\voutput_json\x18\x03 \x01(\fR\n" +
+	"outputJson\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x04 \x01(\tR\terrorCode\x12#\n" +
+	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\x12\x19\n" +
+	"\bbytes_in\x18\x06 \x01(\x04R\abytesIn\x12\x1b\n" +
+	"\tbytes_out\x18\a \x01(\x04R\bbytesOut\x12%\n" +
+	"\x0eoutput_preview\x18\b \x01(\tR\routputPreview\x120\n" +
+	"\x14refused_before_start\x18\t \x01(\bR\x12refusedBeforeStart\"\xaa\x01\n" +
+	"\x13WorkerForwardStream\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12#\n" +
+	"\fstdout_chunk\x18\x02 \x01(\fH\x00R\vstdoutChunk\x12#\n" +
+	"\fstderr_chunk\x18\x03 \x01(\fH\x00R\vstderrChunk\x12\x1f\n" +
+	"\n" +
+	"data_chunk\x18\x04 \x01(\fH\x00R\tdataChunkB\t\n" +
+	"\apayload\"4\n" +
+	"\x13WorkerForwardCancel\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId*\xca\x01\n" +
 	"\x10NodeHealthStatus\x12\x1b\n" +
 	"\x17NODE_HEALTH_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16NODE_HEALTH_CONNECTING\x10\x01\x12\x17\n" +
@@ -2564,7 +3124,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_node_proto_goTypes = []any{
 	(NodeHealthStatus)(0),                // 0: znasllc.memql.node.v1.NodeHealthStatus
 	(ForwardedPrincipalKind)(0),          // 1: znasllc.memql.node.v1.ForwardedPrincipalKind
@@ -2591,19 +3151,23 @@ var file_node_proto_goTypes = []any{
 	(*DeployControlForwardRequest)(nil),  // 22: znasllc.memql.node.v1.DeployControlForwardRequest
 	(*DeployControlForwardResponse)(nil), // 23: znasllc.memql.node.v1.DeployControlForwardResponse
 	(*NodeShutdown)(nil),                 // 24: znasllc.memql.node.v1.NodeShutdown
-	nil,                                  // 25: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
-	nil,                                  // 26: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
-	nil,                                  // 27: znasllc.memql.node.v1.NodeHello.LabelsEntry
-	nil,                                  // 28: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
-	nil,                                  // 29: znasllc.memql.node.v1.PeerInfo.LabelsEntry
-	nil,                                  // 30: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	nil,                                  // 31: znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	nil,                                  // 32: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	(*timestamppb.Timestamp)(nil),        // 33: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),              // 34: google.protobuf.Struct
+	(*WorkerForwardRequest)(nil),         // 25: znasllc.memql.node.v1.WorkerForwardRequest
+	(*WorkerForwardResponse)(nil),        // 26: znasllc.memql.node.v1.WorkerForwardResponse
+	(*WorkerForwardStream)(nil),          // 27: znasllc.memql.node.v1.WorkerForwardStream
+	(*WorkerForwardCancel)(nil),          // 28: znasllc.memql.node.v1.WorkerForwardCancel
+	nil,                                  // 29: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	nil,                                  // 30: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	nil,                                  // 31: znasllc.memql.node.v1.NodeHello.LabelsEntry
+	nil,                                  // 32: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	nil,                                  // 33: znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	nil,                                  // 34: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	nil,                                  // 35: znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	nil,                                  // 36: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	(*timestamppb.Timestamp)(nil),        // 37: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),              // 38: google.protobuf.Struct
 }
 var file_node_proto_depIdxs = []int32{
-	25, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	29, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
 	4,  // 1: znasllc.memql.node.v1.NodeClientMessage.node_hello:type_name -> znasllc.memql.node.v1.NodeHello
 	6,  // 2: znasllc.memql.node.v1.NodeClientMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
 	8,  // 3: znasllc.memql.node.v1.NodeClientMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
@@ -2618,44 +3182,49 @@ var file_node_proto_depIdxs = []int32{
 	19, // 12: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_request:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest
 	21, // 13: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_cancel:type_name -> znasllc.memql.node.v1.WorkbenchForwardCancel
 	22, // 14: znasllc.memql.node.v1.NodeClientMessage.deploy_control_forward_request:type_name -> znasllc.memql.node.v1.DeployControlForwardRequest
-	26, // 15: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
-	5,  // 16: znasllc.memql.node.v1.NodeServerMessage.node_welcome:type_name -> znasllc.memql.node.v1.NodeWelcome
-	6,  // 17: znasllc.memql.node.v1.NodeServerMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
-	8,  // 18: znasllc.memql.node.v1.NodeServerMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
-	9,  // 19: znasllc.memql.node.v1.NodeServerMessage.spawn_request:type_name -> znasllc.memql.node.v1.SpawnRequest
-	10, // 20: znasllc.memql.node.v1.NodeServerMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
-	11, // 21: znasllc.memql.node.v1.NodeServerMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
-	12, // 22: znasllc.memql.node.v1.NodeServerMessage.event_ack:type_name -> znasllc.memql.node.v1.EventAck
-	13, // 23: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
-	14, // 24: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
-	24, // 25: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
-	17, // 26: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
-	20, // 27: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
-	23, // 28: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
-	27, // 29: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
-	7,  // 30: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	33, // 31: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
-	0,  // 32: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	28, // 33: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
-	0,  // 34: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	29, // 35: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
-	7,  // 36: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	30, // 37: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	31, // 38: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	33, // 39: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
-	34, // 40: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
-	32, // 41: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	16, // 42: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	1,  // 43: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
-	16, // 44: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 45: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	2,  // 46: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
-	3,  // 47: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
-	47, // [47:48] is the sub-list for method output_type
-	46, // [46:47] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	25, // 15: znasllc.memql.node.v1.NodeClientMessage.worker_forward_request:type_name -> znasllc.memql.node.v1.WorkerForwardRequest
+	28, // 16: znasllc.memql.node.v1.NodeClientMessage.worker_forward_cancel:type_name -> znasllc.memql.node.v1.WorkerForwardCancel
+	30, // 17: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	5,  // 18: znasllc.memql.node.v1.NodeServerMessage.node_welcome:type_name -> znasllc.memql.node.v1.NodeWelcome
+	6,  // 19: znasllc.memql.node.v1.NodeServerMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
+	8,  // 20: znasllc.memql.node.v1.NodeServerMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
+	9,  // 21: znasllc.memql.node.v1.NodeServerMessage.spawn_request:type_name -> znasllc.memql.node.v1.SpawnRequest
+	10, // 22: znasllc.memql.node.v1.NodeServerMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
+	11, // 23: znasllc.memql.node.v1.NodeServerMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
+	12, // 24: znasllc.memql.node.v1.NodeServerMessage.event_ack:type_name -> znasllc.memql.node.v1.EventAck
+	13, // 25: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
+	14, // 26: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
+	24, // 27: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
+	17, // 28: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
+	20, // 29: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
+	23, // 30: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
+	26, // 31: znasllc.memql.node.v1.NodeServerMessage.worker_forward_response:type_name -> znasllc.memql.node.v1.WorkerForwardResponse
+	27, // 32: znasllc.memql.node.v1.NodeServerMessage.worker_forward_stream:type_name -> znasllc.memql.node.v1.WorkerForwardStream
+	31, // 33: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
+	7,  // 34: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
+	37, // 35: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
+	0,  // 36: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
+	32, // 37: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	0,  // 38: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
+	33, // 39: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	7,  // 40: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
+	34, // 41: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	35, // 42: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	37, // 43: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
+	38, // 44: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
+	36, // 45: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	16, // 46: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	1,  // 47: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
+	16, // 48: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	16, // 49: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	16, // 50: znasllc.memql.node.v1.WorkerForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	2,  // 51: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
+	3,  // 52: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
+	52, // [52:53] is the sub-list for method output_type
+	51, // [51:52] is the sub-list for method input_type
+	51, // [51:51] is the sub-list for extension type_name
+	51, // [51:51] is the sub-list for extension extendee
+	0,  // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -2678,6 +3247,8 @@ func file_node_proto_init() {
 		(*NodeClientMessage_WorkbenchForwardRequest)(nil),
 		(*NodeClientMessage_WorkbenchForwardCancel)(nil),
 		(*NodeClientMessage_DeployControlForwardRequest)(nil),
+		(*NodeClientMessage_WorkerForwardRequest)(nil),
+		(*NodeClientMessage_WorkerForwardCancel)(nil),
 	}
 	file_node_proto_msgTypes[1].OneofWrappers = []any{
 		(*NodeServerMessage_NodeWelcome)(nil),
@@ -2693,6 +3264,13 @@ func file_node_proto_init() {
 		(*NodeServerMessage_AiForwardResponse)(nil),
 		(*NodeServerMessage_WorkbenchForwardResponse)(nil),
 		(*NodeServerMessage_DeployControlForwardResponse)(nil),
+		(*NodeServerMessage_WorkerForwardResponse)(nil),
+		(*NodeServerMessage_WorkerForwardStream)(nil),
+	}
+	file_node_proto_msgTypes[25].OneofWrappers = []any{
+		(*WorkerForwardStream_StdoutChunk)(nil),
+		(*WorkerForwardStream_StderrChunk)(nil),
+		(*WorkerForwardStream_DataChunk)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2700,7 +3278,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   31,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

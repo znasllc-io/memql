@@ -76,6 +76,12 @@ builtin agentworkerListWorkers {
 // emits a canvas card; the agent's tool result is just a small
 // JSON payload acknowledging the request.
 
+// requireLabels is what makes the card's promise honest (design D6). The
+// user's Allow covers the task on ANY of their machines that match, so the
+// card has to SAY which machines those are -- "on any of your machines
+// matching os=darwin -- currently Jose's MacBook". A card that named one
+// machine and then ran the work on another would be a consent surface that
+// described something other than what it authorized.
 @executor("integration.agentworker.requestScope")
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
@@ -86,6 +92,7 @@ builtin agentworkerRequestScope {
   agentId         string!
   ownerUserId     string!
   partitionId         string
+  requireLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerStatus.memql ----

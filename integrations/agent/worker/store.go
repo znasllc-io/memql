@@ -190,6 +190,7 @@ func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.Inv
 		"bytesIn":       row.BytesIn,
 		"bytesOut":      row.BytesOut,
 		"outputPreview": row.OutputPreview,
+		"routing":       row.Routing,
 	}
 	body, err := json.Marshal(args)
 	if err != nil {
@@ -198,6 +199,228 @@ func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.Inv
 	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
 	_, err = s.Engine.Execute(ctx, query)
 	return err
+}
+
+// -- the fleet reads (memql#4351) --------------------------------------------
+//
+// THE TWO STAMPS, and why both are needed on the same context.
+//
+// `workersForOwnerWithStatus` and `routingPolicyForOwner` are @serverOnly:
+// they take a caller-supplied ownerUserId, which is not a caller check, so
+// over the wire they would enumerate any user's machines and their last
+// connect IPs. @serverOnly is admitted only for a context carrying INTERNAL
+// ORIGIN, and integrations/agent/worker is on call_origin.go's allowlist
+// precisely for reads of this shape.
+//
+// Internal origin does NOT satisfy the row gate. v1:worker:registration and
+// v1:worker:routingPolicy declare the composite owner tier, and
+// rowAuthzAdmits has no internal-origin escape on the READ path: a context
+// with no actor resolves the owner comparison against an empty caller and
+// denies every row. So the ACTOR is stamped as well -- the owner whose fleet
+// this turn is routing.
+//
+// The two are independent facts about the call, and each is refused for its
+// own reason. Stamping only origin returns zero rows with no error, which is
+// the failure that reads as "this user has no machines". Stamping only the
+// actor is refused by the annotation with a log line. Both are built inline as
+// the argument to one Execute, never onto the request's own context -- the
+// memql#2989 shape.
+//
+// The ownerUserId is not caller-supplied in any meaningful sense: it is
+// resolved from the AGENT row (replier.go) before the tool loop runs, the same
+// value AgentAuthorization above scopes on.
+
+func (s *EngineStore) fleetContext(ctx context.Context, ownerUserId string) context.Context {
+	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, ownerUserId))
+}
+
+// WorkersForOwner returns the owner's machines in registration order.
+func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) ([]Candidate, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(ownerUserId) == "" {
+		return nil, fmt.Errorf("agent.worker store: ownerUserId is required")
+	}
+	query := fmt.Sprintf(`query workersForOwnerWithStatus(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
+	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), query)
+	if err != nil {
+		return nil, fmt.Errorf("fleet read: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	rows := outputPayloadRows(res.OutputPayload())
+	out := make([]Candidate, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		id := rowString(row, "id")
+		if id == "" {
+			continue
+		}
+		out = append(out, Candidate{
+			RegistrationId: id,
+			Name:           rowString(row, "name"),
+			DisplayName:    rowString(row, "displayName"),
+			Capabilities:   rowStringList(row, "capabilities"),
+			// The merge happens HERE, once, on the way out of the store --
+			// so no caller can accidentally match on the cockpit's map alone
+			// and quietly ignore the labels the owner set.
+			Labels:          MergeLabels(rowStringMap(row, "labels"), rowStringMap(row, "operatorLabels")),
+			Concurrency:     rowUint32Map(row, "concurrency"),
+			ActiveCount:     rowInt(row, "activeCount"),
+			ConnectedNodeId: rowString(row, "connectedNodeId"),
+			LastSelectedAt:  rowTime(row, "lastSelectedAt"),
+			LastSeenAt:      rowTime(row, "lastSeenAt"),
+			RevokedAt:       rowTime(row, "revokedAt"),
+		})
+	}
+	return out, nil
+}
+
+// RoutingPolicyForOwner returns the owner's active policy, or nil when they
+// have none. Nil is the COMMON case and not an error: a user who never opened
+// the Fleet page routes on DefaultPolicy.
+func (s *EngineStore) RoutingPolicyForOwner(ctx context.Context, ownerUserId string) (*Policy, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(ownerUserId) == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`query routingPolicyForOwner(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
+	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), query)
+	if err != nil {
+		return nil, fmt.Errorf("routing policy read: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	// The query sorts newest first and the FIRST row wins. One active policy
+	// per user is the model, but the DSL cannot enforce it (@unique is
+	// declared metadata, memql#2960), so taking the first of a deterministic
+	// order is what makes a second active row harmless instead of making two
+	// replicas route differently.
+	for _, row := range outputPayloadRows(res.OutputPayload()) {
+		if row == nil {
+			continue
+		}
+		return &Policy{
+			Id:            rowString(row, "id"),
+			Strategy:      rowString(row, "strategy"),
+			RequireLabels: rowStringMap(row, "requireLabels"),
+			PreferLabels:  rowStringMap(row, "preferLabels"),
+			Fallback:      rowString(row, "fallback"),
+		}, nil
+	}
+	return nil, nil
+}
+
+// TouchWorkerSelected stamps lastSelectedAt on the machine the router picked.
+func (s *EngineStore) TouchWorkerSelected(ctx context.Context, registrationId, ownerUserId string) error {
+	if s == nil || s.Engine == nil {
+		return nil
+	}
+	if strings.TrimSpace(registrationId) == "" {
+		return nil
+	}
+	query := fmt.Sprintf(`touchWorkerSelected(registrationId:%s)`, langparser.QuoteString(registrationId))
+	_, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), query)
+	return err
+}
+
+// -- row readers -------------------------------------------------------------
+//
+// These read the map[string]any rows outputPayloadRows produces, which is the
+// shape a shape() query lands on (the Data axis), not res.Bundle.Nodes.
+
+func rowString(row map[string]any, key string) string {
+	if v, ok := row[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+func rowInt(row map[string]any, key string) int {
+	switch v := row[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	}
+	return 0
+}
+
+func rowStringList(row map[string]any, key string) []string {
+	raw, ok := row[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func rowStringMap(row map[string]any, key string) map[string]string {
+	raw, ok := row[key].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		switch t := v.(type) {
+		case string:
+			out[k] = t
+		case bool:
+			out[k] = fmt.Sprintf("%t", t)
+		case float64:
+			if t == float64(int64(t)) {
+				out[k] = fmt.Sprintf("%d", int64(t))
+			} else {
+				out[k] = fmt.Sprintf("%g", t)
+			}
+		}
+	}
+	return out
+}
+
+func rowUint32Map(row map[string]any, key string) map[string]uint32 {
+	raw, ok := row[key].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]uint32, len(raw))
+	for k, v := range raw {
+		if f, ok := v.(float64); ok && f >= 0 {
+			out[k] = uint32(f)
+		}
+	}
+	return out
+}
+
+// rowTime parses an RFC3339 timestamp. An empty or unparseable value yields
+// the zero time, which every caller reads as "never" -- and for lastSeenAt
+// that means offline, which is the safe direction: a machine whose timestamp
+// cannot be read is not one to send work to.
+func rowTime(row map[string]any, key string) time.Time {
+	raw := rowString(row, key)
+	if raw == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.000Z"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }
 
 // -- helpers ----------------------------------------------------------------

@@ -494,6 +494,7 @@ func (a *App) cluster() {
 			// but its workbench surface will refuse everything until the
 			// wiring is fixed.
 			a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
+			a.wireWorkerForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 		}
 	}
 

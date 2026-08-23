@@ -58,6 +58,32 @@ type WorkbenchForwardResponseSink interface {
 	Dispatch(resp *nodev1.WorkbenchForwardResponse)
 }
 
+// WorkerForwardHandler is the agent-replica-side entry point for a dispatch
+// forwarded from ANOTHER agent replica (memql#4352). A cockpit machine's
+// WorkerService stream terminates on exactly one replica; the turn wanting to
+// use it is served wherever the mesh routed the request. This is how the two
+// are joined.
+//
+// Left as an interface so component/node stays independent of the concrete
+// worker integration, which is build-tagged `agent`. The agent binary's
+// cluster wiring installs a concrete implementation via
+// SetWorkerForwardHandler; every other node type leaves it nil and answers a
+// forward with a transport error rather than dropping it -- the sender is
+// parked on the reply, and a dropped message turns "this node cannot serve
+// that machine" into a hang.
+type WorkerForwardHandler interface {
+	HandleForwardedRequest(ctx context.Context, req *nodev1.WorkerForwardRequest, send func(*nodev1.NodeServerMessage) error)
+	CancelForwardedRequest(ctx context.Context, requestId string)
+}
+
+// WorkerForwardResponseSink is the originating replica's receiver for replies
+// to worker dispatches it forwarded. Both the single response and the streamed
+// chunks route through it, keyed by request_id.
+type WorkerForwardResponseSink interface {
+	Dispatch(resp *nodev1.WorkerForwardResponse)
+	DispatchStream(chunk *nodev1.WorkerForwardStream)
+}
+
 // DeployControlForwardHandler is the identity-node-side entry point for a
 // forwarded deploy-control call (memql#3380). The nodeService invokes it when
 // an inbound NodeClientMessage carries a DeployControlForwardRequest. Single
@@ -103,6 +129,8 @@ type nodeService struct {
 	aiForwardResponse        AiForwardResponseSink        // BFF-side response sink; nil on worker binaries
 	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
 	workbenchForwardResponse WorkbenchForwardResponseSink // agent-side response sink; nil on non-agent binaries
+	workerForwardHandler     WorkerForwardHandler         // agent-side handler for machines whose stream we hold; nil off the agent build
+	workerForwardResponse    WorkerForwardResponseSink    // agent-side sink for replies to forwards we sent
 	// deployControlForwardHandler serves inbound deploy-control forwards
 	// (memql#3380). Non-nil only on the identity node, the only node that
 	// carries a DeployControlService.
@@ -362,6 +390,12 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_DeployControlForwardRequest:
 		s.handleDeployControlForwardRequest(peerId, payload.DeployControlForwardRequest, stream)
 
+	case *nodev1.NodeClientMessage_WorkerForwardRequest:
+		s.handleWorkerForwardRequest(peerId, payload.WorkerForwardRequest, stream)
+
+	case *nodev1.NodeClientMessage_WorkerForwardCancel:
+		s.handleWorkerForwardCancel(peerId, payload.WorkerForwardCancel)
+
 	default:
 		s.logger.Debug("unhandled message type from peer",
 			"peer_id", peerId,
@@ -584,6 +618,59 @@ func (s *nodeService) handleWorkbenchForwardRequest(peerId string, req *nodev1.W
 		return
 	}
 	s.workbenchForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+}
+
+// handleWorkerForwardRequest dispatches an inbound worker dispatch to this
+// replica's local handler (memql#4352).
+//
+// A node with no handler answers with a REFUSAL THAT SAYS NOTHING RAN. That
+// field is not cosmetic: it is what lets the sender try its next candidate.
+// Getting it wrong in the other direction -- reporting "nothing ran" for a call
+// that did -- would run a side effect twice, so the only place it is set true
+// is where the receiver is certain, and this path is one of them (there is no
+// handler, so nothing was reached).
+func (s *nodeService) handleWorkerForwardRequest(peerId string, req *nodev1.WorkerForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.workerForwardHandler == nil {
+		s.logger.Warn("worker forward request received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   id.NewShortId(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_WorkerForwardResponse{
+				WorkerForwardResponse: &nodev1.WorkerForwardResponse{
+					RequestId:          req.GetRequestId(),
+					ErrorCode:          "not_configured",
+					ErrorMessage:       "no worker forward handler on this node",
+					RefusedBeforeStart: true,
+				},
+			},
+		})
+		return
+	}
+	s.workerForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+}
+
+// handleWorkerForwardCancel stops in-flight work for a forwarded dispatch the
+// originating replica has abandoned.
+func (s *nodeService) handleWorkerForwardCancel(peerId string, cancel *nodev1.WorkerForwardCancel) {
+	if s.workerForwardHandler == nil {
+		return
+	}
+	s.logger.Debug("worker forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.workerForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
+}
+
+// SetWorkerForwardHandler installs the agent-side handler for inbound worker
+// dispatches. Left nil on every non-agent binary.
+func (s *nodeService) SetWorkerForwardHandler(h WorkerForwardHandler) {
+	s.workerForwardHandler = h
+}
+
+// SetWorkerForwardResponseSink installs the agent-side sink for replies to
+// worker dispatches this node forwarded.
+func (s *nodeService) SetWorkerForwardResponseSink(sink WorkerForwardResponseSink) {
+	s.workerForwardResponse = sink
 }
 
 // handleDeployControlForwardRequest dispatches an inbound deploy-control

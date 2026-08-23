@@ -318,14 +318,21 @@ mutate agentAuthorization updateAgentAuthScope {
 // updateWorkerLastSeen
 // ====================
 //
-// Heartbeat-batched lastSeenAt + lastConnectedFromIP update. The
-// worker stream handler calls this opportunistically -- it does NOT
-// fire on every heartbeat (15s) because that would saturate the
-// engine; the in-memory registry tracks the live timestamp on every
-// beat, and the stream handler flushes to the database at most once
-// per HeartbeatBatchInterval (60s), persisting the first heartbeat
-// of each stream immediately so a (re)connected worker's row is
-// fresh within one beat (memql#1340).
+// The heartbeat flush: lastSeenAt + lastConnectedFromIP, and since
+// memql#4350 connectedNodeId + activeCount as well.
+//
+// The cadence WAS 60s on a 15s beat, throttled on the reasoning that
+// per-beat writes bought freshness nobody read. That reasoning was
+// circular: nothing read lastSeenAt BECAUSE it was up to a minute
+// stale. HeartbeatBatchInterval is now 15s -- the beat itself -- so
+// this fires once per heartbeat, and the flush cadence is the
+// freshness budget of the derived `online` flag
+// (component/worker.OnlineWindow is twice it). The in-memory registry
+// still tracks the live timestamp on every beat; what changed is that
+// the row is no longer a minute behind it.
+//
+// A failed flush does not advance the session's watermark, so the next
+// beat retries (memql#1340).
 
 /// Bump lastSeenAt + lastConnectedFromIP on a worker registration.
 mutate registration updateWorkerLastSeen {

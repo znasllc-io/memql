@@ -201,6 +201,16 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 // Logger is used for diagnostic logging in the status handler so
 // "Sofia says unconfigured but the pill is green" reports have
 // trace data on the agent side; pass nil to suppress.
+// Dispatcher exposes the integration's dispatcher so the cluster phase can
+// inject the cross-node forward (memql#4352). The forward needs the
+// PeerManager, which does not exist when the integration is constructed.
+func (i *Integration) Dispatcher() *Dispatcher {
+	if i == nil {
+		return nil
+	}
+	return i.dispatcher
+}
+
 func NewIntegration(dispatcher *Dispatcher, registry *workerservice.Registry, engine *memql.MemQLEngine, logger *slog.Logger) *Integration {
 	return &Integration{dispatcher: dispatcher, registry: registry, engine: engine, logger: logger}
 }
@@ -298,6 +308,11 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		PlanId:        strings.TrimSpace(asString(args["planId"])),
 		TaskId:        strings.TrimSpace(asString(args["taskId"])),
 		CorrelationId: strings.TrimSpace(asString(args["correlationId"])),
+		// Needs, never a machine (design D4). There is no workerId argument to
+		// read here because there is no workerId argument on the builtin.
+		RequireLabels: LabelsFromArgs(args["requireLabels"]),
+		PreferLabels:  LabelsFromArgs(args["preferLabels"]),
+		ReroutedFrom:  strings.TrimSpace(asString(args["reroutedFrom"])),
 	}
 	if req.OwnerUserId == "" || req.AgentId == "" {
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required")
@@ -621,6 +636,27 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	// scoped to a real user instead of a system actor.
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
+	// D6: the card names the requirements AND the current choice, because the
+	// user's Allow covers the task on any machine that matches -- so the card
+	// has to describe the set it is authorizing, not just today's pick.
+	//
+	// The capability asked for here is HEADLESS rather than COMPUTERUSE, and
+	// deliberately: the card is about a SCOPE, not a single action, and both
+	// scopes span actions on either capability (`full` covers exec, which is
+	// headless, and mouse_click, which is not). HEADLESS is mandatory on every
+	// registration, so it names the widest true set and lets requireLabels do
+	// the narrowing. Choosing COMPUTERUSE here would silently drop a
+	// headless-only machine out of a sentence that claims to describe all of
+	// them.
+	requireLabels := LabelsFromArgs(args["requireLabels"])
+	target := ""
+	if i.dispatcher != nil {
+		target = i.dispatcher.ConsentCardTarget(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
+	}
+	if target != "" {
+		summary = strings.TrimRight(summary, " .") + ". Runs " + target + "."
+	}
+
 	planId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
 	q := fmt.Sprintf(
 		`mutation createScopeElevationPlan(planId:%s, agentId:%s, ownerUserId:%s, partitionId:%s, intent:%s, summary:%s, requestedScope:%s)`,
@@ -634,6 +670,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		"status":         "awaiting_user",
 		"planId":         planId,
 		"requestedScope": scope,
+		"target":         target,
 		"message":        "Scope-elevation request emitted on the canvas. The user will approve or deny; reply with a short acknowledgement and end your turn.",
 	})
 	return []memorynodes.MemoryNode{{
