@@ -9,6 +9,7 @@ import { composedViewPath } from "../compose/urls";
 import { useSavedViews } from "../compose/useSavedViews";
 import { CONCEPTS_ROOT } from "../concepts/urls";
 import {
+  Archive,
   Bot,
   Boxes,
   Building2,
@@ -109,13 +110,21 @@ const PREDEFINED_VIEWS: readonly NavItem[] = VIEWS.filter(
 const BUILD: readonly NavItem[] = [{ to: CONCEPTS_ROOT, label: "Concepts", icon: Boxes }];
 const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
 
-// Cluster is the machine, not its contents. The admin surfaces are listed
-// individually rather than behind an "Administration" entry with its own tab
-// strip: one level of nesting for five destinations bought nothing except a
-// landing page that duplicated the console.
+// Cluster is the machine, not the operator's OWN data -- that split is what
+// keeps this group distinct from Views (designed dashboards over whatever
+// concept an operator points one at). Artifacts sits here rather than there
+// for the same reason Sites does: both are a FIXED, cluster-native surface
+// (the Library that indexes what this cluster produces; the hosted web
+// surfaces it serves) rather than a composed view over arbitrary rows.
+//
+// The admin surfaces are listed individually rather than behind an
+// "Administration" entry with its own tab strip: one level of nesting for
+// five destinations bought nothing except a landing page that duplicated the
+// console.
 const CLUSTER: readonly NavItem[] = [
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/sites", label: "Sites", icon: Globe },
+  { to: "/artifacts", label: "Artifacts", icon: Archive },
 ];
 // People is NOT here. It is one of the views, and the verbs an admin needs
 // live on the row detail there (memql#4264) -- which is what removed the

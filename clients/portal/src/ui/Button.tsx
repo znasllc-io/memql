@@ -49,6 +49,12 @@ export function Button({
   disabled = false,
   onClick,
   title,
+  // Sets aria-pressed when the button is a TOGGLE rather than a command --
+  // a filter chip, a two-state switch. Omitted (the default) leaves
+  // aria-pressed off entirely rather than defaulting to false, because
+  // "not a toggle" and "toggle, currently off" are different things a
+  // screen reader announces differently.
+  pressed,
   children,
 }: {
   tone?: ButtonTone;
@@ -59,6 +65,7 @@ export function Button({
   disabled?: boolean;
   onClick?: MouseEventHandler<HTMLButtonElement>;
   title?: string;
+  pressed?: boolean;
   children: ReactNode;
 }): ReactNode {
   return (
@@ -67,6 +74,7 @@ export function Button({
       disabled={busy || disabled}
       {...(onClick === undefined ? {} : { onClick })}
       {...(title === undefined ? {} : { title })}
+      {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
       className={classesFor(tone, size)}
     >
       {busy && busyLabel !== undefined ? busyLabel : children}

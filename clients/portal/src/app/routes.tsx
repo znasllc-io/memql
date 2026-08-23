@@ -11,6 +11,7 @@ import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
+import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
@@ -89,6 +90,7 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /sites/*          hosted sites: list, create, publish, roll back, delete
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //                     (memql#3717)
+//   /artifacts/*      the Library, browsed and labelled
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
 // separate changes would otherwise each need an edit here and in AppShell, and
@@ -118,6 +120,7 @@ export function AppRoutes(): ReactNode {
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="sites/*" element={<SitesRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
+          <Route path="artifacts/*" element={<ArtifactsRoutes />} />
           {/* Retired in memql#4264: the Deployments view carries the four
               verbs now, with the confirmations this page had and that view's
               Ship band did not. Redirected rather than 404'd -- whoever

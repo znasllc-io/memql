@@ -89,6 +89,8 @@ var mustUseContainer = []string{
 	"clients/portal/src/sites/SiteDetailPage.tsx",
 	"clients/portal/src/modules/ModulesPage.tsx",
 	"clients/portal/src/modules/ModuleDetailPage.tsx",
+	"clients/portal/src/artifacts/ArtifactsPage.tsx",
+	"clients/portal/src/artifacts/ArtifactDetailPage.tsx",
 }
 
 func TestPortalPagesCarryNoWidthOfTheirOwn(t *testing.T) {
