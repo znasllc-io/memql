@@ -21,8 +21,13 @@ import (
 // of itself: the engine asserted in Go that staging does not exist while
 // docs/internal/ops/workbench-production.md tabulated a **Staging** row as a
 // deployment target and docs/public/operate/infrastructure.md named the cluster
-// `aks-memql-staging`. A reader following those docs learned the opposite of
+// after that same tier. A reader following those docs learned the opposite of
 // what the design decided (memql#4286).
+//
+// (The literals themselves are deliberately not spelled here. They are banned
+// repo-wide by core/vendorname, and that sweep polices GIT-TRACKED files -- so
+// a new file naming one is invisible to it until the moment it is staged,
+// which is a poor moment to find out.)
 //
 // WHY THIS GATE IS NOT A WORD BAN, which is the version that does not work.
 // `production` is perfectly good ordinary English -- "production traffic", "a
@@ -35,9 +40,10 @@ import (
 // CELL OF A TABLE ROW whose whole text is an environment tier is a claim about
 // the product's shape: it is presented as a thing the product has, a category
 // readers can be in. The same word inside a sentence is not that claim, and is
-// left alone. The resource-name spellings (`aks-memql-staging` and friends),
-// which have no innocent reading at all, are banned outright by the sibling
-// list in core/vendorname.
+// left alone. The resource-name spellings -- one operator's cluster, resource
+// group, storage account and key vault, each with the tier in its name -- have
+// no innocent reading at all and are banned outright by the sibling list in
+// core/vendorname.
 //
 // WHY `development` AND `local` ARE NOT TIERS HERE. They distinguish deploy
 // TARGETS -- k3d versus AKS -- which the design keeps and which carries its own
