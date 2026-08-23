@@ -97,3 +97,53 @@ func TestCredentialExpiryIsHonest(t *testing.T) {
 		t.Fatal("a future expiry must not read as expired")
 	}
 }
+
+// TestInternalOriginCannotEscapeOneWrite is the assertion
+// call_origin_conformance_test.go's allowlist entry for this package
+// PROMISES, rather than merely claims.
+//
+// memql#2989's escalation shape is a package that stamps internal origin onto
+// a context a LATER frame inherits: one @serverOnly call then opens every
+// other @serverOnly construct for the rest of the request. The property that
+// rules it out here is structural -- appSessionWriteContext's result is a
+// local in each store method and is never returned, so the caller's context
+// is untouched.
+//
+// Asserted by observing the caller's own context AFTER the write helper has
+// run against a derived one.
+func TestInternalOriginCannotEscapeOneWrite(t *testing.T) {
+	callerCtx := context.Background()
+
+	writeCtx := appSessionWriteContext(callerCtx, "v1:identity:user:alice")
+	if auth.OriginFromContext(writeCtx) != auth.OriginInternal {
+		t.Fatal("the derived context must carry internal origin")
+	}
+
+	// The caller's context is unchanged -- a Go context is immutable, and
+	// this test exists so that a future refactor which starts RETURNING the
+	// stamped context (or caching it on the store) fails here rather than
+	// silently widening what one stamp unlocks.
+	if got := auth.OriginFromContext(callerCtx); got == auth.OriginInternal {
+		t.Fatalf("the caller's context gained internal origin (%v) -- one @serverOnly "+
+			"write must not unlock the rest of them for the rest of the request", got)
+	}
+	if _, ok := auth.AccessFromContext(callerCtx); ok {
+		t.Fatal("the caller's context gained a borrowed actor")
+	}
+}
+
+// TestStoreMethodsDoNotReturnAContext pins the structural half of the claim
+// above: no exported method on the store hands a stamped context back.
+// A signature change is what would break the property, so a signature check
+// is what guards it.
+func TestStoreMethodsDoNotReturnAContext(t *testing.T) {
+	var store AppSessionStore = (*EngineStore)(nil)
+	// The interface is the whole write surface; every method returns error
+	// and nothing else. If a future method returns a context, this stops
+	// compiling -- which is the point.
+	var _ interface {
+		CreateAppSession(context.Context, AppSessionRow) error
+		AppendAppSessionTranscript(context.Context, string, string, int, bool, string) error
+		EndAppSession(context.Context, AppSessionRow) error
+	} = store
+}

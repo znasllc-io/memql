@@ -349,3 +349,45 @@ func waitForSession(t *testing.T, s *streamSession, sessionId string) {
 	}
 	t.Errorf("session %s never opened", sessionId)
 }
+
+// TestRunnerClassifiesCancellation: a caller giving up is a CANCELLED
+// session, not a failed one. Nothing on the machine misbehaved, and
+// recording it as failed puts a retry-shaped signal on a run that did
+// exactly what it was told.
+func TestRunnerClassifiesCancellation(t *testing.T) {
+	runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		cancel()
+	}()
+
+	result, err := runner.Run(ctx, runSpec(), nil)
+	if err == nil {
+		t.Fatal("a cancelled run must surface the cancellation to its caller")
+	}
+	if result.Status != AppSessionStatusCancelled {
+		t.Fatalf("status = %q, want cancelled", result.Status)
+	}
+	terminal := store.terminal()
+	if len(terminal) != 1 || terminal[0].Status != AppSessionStatusCancelled {
+		t.Fatalf("the row must record cancelled, got %+v", terminal)
+	}
+}
+
+// TestIsCancellationReasonMatchesLoosely: the reason comes from another
+// process on somebody else's machine, and the two mistakes cost different
+// amounts -- so neither spelling of the word decides the classification.
+func TestIsCancellationReasonMatchesLoosely(t *testing.T) {
+	for _, reason := range []string{"cancelled", "canceled", "Cancelled by user", "  CANCEL  "} {
+		if !isCancellationReason(reason) {
+			t.Errorf("isCancellationReason(%q) = false, want true", reason)
+		}
+	}
+	for _, reason := range []string{"", "exec_failed", "timeout", "worker_disconnected"} {
+		if isCancellationReason(reason) {
+			t.Errorf("isCancellationReason(%q) = true, want false", reason)
+		}
+	}
+}

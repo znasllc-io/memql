@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -211,6 +212,13 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 	stopRenewal := r.startRenewal(ctx, handle, spec, cred, lifetime)
 	defer stopRenewal()
 
+	// The drain goroutine must be able to exit on the CALLER's context as
+	// well as on the chunk channel closing. Without that arm this
+	// deadlocks: Wait returns as soon as ctx dies, but the chunk channel
+	// closes only when the session ends, so a worker that never answers
+	// the cancel leaves Run parked on <-drained for the life of the
+	// process. Cancel is a request to a machine that may be asleep,
+	// wedged or gone -- it is not a guarantee of an AppSessionEnd.
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
@@ -229,6 +237,12 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 				}
 			case <-flush.C:
 				r.flushTranscript(ctx, spec.SessionId, collector, AppSessionStatusRunning)
+			case <-ctx.Done():
+				// Flush what arrived before giving up, so a cancelled run
+				// still leaves the transcript it produced. That output is
+				// often the reason somebody cancelled.
+				r.flushTranscript(ctx, spec.SessionId, collector, AppSessionStatusRunning)
+				return
 			}
 		}
 	}()
@@ -239,7 +253,15 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 	status := AppSessionStatusEnded
 	errMessage := ""
 	switch {
-	case waitErr != nil && outcome.Error == "cancelled":
+	case errors.Is(waitErr, context.Canceled), errors.Is(waitErr, context.DeadlineExceeded):
+		// The CALLER gave up -- their plan was cancelled, or their
+		// deadline passed. That is a cancelled session, not a failed
+		// one: nothing on the machine misbehaved, and recording it as
+		// failed would put a retry-shaped signal on a run that did
+		// exactly what it was told.
+		status = AppSessionStatusCancelled
+		errMessage = firstNonEmpty(outcome.Error, waitErr.Error())
+	case waitErr != nil && isCancellationReason(outcome.Error):
 		status = AppSessionStatusCancelled
 		errMessage = outcome.Error
 	case waitErr != nil:
@@ -273,6 +295,20 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 		return result, waitErr
 	}
 	return result, nil
+}
+
+// isCancellationReason reports whether a worker-reported error names a
+// cancellation.
+//
+// Matched loosely, and on purpose. The reason string comes from another
+// process on somebody else's machine, and the cost of the two mistakes is
+// asymmetric: reading a cancel as a failure puts a retry-shaped signal on a
+// run that did what it was told, while reading a genuine failure as a cancel
+// only loses a retry the caller can ask for again. Neither spelling of the
+// word is worth a wrong classification.
+func isCancellationReason(reason string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(reason))
+	return strings.Contains(lowered, "cancel")
 }
 
 // DeriveBilling decides who paid for a run.
