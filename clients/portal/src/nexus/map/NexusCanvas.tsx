@@ -561,17 +561,32 @@ function Labels({
 // anything is still moving and then stops, which is what makes an idle map
 // cost nothing.
 //
-// The predicate is a FUNCTION evaluated every frame, not a boolean computed
-// at render time, and the difference is the whole correctness of this
-// component. A boolean captured at render never changes while the loop is
-// running -- no re-render happens during an animation, because nothing in
-// React state moves -- so `animating: true` would invalidate forever and
-// `animating: false` would never wake up. Asking each frame is what lets the
-// loop notice the last arrival finishing and stop on its own.
+// TWO THINGS HERE ARE EASY TO GET WRONG AND BOTH WERE, IN TURN.
+//
+// 1. The predicate is a FUNCTION evaluated every frame, not a boolean
+//    computed at render time. A boolean captured at render never changes
+//    while the loop is running -- no re-render happens during an animation,
+//    because nothing in React state moves -- so `true` would invalidate
+//    forever and `false` would never wake up.
+//
+// 2. `invalidate(2)`, NOT `invalidate()`. This is the one that cost a blank
+//    scene. React Three Fiber's demand loop reads `internal.frames > 0` to
+//    decide whether to run, and DECREMENTS it after each frame; the loop
+//    continues only while the count it is left with is still positive. A
+//    plain `invalidate()` sets the count to 1, the decrement immediately
+//    takes it to 0, and the loop stops -- so calling it from inside a frame
+//    schedules nothing. The map rendered exactly ONE frame, at which point
+//    every node was still at the start of its arrival (scale ~0.001), and
+//    the result was a canvas with a WebGL context, a full scene graph and
+//    nothing visible in it. Asking for two leaves one after the decrement,
+//    which is what keeps the loop alive frame to frame.
+//
+// Found by opening the scene in a browser. No unit test could have: jsdom
+// has no WebGL, so the whole canvas is behind a fallback there.
 function Governor({ shouldAnimate }: { shouldAnimate: () => boolean }): ReactNode {
   const { invalidate } = useThree();
   useFrame(() => {
-    if (shouldAnimate()) invalidate();
+    if (shouldAnimate()) invalidate(2);
   });
   return null;
 }

@@ -68,17 +68,81 @@ const FALLBACK: ScenePalette = {
   road: "#232b36",
 };
 
-// token reads one custom property off an element, trimmed. Returns "" when
-// the property is unset or unreadable, which is what makes the per-token
-// fallback below a real fallback rather than a blanket one -- a theme that
-// defines six of the seven tokens still gets six real colours.
-function token(styles: CSSStyleDeclaration | null, name: string): string {
-  if (styles === null) return "";
+// ===========================================================================
+// READING A TOKEN IS NOT READING ITS VALUE, AND THAT IS THE WHOLE TRICK
+// ===========================================================================
+// The obvious implementation -- getComputedStyle(root).getPropertyValue(name)
+// -- returns the token's DECLARED text, not a colour. Every brand colour is
+// written once as `light-dark(<light>, <dark>)` (brand/tokens.css: "one
+// definition per token via light-dark()"), and a custom property's computed
+// value is that function call, unresolved. Substitution happens at USE time,
+// inside a real property, against the element's colour scheme.
+//
+// So this asks the browser the question in a form it can answer: set
+// `color: var(--memql-fg, <sentinel>)` on a throwaway span inside the
+// document, then read `getComputedStyle(span).color` -- which comes back
+// resolved as `rgb(r, g, b)`, with the theme already applied.
+//
+// THIS WAS FOUND BY LOOKING AT THE SCENE IN A BROWSER, and it failed in the
+// worst available way: three.js does not throw on a colour it cannot parse.
+// `Color.set("light-dark(#14201a, #e8e6dd)")` logs a warning and leaves the
+// colour at whatever it already was, so every node came out its material's
+// default. No test caught it, because jsdom resolves no custom properties at
+// all and the fallback palette answered instead -- the code path a real
+// browser takes was the one nothing exercised.
+//
+// The sentinel is what makes a MISSING token distinguishable from a resolved
+// one. `color: var(--nope)` is invalid at computed-value time, which makes
+// the property INHERIT rather than go empty, so a bare read would silently
+// return whatever the parent's colour happened to be. A var() fallback the
+// caller recognises is the only honest "the token is not there" signal.
+const SENTINEL = "rgb(1, 2, 3)";
+
+const TOKENS = [
+  "--memql-fg",
+  "--memql-accent",
+  "--memql-fg-subtle",
+  "--memql-warn",
+  "--memql-ok",
+  "--memql-danger",
+  "--memql-data-string",
+  "--memql-data-number",
+  "--memql-bg",
+  "--memql-border",
+] as const;
+
+// resolveTokens asks for every token in one pass, on one throwaway element.
+// One element rather than one per token: each getComputedStyle forces a style
+// recalculation, and this runs on mount and on a theme change -- never per
+// frame.
+function resolveTokens(names: readonly string[], host: Element | null): Map<string, string> {
+  const out = new Map<string, string>();
+  if (typeof document === "undefined" || host === null) return out;
+  let probe: HTMLSpanElement | null = null;
   try {
-    return styles.getPropertyValue(name).trim();
+    probe = document.createElement("span");
+    // In the document (so it inherits the tokens and the colour scheme) and
+    // invisible. `position: fixed` keeps it out of the flow entirely, so it
+    // cannot shift anything for the frame it exists.
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.position = "fixed";
+    probe.style.top = "-9999px";
+    probe.style.left = "-9999px";
+    probe.style.opacity = "0";
+    probe.style.pointerEvents = "none";
+    host.appendChild(probe);
+    for (const name of names) {
+      probe.style.setProperty("color", `var(${name}, ${SENTINEL})`);
+      const resolved = getComputedStyle(probe).color.trim();
+      if (resolved !== "" && resolved !== SENTINEL) out.set(name, resolved);
+    }
   } catch {
-    return "";
+    // A document that will not take a span, or a getComputedStyle that
+    // throws: the fallback palette answers for everything.
+  } finally {
+    probe?.remove();
   }
+  return out;
 }
 
 // readPalette resolves the scene palette from the document's current theme.
@@ -86,15 +150,11 @@ function token(styles: CSSStyleDeclaration | null, name: string): string {
 // Called on mount and again when the theme changes, never per frame:
 // getComputedStyle forces a style recalculation, and doing that inside a
 // render loop is how a scene that draws nothing new still burns a core.
-export function readPalette(root: Element | null = typeof document === "undefined" ? null : document.documentElement): ScenePalette {
-  let styles: CSSStyleDeclaration | null = null;
-  try {
-    styles = root === null || typeof getComputedStyle !== "function" ? null : getComputedStyle(root);
-  } catch {
-    styles = null;
-  }
-
-  const pick = (name: string, fallback: string): string => token(styles, name) || fallback;
+export function readPalette(
+  host: Element | null = typeof document === "undefined" ? null : document.body,
+): ScenePalette {
+  const resolved = resolveTokens(TOKENS, host);
+  const pick = (name: string, fallback: string): string => resolved.get(name) ?? fallback;
 
   return {
     you: pick("--memql-fg", FALLBACK.you),

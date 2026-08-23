@@ -191,6 +191,63 @@ describe("the lazy chunk", () => {
   });
 });
 
+// ===========================================================================
+// THE TWO SHAPES A BROWSER PROVED WERE REQUIRED
+// ===========================================================================
+// Both of these were found by opening the scene in Chrome, and neither can be
+// asserted behaviourally here: jsdom has no WebGL, so the canvas never mounts,
+// and jsdom resolves no custom properties, so the palette's real code path
+// never runs. What CAN be pinned is the shape of the code, and each of these
+// cost a scene that rendered nothing at all -- with no error, in a canvas that
+// had a live WebGL context and a full scene graph behind it.
+describe("the shapes a browser proved were required", () => {
+  const sources = import.meta.glob("../src/nexus/map/*.{ts,tsx}", {
+    query: "?raw",
+    eager: true,
+    import: "default",
+  }) as Record<string, string>;
+
+  // The CODE, with comments removed. These two guards forbid a spelling that
+  // the comment explaining WHY it is forbidden naturally contains, so a scan
+  // over the raw file matches its own documentation. Crude (a `//` inside a
+  // string literal would be stripped too) and sufficient: neither file has
+  // one, and the alternative is wording the comments around the guard, which
+  // makes the explanation worse to protect the test.
+  function source(name: string): string {
+    const raw = Object.entries(sources).find(([path]) => path.endsWith(name))?.[1] ?? "";
+    return raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  }
+
+  it("resolves brand tokens through a real property, never getPropertyValue", () => {
+    const palette = source("palette.ts");
+    expect(palette).not.toBe("");
+
+    // getPropertyValue returns the token's DECLARED TEXT. Every brand colour
+    // is `light-dark(<light>, <dark>)`, which three.js cannot parse -- and
+    // Color.set does not throw on a colour it cannot parse, it warns and
+    // leaves the previous value. The scene came out monochrome and unreadable
+    // with nothing in the test suite red.
+    expect(palette).not.toContain("getPropertyValue");
+    // The shape that works: ask the browser through a real colour property.
+    expect(palette).toContain("getComputedStyle(probe).color");
+    expect(palette).toContain("var(${name}, ${SENTINEL})");
+  });
+
+  it("keeps the demand loop alive with invalidate(2), not invalidate()", () => {
+    const canvas = source("NexusCanvas.tsx");
+    expect(canvas).not.toBe("");
+
+    // React Three Fiber's demand loop runs while internal.frames > 0 and
+    // DECREMENTS after each frame, so a plain invalidate() called from inside
+    // useFrame sets the count to 1, the decrement takes it to 0, and the loop
+    // stops. The map rendered exactly one frame -- at which point every node
+    // was still at the start of its arrival, scale ~0.001 -- and the canvas
+    // was blank.
+    expect(canvas).toContain("invalidate(2)");
+    expect(canvas).not.toMatch(/\binvalidate\(\)/);
+  });
+});
+
 describe("the budget", () => {
   // What a browser actually pays per scrub frame is the layout plus the
   // time filter, both pure. The GPU cost is not measurable here and is NOT
