@@ -398,6 +398,53 @@ const undeclared3591ClaimedOwnerReason = "memql#3591 -- pre-actor owner-claim ch
 // the quiet scope change this gate exists to surface.
 const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric read for clients, the same gate as the generic browse it replaces; a tier on v1:observability:codeMetric is the observability domain's decision"
 
+// The three reads memql#4369 (Nexus) added, each listed rather than
+// declared and each carrying its own blocking issue rather than the
+// grandfather marker.
+//
+// ===========================================================================
+// WHY NONE OF THE THREE PAYS ITS DEBT HERE
+// ===========================================================================
+// Nexus draws ONE GOAL of the caller's -- the plan, its tasks, the agents it
+// raised, the artifacts it produced. Each of those three concepts is blocked
+// on a DIFFERENT thing, and collapsing them into one reason would hide two of
+// the three:
+//
+//	plan      memql#4366 measured the blocker and it is not a matter of
+//	          writing the annotation. Every engine-internal read of `plan`
+//	          runs under an actor carrying no AccessContext
+//	          (integrations/planner/agent_loop.go's systemActorContext), and
+//	          `refuseRowAuthzWithoutActor` refuses such a read on an owned
+//	          concept -- so declaring the tier does not narrow those reads,
+//	          it BREAKS them. Separately, cmd/memqlmigrate's own inference
+//	          already rules that `plan` cannot take an owned floor because
+//	          `plansForSpace` reads collaborators' rows BY DESIGN.
+//
+//	agent     the long tail, and the one where an owner conjunct would be a
+//	          SILENT EMPTINESS rather than a gate: `createAgent` takes
+//	          `ownerUserId` as a caller ARGUMENT rather than stamping it
+//	          from the actor, so a planner-provisioned specialist can carry
+//	          an empty one -- and the planner agent itself is owned by no
+//	          user at all. agentsForPlan is `@public` for exactly that
+//	          reason, narrowed by lineage.originatingPlanId, and every one
+//	          of its eight already-listed siblings is here too.
+//
+//	artifact  the memql#2803 decision the concept is already waiting on, and
+//	          artifactsForPlan carries no new risk over the six listed
+//	          v1:library:artifact reads above it: the identical
+//	          `ownerUserId==actor.userId` top-level conjunct, narrowed by a
+//	          producedByPlanId equality instead of a lens or kind one.
+//
+// What Nexus does about the residual is recorded where the long tail is
+// tracked rather than only here: docs/public/operate/auth/per-row-authz-audit.md
+// carries a table naming these concepts, and states that the client-side
+// filter the portal applies closes a deep-link hole and is NOT a gate.
+const undeclared4369NexusPlanReason = "memql#4366 -- the caller's own goals, newest first; v1:planner:plan cannot take an owned floor until the engine's internal actor is characterised (measured on that issue), and plansForSpace reads collaborators' rows by design"
+
+const undeclared4369NexusAgentReason = "memql#4369 -- the agents one goal raised, narrowed by lineage.originatingPlanId; v1:agents:agent declares no tier and an owner conjunct here would return an empty set rather than a narrowed one (createAgent takes ownerUserId as a caller arg; the planner agent is owned by no user), so the declaration is #4366's successor work"
+
+const undeclared4369NexusArtifactReason = "memql#2803 -- the artifacts one goal produced; identical ownerUserId==actor.userId conjunct to its six listed v1:library:artifact siblings, narrowed by producedByPlanId, and blocked on the same createArtifact ownership-threading decision"
+
 // undeclared2803ArtifactLabelReason covers libraryArtifactsByLabel, the
 // label-facet read the artifacts-labels feature added over
 // v1:library:artifact (dsl/library/queries.memql).
@@ -484,6 +531,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"agentById":             {"v1:agents:agent", undeclaredGrandfatherReason},
 	"agentOwner":            {"v1:agents:agent", undeclaredGrandfatherReason},
 	"agentRoleSlugsInUse":   {"v1:agents:agent", undeclaredGrandfatherReason},
+	"agentsForPlan":         {"v1:agents:agent", undeclared4369NexusAgentReason},
 	"agentsForRegistry":     {"v1:agents:agent", undeclaredGrandfatherReason},
 	"allAgents":             {"v1:agents:agent", undeclaredGrandfatherReason},
 	"assistantAgentForUser": {"v1:agents:agent", undeclaredGrandfatherReason},
@@ -705,6 +753,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"documentChunksForDomain": {"v1:knowledge:documentChunk", undeclaredGrandfatherReason},
 
 	// v1:library:artifact
+	"artifactsForPlan":                  {"v1:library:artifact", undeclared4369NexusArtifactReason},
 	"libraryArtifactById":               {"v1:library:artifact", undeclaredGrandfatherReason},
 	"libraryArtifactBySourceConceptRef": {"v1:library:artifact", undeclared2803ArtifactLabelReason},
 	"libraryArtifacts":                  {"v1:library:artifact", undeclaredGrandfatherReason},
@@ -724,6 +773,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"planById":                         {"v1:planner:plan", undeclaredGrandfatherReason},
 	"plansForResponsibility":           {"v1:planner:plan", undeclaredGrandfatherReason},
 	"plansForSpace":                    {"v1:planner:plan", undeclaredGrandfatherReason},
+	"plansForUser":                     {"v1:planner:plan", undeclared4369NexusPlanReason},
 	"runningPlansForUser":              {"v1:planner:plan", undeclaredGrandfatherReason},
 	"strandedCandidatePlans":           {"v1:planner:plan", undeclaredGrandfatherReason},
 	"waitingPlansForUser":              {"v1:planner:plan", undeclaredGrandfatherReason},
