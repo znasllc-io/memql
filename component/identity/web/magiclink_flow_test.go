@@ -846,3 +846,56 @@ func TestBoundLinkStillRefusesTheWrongBrowser(t *testing.T) {
 		t.Fatal("a bound link signed in the wrong browser")
 	}
 }
+
+// TestLandingPageCopyMatchesWhatContinueDoes is the anti-drift gate between
+// the page and the handler.
+//
+// The landing page TELLS the reader what the button will do -- "this will not
+// sign you in here" on the cross-device branch -- so a page that says one
+// thing while the handler does another is worse than either alone. That drift
+// happened in review: the unbound bootstrap link rendered the cross-device
+// copy and then signed the operator in, on the very first thing anybody does
+// with a new cluster.
+//
+// Both now read one predicate. This asserts the OUTCOME agrees with the COPY
+// for all three shapes, so a future edit to either has to move both.
+func TestLandingPageCopyMatchesWhatContinueDoes(t *testing.T) {
+	cases := []struct {
+		name         string
+		bound        bool
+		holdsCookie  bool
+		wantFinishes int
+	}{
+		{name: "bound, requesting browser", bound: true, holdsCookie: true, wantFinishes: 1},
+		{name: "bound, somebody else", bound: true, holdsCookie: false, wantFinishes: 0},
+		{name: "unbound (the bootstrap claim link)", bound: false, holdsCookie: false, wantFinishes: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newFlowFixture(t)
+			if !tc.bound {
+				fx.verifier.row.BindingHash = ""
+			}
+
+			// What the page SAYS.
+			page := getComplete(t, fx, tc.holdsCookie).Body.String()
+			saysItWillNotSignYouIn := strings.Contains(strings.ToLower(page), "will not sign you in here")
+
+			// What Continue DOES.
+			postLanding(t, fx, tc.holdsCookie)
+			finished := fx.verifier.finishes
+
+			if finished != tc.wantFinishes {
+				t.Fatalf("Continue finished %d time(s), want %d", finished, tc.wantFinishes)
+			}
+			if finished > 0 && saysItWillNotSignYouIn {
+				t.Errorf("the page said it would NOT sign the reader in, and Continue did.\n"+
+					"Page copy and handler branch must come from one predicate (completesHere).")
+			}
+			if finished == 0 && !saysItWillNotSignYouIn {
+				t.Errorf("the page did not warn that Continue would not sign the reader in, and it "+
+					"did not.\nSomebody on the wrong device needs to be told before they press it.")
+			}
+		})
+	}
+}

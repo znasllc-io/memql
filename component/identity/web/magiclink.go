@@ -158,6 +158,20 @@ func (s *Server) clearMagicLinkCookie(w http.ResponseWriter) {
 	})
 }
 
+// completesHere reports whether pressing Continue on this request will FINISH
+// the sign-in rather than merely approve it.
+//
+// THE PAGE AND THE HANDLER BOTH CALL THIS, and they have to. The landing page
+// tells the reader what the button will do -- "this will not sign you in
+// here" on the cross-device branch -- and a page that says one thing while
+// the handler does another is worse than either alone. Two copies of the
+// condition would drift, and the first drift already happened in review: the
+// unbound bootstrap link rendered the cross-device copy and then signed the
+// operator in, on the very first thing anybody does with a new cluster.
+func completesHere(r *http.Request, row *identity.MagicLinkRow) bool {
+	return !row.HasBinding() || requestHoldsBinding(r, row)
+}
+
 // requestHoldsBinding reports whether this request carries the cookie that
 // was minted for this row.
 //
@@ -197,7 +211,7 @@ func (s *Server) handleAuthComplete(w http.ResponseWriter, r *http.Request) {
 	// this same person on this same device a moment ago -- has already said
 	// yes, and the requesting tab is finishing. Saying "invalid" here would
 	// be a lie that sends them to request a fresh link they do not need.
-	if !row.ApprovedAt.IsZero() && !requestHoldsBinding(r, row) {
+	if !row.ApprovedAt.IsZero() && !completesHere(r, row) {
 		s.renderLandingProblem(w, r, "Already confirmed",
 			"This sign-in has already been confirmed. Go back to the device where you asked for the link -- it is finishing signing you in. If you closed that page, request a new link from the device you want to use.")
 		return
@@ -207,7 +221,9 @@ func (s *Server) handleAuthComplete(w http.ResponseWriter, r *http.Request) {
 		Layout:      s.LayoutData(r, "Confirm sign-in", false, nil, nil),
 		MagicToken:  token,
 		MaskedEmail: maskEmail(row.Email),
-		SameDevice:  requestHoldsBinding(r, row),
+		// What the button will actually do, from the same predicate the
+		// handler branches on -- not a second reading of the cookie.
+		SameDevice: completesHere(r, row),
 	}
 	s.render(w, r, "landing", webtempl.Landing(data))
 }
@@ -254,7 +270,7 @@ func (s *Server) handleAuthLanding(w http.ResponseWriter, r *http.Request) {
 	// has a binding and reaches the branch below. If a row ever arrives here
 	// unbound for some OTHER reason, it completes for whoever opened it --
 	// which is why Unbound is server-stamped and no handler propagates it.
-	if !row.HasBinding() || requestHoldsBinding(r, row) {
+	if completesHere(r, row) {
 		s.finishSignIn(w, r, row, false)
 		return
 	}
