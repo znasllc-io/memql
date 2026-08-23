@@ -4,6 +4,7 @@
 // where they clarify, and in status -- never as decoration.
 
 export {
+  Archive,
   Blocks,
   Bot,
   Boxes,
@@ -26,4 +27,5 @@ export {
   Shield,
   Sun,
   Users,
+  X,
 } from "lucide-react";
