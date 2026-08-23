@@ -56,7 +56,9 @@ export function identityPath(identityUrl: string, path: string): string {
 export const IDENTITY_SETTINGS = "/me/settings";
 export const IDENTITY_DEVICES = "/me/devices";
 export const IDENTITY_TOKENS = "/me/tokens";
-// Export is where deletion is requested too -- identity renders both on one
-// page, because "take my data" and "delete my account" are the same decision
-// arriving in two orders.
+// Export is EXPORT ONLY. Deleting the account is on /me/settings, beside the
+// cooldown copy that explains what a deletion actually starts -- checked
+// against the templates rather than assumed from the route names, because
+// "export or delete your data" is the sentence every other product uses and
+// it would have sent somebody to the wrong page here.
 export const IDENTITY_EXPORT = "/me/export";

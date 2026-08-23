@@ -377,8 +377,11 @@ describe("/me/security (memql#4318, #4319)", () => {
     const expected: Array<[RegExp, string]> = [
       [/Manage passkeys/, "https://identity.example.com/me/devices"],
       [/Personal access tokens/, "https://identity.example.com/me/tokens"],
-      [/Account settings/, "https://identity.example.com/me/settings"],
-      [/Export or delete your data/, "https://identity.example.com/me/export"],
+      [/Export your data/, "https://identity.example.com/me/export"],
+      // Deletion is on SETTINGS, not on the export page. Identity's
+      // me_settings.templ carries "Delete account" and the cooldown copy;
+      // me_export.templ carries neither.
+      [/Account settings and deletion/, "https://identity.example.com/me/settings"],
     ];
     for (const [name, href] of expected) {
       expect(screen.getByRole("link", { name }).getAttribute("href")).toBe(href);

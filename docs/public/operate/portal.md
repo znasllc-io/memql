@@ -582,7 +582,7 @@ data and links to identity for every change identity owns. Three routed tabs:
 |---|---|---|
 | Account (`/me`) | display name, email, cluster role, member since, last seen -- read through `currentUser`, which takes no argument and resolves its row from `actor.userId`. Plus the shared-mailbox note when the account is flagged, pointing at the Security tab. | **Edit on identity** -> `/me/settings` |
 | Sessions (`/me/sessions`) | the caller's live sessions (`authSessionsForSelf`) -- device, source, signed in, last active -- with **this device** marked from `MyAccessResult.session_id`. Per-row **Revoke** and **Sign out everywhere**, both confirmed. | -- |
-| Security (`/me/security`) | enrolled passkeys (`passkeysForSelf`) with the backup posture that says whether losing the device loses the credential, and the passkey-only switch (`user.signInPolicy`). | **Manage passkeys** -> `/me/devices`; **Personal access tokens** -> `/me/tokens`; **Account settings** -> `/me/settings`; **Export or delete your data** -> `/me/export` |
+| Security (`/me/security`) | enrolled passkeys (`passkeysForSelf`) with the backup posture that says whether losing the device loses the credential, and the passkey-only switch (`user.signInPolicy`). | **Manage passkeys** -> `/me/devices`; **Personal access tokens** -> `/me/tokens`; **Export your data** -> `/me/export`; **Account settings and deletion** -> `/me/settings` |
 
 **Sign out** is the page header's one primary action, confirmed. It left the
 rail footer with the rest of the person-facing block.

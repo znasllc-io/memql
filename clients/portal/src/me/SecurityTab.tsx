@@ -159,8 +159,14 @@ export function SecurityTab({ me }: { me: MeState }): ReactNode {
           <div className="flex flex-wrap gap-2">
             <IdentityLink href={link(IDENTITY_DEVICES)}>Manage passkeys</IdentityLink>
             <IdentityLink href={link(IDENTITY_TOKENS)}>Personal access tokens</IdentityLink>
-            <IdentityLink href={link(IDENTITY_SETTINGS)}>Account settings</IdentityLink>
-            <IdentityLink href={link(IDENTITY_EXPORT)}>Export or delete your data</IdentityLink>
+            <IdentityLink href={link(IDENTITY_EXPORT)}>Export your data</IdentityLink>
+            {/* Deletion is on SETTINGS, not on the export page -- checked
+                against identity's own templates. Labelled for the decision
+                rather than the page, because somebody looking for it is
+                looking for the verb. */}
+            <IdentityLink href={link(IDENTITY_SETTINGS)}>
+              Account settings and deletion
+            </IdentityLink>
           </div>
           {link(IDENTITY_DEVICES) === "" ? (
             <Panel>
