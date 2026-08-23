@@ -173,7 +173,7 @@ require (
 	github.com/znasllc-io/memql/component/metrics v0.0.0
 	github.com/znasllc-io/memql/component/node v0.0.0
 	github.com/znasllc-io/memql/component/outbound v0.0.0
-	github.com/znasllc-io/memql/component/planner v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/planner v0.0.0
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/router v0.0.0
 	github.com/znasllc-io/memql/component/safety v0.0.0
