@@ -1,3 +1,12 @@
+---
+title: Anthropic Workload Identity Federation
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.20.0
+owner: znas
+---
+
 # Anthropic workload identity federation
 
 **What it replaces:** the one static `MEMQL_AI_ANTHROPIC_API_KEY` on the
