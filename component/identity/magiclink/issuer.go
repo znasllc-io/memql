@@ -147,6 +147,29 @@ type IssueInput struct {
 	// not propagated from request bodies.
 	ExistingUser bool
 
+	// Unbound=true issues a link with NO device binding, for a caller that
+	// has no browser to bind to (memql#4302).
+	//
+	// Exactly one caller sets it: the boot-time env auto-bootstrap, which
+	// emails the configured owner a claim link from a goroutine with nobody
+	// at a keyboard. Every other path issues in response to a request from a
+	// browser, hands that browser the nonce, and gets the device binding.
+	//
+	// WHY IT HAS TO EXIST. A bound link completes only in the browser holding
+	// the cookie. Issue one where no browser was handed a cookie and the link
+	// can be approved from anywhere and completed nowhere -- which for this
+	// path means an env-bootstrapped cluster nobody can claim. Refusing to
+	// have a flag would not make that safer; it would make the cluster
+	// unusable and send the operator to /setup, where they would get a bound
+	// link and the same outcome by a longer route.
+	//
+	// WHAT IT COSTS. An unbound link completes for whoever opens it -- the
+	// pre-memql#4302 behaviour, for this one link. That is the same trust
+	// this path always had: it is emailed to the address the operator
+	// configured, on a cluster with no owner credential yet. Server-stamped;
+	// no HTTP handler may propagate it from a request body.
+	Unbound bool
+
 	// AdminSession=true marks the request as an identity-admin
 	// sign-in (no relying-party OAuth callback; the click should
 	// land in /admin/, not bounce out to a client app). The web
@@ -383,9 +406,17 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 	// browser as the memql_ml cookie and nowhere else. This is what makes
 	// the session land on the device that asked: a click from any other
 	// browser can APPROVE the request but can never complete it.
-	bindingNonce, bindingHash, err := newBindingNonce()
-	if err != nil {
-		return out, fmt.Errorf("magiclink: generate binding nonce: %w", err)
+	//
+	// Skipped for an Unbound issue, where there is no browser to hand the
+	// nonce to. See IssueInput.Unbound -- a bound link nobody holds the
+	// cookie for is a link nobody can complete.
+	var bindingNonce, bindingHash string
+	if !in.Unbound {
+		var err error
+		bindingNonce, bindingHash, err = newBindingNonce()
+		if err != nil {
+			return out, fmt.Errorf("magiclink: generate binding nonce: %w", err)
+		}
 	}
 
 	if err := i.Store.CreateMagicLinkRequest(

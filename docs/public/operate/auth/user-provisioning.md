@@ -97,6 +97,7 @@ sign-in itself.
 | **The user requests a second link from the same browser** | The new cookie overwrites the old one, so the older link behaves as a no-cookie click -- approve only. Accepted and documented. |
 | **JavaScript is off** | The poller does not run. The link still works; it has to be opened in the browser that asked for it, where the same-device branch finishes it directly. |
 | **Two identity replicas** | No affinity is needed. The row is the state and the cookie's digest is on the row, so approve, poll and finish can each be served by a different pod. |
+| **The env auto-bootstrap claim link** | Issued **unbound**, and completes for whoever opens it. It is emailed from a boot-time goroutine with no browser to bind to, so a binding would make it approvable from anywhere and completable nowhere — a cluster nobody can claim. Same trust this path always had: the address is the one the operator configured, on a cluster with no owner credential yet. Every other issue path answers a browser and is bound. |
 
 ### What still is not solved, and is not pretended to be
 

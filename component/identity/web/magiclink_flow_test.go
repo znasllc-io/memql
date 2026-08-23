@@ -791,3 +791,58 @@ func TestRevokedCookieCannotMintAFreshSession(t *testing.T) {
 			"with a longer life than the one the user just revoked.")
 	}
 }
+
+// TestUnboundLinkCompletesForWhoeverOpensIt covers the one issue path that
+// has no browser to bind to (memql#4302).
+//
+// # The regression this exists to prevent
+//
+// The boot-time env auto-bootstrap emails the configured owner a claim link
+// from a goroutine with nobody at a keyboard. If that link carried a binding
+// nobody holds the cookie for, it could be APPROVED from anywhere and
+// COMPLETED nowhere -- an env-bootstrapped cluster nobody can claim, and the
+// failure would present as "I clicked the link and it told me to go back to
+// a device I was never on".
+//
+// So an unbound row completes for whoever opens it: the pre-memql#4302
+// behaviour, for the one link that always had that trust profile.
+func TestUnboundLinkCompletesForWhoeverOpensIt(t *testing.T) {
+	fx := newFlowFixture(t)
+	// Issued with no browser on the other end: no bindingHash on the row.
+	fx.verifier.row.BindingHash = ""
+
+	rec := postLanding(t, fx, false) // no cookie, and none was ever handed out
+
+	if fx.verifier.finishes != 1 {
+		t.Fatalf("an unbound link ran finish %d time(s), want 1.\n"+
+			"This is the env auto-bootstrap's claim link. With no browser to bind to, a binding "+
+			"would make it approvable everywhere and completable nowhere -- a cluster nobody can "+
+			"claim.", fx.verifier.finishes)
+	}
+	if fx.sessions != 1 {
+		t.Fatalf("an unbound link produced %d session(s), want 1", fx.sessions)
+	}
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303", rec.Code)
+	}
+}
+
+// TestBoundLinkStillRefusesTheWrongBrowser is the other half, and it is what
+// stops the test above from being read as "the binding is optional".
+//
+// Same handler, same click, one difference: the row HAS a binding. It must
+// approve rather than complete, or the exemption above would be a hole in
+// every ordinary sign-in rather than a property of one server-initiated link.
+func TestBoundLinkStillRefusesTheWrongBrowser(t *testing.T) {
+	fx := newFlowFixture(t) // row carries a bindingHash
+
+	postLanding(t, fx, false) // no cookie
+
+	if fx.verifier.finishes != 0 {
+		t.Fatal("a BOUND link completed for a browser that does not hold its cookie.\n" +
+			"The unbound exemption must apply only to a row that never had a binding.")
+	}
+	if fx.sessions != 0 {
+		t.Fatal("a bound link signed in the wrong browser")
+	}
+}

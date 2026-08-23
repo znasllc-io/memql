@@ -241,7 +241,20 @@ func (s *Server) handleAuthLanding(w http.ResponseWriter, r *http.Request) {
 	// SAME DEVICE. The browser holding the binding cookie opened its own
 	// link -- the ordinary case where a mail client opens a new tab of the
 	// same profile. Nothing to approve; finish here.
-	if requestHoldsBinding(r, row) {
+	//
+	// AN UNBOUND ROW ALSO FINISHES HERE, and that is not a hole in the
+	// binding -- it is the absence of one, for a link that never had a device
+	// to bind to. Exactly one issuer produces such a row: the boot-time env
+	// auto-bootstrap, emailing the configured owner a claim link from a
+	// goroutine with nobody at a keyboard (magiclink.IssueInput.Unbound).
+	// Binding that link would make it approvable from anywhere and completable
+	// nowhere, i.e. an env-bootstrapped cluster nobody can claim.
+	//
+	// Every other issue path hands a browser the nonce, so every other row
+	// has a binding and reaches the branch below. If a row ever arrives here
+	// unbound for some OTHER reason, it completes for whoever opened it --
+	// which is why Unbound is server-stamped and no handler propagates it.
+	if !row.HasBinding() || requestHoldsBinding(r, row) {
 		s.finishSignIn(w, r, row, false)
 		return
 	}

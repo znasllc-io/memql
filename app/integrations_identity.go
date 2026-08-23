@@ -777,18 +777,25 @@ func (a *App) attemptAutoBootstrap(
 		return
 	}
 
-	// NO BINDING COOKIE ON THIS PATH, and it cannot have one: nobody is
-	// holding a browser. The link goes to the owner's inbox from a boot-time
-	// goroutine, so whoever opens it is a cross-device clicker by
-	// construction -- they approve, and the /check-email page of the browser
-	// that later runs /setup finishes. That is the correct outcome, not a
-	// gap: an unclaimed cluster's first credential should not complete on
-	// the strength of a mailbox alone.
+	// UNBOUND, and it has to be: nobody is holding a browser (memql#4302).
+	//
+	// Every other issue path answers a request FROM a browser and hands that
+	// browser the binding nonce, so the link completes only there. This one
+	// runs in a boot-time goroutine and emails the configured owner. A bound
+	// link here would be approvable from anywhere and completable nowhere --
+	// an env-bootstrapped cluster nobody can claim, with the operator sent to
+	// /setup to get a bound link and the same outcome by a longer route.
+	//
+	// So this link keeps the pre-memql#4302 behaviour: whoever opens it
+	// completes it. That is the trust this path always had -- it goes to the
+	// address the operator configured, on a cluster with no owner credential
+	// yet, and it is the credential that creates the first one.
 	if _, err := mlIssuer.Issue(ctx, magiclink.IssueInput{
 		Email:        cfg.Bootstrap.OwnerEmail,
 		State:        "setup",
 		Bootstrap:    true,
 		AdminSession: true,
+		Unbound:      true,
 	}); err != nil {
 		a.Logger.Warn("identity auto-bootstrap: issue owner magic link failed; rerun setup or check email config",
 			"error", err, "owner_email", cfg.Bootstrap.OwnerEmail,
