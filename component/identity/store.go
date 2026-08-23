@@ -1879,3 +1879,74 @@ func (s *Store) LookupInvitationByTokenHash(ctx context.Context, tokenHash strin
 		RespondedAt: g.time("respondedAt"),
 	}, nil
 }
+
+// ---------------------------------------------------------------------------
+// Authentication activity (memql#4328)
+// ---------------------------------------------------------------------------
+
+// AuthActivityRow projects a v1:identity:authActivity row. Only the members
+// the reuse-detection path reads are lifted; the full projection lives in the
+// authActivityFull shape and is read by clients, not here.
+type AuthActivityRow struct {
+	ID               string
+	OccurredAt       time.Time
+	Action           string
+	SessionId        string
+	ActorUserId      string
+	RetiredTokenHash string
+}
+
+// AuthActivityByRetiredHash returns the most recent rotation that RETIRED the
+// given refresh-token hash, or nil when no rotation ever did.
+//
+// This is the whole of reuse detection's evidence (memql#4329): a presented
+// refresh token that resolves to no usable session but matches a hash some
+// rotation retired is a REPLAY, not a stale cookie. Without the row the two are
+// indistinguishable, which is what they were before this existed.
+//
+// It runs under ContextWithActivityReadActor -- see that function for why an
+// identity rather than an enforcement bypass, and why the idempotent
+// system-actor helper would silently fail here.
+//
+// Detection therefore reaches back exactly as far as
+// MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS. Past the window the row is gone
+// and the replay falls back to session_not_found: a documented limit, and a
+// safe one, since the default 30 days exceeds both the idle timeout and the
+// refresh-token TTL.
+func (s *Store) AuthActivityByRetiredHash(ctx context.Context, retiredTokenHash string) (*AuthActivityRow, error) {
+	hash := strings.TrimSpace(retiredTokenHash)
+	if hash == "" {
+		return nil, nil
+	}
+	var b strings.Builder
+	b.WriteString(`query authActivityByRetiredHash(`)
+	writeKVString(&b, "retiredTokenHash", hash, true)
+	b.WriteString(`)`)
+
+	// executeAndExtractInternal, not executeAndExtract: the query is
+	// @serverOnly and origin DEFAULTS to client, so the plain form is refused
+	// at execute -- and the refusal reads as "no rotation retired this hash",
+	// which is reuse detection failing OPEN on every call.
+	nodes, err := s.executeAndExtractInternal(ContextWithActivityReadActor(ctx), b.String())
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: auth activity by retired hash: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	n := nodes[0]
+	fields := n.GetPayload().GetFields()
+	row := &AuthActivityRow{
+		ID:               n.GetId(),
+		Action:           fields["action"].GetStringValue(),
+		SessionId:        fields["sessionId"].GetStringValue(),
+		ActorUserId:      fields["actorUserId"].GetStringValue(),
+		RetiredTokenHash: fields["retiredTokenHash"].GetStringValue(),
+	}
+	if raw := fields["occurredAt"].GetStringValue(); raw != "" {
+		if parsed, perr := time.Parse(time.RFC3339Nano, raw); perr == nil {
+			row.OccurredAt = parsed
+		}
+	}
+	return row, nil
+}

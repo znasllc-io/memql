@@ -412,6 +412,35 @@ describe("the Audit view", () => {
     const badge = container.querySelector('.vk-row-status[data-status="failure"]');
     expect(badge).toBeTruthy();
   });
+
+  it("carries no routine mechanics -- those moved to v1:identity:authActivity", async () => {
+    // memql#4328. The Trail is a generic concept walk over auditEvent with no
+    // filter of any kind, so it shows whatever that concept contains. Four
+    // actions moved off it -- refresh-token rotations, the blocked ones,
+    // grace-window accepts and PAT-authenticated requests -- because they are
+    // two orders of magnitude more numerous than the decisions and they made
+    // the trail unreadable.
+    //
+    // Asserted against the FIXTURE as well as the render: the fixture is what
+    // a reader takes as the shape of an audit row, and a mechanic reappearing
+    // in it is how the split would quietly come undone.
+    const mechanics = [
+      "session_refreshed",
+      "session_refresh_blocked",
+      "grace_window_accept",
+      "pat_auth_accepted",
+    ];
+    for (const r of ROWS[AUDIT]!) {
+      const action = (r.payload as { action?: string }).action ?? "";
+      expect(mechanics).not.toContain(action);
+    }
+
+    const { container } = renderView({}, "/views/audit");
+    await waitFor(() => expect(screen.getByText("role_changed")).toBeTruthy());
+    for (const action of mechanics) {
+      expect(container.textContent).not.toContain(action);
+    }
+  });
 });
 
 describe("the Deployments view", () => {

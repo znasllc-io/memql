@@ -81,6 +81,30 @@ shape auditEvent auditEventFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:authActivity -- the routine authentication mechanics log
+/// (memql#4328). retiredTokenHash IS projected: it is the digest of a token that can no longer be
+/// used, so it discloses nothing a live credential would, and an operator investigating a replay
+/// needs to see which rotation retired the hash the security signal names.
+@row
+shape authActivity authActivityFull {
+  row.id
+  occurredAt
+  action
+  sessionId
+  actorUserId
+  actorEmail
+  actorRole
+  actorIdentityId
+  sourceIP
+  userAgent
+  clientLabel
+  outcome
+  failureReason
+  retiredTokenHash
+  detail
+  row.createdAt
+}
+
 /// Full projection of v1:identity:authCode. Only the SHA-256 hash exists to project -- the
 /// plaintext code field was removed under issue #3187 -- so a query result can never be replayed
 /// at the token endpoint.

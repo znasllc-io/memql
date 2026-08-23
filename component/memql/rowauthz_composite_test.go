@@ -276,3 +276,91 @@ func walkRowAuthzComparisons(expr ExpressionNode, visit func(*ComparisonExpressi
 		walkRowAuthzComparisons(n.Right, visit)
 	}
 }
+
+// THE SHADOW ANALYZER, which is the land-time gate's whole verdict
+// (TestRowAuthzEnforcementLandGate). It had no composite arm until
+// memql#4328 declared the first composite concept in the tree.
+//
+// The gate hard-fails anything that is not ShadowAlreadyImplied, so
+// without this the composite tier could be DECLARED and then no operator
+// roll-up over it could be AUTHORED -- the tier would parse, inject and
+// admit correctly while being unusable for the one job it exists for.
+//
+// The rule is ordinary propositional logic. The injected predicate is a
+// disjunction `owner || admin`; a conjunctive filter implies it when any
+// top-level conjunct implies EITHER arm. `A` implies `A || B`, and so
+// does `B`. The plain owned tier accepts only the owner leaf because its
+// predicate has only that arm.
+func TestCompositeTierIsImpliedByEitherLeaf(t *testing.T) {
+	decl := compositeFixture(t)
+
+	// Built as expressions rather than parsed source, because what the
+	// gate analyzes is a LOADED query's Expr -- and these two leaf shapes
+	// are exactly what isOwnerScopeLeaf / isClusterOwnerLeaf match.
+	ownerLeaf := ownerScopeLeafExpr(decl.Owner)
+	adminLeaf := clusterOwnerLeafExpr()
+	unrelated := unrelatedLeafExpr()
+
+	if v, reason := AnalyzeShadow(ownerLeaf, decl); v != ShadowAlreadyImplied {
+		t.Errorf("owner leaf against the composite tier = %s (%s), want %s -- `A` implies `A || B`",
+			v, reason, ShadowAlreadyImplied)
+	}
+	if v, reason := AnalyzeShadow(adminLeaf, decl); v != ShadowAlreadyImplied {
+		t.Errorf("cluster-owner leaf against the composite tier = %s (%s), want %s.\n"+
+			"An operator roll-up CANNOT author the owner conjunct -- ANDing it would narrow the "+
+			"cluster owner to their own rows, which is the confidently-wrong answer this tier "+
+			"exists to prevent. The cluster-owner conjunct is the only term it can carry.",
+			v, reason, ShadowAlreadyImplied)
+	}
+	if v, _ := AnalyzeShadow(unrelated, decl); v == ShadowAlreadyImplied {
+		t.Error("an unrelated leaf reads as already-implied against the composite tier -- the " +
+			"analyzer is admitting everything and this whole test would pass vacuously")
+	}
+
+	// And the bypass must not leak onto the PLAIN owned tier: there the
+	// predicate has no admin arm, so a cluster-owner conjunct guarantees
+	// nothing about it.
+	plain := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: decl.Owner}
+	if v, _ := AnalyzeShadow(adminLeaf, plain); v == ShadowAlreadyImplied {
+		t.Error("a cluster-owner conjunct reads as already-implied against the PLAIN owned tier; " +
+			"that tier has no cluster-owner escape and the analyzer must not invent one")
+	}
+}
+
+// A top-level disjunction whose arms are the two leaves -- the tier's own
+// spelling, which an author may legitimately restate -- is implied too.
+func TestCompositeTierIsImpliedByItsOwnSpelling(t *testing.T) {
+	decl := compositeFixture(t)
+	restated := &LogicalExpression{
+		Op:    LogicalOr,
+		Left:  ownerScopeLeafExpr(decl.Owner),
+		Right: clusterOwnerLeafExpr(),
+	}
+	if v, reason := AnalyzeShadow(restated, decl); v != ShadowAlreadyImplied {
+		t.Errorf("the tier's own predicate, restated as a filter, reads as %s (%s)", v, reason)
+	}
+}
+
+func ownerScopeLeafExpr(field string) ExpressionNode {
+	return &ComparisonExpression{
+		Field:    FieldReference{Raw: field, Parts: []string{field}},
+		Operator: OpEq,
+		Value:    &ActorReference{Path: "userId"},
+	}
+}
+
+func clusterOwnerLeafExpr() ExpressionNode {
+	return &ComparisonExpression{
+		Field:    FieldReference{Raw: "actor.isClusterOwner", Parts: []string{"actor", "isClusterOwner"}},
+		Operator: OpEq,
+		Value:    true,
+	}
+}
+
+func unrelatedLeafExpr() ExpressionNode {
+	return &ComparisonExpression{
+		Field:    FieldReference{Raw: "status", Parts: []string{"status"}},
+		Operator: OpEq,
+		Value:    "active",
+	}
+}

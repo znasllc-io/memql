@@ -18,6 +18,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/admin"
+	"github.com/znasllc-io/memql/component/identity/authactivity"
 	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/emailsender"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
@@ -74,12 +75,23 @@ func (a *App) integrationsIdentity() {
 		a.fatal("identity configuration validation failed", "error", err, "component", identity.ComponentName)
 	}
 
-	// Wire the EngineAuditSink so audit events land in
-	// v1:identity:auditEvent in addition to the slog stream. The
-	// engine satisfies identity.EngineExecutor directly.
+	// TWO SINKS BEHIND ONE LOGGER (memql#4328). Decisions and security
+	// signals land in v1:identity:auditEvent; routine mechanics -- refresh
+	// rotations, grace-window accepts, PAT-authenticated requests -- land in
+	// v1:identity:authActivity. Both also go to the slog stream, which is
+	// unbounded and stays the canonical destination.
+	//
+	// Wiring the activity sink is not optional in practice: without it every
+	// mechanic falls back to the audit log (SlogAuditLogger's deliberate
+	// degrade), which is the noise the split exists to remove AND leaves the
+	// reuse-detection lookup with nothing to key on.
 	auditLogger := &identity.SlogAuditLogger{
 		Logger: a.Logger,
 		DB: &identity.EngineAuditSink{
+			Engine: a.engine,
+			Logger: a.Logger,
+		},
+		Activity: &identity.ActivitySink{
 			Engine: a.engine,
 			Logger: a.Logger,
 		},
@@ -553,6 +565,58 @@ func (a *App) integrationsIdentity() {
 	// a cluster that cannot mint a break-glass key must still serve auth. The
 	// warning is loud because the absence is silent otherwise.
 	a.ensureOwnerRecoveryKey(context.Background(), store)
+
+	a.startAuthActivityRetention(cfg)
+}
+
+// startAuthActivityRetention arms the daily hard-delete over
+// v1:identity:authActivity (memql#4330).
+//
+// WHY A GO JOB AND NOT AN AUTOMATION. The DSL sweep beside it,
+// auditEventRetentionSweep, only COUNTS -- MemQL has no delete() mutation, and
+// an append-only audit log cannot be soft-deleted via active=false without
+// changing what the log means. authActivity is a different kind of record: one
+// row per rotation and one per PAT-authenticated request, value that decays in
+// weeks, and no compliance story. Leaving it to grow forever is not a posture,
+// it is a table nobody pruned. So this deletes from the node table directly,
+// on the pattern component/node/delivery_store_pg.go already established.
+//
+// THE DIRECT (non-pooled) HANDLE, for the reason ensureOwnerRecoveryKey gives:
+// a transaction-mode PgBouncer recycles the backend between statements. There
+// is no advisory lock here -- deletes are idempotent, so two replicas sweeping
+// at once race harmlessly -- but the getter is the same one, and using the
+// pooled handle for a multi-statement select-then-delete would be the shape
+// that bites next.
+//
+// Every replica runs it. That is deliberate and is what makes the job survive
+// a leader disappearing; the cost is a few extra no-op queries a day.
+func (a *App) startAuthActivityRetention(cfg identity.Config) {
+	getDB := a.directDBGetter()
+	if getDB == nil {
+		a.Logger.Warn("identity: no database handle, so authActivity retention will not run; the "+
+			"activity log will grow without bound and refresh-token reuse detection will keep "+
+			"finding rows it should have forgotten",
+			"component", identity.ComponentName)
+		return
+	}
+	pruner := &authactivity.Pruner{
+		DB: func() *sql.DB {
+			bdb := getDB()
+			if bdb == nil {
+				return nil
+			}
+			return bdb.DB
+		},
+		Retention: cfg.AuthActivityRetention,
+		Logger:    a.Logger,
+	}
+	// Background, not tied to a request: the App has no shutdown context to
+	// hand it here, and the loop exits with the process. Run() sweeps once
+	// IMMEDIATELY -- a pod that restarts daily would otherwise never prune.
+	go pruner.Run(context.Background())
+	a.Logger.Info("identity: authActivity retention armed",
+		"retention_days", int(cfg.AuthActivityRetention.Hours()/24),
+		"component", identity.ComponentName)
 }
 
 // ensureOwnerRecoveryKey evaluates the recovery-key invariant (memql#3965).

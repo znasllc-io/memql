@@ -403,6 +403,31 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// content-addresses the participant id on (space, user) and requires
 		// the userId a guest does not have.
 		{Path: "cognition/mutations.memql", Name: "createGuestParticipant"}: true,
+		// memql#4328. The two engine-internal halves of the authentication
+		// ACTIVITY log, and neither is caller-scopable -- for opposite
+		// reasons, which is why they are listed together.
+		//
+		// createAuthActivity records an authentication that ALREADY happened.
+		// Every argument is an assertion about it: which session, which
+		// credential, which token hash the rotation retired. The check that
+		// belongs in front of it is "the identity service verified this
+		// credential", which no filter over actor.userId can express -- and
+		// caller-scoping it would be actively wrong, because the row's owner
+		// is stamped from the actor the WRITER borrows (the session's user),
+		// not from a requesting caller. A client-reachable version would let
+		// anyone manufacture activity history, retiredTokenHash included,
+		// which is the exact field reuse detection keys on.
+		//
+		// authActivityByRetiredHash is the reuse lookup (memql#4329). It runs
+		// on the /auth/refresh path, which is UNAUTHENTICATED by construction
+		// -- it is the request that mints the credential -- so at the moment
+		// it runs there is no caller identity to scope to. Worse, scoping it
+		// would defeat it: the question is "did ANY session retire this
+		// hash", asked precisely because the presenter is not the person who
+		// owns it. Exposing it to clients would hand out an oracle over other
+		// people's tokens.
+		{Path: "identity/mutations.memql", Name: "createAuthActivity"}:      true,
+		{Path: "identity/queries.memql", Name: "authActivityByRetiredHash"}: true,
 	}
 	for k := range want {
 		if !set[k] {

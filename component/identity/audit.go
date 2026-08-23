@@ -29,6 +29,28 @@ const (
 	AuditOutcomeNone    AuditOutcome = ""
 )
 
+// AuditStream selects WHICH log an event lands on (memql#4328).
+//
+// One writer, two destinations. v1:identity:auditEvent records DECISIONS and
+// SECURITY SIGNALS -- a sign-in, a revoke, a role change, a detected token
+// replay. v1:identity:authActivity records routine MECHANICS -- refresh-token
+// rotations and PAT-authenticated requests -- which are two orders of
+// magnitude more numerous and which made the operator's audit trail
+// unreadable when they shared it.
+//
+// The zero value is StreamAudit, deliberately: every writer that predates the
+// split leaves the field unset, and the failure mode of a wrong default should
+// be "a mechanic appears in the audit log" (visible, noisy) rather than "a
+// decision disappears into the high-volume log with 30-day retention".
+type AuditStream string
+
+const (
+	// StreamAudit is v1:identity:auditEvent. The default.
+	StreamAudit AuditStream = ""
+	// StreamActivity is v1:identity:authActivity.
+	StreamActivity AuditStream = "activity"
+)
+
 // AuditEvent is the in-memory representation of an audit-log entry.
 // Mirrors the fields on the v1:identity:auditEvent concept. The
 // AuditLogger emits these to BOTH a slog stream (for unbounded
@@ -36,7 +58,9 @@ const (
 // the database via a memql mutation (for the in-app admin view +
 // 365-day default retention).
 type AuditEvent struct {
-	OccurredAt    time.Time
+	OccurredAt time.Time
+	// Stream selects the destination log. Zero value = the audit log.
+	Stream        AuditStream
 	Category      AuditCategory
 	Action        string
 	ActorUserId   string
@@ -53,6 +77,17 @@ type AuditEvent struct {
 	Outcome       AuditOutcome
 	FailureReason string
 	PrevEventHash string
+
+	// --- StreamActivity-only fields (memql#4328) ---------------------------
+	// Ignored by the audit sink, which has no columns for them.
+
+	// ClientLabel is the best-effort human device label (mirrors
+	// authSession.clientLabel), so a person reading their own activity sees
+	// "Safari on macOS" rather than a User-Agent string.
+	ClientLabel string
+	// RetiredHash is the SHA-256 hex of the refresh token a rotation retired.
+	// The lookup key memql#4329's reuse detection runs on.
+	RetiredHash string
 }
 
 // AuditLogger is the interface call sites depend on. Keeping it as
@@ -77,6 +112,11 @@ type AuditDBSink interface {
 type SlogAuditLogger struct {
 	Logger *slog.Logger
 	DB     AuditDBSink // nil = slog-only
+	// Activity is the sink for Stream == StreamActivity. Nil falls back to
+	// DB rather than dropping the event: losing a rotation row costs the
+	// reuse-detection lookup its evidence (memql#4329), and an event landing
+	// noisily on the wrong log is strictly better than one landing nowhere.
+	Activity AuditDBSink
 }
 
 // Log implements AuditLogger.
@@ -87,6 +127,7 @@ func (s *SlogAuditLogger) Log(ctx context.Context, ev AuditEvent) {
 	if s.Logger != nil {
 		s.Logger.LogAttrs(ctx, slog.LevelInfo, "audit",
 			slog.Time("occurred_at", ev.OccurredAt),
+			slog.String("stream", streamLabel(ev.Stream)),
 			slog.String("category", string(ev.Category)),
 			slog.String("action", ev.Action),
 			slog.String("actor_user_id", ev.ActorUserId),
@@ -104,9 +145,14 @@ func (s *SlogAuditLogger) Log(ctx context.Context, ev AuditEvent) {
 			slog.String("detail_json", encodeDetail(ev.Detail)),
 		)
 	}
-	if s.DB != nil {
-		if err := s.DB.WriteAuditEvent(ctx, ev); err != nil && s.Logger != nil {
+	sink := s.DB
+	if ev.Stream == StreamActivity && s.Activity != nil {
+		sink = s.Activity
+	}
+	if sink != nil {
+		if err := sink.WriteAuditEvent(ctx, ev); err != nil && s.Logger != nil {
 			s.Logger.WarnContext(ctx, "audit_db_write_failed",
+				slog.String("stream", string(ev.Stream)),
 				slog.String("action", ev.Action),
 				slog.String("error", err.Error()),
 			)
@@ -133,4 +179,13 @@ func encodeDetail(detail map[string]any) string {
 		return ""
 	}
 	return string(out)
+}
+
+// streamLabel spells the zero value out, so a reader grepping the slog stream
+// does not have to know that an empty field means the audit log.
+func streamLabel(s AuditStream) string {
+	if s == StreamActivity {
+		return "activity"
+	}
+	return "audit"
 }

@@ -1114,6 +1114,28 @@ QueryClient.prototype.auditEventsByTarget = function (this: QueryClient, args: A
   return this.executeNamed("auditEventsByTarget", buildAuditEventsByTarget(args), opts);
 };
 
+/** The caller's OWN authentication mechanics, newest first -- which devices refreshed their session and when. Available to every authenticated user, which is the point of the composite tier: a person can see the activity on their own account without an operator's help, and "a device I do not recognise refreshed my session" is the signal they are best placed to spot. */
+// Bound concept: v1:identity:authActivity (machine-readable: BoundConcepts["authActivityForSelf"] in generated_concepts.ts).
+export interface AuthActivityForSelfArgs {
+  sessionId?: string;
+}
+
+export function buildAuthActivityForSelf(args: AuthActivityForSelfArgs): string {
+  const parts: string[] = [];
+  if (args.sessionId !== undefined) parts.push("sessionId: " + renderMemQLValue(args.sessionId));
+  return "query authActivityForSelf(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    authActivityForSelf(args: AuthActivityForSelfArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.authActivityForSelf = function (this: QueryClient, args: AuthActivityForSelfArgs = {} as AuthActivityForSelfArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("authActivityForSelf", buildAuthActivityForSelf(args), opts);
+};
+
 /** Returns the auth code whose codeHash matches the argument. Zero or one result. */
 // Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["authCodeByCodeHash"] in generated_concepts.ts).
 export interface AuthCodeByCodeHashArgs {
@@ -3916,7 +3938,7 @@ QueryClient.prototype.provisionedWorkspaces = function (this: QueryClient, args:
   return this.executeNamed("provisionedWorkspaces", buildProvisionedWorkspaces(args), opts);
 };
 
-/** Recent audit events, optionally filtered by category. Powers the admin audit-log view. Owner/admin only: the audit trail names who did what to whom across the whole cluster, so an ungated read hands every authenticated caller the cluster's security history. The gate was implicit while the only caller was the identity service's /admin/* routes, which enforce it at the route (component/identity/admin, requireAdmin). The portal reaches this query directly over the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be in the query, which is the only place both callers pass through. */
+/** recentAuditEvents wraps the query named "recentAuditEvents". */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.ts).
 export interface RecentAuditEventsArgs {
   category?: string;
@@ -3936,6 +3958,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.recentAuditEvents = function (this: QueryClient, args: RecentAuditEventsArgs = {} as RecentAuditEventsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recentAuditEvents", buildRecentAuditEvents(args), opts);
+};
+
+/** Every user's recent authentication mechanics, newest first. THE OPERATOR ROLL-UP: cluster owner only, because that is the one role the concept's composite tier lets past the per-user narrowing (see the block above). Optional sessionId narrows to one device's story; optional actorUserId narrows to one person's. */
+// Bound concept: v1:identity:authActivity (machine-readable: BoundConcepts["recentAuthActivity"] in generated_concepts.ts).
+export interface RecentAuthActivityArgs {
+  sessionId?: string;
+  actorUserId?: string;
+}
+
+export function buildRecentAuthActivity(args: RecentAuthActivityArgs): string {
+  const parts: string[] = [];
+  if (args.sessionId !== undefined) parts.push("sessionId: " + renderMemQLValue(args.sessionId));
+  if (args.actorUserId !== undefined) parts.push("actorUserId: " + renderMemQLValue(args.actorUserId));
+  return "query recentAuthActivity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recentAuthActivity(args: RecentAuthActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recentAuthActivity = function (this: QueryClient, args: RecentAuthActivityArgs = {} as RecentAuthActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recentAuthActivity", buildRecentAuthActivity(args), opts);
 };
 
 /** ENGINE: the most recent send jobs in any status, newest first. Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- the question it answers is about the cluster, not about one operator. Backs one thing only: the boot-time check behind the unsubscribe-secret rotation warning (memql#3458), which needs to know whether this deployment has ever put a signed unsubscribe link in front of a recipient. The row carries no recipient data. */

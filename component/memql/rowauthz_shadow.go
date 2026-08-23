@@ -216,6 +216,31 @@ func AnalyzeShadow(expr ExpressionNode, decl *langparser.RowAuthzDecl) (ShadowVe
 			switch {
 			case decl.Tier == langparser.RowAuthzOwned && isOwnerScopeLeaf(c, decl.Owner):
 				return ShadowAlreadyImplied, ""
+			case decl.Tier == langparser.RowAuthzOwned && decl.ClusterOwnerBypass && isClusterOwnerLeaf(c):
+				// THE COMPOSITE ARM (memql#4312, first consumed by
+				// memql#4328). The injected predicate is a DISJUNCTION,
+				// `owner || admin`, so a conjunctive filter implies it when
+				// any top-level conjunct implies EITHER arm -- `A` implies
+				// `A || B` and so does `B`. Ordinary propositional logic,
+				// but it has to be written down, because the two tiers
+				// above are each a single leaf and the loop was shaped
+				// around that.
+				//
+				// Without this arm the composite could be DECLARED and then
+				// no operator roll-up over it could be AUTHORED: the
+				// land-time gate hard-fails anything not already-implied,
+				// and a roll-up cannot carry the owner conjunct -- ANDing it
+				// would narrow the cluster owner to their OWN rows, which is
+				// the confidently-wrong answer this tier exists to prevent.
+				// The tier would have parsed, injected and admitted
+				// correctly while being unusable for its only job.
+				//
+				// Guarded on ClusterOwnerBypass, so a PLAIN owned tier still
+				// refuses a cluster-owner conjunct. That tier has no
+				// cluster-owner escape (rowauthz_enforce.go), and an
+				// analyzer that credited one would report no narrowing where
+				// the engine performs one.
+				return ShadowAlreadyImplied, ""
 			case decl.Tier == langparser.RowAuthzClusterOwner && isClusterOwnerLeaf(c):
 				return ShadowAlreadyImplied, ""
 			}
