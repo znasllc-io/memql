@@ -299,7 +299,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	// the link that is about to be emailed can be APPROVED from anywhere and
 	// COMPLETED nowhere, which is what stops a shared mailbox from being a
 	// first-come-first-served credential.
-	s.setMagicLinkCookie(w, res.BindingNonce, s.magicLinkTTL())
+	s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
 	http.Redirect(w, r, checkEmailURL(email, res.RequestId), http.StatusSeeOther)
 }
 
@@ -314,8 +314,29 @@ func checkEmailURL(email, requestId string) string {
 	return "/check-email?" + q.Encode()
 }
 
-// magicLinkTTL is the cookie's lifetime: the link's own TTL, so the binding
-// dies exactly when the credential it binds does.
+// bindingLifetime is how long the cookie should live: until the ROW expires.
+//
+// Derived from the issuer's own answer rather than re-read from config, so
+// the binding dies exactly when the credential it binds does. Two independent
+// reads of MagicLinkTTL would agree today and diverge the first time either
+// side learns to consult a runtime override -- and the divergence would be
+// silent in the worse direction: a cookie that expires early turns every
+// same-device click into a cross-device approval, which reads as "the link
+// stopped working on my own machine".
+//
+// Falls back to the configured TTL when the issuer returned no expiry (the
+// paths that mint no row, where there is no cookie to set either).
+func (s *Server) bindingLifetime(res IssueMagicLinkResult) time.Duration {
+	if !res.ExpiresAt.IsZero() {
+		if d := time.Until(res.ExpiresAt); d > 0 {
+			return d
+		}
+	}
+	return s.magicLinkTTL()
+}
+
+// magicLinkTTL is the configured link lifetime, used as the fallback above
+// and as the poller's stop time.
 func (s *Server) magicLinkTTL() time.Duration {
 	if s != nil && s.Cfg.MagicLinkTTL > 0 {
 		return s.Cfg.MagicLinkTTL
@@ -766,7 +787,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		// so the claim link completes on the machine that ran /setup. It is
 		// the one flow where the operator is provably at the keyboard, and
 		// binding it costs nothing.
-		s.setMagicLinkCookie(w, res.BindingNonce, s.magicLinkTTL())
+		s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
 		requestId = res.RequestId
 	}
 	http.Redirect(w, r, checkEmailURL(in.OwnerEmail, requestId), http.StatusSeeOther)

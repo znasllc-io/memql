@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
 )
@@ -41,7 +42,13 @@ func newPKCELoginServer(t *testing.T) (*Server, *IssueMagicLinkInput) {
 	captured := &IssueMagicLinkInput{}
 	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error) {
 		*captured = in
-		return IssueMagicLinkResult{RequestId: "req-1", BindingNonce: "nonce-1"}, nil
+		return IssueMagicLinkResult{
+			RequestId:    "req-1",
+			BindingNonce: "nonce-1",
+			// The issuer's own expiry -- what the cookie's lifetime is now
+			// derived from, rather than a second read of the configured TTL.
+			ExpiresAt: time.Now().UTC().Add(7 * time.Minute),
+		}, nil
 	}
 	s.CountUsers = func(_ context.Context) (int, error) { return 1, nil }
 	return s, captured
@@ -114,6 +121,14 @@ func TestLoginAcceptsAMatchedClientWithAChallenge(t *testing.T) {
 			}
 			if !c.HttpOnly {
 				t.Error("binding cookie is not HttpOnly")
+			}
+			// The cookie dies when the ROW does, not when a separately-read
+			// TTL says. A cookie that expires early turns every same-device
+			// click into a cross-device approval, which reads to a user as
+			// "the link stopped working on my own machine".
+			if c.MaxAge > 7*60 || c.MaxAge < 6*60 {
+				t.Errorf("binding cookie Max-Age = %ds, want about %ds (the issuer's expiry, not "+
+					"the configured 10-minute default)", c.MaxAge, 7*60)
 			}
 		}
 	}

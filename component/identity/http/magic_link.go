@@ -75,8 +75,19 @@ func (s *Server) setMagicLinkCookie(w http.ResponseWriter, nonce string, ttl tim
 	})
 }
 
-// magicLinkTTL is the binding's lifetime: the link's own, so the cookie dies
-// exactly when the credential it binds does.
+// bindingLifetime is how long the cookie should live: until the ROW expires,
+// taken from the issuer's own answer rather than re-read from config. See the
+// web package's twin for why two reads of one TTL is the wrong shape.
+func (s *Server) bindingLifetime(res magiclink.IssueResult) time.Duration {
+	if !res.ExpiresAt.IsZero() {
+		if d := time.Until(res.ExpiresAt); d > 0 {
+			return d
+		}
+	}
+	return s.magicLinkTTL()
+}
+
+// magicLinkTTL is the configured link lifetime, the fallback above.
 func (s *Server) magicLinkTTL() time.Duration {
 	if s != nil && s.Cfg.MagicLinkTTL > 0 {
 		return s.Cfg.MagicLinkTTL
@@ -118,7 +129,7 @@ func (s *Server) handleMagicLink(w http.ResponseWriter, r *http.Request) {
 		// with a link that can be approved from anywhere and completed
 		// nowhere -- the safe direction to degrade in, and the honest one:
 		// there is no device for a session to land on.
-		s.setMagicLinkCookie(w, res.BindingNonce, s.magicLinkTTL())
+		s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
 		writeJSON(w, http.StatusOK, magicLinkResponse{
 			Status:    "ok",
 			Action:    "magic_link_sent",
