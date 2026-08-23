@@ -59,7 +59,24 @@ type Settings struct {
 // (which would create a dependency cycle in some refactor scenarios).
 //
 // Implementation is provided by the wiring layer.
-type IssueMagicLinkFunc func(ctx context.Context, in IssueMagicLinkInput) error
+type IssueMagicLinkFunc func(ctx context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error)
+
+// IssueMagicLinkResult is what the issuer hands back so the web layer can
+// BIND the link to this browser (memql#4302).
+//
+// BindingNonce goes into the memql_ml cookie and nowhere else -- only its
+// digest reaches the row. RequestId names the row the /check-email page then
+// polls; it is not a credential and is rendered on that page deliberately,
+// because the cookie is what authorizes and the id only names.
+//
+// Both are empty on the paths that mint no row (the waitlist branch, a
+// policy refusal). A caller that sets no cookie produces a link that can be
+// approved but never finished, which is the safe direction to degrade in.
+type IssueMagicLinkResult struct {
+	RequestId    string
+	BindingNonce string
+	ExpiresAt    time.Time
+}
 
 // IssueMagicLinkInput mirrors the magiclink.IssueInput surface but
 // without importing the magiclink package.
@@ -176,6 +193,24 @@ type Server struct {
 	ClusterClaimed         ClusterClaimedFunc
 	UserExistsByEmail      UserExistsByEmailFunc
 	PersistClusterSettings PersistClusterSettingsFunc
+
+	// The device-bound magic-link flow (memql#4302). All three are wired
+	// together by SetMagicLinkFlow and all three must be non-nil for the
+	// four routes to mount at all -- a sign-in flow that renders but cannot
+	// complete is worse than one that is absent, because the first looks
+	// like it works. Same all-or-nothing judgment as resolveEnrolment /
+	// enrolAudit below.
+	mlVerifier MagicLinkVerifier
+	mlSession  BrowserSessionFunc
+	mlAudit    identity.AuditLogger
+
+	// Abuse is the anti-abuse stack (per-IP velocity, Turnstile,
+	// disposable-domain blocklist, MX validation) wrapped around
+	// POST /login. The SAME instance component/identity/http wraps around
+	// POST /auth/magic-link -- one stack, both issue paths, so a rule
+	// tightened for one cannot leave the other behind. Nil leaves the route
+	// ungated, which is what tests and engine-less binaries get.
+	Abuse *abuse.Middleware
 
 	// Store backs the DB-side OAuth client resolution on /authorize.
 	// When non-nil, a client_id not present in the static
@@ -356,7 +391,22 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /{$}", wrap(preAuth(s.handleRoot)))
 	mux.HandleFunc("GET /login", wrap(preAuth(s.handleLoginGet)))
-	mux.HandleFunc("POST /login", wrap(s.handleLoginPost))
+	// POST /login RUNS THE ABUSE STACK (memql#4303).
+	//
+	// The same middleware instance that wraps POST /auth/magic-link, wrapped
+	// around the browser's issue path -- because the stack is a property of
+	// the ROUTE, not of the issuer, and until now it guarded only the JSON
+	// API. Turnstile, the disposable-domain blocklist, the MX check and the
+	// per-IP velocity limit applied to a surface that takes a client library
+	// to reach, and not to the form a human abuser actually posts.
+	//
+	// Nil Abuse leaves the route exactly as it was, which is what tests and
+	// engine-less binaries get.
+	loginPost := http.Handler(http.HandlerFunc(wrap(s.handleLoginPost)))
+	if s.Abuse != nil {
+		loginPost = s.Abuse.Wrap(loginPost)
+	}
+	mux.Handle("POST /login", loginPost)
 	// OAuth 2.1 authorization endpoint (advertised by the RFC 8414
 	// metadata document). A browser-based OAuth client opens this; it
 	// validates the code-flow params and funnels into the magic-link
@@ -372,6 +422,26 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// consent/login page), unchanged.
 	mux.HandleFunc("GET /authorize", wrap(preAuth(s.handleAuthorize)))
 	mux.HandleFunc("GET /check-email", wrap(s.handleCheckEmail))
+
+	// The device-bound magic-link flow (memql#4302, design D8). Four routes,
+	// mounted together or not at all -- see magicLinkMounted. They live on
+	// the identity server's OWN route table, not component/server's, so the
+	// bff front-door path generator is untouched; and they are inside the
+	// magic-link exception CLAUDE.md already carves out of the gRPC-first
+	// rule, which the owner approved explicitly for these two new names.
+	//
+	// GET /auth/complete moved HERE from component/identity/http. It renders
+	// a page now instead of consuming a credential, and pages are this
+	// package's job -- it needs the layout, the brand and the templates. The
+	// http package no longer registers it; two registrations of one pattern
+	// on one mux would panic at boot, which is the loud failure this comment
+	// exists to keep loud.
+	if s.magicLinkMounted() {
+		mux.HandleFunc("GET /auth/complete", wrap(s.handleAuthComplete))
+		mux.HandleFunc("POST /auth/landing", wrap(s.handleAuthLanding))
+		mux.HandleFunc("GET /auth/magic-link/status", wrap(s.handleMagicLinkStatus))
+		mux.HandleFunc("POST /auth/magic-link/finish", wrap(s.handleMagicLinkFinish))
+	}
 	mux.HandleFunc("GET /logout-complete", wrap(s.handleLogoutComplete))
 	mux.HandleFunc("GET /error", wrap(s.handleError))
 	mux.HandleFunc("GET /setup", wrap(preAuth(s.handleSetupGet)))

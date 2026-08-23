@@ -2,13 +2,15 @@ package identity
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/core/id"
@@ -23,6 +25,24 @@ import (
 type Store struct {
 	Engine EngineExecutor
 	Logger *slog.Logger
+
+	// DirectDB resolves the DIRECT (non-pooled) database handle used by
+	// the magic-link consume gate (memql#4301). Optional: with it nil the
+	// gate degrades to the pre-gate read-then-write, which is what a unit
+	// test with a fake engine gets. app/integrations_identity.go wires it
+	// from the same directDBGetter the cron leader and the recovery-key
+	// mint use -- a transaction-mode PgBouncer would silently drop the
+	// session-scoped lock, so the pooled handle is not interchangeable.
+	// See magic_link_gate.go.
+	DirectDB func() *sql.DB
+}
+
+// warn logs at WARN when a logger is wired, and does nothing otherwise.
+func (s *Store) warn(msg string, args ...any) {
+	if s == nil || s.Logger == nil {
+		return
+	}
+	s.Logger.Warn(msg, args...)
 }
 
 // MagicLinkRow is the minimal projection the magic-link verifier
@@ -38,6 +58,28 @@ type MagicLinkRow struct {
 	SourceIP     string
 	UserAgent    string
 	CreatedAt    time.Time
+
+	// BindingHash is the SHA-256 hex digest of the memql_ml nonce handed
+	// to the browser that REQUESTED the link. A caller presenting a cookie
+	// that hashes to this may finish the sign-in; anybody else may only
+	// approve it (memql#4301, design D2/D4). Empty on a row issued before
+	// the device-bound flow, and on the API issue path when no browser is
+	// on the other end -- such a row can only ever be approved.
+	BindingHash string
+	// ApprovedAt is set by a cross-device click on the landing page. It
+	// authorizes the REQUESTING browser to finish; it is not itself a
+	// sign-in and confers nothing on the device that set it.
+	ApprovedAt time.Time
+	// ApprovedFromIP / ApprovedUserAgent name the device that approved.
+	// This is the pair that names B when B clicked A's link.
+	ApprovedFromIP    string
+	ApprovedUserAgent string
+}
+
+// HasBinding reports whether the row was issued with a device binding.
+// A row without one cannot be finished by anybody -- only approved.
+func (r *MagicLinkRow) HasBinding() bool {
+	return r != nil && strings.TrimSpace(r.BindingHash) != ""
 }
 
 // AuthCodeRow projects a v1:identity:authCode row.
@@ -128,7 +170,7 @@ type AuthSessionRow struct {
 func (s *Store) CreateMagicLinkRequest(
 	ctx context.Context,
 	requestId, email, tokenHash, expiresAt string,
-	sourceIP, userAgent, oauthCtxJSON, invitationId string,
+	sourceIP, userAgent, oauthCtxJSON, invitationId, bindingHash string,
 ) error {
 	var b strings.Builder
 	b.WriteString(`mutation createMagicLinkRequest(`)
@@ -140,6 +182,7 @@ func (s *Store) CreateMagicLinkRequest(
 	writeKVString(&b, "userAgent", userAgent, false)
 	writeKVString(&b, "oauthCtxJSON", oauthCtxJSON, false)
 	writeKVString(&b, "invitationId", invitationId, false)
+	writeKVString(&b, "bindingHash", bindingHash, false)
 	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create magic link: %w", err)
@@ -147,17 +190,95 @@ func (s *Store) CreateMagicLinkRequest(
 	return nil
 }
 
-// ConsumeMagicLinkRequest stamps consumedAt on a magic-link row.
+// Sentinel outcomes of the two guarded magic-link writes. Callers branch
+// on these rather than on an error string; both are ordinary, expected
+// results of a race, not failures.
+var (
+	// ErrMagicLinkAlreadyConsumed means another caller won the consume.
+	// Exactly one caller of ConsumeMagicLinkRequest for a given row gets
+	// nil; every other one gets this.
+	ErrMagicLinkAlreadyConsumed = errors.New("identity.store: magic link already consumed")
+	// ErrMagicLinkNotFound means the row named by requestId does not exist.
+	ErrMagicLinkNotFound = errors.New("identity.store: magic link request not found")
+)
+
+// ConsumeMagicLinkRequest stamps consumedAt on a magic-link row, EXACTLY
+// ONCE (memql#4301).
+//
+// The compare and the swap both happen inside the advisory-lock critical
+// section (magic_link_gate.go): re-read the row, refuse if consumedAt is
+// already set, otherwise write. The winner's write is committed before the
+// lock is released, so the next holder sees it. N concurrent callers
+// therefore produce exactly one nil and N-1 ErrMagicLinkAlreadyConsumed.
+//
+// This matters more than it used to. Before the device-bound flow the only
+// finisher was one human clicking once, and the read-then-write this
+// replaces documented its own race as acceptable. There are now two
+// LEGITIMATE finishers of a single request -- the /check-email poller and a
+// same-device click on the landing page -- so the property is load-bearing
+// rather than defensive.
 func (s *Store) ConsumeMagicLinkRequest(ctx context.Context, requestId, consumedFromIP string) error {
-	var b strings.Builder
-	b.WriteString(`mutation consumeMagicLinkRequest(`)
-	writeKVString(&b, "requestId", requestId, true)
-	writeKVString(&b, "consumedFromIP", consumedFromIP, false)
-	b.WriteString(`)`)
-	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
-		return fmt.Errorf("identity.store: consume magic link: %w", err)
-	}
-	return nil
+	return s.withMagicLinkGate(ctx, requestId, func(ctx context.Context) error {
+		row, err := s.LookupMagicLinkById(ctx, requestId)
+		if err != nil {
+			return fmt.Errorf("identity.store: consume magic link: re-read: %w", err)
+		}
+		if row == nil {
+			return ErrMagicLinkNotFound
+		}
+		if !row.ConsumedAt.IsZero() {
+			return ErrMagicLinkAlreadyConsumed
+		}
+		var b strings.Builder
+		b.WriteString(`mutation consumeMagicLinkRequest(`)
+		writeKVString(&b, "requestId", requestId, true)
+		writeKVString(&b, "consumedFromIP", consumedFromIP, false)
+		b.WriteString(`)`)
+		if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+			return fmt.Errorf("identity.store: consume magic link: %w", err)
+		}
+		return nil
+	})
+}
+
+// ApproveMagicLinkRequest records a cross-device approval and reports
+// whether THIS caller was the one that recorded it.
+//
+// The write happens only when approvedAt and consumedAt are both empty, and
+// the check runs under the same lock the consume takes, so a second click on
+// the same link is idempotent rather than a second approval with a different
+// device's IP on it. won=false with a nil error is the ordinary "somebody
+// already approved (or finished) this" outcome; the handler renders the
+// already-approved message and audits the denial.
+func (s *Store) ApproveMagicLinkRequest(ctx context.Context, requestId, approvedFromIP, approvedUserAgent string) (bool, error) {
+	won := false
+	err := s.withMagicLinkGate(ctx, requestId, func(ctx context.Context) error {
+		row, err := s.LookupMagicLinkById(ctx, requestId)
+		if err != nil {
+			return fmt.Errorf("identity.store: approve magic link: re-read: %w", err)
+		}
+		if row == nil {
+			return ErrMagicLinkNotFound
+		}
+		if !row.ConsumedAt.IsZero() || !row.ApprovedAt.IsZero() {
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString(`mutation approveMagicLinkRequest(`)
+		writeKVString(&b, "requestId", requestId, true)
+		writeKVString(&b, "approvedFromIP", approvedFromIP, false)
+		writeKVString(&b, "approvedUserAgent", approvedUserAgent, false)
+		b.WriteString(`)`)
+		// INTERNAL ORIGIN: approveMagicLinkRequest is @serverOnly. The human
+		// confirmation it records was checked by the handler above this, and
+		// the write is the identity service acting on that check.
+		if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+			return fmt.Errorf("identity.store: approve magic link: %w", err)
+		}
+		won = true
+		return nil
+	})
+	return won, err
 }
 
 // LookupMagicLinkByTokenHash returns the row matching the given hash,
@@ -168,26 +289,54 @@ func (s *Store) LookupMagicLinkByTokenHash(ctx context.Context, tokenHash string
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup magic link: %w", err)
 	}
-	if len(nodes) == 0 {
-		return nil, nil
+	return firstMagicLinkRow(nodes), nil
+}
+
+// LookupMagicLinkById returns the row with the given node id, or nil.
+//
+// The by-id twin of LookupMagicLinkByTokenHash. Two callers need it and
+// neither holds the token: the /auth/magic-link/status poller (which is
+// handed the id by the page it sits on and proves itself with the binding
+// cookie), and the guarded consume / approve writes, whose re-read inside
+// the advisory lock is the compare half of the compare-and-swap.
+func (s *Store) LookupMagicLinkById(ctx context.Context, requestId string) (*MagicLinkRow, error) {
+	// INTERNAL ORIGIN: magicLinkRequestById is @serverOnly. The caller here
+	// is the identity service acting on its own behalf -- checking the
+	// presented binding cookie against the row before anything happens --
+	// which is exactly the server-initiated work the annotation admits.
+	query := fmt.Sprintf(`query magicLinkRequestById(requestId: "%s")`, escapeMemQLString(requestId))
+	nodes, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup magic link by id: %w", err)
+	}
+	return firstMagicLinkRow(nodes), nil
+}
+
+// firstMagicLinkRow projects the first node of a magicLinkRequestFull
+// result, or nil. One projection shared by both lookups so a field added to
+// the shape cannot reach one caller and not the other.
+func firstMagicLinkRow(nodes []*memqlv1.MemoryNode) *MagicLinkRow {
+	if len(nodes) == 0 || nodes[0] == nil {
+		return nil
 	}
 	node := nodes[0]
-	if node == nil {
-		return nil, nil
-	}
 	g := newFieldGetter(node)
 	return &MagicLinkRow{
-		ID:           firstNonEmpty(g.str("id"), node.GetId()),
-		Email:        g.str("email"),
-		TokenHash:    g.str("tokenHash"),
-		ExpiresAt:    g.time("expiresAt"),
-		ConsumedAt:   g.time("consumedAt"),
-		OAuthCtxJSON: g.str("oauthCtxJSON"),
-		InvitationId: g.str("invitationId"),
-		SourceIP:     g.str("sourceIP"),
-		UserAgent:    g.str("userAgent"),
-		CreatedAt:    g.time("createdAt"),
-	}, nil
+		ID:                firstNonEmpty(g.str("id"), node.GetId()),
+		Email:             g.str("email"),
+		TokenHash:         g.str("tokenHash"),
+		ExpiresAt:         g.time("expiresAt"),
+		ConsumedAt:        g.time("consumedAt"),
+		OAuthCtxJSON:      g.str("oauthCtxJSON"),
+		InvitationId:      g.str("invitationId"),
+		SourceIP:          g.str("sourceIP"),
+		UserAgent:         g.str("userAgent"),
+		BindingHash:       g.str("bindingHash"),
+		ApprovedAt:        g.time("approvedAt"),
+		ApprovedFromIP:    g.str("approvedFromIP"),
+		ApprovedUserAgent: g.str("approvedUserAgent"),
+		CreatedAt:         g.time("createdAt"),
+	}
 }
 
 // ---------------------------------------------------------------------------

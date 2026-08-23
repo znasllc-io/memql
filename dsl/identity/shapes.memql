@@ -250,6 +250,10 @@ shape magicLinkRequest magicLinkRequestFull {
   sourceIP
   userAgent
   invitationId
+  bindingHash
+  approvedAt
+  approvedFromIP
+  approvedUserAgent
   row.createdAt
 }
 

@@ -140,28 +140,47 @@ type IssueInput struct {
 	AdminSession bool
 }
 
-// Issue runs the full issuance pipeline. Returns nil on success; the
-// HTTP handler responds 200 regardless of whether a magic link was
-// actually sent (the access-request path also returns nil) so it
+// IssueResult is what the caller needs in order to BIND the link to the
+// browser that asked for it (memql#4302, design D2).
+//
+// BindingNonce is the plaintext the HTTP layer writes into the `memql_ml`
+// cookie; only its SHA-256 digest reaches the row, so a database read
+// cannot reconstruct it. RequestId names the row the requesting tab then
+// polls -- not a credential, and deliberately rendered on the check-email
+// page, because the cookie is what authorizes and the id only names.
+//
+// Both are empty on the paths that mint no row (waitlist, policy refusal),
+// and a caller that sets no cookie simply produces a link that can be
+// approved but never finished -- the safe direction to degrade in.
+type IssueResult struct {
+	RequestId    string
+	BindingNonce string
+	ExpiresAt    time.Time
+}
+
+// Issue runs the full issuance pipeline. Returns a zero IssueResult and nil
+// on success; the HTTP handler responds 200 regardless of whether a magic
+// link was actually sent (the access-request path also returns nil) so it
 // doesn't leak whether a given email is registered.
 //
 // On policy reject, returns ErrEmailNotAllowed; the handler still
 // responds 200 to the caller (don't leak), but emits an audit row
 // and a slog warning.
-func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
+func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) {
+	var out IssueResult
 	if i == nil {
-		return errors.New("magiclink: nil issuer")
+		return out, errors.New("magiclink: nil issuer")
 	}
 	if i.Store == nil {
-		return errors.New("magiclink: nil store")
+		return out, errors.New("magiclink: nil store")
 	}
 
 	email := strings.TrimSpace(in.Email)
 	if email == "" {
-		return errors.New("magiclink: email required")
+		return out, errors.New("magiclink: email required")
 	}
 	if !strings.Contains(email, "@") {
-		return errors.New("magiclink: malformed email")
+		return out, errors.New("magiclink: malformed email")
 	}
 
 	// Bootstrap gate. Pre-bootstrap (no users), only the /setup wizard
@@ -183,7 +202,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 			Outcome:       identity.AuditOutcomeBlocked,
 			FailureReason: "cluster_not_bootstrapped",
 		})
-		return ErrClusterNotBootstrapped
+		return out, ErrClusterNotBootstrapped
 	}
 
 	// Admin-session sign-ins bypass the client-redirect gate: there
@@ -193,16 +212,16 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	// can't smuggle in attacker-supplied targets via the magic link).
 	if !in.AdminSession {
 		if in.ClientId == "" {
-			return ErrUnknownClient
+			return out, ErrUnknownClient
 		}
 		// Resolve through the unified resolver so dynamically-registered
 		// (RFC 7591) clients in the store work exactly like static
 		// MEMQL_IDENTITY_REGISTERED_CLIENTS.
 		if identity.ResolveClient(ctx, i.Cfg, i.Store, in.ClientId) == nil {
-			return ErrUnknownClient
+			return out, ErrUnknownClient
 		}
 		if in.RedirectURI == "" || !identity.ClientAllowsRedirectURI(ctx, i.Cfg, i.Store, in.ClientId, in.RedirectURI) {
-			return ErrRedirectMismatch
+			return out, ErrRedirectMismatch
 		}
 	}
 
@@ -245,30 +264,30 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 				Outcome:       identity.AuditOutcomeBlocked,
 				FailureReason: decision.Reason,
 			})
-			return ErrEmailNotAllowed
+			return out, ErrEmailNotAllowed
 		}
 	}
 
 	switch decision.Action {
 	case registration.ActionCreateAccessRequest:
-		return i.handleAccessRequest(ctx, email, in)
+		return out, i.handleAccessRequest(ctx, email, in)
 
 	case registration.ActionIssueMagicLink:
 		// fall through
 
 	default:
 		// Reject (handled above) or unknown action.
-		return ErrEmailNotAllowed
+		return out, ErrEmailNotAllowed
 	}
 
 	// Mint token + request id.
 	plainToken, tokenHash, err := newMagicLinkToken()
 	if err != nil {
-		return fmt.Errorf("magiclink: generate token: %w", err)
+		return out, fmt.Errorf("magiclink: generate token: %w", err)
 	}
 	requestId, err := identity.NewRandomId("")
 	if err != nil {
-		return fmt.Errorf("magiclink: generate request id: %w", err)
+		return out, fmt.Errorf("magiclink: generate request id: %w", err)
 	}
 
 	ttl := i.Cfg.MagicLinkTTL
@@ -302,6 +321,16 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	}
 	oauthCtxJSON, _ := json.Marshal(oauthCtx)
 
+	// THE DEVICE BINDING (design D2). A 32-byte CSPRNG nonce whose digest
+	// is all that reaches the row; the plaintext goes to the requesting
+	// browser as the memql_ml cookie and nowhere else. This is what makes
+	// the session land on the device that asked: a click from any other
+	// browser can APPROVE the request but can never complete it.
+	bindingNonce, bindingHash, err := newBindingNonce()
+	if err != nil {
+		return out, fmt.Errorf("magiclink: generate binding nonce: %w", err)
+	}
+
 	if err := i.Store.CreateMagicLinkRequest(
 		ctx,
 		requestId,
@@ -312,11 +341,13 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		in.UserAgent,
 		string(oauthCtxJSON),
 		in.InvitationId,
+		bindingHash,
 	); err != nil {
-		return fmt.Errorf("magiclink: persist request: %w", err)
+		return out, fmt.Errorf("magiclink: persist request: %w", err)
 	}
+	out = IssueResult{RequestId: requestId, BindingNonce: bindingNonce, ExpiresAt: expiresAt}
 
-	linkURL := buildMagicLinkURL(i.Cfg.BaseURL, plainToken, in.State)
+	linkURL := buildMagicLinkURL(i.Cfg.BaseURL, plainToken)
 
 	if i.Sender != nil {
 		brandName := i.Cfg.BrandName
@@ -360,7 +391,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		},
 	})
 
-	return nil
+	return out, nil
 }
 
 // handleAccessRequest creates a v1:identity:accessRequest row instead
@@ -426,7 +457,14 @@ func newMagicLinkToken() (plain, hash string, err error) {
 // buildMagicLinkURL constructs the link the user clicks in their
 // email. The token rides as a query param so existing email clients
 // don't garble it.
-func buildMagicLinkURL(baseURL, plainToken, state string) string {
+//
+// `state` NO LONGER TRAVELS IN THE URL (memql#4302). It lives on the row's
+// oauthCtx and is echoed to the relying party at finish, exactly as before;
+// what changed is that it is no longer printed into an email, where it was
+// only ever proof that the reader had the email. The finisher now proves
+// itself with the binding cookie instead -- possession of a value only the
+// requesting browser holds.
+func buildMagicLinkURL(baseURL, plainToken string) string {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/auth/complete")
 	if err != nil {
 		// Defensive: build by string concat if baseURL is malformed,
@@ -435,11 +473,31 @@ func buildMagicLinkURL(baseURL, plainToken, state string) string {
 	}
 	q := u.Query()
 	q.Set("ml", plainToken)
-	if state != "" {
-		q.Set("state", state)
-	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// newBindingNonce mints the device-binding nonce: 32 CSPRNG bytes as
+// URL-safe base64 (the cookie value), plus its SHA-256 hex digest (the only
+// half that is persisted). Same construction as the magic-link token itself
+// -- there is no reason for the two credentials on one row to be minted
+// differently.
+func newBindingNonce() (plain, hash string, err error) {
+	const nonceBytes = 32
+	buf := make([]byte, nonceBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	plain = base64.RawURLEncoding.EncodeToString(buf)
+	return plain, HashBindingNonce(plain), nil
+}
+
+// HashBindingNonce hashes a presented memql_ml cookie value the way the
+// issuer hashed the one it minted. Exposed because the comparison happens in
+// the web layer, which must not be free to invent its own digest.
+func HashBindingNonce(plain string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
+	return hex.EncodeToString(sum[:])
 }
 
 // HashMagicLinkToken hashes a plaintext magic-link token with the

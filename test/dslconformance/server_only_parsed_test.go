@@ -178,6 +178,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the cluster and cannot be caller-scoped: it runs under the seed
 		// materializer's system actor at boot, where there is no requesting
 		// user for actor.userId to name.
+		// memql#4301/#4302. The device-bound magic-link flow's by-id read and
+		// its approval write. Both run BEFORE the caller is authenticated --
+		// they are steps of signing in, not things a signed-in person does --
+		// so actor.userId is empty for every legitimate caller and a
+		// self-scoped filter would match zero rows. The row carries no user
+		// pointer to scope by either: it names an email address, and on a
+		// first-time registration no user row exists until the link is
+		// consumed. What authorizes them is the memql_ml binding cookie,
+		// compared against the row's bindingHash in Go before either runs.
+		{Path: "identity/queries.memql", Name: "magicLinkRequestById"}:      true,
+		{Path: "identity/mutations.memql", Name: "approveMagicLinkRequest"}: true,
 		{Path: "identity/queries.memql", Name: "usersForSeedSweep"}:         true,
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,

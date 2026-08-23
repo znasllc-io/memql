@@ -1117,6 +1117,59 @@ query magicLinkRequest magicLinkRequestByTokenHash {
   shape   magicLinkRequestFull
 }
 
+// ---- queries/v1/identity/magicLinkRequestById.memql ----
+
+// magicLinkRequestById - Look up a magic-link request by node id
+// ==============================================================
+//
+// The by-id twin of magicLinkRequestByTokenHash, added with the
+// device-bound flow (memql#4301). Two callers need it and neither
+// holds the token:
+//
+//   - GET /auth/magic-link/status, the poll the requesting tab runs.
+//     It is handed a requestId by the page it is sitting on and proves
+//     itself with the memql_ml cookie, whose digest is on the row.
+//   - Store.ConsumeMagicLinkRequest / ApproveMagicLinkRequest, which
+//     re-read the row INSIDE the advisory lock to decide whether this
+//     caller is the one that gets to write. That re-read is the
+//     compare half of the compare-and-swap and cannot go through the
+//     token-hash query, because the finish path never sees the token.
+//
+// The id is not a credential and is deliberately rendered on the
+// check-email page. The cookie is what authorizes; the id only names
+// the row. Returns the row whatever its state -- expired, approved and
+// consumed are all answers the poller needs to distinguish.
+//
+// Arguments:
+//   requestId (string) - v1:identity:magicLinkRequest node id
+//
+// Returns:
+//   Zero or one magic-link request row in magicLinkRequestFull shape.
+//
+
+/// Returns the magic-link request with the given id. Zero or one result.
+///
+/// @serverOnly because the row carries a credential digest and the device binding that authorizes
+/// it. Its callers are the identity service's own handlers, which check the presented memql_ml
+/// cookie against bindingHash in Go before they act; a wire-reachable read by id would hand an
+/// arbitrary caller the state of somebody else's pending sign-in.
+///
+/// actor.userId scoping is not the fix, for the reason its sibling approveMagicLinkRequest gives at
+/// length: every read of this row happens BEFORE the caller is authenticated -- the poller and the
+/// finish handler are steps of signing in, not things a signed-in person does -- so actor.userId is
+/// empty for every legitimate caller and a self-scoped filter would match zero rows. The row carries
+/// no user pointer to scope by either: it names an email address, and on a first-time registration
+/// no user row exists until the link is consumed.
+@serverOnly
+@unbounded("magic-link request by primary id -- bounded to a single row by construction")
+query magicLinkRequest magicLinkRequestById {
+  args {
+    requestId  string!
+  }
+  filter  row.id==args.requestId
+  shape   magicLinkRequestFull
+}
+
 // ---- queries/v1/identity/patIdentitiesForUser.memql ----
 
 // patIdentitiesForUser - List PATs for a user

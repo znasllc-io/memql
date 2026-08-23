@@ -33,6 +33,15 @@ type SetupWizardData struct {
 	ClientID    string
 	RedirectURI string
 	OAuthState  string
+
+	// CodeChallenge / CodeChallengeMethod ride through for the same reason
+	// the four fields above do, and they became REQUIRED for the flow to
+	// work at all when /oauth/token stopped redeeming challenge-less codes
+	// (memql#4303). Without them a relying-party-initiated setup would mint
+	// an auth code its own client could never exchange -- a bootstrap that
+	// silently dead-ends at the callback.
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
 // Flash is the standard alert payload reused across pages.
@@ -67,6 +76,10 @@ templ SetupWizard(data SetupWizardData) {
 				}
 				if data.OAuthState != "" {
 					<input type="hidden" name="state" value={ data.OAuthState }/>
+				}
+				if data.CodeChallenge != "" {
+					<input type="hidden" name="code_challenge" value={ data.CodeChallenge }/>
+					<input type="hidden" name="code_challenge_method" value={ data.CodeChallengeMethod }/>
 				}
 				<h2>Cluster domain <span class="text-danger">*</span></h2>
 				<div class="form-row">

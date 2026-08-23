@@ -10,11 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"github.com/znasllc-io/memql/component/auth"
+	nethttp "net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/admin"
@@ -207,13 +208,27 @@ func (a *App) integrationsIdentity() {
 	// Back the DB-side OAuth client resolution on /authorize so
 	// dynamically-registered (RFC 7591) clients resolve like static ones.
 	webSrv.Store = store
-	webSrv.IssueMagicLink = func(ctx context.Context, in identityweb.IssueMagicLinkInput) error {
+	// ONE abuse stack, BOTH issue paths (memql#4303). The same instance
+	// httpSrv wraps around POST /auth/magic-link now also wraps the browser's
+	// POST /login, so a rule tightened for one cannot leave the other behind.
+	// The rejection renders as the web error page rather than the API's JSON
+	// envelope -- a person who trips the rate limit should read a sentence,
+	// not a payload.
+	abuseMW.RenderReject = webSrv.RenderAbuseRejection
+	// The new-sign-in notice (memql#4305). Fired from createSessionRow, the
+	// one place an authSession row is created, so the token exchange, the
+	// device grant, the browser cookie session and the passkey web login are
+	// all covered by one hook rather than four call sites that would drift.
+	httpSrv.SignInNotifier = emailSender
+	webSrv.Abuse = abuseMW
+	webSrv.IssueMagicLink = func(ctx context.Context, in identityweb.IssueMagicLinkInput) (identityweb.IssueMagicLinkResult, error) {
 		if in.IsAccessRequest {
 			// Waitlist path lands an access-request row instead of a
 			// magic-link request. The magic-link issuer rejects
 			// waitlist-mode emails, so this branch is the correct
-			// destination for that form variant.
-			return store.CreateAccessRequest(ctx,
+			// destination for that form variant. No row, no binding, no
+			// cookie -- there is nothing to complete.
+			return identityweb.IssueMagicLinkResult{}, store.CreateAccessRequest(ctx,
 				identity.NewRequestId(),
 				in.Email,
 				in.WaitlistName,
@@ -222,7 +237,7 @@ func (a *App) integrationsIdentity() {
 				in.SourceIP, in.UserAgent,
 			)
 		}
-		return mlIssuer.Issue(ctx, magiclink.IssueInput{
+		res, err := mlIssuer.Issue(ctx, magiclink.IssueInput{
 			Email:               in.Email,
 			ClientId:            in.ClientId,
 			RedirectURI:         in.RedirectURI,
@@ -236,7 +251,22 @@ func (a *App) integrationsIdentity() {
 			ExistingUser:        in.ExistingUser,
 			AdminSession:        in.AdminSession,
 		})
+		return identityweb.IssueMagicLinkResult{
+			RequestId:    res.RequestId,
+			BindingNonce: res.BindingNonce,
+			ExpiresAt:    res.ExpiresAt,
+		}, err
 	}
+
+	// The device-bound magic-link flow (memql#4302). All four routes mount
+	// together or not at all, so this is the one wiring point that decides
+	// whether a cluster has the flow. The verifier reads and finishes; the
+	// session func is the http package's own mint, reached through a seam
+	// because web must not import http; the audit sink records approvals and
+	// refusals, and its absence would leave a credential surface unaudited.
+	webSrv.SetMagicLinkFlow(mlVerifier, func(w nethttp.ResponseWriter, r *nethttp.Request, in identityweb.BrowserSessionInput) error {
+		return httpSrv.StartBrowserSessionFor(w, r, in.UserId, in.Email, in.Action)
+	}, auditLogger)
 	// Wizard's "404 once bootstrapped" check, signal 1 of 2. We use
 	// clusterSettings.bootstrappedAt rather than a user-count so
 	// out-of-band user rows can't trip it. The CountUsers shape is
@@ -747,7 +777,14 @@ func (a *App) attemptAutoBootstrap(
 		return
 	}
 
-	if err := mlIssuer.Issue(ctx, magiclink.IssueInput{
+	// NO BINDING COOKIE ON THIS PATH, and it cannot have one: nobody is
+	// holding a browser. The link goes to the owner's inbox from a boot-time
+	// goroutine, so whoever opens it is a cross-device clicker by
+	// construction -- they approve, and the /check-email page of the browser
+	// that later runs /setup finishes. That is the correct outcome, not a
+	// gap: an unclaimed cluster's first credential should not complete on
+	// the strength of a mailbox alone.
+	if _, err := mlIssuer.Issue(ctx, magiclink.IssueInput{
 		Email:        cfg.Bootstrap.OwnerEmail,
 		State:        "setup",
 		Bootstrap:    true,

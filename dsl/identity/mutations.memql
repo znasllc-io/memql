@@ -403,6 +403,66 @@ mutate magicLinkRequest consumeMagicLinkRequest {
   }
 }
 
+// ---- mutations/v1/identity/approveMagicLinkRequest.memql ----
+
+// approveMagicLinkRequest
+// =======================
+//
+// Records that a human holding the emailed token clicked Continue in a
+// browser that does NOT hold the binding cookie -- the cross-device
+// case (design D2 / D4). This is an APPROVAL, not a sign-in: it mints
+// nothing, sets no cookie, and hands the approving browser no
+// credential at all. The requesting tab is polling
+// GET /auth/magic-link/status; it sees `approved` and completes the
+// sign-in itself, on the device that asked.
+//
+// The conditional half of "set these only if approvedAt and consumedAt
+// are both empty" is enforced by the caller, Store.ApproveMagicLinkRequest,
+// under the same advisory lock the consume takes. A DSL update{} is a
+// read-merge-write with no predicate, so a guard written here would be
+// decoration; the store re-reads the row inside the critical section
+// and skips this mutation entirely when the row is already approved or
+// already consumed. That is why the mutation itself is unconditional --
+// by the time it runs the decision has been made.
+//
+// Arguments:
+//   requestId          (string)            - Magic-link request node ID
+//   approvedFromIP     (string, optional)  - IP of the approving device
+//   approvedUserAgent  (string, optional)  - User-Agent of the approving device
+//
+
+/// Mark a magic-link request approved from another device (stamps approvedAt = now).
+///
+/// @serverOnly because the only thing that legitimately triggers this is a human clicking Continue
+/// on the landing page while holding the emailed token, and the token is checked in Go before the
+/// call. A wire-reachable version would let anyone who can name a request id approve it without
+/// holding the token at all -- which is precisely the human confirmation the approve-on-click design
+/// exists to require. Its sibling consumeMagicLinkRequest carries the same hazard and predates the
+/// gate; it sits in callerArgSelectionExemptions as recorded debt rather than as a blessing, and a
+/// new construct should not add to it.
+///
+/// actor.userId scoping is not the fix, and cannot be: an approval happens BEFORE anyone is
+/// authenticated -- it is one step of signing in, and the whole point of the cross-device branch is
+/// that the approving browser holds no session and gets none. actor.userId is empty for every
+/// legitimate caller, so a self-scoped filter would match zero rows and refuse the only callers that
+/// exist. The row also carries no user pointer to scope BY: a magic-link request names an email
+/// address, which may not correspond to a user row at all until the link is consumed (first-time
+/// registration mints the user at that moment).
+@serverOnly
+mutate magicLinkRequest approveMagicLinkRequest {
+  args {
+    requestId          string!
+    approvedFromIP     string
+    approvedUserAgent  string
+  }
+  update {
+    id: args.requestId
+    approvedAt: now
+    approvedFromIP: args.approvedFromIP ?? ""
+    approvedUserAgent: args.approvedUserAgent ?? ""
+  }
+}
+
 // ---- mutations/v1/identity/createAccessRequest.memql ----
 
 // createAccessRequest
@@ -961,7 +1021,15 @@ mutate identity createIdentity {
 //   userAgent      (string, optional)  - User-Agent at issuance
 //   oauthCtxJSON   (string, optional)  - Serialized OAuth context (clientId, redirectURI, state) for third-party flows
 //   invitationId   (string, optional)  - v1:identity:invitation that triggered this issuance, when applicable
+//   bindingHash    (string, optional)  - SHA-256 hex of the memql_ml nonce cookie set on the requesting browser
 //
+// bindingHash is what makes the link device-bound (memql#4301). The
+// issuer mints a 32-byte nonce, hands the plaintext to the requesting
+// browser as a cookie, and stores only the digest here. Optional
+// because the bootstrap-claim and API issue paths were written before
+// the cookie existed; a row with an empty bindingHash completes for
+// nobody and can only be APPROVED, which is the safe direction to
+// degrade in.
 
 /// Create a magic-link request row at issuance time.
 mutate magicLinkRequest createMagicLinkRequest {
@@ -974,6 +1042,7 @@ mutate magicLinkRequest createMagicLinkRequest {
     userAgent     string
     oauthCtxJSON  string
     invitationId  string
+    bindingHash   string
   }
   insert {
     accept { email, tokenHash, expiresAt }
@@ -983,6 +1052,7 @@ mutate magicLinkRequest createMagicLinkRequest {
       userAgent: args.userAgent ?? ""
       oauthCtxJSON: args.oauthCtxJSON ?? ""
       invitationId: args.invitationId ?? ""
+      bindingHash: args.bindingHash ?? ""
     }
   }
 }

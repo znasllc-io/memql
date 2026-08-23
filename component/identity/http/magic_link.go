@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 )
@@ -16,13 +17,13 @@ import (
 // context onto the magic-link row and the verifier knows where to
 // redirect after consume.
 type magicLinkRequest struct {
-	Email        string `json:"email"`
-	ClientId     string `json:"clientId"`
-	RedirectURI  string `json:"redirectURI"`
-	State        string `json:"state,omitempty"`
+	Email               string `json:"email"`
+	ClientId            string `json:"clientId"`
+	RedirectURI         string `json:"redirectURI"`
+	State               string `json:"state,omitempty"`
 	CodeChallenge       string `json:"codeChallenge,omitempty"`
 	CodeChallengeMethod string `json:"codeChallengeMethod,omitempty"`
-	InvitationId string `json:"invitationId,omitempty"`
+	InvitationId        string `json:"invitationId,omitempty"`
 }
 
 // magicLinkResponse is intentionally bland: it tells the caller "we
@@ -31,6 +32,56 @@ type magicLinkRequest struct {
 type magicLinkResponse struct {
 	Status string `json:"status"`
 	Action string `json:"action,omitempty"` // "magic_link_sent" or "access_request_created"
+	// RequestId names the magic-link row a caller can poll at
+	// GET /auth/magic-link/status (memql#4302). Not a credential -- the
+	// memql_ml cookie set alongside it is -- and empty on every path that
+	// minted no row, so its presence is also the caller's signal that a
+	// link was actually sent.
+	RequestId string `json:"requestId,omitempty"`
+}
+
+// magicLinkCookieName / magicLinkCookiePath mirror the constants in
+// component/identity/web. Duplicated rather than imported for the reason
+// adminCookieName is (complete.go): web already depends on this package's
+// middleware, and one cookie name is not worth a cycle. The pair is pinned
+// by a test so the two copies cannot drift.
+const (
+	magicLinkCookieName = "memql_ml"
+	magicLinkCookiePath = "/auth"
+)
+
+// setMagicLinkCookie writes the device-binding nonce.
+//
+// SameSite=Lax, because a mail client opens the link as a TOP-LEVEL
+// navigation and Lax is exactly the mode that sends a cookie on one. Strict
+// would drop it and turn every same-device click into a cross-device
+// approval.
+func (s *Server) setMagicLinkCookie(w http.ResponseWriter, nonce string, ttl time.Duration) {
+	if w == nil || strings.TrimSpace(nonce) == "" {
+		return
+	}
+	maxAge := int(ttl / time.Second)
+	if maxAge <= 0 {
+		maxAge = int((10 * time.Minute) / time.Second)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     magicLinkCookieName,
+		Value:    nonce,
+		Path:     magicLinkCookiePath,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(strings.ToLower(s.Cfg.BaseURL), "https://"),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// magicLinkTTL is the binding's lifetime: the link's own, so the cookie dies
+// exactly when the credential it binds does.
+func (s *Server) magicLinkTTL() time.Duration {
+	if s != nil && s.Cfg.MagicLinkTTL > 0 {
+		return s.Cfg.MagicLinkTTL
+	}
+	return 10 * time.Minute
 }
 
 func (s *Server) handleMagicLink(w http.ResponseWriter, r *http.Request) {
@@ -46,21 +97,33 @@ func (s *Server) handleMagicLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := magiclink.IssueInput{
-		Email:        body.Email,
-		ClientId:     body.ClientId,
-		RedirectURI:  body.RedirectURI,
-		State:        body.State,
+		Email:               body.Email,
+		ClientId:            body.ClientId,
+		RedirectURI:         body.RedirectURI,
+		State:               body.State,
 		CodeChallenge:       body.CodeChallenge,
 		CodeChallengeMethod: body.CodeChallengeMethod,
-		InvitationId: body.InvitationId,
-		SourceIP:     clientIP(r),
-		UserAgent:    r.Header.Get("User-Agent"),
+		InvitationId:        body.InvitationId,
+		SourceIP:            clientIP(r),
+		UserAgent:           r.Header.Get("User-Agent"),
 	}
 
-	err := s.MLIssuer.Issue(r.Context(), in)
+	res, err := s.MLIssuer.Issue(r.Context(), in)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, magicLinkResponse{Status: "ok", Action: "magic_link_sent"})
+		// BIND THE LINK TO THIS CALLER (memql#4302). The cookie is the only
+		// thing that can later COMPLETE the link, so a browser-driven caller
+		// of this endpoint gets the same device binding the web /login path
+		// gets. A non-browser caller drops the Set-Cookie header and ends up
+		// with a link that can be approved from anywhere and completed
+		// nowhere -- the safe direction to degrade in, and the honest one:
+		// there is no device for a session to land on.
+		s.setMagicLinkCookie(w, res.BindingNonce, s.magicLinkTTL())
+		writeJSON(w, http.StatusOK, magicLinkResponse{
+			Status:    "ok",
+			Action:    "magic_link_sent",
+			RequestId: res.RequestId,
+		})
 		return
 
 	case errors.Is(err, magiclink.ErrAccessRequestPath):

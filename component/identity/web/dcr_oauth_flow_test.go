@@ -154,9 +154,9 @@ func TestDCROAuthFlow_LoginPostPreservesOAuthCtx(t *testing.T) {
 
 	// Capture the IssueMagicLinkInput the handler produces.
 	var captured IssueMagicLinkInput
-	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) error {
+	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error) {
 		captured = in
-		return nil
+		return IssueMagicLinkResult{}, nil
 	}
 	// Prevent the pre-bootstrap redirect (no users → /setup).
 	s.CountUsers = func(_ context.Context) (int, error) { return 1, nil }
@@ -210,7 +210,9 @@ func TestDCROAuthFlow_NoStaticClientsNilStoreReturnsNoMatch(t *testing.T) {
 		Store:  nil, // no store
 		Logger: slog.Default(),
 	}
-	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) error { return nil }
+	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error) {
+		return IssueMagicLinkResult{}, nil
+	}
 	s.CountUsers = func(_ context.Context) (int, error) { return 1, nil }
 
 	form := url.Values{
@@ -224,9 +226,9 @@ func TestDCROAuthFlow_NoStaticClientsNilStoreReturnsNoMatch(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	var captured IssueMagicLinkInput
-	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) error {
+	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error) {
 		captured = in
-		return nil
+		return IssueMagicLinkResult{}, nil
 	}
 
 	s.handleLoginPost(rec, req)
@@ -266,9 +268,9 @@ func TestDCROAuthFlow_StoreErrorDoesNotSilentlyDowngrade(t *testing.T) {
 	s.CountUsers = func(_ context.Context) (int, error) { return 1, nil }
 
 	var captured IssueMagicLinkInput
-	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) error {
+	s.IssueMagicLink = func(_ context.Context, in IssueMagicLinkInput) (IssueMagicLinkResult, error) {
 		captured = in
-		return nil
+		return IssueMagicLinkResult{}, nil
 	}
 
 	form := url.Values{
