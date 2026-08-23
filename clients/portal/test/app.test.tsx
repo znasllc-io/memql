@@ -42,6 +42,7 @@ function fakeConnection(overrides: Partial<Connection> = {}): Connection {
       userId: "user-test",
       primaryEmail: "op@example.test",
       clusterRole: "admin",
+      displayName: "Ada Lovelace",
     })),
   });
   return {
@@ -167,7 +168,10 @@ function header(): HTMLElement {
   // when the rail gained a "Cluster" group (memql#4264). Two elements can
   // legitimately carry the same word; a query that depends on a word being
   // unique in the whole document is the fragile half of that.
-  return screen.getByRole("banner", { name: "Cluster and session" });
+  //
+  // The name became "Portal header" in memql#4316, when the header stopped
+  // being about the cluster and the session and became the brand.
+  return screen.getByRole("banner", { name: "Portal header" });
 }
 
 function rail(): HTMLElement {
@@ -178,24 +182,32 @@ function connectionTone(): string | null {
   return document.querySelector("[data-connection-tone]")?.getAttribute("data-connection-tone") ?? null;
 }
 
-describe("the rail profile (memql#4240)", () => {
+describe("the shell chrome (memql#4240, restructured in memql#4316)", () => {
   afterEach(() => {
     globalThis.localStorage?.removeItem("memql-portal-rail");
   });
 
-  it("shows engineVersion and the peer in the rail, not the wire version in the header", async () => {
+  it("puts the brand in the header and the machine facts in the rail footer", async () => {
     const dial = vi.fn(async () =>
       fakeConnection({ engineVersion: "v0.19.5" }),
     ) as unknown as typeof Connection.dial;
     renderApp(dial);
 
+    // The wordmark is the header's content now. The cluster host that used to
+    // sit here was window.location.host -- the address bar, retyped.
+    await waitFor(() => expect(within(header()).getByText("MemQL Portal")).toBeTruthy());
+
+    // The machine facts, in the footer.
     await waitFor(() => expect(within(rail()).getByText("v0.19.5")).toBeTruthy());
     expect(within(rail()).getByText("bff-test")).toBeTruthy();
     expect(within(rail()).queryByText("0.0.0-test")).toBeNull();
-    expect(within(header()).queryByText("0.0.0-test")).toBeNull();
-    expect(within(header()).queryByText("v1")).toBeNull();
-    expect(within(header()).queryByText("bff-test")).toBeNull();
-    expect(within(header()).queryByText("Connected")).toBeNull();
+
+    // ...and NONE of them in the header, nor the wire version, nor anything
+    // about the person.
+    for (const stray of ["0.0.0-test", "v0.19.5", "v1", "bff-test", "Connected"]) {
+      expect(within(header()).queryByText(stray)).toBeNull();
+    }
+    expect(within(header()).queryByRole("button", { name: "Sign out" })).toBeNull();
   });
 
   it("renders dev when engineVersion is empty", async () => {
@@ -204,6 +216,19 @@ describe("the rail profile (memql#4240)", () => {
 
     await waitFor(() => expect(within(rail()).getByText("dev")).toBeTruthy());
     expect(within(rail()).queryByText("0.0.0-test")).toBeNull();
+  });
+
+  it("carries exactly one live region, and it is the footer's", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderApp(dial);
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Connected"));
+    // getByRole throws on more than one match, which is the assertion: a
+    // second live region would announce every transition twice.
+    expect(within(rail()).getByRole("status")).toBeTruthy();
+    expect(document.querySelectorAll("[data-connection-tone]")).toHaveLength(1);
   });
 
   it("is green only when connected; connecting and error are red", async () => {
@@ -260,46 +285,166 @@ describe("the rail profile (memql#4240)", () => {
     await waitFor(() => expect(screen.getByText("Authentication disabled")).toBeTruthy());
     expect(within(rail()).getByText("Authentication disabled")).toBeTruthy();
     expect(within(header()).queryByText("Authentication disabled")).toBeNull();
+    // ...and no profile row, because there is no person to link to on a
+    // cluster that admits every dial as the synthetic local-dev owner.
+    expect(document.querySelector("[data-profile-row]")).toBeNull();
   });
 
-  it("puts email, role, and Sign out in the rail footer, not the header", async () => {
+  it("collapses from a borderless handle on the rail's edge, and persists it", async () => {
     const dial = vi.fn(async () =>
       fakeConnection({ engineVersion: "v0.19.5" }),
     ) as unknown as typeof Connection.dial;
     renderSignedIn(dial);
 
-    await waitFor(() => expect(within(rail()).getByText("op@example.test")).toBeTruthy());
-    expect(within(rail()).getByText("admin")).toBeTruthy();
-    expect(within(rail()).getByRole("button", { name: "Sign out" })).toBeTruthy();
-    expect(within(header()).queryByText("op@example.test")).toBeNull();
-    expect(within(header()).queryByText("admin")).toBeNull();
-    expect(within(header()).queryByRole("button", { name: "Sign out" })).toBeNull();
-  });
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
 
-  it("collapses from a quiet brand-row control and persists the preference", async () => {
-    const dial = vi.fn(async () =>
-      fakeConnection({ engineVersion: "v0.19.5" }),
-    ) as unknown as typeof Connection.dial;
-    renderSignedIn(dial);
-
-    await waitFor(() => expect(within(rail()).getByText("op@example.test")).toBeTruthy());
     const collapse = within(rail()).getByRole("button", { name: "Collapse the navigation rail" });
     expect(collapse.getAttribute("aria-expanded")).toBe("true");
     expect(collapse.className).not.toMatch(/\bborder\b/);
-    expect(rail().firstElementChild?.contains(collapse)).toBe(true);
+    // A CHILD OF THE NAV, and its first: the handle straddles the rail's own
+    // right border, so a sibling parked outside would belong to neither
+    // landmark.
+    expect(rail().firstElementChild).toBe(collapse);
+    // The ONLY control matching /navigation rail/. Two would mean the old
+    // brand-row chevron survived alongside the new tab.
     expect(within(rail()).getAllByRole("button", { name: /navigation rail/ })).toHaveLength(1);
 
     fireEvent.click(collapse);
     expect(globalThis.localStorage.getItem("memql-portal-rail")).toBe("collapsed");
-    expect(within(rail()).getByRole("button", { name: "Expand the navigation rail" })).toBeTruthy();
-    expect(within(rail()).queryByText("v0.19.5")).toBeNull();
+
+    // Same spot, flipped icon and state -- a control that relocates when you
+    // use it costs a person the position they just learned.
+    const expand = within(rail()).getByRole("button", { name: "Expand the navigation rail" });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    expect(rail().firstElementChild).toBe(expand);
+
+    // Collapsed, the rail keeps the dot and the version; the node id and the
+    // person move into tooltips.
     expect(within(rail()).queryByText("bff-test")).toBeNull();
-    expect(within(rail()).queryByText("op@example.test")).toBeNull();
-    expect(within(rail()).queryByText("admin")).toBeNull();
-    expect(within(rail()).getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(within(rail()).getByText("v0.19.5")).toBeTruthy();
     expect(connectionTone()).toBe("ok");
     expect(screen.getByTitle(/bff-test/)).toBeTruthy();
-    expect(screen.getByTitle(/v0.19.5/)).toBeTruthy();
-    expect(screen.getByTitle(/op@example.test/)).toBeTruthy();
+  });
+});
+
+describe("the rail's profile row (memql#4317)", () => {
+  afterEach(() => {
+    globalThis.localStorage?.removeItem("memql-portal-rail");
+  });
+
+  it("links to /me and shows the name, the email and the role", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    expect(within(rail()).getByText("op@example.test")).toBeTruthy();
+    expect(within(rail()).getByText("admin")).toBeTruthy();
+
+    const row = document.querySelector("[data-profile-row]");
+    expect(row?.getAttribute("href")).toBe("/me");
+
+    // The three facts belong to the PERSON, so none of them is in the header.
+    for (const stray of ["Ada Lovelace", "op@example.test", "admin"]) {
+      expect(within(header()).queryByText(stray)).toBeNull();
+    }
+  });
+
+  it("shows the avatar alone when collapsed, with the facts in the tooltip", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    fireEvent.click(within(rail()).getByRole("button", { name: "Collapse the navigation rail" }));
+
+    expect(within(rail()).queryByText("Ada Lovelace")).toBeNull();
+    expect(within(rail()).queryByText("op@example.test")).toBeNull();
+
+    const row = document.querySelector("[data-profile-row]");
+    // Both, and they must agree: the tooltip is what a pointer gets and the
+    // accessible name is what a screen reader gets, and the second must not
+    // be the poorer of the two.
+    expect(row?.getAttribute("title")).toBe("Ada Lovelace · op@example.test · admin");
+    expect(row?.getAttribute("aria-label")).toBe("Ada Lovelace · op@example.test · admin");
+    // The initials are the first and family name, and they are hidden from
+    // the accessible tree because the link already carries the name.
+    const avatar = row?.querySelector("[data-avatar]");
+    expect(avatar?.textContent).toBe("AL");
+    expect(avatar?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("carries the active style while any /me facet is open", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial, "/me/sessions");
+
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    const row = document.querySelector("[data-profile-row]");
+    // The nav-row recipe's active edge, on a SUB-route: the row is the
+    // person's whole surface, not just its index.
+    expect(row?.className).toMatch(/border-accent/);
+  });
+
+  it("renders a skeleton rather than a half-identity while the read is in flight", async () => {
+    let release!: (access: unknown) => void;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const dial = vi.fn(async () =>
+      fakeConnection({
+        engineVersion: "v0.19.5",
+        query: asQueryClient({
+          listConcepts: vi.fn(async () => CONCEPTS),
+          getMyAccess: vi.fn(() => held),
+        }),
+      } as unknown as Partial<Connection>),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() =>
+      expect(document.querySelector("[data-profile-skeleton]")).toBeTruthy(),
+    );
+    // NOT the email with an ellipsis: a name that is about to change reads as
+    // a name, and a person who glances at the wrong one has been told
+    // something false about which account they are in.
+    expect(within(rail()).queryByText("op@example.test")).toBeNull();
+
+    release({
+      userId: "user-test",
+      primaryEmail: "op@example.test",
+      clusterRole: "admin",
+      displayName: "Ada Lovelace",
+    });
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+  });
+
+  it("falls back to the email, and never takes the shell down, when the name is absent", async () => {
+    // A node that predates display_name sends nothing. AccessSummary is a
+    // WIRE shape, so the type promising a string is not the same as the
+    // payload carrying one -- and this row renders on every paint of the
+    // chrome, so a throw here is the whole console.
+    const dial = vi.fn(async () =>
+      fakeConnection({
+        engineVersion: "v0.19.5",
+        query: asQueryClient({
+          listConcepts: vi.fn(async () => CONCEPTS),
+          getMyAccess: vi.fn(async () => ({
+            userId: "user-test",
+            primaryEmail: "op@example.test",
+            clusterRole: "admin",
+          })),
+        }),
+      } as unknown as Partial<Connection>),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("op@example.test")).toBeTruthy());
+    expect(document.querySelector("[data-profile-row]")?.getAttribute("href")).toBe("/me");
+    // The shell is still standing.
+    expect(within(header()).getByText("MemQL Portal")).toBeTruthy();
   });
 });

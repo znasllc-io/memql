@@ -15,6 +15,7 @@ import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
+import { MeRoutes } from "../me/MeRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
 import { HomePage } from "../home/HomePage";
 import {
@@ -91,6 +92,7 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //                     (memql#3717)
 //   /artifacts/*      the Library, browsed and labelled
+//   /me/*             the signed-in person: account, sessions, security
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
 // separate changes would otherwise each need an edit here and in AppShell, and
@@ -121,6 +123,12 @@ export function AppRoutes(): ReactNode {
           <Route path="sites/*" element={<SitesRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
+          {/* The person, rather than the cluster: the account this
+              connection resolved, its live sessions, and how it can be
+              entered. Reached from the rail's profile row. Identity's own
+              /me/* self-service pages do NOT move here -- this surface
+              renders and links (docs/public/operate/portal.md). */}
+          <Route path="me/*" element={<MeRoutes />} />
           {/* Retired in memql#4264: the Deployments view carries the four
               verbs now, with the confirmations this page had and that view's
               Ship band did not. Redirected rather than 404'd -- whoever

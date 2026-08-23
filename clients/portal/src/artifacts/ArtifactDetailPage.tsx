@@ -74,7 +74,7 @@ export function ArtifactDetailPage(): ReactNode {
           {/* The live-region announcement lives HERE, at the page level, not
               inside LabelChips itself -- role="status" is a page-level
               convention in this codebase (WriteOutcome.tsx,
-              SidebarProfile.tsx), and LabelChips is a shared primitive with
+              RailStatus.tsx), and LabelChips is a shared primitive with
               no page context of its own. Visually hidden: the chip that
               changed is already visible feedback for a sighted user: this is
               only for the screen-reader announcement a silent chip update

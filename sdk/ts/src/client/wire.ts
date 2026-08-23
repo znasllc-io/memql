@@ -129,6 +129,21 @@ export interface RevokeAllSessionsPayload {
   requestId: string;
 }
 
+// The id names one of the CALLER'S OWN sessions. The server resolves it
+// against the caller's own list before writing, so an id from anywhere else
+// is refused rather than acted on (memql#4319).
+export interface RevokeSessionPayload {
+  requestId: string;
+  sessionId: string;
+}
+
+// No user id: the account written is the caller's own, and the absence of a
+// target is the authorization (memql#4319).
+export interface SetSignInPolicyPayload {
+  requestId: string;
+  policy: string;
+}
+
 export interface CreateWorkerTokenPayload {
   requestId: string;
   name: string;
@@ -591,6 +606,8 @@ type ClientPayload =
   | { resendGuestInviteEmail: ResendGuestInviteEmailPayload }
   | { revokeCurrentSession: RevokeCurrentSessionPayload }
   | { revokeAllSessions: RevokeAllSessionsPayload }
+  | { revokeSession: RevokeSessionPayload }
+  | { setSignInPolicy: SetSignInPolicyPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
   | { createAccountToken: CreateAccountTokenPayload }
   | { revokeAccountToken: RevokeAccountTokenPayload }
@@ -726,6 +743,7 @@ export interface MyAccessResultPayload {
   primaryEmail?: string;
   clusterRole?: UserRoleWire | null;
   sessionId?: string;
+  displayName?: string;
 }
 
 export interface RotateAuthResultPayload {
@@ -855,6 +873,23 @@ export interface RevokeAllSessionsResultPayload {
   requestId: string;
   success?: boolean;
   revokedCount?: number;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeSessionResultPayload {
+  requestId: string;
+  success?: boolean;
+  sessionId?: string;
+  wasCurrent?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface SetSignInPolicyResultPayload {
+  requestId: string;
+  success?: boolean;
+  policy?: string;
   errorCode?: string;
   errorMessage?: string;
 }
@@ -1533,6 +1568,8 @@ type ServerPayload =
   | { resendGuestInviteEmailResult: ResendGuestInviteEmailResultPayload }
   | { revokeCurrentSessionResult: RevokeCurrentSessionResultPayload }
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
+  | { revokeSessionResult: RevokeSessionResultPayload }
+  | { setSignInPolicyResult: SetSignInPolicyResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
   | { createAccountTokenResult: CreateAccountTokenResultPayload }
   | { revokeAccountTokenResult: RevokeAccountTokenResultPayload }
@@ -1587,6 +1624,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "resendGuestInviteEmailResult"; value: ResendGuestInviteEmailResultPayload }
   | { kind: "revokeCurrentSessionResult"; value: RevokeCurrentSessionResultPayload }
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
+  | { kind: "revokeSessionResult"; value: RevokeSessionResultPayload }
+  | { kind: "setSignInPolicyResult"; value: SetSignInPolicyResultPayload }
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
   | { kind: "createAccountTokenResult"; value: CreateAccountTokenResultPayload }
   | { kind: "revokeAccountTokenResult"; value: RevokeAccountTokenResultPayload }
@@ -1678,6 +1717,10 @@ export function readServerPayload(msg: ServerMessage):
     };
   if (m.revokeAllSessionsResult)
     return { kind: "revokeAllSessionsResult", value: m.revokeAllSessionsResult as RevokeAllSessionsResultPayload };
+  if (m.revokeSessionResult)
+    return { kind: "revokeSessionResult", value: m.revokeSessionResult as RevokeSessionResultPayload };
+  if (m.setSignInPolicyResult)
+    return { kind: "setSignInPolicyResult", value: m.setSignInPolicyResult as SetSignInPolicyResultPayload };
   if (m.createWorkerTokenResult)
     return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
   if (m.createAccountTokenResult)

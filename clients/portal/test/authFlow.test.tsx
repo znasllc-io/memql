@@ -7,7 +7,7 @@
 
 import { webcrypto } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Connection} from "@znasllc-io/memql-sdk-core/client";
 
@@ -60,6 +60,8 @@ function fakeDial(): typeof Connection.dial {
       userId: "u-42",
       primaryEmail: "ops@example.com",
       clusterRole: "owner" as const,
+      displayName: "Ops Person",
+      sessionId: "",
     })),
   });
   return vi.fn(
@@ -548,22 +550,26 @@ describe("the callback", () => {
   });
 });
 
-describe("the header", () => {
-  it("names both the cluster and the signed-in identity", async () => {
-    // The two questions an operations console must answer without a click.
+describe("the chrome", () => {
+  it("names the signed-in identity, read from the cluster rather than the token", async () => {
     renderPortal({
       path: "/concepts",
       fetchImpl: async () => jsonResponse({ access_token: "AT-1", expires_in: 900 }),
     });
-    // Identity, read from the CLUSTER (MyAccessMsg), not from the local token.
-    await waitFor(() => expect(screen.getByText("ops@example.com")).toBeTruthy());
+    // Identity, read from the CLUSTER (MyAccessMsg), not decoded from the
+    // local token -- the whole reason useMyAccess exists.
+    await waitFor(() => expect(screen.getByText("Ops Person")).toBeTruthy());
+    expect(screen.getByText("ops@example.com")).toBeTruthy();
     expect(screen.getByText("owner")).toBeTruthy();
-    // Cluster, and the replica serving this stream.
-    expect(screen.getByText(globalThis.location.host)).toBeTruthy();
+    // The replica serving this stream, in the footer.
     expect(screen.getByTitle(/bff-1/)).toBeTruthy();
+    // The CLUSTER HOST is deliberately gone (memql#4316): it was
+    // window.location.host -- the address bar, retyped one line lower, in the
+    // header's most prominent slot.
+    expect(screen.queryByText(globalThis.location.host)).toBeNull();
   });
 
-  it("signs out locally without waiting for the server round trip", async () => {
+  it("signs out from /me, after confirming, without waiting for the server round trip", async () => {
     let logoutCalls = 0;
     const navigated: string[] = [];
     const fetchImpl = vi.fn(async (url: string) => {
@@ -573,14 +579,23 @@ describe("the header", () => {
       }
       return jsonResponse({ access_token: "AT-1", expires_in: 900 });
     });
+    // Sign out left the rail footer in memql#4316 and became the profile
+    // page's one primary action (memql#4318). The document-wide click below
+    // is unchanged; where it happens is not.
     renderPortal({
-      path: "/concepts",
+      path: "/me",
       fetchImpl,
       navigate: (url) => navigated.push(url),
     });
 
     await waitFor(() => screen.getByRole("button", { name: "Sign out" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    // It CONFIRMS now. Signing out is the page's one destructive verb, and
+    // the confirm is what makes the same danger treatment honest beside the
+    // session revokes on the next tab.
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Continue with/ })).toBeTruthy());
     await waitFor(() => expect(logoutCalls).toBe(1));

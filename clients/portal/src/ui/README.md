@@ -59,6 +59,24 @@ fails the build on a width token in a page root.
 - Loading is a shaped `Skeleton`, never a spinner; empty is `EmptyState`
   with a verb where one exists; destructive actions confirm in
   `ConfirmDialog`.
+- A note the reader has to act on (or decide not to) is a `Callout`: a title
+  plus the consequence, tinted by tone. The title says the thing and the
+  family tints it, the same rule `Badge` follows -- which is why it takes a
+  title rather than colouring a bare paragraph. `role="alert"` is set for
+  `danger` only: an alert interrupts a screen reader mid-sentence, which is
+  right for "that write failed" and wrong for a standing observation that is
+  true on every render.
+- A person is an `Avatar`: two initials on an `accent-subtle` ground, sizes
+  sm / md / lg. Three rules, and each is load-bearing rather than stylistic.
+  **Initials only** -- `v1:identity:user` carries no image field, so there is
+  nothing to render and a gravatar-style lookup would put an operator's email
+  hash on a third-party wire to draw a circle. **`aria-hidden`, always** --
+  the NAME is carried by the link or heading beside it, so an avatar that
+  also announced it would read the same person twice; the component takes no
+  `label` because there is no correct value for one. **One ground, not a
+  per-person hue** -- colour-coding people encodes identity in a channel
+  somebody may not be able to see, and it would have to stay legible in both
+  themes beside the accent bar the nav rows already use.
 - The five predefined view BODIES (`src/views/*View.tsx`) still may not
   contain raw row markup or iteration -- they compose `<ViewElement>` plus
   these primitives, and repo-root guard tests enforce it.

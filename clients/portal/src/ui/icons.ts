@@ -15,6 +15,7 @@ export {
   Gauge,
   Globe,
   Inbox,
+  KeyRound,
   LayoutGrid,
   LogOut,
   Monitor,
@@ -25,7 +26,9 @@ export {
   Rocket,
   ScrollText,
   Shield,
+  ShieldCheck,
   Sun,
+  User,
   Users,
   X,
 } from "lucide-react";
