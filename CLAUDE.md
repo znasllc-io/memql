@@ -956,7 +956,13 @@ Four rules carry the design, and each has a failure mode that motivated it:
   a protocol it does not have.
 - **A machine is selectable for an app only when it is BOTH `allowed` (the
   machine's own `policy.yaml apps.allow`) and `signedIn`.** Otherwise
-  selection commits a plan to a machine that then refuses the run.
+  selection commits a plan to a machine that then refuses the run. Selection
+  itself is the **Fleet router** (`integrations/agent/worker/router.go`, epic
+  memql#4349) asked for the `app:<id>` label; nothing here picks between
+  machines, because a second selector disagrees with the first. A session runs
+  only on the replica holding that machine's stream -- the app-session envelope
+  has no cross-node forward yet, so a machine on a sibling replica is SKIPPED
+  during selection rather than failing the run.
 - **A run is a SESSION, not a dispatch.** `AppSessionStart / Chunk / Control /
   End` on `WorkerService.Stream`; a `ToolDispatch` carries one timeout and
   returns one result, and a headless `claude -p` runs for an hour emitting

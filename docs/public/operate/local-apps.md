@@ -82,7 +82,26 @@ resulting failure names the wrong thing.
 Signing into an app takes effect on the **next heartbeat**, not the next
 reconnect: an inventory change is applied to the live registry immediately and
 persisted outside the 60-second `lastSeenAt` throttle, because it is a routing
-change.
+change. Persisting it there is also what lets a **planner** node answer "is a
+machine with this app online" — that node holds no worker streams at all, so
+the row and its derived labels are the only thing it can read.
+
+### Which machine, and on which replica
+
+Selection is the **Fleet router**
+([epic memql#4349](https://github.com/znasllc-io/memql/issues/4349)), asked for
+the `app:<id>` label as a requirement. It applies the owner's routing policy,
+orders by their chosen strategy, and knows which replica holds each machine's
+stream. Nothing in this feature picks between machines itself — a second
+selector would disagree with the first, and the plan would commit to a machine
+that then refused.
+
+**A session runs only on the replica holding that machine's stream.** The
+tool-dispatch path can forward across nodes (`WorkerForward`, memql#4352); the
+app-session envelope cannot yet. A machine attached to a different agent
+replica is therefore skipped during selection rather than failing the run —
+which makes it a routing outcome instead of an error, and is why the refusal
+says "on a stream this replica holds".
 
 > A cockpit that reports no apps at all is normal — that is what a build older
 > than the app protocol does, and what a machine with neither binary on PATH
