@@ -409,3 +409,121 @@ func (s *streamSession) sendAuthSessionError(requestId, correlate string, code c
 	}
 	return s.sendQueryErrorWithMetadata(requestId, correlate, code, message, map[string]string{"errorId": eid})
 }
+
+// handleRevokeSession revokes ONE named session belonging to the caller
+// (memql#4319).
+//
+// # Why this is not a thin pass-through to the mutation
+//
+// `revokeAuthSession` declares (sessionId, revokedReason) and nothing else.
+// A mutation cannot carry an owner predicate -- `filter` is a read construct
+// -- so the DSL has no way to say "only if this row is yours", and the
+// mutation is not @serverOnly. A handler that forwarded the caller's
+// session_id straight through would therefore hand every authenticated
+// caller the ability to revoke ANY session in the cluster by id: a
+// denial-of-service primitive against a named colleague, reachable from a
+// browser.
+//
+// So the ownership check is here, and it is a MEMBERSHIP test rather than a
+// comparison: the caller's own live rows are listed by verified subject, and
+// an id that is not among them is refused. That is the same shape identity's
+// own /me/devices revoke uses (component/identity/web/me_sessions.go), which
+// is the point -- one rule, two renderers.
+//
+// # not_found covers both misses on purpose
+//
+// "that id is not yours" and "that id does not exist" return the same
+// error_code. Separating them would answer, for any id an attacker cares to
+// try, whether it names a real session -- and session ids are exactly the
+// thing a sessions list puts in front of somebody.
+func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.RevokeSessionMsg) error {
+	if msg == nil {
+		return nil
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+	correlate := envelope.GetMessageId()
+
+	send := func(result *memqlv1.RevokeSessionResult) error {
+		result.RequestId = requestId
+		return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
+			Payload: &memqlv1.MemqlServerMessage_RevokeSessionResult{
+				RevokeSessionResult: result,
+			},
+		})
+	}
+
+	if s.service.engine == nil {
+		return send(&memqlv1.RevokeSessionResult{
+			ErrorCode:    "unavailable",
+			ErrorMessage: "engine not configured",
+		})
+	}
+
+	target := strings.TrimSpace(msg.GetSessionId())
+	if target == "" {
+		return send(&memqlv1.RevokeSessionResult{
+			ErrorCode:    "invalid",
+			ErrorMessage: "session_id is required",
+		})
+	}
+
+	// The JWT subject, for the reason handleRevokeAllSessions gives: it is
+	// populated by the auth middleware on every request, while
+	// AccessContext.UserId may still be the claims fallback on the first
+	// request after signup.
+	subject := ""
+	if claims, ok := auth.ClaimsFromContext(s.stream.Context()); ok {
+		if v, ok := claims["sub"].(string); ok {
+			subject = strings.TrimSpace(v)
+		}
+	}
+	if subject == "" {
+		return send(&memqlv1.RevokeSessionResult{
+			ErrorCode:    "unauthenticated",
+			ErrorMessage: "caller has no resolved subject",
+		})
+	}
+
+	ctx := contextWithSystemActor(s.stream.Context())
+	sessions, err := listAuthSessionsForSubject(ctx, s.service.engine, subject)
+	if err != nil {
+		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke session: list", err)
+	}
+
+	var owned *authSessionSummary
+	for _, sess := range sessions {
+		if sess != nil && sess.ID == target {
+			owned = sess
+			break
+		}
+	}
+	// An already-revoked or already-expired row is "not found" too: it is not
+	// a live session, so there is nothing here to end, and reporting success
+	// would tell a client its list is stale when the truth is that the row
+	// never needed the write.
+	now := time.Now().UTC()
+	if owned == nil || !owned.RevokedAt.IsZero() ||
+		(!owned.ExpiresAt.IsZero() && now.After(owned.ExpiresAt)) {
+		return send(&memqlv1.RevokeSessionResult{
+			ErrorCode:    "not_found",
+			ErrorMessage: "no live session of yours has that id",
+		})
+	}
+
+	// Whether this is the row backing THIS connection, decided before the
+	// write: afterwards the bearer no longer resolves and the answer would
+	// be unavailable exactly when the client needs it.
+	wasCurrent := false
+	if plain := bearerTokenFromIncomingContext(s.stream.Context()); plain != "" {
+		wasCurrent = owned.TokenHash != "" && owned.TokenHash == HashBearerToken(plain)
+	}
+
+	if err := RevokeAuthSessionRow(ctx, s.service.engine, owned, "user_action"); err != nil {
+		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke session: persist", err)
+	}
+	return send(&memqlv1.RevokeSessionResult{
+		Success:    true,
+		SessionId:  owned.ID,
+		WasCurrent: wasCurrent,
+	})
+}

@@ -33,8 +33,13 @@ func (s *streamSession) handleMyAccess(envelope *memqlv1.MemqlClientMessage, msg
 		RequestId:    requestId,
 		UserId:       ac.UserId,
 		PrimaryEmail: ac.PrimaryEmail,
-		ClusterRole:  roleToProto(ac.Role),
-		SessionId:    sessionIdFromClaims(ctx),
+		// From the user row the resolver already read (memql#4317) -- the
+		// same read that produced PrimaryEmail, so the name costs no extra
+		// query. Empty when no row resolved; a client falls back to the
+		// email it is holding anyway.
+		DisplayName: ac.DisplayName,
+		ClusterRole: roleToProto(ac.Role),
+		SessionId:   sessionIdFromClaims(ctx),
 	}
 
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{

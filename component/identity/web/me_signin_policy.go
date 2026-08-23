@@ -48,12 +48,12 @@ func (s *Server) handleMeSignInPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy := strings.TrimSpace(r.PostForm.Get("policy"))
-	if policy != "any" && policy != "passkey_only" {
+	if policy != identity.SignInPolicyAny && policy != identity.SignInPolicyPasskeyOnly {
 		redirectSettings(w, r, "That is not a sign-in policy we recognise.", "error")
 		return
 	}
 
-	if policy == "passkey_only" {
+	if policy == identity.SignInPolicyPasskeyOnly {
 		count, err := s.activePasskeyCount(r, claims)
 		if err != nil {
 			// FAIL CLOSED: without the count there is no way to tell a safe
@@ -61,13 +61,11 @@ func (s *Server) handleMeSignInPolicy(w http.ResponseWriter, r *http.Request) {
 			// this precondition exists to prevent.
 			s.Logger.Warn("me-signin-policy: passkey count failed; refusing change",
 				"error", err, "userId", claims.Subject)
-			redirectSettings(w, r, "We couldn't check your passkeys just now. Please try again in a moment.", "error")
+			redirectSettings(w, r, identity.SignInPolicyPrecheckFailedMessage, "error")
 			return
 		}
 		if count == 0 {
-			redirectSettings(w, r,
-				"Add a passkey first. Turning off sign-in links with no passkey enrolled would leave you unable to sign in at all.",
-				"error")
+			redirectSettings(w, r, identity.SignInPolicyNeedsPasskeyMessage, "error")
 			return
 		}
 	}
@@ -80,7 +78,7 @@ func (s *Server) handleMeSignInPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	from := user.SignInPolicy
 	if from == "" {
-		from = "any"
+		from = identity.SignInPolicyAny
 	}
 	if from == policy {
 		redirectSettings(w, r, "", "")
@@ -97,10 +95,9 @@ func (s *Server) handleMeSignInPolicy(w http.ResponseWriter, r *http.Request) {
 		"to":   policy,
 	})
 
-	msg := "Sign-in links are on for this account."
-	if policy == "passkey_only" {
-		msg = "Sign-in links are off. Use your passkey to sign in from now on."
-	}
+	// The same two sentences the portal's Security tab shows, from the one
+	// place that owns them (memql#4319).
+	msg := identity.SignInPolicyMessage(policy)
 	redirectSettings(w, r, msg, "success")
 }
 
