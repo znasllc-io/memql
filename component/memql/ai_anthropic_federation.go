@@ -241,10 +241,18 @@ func anthropicCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.
 		// Neither credential. Same failure as before federation existed, with
 		// the seeding hint the auth resolver used to carry (it no longer
 		// errors on these names -- see optionalAuthEnvNames).
+		// NAMES REAL THINGS ONLY (memql#4338), and it is fixed here rather
+		// than only at the resolver because these two are the SAME story
+		// told at two moments -- the resolver's error for an ordinary
+		// provider, and this one for the Anthropic path where the resolver
+		// deliberately stays silent. Fixing one and leaving the other
+		// saying `make secret-set` would leave a pair that
+		// docs/public/operate/env-vars.md describes together disagreeing.
 		return nil, "", fmt.Errorf(
 			"provider %q has no Anthropic credential: neither %s nor workload identity federation is configured. "+
-				"Seed the key with `make secret-set NAME=%s VALUE=... SCOPE=global`, or configure federation "+
-				"(docs/public/operate/auth/anthropic-federation.md)",
+				"Seed the key under %s -- in the node's environment (locally `make secrets`; in a cluster, "+
+				"whichever secret store the deployment reads), or as a v1:platform:globalSecret row -- "+
+				"or configure federation (docs/public/operate/auth/anthropic-federation.md)",
 			cfg.Name, envAnthropicAPIKey, envAnthropicAPIKey)
 
 	default:
