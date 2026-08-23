@@ -30,6 +30,7 @@ import {
 import { aiSuggest, type AiSuggestOptions, type AiSuggestResult } from "@znasllc-io/memql-sdk-core/ai";
 import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
 import {
+  createWorkerToken,
   mintAccountToken,
   revokeAccountToken,
   revokeAllSessions,
@@ -37,6 +38,8 @@ import {
   setSignInPolicy,
   type AccountTokenMintResult,
   type AccountTokenRevokeResult,
+  type CreateWorkerTokenArgs,
+  type CreateWorkerTokenResult,
   type MintAccountTokenArgs,
   type RevokeAllSessionsResult,
   type RevokeSessionResult,
@@ -68,6 +71,20 @@ export interface ClusterClients {
   // stream.
   mintAccountToken: (args: MintAccountTokenArgs) => Promise<AccountTokenMintResult>;
   revokeAccountToken: (identityId: string, signal?: AbortSignal) => Promise<AccountTokenRevokeResult>;
+  // Worker-token mint, for the Fleet page's Add a machine flow (memql#4355).
+  // Same custody shape as the account token above: the plain `mql_wkr_...`
+  // bearer exists in the mint reply and nowhere else -- only its SHA-256 hash
+  // lands on a v1:identity:identity row -- so the page has to show it once and
+  // the SDK retains nothing.
+  //
+  // ON THE STREAM, not identity's POST /pair/codes. The pairing endpoint
+  // authenticates with `Authorization: Bearer <access token>`, and the access
+  // token lives in a closure inside src/auth/identityAuthSource.ts precisely so
+  // no component can reach it (see src/cluster/auth.ts, "WHAT A LATER CHANGE
+  // MUST NOT DO"). CreateWorkerTokenMsg is the same capability over the
+  // credential the connection already holds, and it mints the exact
+  // `--token mql_wkr_...` value the documented install one-liner takes.
+  createWorkerToken: (args: CreateWorkerTokenArgs) => Promise<CreateWorkerTokenResult>;
   // The /me page's two writes (memql#4319), bound to the stream for the same
   // reason the pair above is: the Dispatcher never leaves this module, so a
   // page reaches a wire operation only through a named function somebody had
@@ -220,6 +237,7 @@ export function ClusterProvider({
                 mintAccountToken: (args) => mintAccountToken(transport, args),
                 revokeAccountToken: (identityId, signal) =>
                   revokeAccountToken(transport, identityId, signal),
+                createWorkerToken: (args) => createWorkerToken(transport, args),
                 revokeSession: (sessionId, signal) => revokeSession(transport, sessionId, signal),
                 revokeAllSessions: (signal) => revokeAllSessions(transport, signal),
                 setSignInPolicy: (policy, signal) => setSignInPolicy(transport, policy, signal),

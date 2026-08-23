@@ -247,6 +247,7 @@ type WorkerDialer struct {
 	sinkMu               sync.RWMutex
 	aiForwardSink        AiForwardResponseSink
 	workbenchForwardSink WorkbenchForwardResponseSink
+	workerForwardSink    WorkerForwardResponseSink
 	// deployControlSink receives DeployControlForwardResponse messages on a
 	// managed connection (memql#3380). Set on the bff, whose dial set includes
 	// the identity node; nil elsewhere.
@@ -371,6 +372,19 @@ func (wd *WorkerDialer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRes
 	}
 	wd.sinkMu.Lock()
 	wd.workbenchForwardSink = sink
+	wd.sinkMu.Unlock()
+}
+
+// SetWorkerForwardResponseSink installs the sink that receives
+// WorkerForwardResponse / WorkerForwardStream messages arriving on our managed
+// connections (memql#4352). Called during agent-node bootstrap; other node
+// types leave it nil. Thread-safe; may be called at any time.
+func (wd *WorkerDialer) SetWorkerForwardResponseSink(sink WorkerForwardResponseSink) {
+	if wd == nil {
+		return
+	}
+	wd.sinkMu.Lock()
+	wd.workerForwardSink = sink
 	wd.sinkMu.Unlock()
 }
 
@@ -823,6 +837,22 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 		wd.sinkMu.RUnlock()
 		if sink != nil {
 			sink.Dispatch(payload.WorkbenchForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkerForwardResponse:
+		wd.sinkMu.RLock()
+		sink := wd.workerForwardSink
+		wd.sinkMu.RUnlock()
+		if sink != nil {
+			sink.Dispatch(payload.WorkerForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkerForwardStream:
+		wd.sinkMu.RLock()
+		sink := wd.workerForwardSink
+		wd.sinkMu.RUnlock()
+		if sink != nil {
+			sink.DispatchStream(payload.WorkerForwardStream)
 		}
 
 	case *nodev1.NodeServerMessage_DeployControlForwardResponse:

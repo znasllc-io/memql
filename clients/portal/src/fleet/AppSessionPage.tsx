@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 
 import { ErrorMessage } from "../components/StatusMessage";
 import { Badge, Band, Container, PageHeader, Skeleton } from "../ui";
-import { appLabel } from "./useMachines";
+import { appLabel } from "./rows";
 import { isLive, useAppSessionDetail } from "./useAppSessions";
 
 // One delegated run's transcript (memql#4363).

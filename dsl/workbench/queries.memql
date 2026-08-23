@@ -7,19 +7,66 @@
 /// Look up the workbench workspace row for a Plan. Returns empty when no workspace has been
 /// provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the
 /// first workbenchHost dispatch.
+///
+/// The `ownerUserId==actor.userId` conjunct keeps this read's result set the SAME before and
+/// after the concept's tier is enforced (TestRowAuthzEnforcementLandGate). It is satisfied at
+/// runtime because the integration runs under auth.ContextWithUserActor for the parent plan's
+/// requestedBy -- which it has already resolved in order to know whose plan it is executing.
+/// Without that stamp this returns nothing, and "no workspace row" is indistinguishable from
+/// "not provisioned yet", so the integration would provision a second directory on every call.
+@actor
 @unbounded("the workspace for a plan -- a per-plan singleton bounded to a single row")
 query workspace workspaceForPlan {
   args {
     planId  string!
   }
-  filter  planId==args.planId
+  filter  planId==args.planId && ownerUserId==actor.userId
   shape   workspaceFull
 }
 
-/// List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so
-/// released rows don't clutter the view.
-@unbounded("provisioned workspaces -- an internal lifecycle sweep that must see all")
+/// The caller's provisioned workspaces. Filtered to status=provisioned so released rows don't
+/// clutter the view.
+///
+/// It was an unscoped "internal lifecycle sweep that must see all", and no Go sweep ever called
+/// it -- the release path is driven by the releaseWorkspaceOnPlanTerminal automation off a plan
+/// event, not by scanning. The operator inventory it was standing in for is allWorkspaces, which
+/// says so in its own gate.
+@actor
+@unbounded("one person's live workspaces -- one per plan they have running")
 query workspace provisionedWorkspaces {
-  filter  status=="provisioned"
+  filter  status=="provisioned" && ownerUserId==actor.userId
   shape   workspaceFull
+}
+
+// ---- The Fleet: /fleet/workbenches (epic memql#4349, memql#4356) ----
+//
+// v1:workbench:workspace declares @rowAuthz(owner="ownerUserId", clusterOwner),
+// so the engine decides the rows; what these two add is the CALLER SCOPE the
+// classifier reads, and the status axis the page toggles.
+//
+// provisionedWorkspaces above stays as it is -- an inventory read filtered to
+// live rows -- and is now row-gated like everything else.
+
+/// The caller's own workbench workspaces, live and released, newest first. Backs the workspaces
+/// list on /fleet/workbenches for a person who is not a cluster owner.
+@actor
+query workspace myWorkspaces {
+  filter   ownerUserId==actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 100
+  shape    workspaceFull
+}
+
+/// Every workbench workspace in the cluster, for a cluster owner; optionally narrowed to one
+/// status. Backs the operator view of /fleet/workbenches, which answers "why is this workbench
+/// node full".
+@actor
+query workspace allWorkspaces {
+  args {
+    status  enum("provisioned", "released")
+  }
+  filter   actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort     "row.createdAt", "desc"
+  paginate 200
+  shape    workspaceFull
 }

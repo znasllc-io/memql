@@ -146,63 +146,63 @@ func TestMergeAppLabelsPreservesOperatorLabels(t *testing.T) {
 	}
 }
 
-// TestPickWorkerForAppSkipsUnrunnableMachines is the routing-side
-// half of design §9.3: a machine whose app is not allowed is never
-// selected, even when it is the only machine online.
-func TestPickWorkerForAppSkipsUnrunnableMachines(t *testing.T) {
-	r := NewRegistry(nil, nil)
-	blocked := &Worker{
-		RegistrationId: "blocked",
-		OwnerUserId:    "user-1",
-		Capabilities:   []string{CapabilityHeadless},
-	}
-	blocked.SetApps([]AppInfo{{Id: AppIdClaudeCode, Version: "2.1", Allowed: false, SignedIn: true}})
-	r.Add(blocked)
+// TestRunsAppIsTheSelectionPredicate. Choosing BETWEEN machines is the
+// Fleet router's job (memql#4350) and it matches on the derived `app:`
+// label; RunsApp is that same question asked of ONE worker. The two must
+// agree -- a machine the label says is selectable and RunsApp says is not
+// would be picked and then refuse, and the failure would name the router.
+func TestRunsAppIsTheSelectionPredicate(t *testing.T) {
+	w := &Worker{RegistrationId: "w1", OwnerUserId: "u", Capabilities: []string{CapabilityHeadless}}
+	w.SetApps([]AppInfo{{Id: AppIdClaudeCode, Version: "2.1", Allowed: true, SignedIn: true}})
 
-	if _, err := r.PickWorkerForApp("user-1", AppIdClaudeCode, nil); err == nil {
-		t.Fatal("selected a machine whose policy.yaml does not allow the app")
+	if !w.RunsApp(AppIdClaudeCode) {
+		t.Fatal("an allowed, signed-in app must be runnable")
 	}
-
-	ready := &Worker{
-		RegistrationId: "ready",
-		OwnerUserId:    "user-1",
-		Capabilities:   []string{CapabilityHeadless},
-	}
-	ready.SetApps([]AppInfo{{Id: AppIdClaudeCode, Version: "2.1", Allowed: true, SignedIn: true}})
-	r.Add(ready)
-
-	got, err := r.PickWorkerForApp("user-1", AppIdClaudeCode, nil)
-	if err != nil {
-		t.Fatalf("PickWorkerForApp: %v", err)
-	}
-	if got.RegistrationId != "ready" {
-		t.Fatalf("picked %s, want ready", got.RegistrationId)
+	if _, labelled := w.LabelsSnapshot()[AppLabelKey(AppIdClaudeCode)]; !labelled {
+		t.Fatal("a runnable app must carry its routing label -- the router matches on it")
 	}
 
-	// An extra require-label still applies on top of the app gate.
-	if _, err := r.PickWorkerForApp("user-1", AppIdClaudeCode, map[string]string{"has-gpu": "true"}); err == nil {
-		t.Fatal("require-label was ignored")
+	// Signing out flips BOTH, within one beat.
+	w.SetApps([]AppInfo{{Id: AppIdClaudeCode, Version: "2.1", Allowed: true, SignedIn: false}})
+	if w.RunsApp(AppIdClaudeCode) {
+		t.Fatal("a signed-out app must not be runnable")
+	}
+	if _, labelled := w.LabelsSnapshot()[AppLabelKey(AppIdClaudeCode)]; labelled {
+		t.Fatal("the routing label must go with it, or the router picks a machine that refuses")
+	}
+
+	// An app the engine does not drive is never runnable, however the
+	// machine reports it.
+	w.SetApps([]AppInfo{{Id: "some-future-app", Allowed: true, SignedIn: true}})
+	if w.RunsApp("some-future-app") {
+		t.Fatal("an app outside the engine's closed set must never be runnable")
 	}
 }
 
-// TestPickWorkerForAppFollowsSignOut: the label set is rebuilt on
-// every inventory report, so signing out removes the machine from
-// selection within one heartbeat rather than at the next reconnect.
-func TestPickWorkerForAppFollowsSignOut(t *testing.T) {
+// TestFirstConnectedRunningIsAnExistenceCheck: the probe asks whether
+// delegating is possible at all, and must not become a second router.
+func TestFirstConnectedRunningIsAnExistenceCheck(t *testing.T) {
 	r := NewRegistry(nil, nil)
-	w := &Worker{RegistrationId: "w1", OwnerUserId: "u", Capabilities: []string{CapabilityHeadless}}
-	w.SetApps([]AppInfo{{Id: AppIdCodex, Version: "1.0", Allowed: true, SignedIn: true}})
-	r.Add(w)
+	if got := firstConnectedRunning(r, "u", AppIdClaudeCode); got != "" {
+		t.Fatalf("found %q with nothing connected", got)
+	}
 
-	if _, err := r.PickWorkerForApp("u", AppIdCodex, nil); err != nil {
-		t.Fatalf("expected selectable while signed in: %v", err)
+	blocked := &Worker{RegistrationId: "blocked", OwnerUserId: "u", Capabilities: []string{CapabilityHeadless}}
+	blocked.SetApps([]AppInfo{{Id: AppIdClaudeCode, Allowed: false, SignedIn: true}})
+	r.Add(blocked)
+	if got := firstConnectedRunning(r, "u", AppIdClaudeCode); got != "" {
+		t.Fatalf("found %q on a machine whose policy.yaml refuses the app", got)
 	}
-	w.SetApps([]AppInfo{{Id: AppIdCodex, Version: "1.0", Allowed: true, SignedIn: false}})
-	if _, err := r.PickWorkerForApp("u", AppIdCodex, nil); err == nil {
-		t.Fatal("machine stayed selectable after signing out of the app")
+
+	ready := &Worker{RegistrationId: "ready", OwnerUserId: "u", Capabilities: []string{CapabilityHeadless}}
+	ready.SetApps([]AppInfo{{Id: AppIdClaudeCode, Allowed: true, SignedIn: true}})
+	r.Add(ready)
+	if got := firstConnectedRunning(r, "u", AppIdClaudeCode); got != "ready" {
+		t.Fatalf("got %q, want ready", got)
 	}
-	if _, stale := w.LabelsSnapshot()[AppLabelKey(AppIdCodex)]; stale {
-		t.Fatal("app label survived the sign-out")
+	// Never crosses a user boundary.
+	if got := firstConnectedRunning(r, "other", AppIdClaudeCode); got != "" {
+		t.Fatalf("crossed a user boundary: %q", got)
 	}
 }
 

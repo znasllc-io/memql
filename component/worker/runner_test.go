@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +105,6 @@ func newRunnerFixture(t *testing.T, subscription string) (*SessionRunner, *strea
 	store := &recordingAppSessionStore{}
 	auditor := &recordingAuditor{}
 	runner := &SessionRunner{
-		Registry:    session.server.registry,
 		Store:       store,
 		Minter:      &stubMinter{},
 		Auditor:     auditor,
@@ -145,7 +143,7 @@ func TestRunnerRecordsSubscriptionBilling(t *testing.T) {
 		})
 	}()
 
-	result, err := runner.Run(context.Background(), runSpec(), nil)
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -199,7 +197,7 @@ func TestRunnerNeverInfersBilling(t *testing.T) {
 				waitForSession(t, session, "sess-run")
 				session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run", Usage: tc.usage})
 			}()
-			result, err := runner.Run(context.Background(), runSpec(), nil)
+			result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -215,10 +213,10 @@ func TestRunnerNeverInfersBilling(t *testing.T) {
 // are broken", sending the reader to entirely the wrong place. So the
 // run is REFUSED with a named reason instead of started blank.
 func TestRunnerRefusesWithoutAMinter(t *testing.T) {
-	runner, _, store, _ := newRunnerFixture(t, SubscriptionPresent)
+	runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
 	runner.Minter = nil
 
-	_, err := runner.Run(context.Background(), runSpec(), nil)
+	_, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
 	if err == nil {
 		t.Fatal("started a session with no credential minter")
 	}
@@ -238,7 +236,7 @@ func TestRunnerNonZeroExitIsFailed(t *testing.T) {
 		waitForSession(t, session, "sess-run")
 		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run", ExitCode: 2})
 	}()
-	result, err := runner.Run(context.Background(), runSpec(), nil)
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -272,7 +270,7 @@ func TestRunnerBoundsTheTranscript(t *testing.T) {
 		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
 	}()
 
-	result, err := runner.Run(context.Background(), spec, nil)
+	result, err := runner.Run(context.Background(), session.worker, spec, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -288,22 +286,34 @@ func TestRunnerBoundsTheTranscript(t *testing.T) {
 	}
 }
 
-// TestRunnerRefusesAnOfflineMachine: with nothing online that can run
-// the app, the run is refused with a reason NAMING the app rather
-// than a bare "no worker available".
-func TestRunnerRefusesAnOfflineMachine(t *testing.T) {
-	runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+// TestRunnerRechecksTheAppBeforeStarting. The router matched on the
+// `app:` label at selection time; the machine may have signed out
+// between that read and now. Starting anyway would hand the app a
+// credential it cannot use, and the failure would surface as "MemQL's
+// tools are broken" rather than as a signed-out app.
+func TestRunnerRechecksTheAppBeforeStarting(t *testing.T) {
+	runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
 	session.worker.SetApps([]AppInfo{{Id: AppIdClaudeCode, Allowed: true, SignedIn: false}})
 
-	_, err := runner.Run(context.Background(), runSpec(), nil)
+	_, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
 	if err == nil {
 		t.Fatal("ran on a machine that is not signed in to the app")
 	}
 	if !strings.Contains(err.Error(), AppIdClaudeCode) {
 		t.Fatalf("the refusal must name the app, got %v", err)
 	}
-	if !errors.Is(err, ErrNoWorkerAvailable) {
-		t.Fatalf("error must wrap ErrNoWorkerAvailable, got %v", err)
+	if len(store.created) != 0 {
+		t.Fatal("a refused run must not leave a session row")
+	}
+}
+
+// TestRunnerNeedsASelectedMachine: selection belongs to the Fleet
+// router, so a nil worker is a programming error the runner names
+// rather than a nil dereference.
+func TestRunnerNeedsASelectedMachine(t *testing.T) {
+	runner, _, _, _ := newRunnerFixture(t, SubscriptionPresent)
+	if _, err := runner.Run(context.Background(), nil, runSpec(), nil); err == nil {
+		t.Fatal("a nil worker must be refused")
 	}
 }
 
@@ -321,7 +331,7 @@ func TestRunnerStreamsProgressLive(t *testing.T) {
 		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
 	}()
 
-	if _, err := runner.Run(context.Background(), runSpec(), func(c AppSessionChunk) {
+	if _, err := runner.Run(context.Background(), session.worker, runSpec(), func(c AppSessionChunk) {
 		mu.Lock()
 		seen = append(seen, string(c.Data))
 		mu.Unlock()
@@ -363,7 +373,7 @@ func TestRunnerClassifiesCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	result, err := runner.Run(ctx, runSpec(), nil)
+	result, err := runner.Run(ctx, session.worker, runSpec(), nil)
 	if err == nil {
 		t.Fatal("a cancelled run must surface the cancellation to its caller")
 	}

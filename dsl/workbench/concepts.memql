@@ -18,6 +18,7 @@
 // This concept tracks the workspace lifetime. Compute (container)
 // state is in-process on the agent node and not persisted.
 
+use identity.concepts.{ user }
 use planner.concepts.{ plan }
 
 /// Per-Plan workbench workspace. Tracks the persistent filesystem mounted into every per-Task
@@ -25,6 +26,11 @@ use planner.concepts.{ plan }
 /// parent Plan transitions to a terminal status (succeeded / failed / cancelled). Universal
 /// authorization -- no scope grants, no kill switch, no per-agent gating; the workbench is
 /// sandboxed inside the cluster and the blast radius is contained to the per-Plan directory tree.
+/// TIER: the composite `owner, clusterOwner` (memql#4312). A workspace is a directory of one
+/// person's working files -- whatever their plan wrote -- so it is theirs; the operator who has to
+/// answer "why is this workbench node full" needs to see all of them. ownerUserId is stamped from
+/// the parent plan's requestedBy at provision time and never from a caller argument.
+@rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="planId", secondary="storageRoot", tertiary="lastUsedAt", status="status")
 concept workspace {
   planId          string! @description("v1:planner:plan.id this workspace belongs to. One workspace per Plan; the unique key.")
@@ -36,7 +42,11 @@ concept workspace {
   // A user-declared `createdAt` field is rejected as reserved.
   lastUsedAt      datetime @description("Bumped on every successful workbenchHost dispatch. Backs idle-detection metrics; not used to drive teardown (teardown is Plan-terminal-driven).")
   releasedAt      datetime @description("When the workspace was released and the directory torn down. Empty for status=provisioned.")
-  releasedReason  enum("", "plan_terminal", "explicit", "ttl_expired") @default("") @description("Discriminator for status=released rows. plan_terminal = the releaseWorkspaceOnPlanTerminal automation fired. explicit = an admin / mutation explicitly released. ttl_expired = future ttl-driven sweep.")
+  releasedReason  enum("", "plan_terminal", "explicit", "ttl_expired", "node_lost") @default("") @description("Discriminator for status=released rows. plan_terminal = the releaseWorkspaceOnPlanTerminal automation fired. explicit = an admin / mutation explicitly released. ttl_expired = future ttl-driven sweep. node_lost = the workbench replica this workspace lived on left the mesh, so the directory is gone with it and the plan was given a fresh workspace elsewhere (memql#4354). The files are NOT migrated: the design accepts a fresh directory and records why, because a file tree cannot be recovered from a node that is no longer there.")
+
+  nodeId          string @description("MEMQL_NODE_ID of the workbench replica whose disk holds this directory (memql#4354). Stamped at provision time by the serving node. THE FIX FOR THE TWO-WORKSPACES-PER-PLAN SPLIT: pickWorkbenchPeer was any-fit, so with two workbench replicas one plan got a directory on each and neither side was told -- a call would write a file and the next call, landing on the other replica, would not find it. The picker now prefers this node, and falls back only when it is gone.")
+  ownerUserId     string! @serverSet @description("v1:identity:user.id this workspace's files belong to, taken from the parent plan's requestedBy at provision time. THE ROW-AUTHZ OWNER FIELD. Denormalized rather than joined because the row gate decides one row at a time and cannot follow planId to find out whose it is.")
 
   @relationship(type="parent", field="planId", target=plan, direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

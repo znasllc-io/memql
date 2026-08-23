@@ -23,11 +23,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/safety"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -42,11 +44,21 @@ type Dispatcher struct {
 	auditor  workerservice.Auditor
 	store    Store
 	clock    func() time.Time
+
+	router     *Router
+	selfNodeId string
+	remote     RemoteDispatcher
 }
 
 // Store is the persistence side of the dispatcher (resolve agent
-// authorization, plan, user; write invocations).
+// authorization, plan, user; write invocations) plus the fleet reads the
+// router needs. FleetStore is embedded rather than passed alongside because
+// one implementation serves both and a second constructor argument would let a
+// caller wire a dispatcher whose gates read one graph and whose routing reads
+// another.
 type Store interface {
+	FleetStore
+
 	UserPreferences(ctx context.Context, userId string) (Preferences, error)
 	AgentAuthorization(ctx context.Context, agentId, ownerUserId string) (*Authorization, error)
 	PlanScope(ctx context.Context, planId string) (string, error)
@@ -79,6 +91,12 @@ type Result struct {
 }
 
 // Request carries the inputs from the agent tool loop.
+//
+// THERE IS NO WorkerId FIELD, and its absence is a design decision rather than
+// an omission (design D4, memql#4351). An agent says what the work NEEDS --
+// RequireLabels narrows the candidate set, PreferLabels orders it -- and the
+// owner's routing policy decides which of their machines that lands on. A
+// model cannot name a machine, so it cannot hallucinate one.
 type Request struct {
 	Tool          string
 	Action        string
@@ -89,6 +107,57 @@ type Request struct {
 	TaskId        string
 	CorrelationId string
 	Timeout       time.Duration
+
+	// RequireLabels is AND-ed with the owner's policy requirement and filters
+	// the candidate set. PreferLabels only orders it.
+	RequireLabels map[string]string
+	PreferLabels  map[string]string
+
+	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
+	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
+	// whole result -- and carried here so a chunk that crosses a node hop has
+	// somewhere to land rather than being dropped at the boundary that was
+	// supposed to relay it.
+	OnStreamChunk func(*nodev1.WorkerForwardStream)
+
+	// ReroutedFrom records that this call is not where it was first sent:
+	// "workbench" when the workbench answered environment_mismatch
+	// (memql#4353), or "worker:<registrationId>" when a machine refused before
+	// starting. It lands on the invocation's routing record and is what makes
+	// "why did this run on the laptop" answerable after the fact.
+	ReroutedFrom string
+}
+
+// ForwardOutcome tells the dispatch loop whether a remote attempt got as far
+// as running anything. It is the only thing that decides whether a re-pick is
+// allowed, so it must be reported honestly by the forward: an "it refused
+// before starting" on a call that in fact started would run a side effect
+// twice.
+type ForwardOutcome int
+
+const (
+	// ForwardCompleted -- the call reached the machine. Never re-pick.
+	ForwardCompleted ForwardOutcome = iota
+	// ForwardRefusedBeforeStart -- the remote replica had no usable stream for
+	// the machine, or the machine was at its concurrency cap. Nothing ran.
+	ForwardRefusedBeforeStart
+)
+
+// RemoteDispatcher forwards a dispatch to the agent replica named by the
+// machine's connectedNodeId (memql#4352). Nil on a node with no mesh, in which
+// case a remote candidate is SKIPPED with a logged reason -- never run here.
+// Running it locally would mean dispatching to a machine this node does not
+// hold a stream for, which cannot work, and the shape of the failure would
+// blame the machine rather than the missing forward.
+type RemoteDispatcher interface {
+	ForwardDispatch(
+		ctx context.Context,
+		nodeId string,
+		req Request,
+		registrationId string,
+		capability string,
+		timeout time.Duration,
+	) (Result, ForwardOutcome, error)
 }
 
 // Options configures NewDispatcher.
@@ -99,6 +168,15 @@ type Options struct {
 	Auditor  workerservice.Auditor
 	Store    Store
 	Clock    func() time.Time
+
+	// SelfNodeId is this agent replica's MEMQL_NODE_ID. It is compared with a
+	// candidate's connectedNodeId to decide local dispatch versus forward.
+	// Empty means "single node": every candidate is treated as local, which is
+	// correct for a one-replica cluster and is what the pre-mesh behaviour was.
+	SelfNodeId string
+
+	// Remote is the cross-node forward (memql#4352). Nil disables forwarding.
+	Remote RemoteDispatcher
 }
 
 // NewDispatcher constructs a worker dispatcher.
@@ -113,18 +191,70 @@ func NewDispatcher(opts Options) (*Dispatcher, error) {
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &Dispatcher{
-		logger:   opts.Logger,
-		registry: opts.Registry,
-		engine:   opts.Engine,
-		auditor:  opts.Auditor,
-		store:    opts.Store,
-		clock:    clock,
-	}, nil
+	d := &Dispatcher{
+		logger:     opts.Logger,
+		registry:   opts.Registry,
+		engine:     opts.Engine,
+		auditor:    opts.Auditor,
+		store:      opts.Store,
+		clock:      clock,
+		selfNodeId: strings.TrimSpace(opts.SelfNodeId),
+		remote:     opts.Remote,
+	}
+	if opts.Store != nil {
+		d.router = NewRouter(opts.Store, opts.Logger, clock)
+	}
+	return d, nil
+}
+
+// Router exposes the dispatcher's router so another consumer on this node
+// -- the cockpit-app executor (memql#4361) -- routes through the SAME one.
+// Building a second would give the two paths different answers to "which
+// machine", with the same owner policy read twice and possibly at
+// different moments.
+func (d *Dispatcher) Router() *Router {
+	if d == nil {
+		return nil
+	}
+	return d.router
+}
+
+// Registry exposes the connected-worker registry for the same reason.
+func (d *Dispatcher) Registry() *workerservice.Registry {
+	if d == nil {
+		return nil
+	}
+	return d.registry
+}
+
+// FleetStore exposes the store the router reads through, so the cluster phase
+// can hand the same one to the receiving side of the forward. Sharing it
+// rather than building a second is what keeps "which machines does this owner
+// have" a single answer on both halves of a hop.
+func (d *Dispatcher) FleetStore() FleetStore {
+	if d == nil {
+		return nil
+	}
+	return d.store
+}
+
+// SetRemoteDispatcher wires the cross-node forward after construction. The
+// forward needs the node PeerManager, which is built after the dispatcher in
+// app/, so this is the seam rather than a constructor argument.
+func (d *Dispatcher) SetRemoteDispatcher(remote RemoteDispatcher) {
+	if d == nil {
+		return
+	}
+	d.remote = remote
 }
 
 // Dispatch is the single entry point. Called from the tool loop
 // when a workerHost / workerComputer tool resolves.
+//
+// The gates run FIRST and unchanged (design D6): per-task approval, the kill
+// switch, standing scope, the classifier. Consent is decided before anything
+// is routed, so routing only ever chooses among machines the user already
+// consented to work on -- it never manufactures consent.
 func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) {
 	if d == nil {
 		return Result{}, errors.New("agent.worker: dispatcher not initialized")
@@ -133,55 +263,281 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 
 	gate := d.preDispatchCheck(ctx, req)
 	if gate.deny {
-		d.recordInvocation(ctx, req, "", startedAt, d.clock(), Result{
+		denied := Result{
 			OK:           false,
 			ErrorCode:    gate.errorCode,
 			ErrorMessage: gate.errorMessage,
-		}, gate.outcome)
+		}
+		// A denial never reached the pick, so the record carries only what was
+		// asked for -- not an empty candidate list, which would read as "the
+		// router found nothing" when the router never ran.
+		d.recordInvocation(ctx, req, "", startedAt, d.clock(), denied, gate.outcome, RoutingRecord{
+			ReroutedFrom:  req.ReroutedFrom,
+			RequireLabels: req.RequireLabels,
+			PreferLabels:  req.PreferLabels,
+		})
 		d.emitDenied(ctx, req, gate)
-		return Result{
-			OK:           false,
-			ErrorCode:    gate.errorCode,
-			ErrorMessage: gate.errorMessage,
-		}, nil
+		return denied, nil
 	}
 
-	worker, err := d.pickWorker(req, gate.requiredCapability)
+	plan, err := d.router.Plan(ctx, req.OwnerUserId, gate.requiredCapability, req.RequireLabels, req.PreferLabels)
+	record := plan.Record()
+	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
-		d.recordInvocation(ctx, req, "", startedAt, d.clock(), Result{
+		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error()}
+		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
+		return res, nil
+	}
+	if len(plan.Candidates) == 0 {
+		res := Result{
 			OK:           false,
 			ErrorCode:    "no_worker_available",
-			ErrorMessage: err.Error(),
-		}, "no_worker_available")
-		return Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error()}, nil
+			ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+		}
+		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
+		return res, nil
 	}
 
 	timeout := req.Timeout
 	if timeout <= 0 {
 		timeout = workerservice.DispatchTimeoutDefault
 	}
+
+	for idx, cand := range plan.Candidates {
+		record.Attempts = idx + 1
+		record.SelectedBy = selectedBy(req, plan, idx)
+
+		res, outcome := d.attempt(ctx, req, gate.requiredCapability, cand, timeout)
+		if outcome == ForwardRefusedBeforeStart {
+			// NOTHING RAN on this machine. That is the whole precondition for
+			// trying another one (design D5): a busy machine and a stream that
+			// went away before the dispatch left this node have both produced
+			// exactly no side effect, so moving on is a re-pick rather than a
+			// second execution.
+			last := idx+1 == len(plan.Candidates)
+			if plan.Policy.Fallback == FallbackNextMatching && !last {
+				d.logger.Info("worker router: candidate refused before start, trying the next",
+					"owner_user_id", req.OwnerUserId,
+					"registration_id", cand.RegistrationId,
+					"machine", cand.Label(),
+					"error_code", res.ErrorCode,
+					"strategy", plan.Policy.Strategy,
+					"remaining", len(plan.Candidates)-idx-1,
+				)
+				record.ReroutedFrom = "worker:" + cand.RegistrationId
+				continue
+			}
+			d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
+			return res, nil
+		}
+
+		// The call reached the machine. Whatever it returned, this is where
+		// the routing stops -- an exec that failed mid-run may have run.
+		d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
+		return res, nil
+	}
+
+	// Unreachable while the loop returns on every path; kept as the honest
+	// answer if it ever does not.
+	res := Result{
+		OK:           false,
+		ErrorCode:    "no_worker_available",
+		ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+	}
+	d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
+	return res, nil
+}
+
+// attempt runs one candidate. It returns ForwardRefusedBeforeStart only when
+// it is CERTAIN nothing executed on the machine.
+func (d *Dispatcher) attempt(
+	ctx context.Context,
+	req Request,
+	capability string,
+	cand Candidate,
+	timeout time.Duration,
+) (Result, ForwardOutcome) {
+	if d.isLocal(cand) {
+		return d.attemptLocal(ctx, req, capability, cand, timeout)
+	}
+	return d.attemptRemote(ctx, req, capability, cand, timeout)
+}
+
+// isLocal reports whether this replica holds the machine's stream. An empty
+// SelfNodeId means single-node, where every machine that is connected at all
+// is connected here.
+func (d *Dispatcher) isLocal(cand Candidate) bool {
+	if d.selfNodeId == "" {
+		return true
+	}
+	return cand.ConnectedNodeId == d.selfNodeId
+}
+
+func (d *Dispatcher) attemptLocal(
+	ctx context.Context,
+	req Request,
+	capability string,
+	cand Candidate,
+	timeout time.Duration,
+) (Result, ForwardOutcome) {
+	w := d.registry.WorkerById(cand.RegistrationId)
+	if w == nil {
+		// The row says this replica holds the stream and the registry
+		// disagrees. The row is up to one heartbeat stale, so this is the
+		// ordinary shape of a machine that just disconnected -- not an error
+		// worth failing the turn over while other candidates remain.
+		return Result{
+			OK:           false,
+			ErrorCode:    "worker_disconnected",
+			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
+		}, ForwardRefusedBeforeStart
+	}
+
 	dispatchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := worker.Acquire(dispatchCtx, gate.requiredCapability); err != nil {
-		d.recordInvocation(ctx, req, worker.RegistrationId, startedAt, d.clock(), Result{
+	if err := w.Acquire(dispatchCtx, capability); err != nil {
+		return Result{
 			OK:           false,
 			ErrorCode:    "worker_busy",
 			ErrorMessage: err.Error(),
-		}, "failure")
-		return Result{OK: false, ErrorCode: "worker_busy", ErrorMessage: err.Error()}, nil
+		}, ForwardRefusedBeforeStart
 	}
-	defer worker.Release(gate.requiredCapability)
+	defer w.Release(capability)
+
+	d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
 
 	envelope := buildToolDispatch(req, timeout)
-	res, err := worker.Dispatch(dispatchCtx, envelope)
-	completedAt := d.clock()
+	res, err := w.Dispatch(dispatchCtx, envelope)
+	return translateResult(envelope.GetCallId(), res, err), ForwardCompleted
+}
 
-	wireRes := translateResult(envelope.GetCallId(), res, err)
-	outcome := wireRes.classifyOutcome()
-	d.recordInvocation(ctx, req, worker.RegistrationId, startedAt, completedAt, wireRes, outcome)
+func (d *Dispatcher) attemptRemote(
+	ctx context.Context,
+	req Request,
+	capability string,
+	cand Candidate,
+	timeout time.Duration,
+) (Result, ForwardOutcome) {
+	if d.remote == nil {
+		// No forward wired. The candidate is SKIPPED, never dispatched here:
+		// this node holds no stream for it, so a local dispatch would fail in
+		// a way that blames the machine.
+		d.logger.Warn("worker router: candidate is held by another replica and no forward is configured",
+			"registration_id", cand.RegistrationId,
+			"machine", cand.Label(),
+			"connected_node_id", cand.ConnectedNodeId,
+			"self_node_id", d.selfNodeId,
+		)
+		return Result{
+			OK:           false,
+			ErrorCode:    "worker_unreachable",
+			ErrorMessage: "machine " + cand.Label() + " is connected to replica " + cand.ConnectedNodeId + " and this node has no forward",
+		}, ForwardRefusedBeforeStart
+	}
 
-	return wireRes, nil
+	res, outcome, err := d.remote.ForwardDispatch(ctx, cand.ConnectedNodeId, req, cand.RegistrationId, capability, timeout)
+	if err != nil {
+		// A transport error before a response came back. Treat it as a refusal
+		// only when the forward says so; otherwise it is indistinguishable
+		// from a call that ran and whose answer was lost, and re-running it
+		// would be a second side effect.
+		if outcome == ForwardRefusedBeforeStart {
+			return Result{OK: false, ErrorCode: "worker_unreachable", ErrorMessage: err.Error()}, ForwardRefusedBeforeStart
+		}
+		return Result{OK: false, ErrorCode: "worker_disconnected", ErrorMessage: err.Error()}, ForwardCompleted
+	}
+	if outcome == ForwardCompleted {
+		d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
+	}
+	return res, outcome
+}
+
+// stampSelected records the pick. Best-effort: roundRobin degrades to a
+// stickier rotation if this fails, which is a worse rotation and not a broken
+// call, so it must never fail the dispatch.
+func (d *Dispatcher) stampSelected(ctx context.Context, ownerUserId, registrationId string) {
+	if d.store == nil {
+		return
+	}
+	if err := d.store.TouchWorkerSelected(ctx, registrationId, ownerUserId); err != nil {
+		d.logger.Warn("worker router: stamping lastSelectedAt failed",
+			"registration_id", registrationId, "error", err)
+	}
+}
+
+// ConsentCardTarget renders the sentence the consent card carries (design D6).
+//
+// The user's Allow covers the task on ANY of their machines that satisfy the
+// requirement, because that is what routing means -- so the card must describe
+// the SET, not just today's pick. Naming one machine and then running the work
+// on another is a consent surface that described something other than what it
+// authorized; naming only the set leaves the user unable to picture where
+// anything will run. It says both.
+func (d *Dispatcher) ConsentCardTarget(
+	ctx context.Context,
+	ownerUserId string,
+	capability string,
+	require map[string]string,
+	prefer map[string]string,
+) string {
+	scope := "on any of your machines"
+	if len(require) > 0 {
+		scope += " matching " + formatLabels(require)
+	}
+	if d == nil || d.router == nil {
+		return scope
+	}
+	plan, err := d.router.Plan(ctx, ownerUserId, capability, require, prefer)
+	if err != nil {
+		// The card still goes up. A routing read that failed is not a reason
+		// to withhold the consent surface -- it is a reason not to promise a
+		// specific machine.
+		d.logger.Warn("worker router: could not resolve the consent card's current choice",
+			"owner_user_id", ownerUserId, "error", err)
+		return scope
+	}
+	if len(plan.Candidates) == 0 {
+		return scope + " -- none are online right now"
+	}
+	return scope + " -- currently " + plan.Candidates[0].Label()
+}
+
+// selectedBy classifies why this candidate is the one, for the routing record.
+func selectedBy(req Request, plan RoutePlan, idx int) string {
+	if idx > 0 || strings.TrimSpace(req.ReroutedFrom) != "" {
+		return SelectedByReroute
+	}
+	if len(plan.Candidates) == 1 {
+		return SelectedByOnlyCandidate
+	}
+	return SelectedByPolicy
+}
+
+// noCandidateMessage says WHICH of the owner's machines were ruled out and
+// why. "No worker available" on its own is the least useful true sentence
+// available: the owner is looking at four machines they can see are on.
+func noCandidateMessage(plan RoutePlan, capability string) string {
+	if plan.Total == 0 {
+		return "no machines are paired to this account"
+	}
+	parts := make([]string, 0, len(plan.Rejected))
+	ids := make([]string, 0, len(plan.Rejected))
+	for id := range plan.Rejected {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		parts = append(parts, id+": "+plan.Rejected[id])
+	}
+	msg := fmt.Sprintf("none of the %d paired machine(s) can take a %s call", plan.Total, capability)
+	if req := formatLabels(plan.Require); req != "(no requirements)" {
+		msg += " requiring " + req
+	}
+	if len(parts) > 0 {
+		msg += " -- " + strings.Join(parts, "; ")
+	}
+	return msg
 }
 
 type gateResult struct {
@@ -347,17 +703,6 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 	return gateResult{requiredCapability: required.Capability, requiredScope: required.Scope}
 }
 
-func (d *Dispatcher) pickWorker(req Request, capability string) (*workerservice.Worker, error) {
-	if d.registry == nil {
-		return nil, workerservice.ErrNoWorkerAvailable
-	}
-	w, err := d.registry.PickWorker(req.OwnerUserId, capability, nil)
-	if err != nil {
-		return nil, err
-	}
-	return w, nil
-}
-
 func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch {
 	args, _ := json.Marshal(map[string]any{
 		"action":   req.Action,
@@ -434,6 +779,7 @@ func (d *Dispatcher) recordInvocation(
 	startedAt, completedAt time.Time,
 	res Result,
 	outcome string,
+	routing RoutingRecord,
 ) {
 	if d.store == nil {
 		return
@@ -458,6 +804,7 @@ func (d *Dispatcher) recordInvocation(
 		OutputPreview: clampPreview(res.OutputPreview),
 		ErrorCode:     res.ErrorCode,
 		ErrorMessage:  res.ErrorMessage,
+		Routing:       routing.AsMap(),
 	}
 	if err := d.store.WriteInvocation(ctx, row); err != nil {
 		d.logger.Warn("worker invocation persistence failed",

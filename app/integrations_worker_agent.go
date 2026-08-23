@@ -59,6 +59,13 @@ func (a *App) setupWorkerService() {
 		Engine:   a.engine,
 		Auditor:  auditor,
 		Store:    &agentworker.EngineStore{Engine: a.engine},
+		// Taken from the service rather than read from MEMQL_NODE_ID again:
+		// the service is what STAMPS connectedNodeId, so a second reading is
+		// a second chance to disagree, and disagreeing here means forwarding
+		// every call to a peer for machines connected to this very process.
+		// The cross-node forward itself (Remote) is injected later, in the
+		// cluster phase -- it needs the PeerManager, which does not exist yet.
+		SelfNodeId: svc.NodeId(),
 	})
 	if err != nil {
 		a.fatal("worker dispatcher: build failed", "error", err)

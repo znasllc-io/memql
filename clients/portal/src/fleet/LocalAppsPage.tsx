@@ -16,7 +16,7 @@ import {
   TextInput,
 } from "../ui";
 import { sessionPath } from "./urls";
-import { appLabel, useMachines, type MachineApp } from "./useMachines";
+import { appLabel } from "./rows";
 import { useAppSessions, type AppSessionCard } from "./useAppSessions";
 import {
   useDelegationPolicy,
@@ -45,8 +45,7 @@ const SELECTABLE_APPS = ["claude-code", "codex"];
 // work with nothing to gain from a laptop.
 const DELEGATABLE_KINDS = ["runCommand", "fileProcessor", "callTool", "persistResult"];
 
-export function MachinesPage(): ReactNode {
-  const machines = useMachines();
+export function LocalAppsPage(): ReactNode {
   const sessions = useAppSessions();
   const policy = useDelegationPolicy();
 
@@ -54,38 +53,10 @@ export function MachinesPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow="v1:worker:registration"
-          title="Machines"
-          blurb="The computers running MemQL Cockpit for you, and the local apps each one can run. An app becomes selectable only when the machine's own policy allows it AND it is signed in -- so this list says exactly what the router will and will not pick."
+          eyebrow="v1:worker:delegationPolicy"
+          title="Local apps"
+          blurb="Handing a task to an app you already pay for, on a machine you own. Which apps a machine actually has is on its card under Machines; this page decides when the planner uses them, and shows what happened when it did."
         />
-
-        <Band title="Your machines" panel>
-          {machines.loading ? (
-            <Skeleton />
-          ) : machines.error !== "" ? (
-            <ErrorMessage>{machines.error}</ErrorMessage>
-          ) : machines.machines.length === 0 ? (
-            <EmptyState statement="No machines are registered to you. Run `memql-cockpit worker run` on a computer you own to register one." />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {machines.machines.map((machine) => (
-                <li key={machine.id} className="rounded-lg border border-subtle p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-sm font-medium text-fg">{machine.name}</span>
-                    <span className="text-xs text-fg-muted">
-                      {machine.revokedAt !== "" ? "revoked" : `last seen ${machine.lastSeenAt || "never"}`}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-fg-muted">
-                    {machine.version || "unknown version"}
-                    {machine.buildTag === "" ? "" : ` · ${machine.buildTag}`}
-                  </div>
-                  <AppList apps={machine.apps} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Band>
 
         <Band title="Delegation">
           <DelegationPolicyEditor state={policy} />
@@ -108,44 +79,6 @@ export function MachinesPage(): ReactNode {
         </Band>
       </section>
     </Container>
-  );
-}
-
-// AppList renders one machine's apps. The badge says exactly what the ENGINE
-// says: a machine that has the binary but is not signed in, or whose
-// policy.yaml does not allow it, is shown as present and NOT selectable --
-// rendering it as available would send somebody hunting a routing bug that
-// is not there.
-function AppList({ apps }: { apps: MachineApp[] }): ReactNode {
-  if (apps.length === 0) {
-    return (
-      <p className="mt-2 text-xs text-fg-muted">
-        This machine reports no local apps. A cockpit older than the app
-        protocol reports none, and so does one that found neither app on PATH.
-      </p>
-    );
-  }
-  return (
-    <ul className="mt-2 flex flex-col gap-1">
-      {apps.map((app) => (
-        <li key={app.id} className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="font-medium text-fg">{appLabel(app.id)}</span>
-          <span className="text-fg-muted">{app.version || "version unknown"}</span>
-          <Badge tone={app.runnable ? "ok" : "neutral"}>
-            {app.runnable ? "selectable" : "not selectable"}
-          </Badge>
-          {app.runnable ? null : (
-            <span className="text-fg-muted">
-              {!app.allowed ? "not in the machine's apps.allow" : "not signed in"}
-            </span>
-          )}
-          {app.subscription === "present" ? <Badge tone="ok">subscription</Badge> : null}
-          {app.subscription === "unknown" ? (
-            <span className="text-fg-muted">subscription unreported</span>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }
 

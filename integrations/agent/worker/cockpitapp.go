@@ -49,6 +49,8 @@ type CockpitAppExecutor struct {
 	logger     *slog.Logger
 	dispatcher *Dispatcher
 	runner     *workerservice.SessionRunner
+	router     *Router
+	registry   *workerservice.Registry
 	policies   DelegationPolicyReader
 	// ledger records the run's reported spend on v1:router:call. Nil
 	// disables the write; the run still happens, because losing a
@@ -154,7 +156,18 @@ func NewCockpitAppExecutor(logger *slog.Logger, dispatcher *Dispatcher, runner *
 	if runner == nil {
 		return nil, errors.New("cockpit-app: session runner required")
 	}
-	return &CockpitAppExecutor{logger: logger, dispatcher: dispatcher, runner: runner, policies: policies}, nil
+	return &CockpitAppExecutor{
+		logger:     logger,
+		dispatcher: dispatcher,
+		runner:     runner,
+		// The dispatcher's router and registry, not new ones: two routers
+		// would read the same owner policy twice, possibly at different
+		// moments, and give the two paths different answers to "which
+		// machine".
+		router:   dispatcher.Router(),
+		registry: dispatcher.Registry(),
+		policies: policies,
+	}, nil
 }
 
 // Backend implements planner.ContainerExecutor.
@@ -248,7 +261,18 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		MaxDuration:        defaultAppSessionMaxDuration,
 	}
 
-	result, runErr := e.runner.Run(ctx, spec, progressBridge(progress))
+	// Machine selection goes through the FLEET ROUTER (memql#4350), not
+	// through anything this file invents: it applies the owner's routing
+	// policy, orders by their chosen strategy, and knows which replica
+	// holds each machine's stream. The app requirement is merged into the
+	// require-labels the Task already carried, so a policy that narrows
+	// still narrows and an app requirement is added on top.
+	w, routeErr := e.selectMachine(ctx, ownerUserId, appId, spec.RequireLabels)
+	if routeErr != nil {
+		return planner.ExecutorResult{}, routeErr
+	}
+
+	result, runErr := e.runner.Run(ctx, w, spec, progressBridge(progress))
 
 	// The ledger row is written on EVERY outcome, failures included.
 	// A run that burned an hour of somebody's subscription and then
@@ -283,6 +307,46 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		return out, fmt.Errorf("cockpit-app: %s run failed: %w", appId, runErr)
 	}
 	return out, nil
+}
+
+// selectMachine asks the Fleet router for a machine that can run appId.
+//
+// The `app:<id>` label is what the router matches on -- the engine
+// derived it from the machine's own report and persisted it beside the
+// inventory. Requiring the label rather than filtering candidates here
+// keeps ONE definition of "can run this app": if the router's answer and
+// the runner's re-check ever disagreed, the plan would commit to a
+// machine that then refused, and the failure would name the router.
+func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, appId string, require map[string]string) (*workerservice.Worker, error) {
+	if e.router == nil || e.registry == nil {
+		return nil, fmt.Errorf("cockpit-app: no fleet router on this node; a Task can only reach one on an agent node running WorkerService")
+	}
+	need := mergeRequireLabels(require, appId)
+	if need == nil {
+		need = map[string]string{}
+	}
+	need[workerservice.AppLabelKey(appId)] = ""
+
+	plan, err := e.router.Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, need, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cockpit-app: routing %s: %w", appId, err)
+	}
+	for _, candidate := range plan.Candidates {
+		// Only a machine whose stream THIS replica holds can carry a
+		// session today: the app-session envelope has no cross-node
+		// forward yet (the tool path's WorkerForward does, memql#4352).
+		// Skipping rather than failing is what makes a second replica
+		// holding the machine a routing outcome rather than an error.
+		if w := e.registry.WorkerById(candidate.RegistrationId); w != nil && w.RunsApp(appId) {
+			return w, nil
+		}
+	}
+	if plan.Total == 0 {
+		return nil, fmt.Errorf("cockpit-app: no machines are registered to this user")
+	}
+	return nil, fmt.Errorf(
+		"cockpit-app: none of this user's %d machine(s) has %s allowed and signed in on a stream this replica holds",
+		plan.Total, appId)
 }
 
 // mergeRequireLabels adds the app's own routing label to whatever the

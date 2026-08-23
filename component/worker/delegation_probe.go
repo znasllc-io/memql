@@ -76,8 +76,8 @@ func (p *DelegationProbe) FindMachineForApp(ctx context.Context, ownerUserId, ap
 		return ""
 	}
 	if p.Registry != nil {
-		if w, err := p.Registry.PickWorkerForApp(ownerUserId, appId, nil); err == nil && w != nil {
-			return w.RegistrationId
+		if id := firstConnectedRunning(p.Registry, ownerUserId, appId); id != "" {
+			return id
 		}
 		// A node WITH a registry and no local match still falls through
 		// to the rows. In a multi-replica mesh the machine may be
@@ -307,4 +307,25 @@ func intFromRow(v any) int {
 		return int(n)
 	}
 	return 0
+}
+
+// firstConnectedRunning returns the id of a worker on THIS replica that
+// can actually run appId, or "".
+//
+// It is an existence check, not routing. Choosing BETWEEN machines is the
+// Fleet router's job (memql#4350) -- strategy, policy labels, load -- and
+// re-implementing any of that here would be a second router that
+// disagrees with the first. The triage only needs to know whether
+// delegating is possible at all; the executor asks the router which
+// machine when the Task actually runs.
+func firstConnectedRunning(r *Registry, ownerUserId, appId string) string {
+	for _, w := range r.WorkersForUser(ownerUserId) {
+		if !w.SupportsCapability(CapabilityHeadless) {
+			continue
+		}
+		if w.RunsApp(appId) {
+			return w.RegistrationId
+		}
+	}
+	return ""
 }

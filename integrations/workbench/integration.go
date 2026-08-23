@@ -59,6 +59,12 @@ type Integration struct {
 	// on builds / wiring paths that don't inject it (promotion is then a
 	// silent no-op). Injected via SetEngine during plug-in materialization.
 	engine memql.IntegrationEngineAccess
+	// store is the v1:workbench:workspace row writer (memql#4354), built over
+	// the engine. Held as a field rather than derived per call so a test can
+	// inject one: *memql.ExecuteResult cannot be constructed with a shape
+	// payload outside component/memql, so a fake ENGINE cannot return rows.
+	// Nil until an engine is injected; every store method is a no-op then.
+	store *workspaceStore
 	// uploader + bucket are the GCS attachment surface (memql#733). When
 	// present (injected on the agent node where a GCS bucket is
 	// configured), a successful LOCAL fs_write uploads the written bytes
@@ -107,6 +113,7 @@ func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 // works. Mirrors the SetForwardRouter injection pattern.
 func (i *Integration) SetEngine(e memql.IntegrationEngineAccess) {
 	i.engine = e
+	i.store = newWorkspaceStore(e)
 }
 
 // SetAttachmentUploader injects the GCS uploader + bucket used by the
@@ -173,6 +180,32 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		innerArgs = map[string]any{}
 	}
 
+	// The environment hint (memql#4353). A CALLER-CONTRACT check, which is why
+	// it sits up here with the missing-arg checks rather than down among the
+	// dispatch outcomes: nothing has run yet and nothing is going to, on either
+	// the local or the forwarded path, so there is no dispatch for the safety
+	// classifier below to classify or for a workspace to exist for.
+	//
+	// See environment.go for what the hint means and, at
+	// evaluateEnvironmentHint, for why a mismatch is REFUSED here rather than
+	// redirected to the user's own machine.
+	hint, hintErr := parseEnvironmentHint(args["environment"])
+	if hintErr != nil {
+		return errorResultNode(planId, action, ErrCodeInvalidEnvironmentHint,
+			"workbench: "+hintErr.Error(), started), nil
+	}
+	if mismatch := evaluateEnvironmentHint(hint); mismatch != nil {
+		if i.logger != nil {
+			i.logger.LogAttrs(ctx, slog.LevelInfo, "workbench: refusing dispatch -- environment mismatch",
+				slog.String("planId", planId),
+				slog.String("action", action),
+				slog.String("unmetNeeds", strings.Join(mismatch.UnmetNeeds, ",")),
+			)
+		}
+		return errorResultNodeWithPayload(planId, action, ErrCodeEnvironmentMismatch,
+			describeMismatch(*mismatch), *mismatch, started), nil
+	}
+
 	// Safety classifier (memql#229). Workbench is sandboxed per-Plan
 	// so blast radius is bounded -- fail-OPEN on classifier error.
 	// In shadow mode (the default) this is observation-only; the
@@ -233,9 +266,33 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		}
 	}
 
+	// The workspace row is written under the plan owner's actor (memql#4354),
+	// so the owner is resolved BEFORE the directory exists -- an unattributable
+	// workspace the refusal sits beside is the same bug with better logging,
+	// which is the standard the memql#3506 refusal above is already held to.
+	//
+	// Resolved here rather than at the top of the function so an unreachable
+	// workbench still reports no_workbench_peer. That is the recurring
+	// deployment fault (memql#3450), and answering it with a bookkeeping error
+	// instead would cost an operator the one message that names the missing
+	// peer seed.
+	planOwner, ownerErr := i.workspaceOwner(ctx, planId)
+	if ownerErr != nil {
+		return i.refuseWorkspaceOwner(ctx, planId, action, ownerErr, started), nil
+	}
+
 	ws, err := i.manager.provisionForPlan(planId)
 	if err != nil {
 		return nil, err
+	}
+
+	// THIS node made the directory, so THIS node records where it is.
+	// Everything that writes a v1:workbench:workspace row does so from here, on
+	// the node whose disk the row describes -- a second writer would be
+	// describing a filesystem it cannot see.
+	workspaceId, wsErr := i.recordWorkspace(ctx, planId, planOwner, ws.rootPath)
+	if wsErr != nil {
+		return i.refuseWorkspaceOwner(ctx, planId, action, wsErr, started), nil
 	}
 
 	var res dispatchResult
@@ -344,6 +401,21 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		i.promoteWorkbenchOutput(ctx, planId, agentId, innerArgs, true)
 	}
 
+	// lastUsedAt is idle-detection telemetry, not a lifecycle gate, so a failed
+	// bump is logged and swallowed: refusing a dispatch that already succeeded
+	// because a timestamp did not land would trade a real result for a metric.
+	// (The row's EXISTENCE is a different matter and is handled above, before
+	// anything ran.)
+	if res.OK {
+		if err := i.workspaces().touch(ctx, planOwner, workspaceId); err != nil && i.logger != nil {
+			i.logger.LogAttrs(ctx, slog.LevelWarn, "workbench: touchWorkspace failed",
+				slog.String("planId", planId),
+				slog.String("workspaceId", workspaceId),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
 	if i.logger != nil {
 		level := slog.LevelInfo
 		if !res.OK {
@@ -444,7 +516,43 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 		TaskId:    stringArg(allArgs["taskId"], ""),
 		Authority: node.ForwardedAuthorityToProto(authority, i.router.SelfNodeId(), i.router.SelfNodeType()),
 	}
-	resp, err := i.router.Forward(ctx, req)
+	// AFFINITY (memql#4354). The plan's live workspace row names the replica
+	// whose disk holds its directory; pass that to the picker so the call goes
+	// back to the same filesystem it wrote to.
+	//
+	// A read failure here degrades to "" -- an unpinned pick -- rather than
+	// refusing the call. That is the same outcome the pre-#4354 code always
+	// had, so a transient read problem cannot be worse than the status quo,
+	// and the receiving node still records the substitution.
+	planOwner, ownerErr := i.workspaceOwner(ctx, planId)
+	if ownerErr != nil {
+		// Refused here rather than forwarded: the receiving node runs the same
+		// check against the same row and would refuse identically, one hop
+		// later and with a workbench slot spent on it.
+		return i.refuseWorkspaceOwner(ctx, planId, action, ownerErr, started), true
+	}
+	pinned := i.pinnedWorkspaceNode(ctx, planId, planOwner)
+	resp, servedBy, err := i.router.Forward(ctx, req, pinned)
+	if pinned != "" && servedBy != "" && servedBy != pinned && i.logger != nil {
+		// The bookkeeping (releasing the orphaned row, provisioning a
+		// successor) happens on the node that receives this call, because that
+		// is the node that owns the new directory. What belongs HERE is the
+		// observation, from the only vantage point that can see both ids at
+		// once: this plan's workspace was on a replica that is no longer
+		// reachable, and the call has been sent somewhere else.
+		//
+		// The files are NOT migrated. They were on a node that left the mesh;
+		// there is nothing to copy them from. The plan gets a fresh empty
+		// directory and the reason is recorded on the released row
+		// (releasedReason=node_lost) so "my file vanished" has an answer.
+		i.logger.LogAttrs(ctx, slog.LevelWarn,
+			"workbench: workspace replica is gone -- dispatching to a different node; the plan gets a FRESH empty workspace and its files are NOT migrated",
+			slog.String("planId", planId),
+			slog.String("lostNodeId", pinned),
+			slog.String("servingNodeId", servedBy),
+			slog.String("action", action),
+		)
+	}
 	if errors.Is(err, ErrNoWorkbenchPeer) {
 		// Not decided here (memql#3506). The caller owns the choice
 		// between refusing and -- on the explicit opt-in only -- running
@@ -485,9 +593,22 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 // surface. Keeps the wire shape identical so the agent's tool loop
 // formats both kinds the same way.
 func errorResultNode(planId, action, code, msg string, started time.Time) []memorynodes.MemoryNode {
+	return errorResultNodeWithPayload(planId, action, code, msg, nil, started)
+}
+
+// errorResultNodeWithPayload is the same node with a structured body attached
+// on dispatchResult.Payload -- the field successful results already use, so a
+// machine-readable failure needs no second envelope and no change at the seams
+// that carry it (the forward response passes payload_json through verbatim).
+//
+// The environment_mismatch refusal is the caller: an error string a consumer
+// has to regex for the unmet needs is a contract that breaks the first time
+// somebody improves the wording. See EnvironmentMismatchFromPayload.
+func errorResultNodeWithPayload(planId, action, code, msg string, body any, started time.Time) []memorynodes.MemoryNode {
 	payload, _ := json.Marshal(dispatchResult{
 		OK:        false,
 		Action:    action,
+		Payload:   body,
 		ErrorCode: code,
 		ErrorMsg:  msg,
 	})
@@ -498,6 +619,158 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}
+}
+
+// ---------------------------------------------------------------------------
+// Workspace row bookkeeping (memql#4354)
+// ---------------------------------------------------------------------------
+
+// ErrCodeWorkspaceOwnerUnresolved is the dispatchResult.errorCode when the
+// parent plan's owner could not be resolved and the workspace row therefore
+// cannot be written under an actor.
+//
+// It REFUSES the dispatch. The alternative -- write the row anyway -- is worse
+// than it looks: auth.ContextWithUserActor is a no-op on a blank id, so the
+// insert lands with ownerUserId stamped "", and @rowAuthz(owner="ownerUserId")
+// then hides that row from everyone including the person whose files it
+// describes. The next call reads no row, provisions a second workspace, and the
+// split this issue exists to fix comes back wearing a bookkeeping layer.
+const ErrCodeWorkspaceOwnerUnresolved = "workspace_owner_unresolved"
+
+// workspaces returns the row store. Falls back to building one from the engine
+// so an Integration assembled by struct literal (as several tests do) behaves
+// the same as one built through SetEngine. Returns nil when there is no engine,
+// which every store method treats as "no persistence layer" rather than as an
+// error.
+func (i *Integration) workspaces() *workspaceStore {
+	if i.store != nil {
+		return i.store
+	}
+	return newWorkspaceStore(i.engine)
+}
+
+// workspaceOwner resolves the user whose files the workspace holds: the parent
+// plan's requestedBy, which is also the value provisionWorkspace stamps from
+// actor.userId.
+//
+// Returns ("", nil) when no engine is injected. That is the pre-existing MVP
+// posture, not a silent failure: with no engine there is no row layer to be
+// wrong about, and every store method below is a no-op. It is a different
+// situation from an engine that IS present and an owner that is not, which is
+// the errNoPlanOwner refusal.
+func (i *Integration) workspaceOwner(ctx context.Context, planId string) (string, error) {
+	if !i.workspaces().available() {
+		return "", nil
+	}
+	owner, _ := i.resolvePlanOwner(ctx, planId)
+	if strings.TrimSpace(owner) == "" {
+		return "", errNoPlanOwner
+	}
+	return owner, nil
+}
+
+// refuseWorkspaceOwner turns a workspace-bookkeeping failure into a structured
+// tool result. Logged at ERROR because it is a wiring or data fault -- a plan
+// with no resolvable owner, or an engine that cannot answer -- rather than
+// something the agent did.
+func (i *Integration) refuseWorkspaceOwner(ctx context.Context, planId, action string, cause error, started time.Time) []memorynodes.MemoryNode {
+	msg := fmt.Sprintf("workbench: %s (planId %s). Check that planId names a v1:planner:plan row this "+
+		"caller can read. The workspace row records which replica holds that plan's directory, and a row "+
+		"written with no owner is readable by nobody -- including the operator answering \"where did my "+
+		"file go\". A workspace keyed on a plan that does not exist also never reaches the "+
+		"release-on-plan-terminal automation, so its directory is never reclaimed. Refusing rather than "+
+		"provisioning an unattributable workspace.",
+		cause.Error(), planId)
+	if i.logger != nil {
+		i.logger.LogAttrs(ctx, slog.LevelError, "workbench: refusing dispatch -- workspace owner unresolved",
+			slog.String("planId", planId),
+			slog.String("action", action),
+			slog.String("error", cause.Error()),
+		)
+	}
+	return errorResultNode(planId, action, ErrCodeWorkspaceOwnerUnresolved, msg, started)
+}
+
+// pinnedWorkspaceNode reports the node id on the plan's live workspace row, or
+// "" when there is no row, no engine, or the read failed. Agent-side; feeds the
+// forward router's affinity preference.
+func (i *Integration) pinnedWorkspaceNode(ctx context.Context, planId, planOwner string) string {
+	row, err := i.workspaces().forPlan(ctx, planId, planOwner)
+	if err != nil {
+		if i.logger != nil {
+			i.logger.LogAttrs(ctx, slog.LevelWarn, "workbench: workspace affinity lookup failed; dispatching unpinned",
+				slog.String("planId", planId),
+				slog.String("error", err.Error()),
+			)
+		}
+		return ""
+	}
+	if row == nil {
+		return ""
+	}
+	return row.NodeId
+}
+
+// recordWorkspace makes the v1:workbench:workspace row agree with the directory
+// this node just created, and returns the row id for the post-dispatch touch.
+//
+// Three cases, and the third is the node-loss transition:
+//
+//   - No live row: this plan's first call anywhere. Insert one naming this node.
+//   - A live row naming this node (or naming nobody, which is what a row written
+//     before nodeId existed looks like): adopt it. The common path, every call
+//     after the first.
+//   - A live row naming a DIFFERENT node: that replica held the directory and
+//     the agent's picker only routed here because it could not reach it. Release
+//     the orphan with reason=node_lost and insert a successor on this node.
+//
+// The files are not migrated and cannot be: they were on a disk that is no
+// longer in the mesh. The design accepts a fresh empty directory and records
+// WHY on the released row, so the question "where did my file go" has an answer
+// instead of a plan that silently starts over.
+//
+// The third case can also be reached without an actual node loss -- if the
+// agent's affinity read failed, it dispatches unpinned and may land anywhere.
+// The outcome is then the same swap, which is exactly what happened on every
+// call before this change; the difference is that it is now recorded rather
+// than invisible.
+func (i *Integration) recordWorkspace(ctx context.Context, planId, planOwner, storageRoot string) (string, error) {
+	store := i.workspaces()
+	if !store.available() {
+		return "", nil
+	}
+	self := selfNodeId()
+	existing, err := store.forPlan(ctx, planId, planOwner)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil && (existing.NodeId == self || existing.NodeId == "") {
+		return existing.Id, nil
+	}
+	if existing != nil {
+		if relErr := store.release(ctx, planOwner, existing.Id, releaseReasonNodeLost); relErr != nil {
+			return "", relErr
+		}
+		if i.logger != nil {
+			i.logger.LogAttrs(ctx, slog.LevelWarn,
+				"workbench: taking over a plan whose workspace replica is gone -- released the orphaned row as node_lost and provisioning a FRESH workspace; files are NOT migrated",
+				slog.String("planId", planId),
+				slog.String("lostNodeId", existing.NodeId),
+				slog.String("servingNodeId", self),
+				slog.String("releasedWorkspaceId", existing.Id),
+			)
+		}
+	}
+	row := workspaceRow{
+		Id:          deriveWorkspaceId(planId, self),
+		PlanId:      planId,
+		StorageRoot: storageRoot,
+		NodeId:      self,
+	}
+	if err := store.provision(ctx, planOwner, row); err != nil {
+		return "", err
+	}
+	return row.Id, nil
 }
 
 // promoteWorkbenchOutput records a v1:library:generatedOutput row for a
@@ -821,24 +1094,15 @@ func detectMimeType(fileName string, data []byte) string {
 // though the file was written. requestedBy is faithfully forwarded from the
 // originating user, so it's the correct owner. (memql#952)
 func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (ownerUserId, partitionId string) {
-	if i.engine == nil {
+	row, err := i.workspaces().planRow(ctx, planId)
+	if err != nil || row == nil {
 		return "", ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId)))
-	if err != nil || res == nil {
+	owner := planOwnerFromRow(row)
+	if owner == "" {
 		return "", ""
 	}
-	for _, row := range outputPayloadRows(res.OutputPayload()) {
-		if row == nil {
-			continue
-		}
-		owner := planOwnerFromRow(row)
-		space := strings.TrimSpace(stringFromRow(row, "partitionId"))
-		if owner != "" {
-			return owner, space
-		}
-	}
-	return "", ""
+	return owner, strings.TrimSpace(stringFromRow(row, "partitionId"))
 }
 
 // planOwnerFromRow picks the deliverable owner from a planFull row.

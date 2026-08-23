@@ -94,16 +94,25 @@ func (r *SessionRunner) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Run executes one app session to completion.
+// Run executes one app session to completion on the supplied worker.
 //
-// The ORDER here is load-bearing. The credential is minted and the
-// row is written BEFORE AppSessionStart goes on the wire, so a
-// session the worker never acknowledges still leaves a row saying it
-// was attempted -- without that, "nothing happened" and "it failed to
-// start" read identically afterwards.
-func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress ProgressFunc) (RunResult, error) {
-	if r == nil || r.Registry == nil {
+// The CALLER selects the machine. Choosing between machines is the Fleet
+// router's job (memql#4350) -- strategy, policy labels, load, the
+// cross-node forward -- and a runner that picked for itself would be a
+// second router disagreeing with the first. This one runs the session it
+// is given.
+//
+// The ORDER here is load-bearing. The credential is minted and the row is
+// written BEFORE AppSessionStart goes on the wire, so a session the
+// worker never acknowledges still leaves a row saying it was attempted --
+// without that, "nothing happened" and "it failed to start" read
+// identically afterwards.
+func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progress ProgressFunc) (RunResult, error) {
+	if r == nil {
 		return RunResult{}, fmt.Errorf("worker: session runner not configured")
+	}
+	if w == nil {
+		return RunResult{}, fmt.Errorf("worker: session runner needs a selected machine")
 	}
 	if strings.TrimSpace(spec.SessionId) == "" {
 		return RunResult{}, fmt.Errorf("worker: run requires a session id")
@@ -115,9 +124,13 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 		return RunResult{}, fmt.Errorf("worker: unknown app session kind %q", spec.Kind)
 	}
 
-	w, err := r.Registry.PickWorkerForApp(spec.OwnerUserId, spec.App, spec.RequireLabels)
-	if err != nil {
-		return RunResult{}, fmt.Errorf("worker: no machine online with %s allowed and signed in: %w", spec.App, err)
+	// The router matched on the `app:` label; RunsApp is the same test
+	// asked of this worker directly. Re-checking is not redundant: the
+	// machine may have signed out between the router's read and now, and
+	// starting anyway would hand the app a credential it cannot use.
+	if !w.RunsApp(spec.App) {
+		return RunResult{}, fmt.Errorf("worker: %s is no longer allowed and signed in on %s",
+			spec.App, w.RegistrationId)
 	}
 
 	lifetime := spec.CredentialLifetime

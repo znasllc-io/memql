@@ -719,6 +719,28 @@ QueryClient.prototype.checkRecord = function (this: QueryClient, args: CheckReco
   return this.executeNamed("checkRecord", buildCheckRecord(args), opts);
 };
 
+/** Clear connectedNodeId on a worker registration when its stream closes. NOT @serverOnly, deliberately. Its caller is component/worker, which is not on call_origin.go's internal-origin allowlist and should not be: every context in that package descends from a worker's own inbound stream. The concept's owner tier is the gate instead -- the store stamps auth.ContextWithUserActor for the registration's owner, and the write guard refuses any other actor. The residue is that a signed-in person could clear the field on their OWN machine, which the next heartbeat re-stamps within one interval. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["clearWorkerConnectedNode"] in generated_concepts.ts).
+export interface ClearWorkerConnectedNodeArgs {
+  registrationId: string;
+}
+
+export function buildClearWorkerConnectedNode(args: ClearWorkerConnectedNodeArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "mutation clearWorkerConnectedNode(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clearWorkerConnectedNode(args: ClearWorkerConnectedNodeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clearWorkerConnectedNode = function (this: QueryClient, args: ClearWorkerConnectedNodeArgs = {} as ClearWorkerConnectedNodeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clearWorkerConnectedNode", buildClearWorkerConnectedNode(args), opts);
+};
+
 /** Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate. */
 // Bound concept: v1:telephony:call (machine-readable: BoundConcepts["closeCall"] in generated_concepts.ts).
 export interface CloseCallArgs {
@@ -2933,6 +2955,38 @@ QueryClient.prototype.createRole = function (this: QueryClient, args: CreateRole
   return this.executeNamed("createRole", buildCreateRole(args), opts);
 };
 
+/** Create the caller's routing policy. Run once, for a user who has none; edits go through updateRoutingPolicy. */
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["createRoutingPolicy"] in generated_concepts.ts).
+export interface CreateRoutingPolicyArgs {
+  policyId: string;
+  // Enum: firstFit | roundRobin | leastLoaded | labelMatch
+  strategy: string;
+  requireLabels?: Record<string, unknown>;
+  preferLabels?: Record<string, unknown>;
+  // Enum: none | nextMatching
+  fallback: string;
+}
+
+export function buildCreateRoutingPolicy(args: CreateRoutingPolicyArgs): string {
+  const parts: string[] = [];
+  parts.push("policyId: " + renderMemQLValue(args.policyId));
+  parts.push("strategy: " + renderMemQLValue(args.strategy));
+  if (args.requireLabels !== undefined) parts.push("requireLabels: " + renderMemQLValue(args.requireLabels));
+  if (args.preferLabels !== undefined) parts.push("preferLabels: " + renderMemQLValue(args.preferLabels));
+  parts.push("fallback: " + renderMemQLValue(args.fallback));
+  return "mutation createRoutingPolicy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createRoutingPolicy(args: CreateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createRoutingPolicy = function (this: QueryClient, args: CreateRoutingPolicyArgs = {} as CreateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createRoutingPolicy", buildCreateRoutingPolicy(args), opts);
+};
+
 /** Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons. */
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createScopeElevationPlan"] in generated_concepts.ts).
 export interface CreateScopeElevationPlanArgs {
@@ -3476,6 +3530,7 @@ export interface CreateWorkerInvocationArgs {
   bytesIn?: number;
   bytesOut?: number;
   outputPreview?: string;
+  routing?: Record<string, unknown>;
 }
 
 export function buildCreateWorkerInvocation(args: CreateWorkerInvocationArgs): string {
@@ -3501,6 +3556,7 @@ export function buildCreateWorkerInvocation(args: CreateWorkerInvocationArgs): s
   if (args.bytesIn !== undefined) parts.push("bytesIn: " + renderMemQLValue(args.bytesIn));
   if (args.bytesOut !== undefined) parts.push("bytesOut: " + renderMemQLValue(args.bytesOut));
   if (args.outputPreview !== undefined) parts.push("outputPreview: " + renderMemQLValue(args.outputPreview));
+  if (args.routing !== undefined) parts.push("routing: " + renderMemQLValue(args.routing));
   return "mutation createWorkerInvocation(" + parts.join(", ") + ")";
 }
 
@@ -3546,11 +3602,10 @@ QueryClient.prototype.createWorkerPairingCode = function (this: QueryClient, arg
   return this.executeNamed("createWorkerPairingCode", buildCreateWorkerPairingCode(args), opts);
 };
 
-/** Create a worker registration row on first connect. */
+/** Create a worker registration row on first connect. ownerUserId is STAMPED FROM THE ACTOR, not taken from args: the concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and a declared owner field any mutation writes from caller args fails TestDeclaredOwnerFieldsAreServerStamped (its exemption list is empty and is meant to stay so). The worker authenticates as worker:<id> rather than as its owner, so component/worker's store runs this write under auth.ContextWithUserActor for the owner resolved from the worker_token's identity row -- the same borrowed-authority shape createAuthActivity uses, and for the same reason: the service knows whose credential it is before the actor envelope does. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["createWorkerRegistration"] in generated_concepts.ts).
 export interface CreateWorkerRegistrationArgs {
   registrationId: string;
-  ownerUserId: string;
   identityId: string;
   name: string;
   capabilities: unknown[];
@@ -3566,12 +3621,12 @@ export interface CreateWorkerRegistrationArgs {
   registeredAt: string;
   lastSeenAt?: string;
   lastConnectedFromIP?: string;
+  connectedNodeId?: string;
 }
 
 export function buildCreateWorkerRegistration(args: CreateWorkerRegistrationArgs): string {
   const parts: string[] = [];
   parts.push("registrationId: " + renderMemQLValue(args.registrationId));
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
   parts.push("identityId: " + renderMemQLValue(args.identityId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("capabilities: " + renderMemQLValue(args.capabilities));
@@ -3586,6 +3641,7 @@ export function buildCreateWorkerRegistration(args: CreateWorkerRegistrationArgs
   parts.push("registeredAt: " + renderMemQLValue(args.registeredAt));
   if (args.lastSeenAt !== undefined) parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
+  if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
   return "mutation createWorkerRegistration(" + parts.join(", ") + ")";
 }
 
@@ -3633,6 +3689,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.createWorkerTokenIdentity = function (this: QueryClient, args: CreateWorkerTokenIdentityArgs = {} as CreateWorkerTokenIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createWorkerTokenIdentity", buildCreateWorkerTokenIdentity(args), opts);
+};
+
+/** Take a routing policy out of the active set. The row is kept -- an invocation's routing.policyId names it. */
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["deactivateRoutingPolicy"] in generated_concepts.ts).
+export interface DeactivateRoutingPolicyArgs {
+  policyId: string;
+}
+
+export function buildDeactivateRoutingPolicy(args: DeactivateRoutingPolicyArgs): string {
+  const parts: string[] = [];
+  parts.push("policyId: " + renderMemQLValue(args.policyId));
+  return "mutation deactivateRoutingPolicy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deactivateRoutingPolicy(args: DeactivateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deactivateRoutingPolicy = function (this: QueryClient, args: DeactivateRoutingPolicyArgs = {} as DeactivateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deactivateRoutingPolicy", buildDeactivateRoutingPolicy(args), opts);
 };
 
 /** Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side). */
@@ -4533,12 +4611,15 @@ QueryClient.prototype.proposeOverride = function (this: QueryClient, args: Propo
   return this.executeNamed("proposeOverride", buildProposeOverride(args), opts);
 };
 
-/** Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk. */
+/** Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
+ownerUserId is STAMPED FROM THE ACTOR (memql#4354). The concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and a declared owner field written from caller args fails TestDeclaredOwnerFieldsAreServerStamped. The workbench integration therefore runs this write under auth.ContextWithUserActor for the parent plan's requestedBy, which it has already resolved in order to know whose plan it is executing.
+nodeId is the serving replica's own MEMQL_NODE_ID, supplied by the node that just made the directory. It is an arg rather than a stamp because only that node knows it, and it is not forgeable to any useful end: naming another replica would send the picker somewhere the directory is not, which reads as a node loss and re-provisions. */
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionWorkspace"] in generated_concepts.ts).
 export interface ProvisionWorkspaceArgs {
   workspaceId: string;
   planId: string;
   storageRoot: string;
+  nodeId?: string;
 }
 
 export function buildProvisionWorkspace(args: ProvisionWorkspaceArgs): string {
@@ -4546,6 +4627,7 @@ export function buildProvisionWorkspace(args: ProvisionWorkspaceArgs): string {
   parts.push("workspaceId: " + renderMemQLValue(args.workspaceId));
   parts.push("planId: " + renderMemQLValue(args.planId));
   parts.push("storageRoot: " + renderMemQLValue(args.storageRoot));
+  if (args.nodeId !== undefined) parts.push("nodeId: " + renderMemQLValue(args.nodeId));
   return "mutation provisionWorkspace(" + parts.join(", ") + ")";
 }
 
@@ -5511,6 +5593,7 @@ export interface RefreshWorkerRegistrationArgs {
   apps?: unknown[];
   lastSeenAt: string;
   lastConnectedFromIP?: string;
+  connectedNodeId?: string;
 }
 
 export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationArgs): string {
@@ -5528,6 +5611,7 @@ export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationAr
   if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
   parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
+  if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
   return "mutation refreshWorkerRegistration(" + parts.join(", ") + ")";
 }
 
@@ -5681,7 +5765,7 @@ QueryClient.prototype.rejectOverride = function (this: QueryClient, args: Reject
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["releaseWorkspace"] in generated_concepts.ts).
 export interface ReleaseWorkspaceArgs {
   workspaceId: string;
-  // Enum: plan_terminal | explicit | ttl_expired
+  // Enum: plan_terminal | explicit | ttl_expired | node_lost
   reason: string;
 }
 
@@ -5748,6 +5832,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.renamePasskeyIdentity = function (this: QueryClient, args: RenamePasskeyIdentityArgs = {} as RenamePasskeyIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("renamePasskeyIdentity", buildRenamePasskeyIdentity(args), opts);
+};
+
+/** Rename one of the caller's machines. Writes displayName; `name` stays the cockpit's hostname, which the next reconnect re-stamps. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["renameWorker"] in generated_concepts.ts).
+export interface RenameWorkerArgs {
+  registrationId: string;
+  displayName: string;
+}
+
+export function buildRenameWorker(args: RenameWorkerArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("displayName: " + renderMemQLValue(args.displayName));
+  return "mutation renameWorker(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    renameWorker(args: RenameWorkerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.renameWorker = function (this: QueryClient, args: RenameWorkerArgs = {} as RenameWorkerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("renameWorker", buildRenameWorker(args), opts);
 };
 
 /** Send a v1:forge:request back for changes: set status 'changes_requested' with a reason. */
@@ -7109,6 +7217,30 @@ QueryClient.prototype.setUserActiveSpace = function (this: QueryClient, args: Se
   return this.executeNamed("setUserActiveSpace", buildSetUserActiveSpace(args), opts);
 };
 
+/** Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not merged: the Fleet page edits the set as a set, and a merge would make removing a label impossible through this surface. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerOperatorLabels"] in generated_concepts.ts).
+export interface SetWorkerOperatorLabelsArgs {
+  registrationId: string;
+  operatorLabels: Record<string, unknown>;
+}
+
+export function buildSetWorkerOperatorLabels(args: SetWorkerOperatorLabelsArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("operatorLabels: " + renderMemQLValue(args.operatorLabels));
+  return "mutation setWorkerOperatorLabels(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setWorkerOperatorLabels(args: SetWorkerOperatorLabelsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setWorkerOperatorLabels = function (this: QueryClient, args: SetWorkerOperatorLabelsArgs = {} as SetWorkerOperatorLabelsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setWorkerOperatorLabels", buildSetWorkerOperatorLabels(args), opts);
+};
+
 /** Soft-delete a worker invocation row past retention. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["softDeleteWorkerInvocation"] in generated_concepts.ts).
 export interface SoftDeleteWorkerInvocationArgs {
@@ -7447,6 +7579,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.touchSession = function (this: QueryClient, args: TouchSessionArgs = {} as TouchSessionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("touchSession", buildTouchSession(args), opts);
+};
+
+/** Stamp lastSelectedAt on the machine the router just picked. NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier already refuses a write onto a row the caller does not own, and @serverOnly would add a third entry to the server-only inventory to buy nothing beyond it. The residue is that a person could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin rotation, which is a preference they already control from the Fleet page. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["touchWorkerSelected"] in generated_concepts.ts).
+export interface TouchWorkerSelectedArgs {
+  registrationId: string;
+}
+
+export function buildTouchWorkerSelected(args: TouchWorkerSelectedArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "mutation touchWorkerSelected(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    touchWorkerSelected(args: TouchWorkerSelectedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.touchWorkerSelected = function (this: QueryClient, args: TouchWorkerSelectedArgs = {} as TouchWorkerSelectedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("touchWorkerSelected", buildTouchWorkerSelected(args), opts);
 };
 
 /** Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call. */
@@ -8288,6 +8442,38 @@ QueryClient.prototype.updateResponsibility = function (this: QueryClient, args: 
   return this.executeNamed("updateResponsibility", buildUpdateResponsibility(args), opts);
 };
 
+/** Edit the caller's routing policy in place. The concept's owner tier is what scopes this to a row the caller owns; the body cannot write ownerUserId, so the read-merge keeps it. */
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["updateRoutingPolicy"] in generated_concepts.ts).
+export interface UpdateRoutingPolicyArgs {
+  policyId: string;
+  // Enum: firstFit | roundRobin | leastLoaded | labelMatch
+  strategy: string;
+  requireLabels?: Record<string, unknown>;
+  preferLabels?: Record<string, unknown>;
+  // Enum: none | nextMatching
+  fallback: string;
+}
+
+export function buildUpdateRoutingPolicy(args: UpdateRoutingPolicyArgs): string {
+  const parts: string[] = [];
+  parts.push("policyId: " + renderMemQLValue(args.policyId));
+  parts.push("strategy: " + renderMemQLValue(args.strategy));
+  if (args.requireLabels !== undefined) parts.push("requireLabels: " + renderMemQLValue(args.requireLabels));
+  if (args.preferLabels !== undefined) parts.push("preferLabels: " + renderMemQLValue(args.preferLabels));
+  parts.push("fallback: " + renderMemQLValue(args.fallback));
+  return "mutation updateRoutingPolicy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateRoutingPolicy(args: UpdateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateRoutingPolicy = function (this: QueryClient, args: UpdateRoutingPolicyArgs = {} as UpdateRoutingPolicyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateRoutingPolicy", buildUpdateRoutingPolicy(args), opts);
+};
+
 /** ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.ts).
 export interface UpdateSendJobArgs {
@@ -8561,6 +8747,8 @@ export interface UpdateWorkerLastSeenArgs {
   registrationId: string;
   lastSeenAt: string;
   lastConnectedFromIP?: string;
+  connectedNodeId?: string;
+  activeCount?: number;
 }
 
 export function buildUpdateWorkerLastSeen(args: UpdateWorkerLastSeenArgs): string {
@@ -8568,6 +8756,8 @@ export function buildUpdateWorkerLastSeen(args: UpdateWorkerLastSeenArgs): strin
   parts.push("registrationId: " + renderMemQLValue(args.registrationId));
   parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
+  if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
+  if (args.activeCount !== undefined) parts.push("activeCount: " + renderMemQLValue(args.activeCount));
   return "mutation updateWorkerLastSeen(" + parts.join(", ") + ")";
 }
 

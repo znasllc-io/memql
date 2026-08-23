@@ -1,4 +1,4 @@
-// The machines surface (memql#4363).
+// The local-apps surface (memql#4363), a Fleet tab.
 //
 // Two things here are worth pinning, and both are places where a
 // plausible-looking implementation would mislead a person rather than fail:
@@ -16,10 +16,10 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 
-import { machinesPath, sessionPath, SESSION_ROUTE_PATTERN } from "../src/machines/urls";
-import { appLabel } from "../src/machines/useMachines";
-import { isLive } from "../src/machines/useAppSessions";
-import { policyRowId } from "../src/machines/useDelegationPolicy";
+import { fleetPath, sessionPath, SESSION_ROUTE_PATTERN } from "../src/fleet/urls";
+import { appLabel } from "../src/fleet/rows";
+import { isLive } from "../src/fleet/useAppSessions";
+import { policyRowId } from "../src/fleet/useDelegationPolicy";
 
 // runnableFor mirrors the rule the page renders and the engine enforces.
 // Kept here rather than imported so the test states the rule independently:
@@ -84,8 +84,11 @@ function CapturedSessionId(): React.ReactElement {
 }
 
 describe("session addresses", () => {
-  it("roots the surface at /machines", () => {
-    expect(machinesPath()).toBe("/machines");
+  it("roots the surface under Fleet rather than beside it", () => {
+    // Two doors to one thing is the question the rail's reshuffle removed.
+    // Local apps run ON a machine, so the surface is a Fleet tab.
+    expect(fleetPath("apps")).toBe("/fleet/apps");
+    expect(sessionPath("s1")).toContain("/fleet/apps/sessions/");
   });
 
   it("round-trips a canonical session id through the router", () => {
@@ -93,7 +96,7 @@ describe("session addresses", () => {
     render(
       <MemoryRouter initialEntries={[sessionPath(sessionId)]}>
         <Routes>
-          <Route path={`/machines/${SESSION_ROUTE_PATTERN}`} element={<CapturedSessionId />} />
+          <Route path={`/fleet/${SESSION_ROUTE_PATTERN}`} element={<CapturedSessionId />} />
         </Routes>
       </MemoryRouter>,
     );

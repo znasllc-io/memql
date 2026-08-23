@@ -11,16 +11,31 @@
 
 /// Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is
 /// supplied by the workbench integration which has already created the directory on disk.
+///
+/// ownerUserId is STAMPED FROM THE ACTOR (memql#4354). The concept declares
+/// @rowAuthz(owner="ownerUserId", clusterOwner), and a declared owner field written from caller
+/// args fails TestDeclaredOwnerFieldsAreServerStamped. The workbench integration therefore runs
+/// this write under auth.ContextWithUserActor for the parent plan's requestedBy, which it has
+/// already resolved in order to know whose plan it is executing.
+///
+/// nodeId is the serving replica's own MEMQL_NODE_ID, supplied by the node that just made the
+/// directory. It is an arg rather than a stamp because only that node knows it, and it is not
+/// forgeable to any useful end: naming another replica would send the picker somewhere the
+/// directory is not, which reads as a node loss and re-provisions.
+@actor
 mutate workspace provisionWorkspace {
   args {
     workspaceId  string!
     planId       string!
     storageRoot  string!
+    nodeId       string
   }
   insert {
     accept { planId, storageRoot }
     stamp {
       id: args.workspaceId
+      ownerUserId: actor.userId
+      nodeId: args.nodeId ?? ""
       status: "provisioned"
       createdAt: now
       lastUsedAt: now
@@ -48,7 +63,7 @@ mutate workspace touchWorkspace {
 mutate workspace releaseWorkspace {
   args {
     workspaceId  string!
-    reason       enum("plan_terminal", "explicit", "ttl_expired")!
+    reason       enum("plan_terminal", "explicit", "ttl_expired", "node_lost")!
   }
   update {
     id: args.workspaceId

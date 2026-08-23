@@ -440,6 +440,17 @@ single-node-assuming code and PASS with the cross-node fix. This has shipped
 green single-node and broken in the mesh repeatedly (#1448, #1412, #1388). See
 [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
+**memql#4352 closed the WORKER half of that class.** A cockpit machine's
+`WorkerService` stream terminates on ONE agent replica, so at two replicas the
+turn found the machine on a coin flip and reported `no_worker_available` for a
+laptop the user could see was on. `WorkerForward*` on `NodeService.Stream` now
+forwards the dispatch to the replica named by `connectedNodeId` and routes the
+answer back by request id. Its gate is an IN-PROCESS hop test
+(`integrations/agent/worker/forward_hop_test.go`) wiring the real router to the
+real handler, not a `clustere2e` lane -- a live-cluster gate is skipped on every
+CI lane and every developer machine, and a gate skipped by default cannot be
+what stands between a feature and the bug it prevents.
+
 #### Node image source: product-agnostic engine images + runtime DSL delivery (#2472)
 
 **The engine is the whole platform.** Every node type ships as a
@@ -1017,15 +1028,76 @@ sandboxed first-choice surface for headless work is the Workbench, below.
 - **Worker side:** `memql-cockpit worker run`, a run mode of the Cockpit binary
   built from the `memql-cockpit` repo. macOS TCC / Linux X11 pre-flight via
   `memql-cockpit-computeruse worker setup`.
-- **Per-user routing:** every worker is owned by exactly one
-  `v1:identity:user`; agents in that user's sessions are the only callers
-  admitted by the registry.
+- **Per-user routing, and NO machine id.** Every worker is owned by exactly one
+  `v1:identity:user`; only agents in that user's sessions reach it. The dispatch
+  builtins take `requireLabels` / `preferLabels` and **no `workerId`** (design
+  D4): an agent says what the work NEEDS, the owner's policy decides where it
+  lands, so **a hallucinated machine id is a failure mode this surface does not
+  have**. `no_worker_available` names every machine and why it was ruled out.
 - **Permission model:** three layers checked BEFORE dispatch -- agent
   capability flag, standing scope on
-  `v1:agents:agentAuthorization.computerUseScope` (observe / interact / full),
+  `v1:agents:agentAuthorization.computerUseScope` (observe / full -- `interact`
+  is a RETIRED tier kept in the enum for old rows and read as `full`),
   per-Plan kill switch on `v1:identity:user.preferences.computerUseEnabled`.
   Out-of-scope calls transition the calling Plan to `awaitingFeedback` with
-  `feedbackReason=scope_elevation_required`.
+  `feedbackReason=scope_elevation_required`. Consent is decided BEFORE routing,
+  so routing only ever chooses among machines the user already consented to; the
+  card names the requirement AND today's choice, because an Allow covers the
+  task on any machine that matches (D6).
+- **The router** (`integrations/agent/worker/router.go`, epic memql#4349).
+  `v1:worker:routingPolicy` -- one active row per user, ABSENT for most, and the
+  router then applies `firstFit` + `nextMatching`, exactly the pre-router
+  behaviour. Four strategies, all STABLE sorts over REGISTRATION order (from the
+  row, never from connection order) so every replica agrees: `firstFit`
+  (registration order), `roundRobin` (oldest `lastSelectedAt` -- a timestamp on
+  the row rather than a counter, so two replicas rotate identically with no
+  shared state), `leastLoaded` (`activeCount` against the capability's cap,
+  tie-broken on absolute count so an uncapped machine does not take everything),
+  `labelMatch` (most `preferLabels` hits). `fallback=nextMatching` re-picks ONLY
+  after a refusal BEFORE start (D5) -- an exec that lost its stream may have run.
+  Policy and agent requirements are AND-ed; a conflict is left UNSATISFIABLE
+  rather than resolved toward either side.
+- **Two label maps, and they must not become one.** `labels` is what the cockpit
+  reports and is OVERWRITTEN from the `Register` message on every reconnect;
+  `operatorLabels` is what the owner set and no register/heartbeat path writes
+  it. An operator tag in `labels` is erased by the machine carrying it, roughly
+  whenever the lid closes. `refreshWorkerRegistration` enforces the split by NOT
+  NAMING the field -- `update{}` is a read-merge, so the prohibition is the
+  ABSENCE of a line and "completing the field list" is what would break it
+  (`displayName` is absent for the same reason). Routing matches the MERGE,
+  operator side winning.
+- **`online` is DERIVED, never stored:** unrevoked AND non-zero `lastSeenAt`
+  within `OnlineWindow` = 2 x `HeartbeatBatchInterval` = **30s** (the flush is
+  15s, the cockpit's own beat -- it was 60s, and nothing read `lastSeenAt`
+  BECAUSE it was a minute stale). Exactly two implementations,
+  `component/worker.IsOnline` and `clients/portal/src/fleet/online.ts`, held
+  together by `TestFleetOnlineWindowMatchesPortal`. Deriving it from the
+  in-memory registry is refused: that answers "connected to ME", and the fleet
+  needs "connected to ANY replica".
+- **Cross-node dispatch (memql#4352):** `connectedNodeId` names the replica
+  holding the stream (stamped on register + every flush, cleared on disconnect);
+  any other replica forwards over `WorkerForward*`. `refused_before_start` is the
+  re-pick predicate and the one wire field that must never be guessed. The
+  receiver re-checks only what it alone can know -- ownership against the
+  verified `ForwardedAuthority` (never the envelope's owner field) and
+  revocation -- because the consent gates already ran on the sender. No enable
+  flag: local dispatch here is not a degraded path, it is a call that cannot
+  work.
+- **Row tier + borrowed authority.** `v1:worker:registration` and
+  `routingPolicy` declare the composite `@rowAuthz(owner=..., clusterOwner)`, so
+  the operator can support a machine they do not own. The READ gate has no
+  internal-origin bypass: an unstamped read returns ZERO ROWS, not an error. A
+  worker authenticates as `worker:<id>`, so `component/worker`'s store runs every
+  registration read and write under `auth.ContextWithUserActor` for the owner the
+  `worker_token`'s identity row named -- the `createAuthActivity` shape. It must
+  NOT stamp internal origin, and is deliberately absent from `call_origin.go`'s
+  allowlist: every context in that package descends from a worker's own inbound
+  stream.
+- **Operator surface:** `/fleet/machines` in the portal -- pair a machine,
+  rename it (`displayName`), edit its operator labels, revoke it, edit the
+  routing policy, and read each call's `routing` record (policy, strategy,
+  candidates considered in try order, why each was rejected, what it was
+  rerouted from).
 - **Audit + hardening:** security signals on `v1:identity:auditEvent`;
   per-call telemetry on `v1:worker:invocation`
   (`WORKER_INVOCATION_RETENTION_DAYS` default 90); per-call rlimits on Linux +
@@ -1052,12 +1124,48 @@ and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-prod
   not the engine tree; the wire path goes through the `workbenchDispatchHost`
   builtin in `dsl/workbench/builtins.memql` to
   `integration.workbench.dispatchHost`.
+- **The environment hint and the reroute (memql#4353).**
+  `workbenchDispatchHost` takes an OPTIONAL `environment { os, needs[] }`, with
+  `needs` from a closed four-value set (`display` / `gpu` / `macos_tooling` /
+  `user_files`) naming exactly the things a workbench is not. A mismatch returns
+  a typed `environment_mismatch` carrying the unmet needs, having run NOTHING --
+  it replaces a failure that arrived three layers down and named nothing (a
+  `defaults read` on Linux, an xdotool with no `DISPLAY`). An unknown need is the
+  SEPARATE code `invalid_environment_hint`, so a typo can never read as "the
+  workbench cannot do this" and send a call to somebody's laptop. Omitted means
+  no hint, and there is deliberately no default -- a guessed one would refuse
+  calls that would have worked. On a mismatch the tool loop re-dispatches the
+  SAME call to the fleet and **the dispatcher's existing gate decides**: only
+  `denied_no_per_task_approval` / `denied_by_scope` raise the consent card;
+  everything else is the answer, `kill_switch_engaged` included (a deliberate no
+  is not a missing card). The knowledge corpus's ban on silently switching to the
+  user's machine stands; what is removed is re-ASKING for consent already given.
+  `needs` -> scope/labels lives in `integrations/agent/worker/scope.go`, beside
+  the ladder it reads: `user_files` alone is `observe`, everything else and
+  anything unrecognised is `full`.
 - **Per-Plan workspace:** under `MEMQL_WORKBENCH_ROOT/{planId}/` (default
   `/var/lib/memql/workbenches/`), lazy-provisioned on first call, persisting
   across calls within a Plan, torn down on Plan terminal status via the
   `releaseWorkspaceOnPlanTerminal` automation.
 - **Concept:** `v1:workbench:workspace` -- per-Plan row carrying status
-  (provisioned / released), storageRoot, lifecycle timestamps.
+  (provisioned / released), storageRoot, lifecycle timestamps, plus `nodeId` and
+  `ownerUserId` (memql#4354). It declares the composite
+  `@rowAuthz(owner=..., clusterOwner)`; `ownerUserId` is stamped from the parent
+  plan's `requestedBy` at provision time, and a call whose `planId` does not
+  resolve to a readable plan is now REFUSED (`workspace_owner_unresolved`)
+  rather than run -- a row written under a blank actor is readable by nobody,
+  including the operator answering "where did my file go".
+- **Replica affinity (memql#4354).** Base runs 2 workbench replicas and a
+  workspace is a FILESYSTEM, which does not follow the request. `nodeId` names
+  the replica holding the directory and the peer picker prefers it, falling back
+  to any-fit only when that node is gone. Any-fit alone gave one plan two
+  directories on two disks and told neither side -- a call wrote a file and the
+  next call, landing on the other replica, did not find it, both reporting
+  success. On node loss the orphan row is released `node_lost` and a FRESH
+  workspace is provisioned: **files are NOT migrated**, because there is nothing
+  to copy them from. The log line and the row state ship; a canvas card does not
+  (canvas is pack-only, so a node-loss card must come from a product-bundle
+  automation off the `node_lost` release).
 - **Modes.** Cluster mode is the deployed default: a dedicated `workbench`
   node-type binary hosts the workspaces and agent nodes route via
   `NodeService.Stream` (`WorkbenchForwardRequest` / `Response`). Base sets
@@ -1068,6 +1176,15 @@ and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-prod
   degrade silently, which is how a dropped peer seed stayed invisible for its
   whole life. In-process fallback is `MEMQL_WORKBENCH_REMOTE` unset, or the
   explicit `MEMQL_WORKBENCH_LOCAL_FALLBACK=1` under the remote flag.
+- **Operator surface:** `/fleet/workbenches` in the portal -- the replicas and
+  the per-plan workspaces on each, live and released, with `node_lost` spelled
+  out. `/fleet/machines` is its worker counterpart. Both are live: the
+  `graph.node.*` events for `v1:worker:registration`, `v1:worker:routingPolicy`
+  and `v1:workbench:workspace` carry broadcast routing rules
+  (`component/node/routing.go`) because those rows are written on the agent and
+  read on the page the bff serves -- without them default-deny leaves the list
+  correct on load and frozen after, which looks like it is working.
+  `v1:worker:invocation` is excluded on volume grounds.
 - **Routing preference:** `dsl/cognition/prompts/cognitionReply.tmpl` and the
   `workbench` knowledge domain (auto-attached via `replier.go` when the
   expanded tool list includes `workbenchHost`) instruct the agent to prefer

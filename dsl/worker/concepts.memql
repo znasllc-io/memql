@@ -26,7 +26,8 @@ concept invocation {
   startedAt      datetime!  @description("When dispatch was received from the agent (ToolDispatch envelope sent on the wire).")
   completedAt    datetime  @description("When ToolResult landed back on the agent. Empty for in-flight rows that haven't completed yet -- those are rare; usually the row is written once at completion.")
   durationMs     int  @description("completedAt - startedAt in milliseconds.")
-  outcome        enum("success", "failure", "cancelled", "timeout", "denied_by_scope", "denied_by_policy", "kill_switch_engaged", "no_worker_available")!  @description("Terminal status. denied_* outcomes also produce a v1:identity:auditEvent row.")
+  outcome        enum("success", "failure", "cancelled", "timeout", "denied_by_scope", "denied_by_policy", "denied_by_classifier", "kill_switch_engaged", "no_worker_available", "rerouted")!  @description("Terminal status. denied_* outcomes also produce a v1:identity:auditEvent row. denied_by_classifier is the safety classifier's refusal (integrations/agent/worker/dispatch.go's gate) -- it was emitted by the Go before it was a value here. rerouted means the call did not run on the machine first chosen: either the workbench returned environment_mismatch and the router sent it to the fleet, or a candidate refused before starting and fallback=nextMatching moved it on. The routing object below says which.")
+  routing        object  @description("How this call's destination was chosen (memql#4351). Keys: policyId (v1:worker:routingPolicy.id, empty when the owner has none and the default applied), strategy (firstFit / roundRobin / leastLoaded / labelMatch), candidatesConsidered ([]string of registration ids the router filtered down to, in the order it would try them), attempts (int -- 1 unless fallback=nextMatching moved past a refusal), selectedBy (policy / reroute / only_candidate), reroutedFrom (workbench, or worker:<registrationId>, empty when nothing was rerouted), requireLabels / preferLabels (the merged agent+policy requirement the candidates were filtered and ordered by). Empty object on rows written before the router existed, and on paths that never picked (a denial before the pick).")
   exitCode       int  @description("Process exit code for workerHost.exec. Empty for non-exec actions.")
   signal         string  @description("If exec was killed by signal, the signal name. Empty otherwise.")
   errorCode      string  @description("Worker-side error code from Failure.error_code: exec_failed / fs_denied / http_blocked / etc.")
@@ -49,14 +50,31 @@ concept invocation {
 /// whichever agent node holds the stream; this concept is for everything that needs to survive
 /// disconnect and binary restart. Per-user routing: every registration is owned by exactly one
 /// v1:identity:user; only agents in sessions owned by that user can dispatch tools to this worker.
+/// TIER: the composite `owner, clusterOwner` (memql#4312). A registration is one person's machine
+/// -- it carries their hostname, their platform, the IP it last connected from -- so the owner tier
+/// is the right one, and a plain owner tier would hide every machine from the operator who has to
+/// support them. The engine ANDs `(ownerUserId==actor.userId)||(actor.isClusterOwner==true)` onto
+/// every read and refuses a write onto a row failing the same test.
+///
+/// The tier is why `component/worker`'s store stamps `auth.ContextWithUserActor(ctx, ownerUserId)`
+/// on its registration reads and writes: the worker authenticates as `worker:<id>`, not as its
+/// owner, so an unstamped read of the row the register handshake needs would be refused for having
+/// no actor at all. The owner id it stamps comes from the worker_token's identity row, resolved by
+/// the interceptor before any of this runs -- never from the Register message.
+@rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="name", secondary="version", tertiary="lastSeenAt", status="buildTag")
 concept registration {
-  ownerUserId    string!  @description("v1:identity:user.id who owns this worker. Set once at register time from the worker_token's registeredBy. Dispatch-time access check: caller's session-owner must equal this value.")
+  ownerUserId    string!  @serverSet  @description("v1:identity:user.id who owns this worker. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by createWorkerRegistration and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention, and TestDeclaredOwnerFieldsAreServerStamped fails the build on a mutation that writes it from args. The worker authenticates as worker:<id>, not as its owner, so component/worker's store runs the create under auth.ContextWithUserActor for the owner the worker_token's identity row named. Dispatch-time access check: caller's session-owner must equal this value.")
   identityId     string!  @description("v1:identity:identity.id of the worker_token credential the worker authenticated with. Lookup target on every reconnect; rotated tokens stamp a new identity row, not a new registration.")
   name           string!  @description("User-chosen display name. Defaults to hostname. Shown in /me/workers and /admin/workers.")
   capabilities   []string!  @description("Capability set advertised at registration. HEADLESS is mandatory; COMPUTERUSE is added when the memql-cockpit-computeruse build confirmed TCC + (Wayland/X11) at startup. Order is not significant.")
   capabilityDescriptor  object  @description("Optional structured capability self-description sent at registration (schemaVersion 1): {platform, displayServer: quartz|x11|wayland|none, computerUseAvailable, actions: [supported workerComputer action names], schemaVersion}. Lets dispatch degrade/refuse per-action up front without a live worker round-trip. Empty object when the worker did not send one (older builds).")
-  labels         object  @description("Free-form key=value tags. os, arch, hostname auto-populated; operator extends with custom labels for routing among the user's own workers (e.g. has-blender=true).")
+  displayName    string  @description("The name the OWNER gave this machine from the Fleet page (renameWorker). `name` stays the cockpit's -- a hostname by default, re-stamped from the Register message on every reconnect -- so a rename does not survive one. Empty until renamed; every surface reads `displayName` falling back to `name`.")
+  labels         object  @description("Free-form key=value tags AS THE COCKPIT REPORTS THEM. os, arch and hostname are auto-populated by the worker; the whole map is OVERWRITTEN from the Register message on every reconnect, which is why an operator's own tags cannot live here. They live in operatorLabels. Routing matches on the MERGE of the two, operator side winning.")
+  operatorLabels object  @description("Free-form key=value tags THE OWNER set, from the Fleet page (setWorkerOperatorLabels). Never written by register or heartbeat, so they survive a reconnect -- the whole reason this is a second field rather than a merge into `labels` (design D3). Merged over `labels` with precedence when the router matches requireLabels / preferLabels.")
+  connectedNodeId string  @description("MEMQL_NODE_ID of the agent replica currently holding this worker's gRPC stream. Stamped on register and on every heartbeat flush; CLEARED on disconnect. This is what makes a machine reachable from a replica that is not holding its stream: the router forwards the dispatch to this node over NodeService (WorkerForward*, memql#4352) instead of finding nothing. Empty means no replica holds the stream, i.e. offline.")
+  lastSelectedAt datetime  @description("When the router last picked this machine for a call. Stamped by touchWorkerSelected on every successful pick. roundRobin is `oldest lastSelectedAt first`, which is how two agent replicas agree on a rotation with no shared counter.")
+  activeCount    int  @description("Calls in flight on this machine, as the worker reported on its most recent heartbeat (summed across capabilities). leastLoaded orders on activeCount against the per-capability concurrency cap. Best-effort and up to one heartbeat stale -- a routing input, never a correctness one; the machine's own Acquire is the real valve.")
   concurrency    object!  @description("Per-capability max-parallel limits, e.g. {HEADLESS: 8, COMPUTERUSE: 1}. Scheduler enforces; calls beyond cap queue (FIFO) up to the calling tool's timeout.")
   platformInfo   object  @description("os, arch, hostname snapshot at register time.")
   permissions    object  @description("TCC / X11 status snapshot at register time: {accessibility, screen_recording, x11_display, detail}. Surfaced in /me/workers; the worker re-registers on reconnect so this stays accurate.")
@@ -133,6 +151,33 @@ concept delegationPolicy {
   workspaceRoot  string  @description("Directory under which per-run workspaces are created on the machine. The cockpit refuses a workspace outside its own policy.yaml roots, so this is a preference the machine still gets to veto.")
   credentialLifetimeSeconds  int  @default("14400")  @description("How long the back-channel bearer is good for. Default 4 hours; a run that outlives it is handed a replacement rather than being killed.")
   updatedAt      datetime  @description("When the policy was last written.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// The owner's routing policy: which of their machines gets a piece of work, and what happens when
+/// the first choice refuses. ONE ACTIVE ROW PER USER -- createRoutingPolicy and updateRoutingPolicy
+/// enforce it, and the router reads the active one through routingPolicyForOwner.
+///
+/// ABSENT IS A VALID STATE and the common one. A user who never opened the Fleet page has no row,
+/// and the router applies `firstFit` + `nextMatching`: today's behaviour plus a re-pick. The
+/// default is deliberately the safest pair rather than the cleverest -- firstFit is what
+/// Registry.PickWorker did, and nextMatching only ever moves past a candidate that refused BEFORE
+/// running anything (design D5).
+///
+/// THE AGENT NEVER WRITES THIS, and cannot name a machine at all: the dispatch builtins take
+/// requireLabels / preferLabels and no workerId (design D4). An agent expresses what the work
+/// needs; the policy decides where it lands. That is what makes a hallucinated machine id a
+/// failure mode this design does not have.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="strategy", secondary="fallback", tertiary="ownerUserId", status="active")
+concept routingPolicy {
+  ownerUserId    string!  @serverSet  @description("v1:identity:user.id whose fleet this policy routes. THE ROW-AUTHZ OWNER FIELD -- stamped from actor.userId by createRoutingPolicy, never from args.")
+  strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!  @default("firstFit")  @description("How the router orders the candidates that survived the requireLabels filter. firstFit = registration order, the pre-policy behaviour. roundRobin = oldest lastSelectedAt first, so two agent replicas rotate identically without a shared counter. leastLoaded = lowest activeCount against the capability's concurrency cap. labelMatch = most preferLabels hits first, then registration order.")
+  requireLabels  object  @description("Labels a machine MUST carry to be a candidate at all, AND-ed with whatever the agent's call requires. Narrows, never widens: a policy cannot make a machine eligible for work the agent did not ask to run there.")
+  preferLabels   object  @description("Ordering hint, not a filter. Under labelMatch, candidates matching more of these sort first; under the other strategies they break ties.")
+  fallback       enum("none", "nextMatching")!  @default("nextMatching")  @description("What happens when the chosen machine refuses BEFORE the call starts -- busy at its concurrency cap, or its stream went away before dispatch. nextMatching tries the next candidate; none reports the refusal. Neither ever re-picks after a call has started: an exec that lost its stream mid-run may have run (design D5).")
+  active         bool!  @default("true")  @description("Exactly one active row per owner. Superseded rows are kept rather than deleted -- an invocation's routing.policyId points at the row that made the choice, and a deleted policy would leave that record unreadable.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

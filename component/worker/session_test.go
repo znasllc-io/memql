@@ -84,7 +84,7 @@ func newAppSessionTestSession(t *testing.T) (*streamSession, *fakeCockpitStream)
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	clock := func() time.Time { return time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC) }
-	srv := newServer(logger, &fakeRegistrationStore{}, NewRegistry(nil, clock), nil, clock)
+	srv := newServer(logger, &fakeRegistrationStore{}, NewRegistry(nil, clock), nil, clock, "test-node")
 	stream := newFakeCockpitStream()
 	w := &Worker{
 		RegistrationId: "reg-1",

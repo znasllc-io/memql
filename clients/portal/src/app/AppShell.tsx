@@ -26,8 +26,10 @@ import {
   ScrollText,
   Shield,
   Users,
+  Wrench,
   Blocks,
 } from "../ui/icons";
+import { fleetPath } from "../fleet/urls";
 import { VIEWS } from "../views/registry";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { viewPath } from "../views/urls";
@@ -94,6 +96,9 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
 //            product, then the ones this operator composed.
 //   BUILD    the substrate those screens are made of -- the concept registry
 //            and the modules that declare concepts.
+//   FLEET    WHERE WORK RUNS -- this person's machines, and the cluster's own
+//            sandboxed workbenches (epic memql#4349). See the FLEET constant
+//            below for why it is neither a view nor cluster administration.
 //   CLUSTER  the cluster ITSELF rather than the data in it.
 //
 // What this replaced was Operate / Explore / Administer, and it was wrong in a
@@ -123,6 +128,29 @@ const PREDEFINED_VIEWS: readonly NavItem[] = VIEWS.filter(
 const BUILD: readonly NavItem[] = [{ to: CONCEPTS_ROOT, label: "Concepts", icon: Boxes }];
 const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
 
+// Fleet is WHERE WORK RUNS (epic memql#4349), and it sits between Build and
+// Cluster because it is neither. A machine is somebody's own computer, reached
+// over a stream it opened and revocable by its owner -- so it is not cluster
+// administration, and gating it behind the admin items would hide from a
+// person the list of their own computers. A workbench is the cluster's own
+// sandbox rather than anyone's data, so it is not a View either.
+//
+// Both entries are visible at every role, deliberately. The reads behind them
+// are caller-scoped in the ENGINE (a person sees their own machines and
+// workspaces; the all-cluster reads open with actor.isClusterOwner), so the
+// rail is not advertising a door that will not open -- unlike Modules, which
+// is hidden below owner/admin because there the whole surface is refused.
+const FLEET: readonly NavItem[] = [
+  { to: fleetPath("machines"), label: "Machines", icon: Monitor },
+  // Local apps (memql#4363) sits beside Machines rather than under Cluster:
+  // it is about work running on the person's OWN computer, which is the
+  // question this group answers. Two doors to one thing is what the rail's
+  // reshuffle removed, so the apps surface is a Fleet tab, not a second
+  // Machines entry.
+  { to: fleetPath("apps"), label: "Local apps", icon: Bot },
+  { to: fleetPath("workbenches"), label: "Workbenches", icon: Wrench },
+];
+
 // Cluster is the machine, not the operator's OWN data -- that split is what
 // keeps this group distinct from Views (designed dashboards over whatever
 // concept an operator points one at). Artifacts sits here rather than there
@@ -138,12 +166,6 @@ const CLUSTER: readonly NavItem[] = [
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/sites", label: "Sites", icon: Globe },
   { to: "/artifacts", label: "Artifacts", icon: Archive },
-  // Machines is the one entry in this group that is about the OPERATOR's own
-  // computers rather than the cluster's (memql#4363). It sits here anyway,
-  // because a person looking for "where does my work actually run" reaches
-  // for the cluster group -- and every read behind it is caller-scoped at the
-  // engine, so no role gate is needed or offered.
-  { to: "/machines", label: "Machines", icon: Monitor },
 ];
 // People is NOT here. It is one of the views, and the verbs an admin needs
 // live on the row detail there (memql#4264) -- which is what removed the
@@ -304,6 +326,7 @@ export function AppShell(): ReactNode {
                 making another one. */}
             <NavGroup label="Custom" items={custom} collapsed={collapsed} />
             <NavGroup label="Build" items={build} collapsed={collapsed} />
+            <NavGroup label="Fleet" items={FLEET} collapsed={collapsed} />
             <NavGroup label="Cluster" items={cluster} collapsed={collapsed} />
           </div>
 

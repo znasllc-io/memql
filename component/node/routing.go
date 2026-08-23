@@ -116,6 +116,30 @@ func defaultRoutingRules() []RoutingRule {
 		// submitted plans showed status=queued in the DB forever
 		// because no subscriber was listening on the right node.
 		// Broadcast so any planner-tagged peer in the mesh hears it.
+		// The Fleet's rows (epic memql#4349). A registration is WRITTEN by
+		// the agent node -- every heartbeat flush moves lastSeenAt,
+		// connectedNodeId and activeCount -- and READ by the Fleet page,
+		// which the bff serves. Without these rules default-deny keeps the
+		// event on the agent node and the page's subscription never fires:
+		// the machine list would be correct on load and frozen thereafter,
+		// which is the worst of the three possible behaviours because it
+		// looks like it is working.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:worker:* or v1:workbench:* node events
+		// (dsl/worker/automations.memql triggers on v1:identity:user and a
+		// schedule; dsl/workbench/automations.memql on v1:planner:plan), so
+		// there is no consumer to double-fire.
+		//
+		// v1:worker:invocation is deliberately NOT here. One row per tool
+		// call is a volume the mesh does not need to carry, and the page
+		// reads a machine's recent calls on demand rather than tailing them.
+		{Pattern: "graph.node.created.v1:worker:registration", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:registration", TargetType: ""},
+		{Pattern: "graph.node.created.v1:worker:routingPolicy", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:routingPolicy", TargetType: ""},
+		{Pattern: "graph.node.created.v1:workbench:workspace", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:workbench:workspace", TargetType: ""},
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},

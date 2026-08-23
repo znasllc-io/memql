@@ -13,9 +13,9 @@ import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
+import { FleetRoutes } from "../fleet/FleetRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
-import { MachinesRoutes } from "../machines/MachinesRoutes";
 import { MeRoutes } from "../me/MeRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
 import { HomePage } from "../home/HomePage";
@@ -90,10 +90,10 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /compose/*        the user-composed view builder      (memql#3320)
 //   /admin/*          the absorbed server-rendered admin  (memql#3324)
 //   /sites/*          hosted sites: list, create, publish, roll back, delete
+//   /fleet/*          machines + workbenches -- where work runs (memql#4349)
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //                     (memql#3717)
 //   /artifacts/*      the Library, browsed and labelled
-//   /machines/*       cockpit machines, their local apps, delegation (#4363)
 //   /me/*             the signed-in person: account, sessions, security
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
@@ -123,13 +123,9 @@ export function AppRoutes(): ReactNode {
           <Route path="integrations/*" element={<IntegrationsRoutes />} />
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="sites/*" element={<SitesRoutes />} />
+          <Route path="fleet/*" element={<FleetRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
-          {/* The computers running Cockpit for the signed-in person, the
-              local apps each can run, the policy that decides when a task
-              goes to one, and the transcript of every run that did
-              (memql#4363). Caller-scoped at the engine, not here. */}
-          <Route path="machines/*" element={<MachinesRoutes />} />
           {/* The person, rather than the cluster: the account this
               connection resolved, its live sessions, and how it can be
               entered. Reached from the rail's profile row. Identity's own

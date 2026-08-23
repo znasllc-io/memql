@@ -30,5 +30,10 @@ export {
   Sun,
   User,
   Users,
+  // The Fleet's two surfaces (memql#4355 / #4356). Monitor above already
+  // carries "a machine"; Wrench is the workbench -- the cluster's own
+  // sandboxed working directory, which is a tool this cluster owns rather
+  // than a computer somebody sits at.
+  Wrench,
   X,
 } from "lucide-react";
