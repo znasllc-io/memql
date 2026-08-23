@@ -130,6 +130,15 @@ Three kinds:
   app cannot be opened.
 - **`attach`** — stream a run the human started, named by `app_session_ref`.
 
+> **`run` is the only kind anything initiates today.** The protocol carries all
+> three and the runner accepts all three; `open` and `attach` have no
+> engine-side caller yet, because a planner Task is autonomous by definition —
+> they are for a portal hand-off and a resume, neither of which exists. Said
+> plainly here rather than implied, because the same section of CLAUDE.md spent
+> two years describing a coding agent nothing ran. The cockpit half implements
+> all three (memql-cockpit#347 / #350); the engine-side initiator is the
+> missing piece.
+
 **Chunk `seq` is monotonic, and out-of-order or duplicate chunks are dropped.**
 A transcript is a record; silently interleaving a replayed chunk corrupts it in
 a way no later reader can detect.

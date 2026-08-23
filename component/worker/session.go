@@ -22,6 +22,13 @@ import (
 // Session kinds. `run` is headless and autonomous; `open` hands the
 // app to the HUMAN with the workspace and prompt loaded; `attach`
 // streams a run the human started.
+//
+// ONLY `run` HAS AN ENGINE-SIDE INITIATOR TODAY. A planner Task is
+// autonomous by definition, so cockpit-app opens `run` sessions; `open`
+// and `attach` are carried by the protocol and accepted here, and
+// nothing in this repository starts one. That is stated rather than left
+// to be discovered, because this file sits next to a seam that spent two
+// years being described as running when it was empty (memql#4120).
 const (
 	AppSessionKindRun    = "run"
 	AppSessionKindOpen   = "open"
