@@ -484,6 +484,18 @@ func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage
 		})
 	}
 
+	// Resolved by SUBJECT rather than through the caller's AccessContext: the
+	// subject comes straight off the verified claims, while AccessContext.UserId
+	// may still be the claims fallback on the first request after signup. Same
+	// authority handleRevokeAllSessions uses, for the same reason.
+	//
+	// authSessionsForSubject pages at 50, newest first, so an account holding
+	// more than 50 rows can have an old one fall outside the window and answer
+	// not_found. That bound is the query's and is shared with the revoke-all
+	// fan-out; it is stated here rather than worked around because the failure
+	// is safe (a refusal, never somebody else's row) and widening it belongs
+	// with the query rather than in a handler that would then disagree with
+	// its sibling.
 	ctx := contextWithSystemActor(s.stream.Context())
 	sessions, err := listAuthSessionsForSubject(ctx, s.service.engine, subject)
 	if err != nil {
@@ -498,13 +510,17 @@ func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage
 		})
 	}
 
-	// Whether this is the row backing THIS connection, decided before the
-	// write: afterwards the bearer no longer resolves and the answer would
-	// be unavailable exactly when the client needs it.
-	wasCurrent := false
-	if plain := bearerTokenFromIncomingContext(s.stream.Context()); plain != "" {
-		wasCurrent = owned.TokenHash != "" && owned.TokenHash == HashBearerToken(plain)
-	}
+	// Whether this is the row backing THIS connection.
+	//
+	// FROM THE `sid` CLAIM, not from hashing the bearer. The obvious version
+	// -- HashBearerToken(bearerTokenFromIncomingContext(...)) -- reads the
+	// ORIGINAL stream metadata, which RotateAuth does not update: after a
+	// rotation the hash compares against a credential this stream no longer
+	// holds, so the row that IS current reports false and the client stays on
+	// a page it can no longer read from. The claim is re-stamped on rotation
+	// and is the same value MyAccessResult.session_id carries, so the server
+	// and the client agree on which row is "this device" by construction.
+	wasCurrent := sessionIdFromClaims(s.stream.Context()) == owned.ID
 
 	if err := RevokeAuthSessionRow(ctx, s.service.engine, owned, "user_action"); err != nil {
 		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke session: persist", err)
