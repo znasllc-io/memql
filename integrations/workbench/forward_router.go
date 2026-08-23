@@ -91,14 +91,26 @@ func (r *ForwardRouter) SelfNodeType() string {
 // agentId, taskId, authority) on the request; this method stamps
 // request_id, registers the inflight channel, sends, and awaits the
 // matching response or ctx cancellation.
-func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest) (*nodev1.WorkbenchForwardResponse, error) {
+//
+// pinnedNodeId is the node id recorded on the plan's live workspace row, or ""
+// when the plan has no workspace yet (or the row could not be read). It is a
+// PREFERENCE, not a requirement: while that replica is healthy and connected
+// the call goes there, and when it is gone the call goes anywhere healthy and
+// the caller learns about the substitution from the returned node id.
+//
+// The second return value is the node the call was actually served by. The
+// caller needs it because "the workspace moved" is only knowable by comparing
+// it with the pin, and that comparison is the difference between a recorded
+// re-provision and the silent split this change exists to remove.
+func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if r == nil || r.peerMgr == nil {
-		return nil, ErrNoWorkbenchPeer
+		return nil, "", ErrNoWorkbenchPeer
 	}
-	peer := r.pickWorkbenchPeer()
+	peer := r.pickWorkbenchPeer(pinnedNodeId)
 	if peer == nil {
-		return nil, ErrNoWorkbenchPeer
+		return nil, "", ErrNoWorkbenchPeer
 	}
+	servedBy := peer.Info.GetNodeId()
 	if req.RequestId == "" {
 		req.RequestId = id.NewShortId()
 	}
@@ -113,7 +125,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 	}()
 
 	if peer.Connection == nil {
-		return nil, ErrNoWorkbenchPeer
+		return nil, "", ErrNoWorkbenchPeer
 	}
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
@@ -124,7 +136,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 	peer.Connection.Send(msg)
 	select {
 	case resp := <-respCh:
-		return resp, nil
+		return resp, servedBy, nil
 	case <-ctx.Done():
 		// Best-effort cancel notification; the worker side handler
 		// is wired to stop in-flight work on receipt.
@@ -138,7 +150,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 				},
 			})
 		}
-		return nil, ctx.Err()
+		return nil, servedBy, ctx.Err()
 	}
 }
 
@@ -169,27 +181,70 @@ func (r *ForwardRouter) Dispatch(resp *nodev1.WorkbenchForwardResponse) {
 	}
 }
 
-// pickWorkbenchPeer returns a healthy workbench peer with a live
-// outbound connection, or nil if none are available. Selection is
-// any-fit -- we don't currently track per-peer load.
-func (r *ForwardRouter) pickWorkbenchPeer() *node.PeerEntry {
+// pickWorkbenchPeer returns a healthy workbench peer with a live outbound
+// connection, or nil if none are available.
+//
+// AFFINITY FIRST (memql#4354). existingNodeId is the replica whose disk already
+// holds this plan's workspace directory; when it is healthy and connected, it
+// is the only correct answer, because a workspace is a filesystem and a
+// filesystem does not follow the request.
+//
+// Selection used to be plain any-fit, which is the bug rather than a
+// simplification. The base manifest runs two workbench replicas, so a plan's
+// first call made a directory on one and its second call landed on the other
+// with even odds -- an fs_write followed by an fs_read of the same path,
+// answering "not found" with both calls reporting success. Nothing in either
+// result named a node, so the failure read as the agent having imagined the
+// write.
+//
+// The fallback is still any-fit and still untuned for load: with the pinned
+// replica gone there is no better information here, and the node-loss bookkeeping
+// (releasing the orphaned row, provisioning a successor) belongs to the caller,
+// which is the layer that can see both node ids.
+func (r *ForwardRouter) pickWorkbenchPeer(existingNodeId string) *node.PeerEntry {
 	if r.peerMgr == nil {
 		return nil
 	}
-	peers := r.peerMgr.ByType(node.NodeTypeWorkbench)
+	return selectWorkbenchPeer(r.peerMgr.ByType(node.NodeTypeWorkbench), existingNodeId, healthyWorkbenchPeer)
+}
+
+// selectWorkbenchPeer is the selection itself, separated from where the
+// candidates come from and from what "reachable" means.
+//
+// Both separations earn their keep. The candidate list arrives from a map
+// iteration, so its ORDER varies between calls -- which is what turned any-fit
+// into a coin flip per call rather than a stable wrong answer, and is why the
+// split was so hard to see from the outside. And reachability depends on a live
+// *peerConnection, a type no test outside component/node can construct, so
+// without the predicate as a parameter the affinity rule would be the one part
+// of this file with no coverage.
+func selectWorkbenchPeer(peers []*node.PeerEntry, existingNodeId string, reachable func(*node.PeerEntry) bool) *node.PeerEntry {
+	pinned := strings.TrimSpace(existingNodeId)
+	var anyHealthy *node.PeerEntry
 	for _, p := range peers {
-		if p == nil || p.Info == nil {
+		if !reachable(p) {
 			continue
 		}
-		if p.Connection == nil {
-			continue
+		if pinned != "" && p.Info.GetNodeId() == pinned {
+			return p
 		}
-		if p.Info.Health != nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY {
-			continue
+		if anyHealthy == nil {
+			anyHealthy = p
 		}
-		return p
 	}
-	return nil
+	return anyHealthy
+}
+
+// healthyWorkbenchPeer is the reachability predicate: known, healthy, and with
+// a live outbound connection to send on. Split out of pickWorkbenchPeer so the
+// affinity branch and the any-fit branch cannot drift apart -- a pinned peer
+// admitted on weaker terms than a substitute would send work to a replica that
+// cannot answer.
+func healthyWorkbenchPeer(p *node.PeerEntry) bool {
+	if p == nil || p.Info == nil || p.Connection == nil {
+		return false
+	}
+	return p.Info.Health == nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY
 }
 
 // EncodeArgs marshals the inner args object to JSON for the wire.

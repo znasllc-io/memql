@@ -32,7 +32,7 @@ runtime path, exercised by tests:
 | Build target | `workbench` node-type binary (`make workbench`, ~84 MB) | `app/build_workbench.go`, `app/integrations_workbench.go`, `app/cluster_workbench.go`, `component/node/{bootstrap,compiled}_workbench.go` |
 | gRPC envelopes | `WorkbenchForwardRequest` / `Response` / `Cancel` on `NodeService.Stream` | `component/node/node.proto` + regenerated `gen/` |
 | Stream wiring | Inbound dispatch + outbound response routing on NodeServer, ParentConnector, WorkerDialer | `component/node/{server,stream_handler,parent_connector,worker_dialer}.go` |
-| Agent-side router | `workbench.ForwardRouter` -- finds healthy workbench peer, sends, awaits response, falls back to local on `ErrNoWorkbenchPeer` | `integrations/workbench/forward_router.go` |
+| Agent-side router | `workbench.ForwardRouter` -- prefers the replica holding this plan's workspace (memql#4354), else any healthy peer; sends, awaits response, and refuses on `ErrNoWorkbenchPeer` (memql#3506) | `integrations/workbench/forward_router.go` |
 | Workbench-side handler | `workbench.ForwardHandler` -- unmarshals envelope, calls the local integration's dispatch, sends the response | `integrations/workbench/forward_handler.go` |
 | AKS manifest stub | `workbench` Deployment placeholder (AKS-native; Cloud Run manifest removed) | `deploy/k8s/` |
 | Local cluster | `workbench` Deployment + agent flipped to remote mode | `deploy/k8s/overlays/local` |
@@ -60,6 +60,88 @@ it stays local.
 > hop actually lands on the workbench node is
 > `test/clustere2e/workbench_remote_hop_test.go`, which asserts on the
 > executing pod's `MEMQL_NODE_ID` rather than on command output.
+
+## 1a. Replica affinity: a workspace lives on ONE replica
+
+`deploy/k8s/base/workbench.yaml` runs **2 replicas**, and a workspace is a
+**filesystem**. A filesystem does not follow the request, so which replica
+serves a call is not a load-balancing detail -- it decides whether the plan's
+files are there.
+
+Until memql#4354 the agent's peer picker was **any-fit**. A plan's first call
+made a directory on one replica; its second call landed on the other with even
+odds and found an empty tree. Both calls reported `ok=true` and neither result
+named a node, so the failure read as the agent having imagined the write. The
+`v1:workbench:workspace` concept existed in the DSL the whole time and was
+written by nothing, so there was no record to disagree with.
+
+**How it works now.** The node that creates the directory writes the row and
+stamps its own `MEMQL_NODE_ID` on `workspace.nodeId`. Before forwarding, the
+agent reads the plan's live workspace row and passes that node id to
+`ForwardRouter.pickWorkbenchPeer`, which **prefers that replica whenever it is
+healthy and connected** and falls back to any-fit only when it is not.
+
+| Fact | Where |
+|---|---|
+| The pin, and the four lifecycle calls | `integrations/workbench/workspace_store.go` |
+| Affinity in peer selection | `integrations/workbench/forward_router.go` (`selectWorkbenchPeer`) |
+| Row bookkeeping on the serving node | `integrations/workbench/integration.go` (`recordWorkspace`) |
+| The concept | `dsl/workbench/concepts.memql` (`nodeId`, `ownerUserId`) |
+
+**The row is owner-tiered, and that is load-bearing.**
+`v1:workbench:workspace` declares `@rowAuthz(owner="ownerUserId", clusterOwner)`.
+The read gate has no internal-origin bypass, so a read with **no actor** returns
+**zero rows and no error** -- which is indistinguishable from "this plan has no
+workspace" and would make the integration provision a fresh directory on every
+call. Every read and write therefore runs under
+`auth.ContextWithUserActor(ctx, <the plan's requestedBy>)`.
+
+INFO: `integrations/workbench` is deliberately **not** on the internal-origin
+allowlist in the repo-root `call_origin_conformance_test.go`. It binds a user
+actor instead, and none of the workbench DSL constructs are `@serverOnly`.
+
+WARNING: A workbench call whose `planId` does not resolve to a readable
+`v1:planner:plan` row is now **REFUSED** (`errorCode:
+workspace_owner_unresolved`) rather than run. Writing the row under a blank
+actor would stamp `ownerUserId: ""`, which hides it from the user whose files it
+describes and from the operator; and a workspace keyed on a plan that does not
+exist never reaches the `releaseWorkspaceOnPlanTerminal` automation, so its
+directory is never reclaimed.
+
+### What happens when a replica is lost
+
+A workbench replica leaving the mesh takes its `emptyDir` with it. There is
+nothing to migrate -- **files are NOT copied to the new replica**, because a
+file tree cannot be recovered from a node that is no longer there. The design
+accepts a fresh empty directory and **records why**:
+
+1. The pinned replica is gone, so the picker returns a healthy substitute and
+   the agent logs a WARNING naming **both** node ids and the plan.
+2. The substitute creates the directory, sees a live row naming a different
+   node, and marks that row `status=released`,
+   `releasedReason=node_lost` (`dsl/workbench/mutations.memql`).
+3. It inserts a successor row naming itself. The successor carries a different
+   id, derived from `(planId, nodeId)` -- one row cannot be both released and
+   provisioned.
+4. The plan continues on an **empty** workspace.
+
+The re-provision happens **exactly once**: subsequent calls find a live row
+naming the serving node and adopt it. Anything else would hand the plan a new
+empty directory per call, which is worse than the split it replaces.
+
+INFO: Operator answer to "where did my file go" -- query the plan's workspace
+rows and look for `releasedReason=node_lost`. A released row with that reason
+IS the answer; without the row there is no record that anything moved.
+
+[ ] Not implemented: no notice reaches the user's canvas. The canvas-state
+    concept and `mutationCreateCanvasState` are **pack-only** constructs the
+    engine core does not load (see the note in
+    `integrations/planner/plan_execution.go`: a planner-side notifier for the
+    same reason failed at runtime with `function "mutationCreateCanvasState" not
+    found`, and the card now lands via a product-pack automation). A node-loss
+    card would have to arrive the same way -- an automation in the product
+    bundle fired off the `node_lost` release -- and nothing in this repository
+    can emit one.
 
 ## 2. Storage model: ephemeral scratch + durable blob
 
@@ -257,10 +339,14 @@ When the workbench node is promoted to a dedicated AKS Deployment:
 
 Items deliberately deferred; revisit at production cutover:
 
-- **Per-instance workspace isolation.** Today every workbench
-  instance in a Plan sees the same directory tree. Multiple concurrent
-  Tasks writing the same path use last-writer-wins. Fine for v1; add
-  advisory locking if it bites.
+- **Per-instance workspace isolation.** Every workbench call in a Plan now
+  reaches the same directory tree on the same replica (section 1a); concurrent
+  Tasks writing the same path still use last-writer-wins. Add advisory locking
+  if it bites.
+- **Workspace durability across replica loss.** A lost replica costs the plan
+  its files (section 1a). The row records that it happened; nothing restores
+  them. A durable substrate (a shared volume, or rehydrating from blob) would
+  close it.
 - **Resource quotas per Plan.** Global size + timeout caps exist but
   no per-Plan disk quota or per-Plan blob size limit. Add
   `Plan.workbenchQuotaBytes` and a pre-write check if a misbehaving
