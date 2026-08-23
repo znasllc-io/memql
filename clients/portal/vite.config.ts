@@ -53,6 +53,17 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // The Library's two byte-bearing routes (memql#4343): the one thing the
+      // portal does over plain HTTP rather than on the stream. They live at
+      // the bff's OWN root rather than under /memql, so this rewrite STRIPS
+      // the marker instead of swapping it -- exactly what
+      // component/edge/proxy.go's upstreamPath does for the same prefix, and
+      // the reason it is a second entry rather than a widened first one.
+      "/_memql/artifacts": {
+        target: process.env.MEMQL_PORTAL_DEV_TARGET ?? "http://localhost:8085",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/_memql/, ""),
+      },
     },
   },
   test: {

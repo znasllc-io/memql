@@ -742,9 +742,11 @@ means a sibling query carrying no caller-scope term is not a neutral
 bystander — it is a counterexample, reading rows the floor would
 exclude. One such query blocks the declaration. (Counting only the
 positive votes declares `planner.plan` owned off 2 of its 10 queries
-while the primary user-facing read is space-scoped, and declares
-`library.artifact` owned when `libraryWorkspaceLiveSources` documents
-its rows as having no owner at all.) The single exception is
+while the primary user-facing read is space-scoped, and declared
+`library.artifact` owned while `libraryWorkspaceLiveSources` documented
+its rows as having no owner at all — that read was rescoped when
+memql#4340 declared the concept's tier by hand, which is the other way
+the same rule gets satisfied.) The single exception is
 `@serverOnly`, which is not a client-callable read.
 
 It never infers:

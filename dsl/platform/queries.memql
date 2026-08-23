@@ -206,23 +206,37 @@ query inboundRequest inboundRequestByDedupeKey {
 }
 
 /// Resolve a request Host to the site that answers it. The edge's hot path -- called once per
-/// cache miss, not once per request. Cluster-owner gated per v1:platform:site's declared tier; the
-/// edge integration calls this under a cluster-owner-equivalent credential, not a per-request user.
+/// cache miss, not once per request.
+///
+/// The caller term is the COMPOSITE tier's own predicate, written out (memql#4344). It used to be a
+/// bare `actor.isClusterOwner==true`, which under the composite tier would narrow the query to
+/// cluster owners ALONE and leave a user unable to resolve their own deployable -- the admin gate is
+/// one BRANCH of the tier now, not the whole of it. The engine ANDs this same term in from the
+/// concept's declaration; restating it is what the land gate asks for, so that a reader of the query
+/// can see the scope without resolving the concept (TestRowAuthzEnforcementLandGate). It is an
+/// OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's
+/// own rows. The edge still reads every site because it calls this under a synthetic cluster-owner
+/// actor (component/edge's systemEdgeActor), which the second branch admits.
 @unbounded("site by hostname -- bounded to a single row (hostname is cluster-unique)")
 @actor
 query site siteByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && actor.isClusterOwner==true && isNotDeleted
+  filter  hostname==args.hostname && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
 }
 
-/// Every site in the cluster. The portal's primary screen, and the read that would silently return
-/// a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
+/// The deployables this caller may see: their OWN sites, or every site in the cluster when the
+/// caller is a cluster owner. The portal's primary screen.
+///
+/// The name predates self-serve deployables and is kept: it is the same read, and the composite tier
+/// is what decides how far "all" reaches for a given actor. The caller term is that tier's own
+/// predicate written out -- see siteByHostname for why the bare admin gate it replaced would now
+/// collapse the read to cluster owners alone.
 @actor
 query site sitesAll {
-  filter  actor.isClusterOwner==true && isNotDeleted
+  filter  isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -232,14 +246,15 @@ query site sitesAll {
 /// single query that returns every version at once (D10 / #2880), so re-issuing this one under each
 /// prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query
 /// unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs
-/// (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per
-/// v1:platform:site's declared tier.
+/// (dsl/deployment/queries.memql:78-97 documents the same reasoning). Owner-or-cluster-owner per
+/// v1:platform:site's composite tier -- see siteByHostname for why the bare admin gate this
+/// replaced would now collapse the read to cluster owners alone.
 @unbounded("site by id -- bounded to a single row (id is the row's own primary key)")
 @actor
 query site siteById {
   args {
     siteId  string!
   }
-  filter  row.id==args.siteId && actor.isClusterOwner==true && isNotDeleted
+  filter  row.id==args.siteId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
 }

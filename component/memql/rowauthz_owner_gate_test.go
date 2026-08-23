@@ -225,4 +225,75 @@ each carry an issue number for exactly that reason.`,
 // one. The exemption then had to come out, and the stale-entry check
 // below is what forced the issue: the gate fails on an entry that now
 // passes.
-var ownerGateExemptions = map[string]string{}
+// NOT EMPTY ANY MORE, as of memql#4340, and the entry below is a
+// deliberate re-opening rather than an oversight. Read the two rules
+// above first; this is the "file the decision, then reference it" case.
+//
+// WHAT THE ENTRY IS. v1:library:artifact declares the composite tier
+// (`owner="ownerUserId", clusterOwner`) because the Artifacts page became
+// a primary surface and the concept was in the undeclared population --
+// unmeasured on the read side, on the subscription side, and on graph
+// expansion. Declaring it closes all three. It does NOT close the write
+// side, and this entry is what refuses to pretend otherwise.
+//
+// WHY THE TWO OFFERED REMEDIES BOTH MISFIRE, which is the part worth
+// having in the file rather than in a PR comment:
+//
+//   - "Re-stamp from the actor" is WRONG here, not merely awkward.
+//     createArtifact is invoked from the six index*OnCreate promotion
+//     automations, and an event-triggered automation runs on a context
+//     the scheduler builds with context.Background()
+//     (component/automations/scheduler.go), so contextWithSystemActor
+//     stamps `automation:<name>` as actor.userId -- asserted, not
+//     inferred, by TestSystemActorStampsABindableAccessContext. Stamping
+//     would therefore write the AUTOMATION as the owner of every promoted
+//     row, which is worse than a forgeable field: it is a wrong one, on
+//     every row, silently.
+//   - "Drop the owner tier" is wrong for the reason memql#3323's
+//     v1:campaigns:delivery entry was: these rows are genuinely one
+//     person's, they are the index behind a per-user page, and dropping
+//     the tier moves the failure back onto the undeclared gate while
+//     leaving the rows LESS protected than they are with it.
+//
+// WHAT IS ACTUALLY TRUE ABOUT THE FIELD TODAY. Every live writer derives
+// ownerUserId from a row it did not invent: the promotion automations
+// bind it off the CDC payload of the row the engine itself just wrote,
+// and integrations/library's touchArtifact, label capabilities and
+// analysis re-stamp read it off the current artifact or file row. None
+// takes it from a caller argument. But createArtifact is a registered
+// mutation and is not @serverOnly, so an authenticated caller CAN name an
+// arbitrary owner -- that hole predates this entry and the tier neither
+// opens nor closes it.
+//
+// @serverOnly WAS TRIED AND REVERTED (memql#4340), and the reason is worth
+// keeping: it forces every Go writer to stamp internal origin, and all of
+// them run on REQUEST-DERIVED contexts (the label capabilities and the
+// document edit path are reached from the portal and from agent tools).
+// TestOnlyAllowlistedPackagesStampInternalOrigin exists to refuse exactly
+// that shape. Trading a bounded forgery for a standing origin-laundering
+// seam in a package that also hosts agent-callable builtins is the worse
+// side of the trade, so the honest exemption stays.
+//
+// WHAT WOULD CLOSE IT, so the next reader does not have to re-derive it:
+// the promotion write has to run AS the owner rather than on their behalf
+// -- the shape component/campaigns' drain worker uses for
+// recordCampaignDelivery, where the Go caller resolves the owner off a row
+// and calls under auth.ContextWithUserActor. For promotion that means the
+// automation handing off to a Go seam that resolves the owner from the
+// SOURCE ROW (not from an argument) and re-enters under it, at which point
+// createArtifact can stamp and this entry must come out. That is a
+// redesign of the write path for all six promotions, which is exactly what
+// memql#2803 has recorded as the blocker since before the tier existed --
+// and doing it as a side effect of declaring the tier would bury a
+// six-automation behaviour change inside an annotation.
+//
+// Moving the ownerUserId argument from the mutation to a builtin would
+// turn this gate green and change nothing about forgeability. That is the
+// "gate turns into decoration" outcome the header warns about, and it is
+// the reason this is an honest entry instead.
+var ownerGateExemptions = map[string]string{
+	"v1:library:artifact": "memql#4340 -- the composite tier lands with the Artifacts page; createArtifact " +
+		"threads ownerUserId from the promoting automation's SOURCE row because an event-triggered " +
+		"automation's actor is the system principal, not the owner. The write-as-the-owner redesign " +
+		"is memql#2803's recorded blocker and is tracked there.",
+}

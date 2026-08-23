@@ -1,5 +1,5 @@
-// fetchSiteVersionHistory / justBefore (src/sites/history.ts, memql#3717
-// ruling 2): the rollback picker's version walk.
+// fetchSiteVersionHistory / justBefore (src/deployables/calls.ts, memql#4346,
+// carried over from memql#3717 ruling 2): the rollback picker's version walk.
 //
 // Driven against a fake QueryClient rather than through React, for the same
 // reason rowWalk.test.ts is driven at the reducer: the walk is a property of
@@ -7,12 +7,12 @@
 // can check the EXACT asOf timestamps issued -- not just that "some second
 // row" appeared, which is the vacuous version of this test. The UI-level
 // wiring (does the picker actually call this, does clicking a version call
-// updateSiteBundle) is covered separately in sitesAuthoring.test.tsx.
+// updateSiteBundle) is covered separately in deployables.test.tsx.
 
 import { describe, expect, it } from "vitest";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
-import { fetchSiteVersionHistory, justBefore, MAX_HISTORY_VERSIONS } from "../src/sites/history";
+import { fetchSiteVersionHistory, justBefore, MAX_HISTORY_VERSIONS } from "../src/deployables/calls";
 import { asQueryClient } from "./support/queryFake";
 
 interface FakeVersion {
@@ -110,7 +110,7 @@ describe("fetchSiteVersionHistory", () => {
   });
 
   it("defaults to MAX_HISTORY_VERSIONS when no limit is given", async () => {
-    const many = Array.from({ length: MAX_HISTORY_VERSIONS + 5 }, (_, i) => ({
+    const many: FakeVersion[] = Array.from({ length: MAX_HISTORY_VERSIONS + 5 }, (_, i) => ({
       bundleRef: `v${MAX_HISTORY_VERSIONS + 5 - i}`,
       createdAt: new Date(Date.UTC(2026, 7, MAX_HISTORY_VERSIONS + 5 - i)).toISOString(),
     }));
@@ -122,7 +122,9 @@ describe("fetchSiteVersionHistory", () => {
   it("stops cleanly (not an error) when a version has no predecessor", async () => {
     const { query, calls } = fakeQueryClient([V1]);
     const result = await fetchSiteVersionHistory(query, "site-1", 5);
-    expect(result).toEqual([{ bundleRef: V1.bundleRef, createdAt: V1.createdAt, status: "live" }]);
+    expect(result).toEqual([
+      { bundleRef: V1.bundleRef, createdAt: V1.createdAt, status: "live", artifactId: "" },
+    ]);
     // One plain read, one asOf step that came back empty, then stop.
     expect(calls.length).toBe(2);
   });

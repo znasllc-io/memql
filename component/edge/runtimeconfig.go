@@ -2,6 +2,7 @@
 package edge
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -67,7 +68,57 @@ type RuntimeConfig struct {
 	// reverse-engineering it from identityUrl. Empty, never omitted, when
 	// the node has no domain configured.
 	Domain string `json:"domain"`
+	// Storefront is present ONLY for a kind="shopify_storefront" site, and
+	// carries what that site's own JavaScript needs to talk to Shopify
+	// directly (design D4). Omitted entirely for every other kind, so a spa
+	// or static site's document is byte-identical to what it was before this
+	// field existed.
+	Storefront *StorefrontConfig `json:"storefront,omitempty"`
 }
+
+// StorefrontConfig is the shopify_storefront binding as the browser sees it:
+// the site row's own {storeDomain, storefrontTokenRef}, with the REF
+// RESOLVED to the token it names.
+//
+// # The Storefront API token is a client-side credential BY SHOPIFY'S DESIGN
+//
+// Do not "fix" this by moving the token server-side or proxying the calls.
+// Shopify's Storefront API is built to be called from the shopper's own
+// browser: a Storefront access token is a PUBLIC token, scoped to
+// unauthenticated storefront operations (read products / collections, create
+// and update a cart), rate-limited per IP, and Shopify's own JS SDKs, Hydrogen
+// and every headless example embed it in shipped client code. It cannot read
+// orders, cannot read customers, and cannot mutate the store. Publishing it
+// here is the intended deployment, not a leak.
+//
+// What must NEVER appear in this struct is the ADMIN API token, which is the
+// opposite kind of credential in every respect -- full read/write over
+// orders, customers, inventory and products. It is not in this struct, it is
+// not read anywhere on the serve path, and
+// TestRuntimeConfigNeverCarriesTheShopifyAdminToken greps the SERVED document
+// to keep it that way.
+type StorefrontConfig struct {
+	// Kind restates the site kind so a client can branch on one field
+	// (design D4 specifies {kind, storeDomain, storefrontToken}). Always
+	// "shopify_storefront" -- nothing else produces this object.
+	Kind string `json:"kind"`
+	// StoreDomain is the myshopify.com domain the Storefront API calls are
+	// addressed to, copied verbatim from the site row's binding.
+	StoreDomain string `json:"storeDomain"`
+	// StorefrontToken is the PUBLIC Storefront API access token, resolved at
+	// serve time from the v1:platform:globalSecret the binding's
+	// storefrontTokenRef names. Empty when the ref is unset or the secret
+	// cannot be resolved -- an honest "this store is not wired up yet" rather
+	// than a fabricated value, and the same posture OAuthClientID takes for
+	// an unregistered hostname.
+	StorefrontToken string `json:"storefrontToken"`
+}
+
+// SecretResolver resolves a cluster-scoped secret (v1:platform:globalSecret)
+// by name to its decrypted value. Narrow on purpose: it is the ONLY reason
+// the serving path may touch the secret store, and it is called for exactly
+// one field of one site kind.
+type SecretResolver func(ctx context.Context, name string) (string, error)
 
 // serveRuntimeConfig answers GET /runtime-config.json for site. Every live
 // site gets one -- this is cluster-wide identity discovery, not an opt-in
@@ -78,7 +129,7 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	doc := runtimeConfigForSite(site, os.Getenv, config.IdentityAuthEnabled())
+	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(doc)
@@ -89,8 +140,10 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 // real process environment; authEnabled is a separate parameter rather than
 // read through env because component/config.IdentityAuthEnabled reads
 // os.Getenv directly and has its own tested false-value vocabulary
-// (false/0/no/off) that this package must not reimplement.
-func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool) RuntimeConfig {
+// (false/0/no/off) that this package must not reimplement. resolveSecret is
+// injected for the same reason and may be nil -- a node with no secret
+// resolver wired still serves every other field.
+func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) string, authEnabled bool, resolveSecret SecretResolver) RuntimeConfig {
 	identityURL := identityURLFromEnv(env)
 	hostname := ""
 	if site != nil {
@@ -102,7 +155,53 @@ func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool)
 		OAuthClientID:      clientIDForHostname(hostname, env("MEMQL_IDENTITY_REGISTERED_CLIENTS")),
 		AuthEnabled:        authEnabled,
 		Domain:             domainFromEnv(env),
+		Storefront:         storefrontForSite(ctx, site, resolveSecret),
 	}
+}
+
+// storefrontKind is the one site kind that carries a storefront binding.
+const storefrontKind = "shopify_storefront"
+
+// storefrontForSite builds the storefront block, or nil.
+//
+// KIND IS THE GATE, not the presence of a binding. A row of any other kind
+// that happens to carry a binding object gets nothing here -- so a token ref
+// written onto a `spa` row (by accident, or by someone probing) resolves
+// nothing and publishes nothing. The token is only ever fetched for a site
+// that is declared to be a storefront.
+func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretResolver) *StorefrontConfig {
+	if site == nil || site.Kind != storefrontKind {
+		return nil
+	}
+	out := &StorefrontConfig{
+		Kind:        storefrontKind,
+		StoreDomain: strings.TrimSpace(bindingString(site.Binding, "storeDomain")),
+	}
+	ref := strings.TrimSpace(bindingString(site.Binding, "storefrontTokenRef"))
+	if ref == "" || resolveSecret == nil {
+		return out
+	}
+	token, err := resolveSecret(ctx, ref)
+	if err != nil {
+		// Deliberately silent about the failure IN THE DOCUMENT: an error
+		// string here would tell every visitor the name of a secret and
+		// whether it exists. The empty token is what the client sees, and
+		// the site's own "storefront not configured" path handles it.
+		return out
+	}
+	out.StorefrontToken = strings.TrimSpace(token)
+	return out
+}
+
+// bindingString reads one string leaf out of the site row's binding object.
+func bindingString(binding map[string]any, key string) string {
+	if binding == nil {
+		return ""
+	}
+	if s, ok := binding[key].(string); ok {
+		return s
+	}
+	return ""
 }
 
 // registeredClient mirrors ONE entry of MEMQL_IDENTITY_REGISTERED_CLIENTS --

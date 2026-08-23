@@ -277,12 +277,21 @@ func TestOperatorInstallsArePinnedToExactVersions(t *testing.T) {
 		// every resource in manifests that are self-namespacing and full of
 		// cross-namespace references (webhook service refs, RBAC subjects). The
 		// damage surfaces as a webhook that never answers, not as an apply error.
+		//
+		// THE TRANSFORMER IS A TOP-LEVEL KEY, SO THE COLUMN IS THE TEST. This
+		// scan deliberately reads the RAW line rather than a trimmed one: in
+		// YAML a top-level key carries no indentation, and every legitimate
+		// INDENTED `namespace:` is something else entirely -- a patch target
+		// selector naming the namespace it matches in, or a field inside an
+		// inline resource. Trimming first conflates the two and fails the build
+		// on a correctly-scoped patch (memql#4347 added one for cert-manager's
+		// workload-identity ServiceAccount), which is a false positive that
+		// reads exactly like the real defect.
 		for _, line := range strings.Split(body, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "namespace:") && !strings.HasPrefix(trimmed, "#") {
-				t.Errorf("%s sets a kustomize `namespace:` transformer (%q). These upstream manifests declare "+
-					"their own namespaces and reference themselves across namespaces; rewriting that surfaces "+
-					"as a webhook that never answers rather than as an apply error.", file, trimmed)
+			if strings.HasPrefix(line, "namespace:") {
+				t.Errorf("%s sets a top-level kustomize `namespace:` transformer (%q). These upstream manifests "+
+					"declare their own namespaces and reference themselves across namespaces; rewriting that "+
+					"surfaces as a webhook that never answers rather than as an apply error.", file, strings.TrimSpace(line))
 			}
 		}
 	}

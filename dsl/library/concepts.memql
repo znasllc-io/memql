@@ -34,17 +34,20 @@ use worker.concepts.{ registration }
 /// type spine the Library panel needs to list / search / filter / sort across heterogeneous
 /// sources, while the actual content stays on the backing concept referenced by sourceConceptRef.
 /// The LOCKED backend shape for the Library epic (memql#693): a real index concept, not a UI
-/// projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and
-/// every read gates on ownerUserId==actor.userId.
+/// projection. Per-row authz: the COMPOSITE tier (memql#4312) -- the owner, or a cluster owner.
+/// Every read already carried ownerUserId==actor.userId by hand; the declaration is what extends
+/// that to the paths a filter cannot reach (subscriptions, graph expansion, a raw query string) and
+/// what gives an operator console the cross-user view a plain owner= tier has no bypass for.
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept artifact {
   ownerUserId      string!  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
 
   lens             enum("artifact", "record")!  @description("Which Library lens this row belongs to. 'artifact' = file-like, content-bearing item opened in a type-aware viewer (documents, generated outputs). 'record' = structured memql row read/edited as data (notes, to-dos, calendar events, memories, live sources). Drives the Artifacts | Records toggle in the Library panel.")
 
-  kind             enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")!  @description("The flavor of the backing concept. document = uploaded file (v1:knowledge:document); generated_output = an output produced on the workbench / via computer-use / by an agent; note = v1:notes:note; todo = v1:todos:todo; calendar_event = v1:calendar:calendarEvent; memory = user-facing assistant memory; live_source = v1:knowledge:liveSource. Extensible -- new sources append a value.")
+  kind             enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source", "file")!  @description("The flavor of the backing concept. document = uploaded file (v1:knowledge:document); generated_output = an output produced on the workbench / via computer-use / by an agent; note = v1:notes:note; todo = v1:todos:todo; calendar_event = v1:calendar:calendarEvent; memory = user-facing assistant memory; live_source = v1:knowledge:liveSource; file = v1:library:file, the Library's own first-class byte-bearing row (the sixth backing concept, memql#4340). Extensible -- new sources append a value.")
 
-  source           enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live")!  @description("Provenance -- WHERE this item came from. uploaded = user-provided file; workbench_generated = produced in a v1:workbench:workspace container; computer_use = produced at the computer-use level; agent_generated = emitted by an agent as a standalone deliverable; derived = computed from another artifact; user_created = the person wrote it themselves in the portal, rather than a tool producing it for them; live = a current-state read against a live source (paired with live==true). Rendered as the per-row source label in the Library list.")
+  source           enum("uploaded", "exported", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live")!  @description("Provenance -- WHERE this item came from. uploaded = user-provided file; exported = written out of another artifact by the export route (v1:library:file only); workbench_generated = produced in a v1:workbench:workspace container; computer_use = produced at the computer-use level; agent_generated = emitted by an agent as a standalone deliverable; derived = computed from another artifact; user_created = the person wrote it themselves in the portal, rather than a tool producing it for them; live = a current-state read against a live source (paired with live==true). Rendered as the per-row source label in the Library list. THIS ENUM IS THE UNION OF EVERY BACKING ROW'S OWN source, and it has to be: indexFileOnCreate and its five siblings pass the backing value straight through to createArtifact, so a value a backing concept can hold and this one cannot is a promotion that REFUSES -- the row never gets an index row and never appears in the Library, with nothing on the failing path to say why. `exported` is here for exactly that reason (memql#4342 found it missing). TestEveryBackingSourceValueIsPromotable pins the containment.")
 
   sourceConceptRef string!  @description("Fully-qualified reference to the backing row, e.g. 'v1:knowledge:document:<id>', 'v1:notes:note:<id>', 'v1:knowledge:liveSource:<id>'. The Library drill-in resolves content + children (document->documentChunk, liveSource->liveSnapshot) through this ref. Also the idempotency key for the write-path (one index row per source ref).")
 
@@ -58,9 +61,11 @@ concept artifact {
 
   live             bool    @default("false")  @description("True when this row is a live-data source (kind=live_source, source=live). The Library renders a LIVE badge + freshness indicator computed from the backing liveSource's latest liveSnapshot (materializedAt / expiresAt). False for everything else.")
 
-  scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' = a partition-shared row with NO single owner (ownerUserId is empty); it is invisible to the owned reads and surfaces instead through the non-owned libraryWorkspaceLiveSources path so every partition member sees it. 'private' = owner-scoped like everything else (gated by ownerUserId==actor.userId). Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
+  scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' MEANT a partition-shared row with NO single owner (ownerUserId empty), surfaced through a non-owned libraryWorkspaceLiveSources read (#723). memql#4340's tier ends that: an owner tier is ANDed into every read of this concept and every row is admitted against it on the way out, so an empty ownerUserId is now unreachable on every path and that read is owner-scoped like its siblings. The value survives as a mirrored FACET of the backing source's own scope; a genuinely ownerless partition-shared Library row needs a concept that can express one, which the index no longer is. 'private' = owner-scoped like everything else. Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
 
   labels           []string  @description("Free-text labels the owner or their agents put on this artifact to say what it was for. Rendered as chips in the portal Artifacts page and filterable one label at a time. Distinct from v1:worker:registration.labels (routing among a user's own workers) and v1:cluster:node.labels (arbitrary node metadata), which are key=value OBJECT maps -- these are display labels on a []string, matching note.tags and skill.tags.")
+
+  archived         bool  @default("false")  @description("Soft delete: true once the owner archives the item, which removes it from the default Library list without destroying the row or its provenance (memql#4340). The engine is append-only by (id, createdAt), so an archive is a re-version carrying archived=true rather than a DELETE -- the history, the labels and the sourceConceptRef all survive. archiveArtifact sets it, and archives the backing v1:library:file when the artifact is one. createArtifact writes `archived: args.archived ?? false` so every promoted row carries an explicit value -- not because the list filter requires it (measured: `archived != true` DOES return a row whose payload has no archived key at all, so rows written before this field existed keep listing), but because a row that states its own answer is what makes the filter readable and what stops the next author reaching for `archived == false`, which is the spelling a missing key would silently exclude.")
 
   partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
 
@@ -240,4 +245,117 @@ concept memory {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
   @relationship(type="references", field="sourceUtteranceId", target=utterance, direction="outgoing")
+}
+
+// ---- file: the Library's own byte-bearing row ----
+//
+// The sixth backing concept (memql#4340, design D1). Documents cover
+// files a product's knowledge pipeline ingested; generatedOutput covers
+// deliverables the app produced. Neither covers "a person put a file in
+// their Library" -- any type, any size under the cap, no knowledge
+// domain, no space. `file` is that row, and it is what makes the
+// Artifacts page a place to PUT things rather than only a place to see
+// what the system happened to make.
+//
+// It rides no other concept's routes deliberately (D1): v1:common:attachment
+// is pack-owned, carries a 25 MB cap and a MIME allowlist, and needs a
+// space the engine would have to invent. `POST /artifacts` and
+// `GET /artifacts/{id}/content` are the pair, inside the multipart
+// exception CLAUDE.md already records.
+//
+// THE INDEX STILL OWNS NO CONTENT. Every byte fact -- name, mimeType,
+// size, sha256, blobUrl -- lives here; v1:library:artifact carries only
+// what the listing and the facets need, exactly as memql#693 locked it.
+// indexFileOnCreate promotes a new file into an artifact index row
+// (kind=file, lens=artifact).
+//
+// TRAINING IS A SEPARATE ACT (D7). A file in the Library is the owner's
+// the moment it lands; putting it into a knowledge domain is a decision
+// recorded on the row (trainedIntoDomainIds), never a default.
+
+/// A file the owner put in their Library -- uploaded, exported from another artifact, produced by
+/// an agent, or derived from another file. The Library's own byte-bearing row: the bytes live in
+/// blob storage at blobUrl, and every fact about them (name, mimeType, size, sha256) lives here
+/// rather than on the artifact index, which owns no content (memql#693). Any MIME type is accepted;
+/// an unknown one is stored opaquely with status=ready and no chunks. Promoted into the Library by
+/// indexFileOnCreate. Per-row authz: the composite tier (memql#4312) -- the owner, or a cluster
+/// owner; ownerUserId is stamped from actor.userId and never accepted from caller args.
+@displayCard(primary="name", secondary="summary", tertiary="createdAt", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept file {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns this file. Stamped from actor.userId on every write and never accepted as a mutation arg -- the upload route runs as the authenticated caller, and the detached analysis pass re-enters under that same user's actor (auth.ContextWithUserActor). @serverSet turns 'never a caller arg' into a LOAD-TIME rejection (memql#3175); the engine also server-stamps it from the @rowAuthz declaration above on the raw insert() surface that bypasses accept/stamp (memql#3059). The load-bearing per-row authz key.")
+
+  name         string!  @description("Original filename as the owner sees it, sanitised at upload (path separators and control characters removed, length bounded). Also the filename the export route puts in Content-Disposition, and the last segment of blobUrl.")
+
+  mimeType     string!  @description("Content type as uploaded, or sniffed from the leading bytes when the client sent none. ANY type is accepted -- there is no allowlist here, which is one of the reasons the Library does not ride the attachment routes (design D1). An unrecognised type is stored opaquely: status goes straight to ready, no text is extracted and no chunks are written.")
+
+  size         int!  @description("Size of the stored bytes. Bounded at upload by MEMQL_LIBRARY_MAX_UPLOAD_BYTES (default 256 MB, sized so a site bundle fits). Recorded from what was actually written to blob storage, not from the client's Content-Length.")
+
+  sha256       string!  @description("Lowercase hex SHA-256 of the stored bytes. A DEDUP HINT and an integrity check -- NEVER an access key: knowing it grants nothing, because the download route resolves the artifact under the caller's own actor and there are no signed URLs anywhere in this design.")
+
+  blobUrl      string!  @description("Where the bytes live: 'library/{userId}/{fileId}/{name}' through integration.storage.upload. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content, which re-checks row admission and streams them; it never redirects.")
+
+  source       enum("uploaded", "exported", "agent_generated", "derived")!  @description("Provenance -- how the file came to be. uploaded = a person put it there; exported = written out of another artifact by the export route; agent_generated = an agent produced it as a standalone deliverable; derived = computed from another file. Copied onto the artifact index row's own source field at promotion.")
+
+  format       enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")  @description("High-level content classification DERIVED FROM mimeType by the writer that knows the MIME (the upload route, or the analysis pass when the type had to be sniffed). Carried onto the artifact index at promotion, where it picks the Library viewer. Held on the row rather than computed in indexFileOnCreate because an automation step argument has no conditional form -- the mapping is a Go table, and the row is where its answer is recorded once. Defaults to 'other', which renders the metadata-only card.")
+
+  status       enum("stored", "analyzing", "ready", "failed")!  @description("Lifecycle of the analysis pass. stored = bytes are durable and nothing has looked at them yet; analyzing = extraction / chunking / embedding in flight; ready = terminal success (including the unknown-type case, which is ready with no chunks); failed = terminal failure, with failureReason set. Never a silent partial: a pass that gives up sets failed and says why.")
+
+  summary      string  @description("Short description of the contents, written by the analysis pass for the types it can read. Empty for opaque types. Copied onto the artifact index row's summary so the Library list can render it without a join.")
+
+  failureReason string  @description("Why status is failed, in terms an owner can act on ('could not extract text from a password-protected PDF'). Empty unless status==failed. Carried on the row rather than only in a log because the person who uploaded the file is the one who needs to see it.")
+
+  embeddingStatus enum("none", "partial", "complete")  @default("none")  @description("How much of the file is searchable by meaning. none = no chunks embedded (an opaque type, or the pass has not run); partial = some chunks embedded and the pass stopped; complete = every chunk of the file has an embedding. Read by librarySimilarArtifacts to say whether a miss means 'not similar' or 'not indexed yet'.")
+
+  trainedIntoDomainIds []string  @description("Ids of the knowledge domains this file has been trained into, appended one at a time by libraryTrainFile (design D7). Upload and train are two acts: nothing here is trained by default, and this list is the record of every deliberate one. A []string of domain ids rather than a relationship because the target concept is product-owned and the engine tree does not declare it.")
+
+  archived     bool  @default("false")  @description("Soft delete, set by archiveLibraryFile -- and set for you by archiveArtifact when the artifact being archived is backed by this file, so the two never disagree. The bytes are NOT deleted: the row keeps its blobUrl and its provenance, and the append-only history keeps every earlier version.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+// ---- fileChunk: the similarity substrate ----
+//
+// Chunks live in the library namespace, not on v1:knowledge:documentChunk
+// (design D2). That concept requires a knowledge domain, and the domain
+// concept is not declared in the engine tree at all -- so riding it would
+// make every Library upload a knowledge-domain decision, which is exactly
+// the coupling D7 exists to refuse.
+//
+// Chunking reuses the knowledge splitter's defaults (about 1800
+// characters, 180 overlap) and each chunk is embedded through
+// integration.embedding.store -- the same call dsl/harness and
+// dsl/authoring make. librarySimilarArtifacts runs similarTo over these
+// rows and folds the hits up to artifacts by best score.
+//
+// @no-displayCard: a chunk is machinery, never a row a person is shown.
+// Its fields are two foreign keys, a sequence number, a token count and a
+// slice of body text with no title -- a forced primary would render the
+// first 1800 characters of somebody's PDF as a card heading. The
+// documented fallback is the better rendering; the artifact the chunk
+// rolls up to is what the Library actually displays.
+
+/// One chunk of a Library file's extracted text, embedded for similarity search. Written by the
+/// analysis pass, one row per chunk in file order; librarySimilarArtifacts runs similarTo over these
+/// and folds the hits up to their artifacts by best score. Deliberately NOT v1:knowledge:documentChunk,
+/// which requires a knowledge domain the engine tree does not declare (design D2). Per-row authz: the
+/// composite tier (memql#4312), the same as the file it belongs to -- ownerUserId is stamped from
+/// actor.userId, never accepted from caller args.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept fileChunk {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns the file this chunk came from. Stamped from actor.userId: the analysis pass runs under the file owner's actor, so the chunk lands owned by the same person as its file. @serverSet makes 'never a caller arg' a load-time rejection (memql#3175). The per-row authz key -- it is duplicated here rather than resolved through fileId because a similarity read matches CHUNKS first and must be able to admit or deny each one without a join.")
+
+  fileId       string!  @description("v1:library:file.id this chunk was extracted from. The grouping key for libraryFileChunksForFile, and what a similarity hit resolves back through.")
+
+  artifactId   string!  @description("v1:library:artifact.id of the index row the file was promoted to. Carried on the chunk so a similarity hit folds straight up to the artifact the Library lists, with no second read to resolve the promotion. Written by the analysis pass, which resolves it through libraryArtifactBySourceConceptRef.")
+
+  seq          int!  @description("Zero-based position of this chunk in the file's text, in file order. Chunks overlap by design (about 180 characters), so seq orders them but does not partition the text.")
+
+  text         string!  @description("The chunk body -- the extracted text this row's embedding was computed from. About 1800 characters, the knowledge splitter's default. This is what a similarity match is actually matching against, and what a citation would quote.")
+
+  tokenCount   int  @description("Approximate token count of text, recorded when the embedding was computed. Advisory: it drives batching and cost accounting, and nothing reads it as a correctness signal.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="fileId", target=file, direction="outgoing")
+  @relationship(type="references", field="artifactId", target=artifact, direction="outgoing")
 }

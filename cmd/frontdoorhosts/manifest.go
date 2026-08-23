@@ -83,11 +83,15 @@ func header(overlay, domain string) string {
 		"# is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly\n" +
 		"# its own exact rule hosts under tls; and the union of those tls lists is the dnsNames\n" +
 		"# set -- deploy/k8s/overlays/frontdoor_hosts_test.go fails the build when they differ.\n" +
-		"# The *.<domain> RULE stays, because it is how every site reaches the edge, but it has no\n" +
-		"# certificate behind it: a customer site hostname needs its own Certificate and its own\n" +
-		"# exact-host Ingress until the issuer gains a DNS-01 solver\n" +
-		"# (docs/public/operate/site-hosting.md). The portal is the one site the generator can\n" +
-		"# name in advance, so it is the one site with an exact rule and a SAN.\n" +
+		"# The *.<domain> RULE stays, because it is how every site reaches the edge, and THIS\n" +
+		"# certificate is not what covers it. Where the overlay declares a DNS-01 ClusterIssuer it\n" +
+		"# also declares a SECOND, wildcard Certificate, and the wildcard rule carries that one\n" +
+		"# under tls (memql#4347). Where it does not -- the default -- the wildcard rule still has\n" +
+		"# no certificate behind it and a customer site hostname needs its own Certificate and\n" +
+		"# exact-host Ingress (docs/public/operate/site-hosting.md). Either way this generated\n" +
+		"# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The portal\n" +
+		"# is the one site the generator can name in advance, so it is the one site with an exact\n" +
+		"# rule and a SAN here.\n" +
 		"#\n" +
 		"# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/\n" +
 		"# names a real domain: the domain is a value on the memql-domain ConfigMap, which every\n" +
@@ -123,8 +127,9 @@ func certificate(domain string) string {
 		"# not the one name -- the Certificate would sit Pending and every host here would serve\n" +
 		"# the controller's default certificate. The apex is a dnsName like any other now; it\n" +
 		"# used to be the one exception to a wildcard that matched exactly one label. One order,\n" +
-		"# one renewal, and a new customer site does NOT join this list: it needs a Certificate\n" +
-		"# of its own until a DNS-01 solver exists (docs/public/operate/site-hosting.md).\n" +
+		"# one renewal, and a new customer site does NOT join this list: it is covered by the\n" +
+		"# overlay's wildcard Certificate where a DNS-01 issuer is declared, and otherwise needs a\n" +
+		"# Certificate of its own (docs/public/operate/site-hosting.md).\n" +
 		"#\n" +
 		"# This list and the tls.hosts of the Ingresses below are the SAME set, derived from\n" +
 		"# component/frontdoor.CertificateSANs; the overlay render gate asserts the equality.\n" +
@@ -338,12 +343,13 @@ func edgeIngress(domain string) string {
 		"# data, not infrastructure\": the host count is fixed by the closed ROLE set plus the\n" +
 		"# platform's own portal, and never grows with sites.\n" +
 		"#\n" +
-		"# TLS NAMES THE APEX ONLY (memql#4224). The wildcard rule has no certificate behind it:\n" +
-		"# the issuer is HTTP-01, which cannot issue *.<domain>, and listing the wildcard under\n" +
-		"# tls anyway is what made ingress-nginx fall back to its self-signed default for every\n" +
-		"# name this rule answers. A site routed by the wildcard terminates TLS with that default\n" +
-		"# until it has a Certificate and an exact-host Ingress of its own\n" +
-		"# (docs/public/operate/site-hosting.md).\n" +
+		"# TLS NAMES THE APEX ONLY, IN THIS GENERATED BLOCK (memql#4224). The issuer here is\n" +
+		"# HTTP-01, which cannot issue *.<domain>, and listing the wildcard under tls against an\n" +
+		"# HTTP-01 certificate is what made ingress-nginx fall back to its self-signed default for\n" +
+		"# every name this rule answers. An overlay that declares a DNS-01 ClusterIssuer adds the\n" +
+		"# wildcard tls entry by patch, against its own wildcard Certificate (memql#4347); without\n" +
+		"# one, a site routed by the wildcard terminates TLS with that default until it has a\n" +
+		"# Certificate and an exact-host Ingress of its own (docs/public/operate/site-hosting.md).\n" +
 		"#\n" +
 		"# The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here\n" +
 		"# -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https\n" +

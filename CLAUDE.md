@@ -620,6 +620,7 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 | **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | Same reasoning as attachments (memql#3713): a CI job hands over an arbitrary tree of files -- unknown paths, count and content types -- which is what multipart exists to carry and a fixed protobuf schema does not. `component/edge.Publisher` makes it atomic: the bundle lands under a content-addressed version prefix and only then does the site row's `bundleRef` flip. Authorization is a `class="service_account"` JWT; declared in `HandlerAuthorizedPaths()`, never `PublicPaths()`. Served by the bff, never the edge (which is wildcard-routed by site hostname) |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US and will POST to a URL and nothing else (memql#2957). Deny-by-default source allowlist + per-source HMAC; `HandlerAuthorizedPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 is a contract with Gmail / Outlook / Yahoo, and without it there is no one-click unsubscribe. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read, with the impersonated identity coming out of the signed payload rather than a parameter. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
+| **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content` (bff only) | Upload is the multipart reasoning already recorded for attachments, approved by the owner in this epic's design record (memql#4341, D1) the way memql#3713 approved the bundle route. `GET .../content` is the export side of the same bytes and STREAMS through the bff after re-resolving the row under the caller's actor -- never a redirect, because there are no signed URLs here and a redirect would move authorization from the graph to whoever holds a URL. Both are ordinary AUTHENTICATED routes, so they appear in none of the three aggregates; `server.ArtifactPaths()` routes them. Cap: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 256 MB) |
 
 ### The front door's HOST set is generated too (memql#3767)
 
@@ -645,7 +646,11 @@ exactly its own exact rule hosts under `tls`; and the union of those lists
 equals the dnsNames (`deploy/k8s/overlays/frontdoor_hosts_test.go` gates all
 three). The wildcard RULE stays with no certificate behind it: a customer site
 hostname on the cloud front door needs its own Certificate and exact-host
-Ingress until a DNS-01 solver exists. The portal carries an exact rule because
+Ingress WHERE THE OVERLAY DECLARES NO DNS-01 ISSUER. Both cloud overlays now
+declare one (memql#4347) plus a second, wildcard Certificate that the edge
+Ingress's wildcard rule carries, so a freshly deployed site is live over TLS
+with no operator step; the render gate reads the SOLVER rather than the
+issuer's name, so #4224's exact-host rule holds by default. The portal carries an exact rule because
 ingress-nginx builds a certificate-bearing server block per RULE host, never
 per tls host.
 
@@ -2066,10 +2071,27 @@ Package: `component/memql/sense/` -- pure Go, no gRPC dependency. gRPC handlers 
 Inventories live in the `.memql` files; what follows is what a reader needs to
 know that the schema does not say.
 
-**Platform** (`dsl/platform/concepts.memql`): `site` (a hosted web surface --
-the edge node resolves the request `Host` header to one of these rows and
-serves its `bundleRef`), `globalSecret` / `globalVariable` (cluster-scoped
-config), `outboundRequest` / `inboundRequest`, `missingCapability`.
+**Platform** (`dsl/platform/concepts.memql`): `site` -- a hosted web surface,
+now a "deployable" (memql#4344). The edge resolves the request `Host` to one of
+these rows and serves its `bundleRef`; the row carries `ownerUserId` (empty =
+cluster-owned, which the seeded portal row stays), `artifactId`, a typed
+`binding`, `kind` including `shopify_storefront`, and the composite tier. A
+user's hostname is `<slug>.<domain>` against a reserved set DERIVED from
+`frontdoor.Roles()` + the portal, so a new role can never become claimable by
+omission; Android / iOS / macOS deliberately have NO enum values, being
+distribution rather than hostnames ([deployables.md](docs/public/operate/deployables.md)).
+Plus `globalSecret` / `globalVariable` (cluster-scoped config),
+`outboundRequest` / `inboundRequest`, `missingCapability`.
+
+**Library** (`dsl/library/concepts.memql`): `artifact` is a thin INDEX row
+(memql#693) owning no content -- one per item, carrying the provenance/type
+spine the Artifacts page lists on. `file` is the sixth backing row and the only
+one with bytes (memql#4340); `fileChunk` holds the embeddings search-by-meaning
+runs over. All three declare `@rowAuthz(owner="ownerUserId", clusterOwner)`.
+The index's `source` enum is the UNION of every backing concept's own, because
+the promotions pass the backing value straight through -- a value one can hold
+and the index cannot is a promotion that refuses at execute time
+([library.md](docs/public/operate/library.md)).
 
 **Cluster** (`dsl/cluster/concepts.memql`): `node`, `nodeType` (optional
 `codeReference` links the row to its architecture-model service id, consumed by

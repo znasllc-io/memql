@@ -4,6 +4,7 @@ package edge
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -31,13 +32,15 @@ func (f *fakeEngine) Execute(ctx context.Context, query string) (any, error) {
 }
 
 // The edge is a service, not a user: v1:platform:site declares
-// @rowAuthz(clusterOwner) and siteByHostname's own filter carries an explicit
-// actor.isClusterOwner==true conjunct on top of that. Without a synthetic
-// cluster-owner actor on the ctx the engine hands to Execute, every real
-// lookup is refused twice over -- once by the declared tier, once by the
-// textual conjunct -- and every hosted site 404s in a real cluster while this
-// exact test, run against stubExec, would keep passing. That is the false-
-// signal class this test exists to close off.
+// @rowAuthz(owner="ownerUserId", clusterOwner) -- the COMPOSITE tier
+// (memql#4344) -- and siteByHostname's own filter carries that tier's
+// predicate written out, `ownerUserId==actor.userId || actor.isClusterOwner`.
+// The edge owns no site row, so the only branch that can admit it is the
+// cluster-owner one. Without a synthetic cluster-owner actor on the ctx the
+// engine hands to Execute, every real lookup is refused twice over -- once by
+// the declared tier, once by the textual conjunct -- and every hosted site
+// 404s in a real cluster while this exact test, run against stubExec, would
+// keep passing. That is the false-signal class this test exists to close off.
 func TestEngineExecutorRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
 	fe := &fakeEngine{rows: []map[string]any{
 		{"id": "v1:platform:site:abc123", "hostname": "shop.example.com", "status": "live"},
@@ -81,7 +84,10 @@ func TestEngineExecutorSiteByHostnameProjectsTheRow(t *testing.T) {
 		BundleRef: "file:///app/portal", Status: "live", Title: "Shop",
 		APIProxy: true, SystemOwned: true,
 	}
-	if *got != *want {
+	// reflect.DeepEqual rather than *got != *want: Site carries the row's
+	// `binding` object as a map now (memql#4345), and a struct holding a map
+	// is not comparable with ==.
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("SiteByHostname returned %+v, want %+v", got, want)
 	}
 }

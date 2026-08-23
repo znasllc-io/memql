@@ -20,6 +20,15 @@
 /// the portal gets from the cluster install. It carries the committed default
 /// the same way the Ingress hosts do (memql#3593); an install on another
 /// domain overrides it through the same seam.
+///
+/// NO ownerUserId, and its ABSENCE is the meaning (memql#4344): an empty owner
+/// is the CLUSTER-OWNED state, which is what site #1 has to be -- the portal is
+/// the platform's row, not whichever principal happened to boot the cluster.
+/// createSite stamps `ownerUserId: actor.userId` like every owned concept must,
+/// and executeWrite undoes that stamp for a system actor, so adding the field
+/// here would be both unnecessary and wrong. `portal.<domain>` is also a
+/// RESERVED label a user may not claim, and the same privileged path is what
+/// lets this seed use it (component/memql/platform_site_hostname_policy.go).
 @description("The MemQL Portal as site #1")
 seed site portal {
   id:          "portal"

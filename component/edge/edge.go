@@ -113,6 +113,7 @@ func siteFromRow(r map[string]any) *Site {
 		Title:       rowString(r, "title"),
 		APIProxy:    rowBool(r, "apiProxy"),
 		SystemOwned: rowBool(r, "systemOwned"),
+		Binding:     rowObject(r, "binding"),
 	}
 }
 
@@ -134,4 +135,17 @@ func rowBool(m map[string]any, key string) bool {
 	default:
 		return false
 	}
+}
+
+// rowObject projects a nested object field (v1:platform:site.binding) as a
+// plain map. A payload arrives here through structpb's AsMap, so a stored
+// object is already a map[string]any; anything else -- absent, null, or a
+// scalar somebody wrote into an object field -- yields nil rather than a
+// partially-populated map, so a caller's "is there a binding" check is a
+// single nil test.
+func rowObject(m map[string]any, key string) map[string]any {
+	if v, ok := m[key].(map[string]any); ok && len(v) > 0 {
+		return v
+	}
+	return nil
 }

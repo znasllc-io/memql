@@ -1,4 +1,4 @@
-// Package overlays -- the front-door render gates (memql#3767, memql#4224).
+// Package overlays -- the front-door render gates (memql#3767, memql#4224, memql#4347).
 //
 // WHY A TEST AND NOT A REVIEW. The host set is a DERIVATION -- three roles plus
 // the portal plus the sites wildcard plus the apex -- written into ~440 lines
@@ -16,7 +16,38 @@
 // Ingress listed the wildcard under tls, so ingress-nginx served its
 // self-signed default for portal.<domain>. So three things are gated here, by
 // exact name: the SANs against the hosts, each Ingress's tls.hosts against its
-// own rule hosts, and the union of the tls lists against the SANs.
+// own rule hosts, and the requested SANs against the rules that serve them.
+//
+// # TWO ISSUER REGIMES, AND THE GATES READ WHICH ONE IS IN PLAY (memql#4347)
+//
+// memql#4224's rule -- "no wildcard SAN, and no wildcard under tls" -- was never
+// a preference. It followed from ONE fact about the issuer: letsencrypt-prod
+// solves HTTP-01, ACME cannot serve an HTTP-01 challenge for a name that is not
+// a host, and one wildcard dnsName fails the WHOLE order rather than the one
+// name. A DNS-01 solver proves control of the ZONE by writing a TXT record,
+// which is a claim over every name under it, so the same wildcard becomes
+// issuable. The manifests are therefore checked against the SOLVER, not against
+// a remembered conclusion:
+//
+//	HTTP-01 regime -- no DNS-01 issuer declared in the overlay. Every Certificate
+//	names exact hosts only, no Ingress lists a wildcard under tls, and the
+//	`*.<domain>` RULE is asserted to be covered by NOTHING. This is memql#4224
+//	unchanged, and it is the DEFAULT: an issuer this render does not contain is
+//	read as HTTP-01, so the strict regime stays in force by omission rather than
+//	needing to be re-chosen.
+//
+//	DNS-01 regime -- the overlay declares a ClusterIssuer with a dns01 solver.
+//	A Certificate issued BY THAT ISSUER may name `*.<domain>`, and the edge
+//	Ingress's wildcard rule must then carry its tls entry -- a rule host with a
+//	usable certificate and no tls entry gets the controller's default anyway, so
+//	under this regime the omission is the bug.
+//
+// The two overlays are in the MIXED state today, deliberately: letsencrypt-prod
+// still issues the exact-host certificate for api / identity / mcp / portal and
+// the apex, and letsencrypt-dns01 issues one additional certificate for the
+// sites plane. Nothing here waves that through as a special case --
+// TestBothOverlaysDeclareTheDNS01Issuer states it, so a regression to either
+// single regime fails rather than being absorbed.
 package overlays
 
 import (
@@ -39,10 +70,15 @@ import (
 // reconciled before its domain is set fails visibly.
 const committedDomain = "memql.localhost"
 
-// frontDoorSecret is the one Secret every front-door Ingress terminates with
-// and the Certificate creates. It is also how a front-door Ingress is told
-// apart from the media plane's (deploy/k8s/base/livekit.yaml names its own).
+// frontDoorSecret is the Secret the EXACT-host certificate creates and every
+// role host terminates with. It is also how a front-door Ingress is told apart
+// from the media plane's (deploy/k8s/base/livekit.yaml names its own).
 const frontDoorSecret = "memql-front-door-tls"
+
+// wildcardSecret is the Secret the DNS-01 certificate creates (memql#4347). A
+// SECOND secret rather than a replacement: the exact hosts keep terminating
+// with frontDoorSecret, so a DNS-01 misconfiguration cannot reach sign-in.
+const wildcardSecret = "memql-wildcard-tls"
 
 // generatedOverlays are the two instance overlays cmd/frontdoorhosts writes.
 // Both are gated: the entry / client instance (cloud-entry) is the one that
@@ -51,8 +87,8 @@ var generatedOverlays = []string{cloudOverlay, entryOverlay}
 
 // frontDoorIngressNames is the closed set of Ingress objects the generator
 // emits. Listed so that a front-door Ingress that LOST its tls block would be
-// noticed rather than silently dropping out of the certificate-union gate,
-// which selects by Secret name.
+// noticed rather than silently dropping out of the certificate gates, which
+// select by Secret name.
 var frontDoorIngressNames = []string{
 	"api-front-door", "api-front-door-grpc", "identity-front-door",
 	"mcp-front-door", "portal-front-door", "edge-front-door",
@@ -100,8 +136,9 @@ func TestEveryGeneratedHostRuleIsServed(t *testing.T) {
 
 // TestTheApexIsServedAndCertificated. The bare domain needs both its own
 // Ingress rule and its own SAN -- it always did, since no wildcard could cover
-// it, and now every exact host is in the same position. Missing either is a
-// main website that answers with the controller's default certificate.
+// it, and a DNS-01 wildcard does not change that: `*.<domain>` matches exactly
+// one label and the apex has none. Missing either is a main website that
+// answers with the controller's default certificate.
 func TestTheApexIsServedAndCertificated(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
@@ -109,7 +146,7 @@ func TestTheApexIsServedAndCertificated(t *testing.T) {
 			if !hostsIn(rendered)[committedDomain] {
 				t.Errorf("the apex %q has no Ingress rule; for a customer cluster the bare domain IS their main website", committedDomain)
 			}
-			sans := certificateSANs(t, rendered)
+			sans := requestedSANs(t, rendered)
 			var found bool
 			for _, s := range sans {
 				if s == committedDomain {
@@ -123,58 +160,166 @@ func TestTheApexIsServedAndCertificated(t *testing.T) {
 	}
 }
 
-// TestTheCertificateNamesExactHostsOnly is the memql#4224 decision, gated.
+// TestTheFrontDoorCertificateNamesExactHostsOnly is the memql#4224 decision,
+// gated -- now scoped to the certificate it was always about.
 //
-// The issuer is HTTP-01. ACME cannot serve an HTTP-01 challenge for
-// `*.<domain>`, and ONE wildcard dnsName fails the WHOLE order -- the
-// Certificate sits Pending and every host serves the controller's default. So
-// the requested SANs are exactly component/frontdoor.CertificateSANs: every
-// exact host, in rule order, and no wildcard.
-func TestTheCertificateNamesExactHostsOnly(t *testing.T) {
+// memql-front-door-tls is issued by letsencrypt-prod, which solves HTTP-01.
+// ACME cannot serve an HTTP-01 challenge for `*.<domain>`, and ONE wildcard
+// dnsName fails the WHOLE order -- the Certificate sits Pending and every host
+// under it serves the controller's default. So its requested SANs are exactly
+// component/frontdoor.CertificateSANs: every exact host, in rule order, and no
+// wildcard.
+//
+// THE WILDCARD CERTIFICATE DOES NOT RELAX THIS. memql#4347 adds a second
+// Certificate under a DNS-01 issuer; it does not move a single name off this
+// one. If the two are ever merged, this gate is what has to be re-argued
+// deliberately rather than discovered to have stopped applying.
+func TestTheFrontDoorCertificateNamesExactHostsOnly(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
-			sans := certificateSANs(t, render(t, overlay))
-			if len(sans) == 0 {
-				t.Fatalf("the %s overlay requests no front-door certificate at all, so every host in it "+
-					"terminates TLS with whatever default the controller has", overlay)
-			}
-			for _, s := range sans {
+			cert := certificateFor(t, render(t, overlay), frontDoorSecret)
+			for _, s := range cert.DNSNames {
 				if strings.HasPrefix(s, "*") {
-					t.Errorf("the %s overlay requests the wildcard SAN %q; an HTTP-01 issuer fails the whole "+
-						"order on it, and the cluster ends up with no certificate (memql#4224)", overlay, s)
+					t.Errorf("the %s overlay requests the wildcard SAN %q on %s; its issuer %s solves "+
+						"HTTP-01, which fails the whole order on a wildcard, and the cluster ends up "+
+						"with no certificate for any exact host (memql#4224)",
+						overlay, s, frontDoorSecret, cert.IssuerName)
 				}
 			}
 			want := frontdoor.CertificateSANs(committedDomain)
-			if strings.Join(sans, ",") != strings.Join(want, ",") {
-				t.Errorf("the %s overlay requests SANs %v, want %v", overlay, sans, want)
+			if strings.Join(cert.DNSNames, ",") != strings.Join(want, ",") {
+				t.Errorf("the %s overlay requests SANs %v on %s, want %v",
+					overlay, cert.DNSNames, frontDoorSecret, want)
 			}
 		})
 	}
 }
 
-// TestEveryExactHostIsCoveredByARequestedSANAndTheWildcardIsNot is what makes
-// the gates above mean something together: it is possible to serve every
-// expected host and request every expected SAN and still have one host that no
-// SAN covers, if the wildcard rule is misread. The rule is ONE label, and it is
-// applied here rather than assumed -- and with no wildcard SAN requested, the
-// only way a host is covered is by exact name.
+// TestAWildcardSANIsRequestedOnlyFromADNS01Issuer is the memql#4224 rule made
+// CONDITIONAL rather than repealed (memql#4347).
 //
-// The wildcard RULE is asserted NOT covered. That is the honest state of the
-// front door under HTTP-01 and the gate says so, rather than letting a future
-// wildcard SAN slip back in as "coverage".
-func TestEveryExactHostIsCoveredByARequestedSANAndTheWildcardIsNot(t *testing.T) {
+// The rule is about the solver, not about the name of the issuer and not about
+// which certificate it is: any Certificate in the overlay may name `*.<domain>`
+// if and only if its issuerRef names an issuer DECLARED IN THIS OVERLAY whose
+// ACME solver list contains a dns01 solver.
+//
+// "Declared in this overlay" is doing real work. letsencrypt-prod is created
+// out of band on the cluster, so this render cannot see what it solves -- and
+// an issuer the gate cannot inspect is read as HTTP-01, which keeps the strict
+// regime in force by default. The alternative (assume DNS-01 unless proven
+// otherwise) would silently permit exactly the Pending-forever Certificate that
+// memql#4224 was filed for.
+func TestAWildcardSANIsRequestedOnlyFromADNS01Issuer(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
-			sans := certificateSANs(t, render(t, overlay))
+			rendered := render(t, overlay)
+			dns01 := dns01Issuers(t, rendered)
+			certs := certificatesIn(t, rendered)
+			if len(certs) == 0 {
+				t.Fatalf("the %s overlay requests no certificate at all, so every host in it "+
+					"terminates TLS with whatever default the controller has", overlay)
+			}
+			for _, c := range certs {
+				for _, s := range c.DNSNames {
+					if !strings.HasPrefix(s, "*") {
+						continue
+					}
+					if !dns01[c.IssuerName] {
+						t.Errorf("the %s overlay requests the wildcard SAN %q on Certificate %s, whose "+
+							"issuer %q is not a DNS-01 issuer declared in this overlay. ACME cannot "+
+							"serve an HTTP-01 challenge for a wildcard and one wildcard dnsName fails "+
+							"the whole order, so this Certificate would sit Pending forever "+
+							"(memql#4224). Declared DNS-01 issuers here: %v",
+							overlay, s, c.Name, c.IssuerName, sortedKeys(dns01))
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBothOverlaysDeclareTheDNS01Issuer states the MIXED state explicitly, so
+// that it is a decision rather than something the gates happen to tolerate.
+//
+// memql#4347 asked for the mixed regime to be accepted deliberately: HTTP-01
+// keeps the role hosts while DNS-01 takes the sites plane. Two failures this
+// catches, in opposite directions -- the DNS-01 issuer or its certificate
+// quietly disappearing (the wildcard rule silently back to the controller's
+// default, which is the memql#4224 symptom at a host nobody re-tests), and the
+// conditional above going vacuous because there is no longer a DNS-01 issuer
+// anywhere for it to be conditional ON.
+func TestBothOverlaysDeclareTheDNS01Issuer(t *testing.T) {
+	for _, overlay := range generatedOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			rendered := render(t, overlay)
+
+			if dns01 := dns01Issuers(t, rendered); len(dns01) == 0 {
+				t.Fatalf("the %s overlay declares no DNS-01 issuer, so the wildcard rule has no "+
+					"certificate behind it and every hosted site terminates TLS with ingress-nginx's "+
+					"self-signed default (memql#4347)", overlay)
+			}
+
+			cert := certificateFor(t, rendered, wildcardSecret)
+			want := []string{frontdoor.SitesWildcard(committedDomain), frontdoor.Apex(committedDomain)}
+			if strings.Join(cert.DNSNames, ",") != strings.Join(want, ",") {
+				t.Errorf("the %s overlay's %s names %v, want %v -- the apex is on it as well as the "+
+					"wildcard because `*.<domain>` matches exactly one label and the apex has none, "+
+					"so a sites-plane certificate without it could not serve the main website",
+					overlay, wildcardSecret, cert.DNSNames, want)
+			}
+			// The exact-host certificate must still come from a DIFFERENT
+			// issuer. Collapsing the two is a design change -- one order for
+			// everything, HTTP-01 retired -- and has to be argued, not arrived
+			// at, because it puts sign-in behind the DNS-01 solver too.
+			exact := certificateFor(t, rendered, frontDoorSecret)
+			if exact.IssuerName == cert.IssuerName {
+				t.Errorf("the %s overlay issues both %s and %s from %q; the staged reversal keeps the "+
+					"exact hosts on HTTP-01 precisely so a DNS-01 misconfiguration cannot reach sign-in",
+					overlay, frontDoorSecret, wildcardSecret, cert.IssuerName)
+			}
+		})
+	}
+}
+
+// TestEveryHostIsCoveredExactlyWhenItsRegimeAllows is what makes the gates
+// above mean something together: it is possible to serve every expected host
+// and request every expected SAN and still have one host that no SAN covers, if
+// the wildcard rule is misread. The rule is ONE label, and it is applied here
+// rather than assumed.
+//
+// BOTH REGIMES, STATED (memql#4347). Every EXACT host must be covered by a
+// requested SAN under either issuer -- that half never changes. The wildcard
+// rule is covered if and only if the overlay declares a DNS-01 issuer:
+//
+//   - HTTP-01 only: asserted NOT covered. That is the honest state of the front
+//     door under that issuer, and saying so is what stopped a wildcard SAN
+//     slipping back in as "coverage" (memql#4224).
+//   - DNS-01 declared: asserted covered. An issuer that is declared and then not
+//     used for the one name it exists to issue is the whole feature missing,
+//     with every manifest looking present.
+func TestEveryHostIsCoveredExactlyWhenItsRegimeAllows(t *testing.T) {
+	for _, overlay := range generatedOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			rendered := render(t, overlay)
+			sans := requestedSANs(t, rendered)
+			wildcardIssuable := len(dns01Issuers(t, rendered)) > 0
+
 			for _, h := range frontdoor.Hosts(committedDomain) {
+				covered := wildcardCovers(h.Name, sans)
 				if h.Wildcard {
-					if wildcardCovers(h.Name, sans) {
-						t.Errorf("the wildcard rule %q is covered by the requested SANs %v; the cloud issuer "+
-							"cannot issue that, so this certificate will never become Ready", h.Name, sans)
+					switch {
+					case wildcardIssuable && !covered:
+						t.Errorf("the %s overlay declares a DNS-01 issuer but no requested SAN covers the "+
+							"wildcard rule %q (requested: %v) -- every hosted site still terminates with "+
+							"the controller's default certificate (memql#4347)", overlay, h.Name, sans)
+					case !wildcardIssuable && covered:
+						t.Errorf("the wildcard rule %q is covered by the requested SANs %v, but this overlay "+
+							"declares no DNS-01 issuer; an HTTP-01 order fails whole on that name, so this "+
+							"certificate will never become Ready (memql#4224)", h.Name, sans)
 					}
 					continue
 				}
-				if !wildcardCovers(h.Name, sans) {
+				if !covered {
 					t.Errorf("%q is served but covered by none of the requested SANs %v -- TLS "+
 						"termination succeeds with the controller's default certificate, so this "+
 						"presents as a browser name mismatch and names nothing", h.Name, sans)
@@ -210,30 +355,40 @@ type ingressDoc struct {
 	} `yaml:"spec"`
 }
 
-// frontDoorIngresses decodes every Ingress in a rendered stream that
-// terminates with the front-door Secret, and fails unless that is exactly the
-// generator's closed set -- so an Ingress that lost its tls block cannot drop
-// out of the union gate unnoticed.
+// frontDoorIngresses decodes every Ingress in a rendered stream that terminates
+// with a Secret one of THIS OVERLAY'S Certificates creates, and fails unless
+// that is exactly the generator's closed set -- so an Ingress that lost its tls
+// block cannot drop out of the coverage gates unnoticed.
+//
+// Selecting by "a Secret a declared Certificate writes" rather than by the one
+// hard-coded name is what lets the edge Ingress carry two certificates without
+// the selector having to learn each new secret by hand. The media plane is
+// excluded by that same rule rather than by a special case:
+// deploy/k8s/base/livekit.yaml asks cert-manager's ingress-shim for its
+// certificate through an annotation, so no Certificate object for it exists in
+// the render.
 func frontDoorIngresses(t *testing.T, rendered string) []ingressDoc {
 	t.Helper()
 
+	issued := issuedSecrets(t, rendered)
+
 	dec := yaml.NewDecoder(strings.NewReader(rendered))
 	var out []ingressDoc
-	for {
+	for i := 0; ; i++ {
 		var d ingressDoc
 		err := dec.Decode(&d)
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			t.Fatalf("decoding document %d of the rendered overlay: %v", len(out)+1, err)
+			t.Fatalf("decoding document %d of the rendered overlay: %v", i+1, err)
 		}
 		if d.Kind != "Ingress" {
 			continue
 		}
 		var frontDoor bool
 		for _, tls := range d.Spec.TLS {
-			if tls.SecretName == frontDoorSecret {
+			if issued[tls.SecretName] {
 				frontDoor = true
 			}
 		}
@@ -250,29 +405,60 @@ func frontDoorIngresses(t *testing.T, rendered string) []ingressDoc {
 	want := append([]string(nil), frontDoorIngressNames...)
 	sort.Strings(want)
 	if strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Fatalf("the Ingresses terminating with %s are %v, want exactly %v -- an Ingress missing "+
-			"here either lost its tls block (and serves the controller's default certificate) or "+
-			"is a front-door rule the generator does not know about", frontDoorSecret, names, want)
+		t.Fatalf("the Ingresses terminating with a certificate this overlay declares are %v, want "+
+			"exactly %v -- an Ingress missing here either lost its tls block (and serves the "+
+			"controller's default certificate) or is a front-door rule the generator does not "+
+			"know about", names, want)
 	}
 	return out
 }
 
-// TestEachIngressTLSHostsAreItsOwnExactRuleHosts is the half of memql#4224
-// that the Certificate alone cannot fix.
+// TestEachIngressTLSHostsAreItsCertifiableRuleHosts is the half of memql#4224
+// that the Certificate alone cannot fix, restated for two certificates
+// (memql#4347).
 //
 // ingress-nginx creates a server block per RULE host and verifies the
-// certificate against each host listed under tls; a tls host the certificate
-// does not name -- the wildcard -- gets the controller's self-signed default.
-// So every Ingress lists under tls exactly the exact hosts its rules carry:
-// no wildcard, nothing missing, nothing extra.
-func TestEachIngressTLSHostsAreItsOwnExactRuleHosts(t *testing.T) {
+// certificate against each host listed under tls; a tls host the named Secret's
+// certificate does not cover gets the controller's self-signed default. So two
+// equalities per Ingress:
+//
+//   - every host under a tls entry is covered by the Certificate that writes
+//     THAT entry's Secret. Not "some certificate in the overlay" -- nginx serves
+//     the Secret the entry names, so a host covered only by the other one still
+//     gets the default.
+//   - the set of tls hosts equals the set of rule hosts something in this
+//     overlay can certify. That is the both-regimes form of "no wildcard under
+//     tls": under HTTP-01 nothing can certify `*.<domain>`, so it must not be
+//     listed (memql#4224); with the DNS-01 certificate it can be, so it must be
+//     -- an uncertified rule host and an unlisted certifiable one are the same
+//     browser warning.
+func TestEachIngressTLSHostsAreItsCertifiableRuleHosts(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
-			for _, ing := range frontDoorIngresses(t, render(t, overlay)) {
-				var tlsHosts, ruleHosts []string
+			rendered := render(t, overlay)
+
+			bySecret := map[string]certificateDoc{}
+			for _, c := range certificatesIn(t, rendered) {
+				bySecret[c.SecretName] = c
+			}
+
+			for _, ing := range frontDoorIngresses(t, rendered) {
+				var tlsHosts, certifiableRuleHosts []string
 				for _, tls := range ing.Spec.TLS {
-					if tls.SecretName != frontDoorSecret {
-						t.Errorf("%s: a tls entry names Secret %q, want %s", ing.Metadata.Name, tls.SecretName, frontDoorSecret)
+					cert, ok := bySecret[tls.SecretName]
+					if !ok {
+						t.Errorf("%s terminates with Secret %q, which no Certificate in this overlay "+
+							"writes -- the Secret is never created and every host in the entry serves "+
+							"the controller's default", ing.Metadata.Name, tls.SecretName)
+						continue
+					}
+					for _, h := range tls.Hosts {
+						if !wildcardCovers(h, cert.DNSNames) {
+							t.Errorf("%s lists %q under tls against Secret %s, whose Certificate names %v. "+
+								"ingress-nginx verifies the certificate it is pointed at and falls back to "+
+								"its self-signed default for a host that certificate does not cover "+
+								"(memql#4224)", ing.Metadata.Name, h, tls.SecretName, cert.DNSNames)
+						}
 					}
 					tlsHosts = append(tlsHosts, tls.Hosts...)
 				}
@@ -281,62 +467,61 @@ func TestEachIngressTLSHostsAreItsOwnExactRuleHosts(t *testing.T) {
 						t.Errorf("%s: a rule has no host; every front-door rule is host-routed", ing.Metadata.Name)
 						continue
 					}
-					if strings.HasPrefix(r.Host, "*") {
-						continue // the wildcard rule has no certificate behind it
+					if !anyCertificateCovers(r.Host, bySecret) {
+						continue // nothing here can issue for it; the regime gates own that case
 					}
-					ruleHosts = append(ruleHosts, r.Host)
+					certifiableRuleHosts = append(certifiableRuleHosts, r.Host)
 				}
 				sort.Strings(tlsHosts)
-				sort.Strings(ruleHosts)
+				sort.Strings(certifiableRuleHosts)
 				if len(tlsHosts) == 0 {
 					t.Errorf("%s lists no tls hosts", ing.Metadata.Name)
 				}
-				for _, h := range tlsHosts {
-					if strings.HasPrefix(h, "*") {
-						t.Errorf("%s lists the wildcard %q under tls; ingress-nginx cannot verify the "+
-							"exact-name certificate for it and serves its self-signed default instead "+
-							"(memql#4224)", ing.Metadata.Name, h)
-					}
-				}
-				if strings.Join(tlsHosts, ",") != strings.Join(ruleHosts, ",") {
-					t.Errorf("%s: tls.hosts %v, but its exact rule hosts are %v -- the two must match, "+
-						"a rule host missing from tls terminates with the controller's default and a "+
-						"tls host with no rule has no server block to be verified for",
-						ing.Metadata.Name, tlsHosts, ruleHosts)
+				if strings.Join(tlsHosts, ",") != strings.Join(certifiableRuleHosts, ",") {
+					t.Errorf("%s: tls.hosts %v, but the rule hosts this overlay can certify are %v -- the "+
+						"two must match. A rule host missing from tls terminates with the controller's "+
+						"default, and a tls host with no rule has no server block to be verified for",
+						ing.Metadata.Name, tlsHosts, certifiableRuleHosts)
 				}
 			}
 		})
 	}
 }
 
-// TestTheUnionOfTLSHostsIsTheCertificate closes the loop: the set of hosts the
-// Ingresses terminate TLS for is the set of hosts the Certificate is issued
-// for. One name on either side only is a host that presents the controller's
-// default (tls without SAN) or a SAN the order pays for and nothing serves.
-func TestTheUnionOfTLSHostsIsTheCertificate(t *testing.T) {
+// TestEveryRequestedSANIsAHostTheFrontDoorServes closes the loop from the other
+// side: a SAN is a name the ACME order pays for and every renewal keeps paying
+// for, so each one must be a host some front-door rule actually answers.
+//
+// This used to be stated as strict set equality between the union of tls hosts
+// and the certificate's dnsNames, which was the right shape while there was one
+// certificate. With two it would forbid the apex appearing on both -- which is
+// deliberate (memql#4347: `*.<domain>` cannot cover the apex, so a sites-plane
+// certificate without it is a trap for whoever later retires HTTP-01). What
+// survives is the invariant that was doing the work: no SAN nothing serves,
+// and -- asserted next door, per Secret -- no tls host without a SAN.
+func TestEveryRequestedSANIsAHostTheFrontDoorServes(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
 			rendered := render(t, overlay)
 
-			union := map[string]bool{}
+			ruleHosts := map[string]bool{}
 			for _, ing := range frontDoorIngresses(t, rendered) {
-				for _, tls := range ing.Spec.TLS {
-					for _, h := range tls.Hosts {
-						union[h] = true
-					}
+				for _, r := range ing.Spec.Rules {
+					ruleHosts[r.Host] = true
 				}
 			}
-			var tlsHosts []string
-			for h := range union {
-				tlsHosts = append(tlsHosts, h)
+			if len(ruleHosts) == 0 {
+				t.Fatal("no front-door rule hosts rendered; this gate cannot pass on an overlay it did not read")
 			}
-			sort.Strings(tlsHosts)
 
-			sans := certificateSANs(t, rendered)
-			sort.Strings(sans)
-
-			if strings.Join(tlsHosts, ",") != strings.Join(sans, ",") {
-				t.Errorf("the %s overlay terminates TLS for %v but the Certificate names %v", overlay, tlsHosts, sans)
+			for _, c := range certificatesIn(t, rendered) {
+				for _, s := range c.DNSNames {
+					if !ruleHosts[s] {
+						t.Errorf("the %s overlay's Certificate %s requests %q, which no front-door rule "+
+							"serves -- the order and every renewal pay for a name nothing answers at. "+
+							"Rules: %v", overlay, c.Name, s, sortedKeys(ruleHosts))
+					}
+				}
 			}
 		})
 	}
@@ -348,6 +533,11 @@ func TestTheUnionOfTLSHostsIsTheCertificate(t *testing.T) {
 // carries an exact rule of its own, pointing at the same edge Service the
 // wildcard does. The wildcard rule stays: it is how every other site reaches
 // the edge.
+//
+// The DNS-01 wildcard certificate does not retire this rule. It removes the
+// CERTIFICATE reason the portal needed one, not the server-block reason: nginx
+// still builds a certificate-bearing server block per rule host, and the
+// portal's exact rule is what outranks the wildcard for that name.
 func TestThePortalHasItsOwnExactRuleToTheEdge(t *testing.T) {
 	portal := frontdoor.PortalHost(committedDomain)
 	wildcard := frontdoor.SitesWildcard(committedDomain)
@@ -383,34 +573,207 @@ func TestThePortalHasItsOwnExactRuleToTheEdge(t *testing.T) {
 	}
 }
 
-// certificateSANs returns the dnsNames of every Certificate in a rendered
-// stream.
-func certificateSANs(t *testing.T, rendered string) []string {
+// certificateDoc is the slice of a rendered cert-manager Certificate these
+// gates reason about.
+type certificateDoc struct {
+	Name       string
+	SecretName string
+	IssuerName string
+	IssuerKind string
+	DNSNames   []string
+}
+
+// eachDocument hands every document of a rendered stream to fn along with its
+// kind, decoding lazily so that a document of an unrelated kind can never fail
+// a typed decode meant for another one.
+//
+// A mid-stream decode error is FATAL rather than a break, for the reason
+// parse() gives in render_cloud_test.go: stopping quietly at the first bad
+// document leaves every assertion reasoning about a truncated prefix of the
+// overlay, and they would all pass having checked a fraction of it.
+func eachDocument(t *testing.T, rendered string, fn func(kind string, doc *yaml.Node)) {
 	t.Helper()
 
-	var out []string
-	lines := strings.Split(rendered, "\n")
-	for i, line := range lines {
-		if strings.TrimSpace(line) != "dnsNames:" {
+	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	for i := 0; ; i++ {
+		var node yaml.Node
+		err := dec.Decode(&node)
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("decoding document %d of the rendered overlay: %v", i+1, err)
+		}
+		var probe struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := node.Decode(&probe); err != nil || probe.Kind == "" {
 			continue
 		}
-		for _, next := range lines[i+1:] {
-			trimmed := strings.TrimSpace(next)
-			after, ok := strings.CutPrefix(trimmed, "- ")
-			if !ok {
-				break
+		fn(probe.Kind, &node)
+	}
+}
+
+// certificatesIn decodes every cert-manager Certificate in a rendered stream.
+func certificatesIn(t *testing.T, rendered string) []certificateDoc {
+	t.Helper()
+
+	var out []certificateDoc
+	eachDocument(t, rendered, func(kind string, doc *yaml.Node) {
+		if kind != "Certificate" {
+			return
+		}
+		var c struct {
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				SecretName string   `yaml:"secretName"`
+				DNSNames   []string `yaml:"dnsNames"`
+				IssuerRef  struct {
+					Name string `yaml:"name"`
+					Kind string `yaml:"kind"`
+				} `yaml:"issuerRef"`
+			} `yaml:"spec"`
+		}
+		if err := doc.Decode(&c); err != nil {
+			t.Fatalf("decoding a Certificate: %v", err)
+		}
+		out = append(out, certificateDoc{
+			Name:       c.Metadata.Name,
+			SecretName: c.Spec.SecretName,
+			IssuerName: c.Spec.IssuerRef.Name,
+			IssuerKind: c.Spec.IssuerRef.Kind,
+			DNSNames:   c.Spec.DNSNames,
+		})
+	})
+	return out
+}
+
+// certificateFor returns the Certificate that writes a named Secret, and fails
+// unless there is exactly one. None is a Secret that never exists and hosts
+// that terminate with the controller's default; two is a race whose winner is
+// whichever reconciled last.
+func certificateFor(t *testing.T, rendered, secret string) certificateDoc {
+	t.Helper()
+
+	var found []certificateDoc
+	for _, c := range certificatesIn(t, rendered) {
+		if c.SecretName == secret {
+			found = append(found, c)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0]
+	case 0:
+		t.Fatalf("no Certificate writes Secret %q; every host that terminates with it serves whatever "+
+			"default the controller has", secret)
+	default:
+		t.Fatalf("%d Certificates write Secret %q; they overwrite each other and which one wins is "+
+			"whichever reconciled last", len(found), secret)
+	}
+	return certificateDoc{}
+}
+
+// issuedSecrets is the set of Secret names the overlay's Certificates create.
+func issuedSecrets(t *testing.T, rendered string) map[string]bool {
+	t.Helper()
+
+	out := map[string]bool{}
+	for _, c := range certificatesIn(t, rendered) {
+		out[c.SecretName] = true
+	}
+	return out
+}
+
+// requestedSANs is every dnsName the overlay's Certificates request, across all
+// of them, de-duplicated -- the apex is deliberately on two (memql#4347).
+func requestedSANs(t *testing.T, rendered string) []string {
+	t.Helper()
+
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range certificatesIn(t, rendered) {
+		for _, s := range c.DNSNames {
+			if seen[s] {
+				continue
 			}
-			out = append(out, strings.Trim(strings.TrimSpace(after), `"'`))
+			seen[s] = true
+			out = append(out, s)
 		}
 	}
 	return out
 }
 
+// dns01Issuers is the set of Issuer / ClusterIssuer names DECLARED IN THIS
+// OVERLAY whose ACME solver list contains a dns01 solver.
+//
+// Read from the SOLVER, never from the name: `letsencrypt-dns01` is a label an
+// operator chose and could put on an HTTP-01 issuer, while the property that
+// makes a wildcard issuable is which challenge the ACME server is asked to
+// verify. An issuer this render does not contain is absent from this set, which
+// is what keeps the memql#4224 regime in force for letsencrypt-prod -- created
+// out of band, so nothing here can inspect it.
+func dns01Issuers(t *testing.T, rendered string) map[string]bool {
+	t.Helper()
+
+	out := map[string]bool{}
+	eachDocument(t, rendered, func(kind string, doc *yaml.Node) {
+		if kind != "ClusterIssuer" && kind != "Issuer" {
+			return
+		}
+		var iss struct {
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				ACME struct {
+					Solvers []struct {
+						DNS01  map[string]any `yaml:"dns01"`
+						HTTP01 map[string]any `yaml:"http01"`
+					} `yaml:"solvers"`
+				} `yaml:"acme"`
+			} `yaml:"spec"`
+		}
+		if err := doc.Decode(&iss); err != nil {
+			t.Fatalf("decoding a %s: %v", kind, err)
+		}
+		for _, s := range iss.Spec.ACME.Solvers {
+			if len(s.DNS01) > 0 {
+				out[iss.Metadata.Name] = true
+			}
+		}
+	})
+	return out
+}
+
+// anyCertificateCovers reports whether some Certificate in the overlay names a
+// SAN covering a host, applying the one-label wildcard rule.
+func anyCertificateCovers(host string, bySecret map[string]certificateDoc) bool {
+	for _, c := range bySecret {
+		if wildcardCovers(host, c.DNSNames) {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys is a diagnostic helper: a failure message that names what the gate
+// DID find is the whole of what the person who tripped it learns.
+func sortedKeys(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // wildcardCovers applies the ONE-LABEL rule that TLS applies, so that a
-// wildcard SAN -- should a DNS-01 issuer ever bring one back -- is read the
-// way a browser reads it. A checker that accepted `*.example.test` for
-// `api.staging.example.test` would pass the exact configuration the design
-// refuses, so it is spelled out rather than approximated with
+// wildcard SAN is read the way a browser reads it. A checker that accepted
+// `*.example.test` for `api.staging.example.test` would pass a configuration
+// no browser accepts, so it is spelled out rather than approximated with
 // strings.HasSuffix.
 func wildcardCovers(host string, sans []string) bool {
 	for _, san := range sans {
@@ -439,6 +802,70 @@ func TestWildcardCoversRefusesAMultiLabelMatch(t *testing.T) {
 	if wildcardCovers("shop.example.test", []string{"portal.example.test", "example.test"}) {
 		t.Error("wildcardCovers accepted a host that no exact SAN names")
 	}
+	// The apex is NOT covered by its own wildcard -- which is why the DNS-01
+	// certificate names both (memql#4347). If this ever passed, that second
+	// dnsName would read as redundant to the next person who tidied it.
+	if wildcardCovers("example.test", []string{"*.example.test"}) {
+		t.Error("wildcardCovers accepted the apex under its own wildcard")
+	}
+	// And the wildcard RULE host is covered only by an identical SAN, which is
+	// the comparison the regime gates make.
+	if wildcardCovers("*.example.test", []string{"portal.example.test", "example.test"}) {
+		t.Error("wildcardCovers accepted the wildcard rule under exact SANs")
+	}
+	if !wildcardCovers("*.example.test", []string{"*.example.test"}) {
+		t.Error("wildcardCovers rejected the wildcard rule under its own SAN")
+	}
+}
+
+// TestTheIssuerRegimeIsReadFromTheSolverNotTheName is the self-test on the
+// conditional the whole of memql#4347 turns on.
+//
+// Without it, dns01Issuers could return an empty map for every input -- every
+// wildcard assertion would then read as "HTTP-01 regime" and the gates would
+// pass while asserting the opposite of the truth. So both branches are shown
+// reachable on a fixture, and neither is decided by the issuer's name.
+func TestTheIssuerRegimeIsReadFromTheSolverNotTheName(t *testing.T) {
+	const fixture = `
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: named-dns01-but-solves-http01
+spec:
+  acme:
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: named-prod-but-solves-dns01
+spec:
+  acme:
+    solvers:
+      - dns01:
+          azureDNS:
+            hostedZoneName: example.test
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: an-unrelated-document
+data:
+  acme: "not an issuer"
+`
+	got := dns01Issuers(t, fixture)
+	if got["named-dns01-but-solves-http01"] {
+		t.Error("an HTTP-01 issuer was read as DNS-01 because of its name; the solver is the property that matters")
+	}
+	if !got["named-prod-but-solves-dns01"] {
+		t.Error("a DNS-01 issuer was not detected; every regime assertion in this file would then read as HTTP-01")
+	}
+	if len(got) != 1 {
+		t.Errorf("dns01Issuers returned %v, want exactly the one dns01-solving issuer", sortedKeys(got))
+	}
 }
 
 // TestTheGeneratedFrontDoorIsReconciled closes the silent-failure hole one
@@ -465,6 +892,11 @@ func TestTheGeneratedFrontDoorIsReconciled(t *testing.T) {
 // every other generated artifact in this tree carries, so a reader who opens it
 // is told before they read it. TestFrontDoorHostsAreNotStale is what enforces
 // it; this is what makes the enforcement discoverable from the file.
+//
+// It is also why the memql#4347 reversal stays OUT of the generated file: the
+// wildcard tls entry is a kustomize patch and the DNS-01 objects are their own
+// resource, because a hand edit here is reverted by the next `make frontdoor`
+// and a reviewer would have approved a change that then vanishes.
 func TestGeneratedFrontDoorIsNotHandEdited(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {

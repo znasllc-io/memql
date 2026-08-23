@@ -25,8 +25,8 @@ mutate artifact createArtifact {
     sourceConceptRef  string!
     ownerUserId       string!
     lens              enum("artifact", "record")!
-    kind              enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")!
-    source            enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live")!
+    kind              enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source", "file")!
+    source            enum("uploaded", "exported", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live")!
     title             string!
     summary           string
     format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
@@ -34,6 +34,7 @@ mutate artifact createArtifact {
     live              bool
     scope             enum("workspace", "private")
     labels            []string
+    archived          bool
     partitionId           string
     agentId           string
     producedByPlanId  string
@@ -55,6 +56,14 @@ mutate artifact createArtifact {
     live: args.live ?? false
     args.scope
     args.labels
+    // Written explicitly rather than left to the concept's @default, which
+    // never fires on insert. NOT because the default list needs it: a row with
+    // no `archived` member is still returned by `archived != true` (measured,
+    // TestArchivedFilterKeepsRowsWrittenBeforeTheFieldExisted). It is written
+    // so every row states its own answer -- which is what keeps the next
+    // author from "simplifying" the filter to `archived == false`, the one
+    // spelling a missing key WOULD silently exclude.
+    archived: args.archived ?? false
     args.partitionId
     args.agentId
     args.producedByPlanId
@@ -212,6 +221,153 @@ mutate generatedOutput updateGeneratedOutputContent {
       id: args.outputId
       ownerUserId: actor.userId
       format: args.format ?? "markdown"
+    }
+  }
+}
+
+// ---- file + fileChunk: the Library's own byte-bearing writes (memql#4340) ----
+//
+// Unlike createArtifact above, these are OWNER-ACTED rather than
+// owner-threaded: every one of them runs as the person whose file it is.
+// The upload route runs under the caller's own bearer; the detached
+// analysis pass re-enters under that same user via
+// auth.ContextWithUserActor, exactly as the campaigns drain worker does
+// for the campaign owner. So ownerUserId is stamped from actor.userId and
+// is not an argument any caller can name -- which is what the concept's
+// @serverSet turns from a convention into a load-time rejection.
+//
+// The three update-shaped writes take MINIMAL arguments. update{} has
+// been a read-merge since memql#1628, so re-supplying the discriminators
+// is dead weight, and an absent optional argument is simply not written
+// rather than nulled -- which is what lets setLibraryFileStatus advance
+// the lifecycle without clobbering a summary an earlier call wrote.
+
+/// Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is
+/// stamped from actor.userId, so a file can only ever be created for the person the call runs as.
+/// format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only
+/// card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and
+/// nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus.
+/// That status is STAMPED rather than accepted is load-bearing beyond this mutation:
+/// indexFileOnCreate filters on status=="stored" so it promotes exactly once, because
+/// graph.node.created fires on every write and a second promotion would wipe the artifact's
+/// labels -- a caller-supplied status would let a later write re-enter that state.
+/// indexFileOnCreate folds the new row into the Library index automatically.
+@actor
+mutate file createLibraryFile {
+  args {
+    fileId    string!
+    name      string!
+    mimeType  string!
+    size      int!
+    sha256    string!
+    blobUrl   string!
+    source    enum("uploaded", "exported", "agent_generated", "derived")!
+    format    enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    summary   string
+  }
+  insert {
+    accept { name, mimeType, size, sha256, blobUrl, source, summary }
+    stamp {
+      id: args.fileId
+      ownerUserId: actor.userId
+      format: args.format ?? "other"
+      status: "stored"
+      embeddingStatus: "none"
+      archived: false
+    }
+  }
+}
+
+/// Advance a Library file through the analysis lifecycle: the new status, and whatever the pass
+/// learned along with it (a summary, how much of the file is embedded, or why it failed). Every
+/// field but the status is optional and an absent one is NOT written, so a later transition cannot
+/// blank a summary an earlier one recorded. Handler-invoked by the analysis pass, which runs under
+/// the file owner's actor; the read-merge preserves ownerUserId and every byte fact.
+mutate file setLibraryFileStatus {
+  args {
+    fileId           string!
+    status           enum("stored", "analyzing", "ready", "failed")!
+    summary          string
+    embeddingStatus  enum("none", "partial", "complete")
+    failureReason    string
+  }
+  update {
+    accept { status, summary, embeddingStatus, failureReason }
+    stamp {
+      id: args.fileId
+    }
+  }
+}
+
+/// Record that a Library file has been trained into a knowledge domain (design D7 -- upload and
+/// train are two acts, and this is where the second one is written down). Takes the FULL merged
+/// list rather than a single id: MemQL has no array append, and a caller sending only the new
+/// member would clobber whatever another agent added concurrently -- the same reason the artifact
+/// label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the
+/// domain if it is not already there, and calls this; adding a domain twice writes nothing new.
+mutate file appendLibraryFileTrainedDomain {
+  args {
+    fileId                string!
+    trainedIntoDomainIds  []string!
+  }
+  update {
+    id: args.fileId
+    args.trainedIntoDomainIds
+  }
+}
+
+/// Archive a Library file -- the soft delete. Sets archived so the file drops out of the owner's
+/// default list; the row, its provenance and its bytes all survive, and the append-only history
+/// keeps every earlier version. Called directly by the owner, and by archiveFileOnArtifactArchive
+/// when the owner archives the artifact the file backs, so the two rows never disagree.
+mutate file archiveLibraryFile {
+  args {
+    fileId  string!
+  }
+  update {
+    id: args.fileId
+    archived: true
+  }
+}
+
+/// Archive a Library artifact index row -- the first write that takes something OUT of the Library,
+/// and a soft one. Sets archived so the row drops out of libraryArtifacts (the default list) while
+/// keeping its labels, its provenance and its sourceConceptRef intact; nothing is destroyed and the
+/// backing row is untouched by this write. When the artifact is a file (kind=file), the backing
+/// v1:library:file is archived alongside it by archiveFileOnArtifactArchive rather than here --
+/// a mutation body writes one row, and which second row to touch is a decision that depends on the
+/// kind.
+mutate artifact archiveArtifact {
+  args {
+    artifactId  string!
+  }
+  update {
+    id: args.artifactId
+    archived: true
+    updatedAt: now
+  }
+}
+
+/// Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId
+/// is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always
+/// lands owned by the same person as its file. artifactId is resolved by the pass through
+/// libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second
+/// read.
+@actor
+mutate fileChunk createLibraryFileChunk {
+  args {
+    chunkId     string!
+    fileId      string!
+    artifactId  string!
+    seq         int!
+    text        string!
+    tokenCount  int
+  }
+  insert {
+    accept { fileId, artifactId, seq, text, tokenCount }
+    stamp {
+      id: args.chunkId
+      ownerUserId: actor.userId
     }
   }
 }

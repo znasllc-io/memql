@@ -44,10 +44,16 @@
 //
 // So CertificateSANs is every EXACT host the front door serves -- the three
 // role hosts, the portal, and the apex -- and the wildcard is an Ingress RULE
-// with no certificate behind it. The portal is the one site the platform ships
-// itself, which is why it is the one site this package can name in advance;
-// every other site needs its own Certificate until a DNS-01 solver exists
-// (docs/public/operate/site-hosting.md). A server block under ingress-nginx is
+// this package requests no SAN for. That is a statement about the HTTP-01
+// certificate this package derives, not about the wildcard being uncovered:
+// an overlay that declares a DNS-01 ClusterIssuer also declares a SECOND,
+// wildcard Certificate and gives the wildcard rule its tls entry by patch
+// (memql#4347), which is why the render gate reads the SOLVER rather than
+// this list. Without such an issuer the wildcard rule still has nothing
+// behind it and every other site needs its own Certificate
+// (docs/public/operate/site-hosting.md). The portal is the one site the
+// platform ships itself, which is why it is the one site this package can
+// name in advance. A server block under ingress-nginx is
 // created per Ingress RULE host, never per tls host, so naming the portal in
 // tls.hosts is not enough: it carries its own exact rule, pointing at the same
 // edge Service the wildcard does.
@@ -127,7 +133,9 @@ type Host struct {
 	// service: the portal, the wildcard and the apex.
 	Sites bool
 	// Wildcard is true for the one rule whose host is `*.<domain>`. It is the
-	// only rule with no certificate SAN behind it (memql#4224).
+	// only rule this package requests no certificate SAN for (memql#4224) --
+	// HTTP-01 cannot issue a wildcard. An overlay declaring a DNS-01 issuer
+	// covers it with a wildcard Certificate of its own (memql#4347).
 	Wildcard bool
 }
 

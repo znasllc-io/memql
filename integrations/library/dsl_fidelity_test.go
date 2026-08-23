@@ -298,7 +298,7 @@ func TestArtifactFullShapeFieldsDerivedFromDSL(t *testing.T) {
 // create path writes, clients/portal/src/artifacts/useArtifacts.ts) --
 // nothing failed, because no existing test happened to push that value
 // through the stub. A derived list cannot go stale this way; this proves
-// the derivation actually recovers all seven declared values in their
+// the derivation actually recovers all eight declared values in their
 // declared order, "user_created" included.
 func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	if len(artifactEnumValues) == 0 {
@@ -314,13 +314,19 @@ func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	}
 
 	source := artifactEnumValues["source"]
-	if len(source) != 7 {
-		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 7 (memql#4298: the hand-maintained "+
+	if len(source) != 8 {
+		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 8 (memql#4298: the hand-maintained "+
 			"list silently dropped one -- \"user_created\" -- and the derivation must not repeat that): %v",
 			len(source), source)
 	}
+	// "exported" joined in memql#4340/#4342: v1:library:file can hold it, and a
+	// promotion passes the backing row's source straight through, so the index
+	// enum has to contain it or that file never gets an index row. The
+	// containment itself is gated by TestEveryBackingSourceValueIsPromotable in
+	// component/memql; this list is the ORDER-SENSITIVE mirror, so it moves with
+	// the declaration rather than deriving the same fact twice.
 	wantSource := []string{
-		"uploaded", "workbench_generated", "computer_use", "agent_generated",
+		"uploaded", "exported", "workbench_generated", "computer_use", "agent_generated",
 		"derived", "user_created", "live",
 	}
 	if !slices.Equal(source, wantSource) {

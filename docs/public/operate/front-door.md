@@ -10,8 +10,10 @@ owner: znas
 # The cluster front door — six host rules
 
 A MemQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
-traefik locally, nginx in the cloud — terminating TLS once with one certificate
-and routing by hostname. Port 80 exists only to redirect.
+traefik locally, nginx in the cloud — terminating TLS and routing by hostname.
+Port 80 exists only to redirect. One certificate covers the whole door locally;
+in the cloud it is two, split by which ACME challenge can issue each half
+([below](#the-wildcard-has-a-certificate-now-and-it-is-a-second-one)).
 
 Behind that door are **six host rules**, committed to `deploy/k8s`, plus a
 **separate media plane** that does not and cannot go through it.
@@ -33,45 +35,101 @@ Related: [environment-parity.md](environment-parity.md) ·
 
 ## The six hosts
 
-| Host | Backend | Protocol | Certificate SAN |
+| Host | Backend | Protocol | Certificate (cloud) |
 |---|---|---|---|
-| `api.<domain>` | `svc/bff:50051` **and** `svc/bff-http:8085` | h2c (gRPC) + http | yes |
-| `identity.<domain>` | `svc/identity:8085` | https | yes |
-| `mcp.<domain>` | `svc/mcp:8090` | http | yes |
-| `portal.<domain>` | `svc/edge:8085` | http | yes |
-| `*.<domain>` | `svc/edge:8085` | http | **no** — see below |
-| `<domain>` (apex) | `svc/edge:8085` | http | yes |
+| `api.<domain>` | `svc/bff:50051` **and** `svc/bff-http:8085` | h2c (gRPC) + http | `memql-front-door-tls` |
+| `identity.<domain>` | `svc/identity:8085` | https | `memql-front-door-tls` |
+| `mcp.<domain>` | `svc/mcp:8090` | http | `memql-front-door-tls` |
+| `portal.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
+| `*.<domain>` | `svc/edge:8085` | http | `memql-wildcard-tls` — see below |
+| `<domain>` (apex) | `svc/edge:8085` | http | `memql-front-door-tls` (and named by the wildcard's too) |
 
 **Every host is a single label under the domain, and that is a routing
 decision.** An Ingress wildcard matches exactly **one** label, so the one
-`*.<domain>` rule routes every present and future site to the edge. It used to
-be a TLS decision too — one `*.<domain>` certificate covering every role host
-and every site, with the apex as the lone extra SAN — and that was never true
-of a running cluster (memql#4224). **The cloud issuer solves HTTP-01 only.**
-ACME cannot serve an HTTP-01 challenge for a wildcard, and one wildcard
-`dnsName` fails the whole order, so the Certificate sat Pending; when it was
-hand-edited to exact names, the edge Ingress whose `tls.hosts` still said
-`*.<domain>` made ingress-nginx serve its self-signed default for
-`portal.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
-certificate names **exact hosts only** — `api.`, `identity.`, `mcp.`, `portal.`
-and the apex — every Ingress lists exactly its own exact rule hosts under
-`tls`, and the union of those lists is the certificate's `dnsNames`. All three
-are gated by `deploy/k8s/overlays/frontdoor_hosts_test.go`, against both
-instance overlays.
+`*.<domain>` rule routes every present and future site to the edge.
 
-**The wildcard rule has no certificate behind it.** A site routed by
-`*.<domain>` terminates TLS with the ingress controller's default certificate
-until it has a `Certificate` and an exact-host Ingress of its own — see
-[site-hosting.md](site-hosting.md#2-add-the-hostname) — and that stays true
-until the issuer gains a DNS-01 solver. The portal is the exception because it
-is the one site the platform ships itself: its name exists before any operator
-creates a row, so the generator can write its rule and SAN, and the engine seeds
-its `v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
-(`frontdoor.PortalHost`). The exact rule is a TLS artefact, not a second way to
-serve the portal: ingress-nginx builds a certificate-bearing server block per
-**rule** host, never per `tls` host, so a `tls.hosts` entry alone would have
-changed nothing — which is why the ops workaround on the first entry-shape cluster
-was an extra Ingress, and why that is now the generated shape.
+It was once a TLS decision too — one `*.<domain>` certificate covering every
+role host and every site, with the apex as the lone extra SAN — and that was
+never true of a running cluster (memql#4224). **`letsencrypt-prod` solves
+HTTP-01 only.** ACME cannot serve an HTTP-01 challenge for a wildcard, and one
+wildcard `dnsName` fails the whole order, so the Certificate sat Pending; when
+it was hand-edited to exact names, the edge Ingress whose `tls.hosts` still
+said `*.<domain>` made ingress-nginx serve its self-signed default for
+`portal.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
+certificate `memql-front-door-tls` names **exact hosts only** — `api.`,
+`identity.`, `mcp.`, `portal.` and the apex — and every Ingress lists under
+`tls` exactly the hosts the certificate it points at can cover.
+
+### The wildcard has a certificate now, and it is a second one
+
+memql#4347 reverses the *wildcard* half of that, and only that half. A
+**DNS-01** solver proves control of the **zone** by writing a TXT record, which
+is a claim over every name under it, so a wildcard is issuable where HTTP-01
+could not even be asked. The cloud overlays declare a `letsencrypt-dns01`
+`ClusterIssuer` — the Azure DNS solver, authenticating with a **workload
+identity** rather than a stored client secret, exactly as External Secrets
+reaches Key Vault — and one `Certificate` for `*.<domain>` **plus the apex**.
+
+| | `memql-front-door-tls` | `memql-wildcard-tls` |
+|---|---|---|
+| Issuer | `letsencrypt-prod` (HTTP-01) | `letsencrypt-dns01` (DNS-01, Azure DNS) |
+| Names | `api.`, `identity.`, `mcp.`, `portal.`, the apex | `*.<domain>`, the apex |
+| Declared in | `front-door.generated.yaml` (generated) | `dns01-wildcard-tls.yaml` (hand-authored) |
+| Terminates | every role host, the portal, the apex | the `*.<domain>` rule on `edge-front-door` |
+
+**Why the apex is on both.** `*.<domain>` matches exactly one label and the
+apex has none, so a sites-plane certificate without it could not serve the main
+website. The apex rule still terminates with `memql-front-door-tls`; the second
+SAN is what lets it move without a reissue.
+
+**Why two certificates and not one.** The reversal is **staged on purpose**:
+sign-in (`identity.`), the API (`api.`) and the portal keep terminating with a
+Secret the DNS-01 issuer does not touch, so a wrong zone name, a missing role
+assignment or an expired federation cannot reach them. Until the install-time
+values below are real the wildcard Certificate simply never becomes
+Ready, `memql-wildcard-tls` is never written, and ingress-nginx serves its
+default for `*.<domain>` — which is precisely what a wildcard-routed site got
+before this existed. **Nothing that works stops working.**
+
+**Why it is safe to have at all.** The wildcard key serves the site hostnames
+the `edge` node already serves, from the one `edge` process, which already
+answers on every one of them. One key for names one process already owns does
+not widen the blast radius; it removes an object pair per site.
+
+**The wildcard rule's `tls` entry is a kustomize patch, not a generator
+change.** `cmd/frontdoorhosts`'s whole input is the role set and the domain, and
+the certificate regime is neither — it is chosen per install. So the overlays
+add `/spec/tls/-` to `edge-front-door` rather than the generator emitting it,
+which also keeps `front-door.generated.yaml` byte-identical to what
+`make frontdoor` produces.
+
+`deploy/k8s/overlays/frontdoor_hosts_test.go` gates both instance overlays, and
+it reads the **solver**, never the issuer's name: the exact-host certificate is
+still exactly `frontdoor.CertificateSANs`;
+a wildcard SAN is permitted only from a DNS-01 issuer *declared in that
+overlay* (an issuer the render cannot inspect is read as HTTP-01, so the strict
+regime holds by default); each Ingress's `tls.hosts` equals the rule hosts
+something in the overlay can certify; and every requested SAN is a host some
+rule serves.
+
+**The portal keeps its own exact rule** — the certificate reason for it is
+gone, the server-block reason is not. ingress-nginx builds a
+certificate-bearing server block per **rule** host, never per `tls` host, so an
+exact rule is what makes `portal.<domain>` outrank `*.<domain>` and get its own
+certificate rather than the wildcard's. The portal is also the one site the
+platform ships itself: its name exists before any operator creates a row, so
+the generator can write its rule and SAN, and the engine seeds its
+`v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
+(`frontdoor.PortalHost`).
+
+> **WARNING: the wildcard certificate is a cloud thing with install-time
+> prerequisites.** It needs an Azure DNS zone for `<domain>`, a managed identity
+> holding `DNS Zone Contributor` **on that zone**, a federated credential for
+> `system:serviceaccount:cert-manager:cert-manager`, and the cert-manager
+> controller Pod labelled for the workload-identity webhook. The steps are in
+> [azure-entry-install.md](azure-entry-install.md#dns-and-certificates), in
+> order. Skip them and you are back to the state above — routing without a
+> certificate — not to a broken cluster.
 
 (The set was once the product of role × ENVIRONMENT, with a label that
 hyphenated into role hosts — `api-staging.<domain>` — and nested into site
@@ -270,6 +328,14 @@ exact-host SANs. Its whole input is the closed role set, the portal and the
 domain, and it emits ~440 lines from those — which is what earns generation for
 a listed target.
 
+The DNS-01 `ClusterIssuer` and the wildcard `Certificate` beside it
+(`dns01-wildcard-tls.yaml`, memql#4347) are **not** generated, for the same
+reason: they are neither the role set nor the domain but a certificate regime,
+chosen per install, and the values in them are Azure coordinates the generator
+has no input for. The one line they add to the generated file — the wildcard's
+`tls` entry on `edge-front-door` — is a kustomize patch in each overlay, so a
+hand edit cannot be reverted by the next `make frontdoor` run.
+
 **The PATHS** on the api host — `cmd/frontdoorpaths` fills the block between
 markers in every api front door, from `component/server`'s own declarations. The
 hosts generator preserves that block across a regeneration rather than
@@ -365,15 +431,20 @@ up — every name, that is, that the five exact hosts have not claimed, which is
 an assumption about rule ranking rather than a given
 ([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)).
 
-**The certificate is not part of that claim in the cloud** (memql#4224). It
-names exact hosts, because the issuer is HTTP-01, so a new site gets routing
-for free and TLS only with a `Certificate` and exact-host Ingress of its own —
-one object pair per site, the one explicit exception to "a site is data", and
-it stands until the issuer gains a DNS-01 solver. Locally the mkcert pair is a
-wildcard, so a new site needs no reissue there — which is exactly why a site
-that works over https locally is no evidence it has a certificate in the cloud.
-The portal is the one site whose rule and SAN the generator writes, because it
-is the one site whose name is known before any row exists.
+**The certificate is part of that claim again** (memql#4347). It was not:
+under HTTP-01 the front-door certificate could only name exact hosts, so a new
+site got routing for free and TLS only with a `Certificate` and an exact-host
+Ingress of its own — one object pair per site, the one explicit exception to "a
+site is data". The DNS-01 wildcard closes that exception: a new site is a row,
+and `*.<domain>` already names it. Locally the mkcert pair is a wildcard and
+always was, so the two targets now agree on this too.
+
+Two things still hold. A hostname **outside** `<domain>` — a customer's own
+apex, a second domain — is not under the wildcard and stays cluster-owner-only
+and hand-certified, one object pair each. And the wildcard covers exactly one
+label, so `shop.<domain>` is certified and `shop.eu.<domain>` is not. The
+portal is the one site whose rule and SAN the generator writes, because it is
+the one site whose name is known before any row exists.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
@@ -416,14 +487,18 @@ implementation of each interchangeable part is in play.
 | | Varies | Does not vary |
 |---|---|---|
 | Proxy | traefik locally (`serversscheme` annotations) / nginx in the cloud (`backend-protocol`) | that there is exactly one L7 proxy on 443 |
-| Certificate | mkcert locally (a `*.<domain>` + apex pair) / cert-manager in the cloud (exact hosts only — HTTP-01 cannot issue a wildcard, memql#4224) | one Secret, `memql-front-door-tls`, that every front-door Ingress terminates with, issued at install |
+| Certificate | mkcert locally (a `*.<domain>` + apex pair) / cert-manager in the cloud (`memql-front-door-tls` for the exact hosts over HTTP-01, `memql-wildcard-tls` for `*.<domain>` + apex over DNS-01, memql#4347) | that every front-door Ingress terminates with a certificate issued at install, and that the wildcard rule and the apex are both covered |
 | DNS | the `/etc/hosts` managed block locally / real DNS in the cloud | the hostnames themselves |
 | Secrets | `make secrets` locally / External Secrets + Key Vault in the cloud | — |
 
-> **WARNING: the SAN set is the one place local is more permissive than the
-> cloud.** The local wildcard covers every site; the cloud certificate covers
-> the five exact hosts and nothing else. A site that works over https on the
-> local cluster has proven its routing, not its certificate.
+> **WARNING: local proves routing, not certificates — still.** The local
+> mkcert wildcard is unconditional; the cloud wildcard depends on install-time
+> Azure values, and when they are not set the Certificate never
+> becomes Ready and every site falls back to ingress-nginx's default. The SAN
+> *sets* now agree, so the divergence that remains is whether the certificate
+> was actually **issued** — check
+> `kubectl -n memql get certificate memql-wildcard-tls` before believing a site
+> is served over TLS in the cloud.
 
 Fixed everywhere: **the six host rules, the paths behind them, and the dial
 path a client uses** (`https://api.<domain>`, TLS at the proxy, gRPC to the
@@ -531,9 +606,13 @@ set is only the doors we assert are up.
 - Design: `docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`
   (epic [memql#3700](https://github.com/znasllc-io/memql/issues/3700)) —
   decisions D3 (the five rules as designed; memql#4224 added the portal's
-  exact rule and retired D2's wildcard SAN in the cloud), D5 (a site is data)
+  exact rule and retired D2's wildcard SAN in the cloud, and memql#4347
+  reinstated it on a second, DNS-01-issued certificate), D5 (a site is data)
   and D9 (the same-origin proxy for hosted sites), each with the alternatives
   that were rejected.
+- The DNS-01 reversal: `docs/superpowers/specs/2026-08-22-library-artifacts-and-deployables-design.md`
+  section 4.5 (epic [memql#4347](https://github.com/znasllc-io/memql/issues/4347)),
+  and the manifests at `deploy/k8s/overlays/{cloud,cloud-entry}/dns01-wildcard-tls.yaml`.
 - The Service split and its annotations:
   `deploy/k8s/components/engine-bff/bff.yaml`.
 - The path declarations the block is generated from:

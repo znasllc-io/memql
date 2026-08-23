@@ -13,9 +13,9 @@ import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
+import { DeployablesRoutes, RetiredSitesRedirect } from "../deployables/DeployablesRoutes";
 import { FleetRoutes } from "../fleet/FleetRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
-import { SitesRoutes } from "../sites/SitesRoutes";
 import { MeRoutes } from "../me/MeRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
 import { NexusRoutes } from "../nexus/NexusRoutes";
@@ -90,10 +90,11 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /integrations/*   integration + campaign management   (memql#3323)
 //   /compose/*        the user-composed view builder      (memql#3320)
 //   /admin/*          the absorbed server-rendered admin  (memql#3324)
-//   /sites/*          hosted sites: list, create, publish, roll back, delete
+//   /deployables/*    what this cluster hosts: list, create, deploy from the
+//                     Library, roll back, enable/disable, delete (memql#4346,
+//                     replacing /sites/* from memql#3717)
 //   /fleet/*          machines + workbenches -- where work runs (memql#4349)
 //   /modules/*        the module inventory + pack enablement (memql#4191)
-//                     (memql#3717)
 //   /artifacts/*      the Library, browsed and labelled
 //   /nexus/*          Nexus: a goal's world in 3D, its constructs, its
 //                     replay (memql#4369)
@@ -125,7 +126,7 @@ export function AppRoutes(): ReactNode {
           <Route path="compose/*" element={<ComposeRoutes />} />
           <Route path="integrations/*" element={<IntegrationsRoutes />} />
           <Route path="admin/*" element={<AdminRoutes />} />
-          <Route path="sites/*" element={<SitesRoutes />} />
+          <Route path="deployables/*" element={<DeployablesRoutes />} />
           <Route path="fleet/*" element={<FleetRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
@@ -142,6 +143,12 @@ export function AppRoutes(): ReactNode {
               bookmarked it did nothing wrong, and a Not Found would read as
               "the capability is gone" when it moved. */}
           <Route path="cluster-ops" element={<Navigate to={viewPath("deployments")} replace />} />
+          {/* Renamed in memql#4346: Sites became Deployables when the concept
+              gained an owner and a person -- not only an operator -- could put
+              a thing on the internet. Same redirect reasoning as above, and
+              the SPLAT carries the tail so a bookmarked /sites/:siteId lands on
+              that deployable rather than on the list. */}
+          <Route path="sites/*" element={<RetiredSitesRedirect />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

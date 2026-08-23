@@ -29,8 +29,45 @@ resources:
   # The front door, GENERATED from the role set and the domain by
   # cmd/frontdoorhosts (memql#4204) -- run `make frontdoor`, never edit it.
   - front-door.generated.yaml
+  # DNS-01 + the wildcard certificate for the sites plane (memql#4347). Hand-
+  # authored and NOT part of the generated front door: the generator's whole
+  # input is the role set and the domain, and this is neither -- it is a
+  # certificate REGIME, chosen per install. Keeping it out of the generator is
+  # also what keeps the reversal STAGED: front-door.generated.yaml still asks
+  # letsencrypt-prod for the exact hosts, unchanged. Each instance overlay owns
+  # its own copy for the same load-restrictor reason the front door does.
+  - dns01-wildcard-tls.yaml
 
 patches:
+  # THE WILDCARD RULE GAINS ITS tls ENTRY (memql#4347) -- the half of the
+  # reversal a Certificate alone cannot do.
+  #
+  # ingress-nginx builds a certificate-bearing server block per RULE host and
+  # verifies the certificate against each host listed under `tls`. The
+  # `*.<domain>` rule has always existed; until something could ISSUE for it,
+  # listing it under `tls` made the controller serve its self-signed default for
+  # every name the rule answers (memql#4224). With memql-wildcard-tls issuable by
+  # DNS-01 it can finally be listed -- and it must be, because a rule host with a
+  # usable certificate and no `tls` entry gets the default anyway.
+  #
+  # `add /spec/tls/-` rather than a rewrite: the entry already there is the apex
+  # on memql-front-door-tls, and it stays exactly as generated. One tls entry per
+  # certificate, so nothing that terminates today changes issuer.
+  #
+  # AN INSTALL MUST PATCH `/spec/tls/1/hosts/0` TOO. The Argo host-patch list in
+  # docs/public/operate/azure-entry-install.md grew that pointer with this
+  # change; a patch set written against the previous shape leaves the committed
+  # `*.memql.localhost` behind, which is a tls host the real certificate does not
+  # name -- the memql#4224 symptom, at the one host it was about.
+  - target: { kind: Ingress, name: edge-front-door }
+    patch: |
+      - op: add
+        path: /spec/tls/-
+        value:
+          hosts:
+            - "*.memql.localhost"
+          secretName: memql-wildcard-tls
+
   # Replica counts, STATED rather than inherited. Request-serving mesh
   # nodes are 1. Voice-off is 0, not a leftover placeholder.
   - target: { kind: Deployment, name: identity }

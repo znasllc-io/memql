@@ -1,0 +1,119 @@
+# DNS-01 in the cloud, and the wildcard certificate it makes issuable (memql#4347).
+#
+# WHAT THIS REVERSES. memql#4224 established that the front-door certificate names
+# EXACT hosts only. The reason was never a preference: the cloud ClusterIssuer
+# (letsencrypt-prod) solves HTTP-01, ACME cannot serve an HTTP-01 challenge for a name
+# that is not a host, and ONE wildcard dnsName fails the WHOLE order -- so a Certificate
+# that asked for `*.<domain>` sat Pending and every host under it served ingress-nginx's
+# self-signed default. The `*.<domain>` Ingress RULE stayed, with nothing behind it.
+#
+# WHY IT IS SAFE NOW. A DNS-01 solver proves control of the ZONE by writing a TXT record,
+# which is a claim over every name under it -- so a wildcard is issuable where HTTP-01
+# could not even be asked. Nothing about the blast radius changes: the wildcard key
+# serves the site hostnames the `edge` node already serves from one process, and the edge
+# already answers on every one of them.
+#
+# STAGED, NOT SWAPPED, AND DELIBERATELY SO. letsencrypt-prod keeps issuing
+# memql-front-door-tls for the role hosts, the portal and the apex; this issuer issues
+# ONE additional certificate for the sites plane. Two consequences worth having:
+#
+#   - the reversal cannot regress sign-in. api / identity / mcp / portal terminate with a
+#     Secret this file does not touch, so a DNS-01 misconfiguration cannot reach them.
+#   - the failure mode is exactly today's. Until the placeholders below are real the
+#     Certificate never becomes Ready, memql-wildcard-tls is never written, and
+#     ingress-nginx serves its default for `*.<domain>` -- which is what a
+#     wildcard-routed site gets today anyway. Nothing that works stops working.
+#
+# THE APEX IS A dnsName HERE TOO, and that is not redundancy. `*.<domain>` does not cover
+# `<domain>` -- a wildcard matches exactly one label and the apex has none -- so a
+# "wildcard certificate for the sites plane" that omitted the apex would be a trap for
+# whoever later retires HTTP-01. The apex Ingress rule still terminates with
+# memql-front-door-tls; this SAN is what lets it move without a reissue.
+#
+# INSTALL-TIME PREREQUISITES (docs/public/operate/front-door.md, and in order in
+# docs/public/operate/azure-entry-install.md). None of them can live in this file:
+#
+#   1. an Azure DNS zone for <domain>, with the cluster ingress IP as its A records;
+#   2. a user-assigned managed identity granted `DNS Zone Contributor` ON THAT ZONE --
+#      scoped to the zone, never to the subscription;
+#   3. a federated credential on that identity for
+#      `system:serviceaccount:cert-manager:cert-manager`, exactly the shape ESO uses for
+#      its own SA (deploy/external-secrets/README.md, "Key Vault auth"). This is the
+#      whole point of workload identity: no client secret exists in the cluster to leak;
+#   4. the cert-manager controller Pod labelled `azure.workload.identity/use: "true"` and
+#      its ServiceAccount annotated with the identity's client id, so the webhook
+#      projects a token into it. cert-manager is an upstream static install here
+#      (deploy/cert-manager/install), so that patch is an install step rather than a
+#      value in this overlay.
+#
+# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593), on the same terms as
+# the generated front door beside it: `memql.localhost` is unroutable, so a cluster
+# reconciled before its domain is set fails visibly. An install repoints hostedZoneName
+# and both dnsNames through the ArgoCD Application's kustomize.patches, alongside the
+# Ingress hosts it already patches.
+#
+# THE ClusterIssuer RENDERS WITH `namespace: memql`. Kustomize's namespace transformer
+# does not know cert-manager's CRDs are cluster-scoped, so it stamps one on. The API
+# server clears the namespace of a cluster-scoped object on write and ArgoCD does the
+# same when it diffs, so this is inert -- and the AppProject already anticipates this
+# overlay owning a ClusterIssuer (deploy/argocd/apps/project.yaml).
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns01
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # PLACEHOLDER. Let's Encrypt refuses account registration on a malformed contact, so
+    # an unreplaced value leaves this issuer NotReady with a message naming itself --
+    # which is the intent, and is why it is not simply omitted (the field is optional).
+    email: "REPLACE-WITH-ACME-ACCOUNT-EMAIL"
+    privateKeySecretRef:
+      # The ACME account key, in cert-manager's --cluster-resource-namespace (the
+      # `cert-manager` namespace), NOT in memql. A ClusterIssuer's own Secrets always
+      # live there; only the issued Certificate below lands beside the workloads.
+      name: letsencrypt-dns01-account-key
+    solvers:
+      - dns01:
+          azureDNS:
+            # The Azure DNS zone, which for this cluster IS the domain. Committed
+            # default, patched at install (see the header).
+            hostedZoneName: "memql.localhost"
+            # PLACEHOLDERS: infrastructure coordinates, not values derivable from the
+            # domain. The resource group is the ZONE's, which need not be the cluster's.
+            resourceGroupName: "REPLACE-WITH-DNS-ZONE-RESOURCE-GROUP"
+            subscriptionID: "REPLACE-WITH-AZURE-SUBSCRIPTION-ID"
+            environment: AzurePublicCloud
+            managedIdentity:
+              # The user-assigned identity federated to cert-manager's ServiceAccount.
+              # Stated here as well as on the SA annotation on purpose: it makes the
+              # identity this issuer acts as a reviewable fact in git rather than
+              # something read out of a live cluster. `tenantID` belongs beside it only
+              # if the identity lives in another tenant than the cluster.
+              clientID: "REPLACE-WITH-DNS-IDENTITY-CLIENT-ID"
+---
+# The sites plane's certificate: the wildcard, plus the apex the wildcard cannot cover.
+#
+# ONE certificate, one order, one renewal -- and a new customer site joins it by existing,
+# because the wildcard already names it. That is what closes the last exception to
+# memql#3700's "a site is data, not infrastructure": before this, routing a site was a
+# row and certifying it was a Certificate plus an exact-host Ingress per site.
+#
+# Its Secret is a SECOND secret, not a replacement for memql-front-door-tls. Every
+# front-door Ingress still terminates the exact hosts with the HTTP-01 certificate; the
+# `edge-front-door` Ingress alone carries both, one tls entry per certificate.
+# deploy/k8s/overlays/frontdoor_hosts_test.go gates the pairing in both directions.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: memql-wildcard-tls
+  namespace: memql
+spec:
+  secretName: memql-wildcard-tls
+  issuerRef:
+    name: letsencrypt-dns01
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.memql.localhost"
+    - "memql.localhost"

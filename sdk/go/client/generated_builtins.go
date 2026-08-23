@@ -379,6 +379,75 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 	return b.String()
 }
 
+// LibrarySimilarArtifacts -- Search the caller's Library by meaning and get whole artifacts back, best match first.
+type LibrarySimilarArtifactsArgs struct {
+	// The phrase to search by. Set this OR artifactId.
+	Text string
+	// Find artifacts similar to this one. Set this OR text.
+	ArtifactId string
+	// Maximum artifacts to return. Defaults to 5; capped at 50, because each returned artifact costs one further owner-gated read.
+	Limit int
+}
+
+// LibrarySimilarArtifacts calls the engine builtin librarySimilarArtifacts.
+func (qc *QueryClient) LibrarySimilarArtifacts(ctx context.Context, args LibrarySimilarArtifactsArgs) (*Result, error) {
+	call := LibrarySimilarArtifactsBuild(args)
+	return qc.executeNamed(ctx, "librarySimilarArtifacts", call)
+}
+
+func LibrarySimilarArtifactsBuild(args LibrarySimilarArtifactsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin librarySimilarArtifacts(")
+	if args.Text != "" {
+		b.WriteString("text: ")
+		b.WriteString(quoteMemQL(args.Text))
+	}
+	if args.ArtifactId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryTrainFile -- Train a Library file into a knowledge domain -- the deliberate second act after upload.
+type LibraryTrainFileArgs struct {
+	// The v1:library:file row id to train. Must belong to the acting user.
+	FileId string
+	// Id of the knowledge domain to train the file into.
+	DomainId string
+}
+
+// LibraryTrainFile calls the engine builtin libraryTrainFile.
+func (qc *QueryClient) LibraryTrainFile(ctx context.Context, args LibraryTrainFileArgs) (*Result, error) {
+	call := LibraryTrainFileBuild(args)
+	return qc.executeNamed(ctx, "libraryTrainFile", call)
+}
+
+func LibraryTrainFileBuild(args LibraryTrainFileArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryTrainFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domainId: ")
+	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Recall -- Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
 type RecallArgs struct {
 	Text     string
@@ -489,6 +558,34 @@ func SearchActionsBuild(args SearchActionsArgs) string {
 		b.WriteString("provider: ")
 		b.WriteString(quoteMemQL(args.Provider))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePublishFromArtifact -- Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef.
+type SitePublishFromArtifactArgs struct {
+	// The v1:platform:site row to publish to.
+	SiteId string
+	// The v1:library:artifact index row of the zip to deploy.
+	ArtifactId string
+}
+
+// SitePublishFromArtifact calls the engine builtin sitePublishFromArtifact.
+func (qc *QueryClient) SitePublishFromArtifact(ctx context.Context, args SitePublishFromArtifactArgs) (*Result, error) {
+	call := SitePublishFromArtifactBuild(args)
+	return qc.executeNamed(ctx, "sitePublishFromArtifact", call)
+}
+
+func SitePublishFromArtifactBuild(args SitePublishFromArtifactArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sitePublishFromArtifact(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
 	return b.String()
 }

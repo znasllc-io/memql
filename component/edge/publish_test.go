@@ -318,9 +318,16 @@ func TestBundleFileContentTypeDefaultsToOctetStream(t *testing.T) {
 // (same package), reused rather than redefined.
 // ---------------------------------------------------------------------------
 
-// The site concept declares @rowAuthz(clusterOwner); without a synthetic
-// cluster-owner actor on the ctx handed to Execute, updateSiteBundle refuses
-// the write the same way siteByHostname would refuse the read.
+// The site concept declares @rowAuthz(owner="ownerUserId", clusterOwner) --
+// the COMPOSITE tier (memql#4344) -- and this store backs the CI route, which
+// belongs to no user, so the cluster-owner branch is the only one that can
+// admit its write. Without a synthetic cluster-owner actor on the ctx handed
+// to Execute, updateSiteBundle refuses the write the same way siteByHostname
+// would refuse the read.
+//
+// The portal's deploy-from-the-Library path is deliberately NOT this store:
+// it runs under the CALLER's own actor and is admitted by the OWNER branch
+// (component/sitepublish/site_publish.go's artifactSiteStore, memql#4345).
 func TestEngineSiteStoreRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)

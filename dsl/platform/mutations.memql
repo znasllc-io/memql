@@ -372,22 +372,52 @@ mutate inboundRequest updateInboundRequestStatus {
 /// guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently,
 /// because nothing exercised this mutation against a live boot until memql#3714's edge verification
 /// found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
+///
+/// OWNERSHIP (memql#4344). `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an
+/// arg. A concept declaring an owner tier over a caller-supplied field records a guarantee nothing
+/// provides -- and reads as safe, so an auditor seeing the tier stops looking; that is what
+/// TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because
+/// the field genuinely is not forgeable.
+///
+/// The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the
+/// deployment's row rather than a person's -- the seeded portal is site #1 and must land
+/// CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp
+/// "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every
+/// boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own
+/// id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See
+/// component/memql/platform_site_hostname_policy.go.
+///
+/// That is a NARROWING and never a widening, which is why it does not reopen what the gate above
+/// protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody
+/// (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A
+/// cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the
+/// read-merge makes that an update and the cluster-owner write escape admits it.
+///
+/// HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is
+/// all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS
+/// cluster serves, the [a-z0-9-]{3,40} slug, the reserved labels, cluster-wide uniqueness, and the
+/// cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the
+/// systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check.
+@actor
 @description("Create a site")
 mutate site createSite {
   args {
     siteId       string!
-    hostname     string!
-    kind         enum("spa", "static")
+    hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
+    kind         enum("spa", "static", "shopify_storefront")
     bundleRef    string!
     status       enum("draft", "live", "disabled")
     apiProxy     boolean
     systemOwned  boolean
     title        string
+    artifactId   string
+    binding      object
   }
   insert {
-    accept { hostname, bundleRef }
+    accept { hostname, bundleRef, artifactId, binding }
     stamp {
       id:          args.siteId
+      ownerUserId: actor.userId
       kind:        args.kind ?? "spa"
       status:      args.status ?? "draft"
       apiProxy:    args.apiProxy ?? false
@@ -400,19 +430,37 @@ mutate site createSite {
 /// Point a site at a different bundle version. THE deploy operation, and THE rollback operation --
 /// they are the same write in opposite directions, which is the whole reason bundles are stored
 /// under versioned prefixes rather than overwritten.
+///
+/// `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the
+/// bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in
+/// accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args
+/// are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ??
+/// ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body:
+/// the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is
+/// the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an
+/// operator publishes to any, and a cross-user write is refused before the merge -- which is why the
+/// guard reads the PRIOR row rather than the merged payload.
 @description("Point a site at a bundle version")
 mutate site updateSiteBundle {
   args {
-    siteId    string!
-    bundleRef string!
+    siteId     string!
+    bundleRef  string!
+    artifactId string
   }
   update {
-    id:        args.siteId
-    bundleRef: args.bundleRef
+    accept { bundleRef, artifactId }
+    stamp {
+      id: args.siteId
+    }
   }
 }
 
 /// Move a site between draft / live / disabled.
+///
+/// Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier
+/// rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 @description("Set a site's status")
 mutate site updateSiteStatus {
   args {
@@ -431,6 +479,9 @@ mutate site updateSiteStatus {
 /// (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express
 /// that conditional, so the block is a Go write guard wired beside executeWrite (see
 /// component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+/// Beyond that, deletion is owner-or-cluster-owner: guardRowAuthzWrite admits the row's OWNER, and
+/// the cluster-owner path is rowAuthzWriteEscape's explicit escape -- so one user cannot delete
+/// another's deployable, and an operator can delete any non-systemOwned one.
 @description("Soft-delete a site")
 mutate site deleteSite {
   args {

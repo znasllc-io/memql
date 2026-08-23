@@ -275,15 +275,16 @@ function bandTitles(): (string | null)[] {
 }
 
 describe("the nav rail", () => {
-  // The rail's three groups (memql#4264). The names are the decision: the DATA
-  // as screens, the SUBSTRATE those screens are made of, and the CLUSTER
-  // itself. What this replaced -- Operate / Explore / Administer -- put People
-  // in two groups at once, which is the shape being asserted against here.
-  it("groups the views, the substrate, and the cluster", async () => {
+  // The rail's groups (memql#4264, a fourth added by memql#4343). The names
+  // are the decision: the DATA as screens, the SUBSTRATE those screens are
+  // made of, the operator's own MATERIAL, and the CLUSTER itself. What #4264
+  // replaced -- Operate / Explore / Administer -- put People in two groups at
+  // once, which is the shape being asserted against here.
+  it("groups the views, the substrate, the library, and the cluster", async () => {
     renderView({}, "/views/people");
     const nav = screen.getByRole("navigation", { name: "Portal sections" });
     await waitFor(() => expect(within(nav).getByText("Views")).toBeTruthy());
-    for (const group of ["Custom", "Build", "Cluster"]) {
+    for (const group of ["Custom", "Build", "Library", "Cluster"]) {
       expect(within(nav).getByText(group)).toBeTruthy();
     }
     for (const label of ["People", "Agents", "Customers", "Deployments", "Audit"]) {
@@ -298,6 +299,17 @@ describe("the nav rail", () => {
     // People appears ONCE. The duplicate was the whole reason for this change:
     // the population under one group and the change surface under another.
     expect(within(nav).getAllByRole("link", { name: "People" })).toHaveLength(1);
+
+    // Artifacts MOVED out of Cluster into Library rather than being listed in
+    // both -- the same duplicate-door failure, one group over (memql#4343).
+    expect(within(nav).getAllByRole("link", { name: "Artifacts" })).toHaveLength(1);
+
+    // Deployables joined it there and left Cluster with it (memql#4346). Same
+    // axis argument: as Sites it was cluster-owner-only and genuinely a fact
+    // about the machine; v1:platform:site declares the composite tier now, so a
+    // deployable is a person's own material. Once, and under Library.
+    expect(within(nav).getAllByRole("link", { name: "Deployables" })).toHaveLength(1);
+    expect(within(nav).queryByRole("link", { name: "Sites" })).toBeNull();
   });
 });
 

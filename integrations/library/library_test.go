@@ -533,9 +533,9 @@ func TestTouchArtifact_PreservesLabelsAcrossEdit(t *testing.T) {
 }
 
 // TestTouchArtifact_SkipsReStampOnReadFailure is the finding-4 regression:
-// currentArtifactLabels distinguishes "read failed" from "no row yet" / "row
-// has no labels" -- only the latter two legitimately carry forward as no
-// labels. A genuine read failure must make touchArtifact skip the
+// currentArtifactCarryForward distinguishes "read failed" from "no row yet" /
+// "row carries nothing" -- only the latter two legitimately carry forward as
+// empty. A genuine read failure must make touchArtifact skip the
 // createArtifact re-stamp ENTIRELY; writing labels: [] on a failed read
 // would DESTROY real labels, not merely leave updatedAt stale (the
 // documented, accepted best-effort price of skipping).

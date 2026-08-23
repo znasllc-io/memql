@@ -41,13 +41,19 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/harnesstrace"
 	_ "github.com/znasllc-io/memql/integrations/identity"
 	_ "github.com/znasllc-io/memql/integrations/knowledge"
+	// sitePublish lives in the ROOT module, not integrations/, because it uses
+	// component/edge's Publisher and integrations is its own module that the root
+	// already requires -- importing edge from there made the module graph a cycle
+	// (memql#4345). Blank-imported HERE, beside the integration it split from, so
+	// the registration reaches exactly the same binaries it did before the move.
+	_ "github.com/znasllc-io/memql/component/sitepublish"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	_ "github.com/znasllc-io/memql/integrations/openairealtime"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	_ "github.com/znasllc-io/memql/integrations/router"
-	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/shopify"
+	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/telephony"
 	_ "github.com/znasllc-io/memql/integrations/telephony/telnyx"
 	_ "github.com/znasllc-io/memql/integrations/timeutil"
