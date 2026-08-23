@@ -99,7 +99,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/component/identity/web": 20,  // static/* (incl. generated app.css, favicon.svg, fonts/) + legal/*.md
 	"github.com/znasllc-io/memql/component/mcp":          1,   // icon.svg
 	"github.com/znasllc-io/memql/docs":                   1,   // public/language/memql.md
-	"github.com/znasllc-io/memql/dsl":                    241, // all:<domain> x37 (+observability queries -- memql#4208; +shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
+	"github.com/znasllc-io/memql/dsl":                    242, // all:<domain> x37 (+observability queries -- memql#4208; +shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711; +library tools -- artifact labels, memql#4290)
 	"github.com/znasllc-io/memql/examples/deploypack":    3,   // all:dsl
 	"github.com/znasllc-io/memql/examples/referencepack": 5,   // all:dsl
 	"github.com/znasllc-io/memql/examples/reviewspack":   5,   // all:dsl (memql#4139)

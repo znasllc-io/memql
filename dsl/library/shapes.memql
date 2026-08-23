@@ -17,9 +17,12 @@ shape artifact artifactFull {
   mimeType
   live
   scope
+  labels
   partitionId
   agentId
   producedByPlanId
+  producedByWorkerId
+  producedByWorkerName
   validationStatus
   updatedAt
   row.createdAt

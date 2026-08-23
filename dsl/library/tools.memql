@@ -1,0 +1,45 @@
+// library domain -- the AI-facing artifact-label tool surface.
+//
+// artifactAddLabel / artifactRemoveLabel let an agent put a label on (or
+// take one off) a Library artifact the user already has -- the assistant
+// counterpart to the portal's own label editor. Both ride the SAME builtin
+// (dsl/library/builtins.memql: libraryAddArtifactLabel /
+// libraryRemoveArtifactLabel), which is also @sdk-exposed so the portal
+// calls it directly through the generated client SDK. One implementation
+// serves both callers because, unlike editDocument's user/assistant split,
+// there is no attribution difference between an agent adding a label and a
+// person adding one -- a label carries no authorKind. See the
+// artifacts-labels design doc, D2.
+//
+// The handler reaches the builtin through the `function` type -- there is
+// no "builtin" handler type. The target is resolved at load, so a name
+// typo here refuses boot rather than failing the first time an agent calls
+// the tool.
+//
+// Ownership needs no new mechanism: the builtin loads the artifact row
+// under a system actor, then acts under a synthetic actor derived from the
+// ROW's own ownerUserId (mirrors handleEditDocument's shape exactly), so
+// an agent acting in a user's session can only ever label an artifact that
+// user can already read.
+
+/// Put a label on an artifact so the person can tell later what it was for. Idempotent -- adding a
+/// label that is already there succeeds and changes nothing. Use this when the user asks to
+/// label / tag / categorize an artifact (a document, a generated deliverable) they already have.
+@handler(type="function", name="libraryAddArtifactLabel")
+@allowedRoles("assistant", "specialist")
+@executionTime("fast")
+tool artifactAddLabel {
+  artifactId  string!  @description("Id of the artifact to label -- the v1:library:artifact row id.")
+  label       string!  @description("The label to add. Short and human-readable -- a project or topic name, not a sentence.")
+}
+
+/// Remove a label from an artifact. Idempotent -- removing a label that is not there succeeds and
+/// changes nothing. Use this when the user asks to un-label / remove a tag from an artifact they
+/// already have.
+@handler(type="function", name="libraryRemoveArtifactLabel")
+@allowedRoles("assistant", "specialist")
+@executionTime("fast")
+tool artifactRemoveLabel {
+  artifactId  string!  @description("Id of the artifact to remove the label from -- the v1:library:artifact row id.")
+  label       string!  @description("The label to remove. Must match an existing label exactly.")
+}

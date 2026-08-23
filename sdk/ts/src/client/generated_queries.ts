@@ -2981,6 +2981,28 @@ QueryClient.prototype.libraryArtifactById = function (this: QueryClient, args: L
   return this.executeNamed("libraryArtifactById", buildLibraryArtifactById(args), opts);
 };
 
+/** Internal read backing touchArtifact / the label-write capabilities (integrations/library/): resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. sourceConceptRef is the idempotency key createArtifact derives the row's id from (one index row per source ref), so this is bounded to at most one row without needing to re-derive that id in Go -- the coupling a Go-side re-implementation of createArtifact's hash expression would otherwise create. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactBySourceConceptRef"] in generated_concepts.ts).
+export interface LibraryArtifactBySourceConceptRefArgs {
+  sourceConceptRef: string;
+}
+
+export function buildLibraryArtifactBySourceConceptRef(args: LibraryArtifactBySourceConceptRefArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceConceptRef: " + renderMemQLValue(args.sourceConceptRef));
+  return "query libraryArtifactBySourceConceptRef(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactBySourceConceptRef(args: LibraryArtifactBySourceConceptRefArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactBySourceConceptRef = function (this: QueryClient, args: LibraryArtifactBySourceConceptRefArgs = {} as LibraryArtifactBySourceConceptRefArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactBySourceConceptRef", buildLibraryArtifactBySourceConceptRef(args), opts);
+};
+
 /** List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.ts).
 export interface LibraryArtifactsArgs {
@@ -3021,6 +3043,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryArtifactsByKind = function (this: QueryClient, args: LibraryArtifactsByKindArgs = {} as LibraryArtifactsByKindArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryArtifactsByKind", buildLibraryArtifactsByKind(args), opts);
+};
+
+/** List the caller's Library rows carrying a given label -- backs the label facet filter. Owned: ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even when args.label is absent); the when() membership predicate narrows to rows whose labels include the given value. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLabel"] in generated_concepts.ts).
+export interface LibraryArtifactsByLabelArgs {
+  label: string;
+}
+
+export function buildLibraryArtifactsByLabel(args: LibraryArtifactsByLabelArgs): string {
+  const parts: string[] = [];
+  parts.push("label: " + renderMemQLValue(args.label));
+  return "query libraryArtifactsByLabel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactsByLabel(args: LibraryArtifactsByLabelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactsByLabel = function (this: QueryClient, args: LibraryArtifactsByLabelArgs = {} as LibraryArtifactsByLabelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactsByLabel", buildLibraryArtifactsByLabel(args), opts);
 };
 
 /** List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens. */

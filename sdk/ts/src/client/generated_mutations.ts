@@ -1273,7 +1273,7 @@ export interface CreateArtifactArgs {
   lens: string;
   // Enum: document | generated_output | note | todo | calendar_event | memory | live_source
   kind: string;
-  // Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | live
+  // Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
   source: string;
   title: string;
   summary?: string;
@@ -1283,6 +1283,7 @@ export interface CreateArtifactArgs {
   live?: boolean;
   // Enum: workspace | private
   scope?: string;
+  labels?: string[];
   partitionId?: string;
   agentId?: string;
   producedByPlanId?: string;
@@ -1305,6 +1306,7 @@ export function buildCreateArtifact(args: CreateArtifactArgs): string {
   if (args.mimeType !== undefined) parts.push("mimeType: " + renderMemQLValue(args.mimeType));
   if (args.live !== undefined) parts.push("live: " + renderMemQLValue(args.live));
   if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
+  if (args.labels !== undefined) parts.push("labels: " + renderMemQLValue(args.labels));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));
@@ -2177,7 +2179,7 @@ export interface CreateGeneratedOutputArgs {
   // Enum: markdown | document | pdf | spreadsheet | image | text | other
   format?: string;
   mimeType?: string;
-  // Enum: workbench_generated | computer_use | agent_generated | derived
+  // Enum: workbench_generated | computer_use | agent_generated | derived | user_created
   source: string;
   partitionId?: string;
   producedByPlanId?: string;
@@ -7794,7 +7796,7 @@ export interface UpdateGeneratedOutputContentArgs {
   // Enum: markdown | document | pdf | spreadsheet | image | text | other
   format?: string;
   mimeType?: string;
-  // Enum: workbench_generated | computer_use | agent_generated | derived
+  // Enum: workbench_generated | computer_use | agent_generated | derived | user_created
   source: string;
   partitionId?: string;
   producedByPlanId?: string;

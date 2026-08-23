@@ -26,13 +26,14 @@ mutate artifact createArtifact {
     ownerUserId       string!
     lens              enum("artifact", "record")!
     kind              enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")!
-    source            enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live")!
+    source            enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live")!
     title             string!
     summary           string
     format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
     mimeType          string
     live              bool
     scope             enum("workspace", "private")
+    labels            []string
     partitionId           string
     agentId           string
     producedByPlanId  string
@@ -53,6 +54,7 @@ mutate artifact createArtifact {
     args.mimeType
     live: args.live ?? false
     args.scope
+    args.labels
     args.partitionId
     args.agentId
     args.producedByPlanId
@@ -84,7 +86,7 @@ mutate generatedOutput createGeneratedOutput {
     attachmentId      string
     format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType          string
-    source            enum("workbench_generated", "computer_use", "agent_generated", "derived")!
+    source            enum("workbench_generated", "computer_use", "agent_generated", "derived", "user_created")!
     partitionId           string
     producedByPlanId  string
     producedByAgentId string
@@ -199,7 +201,7 @@ mutate generatedOutput updateGeneratedOutputContent {
     attachmentId  string
     format        enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType      string
-    source        enum("workbench_generated", "computer_use", "agent_generated", "derived")!
+    source        enum("workbench_generated", "computer_use", "agent_generated", "derived", "user_created")!
     partitionId       string
     producedByPlanId  string
     producedByAgentId string

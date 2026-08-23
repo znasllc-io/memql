@@ -50,6 +50,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,6 +124,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"documentId": "string (required) -- the logical document id",
 				"versionId":  "string (required) -- the documentVersion row id to restore content from",
 				"authorId":   "string -- optional id of the user who triggered the restore (recorded as provenance)",
+			},
+		},
+		{
+			Name:        "addArtifactLabel",
+			Description: "Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. Loads the row under a system actor (the caller only supplies artifactId), then merges + writes back under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.",
+			Handler:     i.handleAddArtifactLabel,
+			ArgsSchema: map[string]string{
+				"artifactId": "string (required) -- the v1:library:artifact row id",
+				"label":      "string (required) -- the label to add; blank is refused",
+			},
+		},
+		{
+			Name:        "removeArtifactLabel",
+			Description: "Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as addArtifactLabel.",
+			Handler:     i.handleRemoveArtifactLabel,
+			ArgsSchema: map[string]string{
+				"artifactId": "string (required) -- the v1:library:artifact row id",
+				"label":      "string (required) -- the label to remove; blank is refused",
 			},
 		},
 	}
@@ -367,6 +386,246 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	})
 }
 
+// artifactLabelResult is the payload returned by handleAddArtifactLabel /
+// handleRemoveArtifactLabel.
+type artifactLabelResult struct {
+	ArtifactId string   `json:"artifactId"`
+	Label      string   `json:"label"`
+	Labels     []string `json:"labels"`
+	Changed    bool     `json:"changed"`
+}
+
+// handleAddArtifactLabel adds a label to a Library artifact index row.
+// Idempotent: a label already present is left alone and nothing is
+// written (mergeLabelAdd reports changed=false). Follows
+// handleEditDocument's exact load/write shape: loadArtifactUnderOwner
+// reads the row under a system actor (the caller only supplies
+// artifactId, so the owner isn't known yet) and hands back a context
+// carrying a synthetic owner actor derived from the row's OWN
+// ownerUserId -- the write then runs under that borrowed authority, which
+// is what makes "you cannot label someone else's artifact" true without
+// a new mechanism (the row simply will not load for anyone else).
+func (i *Integration) handleAddArtifactLabel(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil || i.engine == nil {
+		return nil, fmt.Errorf("library.addArtifactLabel: integration not initialized")
+	}
+	artifactId := strings.TrimSpace(asString(args["artifactId"]))
+	if artifactId == "" {
+		return nil, fmt.Errorf("library.addArtifactLabel: 'artifactId' is required")
+	}
+	label := strings.TrimSpace(asString(args["label"]))
+	if label == "" {
+		return nil, fmt.Errorf("library.addArtifactLabel: 'label' is required and cannot be blank")
+	}
+
+	row, ownerCtx, err := i.loadArtifactUnderOwner(ctx, artifactId)
+	if err != nil {
+		return nil, fmt.Errorf("library.addArtifactLabel: %w", err)
+	}
+
+	current := stringSliceField(row, "labels")
+	merged, changed := mergeLabelAdd(current, label)
+	if changed {
+		if err := i.writeArtifactLabels(ownerCtx, row, merged); err != nil {
+			return nil, fmt.Errorf("library.addArtifactLabel: write back: %w", err)
+		}
+	} else {
+		merged = current
+	}
+
+	return wrapLabelResult(artifactLabelResult{
+		ArtifactId: artifactId,
+		Label:      label,
+		Labels:     merged,
+		Changed:    changed,
+	})
+}
+
+// handleRemoveArtifactLabel removes a label from a Library artifact index
+// row. Idempotent: a label already absent is left alone and nothing is
+// written. Same owner-threaded load/write shape as handleAddArtifactLabel.
+func (i *Integration) handleRemoveArtifactLabel(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil || i.engine == nil {
+		return nil, fmt.Errorf("library.removeArtifactLabel: integration not initialized")
+	}
+	artifactId := strings.TrimSpace(asString(args["artifactId"]))
+	if artifactId == "" {
+		return nil, fmt.Errorf("library.removeArtifactLabel: 'artifactId' is required")
+	}
+	label := strings.TrimSpace(asString(args["label"]))
+	if label == "" {
+		return nil, fmt.Errorf("library.removeArtifactLabel: 'label' is required and cannot be blank")
+	}
+
+	row, ownerCtx, err := i.loadArtifactUnderOwner(ctx, artifactId)
+	if err != nil {
+		return nil, fmt.Errorf("library.removeArtifactLabel: %w", err)
+	}
+
+	current := stringSliceField(row, "labels")
+	remaining, changed := mergeLabelRemove(current, label)
+	if changed {
+		if err := i.writeArtifactLabels(ownerCtx, row, remaining); err != nil {
+			return nil, fmt.Errorf("library.removeArtifactLabel: write back: %w", err)
+		}
+	} else {
+		remaining = current
+	}
+
+	return wrapLabelResult(artifactLabelResult{
+		ArtifactId: artifactId,
+		Label:      label,
+		Labels:     remaining,
+		Changed:    changed,
+	})
+}
+
+// loadArtifactUnderOwner loads the artifact row under a system actor
+// (mirrors loadGeneratedOutput -- the row's owner is not known until it is
+// read) and returns it alongside a context carrying a SYNTHETIC owner
+// actor derived from the row's own ownerUserId, for the caller to run its
+// write-back under. Refuses an unknown artifact or one with no owner,
+// exactly as handleEditDocument refuses an ownerless document.
+func (i *Integration) loadArtifactUnderOwner(ctx context.Context, artifactId string) (map[string]any, context.Context, error) {
+	q := fmt.Sprintf(`query libraryArtifactById(artifactId: %s)`, langparser.QuoteString(artifactId))
+	raw, err := i.engine.Execute(systemActorContext(ctx), q)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load artifact %q: %w", artifactId, err)
+	}
+	rows := extractRows(raw)
+	if len(rows) == 0 {
+		return nil, nil, fmt.Errorf("artifact %q not found", artifactId)
+	}
+	row := rows[0]
+	ownerUserId := stringField(row, "ownerUserId")
+	if strings.TrimSpace(ownerUserId) == "" {
+		return nil, nil, fmt.Errorf("artifact %q has no owner -- cannot attribute the change", artifactId)
+	}
+	return row, withUserActor(ctx, ownerUserId), nil
+}
+
+// writeArtifactLabels re-versions the artifact row via createArtifact,
+// carrying every field the row itself currently holds forward and
+// replacing labels with the given set. createArtifact's insert body is a
+// bare `insert{}` block -- a full replace (D3): a field this call omits
+// is absent from the new version, not carried over from the prior one --
+// so every artifact field is threaded through explicitly rather than
+// leaving any of them to an implicit carry-forward that does not exist.
+// artifactEnumFields lists createArtifact's OPTIONAL enum args (mirrors
+// the enum declarations on dsl/library/mutations.memql's createArtifact
+// args block). lens/kind/source are enums too but required(!), so a row
+// that exists at all already carries a valid value for them; format,
+// scope and validationStatus are optional, and a real row's stored value
+// is routinely blank -- none of the five promotion automations pass
+// scope, and a record-lens row has no format at all.
+var artifactEnumFields = []string{"format", "scope", "validationStatus"}
+
+// writeArtifactLabels re-versions the artifact row via createArtifact,
+// carrying every field the row itself currently holds forward and
+// replacing labels with the given set. createArtifact's insert body is a
+// bare `insert{}` block -- a full replace (D3): a field this call omits
+// is absent from the new version, not carried over from the prior one --
+// so every artifact field is threaded through explicitly rather than
+// leaving any of them to an implicit carry-forward that does not exist.
+//
+// The three OPTIONAL ENUM fields (artifactEnumFields) are the one
+// exception to "thread every field through": createArtifact's arg
+// validation rejects a PRESENT value outside its declared enum set, and
+// an empty string IS present -- it is not the same as the caller never
+// naming the argument. A blank optional enum on the loaded row (the
+// common case: no promotion automation passes scope, a record-lens row
+// has no format) must therefore be OMITTED from the call entirely, not
+// quoted through as "". Plain-string optionals (summary, mimeType,
+// partitionId, ...) have no such set to violate, so they stay
+// unconditional -- the same shape touchArtifact and the automations
+// already use for them.
+func (i *Integration) writeArtifactLabels(ctx context.Context, row map[string]any, labels []string) error {
+	parts := []string{
+		fmt.Sprintf("sourceConceptRef: %s", langparser.QuoteString(stringField(row, "sourceConceptRef"))),
+		fmt.Sprintf("ownerUserId: %s", langparser.QuoteString(stringField(row, "ownerUserId"))),
+		fmt.Sprintf("lens: %s", langparser.QuoteString(stringField(row, "lens"))),
+		fmt.Sprintf("kind: %s", langparser.QuoteString(stringField(row, "kind"))),
+		fmt.Sprintf("source: %s", langparser.QuoteString(stringField(row, "source"))),
+		fmt.Sprintf("title: %s", langparser.QuoteString(stringField(row, "title"))),
+		fmt.Sprintf("summary: %s", langparser.QuoteString(stringField(row, "summary"))),
+		fmt.Sprintf("mimeType: %s", langparser.QuoteString(stringField(row, "mimeType"))),
+		fmt.Sprintf("live: %t", boolField(row, "live")),
+		fmt.Sprintf("labels: %s", quoteStringArray(labels)),
+		fmt.Sprintf("partitionId: %s", langparser.QuoteString(stringField(row, "partitionId"))),
+		fmt.Sprintf("agentId: %s", langparser.QuoteString(stringField(row, "agentId"))),
+		fmt.Sprintf("producedByPlanId: %s", langparser.QuoteString(stringField(row, "producedByPlanId"))),
+		fmt.Sprintf("producedByWorkerId: %s", langparser.QuoteString(stringField(row, "producedByWorkerId"))),
+		fmt.Sprintf("producedByWorkerName: %s", langparser.QuoteString(stringField(row, "producedByWorkerName"))),
+	}
+	for _, field := range artifactEnumFields {
+		if v := stringField(row, field); v != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", field, langparser.QuoteString(v)))
+		}
+	}
+	q := fmt.Sprintf("mutation createArtifact(%s)", strings.Join(parts, ", "))
+	_, err := i.engine.Execute(ctx, q)
+	return err
+}
+
+// mergeLabelAdd returns labels with label appended if absent. Idempotent:
+// a label already present is returned unchanged (changed=false), so a
+// caller can skip the write-back entirely on a no-op retry or double-click.
+// Compares trimmed so a label written whitespace-padded through some
+// OTHER path (createArtifact directly, an automation) is still
+// recognised as the same label -- mirrors mergeLabelRemove.
+func mergeLabelAdd(labels []string, label string) (merged []string, changed bool) {
+	for _, l := range labels {
+		if strings.TrimSpace(l) == label {
+			return labels, false
+		}
+	}
+	// slices.Clone rather than make([]string, 0, len(labels)+1): CodeQL's
+	// go/allocation-size-overflow traces a taint path from the caller's
+	// label set to that capacity arithmetic. The overflow is not reachable
+	// -- it needs len(labels) at MaxInt, which is one API call per label --
+	// but this repo's code-scanning dashboard is at zero open alerts, and a
+	// dashboard nobody trusts is worth less than the arithmetic saved.
+	return append(slices.Clone(labels), label), true
+}
+
+// mergeLabelRemove returns labels with label dropped if present.
+// Idempotent: a label already absent is returned unchanged (changed=false).
+// Compares trimmed: handleRemoveArtifactLabel trims the caller's label
+// before calling this, but a STORED label can carry whitespace padding if
+// it was written through some other path (createArtifact directly, an
+// automation) that never ran it through mergeLabelAdd's own trim -- an
+// exact-match compare would then make that label permanently
+// unremovable through this capability.
+func mergeLabelRemove(labels []string, label string) (remaining []string, changed bool) {
+	found := false
+	out := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if strings.TrimSpace(l) == label {
+			found = true
+			continue
+		}
+		out = append(out, l)
+	}
+	if !found {
+		return labels, false
+	}
+	return out, true
+}
+
+func wrapLabelResult(r artifactLabelResult) ([]memorynodes.MemoryNode, error) {
+	payload, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("library: marshal label result: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        fmt.Sprintf("library:label:%s:%d", r.ArtifactId, time.Now().UnixNano()),
+		Concept:   resultConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		Payload:   payload,
+	}}, nil
+}
+
 // appendArgs bundles the documentVersion append fields.
 //
 // No ownerUserId: appendDocumentVersion stamps it from actor.userId
@@ -434,6 +693,23 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 // content are the source of truth; a failed index re-stamp just leaves
 // the Library sort key stale until the next promotion. sourceConceptRef
 // is the canonical 'v1:library:generatedOutput:<id>' form.
+//
+// createArtifact's insert body is a bare `insert{}` block, so MemQL's
+// insert-versioning means the re-versioned row carries only the fields
+// THIS call names (D3 / memql artifacts-labels spec). labels is not
+// derived from doc (the generatedOutput row has no labels field) -- it
+// lives on the artifact row itself, so it has to be read back from the
+// CURRENT artifact row before re-versioning, or every document edit
+// silently drops whatever labels the artifact carried.
+//
+// The lookup is best-effort like the rest of this function -- EXCEPT for
+// the specific failure mode of losing labels. currentArtifactLabels
+// distinguishes "read failed" from "no row yet" / "row has no labels":
+// only the latter two legitimately carry forward as no labels. On a
+// genuine read failure this function skips the re-stamp ENTIRELY rather
+// than risk writing `labels: []` over whatever the row actually holds --
+// a stale updatedAt watermark is the documented best-effort price of a
+// failed re-stamp; destroying real labels is not.
 func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	docId := stringField(doc, "id")
 	if docId == "" {
@@ -444,8 +720,12 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	if source == "" {
 		source = "agent_generated"
 	}
+	labels, ok := i.currentArtifactLabels(ctx, sourceRef)
+	if !ok {
+		return
+	}
 	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s)`,
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s)`,
 		langparser.QuoteString(sourceRef),
 		langparser.QuoteString(stringField(doc, "ownerUserId")),
 		langparser.QuoteString(source),
@@ -455,8 +735,33 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		langparser.QuoteString(stringField(doc, "mimeType")),
 		langparser.QuoteString(stringField(doc, "partitionId")),
 		langparser.QuoteString(stringField(doc, "producedByPlanId")),
+		quoteStringArray(labels),
 	)
 	_, _ = i.engine.Execute(ctx, q)
+}
+
+// currentArtifactLabels reads the CURRENT artifact index row's labels for
+// a source ref, so touchArtifact can carry them forward into its
+// re-version call. Resolves the row via libraryArtifactBySourceConceptRef
+// -- a declared-payload-field filter, not a Go-side re-derivation of
+// createArtifact's hash-based id, so a future change to that DSL
+// expression cannot silently reopen this exact lookup.
+//
+// ok=false is a GENUINE read failure -- the caller must not treat that as
+// "no labels" (see touchArtifact). ok=true with a nil/empty result covers
+// both legitimate no-labels cases: no row promoted yet, and a row that
+// has never been labelled.
+func (i *Integration) currentArtifactLabels(ctx context.Context, sourceRef string) (labels []string, ok bool) {
+	q := fmt.Sprintf(`query libraryArtifactBySourceConceptRef(sourceConceptRef: %s)`, langparser.QuoteString(sourceRef))
+	raw, err := i.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, false
+	}
+	rows := extractRows(raw)
+	if len(rows) == 0 {
+		return nil, true
+	}
+	return stringSliceField(rows[0], "labels"), true
 }
 
 // loadGeneratedOutput reads the backing document row. Runs under a
@@ -555,6 +860,54 @@ func stringField(m map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+// stringSliceField coerces a row's array field (e.g. artifact.labels) to
+// []string. The engine's AsMap() round-trip (structpb -> Go) decodes a
+// JSONB string array as []any with each element a string; the []string
+// case is a defensive fallback for a caller that already holds native Go
+// values (e.g. a test stub). Returns nil for an absent/wrong-typed field --
+// callers treat that the same as "no labels".
+func stringSliceField(m map[string]any, key string) []string {
+	if m == nil {
+		return nil
+	}
+	switch v := m[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// boolField coerces a row field to bool. Missing/wrong-typed is false.
+func boolField(m map[string]any, key string) bool {
+	if m == nil {
+		return false
+	}
+	b, _ := m[key].(bool)
+	return b
+}
+
+// quoteStringArray renders a []string as a MemQL array-literal call
+// argument value (`["a", "b"]`) -- the form parseValue/parseArray accept in
+// a named call argument position (e.g. `labels: ["a", "b"]`). Every element
+// is quoted through langparser.QuoteString, exactly like every neighbouring
+// string field in this file; never hand-interpolated. A nil/empty slice
+// renders as `[]`, the empty-array literal.
+func quoteStringArray(items []string) string {
+	parts := make([]string, len(items))
+	for idx, item := range items {
+		parts[idx] = langparser.QuoteString(item)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // intField coerces a row field to int across the float64 / json.Number /

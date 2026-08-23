@@ -2039,7 +2039,7 @@ type CreateArtifactArgs struct {
 	Lens string
 	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source
 	Kind string
-	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | live
+	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
 	Source  string
 	Title   string
 	Summary string
@@ -2050,6 +2050,7 @@ type CreateArtifactArgs struct {
 	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
 	// Enum: workspace | private
 	Scope                string
+	Labels               []string
 	PartitionId          string
 	AgentId              string
 	ProducedByPlanId     string
@@ -2129,6 +2130,13 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 		}
 		b.WriteString("scope: ")
 		b.WriteString(quoteMemQL(args.Scope))
+	}
+	if args.Labels != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 24 {
@@ -3938,7 +3946,7 @@ type CreateGeneratedOutputArgs struct {
 	// Enum: markdown | document | pdf | spreadsheet | image | text | other
 	Format   string
 	MimeType string
-	// Enum: workbench_generated | computer_use | agent_generated | derived
+	// Enum: workbench_generated | computer_use | agent_generated | derived | user_created
 	Source               string
 	PartitionId          string
 	ProducedByPlanId     string
@@ -13699,7 +13707,7 @@ type UpdateGeneratedOutputContentArgs struct {
 	// Enum: markdown | document | pdf | spreadsheet | image | text | other
 	Format   string
 	MimeType string
-	// Enum: workbench_generated | computer_use | agent_generated | derived
+	// Enum: workbench_generated | computer_use | agent_generated | derived | user_created
 	Source            string
 	PartitionId       string
 	ProducedByPlanId  string
