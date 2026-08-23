@@ -238,6 +238,35 @@ func TestConflictingRequirementsMatchNothing(t *testing.T) {
 	if len(plan.Candidates) != 0 {
 		t.Fatalf("candidates = %v, want none -- a conflicting requirement is unsatisfiable, not a preference", ids(plan.Candidates))
 	}
+	// The reason must SAY both demands. An unsatisfiable requirement reported
+	// as a bare "no worker available" sends the reader looking at their
+	// machines, which are fine.
+	reason := plan.Rejected["(requirement)"]
+	for _, want := range []string{"unsatisfiable", "os=darwin", "os=linux"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("rejection %q does not mention %q", reason, want)
+		}
+	}
+	// And it must never contain a NUL. The first implementation encoded the
+	// conflict as an unmatchable sentinel value, which then rendered -- into
+	// this message and into the invocation's routing record.
+	if strings.ContainsRune(formatLabels(plan.Require), 0) {
+		t.Error("the merged requirement carries a NUL: a sentinel value has leaked into a rendered string")
+	}
+}
+
+func TestPreferLabelsDoNotConflict(t *testing.T) {
+	// preferLabels only ORDER. The policy preferring one value and the agent
+	// another is two hints, not a contradiction, and treating it as one would
+	// empty the candidate set over a tie-break.
+	f := &fakeFleet{
+		machines: []Candidate{machine("a", withLabels(map[string]string{"tier": "fast"}))},
+		policy:   &Policy{Strategy: StrategyLabelMatch, PreferLabels: map[string]string{"tier": "fast"}},
+	}
+	plan := mustPlan(t, newTestRouter(f), nil, map[string]string{"tier": "slow"})
+	if len(plan.Candidates) != 1 {
+		t.Fatalf("candidates = %v, want the machine kept", ids(plan.Candidates))
+	}
 }
 
 func TestOperatorLabelsWinTheMerge(t *testing.T) {

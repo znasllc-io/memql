@@ -309,8 +309,25 @@ func (r *Router) Plan(
 	// other. A policy cannot make a machine eligible for work the agent did
 	// not ask to run there, and an agent cannot escape a requirement the
 	// owner set.
-	merged := unionLabels(policy.RequireLabels, require)
-	preferred := unionLabels(policy.PreferLabels, prefer)
+	merged, conflicts := unionLabels(policy.RequireLabels, require)
+	// preferLabels only ORDER, so a disagreement between the policy's and the
+	// agent's is not a conflict -- it is two hints, and both are honoured by
+	// counting hits. Only the requirement can be unsatisfiable.
+	preferred, _ := unionLabels(policy.PreferLabels, prefer)
+
+	if len(conflicts) > 0 {
+		// No candidate set to compute: the requirement cannot be met by any
+		// machine, present or future. Returned as an empty plan with the reason
+		// on it rather than as an error, so the dispatcher records the same
+		// no_worker_available it records for every other empty candidate set --
+		// with a message that says which two demands disagree.
+		return RoutePlan{
+			Policy:   policy,
+			Require:  merged,
+			Prefer:   preferred,
+			Rejected: map[string]string{"(requirement)": "unsatisfiable: " + strings.Join(conflicts, "; ")},
+		}, nil
+	}
 
 	all, err := r.store.WorkersForOwner(ctx, ownerUserId)
 	if err != nil {
@@ -442,14 +459,22 @@ func MergeLabels(cockpit, operator map[string]string) map[string]string {
 	return out
 }
 
-// unionLabels ANDs two requirements. On a key both sides name with different
-// values the result is UNSATISFIABLE, and it is left that way on purpose: the
-// owner said "only machines where k=a" and the agent said "only machines where
-// k=b", and there is no machine that is both. Silently preferring either side
-// would run the work somewhere one of them excluded.
-func unionLabels(a, b map[string]string) map[string]string {
+// unionLabels ANDs two requirements, and reports whether the result is
+// satisfiable at all.
+//
+// On a key both sides name with DIFFERENT values there is no machine that is
+// both: the owner's policy said "only where k=a" and the agent said "only where
+// k=b". Silently preferring either side would run the work somewhere the other
+// excluded, so the conflict is reported rather than resolved.
+//
+// It returns a flag rather than writing an unmatchable sentinel value into the
+// map. A sentinel has to be a string no real label can equal, which is a
+// property nothing enforces -- and it would then be RENDERED, into the
+// no_worker_available message a person reads and into the invocation's routing
+// record. The conflicting keys come back so both can be named.
+func unionLabels(a, b map[string]string) (merged map[string]string, conflicts []string) {
 	if len(a) == 0 && len(b) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]string, len(a)+len(b))
 	for k, v := range a {
@@ -457,14 +482,13 @@ func unionLabels(a, b map[string]string) map[string]string {
 	}
 	for k, v := range b {
 		if existing, ok := out[k]; ok && existing != v {
-			// Two different demands on one key. Keep a sentinel neither side
-			// can match rather than choosing a winner.
-			out[k] = "\x00conflict:" + existing + "|" + v
+			conflicts = append(conflicts, k+"="+existing+" vs "+k+"="+v)
 			continue
 		}
 		out[k] = v
 	}
-	return out
+	sort.Strings(conflicts)
+	return out, conflicts
 }
 
 // formatLabels renders a requirement for an error message or a consent card,
