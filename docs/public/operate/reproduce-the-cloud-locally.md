@@ -65,7 +65,7 @@ only after a deploy.
   browser-trusted `*.memql.localhost` wildcard; `make secrets` issues that pair
   for you (see [Front-door TLS](#front-door-tls) below), but it needs mkcert
   and a root CA on the machine.
-- **certutil (Linux only)** -- `sudo apt-get install -y libnss3-tools`
+- **certutil** -- `sudo apt-get install -y libnss3-tools` on Debian/Ubuntu, `brew install nss` on macOS (Firefox's trust store is NSS on both; Safari and Chrome read the system keychain and need nothing extra). `scripts/install/nss-tools.sh` installs it for you and picks the right package manager.
   (`nss-tools` on Fedora/RHEL, `nss` on Arch). Firefox and Chrome on Linux read
   their own NSS trust store rather than the system one, and mkcert can only
   write it through certutil. Without it mkcert warns and exits 0, so the pair

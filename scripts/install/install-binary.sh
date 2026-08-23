@@ -48,11 +48,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/platform.sh
+source "${SCRIPT_DIR}/../lib/platform.sh"
 
 cap_init "install.binary" "Download, digest-verify and install one pinned tool."
 cap_spec_param_required "tool"    "which pinned tool to install (k3d | kubectl | mkcert)"
 cap_spec_param "dest"    "directory to install into (default: \$HOME/.memql/bin)"
 cap_spec_param "pins"    "path to the pins manifest (default: the committed tool-pins.env)"
+cap_spec_param "platform" "os/arch to resolve the pin for (default: this machine)"
 cap_spec_param "dry-run" "report the plan and write nothing (flag)"
 
 #=============================================================================
@@ -78,18 +81,33 @@ function _pin_lookup() {
     done < "$file"
 }
 
-# _pinned_tools <pins-file> -- the tool names the manifest actually pins,
-# lowercased. The known-tool set is derived from the manifest, never
-# hardcoded here, so adding a tool is a pins regeneration and not a code edit.
+# _pinned_tools <pins-file> [platform-suffix] -- the tool names the manifest
+# pins, lowercased and de-duplicated. The known-tool set is derived from the
+# manifest, never hardcoded here, so adding a tool is a pins regeneration and
+# not a code edit.
+#
+# Keys are platform-qualified since memql#4295 (K3D_DARWIN_ARM64_URL), so the
+# suffix is stripped before the name is reported -- otherwise an unknown-tool
+# message would offer `k3d-darwin-arm64` as something to ask for. With a suffix
+# given, only that platform's tools are listed, which is what the caller wants
+# when the tool is known but this platform has no pin for it.
 function _pinned_tools() {
-    local file="$1" line k out=""
+    local file="$1" suffix="${2:-}" line k name out=""
     while IFS= read -r line; do
         [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
         k="${line%%=*}"
         k="${k//[[:space:]]/}"
-        if [[ "$k" == *_URL ]]; then
-            out+=" $(printf '%s' "${k%_URL}" | tr '[:upper:]_' '[:lower:]-')"
+        [[ "$k" == *_URL ]] || continue
+        name="${k%_URL}"
+        if [[ -n "$suffix" ]]; then
+            [[ "$name" == *"_${suffix}" ]] || continue
+            name="${name%_${suffix}}"
+        else
+            # Strip any trailing <OS>_<ARCH> pair.
+            name="$(printf '%s' "$name" | sed -E 's/_[A-Z0-9]+_[A-Z0-9]+$//')"
         fi
+        name="$(printf '%s' "$name" | tr '[:upper:]_' '[:lower:]-')"
+        [[ " ${out} " == *" ${name} "* ]] || out+=" ${name}"
     done < "$file"
     printf '%s' "${out# }"
 }
@@ -171,10 +189,16 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local tool dest pins dry_run
+    local tool dest pins dry_run platform
     tool="$(cap_param tool "")"
     dest="$(cap_param dest "${HOME:-/root}/.memql/bin")"
     pins="$(cap_param pins "${SCRIPT_DIR}/tool-pins.env")"
+    # `platform` is an override, not a preference: it exists so the pin
+    # resolution for a platform can be exercised from a machine that is not it
+    # (a darwin/arm64 pin, checked on Linux CI). It does NOT cross-install --
+    # a Mac binary written to a Linux box would simply not run -- and the
+    # supported-set check below refuses a platform with no pins either way.
+    platform="$(cap_param platform "$(platform_id)")"
     dry_run="$(cap_flag dry-run)"
     cap_require tool "$tool"
     cap_require dest "$dest"
@@ -183,12 +207,23 @@ function main() {
     if [[ ! -f "$pins" ]]; then
         cap_fail 4 "pins manifest not found at ${pins} -- regenerate it with scripts/install/refresh-tool-pins.sh"
     fi
-    local key version url digest known
-    key="$(printf '%s' "$tool" | tr '[:lower:]-' '[:upper:]_')"
+    if ! platform_supported "$platform"; then
+        cap_fail 3 "unsupported platform ${platform}: the local cluster installer targets $(platform_supported_csv)"
+    fi
+    local key suffix version url digest known
+    suffix="$(platform_pin_suffix "$platform")"
+    key="$(printf '%s' "$tool" | tr '[:lower:]-' '[:upper:]_')_${suffix}"
     url="$(_pin_lookup "$pins" "${key}_URL")"
     if [[ -z "$url" ]]; then
-        known="$(_pinned_tools "$pins")"
-        cap_fail 2 "unknown tool '${tool}' -- ${pins} pins: ${known:-<none>}"
+        # TWO DIFFERENT FAILURES, said differently. A tool nobody pins anywhere
+        # is a typo; a tool pinned for other platforms but not this one is a
+        # missing `refresh-tool-pins.sh` run, and telling an operator "unknown
+        # tool: kubectl" for the second would be actively misleading.
+        if [[ -n "$(_pin_lookup "$pins" "$(printf '%s' "$tool" | tr '[:lower:]-' '[:upper:]_')_$(platform_pin_suffix "${SUPPORTED_PLATFORMS[0]}")_URL")" ]]; then
+            cap_fail 4 "'${tool}' has no pin for ${platform} in ${pins} -- regenerate with scripts/install/refresh-tool-pins.sh"
+        fi
+        known="$(_pinned_tools "$pins" "$suffix")"
+        cap_fail 2 "unknown tool '${tool}' -- ${pins} pins for ${platform}: ${known:-<none>}"
     fi
     version="$(_pin_lookup "$pins" "${key}_VERSION")"
     digest="$(_pin_lookup  "$pins" "${key}_SHA256")"
