@@ -40,7 +40,7 @@ concept accessRequest {
 concept auditEvent {
   occurredAt      datetime!  @description("When the event happened. May lag createdAt by milliseconds because the row is written after the event completes.")
   category        enum("auth", "identity", "authorization", "configuration", "admin", "data")!  @description("Coarse grouping for filtering and retention policy hooks.")
-  action          string!  @description("Machine-readable action enum, lower_snake_case. Examples: login_attempted, login_succeeded, magic_link_issued, magic_link_approved, magic_link_approval_denied, magic_link_completed, magic_link_finish_blocked, magic_link_consumed, magic_link_refused_policy, auth_code_redemption_blocked, session_created, sign_in_notification_sent, sign_in_policy_changed, sign_in_policy_reset_by_admin, shared_mailbox_changed, session_revoked, role_changed, partition_grant_created, registration_mode_changed, jwks_rotated. refresh_succeeded and refresh_token_theft_detected were listed here and are not: nothing in the tree emits either, and the refresh lifecycle is designed separately (the 2026-08-22 backlog brief, sub-project D). An example nothing writes reads as a control that exists.")
+  action          string!  @description("Machine-readable action enum, lower_snake_case. Examples: login_attempted, login_succeeded, magic_link_issued, magic_link_approved, magic_link_approval_denied, magic_link_completed, magic_link_finish_blocked, magic_link_consumed, magic_link_refused_policy, auth_code_redemption_blocked, session_created, sign_in_notification_sent, sign_in_policy_changed, sign_in_policy_reset_by_admin, shared_mailbox_changed, session_revoked, refresh_token_reuse_detected, role_changed, partition_grant_created, registration_mode_changed, jwks_rotated. THIS LOG RECORDS DECISIONS AND SECURITY SIGNALS; routine mechanics live on v1:identity:authActivity (memql#4328). Four actions MOVED there and no longer appear here: session_refreshed, session_refresh_blocked, grace_window_accept, pat_auth_accepted. refresh_succeeded and refresh_token_theft_detected were listed here and are not, because nothing emitted either -- an example nothing writes reads as a control that exists. Their successors are real: the rotation event is session_refreshed on the activity stream, and refresh_token_theft_detected is superseded by refresh_token_reuse_detected, which memql#4329 actually emits. Unlike authActivity.action this stays an unconstrained string: this concept has many writers across the identity service and a closed enum here would refuse a new decision at insert time.")
 
   actorUserId     string  @description("v1:identity:user.id of the actor when authenticated. Empty for anonymous events (login attempts where no session yet exists).")
   actorEmail      string  @description("Email of the actor at the time of the event. Captured here for audit even after the user record is deleted — auditEvent rows are tombstoned, not removed, on user deletion.")
@@ -63,6 +63,62 @@ concept auditEvent {
 
   @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="actorIdentityId", target=identity, direction="outgoing")
+}
+
+/// Routine authentication MECHANICS: refresh-token rotations, the blocked ones, grace-window
+/// acceptances, and PAT-authenticated requests (memql#4328). The high-volume sibling of
+/// v1:identity:auditEvent, split from it so the audit trail stays a log of DECISIONS AND SIGNALS
+/// and is clean by construction rather than by a filter every reader has to remember.
+///
+/// WHY A SECOND CONCEPT. One rotation is one row, and the designed cadence is one rotation per
+/// ~10.5 minutes per open tab. Two defects (memql#4326's skew-blind timer, memql#4327's
+/// per-route probe) turned that into a row every few seconds, and the operator's Audit Trail --
+/// a generic concept walk over auditEvent with no filter of any kind -- became unreadable.
+/// Considered and rejected: a `severity` field plus a server-side filter on the generic browse
+/// walk (new engine, SDK and view-kit machinery, epic #4274), and simply not persisting
+/// rotations (which throws away the one signal showing WHICH DEVICE refreshed WHEN -- exactly
+/// what you need when a refresh token is stolen, and what memql#4329's reuse detection is built
+/// on). Two concepts also let retention differ, and keep a session's whole story one join on
+/// sessionId.
+///
+/// `action` IS A CLOSED ENUM, unlike auditEvent.action. This concept has exactly four writers
+/// and will not grow by convention; a fifth mechanic is a deliberate change to this line and to
+/// the Go constants beside it, checked against each other by
+/// test/dslconformance/identity_audit_enum_contract_test.go.
+///
+/// RETENTION IS REAL HERE. Rows older than MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default
+/// 30) are HARD-DELETED daily by a Go-side job on the identity node
+/// (component/identity/authactivity, memql#4330) -- not counted, as auditEvent's observe-only
+/// sweep does. Reuse detection therefore reaches back exactly that far; the default exceeds both
+/// the 14-day idle timeout and the 30-day refresh TTL, so a token older than the window is dead
+/// on its own account.
+@rowAuthz(owner="actorUserId", clusterOwner)
+@displayCard(primary="action", secondary="clientLabel", tertiary="actorEmail", status="outcome")
+concept authActivity {
+  occurredAt      datetime!  @description("When the mechanic happened. Written by the identity service at the moment it completes, so it is within milliseconds of the row's createdAt -- the retention job leans on that (it prunes on the hypertable's partition key and confirms against this field).")
+  action          enum("session_refreshed", "session_refresh_blocked", "grace_window_accept", "pat_auth_accepted")!  @description("What happened. CLOSED, and each value has exactly one writer: session_refreshed and session_refresh_blocked are refresh.Rotator's two outcomes; grace_window_accept is the Rotator accepting the immediately-previous hash inside its 30s window (a legitimate mid-rotation retry, NEVER reuse -- see memql#4329); pat_auth_accepted is the PAT verifier, once per PAT-authenticated request. Every value here must also be accepted by createAuthActivity, and every value a Go writer emits must be here.")
+
+  sessionId       string  @description("v1:identity:authSession row this concerns. Empty when the presented credential resolved to no session at all -- which is the session_not_found case, and the one a reuse lookup then investigates.")
+
+  actorUserId     string!  @serverSet  @description("v1:identity:user this activity belongs to. THE ROW-AUTHZ OWNER FIELD: stamped from actor.userId by createAuthActivity and never accepted from caller args, which @serverSet turns from a convention into a load-time rejection. The Go writers reach it by running the write under auth.ContextWithUserActor for the user the SESSION resolved to -- the identity service knows whose session it is before the actor envelope does, because /auth/refresh is unauthenticated by construction. Empty when nothing resolved, which leaves the row readable by a cluster owner alone; an unattributable blocked attempt is an operator's row.")
+  actorEmail      string  @description("Email of that user at the time, denormalized so the Trail-equivalent view has an actor column that is not blank. Point-in-time, like auditEvent's.")
+  actorRole       string  @description("Cluster role at the time (owner / admin / developer / writer / reader).")
+  actorIdentityId string  @description("v1:identity:identity the credential belongs to. For pat_auth_accepted this is the PAT row itself, which is what distinguishes one CI credential's traffic from another's.")
+
+  sourceIP        string  @description("IP the request came from. Best-effort, same proxy caveat as auditEvent.sourceIP.")
+  userAgent       string  @description("User-Agent at the time. With sourceIP this is the whole of what a user can be shown about a device that refreshed their session.")
+  clientLabel     string  @description("Best-effort human device label (mirrors authSession.clientLabel) so a person reading their own activity sees 'Safari on macOS' rather than a UA string.")
+
+  outcome         enum("success", "blocked")!  @description("Only two outcomes are reachable here: the mechanic completed, or it was refused. There is no `failure` value -- an internal error on this path returns before any row is written -- and no empty value, because a mechanic with no outcome is not a mechanic.")
+  failureReason   string  @description("Why, when outcome=blocked. The rotator's existing reasons, unchanged: session_not_found, previous_refresh_grace_expired, session_revoked, session_expired_absolute, session_idle_timeout, session_max_age_exceeded.")
+
+  retiredTokenHash string  @description("SHA-256 hex of the refresh token THIS rotation retired. The lookup key memql#4329's reuse detection runs on: a presented token matching no live session but matching a retired hash is a replay, not a stale cookie. Storing it is the same posture as authSession.previousRefreshTokenHash -- a retired token can no longer be used, and a digest cannot be reversed. Indexed by a partial index on this concept (20260823000000_auth_activity_retired_token_hash_idx).")
+
+  detail          object  @description("Action-specific structured payload. Consumers read the keys they know, exactly as with auditEvent.detail.")
+
+  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="actorIdentityId", target=identity, direction="outgoing")
+  @relationship(type="references", as="concerns", field="sessionId", target=authSession, direction="outgoing")
 }
 
 /// One-time OAuth authorization code, RFC 6749 §4.1 style. Minted at /auth/magic-link/consume when
@@ -179,7 +235,7 @@ concept authSession {
   previousRefreshTokenHash string  @description("SHA-256 hex digest of the IMMEDIATELY-PREVIOUS refresh token, kept valid for a short grace window after rotation. Handles the 'client hard-refreshed mid-rotation' case: the server completed the rotation and stored the new hash, but the browser aborted before receiving the Set-Cookie response, so the browser still holds the old token. Within the grace window (see previousRotatedAt) the rotator accepts presentation of this hash and re-issues a fresh pair. Outside the window the field is treated as expired bookkeeping.")
   previousRotatedAt datetime  @description("Wall-clock timestamp at which previousRefreshTokenHash was the current hash. Combined with the rotator's grace-window constant (~30s) to decide whether the previous hash is still acceptable. Past the window, presenting the previous hash returns 401 like any other stale token.")
   revokedAt       datetime  @description("Set when the user revokes the session. Non-nil = middleware rejects the bearer token.")
-  revokedReason   enum("user_action", "all_sessions", "admin", "")  @default("")  @description("Why the session was revoked. user_action = the per-device sign-out. all_sessions = the cross-device revoke. admin = staff-initiated.")
+  revokedReason   enum("user_action", "all_sessions", "admin", "reuse_detected", "")  @default("")  @description("Why the session was revoked. user_action = the per-device sign-out. all_sessions = the cross-device revoke. admin = staff-initiated. reuse_detected = a refresh token this session had already RETIRED was presented again (memql#4329); the rotator revokes the whole session, writes refresh_token_reuse_detected to v1:identity:auditEvent and notifies the user. It is the one value no human chose -- and the one that means the credential is believed to be in someone else's hands.")
 
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
   @relationship(type="parent", field="identityId", target=identity, direction="outgoing")

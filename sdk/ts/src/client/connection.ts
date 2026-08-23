@@ -38,6 +38,13 @@ export interface ConnectionAuth {
   // timer + rotateAuth round-trip (#1110); consumers no longer reimplement
   // it. Guest/worker tokens don't carry an exp and are never auto-rotated.
   onTokenExpired?: () => Promise<string | null>;
+  // Lower bound on the auto-rotation timer, in milliseconds. Defaults to
+  // DEFAULT_ROTATE_FLOOR_MS (30s). The floor is what stops a pathological
+  // schedule -- a clock-skewed browser, or a token whose whole lifetime is
+  // shorter than a round trip -- from rotating at network speed (memql#4326).
+  // Lower it only in a harness driving deliberately short-lived tokens;
+  // lowering it in a browser re-opens the storm this floor exists to close.
+  rotateFloorMs?: number;
   // Legacy transport opt-in (#2524). When true, `bearer` / `guestToken` are
   // stamped onto the dial URL as the deprecated `?bearer_token=` /
   // `?guest_token=` query params instead of riding the WebSocket subprotocol
@@ -101,6 +108,9 @@ export class Connection {
   // (guest/worker token, no onTokenExpired hook, or a bearer with no exp).
   private rotateTimer: ReturnType<typeof setTimeout> | null = null;
   private currentBearer: string | undefined;
+  // When the current bearer ARRIVED, by this machine's clock. The rotation
+  // schedule is measured from here (memql#4326).
+  private bearerReceivedAtMs = 0;
 
   private constructor(socket: WebSocket, opts: ConnectOptions) {
     this.socket = socket;
@@ -194,12 +204,32 @@ export class Connection {
     this.clearRotateTimer();
     if (this.closed) return; // never arm a timer on a closed connection
     this.currentBearer = bearer;
-    const exp = decodeJwtExp(bearer);
-    if (exp == null) return; // no exp -> nothing to schedule against (skip)
-    const delay = computeRotateDelayMs(exp, Date.now());
+    // RECEIPT TIME, stamped here and nowhere else. Every later arithmetic is
+    // measured from it, so the browser's clock only ever measures ELAPSED
+    // time against itself and never gets compared with the server's.
+    this.bearerReceivedAtMs = Date.now();
+    const lifetime = decodeJwtLifetime(bearer);
+    if (lifetime == null) return; // no exp -> nothing to schedule against (skip)
+    const delay = computeRotateDelayMs(
+      lifetime,
+      this.bearerReceivedAtMs,
+      this.bearerReceivedAtMs,
+      DEFAULT_ROTATE_FRACTION,
+      this.rotateFloorMs(),
+    );
     this.rotateTimer = setTimeout(() => {
       void this.performAutoRotate();
     }, delay);
+  }
+
+  // rotateFloorMs resolves the configured floor, refusing a non-positive or
+  // non-finite override rather than letting it disarm the guard.
+  private rotateFloorMs(): number {
+    const configured = this.auth?.rotateFloorMs;
+    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+      return configured;
+    }
+    return DEFAULT_ROTATE_FLOOR_MS;
   }
 
   // performAutoRotate fetches a fresh bearer via onTokenExpired and rotates it
@@ -237,10 +267,20 @@ export class Connection {
     // Failed to rotate: retry partway through whatever TTL remains, so we get
     // another shot before the bearer actually expires.
     if (retriesLeft > 0 && !this.closed) {
-      const exp = this.currentBearer ? decodeJwtExp(this.currentBearer) : null;
-      const remainingMs = exp != null ? exp * 1000 - Date.now() : 0;
+      const lifetime = this.currentBearer ? decodeJwtLifetime(this.currentBearer) : null;
+      const remainingMs =
+        lifetime != null
+          ? remainingLifetimeMs(lifetime, this.bearerReceivedAtMs, Date.now())
+          : 0;
       if (remainingMs > 0) {
-        const retryDelay = Math.max(1_000, Math.floor(remainingMs / (retriesLeft + 1)));
+        // FLOORED at the same bound as the scheduled rotation (memql#4326).
+        // This used to be a 1s floor, so a refresh outage against a
+        // short-lived token became three requests a second -- the retry path
+        // amplifying the very storm the scheduled path was fixed to stop.
+        const retryDelay = Math.max(
+          this.rotateFloorMs(),
+          Math.floor(remainingMs / (retriesLeft + 1)),
+        );
         this.rotateTimer = setTimeout(() => {
           void this.performAutoRotate(retriesLeft - 1);
         }, retryDelay);
@@ -302,32 +342,100 @@ export class Connection {
   }
 }
 
-// computeRotateDelayMs returns how long to wait before rotating a bearer that
-// expires at `expSeconds` (unix seconds), given `nowMs`. It fires at `fraction`
-// of the remaining TTL (default 70%) so there's headroom to retry before the
-// hard expiry; never negative, and 0 when the token is already past that point.
-export function computeRotateDelayMs(
-  expSeconds: number,
-  nowMs: number,
-  fraction = 0.7,
-): number {
-  const ttlMs = expSeconds * 1000 - nowMs;
-  if (ttlMs <= 0) return 0;
-  return Math.max(0, Math.floor(ttlMs * fraction));
+// DEFAULT_ROTATE_FRACTION is how much of a token's lifetime elapses before the
+// SDK rotates it. 70% leaves headroom for the bounded retries below.
+export const DEFAULT_ROTATE_FRACTION = 0.7;
+
+// DEFAULT_ROTATE_FLOOR_MS is the shortest interval the SDK will ever schedule a
+// rotation at.
+//
+// memql#4326. Without a floor, ANY arithmetic that can produce a small number
+// produces a request loop: the old formula compared the identity service's
+// `exp` against the browser's `Date.now()`, so a browser running ahead by a
+// little under the TTL saw every fresh token as nearly expired and rotated
+// every few seconds, forever -- one refresh-token rotation, and one audit row,
+// per rotation. `exp - iat` removes the skew; the floor is what makes a
+// *pathological token* (a 20-second TTL, a malformed claim) harmless too.
+export const DEFAULT_ROTATE_FLOOR_MS = 30_000;
+
+// JwtLifetime is the pair of claims the rotation schedule is derived from.
+// `iat` is null when the token does not carry a usable one.
+export interface JwtLifetime {
+  iat: number | null; // unix seconds
+  exp: number; // unix seconds
 }
 
-// decodeJwtExp reads the `exp` (unix seconds) claim from a JWT WITHOUT
-// verifying the signature -- it only needs the expiry to schedule rotation.
+// computeRotateDelayMs returns how long to wait before rotating a bearer.
+//
+// THE CLOCKS. `exp` and `iat` are both stamped by the identity service, so
+// their DIFFERENCE is the token's lifetime on the server's clock and carries no
+// skew. `receivedAtMs` and `nowMs` are both this machine's clock, so their
+// difference is elapsed time on the browser's clock and carries no skew either.
+// The formula only ever subtracts same-clock pairs, which is the whole point:
+//
+//     delay = max(floor, fraction * (exp - iat) - (now - receivedAt))
+//
+// A token with no usable `iat` has no server-measured lifetime to work from, so
+// it falls back to the wall-clock reading `exp - now` -- today's arithmetic,
+// skew and all, but still floored, which is what bounds the damage.
+//
+// The result is never below `floorMs`, including for an already-expired token:
+// rotating instantly would not help (the refresh either works in 30s or it does
+// not) and spinning is the failure this floor exists to prevent.
+export function computeRotateDelayMs(
+  lifetime: JwtLifetime,
+  receivedAtMs: number,
+  nowMs: number,
+  fraction = DEFAULT_ROTATE_FRACTION,
+  floorMs = DEFAULT_ROTATE_FLOOR_MS,
+): number {
+  if (lifetime.iat == null) {
+    // No server-measured lifetime: fall back to the wall clock. `nowMs` is the
+    // reference here, so there is no elapsed term to subtract.
+    const ttlMs = lifetime.exp * 1000 - nowMs;
+    return Math.max(floorMs, Math.floor(ttlMs * fraction));
+  }
+  const lifetimeMs = (lifetime.exp - lifetime.iat) * 1000;
+  const targetMs = Math.max(floorMs, lifetimeMs * fraction);
+  const elapsedMs = Math.max(0, nowMs - receivedAtMs);
+  return Math.max(floorMs, Math.floor(targetMs - elapsedMs));
+}
+
+// remainingLifetimeMs answers "how much of this token is left", measured the
+// same skew-free way computeRotateDelayMs schedules against. Used by the retry
+// path to decide whether another attempt can still land before expiry.
+export function remainingLifetimeMs(
+  lifetime: JwtLifetime,
+  receivedAtMs: number,
+  nowMs: number,
+): number {
+  if (lifetime.iat == null) {
+    return lifetime.exp * 1000 - nowMs;
+  }
+  const lifetimeMs = (lifetime.exp - lifetime.iat) * 1000;
+  return lifetimeMs - Math.max(0, nowMs - receivedAtMs);
+}
+
+// decodeJwtLifetime reads the `iat` and `exp` claims from a JWT WITHOUT
+// verifying the signature -- it only needs the lifetime to schedule rotation.
+//
 // Returns null for a non-JWT, an unparseable payload, or a missing/non-numeric
-// exp (callers treat null as "don't auto-rotate this token").
-export function decodeJwtExp(jwt: string): number | null {
+// `exp` (callers treat null as "don't auto-rotate this token"). A missing,
+// non-numeric, or nonsensical `iat` (at or after `exp`) is reported as null
+// ALONGSIDE a usable exp, which selects the wall-clock fallback rather than
+// disabling rotation: a token still has to be rotated even when it declines to
+// say when it was issued.
+export function decodeJwtLifetime(jwt: string): JwtLifetime | null {
   const payload = jwt.split(".")[1];
   if (!payload) return null;
   try {
-    const claims = JSON.parse(base64UrlDecode(payload)) as { exp?: unknown };
-    return typeof claims.exp === "number" && Number.isFinite(claims.exp)
-      ? claims.exp
-      : null;
+    const claims = JSON.parse(base64UrlDecode(payload)) as { exp?: unknown; iat?: unknown };
+    if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) return null;
+    const iat =
+      typeof claims.iat === "number" && Number.isFinite(claims.iat) && claims.iat < claims.exp
+        ? claims.iat
+        : null;
+    return { iat, exp: claims.exp };
   } catch {
     return null;
   }

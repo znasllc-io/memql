@@ -177,3 +177,44 @@ func SystemActorHandlerFunc(next http.HandlerFunc) http.HandlerFunc {
 		wrapped.ServeHTTP(w, r)
 	}
 }
+
+// ContextWithActivityReadActor stamps the identity service's OWN operator
+// identity for an engine-internal read over v1:identity:authActivity
+// (memql#4328 / memql#4329).
+//
+// WHY IT EXISTS AT ALL. authActivity declares
+// @rowAuthz(owner="actorUserId", clusterOwner), so every read of it is ANDed
+// with `(actorUserId==actor.userId)||(actor.isClusterOwner==true)` and an
+// actorless read is REFUSED outright (component/memql/rowauthz_enforce.go,
+// memql#3172 finding 4). The reuse-detection lookup runs on the /auth/refresh
+// path, which is unauthenticated by construction -- it is the request that
+// mints the credential -- so at that moment there is no caller identity, and
+// the question it asks ("did ANY session retire this hash") is precisely one
+// that cannot be caller-scoped.
+//
+// WHY AN IDENTITY RATHER THAN AN ESCAPE HATCH. The alternative would be a
+// read-path bypass in the enforcement layer, which is strictly worse: a bypass
+// is available to every caller that can reach it, whereas an identity is only
+// as powerful as the queries it is used for. component/campaigns/worker.go
+// records the same reasoning for the same choice. Every use of this context is
+// the single @serverOnly construct authActivityByRetiredHash.
+//
+// NOT IDEMPOTENT, unlike ContextWithSystemActor, and that is the point.
+// SystemActorMiddleware has already stamped claims + TokenInfo on every
+// identity HTTP request but NOT an AccessContext, so the idempotent helper
+// short-circuits and leaves actor.isClusterOwner false -- which is the
+// memql#2989 trap, and here it would present as reuse detection silently never
+// finding anything.
+func ContextWithActivityReadActor(ctx context.Context) context.Context {
+	claims := map[string]any{
+		"sub":  SystemActorSubject,
+		"role": "owner",
+		"name": "Identity Service",
+	}
+	ctx = auth.ContextWithClaims(ctx, claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: SystemActorSubject,
+		Role:   auth.RoleOwner,
+	})
+}

@@ -5984,11 +5984,12 @@ QueryClient.prototype.revokeAgentAuthorization = function (this: QueryClient, ar
   return this.executeNamed("revokeAgentAuthorization", buildRevokeAgentAuthorization(args), opts);
 };
 
-/** Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628). */
+/** Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).
+`reuse_detected` is the one value no human chose (memql#4329): the rotator revokes the session itself when a refresh token it had already RETIRED is presented again, because at that point the credential is believed to be in someone else's hands and the legitimate holder's next rotation would be indistinguishable from the attacker's. */
 // Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["revokeAuthSession"] in generated_concepts.ts).
 export interface RevokeAuthSessionArgs {
   sessionId: string;
-  // Enum: user_action | all_sessions | admin
+  // Enum: user_action | all_sessions | admin | reuse_detected
   revokedReason: string;
 }
 

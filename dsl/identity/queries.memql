@@ -1415,6 +1415,89 @@ query accessRequest pendingAccessRequests {
 /// the route (component/identity/admin, requireAdmin). The portal reaches this query directly over
 /// the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be
 /// in the query, which is the only place both callers pass through.
+// v1:identity:authActivity -- the routine-mechanics log (memql#4328)
+// ===================================================================
+//
+// The concept declares @rowAuthz(owner="actorUserId", clusterOwner), so
+// the engine ANDs `(actorUserId==actor.userId)||(actor.isClusterOwner==true)`
+// into every read below whether the author wrote it or not.
+//
+// WHY THE ROLL-UP IS CLUSTER-OWNER-GATED AND NOT requiresOwnerOrAdmin.
+// The composite tier's escape is `isClusterOwner`, which is the `owner`
+// ROLE alone. A read gated requiresOwnerOrAdmin would pass for an admin
+// and then be narrowed by the tier to that admin's OWN rows -- the same
+// confidently-wrong answer dsl/identity/concepts.memql records for
+// searchUsers over a self-scoped tier. So the two reads split by what
+// the tier can actually express: recentAuthActivity is the operator
+// roll-up (cluster owner, every user's rows) and authActivityForSelf is
+// the per-user read (anyone, their own rows). A non-owner admin uses the
+// second one, and sees exactly what it says.
+
+/// Every user's recent authentication mechanics, newest first. THE OPERATOR ROLL-UP: cluster
+/// owner only, because that is the one role the concept's composite tier lets past the
+/// per-user narrowing (see the block above). Optional sessionId narrows to one device's story;
+/// optional actorUserId narrows to one person's.
+@actor
+query authActivity recentAuthActivity {
+  args {
+    sessionId    string
+    actorUserId  string
+  }
+  filter  actor.isClusterOwner==true && when(args.sessionId) { sessionId==args.sessionId } && when(args.actorUserId) { actorUserId==args.actorUserId }
+  sort     "occurredAt", "desc"
+  paginate 50
+  shape   authActivityFull
+}
+
+/// The caller's OWN authentication mechanics, newest first -- which devices refreshed their
+/// session and when. Available to every authenticated user, which is the point of the composite
+/// tier: a person can see the activity on their own account without an operator's help, and
+/// "a device I do not recognise refreshed my session" is the signal they are best placed to spot.
+@actor
+query authActivity authActivityForSelf {
+  args {
+    sessionId  string
+  }
+  filter  actorUserId==actor.userId && when(args.sessionId) { sessionId==args.sessionId }
+  sort     "occurredAt", "desc"
+  paginate 50
+  shape   authActivityFull
+}
+
+/// Look up the rotation that RETIRED a given refresh-token hash. Engine-internal: this is how
+/// memql#4329 tells a replayed token apart from a stale cookie -- a presented token that resolves
+/// to no live session but matches a hash some rotation retired is a replay, and the session is
+/// revoked. @serverOnly, because a client able to ask "was this hash ever retired" holds an oracle
+/// over other people's tokens.
+///
+/// @serverOnly rather than caller-scoped, because there is no caller to scope to: this runs on the
+/// /auth/refresh path, which is UNAUTHENTICATED by construction -- it is the request that mints the
+/// credential -- so at the moment it runs no actor.userId exists. Scoping would also defeat it: the
+/// question is "did ANY session retire this hash", asked precisely because the presenter is not the
+/// person who owns it.
+///
+/// It reads under actor.isClusterOwner==true because its only caller is the identity service
+/// running it under its OWN operator identity (identity.ContextWithActivityReadActor). The
+/// alternative would be a read-path escape hatch in the enforcement layer, which is strictly worse:
+/// a bypass is available to every caller that can reach it, whereas an identity is only as powerful
+/// as the queries it is used for -- the reasoning component/campaigns/worker.go records for the
+/// same choice.
+///
+/// Detection reaches back exactly as far as MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default
+/// 30). The default exceeds both the 14-day idle timeout and the 30-day refresh TTL, so a token
+/// older than the window is already dead on its own account.
+@serverOnly
+@actor
+query authActivity authActivityByRetiredHash {
+  args {
+    retiredTokenHash  string!
+  }
+  filter  actor.isClusterOwner==true && retiredTokenHash==args.retiredTokenHash
+  sort     "occurredAt", "desc"
+  paginate 10
+  shape   authActivityFull
+}
+
 query auditEvent recentAuditEvents {
   args {
     category  string

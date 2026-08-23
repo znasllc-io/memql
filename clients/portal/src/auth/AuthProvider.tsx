@@ -163,6 +163,27 @@ export function AuthProvider({
   // development, and the bootstrap probe is async.
   const generation = useRef(0);
 
+  // ONE bootstrap per cold load (memql#4327).
+  //
+  // The effect below reads `location.pathname`, so it is re-armed on every
+  // in-app navigation. That is correct for the callback-path branch and wrong
+  // for everything after it: the probe is a POST /auth/refresh, and every one
+  // of those is a real refresh-token ROTATION server-side. With the probe on
+  // the route change, clicking three rows in the Audit Trail wrote three rows
+  // in the Audit Trail. memql#4158's reasoning ("a 401 is a normal outcome")
+  // is untouched -- only the frequency changes.
+  //
+  // SETTLED, not STARTED. A `started` flag would break React StrictMode's
+  // development double-mount: the first run is cancelled by its own cleanup
+  // and the second would be skipped, leaving the provider stuck on `loading`
+  // forever. This flips only where a run REACHES a terminal state, so a
+  // cancelled run leaves the next one free to do the work.
+  //
+  // signOut resets it, so a session established in another tab is picked up on
+  // the next navigation. That costs at most one extra request, because the run
+  // it permits settles again.
+  const bootstrapSettled = useRef(false);
+
   const authSourceRef = useRef<IdentityAuthSource | null>(null);
   if (authSourceRef.current === null) {
     authSourceRef.current = createIdentityAuthSource({
@@ -185,8 +206,14 @@ export function AuthProvider({
 
   // ---- bootstrap: read the config, then probe for an existing session -----
   useEffect(() => {
+    if (bootstrapSettled.current) return;
     const mine = ++generation.current;
     let cancelled = false;
+    // settle marks the cold-load bootstrap done. Called at every point the run
+    // reaches a terminal state, and nowhere else.
+    const settle = () => {
+      bootstrapSettled.current = true;
+    };
 
     void (async () => {
       let resolved = configOverride;
@@ -198,6 +225,7 @@ export function AuthProvider({
           configRef.current = UNKNOWN_RUNTIME_CONFIG;
           setStatus("misconfigured");
           setError(err instanceof Error ? err.message : String(err));
+          settle();
           return;
         }
       }
@@ -210,6 +238,7 @@ export function AuthProvider({
         // Auth is off on this cluster. Do not probe for a session that cannot
         // exist, and do not show a sign-in the operator cannot complete.
         setStatus("authDisabled");
+        settle();
         return;
       }
       if (!resolved.identityUrl || !resolved.oauthClientId) {
@@ -219,6 +248,7 @@ export function AuthProvider({
             "or OAuth client id, so the portal cannot sign anyone in. See " +
             "docs/public/operate/portal.md.",
         );
+        settle();
         return;
       }
 
@@ -229,6 +259,11 @@ export function AuthProvider({
       // Stay loading so the socket is opened once, after the exchange.
       if (location.pathname === portalRedirectPath || location.pathname.endsWith("/auth/callback")) {
         setAutoStartAuthorize(false);
+        // Settled: completeSignIn owns the session from here, and it sets the
+        // status itself. Leaving this unsettled would probe on the navigation
+        // AWAY from the callback -- one wasted rotation immediately after a
+        // successful exchange, which is the noise this change removes.
+        settle();
         return;
       }
 
@@ -249,6 +284,7 @@ export function AuthProvider({
       // portal token (memql#4152). A later in-tab Sign out must not.
       setAutoStartAuthorize(!token);
       setStatus(token ? "signedIn" : "signedOut");
+      settle();
     })();
 
     return () => {
@@ -363,6 +399,10 @@ export function AuthProvider({
     authSource.forget();
     setAutoStartAuthorize(false);
     setStatus((current) => (current === "authDisabled" ? current : "signedOut"));
+    // Re-arm the cold-load bootstrap: this tab no longer holds a credential,
+    // so the next navigation may legitimately discover a session established
+    // elsewhere (memql#4327).
+    bootstrapSettled.current = false;
     void endIdentitySession(fetchImpl, configRef.current);
   }, [authSource, fetchImpl]);
 

@@ -52,8 +52,15 @@ describe("bearer auto-rotation across an expiry", () => {
     { timeout: 15_000 },
     async () => {
       const nowSec = Date.now() / 1000;
-      // A 400ms TTL: the SDK rotates at 70% of remaining TTL, so ~280ms.
-      const initialBearer = jwtWithExp(nowSec + 0.4, { sub: "u-1" });
+      // A 400ms lifetime, stamped iat+exp so the SDK reads it off the token's
+      // OWN clock (memql#4326): 70% is ~280ms.
+      //
+      // In production that would be floored to 30s -- a 400ms access token is
+      // exactly the pathological input DEFAULT_ROTATE_FLOOR_MS exists to
+      // refuse. The dial below lowers the floor for this harness, which is
+      // what `rotateFloorMs` is for: the assertion is still that a REAL
+      // rotation crosses a REAL expiry on ONE socket.
+      const initialBearer = jwtWithExp(nowSec + 0.4, { sub: "u-1", iat: nowSec });
       // The rotated token deliberately carries NO exp, so the SDK arms no
       // further timer -- the test asserts one rotation and then stops cleanly
       // instead of racing a second one during teardown.
@@ -84,8 +91,12 @@ describe("bearer auto-rotation across an expiry", () => {
       // Seed the token the authorization-code exchange would have produced.
       source.adopt(initialBearer);
 
-      const auth = await toConnectionAuth(source);
-      expect(auth?.bearer).toBe(initialBearer);
+      const base = await toConnectionAuth(source);
+      expect(base?.bearer).toBe(initialBearer);
+      // 50ms floor: below the ~280ms this token schedules, so the fraction
+      // still decides WHEN, and the floor only stops the test from waiting
+      // the production 30 seconds.
+      const auth = base ? { ...base, rotateFloorMs: 50 } : base;
 
       const sockets: FakeWebSocket[] = [];
       let conn: Connection | undefined;

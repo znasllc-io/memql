@@ -148,6 +148,14 @@ func (s *Server) issueSessionForUser(w http.ResponseWriter, r *http.Request, in 
 		Detail: map[string]any{
 			"clientId": in.ClientId,
 			"source":   source,
+			// THE FIRST REFRESH TOKEN IS MINTED HERE, and until memql#4327
+			// nothing said so. Rotation has its own event (session_refreshed,
+			// on the activity log since memql#4328); the initial mint had
+			// none, so "when was a refresh token for this account created"
+			// could only be answered by knowing that a session_created
+			// implies one. That is exactly the implicit knowledge an audit
+			// log exists to remove.
+			"refreshTokenIssued": true,
 		},
 	})
 

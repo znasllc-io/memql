@@ -551,6 +551,84 @@ mutate accessRequest createAccessRequest {
 //   prevEventHash    (string, optional)  - Reserved hash-chain anchor
 //
 
+// createAuthActivity
+// ==================
+//
+// The single write path for v1:identity:authActivity (memql#4328). Four
+// Go writers reach it through identity.ActivitySink: the rotator's two
+// outcomes, its grace-window acceptance, and the PAT verifier.
+//
+// @serverOnly. Every argument here is an assertion about an
+// authentication that already happened -- which session, which user,
+// which token hash was retired -- and a client-reachable version would
+// let a caller manufacture activity history, including the
+// retiredTokenHash that memql#4329's reuse detection keys on. The
+// authorization that belongs in front of it is "the identity service
+// verified this credential", which no DSL predicate can express.
+//
+// actorUserId IS STAMPED FROM THE ACTOR, not taken from args, and that
+// is not a formality: the concept declares
+// @rowAuthz(owner="actorUserId", clusterOwner), and
+// TestDeclaredOwnerFieldsAreServerStamped hard-fails a declared owner
+// field any mutation writes from caller args (its exemption list is
+// empty and is meant to stay that way). The Go writers therefore run
+// the write under auth.ContextWithUserActor for the user the SESSION
+// resolved to -- the identity service knows whose session it is before
+// the actor envelope does, because /auth/refresh is unauthenticated by
+// construction. Where nothing resolved (session_not_found), the field
+// lands empty and the row is a cluster owner's to read.
+/// Record one routine authentication mechanic on the activity log. The single write path for
+/// v1:identity:authActivity (memql#4328); four Go writers reach it through
+/// identity.ActivitySink -- the rotator's two outcomes, its grace-window acceptance, and the
+/// PAT verifier.
+///
+/// @serverOnly, and caller-scoping is not the alternative. Every argument is an assertion about
+/// an authentication that ALREADY happened: which session, which credential, which token hash
+/// the rotation retired. The check that belongs in front of it is "the identity service verified
+/// this credential", which no filter over actor.userId can express. Scoping it to the caller
+/// would also be wrong in substance: the row's owner is stamped from the actor the WRITER
+/// borrows (the session's user), not from a requesting caller, because /auth/refresh is
+/// unauthenticated by construction and the service knows whose session it is before the actor
+/// envelope does. A client-reachable version would let a caller manufacture activity history --
+/// including retiredTokenHash, the field memql#4329's reuse detection keys on.
+@serverOnly
+@actor
+mutate authActivity createAuthActivity {
+  args {
+    activityId       string!
+    occurredAt       string!
+    action           enum("session_refreshed", "session_refresh_blocked", "grace_window_accept", "pat_auth_accepted")!
+    outcome          enum("success", "blocked")!
+    sessionId        string
+    actorEmail       string
+    actorRole        string
+    actorIdentityId  string
+    sourceIP         string
+    userAgent        string
+    clientLabel      string
+    failureReason    string
+    retiredTokenHash string
+    detail           object
+  }
+  insert {
+    id: args.activityId
+    args.occurredAt
+    args.action
+    args.outcome
+    actorUserId: actor.userId
+    sessionId: args.sessionId ?? ""
+    actorEmail: args.actorEmail ?? ""
+    actorRole: args.actorRole ?? ""
+    actorIdentityId: args.actorIdentityId ?? ""
+    sourceIP: args.sourceIP ?? ""
+    userAgent: args.userAgent ?? ""
+    clientLabel: args.clientLabel ?? ""
+    failureReason: args.failureReason ?? ""
+    retiredTokenHash: args.retiredTokenHash ?? ""
+    detail: args.detail ?? {}
+  }
+}
+
 /// Append a row to the append-only security audit log.
 mutate auditEvent createAuditEvent {
   args {
@@ -1898,7 +1976,7 @@ mutate accessRequest rejectAccessRequest {
 //   tokenHash      (string)            - SHA-256 hex (preserved)
 //   source         (string)            - "bff_exchange" | "oidc_cookie" (preserved)
 //   expiresAt      (string)            - ISO 8601 (preserved)
-//   revokedReason  (string)            - "user_action" | "all_sessions" | "admin"
+//   revokedReason  (string)            - "user_action" | "all_sessions" | "admin" | "reuse_detected"
 //   userId         (string, optional)  - Owning user (preserved across the version bump)
 //
 
@@ -1906,10 +1984,15 @@ mutate accessRequest rejectAccessRequest {
 /// revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and
 /// the rotation bookkeeping inherit from the persisted row instead of being re-supplied
 /// (memql#1628).
+///
+/// `reuse_detected` is the one value no human chose (memql#4329): the rotator revokes the session
+/// itself when a refresh token it had already RETIRED is presented again, because at that point
+/// the credential is believed to be in someone else's hands and the legitimate holder's next
+/// rotation would be indistinguishable from the attacker's.
 mutate authSession revokeAuthSession {
   args {
     sessionId      string!
-    revokedReason  enum("user_action", "all_sessions", "admin")!
+    revokedReason  enum("user_action", "all_sessions", "admin", "reuse_detected")!
   }
   update {
     id: args.sessionId

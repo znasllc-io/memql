@@ -167,15 +167,29 @@ func (v *Verifier) verifyPAT(ctx context.Context, token string) (*Claims, error)
 			"identityId", row.ID, "userId", user.ID, "error", err)
 	}
 
+	// ONE ROW PER REQUEST, so it goes on the activity log (memql#4328).
+	//
+	// This is the highest-volume writer in the identity service: not one row
+	// per session and not one per rotation, but one per authenticated call. A
+	// CI job polling every few seconds put a row in the operator's Audit Trail
+	// every few seconds. The rejections above stay on the audit log -- a
+	// revoked credential or a suspended user being used is a security signal,
+	// which is what a trail is scanned for.
+	//
+	// actorIdentityId names the PAT row itself. Without it every CI
+	// credential's traffic looks the same, and "which token is doing this" is
+	// the question this row exists to answer.
 	v.audit(ctx, identity.AuditEvent{
-		Category:    identity.AuditCategoryAuth,
-		Action:      "pat_auth_accepted",
-		ActorUserId: user.ID,
-		ActorEmail:  user.PrimaryEmail,
-		ActorRole:   user.Role,
-		TargetType:  "identity",
-		TargetId:    row.ID,
-		Outcome:     identity.AuditOutcomeSuccess,
+		Stream:        identity.StreamActivity,
+		Category:      identity.AuditCategoryAuth,
+		Action:        "pat_auth_accepted",
+		ActorUserId:   user.ID,
+		ActorEmail:    user.PrimaryEmail,
+		ActorRole:     user.Role,
+		ActorIdentity: row.ID,
+		TargetType:    "identity",
+		TargetId:      row.ID,
+		Outcome:       identity.AuditOutcomeSuccess,
 	})
 
 	return &Claims{

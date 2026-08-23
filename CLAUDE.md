@@ -1901,7 +1901,7 @@ module drill-in uses instead of a capped client-side walk.
 **Identity** (`dsl/identity/concepts.memql`, loaded by every node -- full model
 in [access-model.md](docs/public/operate/auth/access-model.md)): `user` (the
 person; cluster-wide role owner / admin / developer / writer / reader; prefs),
-`authSession` (per-token, used for revocation), `magiclink`, `auditEvent`,
+`authSession` (per-token, used for revocation), `magiclink`,
 `accessRequest`, `invitation`, `delegation` (agent acting through a user's
 identity, bounded role/scope/lifetime), plus:
 - `identity` -- a credential set owned by a user, a discriminated union keyed
@@ -1909,6 +1909,24 @@ identity, bounded role/scope/lifetime), plus:
   service account, worker token, badge, account token, passkey). The `passkey`
   variant is the only one whose stored material is PUBLIC (a COSE key),
   because possession is proved by a signature rather than a digest match.
+- `auditEvent` / `authActivity` -- TWO logs since memql#4328, and the split is
+  what keeps the portal's Audit Trail readable. `auditEvent` records DECISIONS
+  and security signals (sign-in, session created/revoked, role change,
+  `refresh_token_reuse_detected`); `authActivity` records routine MECHANICS --
+  refresh-token rotations, the blocked ones, grace-window accepts,
+  PAT-authenticated requests -- which are two orders of magnitude more numerous.
+  The Trail is a generic concept walk with no filter, so the split is
+  structural rather than something every reader has to remember.
+  `authActivity.action` is a CLOSED enum of four values, unlike its sibling's;
+  it is the first concept in the tree to declare
+  `@rowAuthz(owner="<field>", clusterOwner)`, which is what lets a person read
+  their OWN activity and a cluster owner read everyone's (a non-owner admin
+  gets `authActivityForSelf` -- the composite's escape is the owner ROLE); and
+  its `retiredTokenHash` is the evidence refresh-token reuse detection keys on
+  (memql#4329). Real retention applies:
+  `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS` (default 30), hard-deleted
+  daily from Go, unlike `auditEvent`'s count-only sweep -- so detection reaches
+  back exactly that far.
 - `enrolmentToken` -- single-use, TTL'd, authorizing exactly one action:
   register a passkey as the named user (memql#3408). What makes a FIRST
   credential obtainable with no mailbox. Mirrors `workerPairingCode` rather

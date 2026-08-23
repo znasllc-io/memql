@@ -7,8 +7,9 @@ import assert from "node:assert/strict";
 
 import {
   Connection,
+  DEFAULT_ROTATE_FLOOR_MS,
   computeRotateDelayMs,
-  decodeJwtExp,
+  decodeJwtLifetime,
 } from "../src/client/connection.js";
 import type { ServerMessage } from "../src/client/wire.js";
 
@@ -32,55 +33,181 @@ function jwtWithExp(expSeconds: number): string {
   return `${b64urlJson({ alg: "none" })}.${b64urlJson({ exp: expSeconds })}.`;
 }
 
+// A token stamped by the SERVER's clock: both claims come from the same clock,
+// which is the whole premise of the skew-proof schedule.
+function jwtWithLifetime(iatSeconds: number, ttlSeconds: number): string {
+  return `${b64urlJson({ alg: "none" })}.${b64urlJson({
+    iat: iatSeconds,
+    exp: iatSeconds + ttlSeconds,
+  })}.`;
+}
+
 // ---------------------------------------------------------------------
-// computeRotateDelayMs
+// computeRotateDelayMs -- scheduled from the token's OWN lifetime
+//
+// memql#4326. The old arithmetic was `0.7 * (exp*1000 - Date.now())`: `exp` is
+// the identity service's clock and `Date.now()` is the browser's, so a browser
+// running ahead saw every fresh token as nearly expired and rotated every few
+// seconds forever. `exp - iat` is stamped by ONE clock, so skew cancels.
 // ---------------------------------------------------------------------
 
-test("computeRotateDelayMs -- fires at 70% of remaining TTL by default", () => {
-  const now = 1_000_000;
-  const exp = now / 1000 + 1000; // 1000s of TTL
-  assert.equal(computeRotateDelayMs(exp, now), 700_000); // 70%
+test("computeRotateDelayMs -- fires at 70% of the token's own lifetime", () => {
+  const iat = 1_700_000_000;
+  // Receipt and now are the same instant: the full 70% is still ahead.
+  const receivedAt = iat * 1000;
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 900 }, receivedAt, receivedAt),
+    630_000,
+  );
+});
+
+test("computeRotateDelayMs -- a browser 14 minutes FAST schedules the same 630s", () => {
+  const iat = 1_700_000_000;
+  const skewMs = 14 * 60 * 1000;
+  const receivedAt = iat * 1000 + skewMs; // the browser's clock at receipt
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 900 }, receivedAt, receivedAt),
+    630_000,
+  );
+});
+
+test("computeRotateDelayMs -- a browser 14 minutes SLOW schedules the same 630s", () => {
+  const iat = 1_700_000_000;
+  const skewMs = 14 * 60 * 1000;
+  const receivedAt = iat * 1000 - skewMs;
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 900 }, receivedAt, receivedAt),
+    630_000,
+  );
+});
+
+test("computeRotateDelayMs -- a 20s token schedules the 30s floor, not 14s", () => {
+  const iat = 1_700_000_000;
+  const receivedAt = iat * 1000;
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 20 }, receivedAt, receivedAt),
+    DEFAULT_ROTATE_FLOOR_MS,
+  );
+});
+
+test("computeRotateDelayMs -- subtracts the time already elapsed since receipt", () => {
+  const iat = 1_700_000_000;
+  const receivedAt = iat * 1000;
+  // 100s after the token arrived, 530s of the 630s target remain.
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 900 }, receivedAt, receivedAt + 100_000),
+    530_000,
+  );
+});
+
+test("computeRotateDelayMs -- an elapsed-past target still waits the floor, never 0", () => {
+  const iat = 1_700_000_000;
+  const receivedAt = iat * 1000;
+  // A token held well past its rotation point must not spin at network speed.
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 900 }, receivedAt, receivedAt + 10_000_000),
+    DEFAULT_ROTATE_FLOOR_MS,
+  );
 });
 
 test("computeRotateDelayMs -- honours a custom fraction", () => {
-  const now = 0;
-  const exp = 100; // 100s TTL
-  assert.equal(computeRotateDelayMs(exp, now, 0.5), 50_000);
+  const iat = 1_000_000;
+  const receivedAt = iat * 1000;
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 1000 }, receivedAt, receivedAt, 0.5),
+    500_000,
+  );
 });
 
-test("computeRotateDelayMs -- already past expiry yields 0 (rotate now)", () => {
-  const now = 5_000_000;
-  const exp = now / 1000 - 10; // expired 10s ago
-  assert.equal(computeRotateDelayMs(exp, now), 0);
+test("computeRotateDelayMs -- no iat falls back to exp - now, still floored", () => {
+  const nowMs = 1_700_000_000_000;
+  const exp = nowMs / 1000 + 900;
+  assert.equal(computeRotateDelayMs({ iat: null, exp }, nowMs, nowMs), 630_000);
+
+  const nearlyExpired = nowMs / 1000 + 10;
+  assert.equal(
+    computeRotateDelayMs({ iat: null, exp: nearlyExpired }, nowMs, nowMs),
+    DEFAULT_ROTATE_FLOOR_MS,
+  );
 });
 
-test("computeRotateDelayMs -- never negative", () => {
-  assert.ok(computeRotateDelayMs(0, 999_999) >= 0);
+test("computeRotateDelayMs -- an expired token waits the floor rather than spinning", () => {
+  const nowMs = 1_700_000_000_000;
+  const exp = nowMs / 1000 - 10; // expired 10s ago
+  assert.equal(computeRotateDelayMs({ iat: null, exp }, nowMs, nowMs), DEFAULT_ROTATE_FLOOR_MS);
+});
+
+test("computeRotateDelayMs -- an explicit floor replaces the default in both directions", () => {
+  const iat = 1_700_000_000;
+  const receivedAt = iat * 1000;
+  // A 20ms lifetime: 70% is 14ms, so the custom 50ms floor is what binds.
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 0.02 }, receivedAt, receivedAt, 0.7, 50),
+    50,
+  );
+  // A 200ms lifetime: 70% is 140ms, above the custom floor, so the fraction
+  // wins -- a lowered floor must not become a fixed interval.
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 0.2 }, receivedAt, receivedAt, 0.7, 50),
+    140,
+  );
+  // And the DEFAULT floor would have swallowed both.
+  assert.equal(
+    computeRotateDelayMs({ iat, exp: iat + 0.2 }, receivedAt, receivedAt),
+    DEFAULT_ROTATE_FLOOR_MS,
+  );
 });
 
 // ---------------------------------------------------------------------
-// decodeJwtExp
+// decodeJwtLifetime
 // ---------------------------------------------------------------------
 
-test("decodeJwtExp -- reads a numeric exp", () => {
-  assert.equal(decodeJwtExp(jwtWithExp(1_700_000_000)), 1_700_000_000);
+test("decodeJwtLifetime -- reads both iat and exp", () => {
+  assert.deepEqual(decodeJwtLifetime(jwtWithLifetime(1_700_000_000, 900)), {
+    iat: 1_700_000_000,
+    exp: 1_700_000_900,
+  });
 });
 
-test("decodeJwtExp -- null for a token with no exp", () => {
-  assert.equal(decodeJwtExp(`${b64urlJson({})}.${b64urlJson({ sub: "u1" })}.`), null);
+test("decodeJwtLifetime -- exp with no iat reports iat null", () => {
+  assert.deepEqual(decodeJwtLifetime(jwtWithExp(1_700_000_000)), {
+    iat: null,
+    exp: 1_700_000_000,
+  });
 });
 
-test("decodeJwtExp -- null for a non-JWT / single segment", () => {
-  assert.equal(decodeJwtExp("not-a-jwt"), null);
-  assert.equal(decodeJwtExp(""), null);
+test("decodeJwtLifetime -- null for a token with no exp", () => {
+  assert.equal(decodeJwtLifetime(`${b64urlJson({})}.${b64urlJson({ sub: "u1" })}.`), null);
 });
 
-test("decodeJwtExp -- null for an unparseable payload", () => {
-  assert.equal(decodeJwtExp("aaa.%%%not-base64-json%%%.bbb"), null);
+test("decodeJwtLifetime -- null for a non-JWT / single segment", () => {
+  assert.equal(decodeJwtLifetime("not-a-jwt"), null);
+  assert.equal(decodeJwtLifetime(""), null);
 });
 
-test("decodeJwtExp -- null when exp is non-numeric", () => {
-  assert.equal(decodeJwtExp(`${b64urlJson({})}.${b64urlJson({ exp: "soon" })}.`), null);
+test("decodeJwtLifetime -- null for an unparseable payload", () => {
+  assert.equal(decodeJwtLifetime("aaa.%%%not-base64-json%%%.bbb"), null);
+});
+
+test("decodeJwtLifetime -- null when exp is non-numeric", () => {
+  assert.equal(decodeJwtLifetime(`${b64urlJson({})}.${b64urlJson({ exp: "soon" })}.`), null);
+});
+
+test("decodeJwtLifetime -- a non-numeric iat degrades to the no-iat fallback", () => {
+  assert.deepEqual(
+    decodeJwtLifetime(`${b64urlJson({})}.${b64urlJson({ iat: "yesterday", exp: 1_700_000_000 })}.`),
+    { iat: null, exp: 1_700_000_000 },
+  );
+});
+
+test("decodeJwtLifetime -- an iat at or after exp degrades to the no-iat fallback", () => {
+  // A non-positive lifetime would make `0.7 * (exp - iat)` zero or negative;
+  // the floor would still catch it, but the claim is nonsense and the
+  // wall-clock fallback is the honest reading.
+  assert.deepEqual(
+    decodeJwtLifetime(`${b64urlJson({})}.${b64urlJson({ iat: 1_700_000_900, exp: 1_700_000_000 })}.`),
+    { iat: null, exp: 1_700_000_000 },
+  );
 });
 
 // ---------------------------------------------------------------------
@@ -167,14 +294,20 @@ async function replyTo(
 // `timeout` bounds the test so a leaked timer can never hang the CI runner;
 // the finally-close clears the post-rotation reschedule timer (which is armed
 // at ~70% of the rotated token's TTL) even if an assertion throws first.
+//
+// `rotateFloorMs` is what keeps this a REAL end-to-end rotation rather than a
+// 30-second test: the production floor (memql#4326) refuses to schedule sooner
+// than 30s, and a 200ms token under it would rotate long after its own expiry.
+// Lowering the floor is the documented opt-out, and this is the case it exists
+// for -- a harness driving a deliberately short-lived token.
 test(
   "Connection auto-rotates in place shortly before the bearer expires (#1110)",
   { timeout: 8000 },
   async () => {
     let socket!: FakeWebSocket;
     const nowSec = Math.floor(Date.now() / 1000);
-    // exp ~200ms out -> computeRotateDelayMs fires at ~140ms.
-    const shortLivedBearer = jwtWithExp(nowSec + 0.2);
+    // A 200ms lifetime -> 70% is 140ms, above the 50ms floor this dial sets.
+    const shortLivedBearer = jwtWithLifetime(nowSec, 0.2);
     // Rotated token is intentionally exp-less so scheduleAutoRotate arms NO
     // further timer after the rotation -- keeps the test free of any lingering
     // handle regardless of timing.
@@ -187,6 +320,7 @@ test(
         endpoint: "wss://test.local/memql/ws",
         auth: {
           bearer: shortLivedBearer,
+          rotateFloorMs: 50,
           onTokenExpired: async () => {
             onTokenExpiredCalls++;
             return rotatedBearer;
@@ -222,6 +356,65 @@ test(
         (f) => (JSON.parse(f) as { rotateAuth?: unknown }).rotateAuth !== undefined,
       );
       assert.ok(sentRotate, "SDK should have sent a rotateAuth frame on the timer");
+    } finally {
+      conn?.close();
+    }
+  },
+);
+
+// The retry path used to spend a full rotation per attempt at a ONE-SECOND
+// floor, so a refresh outage turned into three requests a second. It is the
+// second half of memql#4326 and is bounded by the same floor.
+test(
+  "the retry path never re-fires under the rotation floor (memql#4326)",
+  { timeout: 8000 },
+  async () => {
+    let socket!: FakeWebSocket;
+    const nowSec = Math.floor(Date.now() / 1000);
+    // 200ms lifetime, 50ms floor: the FIRST rotation fires at 140ms. The hook
+    // then fails, and the retry must be scheduled at the 50ms floor rather
+    // than at the ~30ms a third of the remaining TTL would give.
+    const bearer = jwtWithLifetime(nowSec, 0.2);
+
+    const hookCallsAt: number[] = [];
+    let conn: Connection | undefined;
+    try {
+      const dialP = Connection.dial({
+        endpoint: "wss://test.local/memql/ws",
+        auth: {
+          bearer,
+          rotateFloorMs: 50,
+          onTokenExpired: async () => {
+            hookCallsAt.push(Date.now());
+            return null; // never succeeds -> the retry path drives the rest
+          },
+        },
+        webSocketFactory: (url) => {
+          socket = new FakeWebSocket(url);
+          return socket as unknown as WebSocket;
+        },
+      });
+      await replyTo(
+        socket,
+        (m) => m.clientHello !== undefined,
+        (id) =>
+          ({ correlateTo: id, serverHello: { nodeId: "n1", version: "test" } }) as unknown as ServerMessage,
+      );
+      conn = await dialP;
+
+      // Wait for at least two hook calls (the scheduled rotation + one retry).
+      for (let i = 0; i < 3000 && hookCallsAt.length < 2; i++) {
+        await new Promise((r) => setTimeout(r, 1));
+      }
+      assert.ok(
+        hookCallsAt.length >= 2,
+        `expected the retry to fire; saw ${hookCallsAt.length} hook call(s)`,
+      );
+      const gap = hookCallsAt[1]! - hookCallsAt[0]!;
+      assert.ok(
+        gap >= 45,
+        `retry fired ${gap}ms after the first attempt, under the 50ms floor this dial set`,
+      );
     } finally {
       conn?.close();
     }

@@ -662,6 +662,13 @@ describe("reload after exchange (memql#4158)", () => {
       navigate: (url) => navigated.push(url),
     });
     await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());
+
+    // NOT ONE PROBE IN THE WHOLE CALLBACK DOCUMENT (memql#4327). The exchange
+    // owns the session here, and the navigation away from the callback used to
+    // re-arm the bootstrap effect -- a refresh-token rotation fired
+    // immediately after a successful exchange, for a session that had just
+    // been minted. This assertion used to be `>= 2` and was counting it.
+    expect(refreshInits).toHaveLength(0);
     first.unmount();
 
     // Cold remount: new provider, empty in-memory token, same jar.
@@ -674,7 +681,9 @@ describe("reload after exchange (memql#4158)", () => {
     });
     await waitFor(() => expect(screen.getByText("Concepts")).toBeTruthy());
 
-    expect(refreshInits.length).toBeGreaterThanOrEqual(2);
+    // memql#4158's actual claim: the cold remount probes, ONCE, and that one
+    // probe is what restores the session from the host-only refresh cookie.
+    expect(refreshInits).toHaveLength(1);
     expect(exchanged).toBe(true);
     for (const init of refreshInits) {
       expect(init?.credentials).toBe("include");

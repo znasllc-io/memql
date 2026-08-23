@@ -1074,6 +1074,30 @@ func AuditEventsByTargetBuild(args AuditEventsByTargetArgs) string {
 	return b.String()
 }
 
+// AuthActivityForSelf -- The caller's OWN authentication mechanics, newest first -- which devices refreshed their session and when. Available to every authenticated user, which is the point of the composite tier: a person can see the activity on their own account without an operator's help, and "a device I do not recognise refreshed my session" is the signal they are best placed to spot.
+//
+// Bound concept: v1:identity:authActivity (machine-readable: BoundConcepts["authActivityForSelf"] in generated_concepts.go).
+type AuthActivityForSelfArgs struct {
+	SessionId string
+}
+
+// AuthActivityForSelf calls the engine query authActivityForSelf.
+func (qc *QueryClient) AuthActivityForSelf(ctx context.Context, args AuthActivityForSelfArgs) (*Result, error) {
+	call := AuthActivityForSelfBuild(args)
+	return qc.executeNamed(ctx, "authActivityForSelf", call)
+}
+
+func AuthActivityForSelfBuild(args AuthActivityForSelfArgs) string {
+	var b strings.Builder
+	b.WriteString("query authActivityForSelf(")
+	if args.SessionId != "" {
+		b.WriteString("sessionId: ")
+		b.WriteString(quoteMemQL(args.SessionId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AuthCodeByCodeHash -- Returns the auth code whose codeHash matches the argument. Zero or one result.
 //
 // Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["authCodeByCodeHash"] in generated_concepts.go).
@@ -3926,7 +3950,7 @@ func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 	return "query provisionedWorkspaces()"
 }
 
-// RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view. Owner/admin only: the audit trail names who did what to whom across the whole cluster, so an ungated read hands every authenticated caller the cluster's security history. The gate was implicit while the only caller was the identity service's /admin/* routes, which enforce it at the route (component/identity/admin, requireAdmin). The portal reaches this query directly over the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be in the query, which is the only place both callers pass through.
+// RecentAuditEvents wraps the query named "recentAuditEvents".
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.go).
 type RecentAuditEventsArgs struct {
@@ -3945,6 +3969,38 @@ func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 	if args.Category != "" {
 		b.WriteString("category: ")
 		b.WriteString(quoteMemQL(args.Category))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecentAuthActivity -- Every user's recent authentication mechanics, newest first. THE OPERATOR ROLL-UP: cluster owner only, because that is the one role the concept's composite tier lets past the per-user narrowing (see the block above). Optional sessionId narrows to one device's story; optional actorUserId narrows to one person's.
+//
+// Bound concept: v1:identity:authActivity (machine-readable: BoundConcepts["recentAuthActivity"] in generated_concepts.go).
+type RecentAuthActivityArgs struct {
+	SessionId   string
+	ActorUserId string
+}
+
+// RecentAuthActivity calls the engine query recentAuthActivity.
+func (qc *QueryClient) RecentAuthActivity(ctx context.Context, args RecentAuthActivityArgs) (*Result, error) {
+	call := RecentAuthActivityBuild(args)
+	return qc.executeNamed(ctx, "recentAuthActivity", call)
+}
+
+func RecentAuthActivityBuild(args RecentAuthActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query recentAuthActivity(")
+	if args.SessionId != "" {
+		b.WriteString("sessionId: ")
+		b.WriteString(quoteMemQL(args.SessionId))
+	}
+	if args.ActorUserId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("actorUserId: ")
+		b.WriteString(quoteMemQL(args.ActorUserId))
 	}
 	b.WriteString(")")
 	return b.String()

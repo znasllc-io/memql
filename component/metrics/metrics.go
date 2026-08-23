@@ -144,6 +144,12 @@ var (
 		[]string{"concept"},
 	)
 
+	authActivityPruned = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "auth",
+		Name:      "activity_pruned_total",
+		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this at a constant 0 because only the identity node runs the sweep. Rows hard-deleted from v1:identity:authActivity by the daily retention job, past MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default 30). Unlike v1:identity:auditEvent's observe-only sweep, this one really deletes, so the counter measures work done rather than work identified. A steady non-zero rate is NORMAL and is what the job existing looks like. Alert on a FLAT ZERO over more than a day on a cluster that authenticates anyone -- that means the sweep is not running, and the first thing to break is refresh-token REUSE DETECTION, which reaches back exactly as far as this window and degrades silently to \"stale cookie\" when the rows it keys on are neither pruned nor present.",
+	})
 	aiFederationExchanges = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -174,6 +180,7 @@ func init() {
 		identitySigningKeyAgeKnown,
 		identitySigningKeyRotationSupported,
 		subscriptionRowsDenied,
+		authActivityPruned,
 		aiFederationExchanges,
 	)
 	// Explicit zero so the series exists before the first keyset is
@@ -367,6 +374,28 @@ func KeysetFingerprint(kids []string) float64 {
 	}
 	v &= (uint64(1) << 52) - 1 // keep float64-exact
 	return float64(v)
+}
+
+// AuthActivityPruned records rows hard-deleted from v1:identity:authActivity
+// by the retention job (memql#4330).
+//
+// Unlabelled, deliberately. The only dimension worth having would be the
+// concept, and there is exactly one; a per-run or per-batch label would be
+// unbounded cardinality bought for nothing.
+func AuthActivityPruned(n int64) {
+	if n <= 0 {
+		return
+	}
+	authActivityPruned.Add(float64(n))
+}
+
+// AuthActivityPrunedValue returns the current count, for tests.
+func AuthActivityPrunedValue() float64 {
+	var m dto.Metric
+	if err := authActivityPruned.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
 }
 
 // Federation-exchange outcomes (memql#4335). Closed set: an outcome label is
