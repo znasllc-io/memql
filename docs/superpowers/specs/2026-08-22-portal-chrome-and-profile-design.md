@@ -116,7 +116,7 @@ whichever lands first, the other is a one-field merge.
 +-----------------------+------------------------------------------------------+
 | <nav "Portal sections">(«)                                                   |
 |  (JS) Jose Sanz       |   <main>                                             |
-|       znas@znas.io  owner  <- profile row, NavLink to /me                    |
+|       owner@example.com  owner  <- profile row, NavLink to /me               |
 |  > Console            |                                                      |
 |  VIEWS                |                                                      |
 |   People  Agents ...  |                                                      |
