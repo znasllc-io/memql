@@ -80,8 +80,10 @@ func stubArtifactId(sourceRef string) string {
 }
 
 // artifactFullShapeFields lists the fields the REAL artifactFull shape
-// projects (dsl/library/shapes.memql) -- hand-kept in sync; there is no
-// schema introspection available to a Go-level stub. A shaped read must
+// projects (dsl/library/shapes.memql). DERIVED, not hand-copied: TestMain
+// (dsl_fidelity_test.go) parses the actual shape block out of the DSL
+// source once before any test runs, so this list cannot silently drift
+// from the shape it claims to model (memql#4298). A shaped read must
 // return ONLY these keys, never the full underlying row, or the stub
 // cannot catch a Go call site that assumes an UNprojected field survived
 // a shaped read -- which is exactly the shape of the real bug the review
@@ -89,12 +91,7 @@ func stubArtifactId(sourceRef string) string {
 // loadArtifactUnderOwner read them as "" through the shaped
 // libraryArtifactById, and writeArtifactLabels wrote that "" back,
 // permanently destroying machine attribution on the first label change.
-var artifactFullShapeFields = []string{
-	"id", "ownerUserId", "lens", "kind", "source", "sourceConceptRef",
-	"title", "summary", "format", "mimeType", "live", "scope", "labels",
-	"partitionId", "agentId", "producedByPlanId", "producedByWorkerId",
-	"producedByWorkerName", "validationStatus", "updatedAt", "createdAt",
-}
+var artifactFullShapeFields []string
 
 // projectShapeFields models a MemQL shaped read: a FRESH map containing
 // only the given fields' values from row (when present), never the row
@@ -112,19 +109,19 @@ func projectShapeFields(row map[string]any, fields []string) map[string]any {
 }
 
 // artifactEnumValues mirrors createArtifact's enum arg declarations
-// (dsl/library/mutations.memql). lens/kind/source are required(!), so an
-// existing row already carries a valid value for them; format, scope and
-// validationStatus are OPTIONAL, and a real row's stored value is
-// routinely blank -- none of the five promotion automations pass scope,
-// and a record-lens row has no format at all.
-var artifactEnumValues = map[string][]string{
-	"lens":             {"artifact", "record"},
-	"kind":             {"document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source"},
-	"source":           {"uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live"},
-	"format":           {"markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other"},
-	"scope":            {"workspace", "private"},
-	"validationStatus": {"none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded"},
-}
+// (dsl/library/mutations.memql). DERIVED, not hand-copied: TestMain
+// (dsl_fidelity_test.go) parses the actual args block out of the DSL
+// source once before any test runs, so a value added to (or dropped from)
+// a declared enum can never silently go unmodeled here again (memql#4298:
+// this map's hand-maintained "source" entry was missing "user_created" on
+// main -- the exact value the portal's create path writes -- and nothing
+// failed, because no test happened to push that value through the stub).
+// lens/kind/source are required(!), so an existing row already carries a
+// valid value for them; format, scope and validationStatus are OPTIONAL,
+// and a real row's stored value is routinely blank -- none of the five
+// promotion automations pass scope, and a record-lens row has no format
+// at all.
+var artifactEnumValues map[string][]string
 
 // validateCreateArtifactEnums models the one piece of the real engine's
 // arg validation (validateArgsField) this suite needs: a call naming an
