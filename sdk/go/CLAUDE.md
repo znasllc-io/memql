@@ -111,6 +111,9 @@ sdk/go/
   constructs/              Construct-catalog SDK surface -- what a cluster has loaded (memql#3749)
   dslspec/                 DSL spec export SDK surface -- portable JSON form of the authoring surface
   pack/                    Pack-browser SDK surface -- read-only enumeration of a node's .memql tree
+  modules/                 Module-registry SDK surface (epic memql#4183) -- the runtime
+                           inventory of components / integrations / packs / node-type
+                           modules, plus the one write: SetPackEnabled (owner-only)
   voice/                  Push-to-talk transcription
   sense/                  Tokenize / Diagnose / Complete / Hover / SignatureHelp
   worker/                 WorkerService dial + TLS + stream lifecycle

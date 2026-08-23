@@ -21,29 +21,39 @@
 
 ## Quick Start
 
+**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
+
 ```bash
-# --- k3d + ArgoCD (the local run path) ---
-# Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
-make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
-make dev         # inner-loop: rebuild images -> import -> restart pods
-make status      # mesh litmus (unique MEMQL_NODE_ID per pod;
-                 # one shared identity signing keyset)
-make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
-make down        # tear down
+# --- k3d + ArgoCD: the ONLY supported local run path ---
+make up                      # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
+make up SERVERS=2 AGENTS=1   # multi-node (cross-node mesh testing)
+make dev                     # inner-loop: rebuild images -> import -> restart pods
+make dev NODE=bff            # ...one node only (faster)
+make dev PULL_INFRA=1        # ...also refresh infra images (postgres/azurite/livekit)
+make scale N=2               # 2 replicas per Deployment (NAMESPACE= overrides `memql`)
+make status                  # mesh litmus: unique MEMQL_NODE_ID per pod + one shared identity keyset
+make secrets                 # re-seed secrets (idempotent; use after a cluster recreate)
+make up-refresh              # clean slate: nuke + repave (fresh DB), then bring up
+make down                    # tear down (PURGE=1 also removes the kubeconfig context)
 
-# Multi-node mesh testing (2 replicas per Deployment -- cloud parity):
-make up SERVERS=2 AGENTS=1
-make scale N=2
-make status   # verify unique MEMQL_NODE_IDs + shared identity keyset
-
-# Run tests -- `make test`, NOT `go test ./...` (see Testing below)
+# Tests -- see Testing below. A bare `go test ./...` does NOT reach the engine.
 make test
 
-# Build binary (BFF is the default, no tag needed)
+# Build. BFF is the default (no tag needed); the other node types are under
+# Distributed Node Architecture below.
 go build -o bin/memql .
-
-# Build node-type binary (voice, cognition, agent, planner)
 go build -tags voice -o bin/memql-voice .
+
+# Database shell (after `make up`)
+psql postgres://memql:memql_dev@localhost:5432/memql
+
+# Front door: regenerate after changing a role or adding an HTTP route
+make frontdoor                                            # hosts, then paths
+make frontdoor-hosts-check   # gates: fail when a generated front door
+make frontdoor-paths-check   # or path block is stale
+
+# Logs
+kubectl logs -n memql deploy/<node> -f
 ```
 
 ---
@@ -60,145 +70,99 @@ See [Component vs integration vs pack](docs/public/concepts/component-integratio
 `dsl/todos`, `dsl/calendar`, `dsl/campaigns` are **core**. Packs cannot shadow them.
 `memql.RegisterPlugin` is the Go registration primitive. It is not a fourth runtime.
 
-
 ```
 MemQL/
-├── app/               Phased service bootstrap (Go)
-│   ├── app.go         Build() orchestrator + Overrides
-│   ├── config.go      Phase 1: config + auth middleware
-│   ├── database.go    Phase 2: database + concepts
-│   ├── engine.go      Phase 3: engine + bus + automations
-│   ├── integrations.go Phase 4: integration registration
-│   ├── transport.go   Phase 5: gRPC + HTTP + WS endpoints
-│   ├── cluster.go     Phase 6: distributed node bootstrap
-│   └── adapters.go    Engine adapter types
-├── dsl/               Consolidated MemQL DSL tree (every .memql file),
-│   │                  flattened to per-namespace per-construct files
-│   ├── <namespace>/   One directory per namespace (actions, agents,
-│   │   │              authoring, calendar, campaigns, capabilities,
-│   │   │              cluster, cognition, common, data, deployment,
-│   │   │              forge, harness, healing, identity, install,
-│   │   │              integrations, knowledge, library, memql, notes,
-│   │   │              observability, planner, platform, policies,
-│   │   │              portalviews, providers, rbac, router, safety, shopify,
-│   │   │              telephony, todos, workbench, worker)
-│   │   ├── concepts.memql     Concept definitions (schemas)
-│   │   ├── mutations.memql    Mutation functions
-│   │   ├── queries.memql      Query functions
-│   │   ├── specs.memql        Specification predicates
-│   │   ├── shapes.memql       Reusable shape templates
-│   │   ├── builtins.memql     Go-backed executors
-│   │   ├── tools.memql        AI tool definitions
-│   │   ├── prompts.memql      AI prompt schemas (+ prompts/*.tmpl)
-│   │   ├── automations.memql  Event-driven workflows
-│   │   └── ...                (not every namespace carries every construct)
+├── app/               Phased service bootstrap (Go). Build() orchestrator +
+│                      one file per phase: config -> database -> engine ->
+│                      integrations -> transport -> cluster
+├── dsl/               Consolidated MemQL DSL tree, flattened to per-namespace
+│   │                  per-construct files (see DSL Tree Layout below)
+│   ├── <namespace>/   concepts / mutations / queries / specs / shapes /
+│   │                  builtins / tools / prompts / automations .memql
 │   └── _reference/    Per-construct authoring reference skeletons
-│                      (_concept / _shape / _spec / _trait / _agent)
 ├── integrations/      External services + DSL-callable capabilities (Go)
-├── brand/             The product's visual identity, as plain CSS custom
-│                   properties: tokens, the Tailwind v4 @theme bridge, the
-│                   three self-hosted faces, the mark and the favicon. Imported
-│                   by BOTH clients/portal (Vite) and component/identity/web
-│                   (the standalone Tailwind CLI, embedded in the Go binary) --
-│                   they share no package manager, and CSS variables are the
-│                   one format both consume. Never copied: brand_shared_source_test.go
-│                   fails the build on a --memql-* token, an @theme block or an
-│                   @font-face defined outside it (memql#4266)
-├── clients/           Surfaces built ON the platform -- the mirror of
-│   │                  integrations/ (which points outward). One directory per
-│   │                  client; the engine carries exactly one, which is the
-│   │                  worked example the memql-project template copies.
-│   ├── README.md      The convention: what belongs here, and the wiring a
-│   │                  client needs (npm package, Go server, CI lane + bucket,
-│   │                  Dockerfile stage, deploy component)
-│   └── portal/        MemQL Portal -- the platform's graphical operations
-│                      console, the Cockpit's browser sibling. React + TS +
-│                      Vite + Tailwind; served by component/edge as site #1
-├── component/         Core Go components
-│   ├── bus/           Channel-based inter-component communication (Go)
-│   ├── config/        Centralized env var loading (Go)
+├── brand/             Visual identity as plain CSS custom properties. Imported
+│                      by BOTH clients/portal (Vite) and component/identity/web
+│                      (standalone Tailwind CLI) -- they share no package
+│                      manager, and CSS variables are the one format both
+│                      consume. Never copied: brand_shared_source_test.go fails
+│                      the build on a --memql-* token, an @theme block or an
+│                      @font-face defined outside it (memql#4266)
+├── clients/           Surfaces built ON the platform -- the inward-facing
+│   │                  mirror of integrations/. The engine carries exactly one,
+│   │                  the worked example the memql-project template copies
+│   └── portal/        MemQL Portal, served by component/edge as site #1
+├── component/         Core Go components (memql, grpc, events, database,
+│   │                  server, auth, edge, language, ...)
+│   ├── bus/           Channel-based inter-component communication
 │   ├── node/          Distributed node system (identity, peer mesh, bootstrap)
 │   ├── architecture/  Auto-generated architecture model (UML/C4 from source)
 │   ├── observe/       Per-invocation observability runtime (FQN-keyed)
-│   ├── envregistry/   Env-var registry: manifest, boot validation, domain
-│   │                  derivations, legacy aliases, repo-root .env override
-│   │                  (localenv.go). Was `genesis/` until memql#3963; the
-│   │                  sealed-envelope half it shared a directory with is gone
-│   └── ...            (memql, grpc, events, database, server, auth, edge, etc.)
-├── core/              Shared utilities (logger, env, id)
-│   └── dslfs/         MEMQL_DSL_PATH on-disk override / embedded FS picker
-├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate,
-│                      memqllint, frontdoorhosts, frontdoorpaths, admin-preview, etc.)
+│   └── envregistry/   Env-var registry: manifest, boot validation, domain
+│                      derivations, legacy aliases, repo-root .env override
+├── core/              Shared utilities (logger, env, id) + dslfs (the
+│                      MEMQL_DSL_PATH on-disk override / embedded FS picker)
+├── cmd/               CLI tools (healthcheck, memqlfmt, memqlmigrate,
+│                      memqllint, frontdoorhosts, frontdoorpaths, ...)
 ├── deploy/k8s/        GitOps manifests: base + components + per-env overlays
 ├── scripts/           Shell scripts (k3d bring-up, deploy, release, install,
-│                      migrations) + `lib/capability.sh`, the capability runtime
+│                      migrations) + lib/capability.sh, the capability runtime
 ├── docs/              Documentation
 ├── docker/            Dockerfile + db init + nginx assets
 └── .claude/           Claude Code project state. This repo is PUBLIC, so
-    │                   .gitignore ignores `.claude/*` and negates back only
-    │                   what should travel with the project (memql#3344)
-    ├── skills/        Project skills -- tracked
-    ├── commands/      Project slash commands -- tracked
-    ├── agents/        Project subagent definitions -- tracked
-    ├── settings.json  Shared project settings -- tracked
-    ├── settings.local.json   Personal permission overrides -- NEVER tracked
-    ├── epics/ prds/   CCPM working state -- not tracked; the durable record is
-    │                  the GitHub Issues CCPM syncs them to
-    └── worktrees/     Local checkouts -- not tracked
+                       .gitignore ignores `.claude/*` and negates back only
+                       what should travel with the project (memql#3344):
+                       skills/, commands/, agents/, settings.json are tracked;
+                       settings.local.json, epics/, prds/ and worktrees/ are not
 ```
 
 ---
 
 ## Key Directories
 
-| Directory | Purpose | Language | CLAUDE.md |
-|-----------|---------|----------|-----------|
-| `dsl/<ns>/automations.memql` | Event-driven automations | MemQL | — |
-| `dsl/<ns>/queries.memql` | Query functions | MemQL | — |
-| `dsl/<ns>/mutations.memql` | Mutation functions | MemQL | — |
-| `dsl/<ns>/specs.memql` | Specification predicates | MemQL | — |
-| `dsl/<ns>/tools.memql` | AI tool definitions | MemQL | — |
-| `dsl/<ns>/prompts.memql` | AI prompt schemas (+ `prompts/*.tmpl`) | MemQL | — |
-| `dsl/providers/providers.memql` | AI provider configurations | MemQL | — |
-| `dsl/<ns>/shapes.memql` | Reusable shape templates | MemQL | — |
-| `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
-| `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
-| `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps). Plural + first-class, the inward-facing mirror of `integrations/`. The engine carries one inhabitant -- the portal -- as the worked example downstream repos copy | TypeScript | [→](clients/README.md) |
-| `clients/portal/` | MemQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/edge` as site #1 (its own hostname, `bundleRef: file:///app/portal`) | TypeScript | [→](clients/README.md) |
-| `component/` | Core service components | Go | [→](component/CLAUDE.md) |
-| `component/bus/` | Channel-based component communication bus | Go | -- |
-| `component/config/` | Centralized configuration loading | Go | -- |
-| `component/language/` | The MemQL front end: lexer, parser, struct-form rewriter, AST, compiler, and the annotation / spec / clause / pagination registries | Go | [→](component/language/CLAUDE.md) |
-| `component/node/` | Distributed node system (bootstrap, peers, mesh) | Go | [→](component/node/CLAUDE.md) |
-| `docs/` | Documentation | Markdown | [→](docs/CLAUDE.md) |
+Several directories carry their own CLAUDE.md, and it is the first thing to
+read before editing that tree. This is a list, not a rule -- a directory
+without one is normal.
+
+| Directory | Purpose | CLAUDE.md |
+|-----------|---------|-----------|
+| `dsl/<ns>/*.memql` | Automations, queries, mutations, specs, tools, prompts, shapes per namespace | — |
+| `dsl/providers/providers.memql` | AI provider configurations | — |
+| `dsl/policies/policies.memql` | AI provider-selection policies | — |
+| `integrations/` | External service integrations + DSL capabilities (Go) | [→](integrations/CLAUDE.md) |
+| `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps) | [→](clients/README.md) |
+| `clients/portal/` | MemQL Portal -- the graphical ops console, served by `component/edge` as site #1 | [→](clients/README.md) |
+| `component/` | Core service components (Go) | [→](component/CLAUDE.md) |
+| `component/language/` | The MemQL front end: lexer, parser, rewriter, AST, compiler, registries | [→](component/language/CLAUDE.md) |
+| `component/node/` | Distributed node system (bootstrap, peers, mesh) | [→](component/node/CLAUDE.md) |
+| `component/architecture/` | Auto-generated architecture model | [→](component/architecture/CLAUDE.md) |
+| `component/observe/` | Per-invocation observability runtime | [→](component/observe/CLAUDE.md) |
+| `sdk/go/` | Go SDK -- the public client surface | [→](sdk/go/CLAUDE.md) |
+| `docs/` | Documentation | [→](docs/CLAUDE.md) |
 
 ---
 
 ## Documentation
 
-**Start here:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) - Get running in 5 minutes
-
-**Full index:** [GLOSSARY.md](GLOSSARY.md) - Find any documentation
-
-**Tech stack:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md) - Deployment practices
-
-**Operations:**
-- [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
-- [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/envregistry/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
+**Start here:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) — get running in 5 minutes.
+**Full index:** [GLOSSARY.md](GLOSSARY.md) — find any documentation.
 
 **Core concepts:**
 - [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md) -- the three words; intake "plugin" means pack
-- [Architecture](docs/public/concepts/architecture.md)
-- [MemQL Language](docs/public/language/memql.md)
-- [Functions](docs/public/language/functions.md)
-- [Events](docs/public/concepts/events.md)
-- [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical `{concept}:{shortId}` internally vs the BARE-ids client contract at every wire seam (engine bare-ifies on egress, resolves bare args on inbound; clients never compose/parse/compare canonical ids), the `(concept, id)` keying rule, who composes ids, anti-patterns
+- [Architecture](docs/public/concepts/architecture.md) · [Events](docs/public/concepts/events.md) · [Tech stack](docs/public/overview/tech-stack.md)
+- [MemQL Language](docs/public/language/memql.md) · [Functions](docs/public/language/functions.md)
 - [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
-- [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls.
-- [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (UI takeover, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
+- [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical `{concept}:{shortId}` internally vs the BARE-ids client contract at every wire seam (engine bare-ifies on egress, resolves bare args on inbound; clients never compose/parse/compare canonical ids), the `(concept, id)` keying rule, anti-patterns
+- [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails that make a runaway spend loop structurally impossible. Read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls
+- [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge, put it in a knowledge domain the tool requires, not in the agent prompt template
 
-**Tooling:**
-- **memql-cockpit** -- terminal-native IDE and operations console (display name "MemQL Cockpit"). Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
+**Operations:**
+- [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
+- [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- static topology model + observe runtime + cockpit drill-down
+
+**Tooling:** **memql-cockpit** -- terminal-native IDE and operations console.
+Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that
+repo's CLAUDE.md and Makefile.
 
 ---
 
@@ -206,52 +170,16 @@ MemQL/
 
 ### Development Environment (k3d + ArgoCD)
 
-The k3d + ArgoCD cluster is the local dev topology (memql#2061 /
-E0 -- Argo parity). It mirrors the cloud cluster (AKS + ArgoCD + the
-k8s base in `deploy/k8s/`) so the same manifests and reconciliation
-path run locally and in the cloud. Multi-node is the default (#2067):
-use `make up SERVERS=2 + make scale N=2` for full cross-node
-mesh testing.
+The k3d + ArgoCD cluster is the local dev topology (memql#2061 / E0 -- Argo
+parity) and the ONLY supported local run path. It mirrors the cloud cluster
+(AKS + ArgoCD + the k8s base in `deploy/k8s/`), so the same manifests and
+reconciliation path run locally and in the cloud. Multi-node is the default
+(#2067): use `make up SERVERS=2` + `make scale N=2` for full cross-node mesh
+testing. Commands are in Quick Start above; the full k3d runbook and
+port-forward reference is
+[docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
-**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
-
-```bash
-# Bootstrap (creates cluster + installs ArgoCD + seeds secrets):
-make up                       # single-node default
-make up SERVERS=2 AGENTS=1   # multi-node (for cross-node mesh testing)
-
-# Inner-loop dev (after code change):
-make dev                      # rebuild + import + restart ALL app nodes
-make dev NODE=bff             # single node (faster)
-make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
-
-# Multi-node scaling:
-make scale N=2      # 2 replicas per Deployment
-make status                   # litmus: unique MEMQL_NODE_ID per pod +
-                              #         one shared identity signing keyset
-
-# Secrets (re-seed if changed):
-make secrets
-
-# Tear down:
-make down                     # keep kubeconfig
-make down PURGE=1             # also remove kubeconfig context
-```
-
-See [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md)
-for the full k3d runbook and port-forward reference.
-
-### Building
-```bash
-# Standalone binary (all components)
-go build -o bin/memql .
-
-# Node-type binaries
-go build -tags bff -o bin/memql-bff .
-go build -tags cognition -o bin/memql-cognition .
-go build -tags agent -o bin/memql-agent .
-go build -tags planner -o bin/memql-planner .
-```
+Migrations run automatically on startup.
 
 ### Testing
 
@@ -338,19 +266,13 @@ the engine images, pin those three digests, merge -> ArgoCD reconciles. See
 
 ## Branch Workflow
 
-MemQL uses a single long-lived branch: `main`. Core engine, wire
-protocol, and DSL all live here.
+MemQL uses a single long-lived branch: `main`. Core engine, wire protocol and
+DSL all live here.
 
-**Rules of engagement:**
-
-1. **Every change goes through a branch + PR. `main` refuses direct
-   pushes.** This is enforced by a repository ruleset, not by
-   convention: `gh api repos/znasllc-io/memql/rules/branches/main`
-   returns `pull_request`, `required_status_checks` and `merge_queue`
-   (plus `deletion` and `non_fast_forward`), so `git push origin main`
-   fails with `push declined due to repository rule violations` no
-   matter how small the change. A one-line docs fix needs a PR exactly
-   like a feature does.
+1. **Every change goes through a branch + PR. `main` refuses direct pushes**
+   -- a repository ruleset, not a convention (`pull_request`,
+   `required_status_checks`, `merge_queue`, `deletion`, `non_fast_forward`), so
+   a one-line docs fix needs a PR exactly like a feature does.
 
    Branch, push, open the PR, let CI go green, then **enqueue it**:
 
@@ -358,67 +280,41 @@ protocol, and DSL all live here.
    gh pr merge <n> --repo znasllc-io/memql   # bare: no strategy, no --delete-branch
    ```
 
-   **The bare form is the whole instruction, and both flags you would
-   reach for are wrong.** `--delete-branch` is REFUSED outright --
-   `Cannot use -d or --delete-branch when merge queue enabled` -- because
-   the queue deletes the branch itself. `--merge` is merely ignored with
-   `The merge strategy for main is set by the merge queue`: the queue's
-   `merge_method` is already `MERGE`, so squash merges stay disabled
-   repo-wide and the strategy is not yours to pass.
+   **The bare form is the whole instruction, and both flags you would reach for
+   are wrong.** `--delete-branch` is REFUSED (`Cannot use -d or
+   --delete-branch when merge queue enabled`) because the queue deletes the
+   branch itself. `--merge` is ignored -- the queue's `merge_method` is already
+   `MERGE`, so the strategy is not yours to pass.
 
-   **It ENQUEUES rather than merges, and the wait is by design.** The
-   queue's `min_entries_to_merge_wait_minutes` is 5 and it batches under
-   `grouping_strategy: ALLGREEN`, so a PR sits at `OPEN` with
-   `mergedAt: null` for minutes with nothing wrong. Re-running the
-   command answers `is already queued to merge`, which is the
-   CONFIRMATION it worked rather than an error -- reading it as one and
-   "retrying" is the natural mistake.
+   **It ENQUEUES rather than merges, and the wait is by design.**
+   `min_entries_to_merge_wait_minutes` is 5 and it batches under
+   `grouping_strategy: ALLGREEN`, so a PR sits at `OPEN` with `mergedAt: null`
+   for minutes with nothing wrong. Re-running the command answers `is already
+   queued to merge`, which is CONFIRMATION rather than an error -- reading it
+   as one and "retrying" is the natural mistake.
 
-   **A queued PR can go `DIRTY`, and it will stay there.** When a
-   sibling lands underneath it, `mergeStateStatus` becomes `DIRTY` and
-   does not resolve itself; rebase on `origin/main` and force-push.
-   Worth stating because the failure is silent in a specific way: a
-   watcher looking only for merged / failed / clean cannot see `DIRTY`
-   at all, and its silence is indistinguishable from "still queued".
-2. **Pre-release -- no backwards-compat shims or deprecation windows.**
-   When a contract changes, fix both MemQL and the consumer at once and
-   delete what is no longer needed. Do not add legacy adapters, fallback
-   code paths, or "keep working while we migrate" layers.
-3. **Stage files by explicit path** (`git add <file>`) -- never
-   `git add -A` or `git add .`. The repo owner runs multiple Claude
-   sessions against this working tree and untracked files from another
-   session must not get swept into your commit.
+   **A queued PR can go `DIRTY`, and it will stay there.** When a sibling lands
+   underneath it, `mergeStateStatus` becomes `DIRTY` and does not resolve
+   itself; rebase on `origin/main` and force-push. The failure is silent in a
+   specific way: a watcher looking only for merged / failed / clean cannot see
+   `DIRTY` at all, and its silence is indistinguishable from "still queued".
+2. **Pre-release -- no backwards-compat shims or deprecation windows.** When a
+   contract changes, fix both MemQL and the consumer at once and delete what is
+   no longer needed. No legacy adapters, fallback paths, or "keep working while
+   we migrate" layers.
+3. **Stage files by explicit path** (`git add <file>`) -- never `git add -A` or
+   `git add .`. The repo owner runs multiple Claude sessions against this
+   working tree, and untracked files from another session must not get swept
+   into your commit.
 
-**What triggers a frontend team ping:** if the backend change alters
-a wire contract the frontend depends on (removed/renamed `/si/*`
-endpoints, changed required request fields, new required response
-fields, new gRPC message types the client must handle to get a
-complete response), call it out explicitly in the commit body /
-summary so the repo owner can relay to the frontend team. Backend-
-internal refactors that leave the wire identical -- file moves,
-renamed internal functions, which node owns a handler -- don't need
-frontend coordination.
+**What triggers a frontend team ping:** a change that alters a wire contract
+the frontend depends on (removed/renamed endpoints, changed required request
+fields, new required response fields, new gRPC message types the client must
+handle to get a complete response). Call it out explicitly in the commit body
+so the repo owner can relay it. Backend-internal refactors that leave the wire
+identical -- file moves, renamed internal functions, which node owns a handler
+-- don't need frontend coordination.
 
----
-
-## Common Tasks
-
-| Task | Command | Description |
-|------|---------|-------------|
-| **Bootstrap k3d cluster** | `make up` | Fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy (memql#2061 / Epic 0) |
-| **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
-| **Clean slate (nuke + repave)** | `make up-refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
-| **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod, and that every identity replica publishes the same JWKS keyset (mesh parity check) |
-| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing, in namespace `memql` (`NAMESPACE=` overrides) |
-| **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
-| **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
-| **Run tests** | `make test` | Go tests. NOT `go test ./...` -- that misses the engine's own modules (memql#4032); see Testing |
-| **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
-| **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
-| **Regenerate the front door** | `make frontdoor` | Both generators, in order: hosts, then paths |
-| **Regenerate front-door hosts** | `make frontdoor-hosts` | Re-emit the cloud overlay's `front-door.generated.yaml` from the closed role set (memql#3767). Run after changing a role or the composition rule |
-| **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in every api front door from `component/server`'s path declarations. Run after adding an HTTP route |
-| **Front-door gates** | `make frontdoor-hosts-check` / `make frontdoor-paths-check` | Fail when a generated front door or path block is stale. The path drift catches an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703); the host drift catches a service reachable at a name nothing serves |
 
 ---
 
@@ -456,36 +352,21 @@ and `scripts/identity/build-css.sh` all branch on `darwin`/`linux`.
 **Full tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
 ### System Architecture
+
 ```
-┌─────────────────────────────────────────────────────┐
-│   Front door (TLS 443) -> bff gRPC :50051 (h2c)     │
-│                        -> bff-http :8085 (exceptions)│
-├─────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐   │
-│  │   MemQL      │  │ Automations  │  │ Functions│   │
-│  │   Engine     │◄─┤   System     │◄─┤  System  │   │
-│  └──────┬───────┘  └──────────────┘  └──────────┘   │
-│         │                                            │
-│    ┌────┴────────┐ ┌──────────────┐                  │
-│    │ AI Provider │ │ Integrations │                  │
-│    │  Registry   │ │ (Cognition,  │                  │
-│    │(OpenAI,     │ │  Audio, etc) │                  │
-│    │ Anthropic)  │ └──────────────┘                  │
-│    └────┬────────┘                                   │
-│         │                                            │
-│    ┌────┴────────────────────┐  ┌──────────────┐     │
-│    │  AI gRPC Messages       │  │ MemQL Sense  │     │
-│    │  (MemqlService.Stream): │  │ (Language    │     │
-│    │  AiChatMsg, AiSpeechMsg,│  │ Intelligence)│     │
-│    │  AiTranscribeMsg,       │  │ Tokenize,    │     │
-│    │  AiSuggestMsg (space /  │  │ Complete,    │     │
-│    │  group / agent)         │  │ Diagnose,    │     │
-│    └─────────────────────────┘  │ Hover, Sig.  │     │
-│                                 └──────────────┘     │
-├─────────────────────────────────────────────────────┤
-│          PostgreSQL + TimescaleDB                   │
-│   (time-series memory nodes; PK: (id, createdAt))   │
-└─────────────────────────────────────────────────────┘
+Front door (TLS 443) -> bff gRPC :50051 (h2c)
+                     -> bff-http :8085 (the documented HTTP exceptions)
+   |
+   MemQL Engine  <-  Automations System  <-  Functions System
+   |
+   +-- AI Provider Registry (OpenAI, Anthropic)
+   |     +-- AI gRPC messages on MemqlService.Stream:
+   |         AiChatMsg, AiSpeechMsg, AiTranscribeMsg, AiSuggestMsg
+   +-- Integrations (cognition, audio, ...)
+   +-- MemQL Sense (Tokenize, Complete, Diagnose, Hover, SignatureHelp)
+   |
+   PostgreSQL + TimescaleDB
+   (time-series memory nodes; PK: (id, createdAt))
 ```
 
 ### Distributed Node Architecture (Cluster Mode)
@@ -495,258 +376,178 @@ A tag selects which `app/build_*.go` runs, and therefore which integrations and
 transport layers a node WIRES UP.
 
 **Tags are a wiring mechanism, not a size mechanism.** Every node binary is
-within ~5.5% of every other one (80.4-84.8MB, `CGO_ENABLED=0`, no strip). Two
-structural reasons, both measured in memql#4106: ~32 MiB of every binary is a
-single Go 1.26 stdlib symbol (`crypto/internal/fips140/drbg.memory`), and the
-tag gating stops at `app/` -- `go list -deps` moves only 3-5 of ~116 first-party
-packages per tag, so untagged packages keep the heavy vendor set constant in
-every build (a `planner` binary still links 79 `pion/*` packages via
-`integrations/telephony`). Full numbers + the three offending imports:
+within ~5.5% of every other one: the tag gating stops at `app/`, so untagged
+packages keep the heavy vendor set constant in every build (a `planner` binary
+still links 79 `pion/*` packages via `integrations/telephony`). Never justify a
+build tag by expected binary size -- the measurements are in
 [docs/public/build/build-tags.md](docs/public/build/build-tags.md#binary-size).
-Never justify a build tag by expected binary size:
 
 ```bash
-go build .                       # bff        (~80 MB, default)
-go build -tags voice .           # voice      (CGO_ENABLED=1 required; not measured here)
-go build -tags cognition .       # cognition  (~81 MB)
-go build -tags agent .           # agent      (~82 MB)
-go build -tags planner .         # planner    (~81 MB)
+go build .                       # bff        (default)
+go build -tags voice .           # voice      (CGO_ENABLED=1 required)
+go build -tags cognition .       # cognition
+go build -tags agent .           # agent
+go build -tags planner .         # planner
 go build -tags edge .            # edge       (serves hosted sites + the portal)
 ```
 
-This diagram shows only the mesh/product node types; the complete 9-type
-list (identity, bff, cognition, agent, planner, voice, workbench, mcp, edge)
-is in "The engine is the whole platform" below.
+The nine node types are identity, bff, cognition, agent, planner, voice,
+workbench, mcp, edge. The mesh/product ones:
 
-```
-        ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │   BFF    │ │  Voice   │ │Cognition │ │ Planner  │ │  Agent   │ │   Edge   │
-        │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │
-        └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
-         backend      voice        cognition     planning     task exec    sites +
-         for front.   transport    pipeline       orchestr.    AI work    portal
-```
-
-- **BFF** (default): Backend for frontend, domain-specific API surface
-- **Voice**: Voice transport (audio WS, LiveKit)
-- **Cognition**: Cognition pipeline, Polyphon
-- **Agent**: Task execution, AI work, tool calling
-- **Planner**: Task planning and orchestration
-- **Edge**: Serves this cluster's hosted web surfaces -- every hosted SPA/website
-  and the MemQL Portal itself (site #1, no special path) -- by resolving the
+- **BFF** (default): backend for frontend, domain-specific API surface
+- **Voice**: voice transport (audio WS, LiveKit)
+- **Cognition**: cognition pipeline, Polyphon
+- **Agent**: task execution, AI work, tool calling
+- **Planner**: task planning and orchestration
+- **Edge**: serves this cluster's hosted web surfaces -- every hosted SPA and
+  the MemQL Portal itself (site #1, no special path) -- by resolving the
   request `Host` header to a `v1:platform:site` graph row (epic memql#3700)
 
-Nodes discover each other via mesh. All nodes share a single
-PostgreSQL + TimescaleDB database. Inter-node communication uses `NodeService` gRPC
-bidirectional stream. Events bridge across nodes with dedup and TTL.
+Nodes discover each other via mesh and share one PostgreSQL + TimescaleDB
+database. Inter-node communication uses the `NodeService` gRPC bidirectional
+stream; events bridge across nodes with dedup and TTL.
+
+**Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 
 #### Multi-node is the DEFAULT -- design, implement, AND test for cross-node
 
 The cluster (2 replicas per mesh node) is the runtime in the **cloud** and in
-the local **parity cluster**, which is the topology every feature must be
+the local **parity cluster**, and it is the topology every feature must be
 designed and tested against. Never reason about a feature as if it runs in a
-single process.
+single process. The blessed local repro is `make up SERVERS=2` + `make scale
+N=2`; a cloud cluster spends most of its idle life at `make scale N=0`, and
+parking it at one replica instead would make it unable to catch this bug class.
 
-> A cloud cluster spends most of its life scaled to ZERO when idle
-> (`make scale N=0`) -- the saving is the idle time, not the width. Parking it
-> at one replica instead would make it unable to catch the class below, and the
-> money that saves is the fraction of the time it is up at all.
->
-> The local 2-replica parity cluster (`make up SERVERS=2` + `make scale N=2`) is
-> the blessed repro -- it is the topology a developer can iterate against.
-
-This has bitten us repeatedly -- a fix ships
-with green single-node tests and silently breaks in the mesh (e.g.
-realtime `ListTools` proxied bff->agent read `voiceAgentSpaceId` off the
-wrong-node session and failed open to the full 517-tool registry, #1448;
-the voice gate directive had no mesh routing rule, #1412; snapshot peers
-reaped after a bff cutover, #1388).
-
-**When implementing:** any state/context/event that crosses a node
-boundary needs EXPLICIT plumbing -- it does NOT travel implicitly.
-- Session / in-memory state (caches, waiters, fields like
-  `voiceAgentSpaceId`) lives on exactly ONE node. A different node
-  handling a **proxied / forwarded** request (`AiForwardRouter`,
-  `proxySI`, `NodeService` forwards) does NOT see it -- thread it
-  through the message or metadata and resolve it on the receiving side.
+**When implementing:** any state/context/event that crosses a node boundary
+needs EXPLICIT plumbing -- it does NOT travel implicitly.
+- Session / in-memory state (caches, waiters, fields like `voiceAgentSpaceId`)
+  lives on exactly ONE node. A different node handling a **proxied /
+  forwarded** request (`AiForwardRouter`, `proxySI`, `NodeService` forwards)
+  does NOT see it -- thread it through the message or metadata and resolve it
+  on the receiving side.
 - Every cross-node event-bus pub/sub needs a **routing rule**
   (`node.RegisterRoutingRule`) or it silently dies in cluster mode.
-- Before calling a feature done, ask: *which node holds this state, and
-  which node needs it?* If those differ, you have cross-node work to do.
+- Before calling a feature done, ask: *which node holds this state, and which
+  node needs it?* If those differ, you have cross-node work to do.
 
 **When testing:** a green single-node unit test is a FALSE signal for
-cross-node behaviour. Tests MUST exercise the hop -- a handler running on
-a session WITHOUT the originating node's local state, context surviving a
-proxy/forward, an event consumed on a different replica. Add coverage to
-the cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
+cross-node behaviour. Tests MUST exercise the hop -- a handler running on a
+session WITHOUT the originating node's local state, context surviving a
+proxy/forward, an event consumed on a different replica. Add coverage to the
+cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
 (`component/grpc/ai_forward_test.go`); the test should FAIL against
-single-node-assuming code and PASS with the cross-node fix. The blessed
-local repro is the 2-replica parity cluster (`make up SERVERS=2` +
-`make scale N=2`) -- the only topology that reproduces this
-bug class. See
+single-node-assuming code and PASS with the cross-node fix. This has shipped
+green single-node and broken in the mesh repeatedly (#1448, #1412, #1388). See
 [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
-#### Node image source: product-agnostic engine images + runtime DSL delivery (platform consolidation #2472)
+#### Node image source: product-agnostic engine images + runtime DSL delivery (#2472)
 
-**The engine is the whole platform.** Every node type -- identity, bff,
-cognition, agent, planner, voice, workbench, mcp, edge -- ships as a
+**The engine is the whole platform.** Every node type ships as a
 **product-agnostic engine image** from THIS repo's Dockerfile
-(`BUILD_TAGS=<type>`). There are no per-product node images and no
-carrier-built nodes in the common case. Reusable capabilities (chat,
-daily-space, avatar, ...) live in the engine as **generic, DSL-configurable
-features**, never product code.
+(`BUILD_TAGS=<type>`). There are no per-product node images. Reusable
+capabilities (chat, daily-space, avatar, ...) live in the engine as **generic,
+DSL-configurable features**, never product code.
+
+**Product DSL is delivered at runtime, not compiled in.** A product ships its
+DSL as a tiny data-only **bundle image**; the `dsl-bundle` kustomize component
+runs it as an init-container that copies the `.memql` tree into a shared volume
+the node reads at `MEMQL_DSL_PATH`. A "bff" is just a plain engine `bff` node
+fronting a product's bundle -- a deploy concern. A release is
+`{engine version, bundle digest, client digest}`.
 
 **What "never product code" is actually enforced by** -- two narrow guards, not
 a general one, so know their edges (memql#3326):
 
-- `TestEngineIsProductNeutral` (`product_neutrality_test.go`) -- a **banned-names
-  list**. It sweeps every tracked file, path and body, for the specific product
-  names this repo shed. It cannot notice a product arriving under a name nobody
-  thought to ban.
+- `TestEngineIsProductNeutral` (`product_neutrality_test.go`) -- a
+  **banned-names list** of the specific product names this repo shed. It cannot
+  notice a product arriving under a name nobody thought to ban.
 - `TestClientsDirectoryIsAllowlisted` (`clients_allowlist_test.go`) -- an
-  **allowlist of `clients/` inhabitants**. `clients/` is where a client
-  application would land, so it gets structural enforcement: an unlisted
-  directory fails. The engine hosts the platform's own console (the portal); a
-  customer's SPA belongs in a product repo built from the `memql-project`
-  template.
+  **allowlist of `clients/` inhabitants**. An unlisted directory fails.
 
 Everything else -- generic-vs-product Go in `component/`, a product-shaped
 concept in `dsl/` -- rests on review. Write new product-shaped code as a
-DSL-configurable feature or keep it downstream; do not read the guards as
-proof that anything unflagged is neutral.
-
-**Product DSL is delivered at runtime, not compiled in.** A product ships its
-DSL as a tiny data-only **bundle image**; the `dsl-bundle` kustomize component
-(`deploy/k8s/components/dsl-bundle`) runs it as an init-container that copies
-the `.memql` tree into a shared volume the node reads at `MEMQL_DSL_PATH`.
-`dsl.MountRuntimeDomainsFromEnv` (see the `MEMQL_DSL_PATH` section above)
-mounts each product domain via `RegisterTree` at boot, so a plain engine image
-runs any product's DSL with zero compiled-in product code. A "bff" is just a
-plain engine `bff` node fronting a product's bundle -- a deploy concern.
-
-Topology (one product-agnostic engine mesh; a product = a DSL bundle + a
-client; a release = `{engine version, bundle digest, client digest}`):
-
-```
-   product-agnostic engine images (memql, one public repo)
-   identity · bff · cognition · agent · planner · voice · workbench · mcp
-        ▲  mounts the product's DSL bundle at MEMQL_DSL_PATH
-        │  (data-only image → init-container → shared volume)
-   DSL bundle (product)     +     client (SPA)      ← the only per-product artifacts
-```
-
-Genuinely-bespoke product Go (rare) becomes a thin optional `bff/` pack
-module in the product repo. Full rationale:
+DSL-configurable feature or keep it downstream; do not read the guards as proof
+that anything unflagged is neutral. Genuinely-bespoke product Go (rare) becomes
+a thin optional `bff/` pack module in the product repo. Full rationale:
 [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
-
-**Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 
 #### Environment parity -- one topology everywhere (NON-NEGOTIABLE)
 
 The local cluster and a cloud cluster run the **same topology, the same
 deployment process, and the same connection model**. Only **configuration
 values** and **hardware resources** differ -- never the shape of the system.
-FIXED everywhere: the node topology, the GitOps base+overlay+ArgoCD deploy path
-(`make up` locally applies the same manifests ArgoCD applies in the cloud), and
-the client connection (ingress -> TLS -> gRPC -> `bff`, dialed as
-`https://api.<domain>`). ALLOWED to vary (overlay/registry values, not
-architecture): image digests/tags, replicas/resources, domain, DNS source
-(hosts vs real), TLS source (mkcert vs cert-manager), ingress controller
-(traefik vs nginx annotations), secrets source. **Reject in review:**
-port-forward-as-connection, target-specific commands (`run-local`), `if
-env=="local"` branches, or a second way to deploy -- the moment local diverges
-in *shape* it stops proving anything about the cloud. Ask of any change: *is
-this the shape of the system (→ base/component, everywhere) or a value (→
-overlay)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
+
+- FIXED everywhere: the node topology, the GitOps base+overlay+ArgoCD deploy
+  path (`make up` locally applies the same manifests ArgoCD applies in the
+  cloud), and the client connection (ingress -> TLS -> gRPC -> `bff`, dialed as
+  `https://api.<domain>`).
+- ALLOWED to vary (overlay/registry values, not architecture): image
+  digests/tags, replicas/resources, domain, DNS source (hosts vs real), TLS
+  source (mkcert vs cert-manager), ingress controller (traefik vs nginx
+  annotations), secrets source.
+- **Reject in review:** port-forward-as-connection, target-specific commands
+  (`run-local`), `if env=="local"` branches, or a second way to deploy.
+
+Ask of any change: *is this the shape of the system (→ base/component,
+everywhere) or a value (→ overlay)?* The standard:
+[docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
 
 **ONE INSTALLATION SHAPE (epic memql#3943).** MemQL has no
 staging-versus-production dimension. An operator who wants a second environment
-installs a second instance -- its own cluster or at least its own ArgoCD, its
-own domain, its own database. There is one cloud overlay
-(`deploy/k8s/overlays/cloud`), one ArgoCD Application (`memql`), one namespace
-(`memql`), and everything in that overlay is a VALUE over
-`deploy/k8s/base`. This reverses epic memql#3748, which put two environments in
-two namespaces of one cluster and separated their data with a Postgres schema
-search path.
+installs a second instance -- its own domain, its own database. There is one
+cloud overlay (`deploy/k8s/overlays/cloud`), one ArgoCD Application (`memql`),
+one namespace (`memql`), and everything in that overlay is a VALUE over
+`deploy/k8s/base`.
 
-**Therefore: no `if env == "..."` in engine code.** There is no environment for
-a branch to read, and a branch that invented one would be the second way to
-deploy this standard rejects. `TestNoEnvironmentBranchingInEngineCode`
-(`environment_branching_test.go`) fails the build on engine code so much as
-NAMING `prod` / `production` / `staging`, in any form -- comparison, switch case
-or map key -- and its exemption map is now EMPTY, so nothing in the tree is
-excused. `development` / `local` stay outside that gate: they distinguish deploy
-TARGETS (k3d vs AKS), which the design keeps and which carries its own field,
-`provider` (`docker-local` | `azure`).
+**Therefore: no `if env == "..."` in engine code.**
+`TestNoEnvironmentBranchingInEngineCode` (`environment_branching_test.go`) fails
+the build on engine code so much as NAMING `prod` / `production` / `staging`, in
+any form -- comparison, switch case or map key -- and its exemption map is EMPTY.
+`development` / `local` stay outside that gate: they distinguish deploy TARGETS
+(k3d vs AKS), which carry their own field, `provider` (`docker-local` | `azure`).
 
-**Local cluster (cloud parity -- THE blessed local topology, memql#2061 /
-Epic 0).** `make up` brings up k3d + ArgoCD + the local overlay at
-`deploy/k8s/overlays/local` + seeded secrets; `make dev [NODE=<type>]`
-rebuilds an image, imports it into k3d, and rolls the Deployment after
-Go/MemQL source edits; `make down` tears it down. It is the ONLY supported
-local run path -- a single-node stack structurally cannot reproduce the
-resilient-mesh class of bugs. What makes it parity rather than a lookalike:
+**Local cluster (memql#2061 / Epic 0).** `make up` brings up k3d + ArgoCD +
+`deploy/k8s/overlays/local` + seeded secrets; `make dev [NODE=<type>]` rebuilds
+after source edits; `make down` tears it down. It is the ONLY supported local
+run path. What makes it parity rather than a lookalike:
 
-- **Same manifests, same reconciliation as AKS** -- it mirrors the cloud
-  along the **mesh-delivery path** (memql#1212). Scale to 2 replicas per
-  mesh node (bff/cognition/voice/agent/planner/workbench/edge) with
-  `make up SERVERS=2` + `make scale N=2`; each pod carries a unique
+- **Same manifests, same reconciliation as AKS.** Scale to 2 replicas per mesh
+  node with `make up SERVERS=2` + `make scale N=2`; each pod carries a unique
   `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in the cloud.
-- **Clients connect exactly as in the cloud.** The Cockpit and SDKs reach
-  the `api.memql.localhost` traefik front door (TLS on 443 with the mkcert
-  `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC
-  to `svc/bff:50051`) -- the local analog of the cloud nginx ingress.
-  `identity.memql.localhost` works the same way. This is **env parity,
-  non-negotiable**: there is NO local-only port-forward in the connection
-  path (the standard:
-  [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)).
-  Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`,
-  `svc/identity 8085`) remain for low-level debugging only.
-- **The domain is a VALUE, not the shape of the system** (memql#3593).
-  `make up DOMAIN=lab.example.com` serves any domain the operator brings,
-  seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap
-  that every node derives its issuer, CORS origins and OAuth redirect URIs
-  from at boot (`component/envregistry/domain.go`), plus two
-  `kustomize.patches` on the ArgoCD Application for the Ingress hostnames
-  when it differs from the committed default. **No file under `deploy/`
-  names a domain.**
-- **The engine bff is a COMPONENT, not the base.** Engine-only overlays opt
-  into one product-agnostic `bff` via `deploy/k8s/components/engine-bff`
-  (the Cockpit / ops edge, no bundle, #2472 Decision 5), so a product
-  cluster bringing its OWN `bff-<product>` (same engine image + the
-  `dsl-bundle` component mounting its bundle, plus its SPA) never collides
-  with a base-shipped bff. Multiple bffs coexist in the one mesh.
-- **`make status` is the litmus.** Per-pod node ids, plus a check that
-  every identity replica publishes the same JWKS keyset -- divergent
-  keysets fail roughly half of all auth (memql#3400).
+- **Clients connect exactly as in the cloud** -- the `api.memql.localhost`
+  traefik front door (TLS on 443, mkcert wildcard, h2c gRPC to `svc/bff:50051`).
+  There is NO local-only port-forward in the connection path; raw kubectl
+  port-forwards remain for low-level debugging only.
+- **The domain is a VALUE** (memql#3593). `make up DOMAIN=lab.example.com`
+  serves any domain, seeded as the single `MEMQL_DOMAIN` key every node derives
+  its issuer, CORS origins and OAuth redirect URIs from
+  (`component/envregistry/domain.go`). **No file under `deploy/` names a domain.**
+- **The engine bff is a COMPONENT, not the base** --
+  `deploy/k8s/components/engine-bff`, so a product cluster bringing its own
+  `bff-<product>` never collides with a base-shipped bff.
+- **`make status` is the litmus** -- per-pod node ids, plus a check that every
+  identity replica publishes the same JWKS keyset (divergent keysets fail
+  roughly half of all auth, memql#3400).
 
-Reach for the cluster whenever a change can touch cross-node delivery,
-replica fan-out, or node lifecycle. Runbook:
-[docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
+Runbook: [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
 #### Client-tool relay (agent → browser, across nodes)
 
-The MemQL tool registry supports **client-executed tools** (tools whose
-implementation runs in the browser, e.g. UI-drive helpers). In
-single-binary mode the agent's `InvokeClientTool` writes directly to
-the browser's stream and parks on a session-scoped waiter. In cluster
-mode the agent and browser live on different nodes, so the
-`ClientToolCall` envelope needs a cross-node round-trip. MemQL does
-this via the graph event bus:
+The tool registry supports **client-executed tools** (tools whose implementation
+runs in the browser). In single-binary mode the agent's `InvokeClientTool`
+writes directly to the browser's stream and parks on a session-scoped waiter. In
+cluster mode the agent and browser live on different nodes, so the
+`ClientToolCall` envelope needs a cross-node round-trip via the graph event bus:
 
-1. Cognition intercepts `ClientToolCall` in `consumeAgentTurnStream`
-   and inserts a `v1:cognition:client:tool:request` node (via
-   `emitClientToolRequest`).
-2. Browsers subscribed to the space pick the event up, dispatch the
-   tool locally, and insert a matching
-   `v1:cognition:client:tool:response` (via
-   `emitClientToolResponse`).
+1. Cognition intercepts `ClientToolCall` in `consumeAgentTurnStream` and inserts
+   a `v1:cognition:client:tool:request` node (`emitClientToolRequest`).
+2. Browsers subscribed to the space dispatch the tool locally and insert a
+   matching `v1:cognition:client:tool:response` (`emitClientToolResponse`).
 3. Cognition subscribes to those responses, wraps the payload in a
-   `ClientToolResult` envelope, and calls
-   `AgentForwarder.ForwardContinuation` so the agent's
-   service-scoped waiter fires and the parked tool loop returns.
+   `ClientToolResult`, and calls `AgentForwarder.ForwardContinuation` so the
+   agent's service-scoped waiter fires and the parked tool loop returns.
 
-The relay lives in `integrations/cognition/client_tool_relay.go`. A client SPA mounts its consumer bridges (operator client-tool, relay, delegate-takeover) on its main page and rides the same protocol.
+The relay lives in `integrations/cognition/client_tool_relay.go`.
 
 ### Component Bus (Channel-Based Communication)
 
@@ -795,17 +596,19 @@ When adding a new endpoint or capability to MemQL, apply this decision tree:
 
 ### Allowed HTTP Exceptions
 
-These endpoints **must** remain HTTP due to external protocol requirements:
+These endpoints **must** remain HTTP because an external protocol requires it.
+Each was approved individually; the shared reason is that the other party
+dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against. `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP. The three magic-link routes added by memql#4302 are the same category, and the owner approved them explicitly (design D8): `POST /auth/landing` is the browser form post that a GET used to do -- a GET now renders and never changes state, so mail scanners stop burning links; `GET /auth/magic-link/status` is the requesting tab's poll, gated on the `memql_ml` binding cookie and 404 to anyone without it; `POST /auth/magic-link/finish` is that tab completing its own sign-in, which has to be a real form POST because the reply is a 303 the tab must NAVIGATE (a fetch would follow it and strand the auth code). All three are declared on the identity server's own route table, not `component/server`'s, so the bff front-door path generator is untouched |
-| **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
-| **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
-| **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
-| **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | The reasoning already recorded above for `/spaces/{id}/attachments`: multipart bundles map poorly to gRPC (memql#3713, explicit owner approval on the issue). A CI job publishing a built site hands over an arbitrary, variable-shaped tree of files -- unknown paths, unknown count, mixed binary content types -- which is exactly the shape multipart form-data exists to carry and exactly the shape a fixed protobuf message schema does not. Every CI toolchain already knows how to POST a multipart body; none carries a MemQL gRPC client. `component/edge.Publisher` is what makes the deploy atomic once the bytes arrive: the whole bundle lands under a new content-addressed version prefix and only then does the site row's `bundleRef` flip, so a failed upload never leaves a half-published site reachable, and rollback is one more row write to bytes that are still there. Authorization is a `class="service_account"` identity-issued JWT (memql#691) the handler verifies itself; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`, for the same reason the inbound receiver is below: that list is consulted by the verifier middleware on every verifier-consuming node, so listing it there would make the route unauthenticated for every bearer instead of pinned to the service-account credential specifically. Served by the bff, never the edge node -- the edge is wildcard-routed by site hostname, so a site-agnostic publish endpoint has no coherent address there |
-| **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
-| **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/{register,login}/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link needs HTTP redirects, browser form posts and JWKS publishing. WebAuthn is a **browser API** -- there is no gRPC form of "the user touched their security key". RFC 8628 device grant is **defined over HTTP**. `GET /enroll` is a page a person opens from a link, arriving before any application code exists to speak a protocol. The three memql#4302 magic-link routes: `POST /auth/landing` is the form post a GET used to do (a GET now renders and never changes state, so mail scanners stop burning links); `/auth/magic-link/status` is the requesting tab's poll, gated on the `memql_ml` cookie and 404 to anyone without it; `POST /auth/magic-link/finish` must be a real form POST because the reply is a 303 the tab must NAVIGATE. All identity routes are declared on the identity server's own route table, not `component/server`'s, so the bff path generator is untouched |
+| **Health check** | `/healthz` | Docker and Kubernetes probes expect HTTP GET |
+| **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browsers need an HTTP upgrade |
+| **File uploads** | `/spaces/{id}/attachments` | Multipart form-data maps poorly to gRPC |
+| **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | Same reasoning as attachments (memql#3713): a CI job hands over an arbitrary tree of files -- unknown paths, count and content types -- which is what multipart exists to carry and a fixed protobuf schema does not. `component/edge.Publisher` makes it atomic: the bundle lands under a content-addressed version prefix and only then does the site row's `bundleRef` flip. Authorization is a `class="service_account"` JWT; declared in `HandlerAuthorizedPaths()`, never `PublicPaths()`. Served by the bff, never the edge (which is wildcard-routed by site hostname) |
+| **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US and will POST to a URL and nothing else (memql#2957). Deny-by-default source allowlist + per-source HMAC; `HandlerAuthorizedPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
+| **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 is a contract with Gmail / Outlook / Yahoo, and without it there is no one-click unsubscribe. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read, with the impersonated identity coming out of the signed payload rather than a parameter. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
 
 ### The front door's HOST set is generated too (memql#3767)
 
@@ -819,100 +622,82 @@ site, not maintained as a list:
 | mcp | `mcp.<domain>` |
 | sites | `portal.<domain>` (site #1, its own exact rule), `*.<domain>`, plus the apex |
 
-**Every host is a SINGLE label under the domain, and that is a ROUTING fact.** An
-Ingress wildcard matches exactly ONE label, so the one `*.<domain>` rule routes
-every present and future site to the edge. **It is NOT a certificate fact
-(memql#4224).** The cloud ClusterIssuer solves HTTP-01 only: ACME cannot issue a
-wildcard over HTTP-01, and ONE wildcard dnsName fails the WHOLE order -- so the
-Certificate that requested `*.<domain>` sat Pending, and once it was hand-edited
-to exact names, the edge Ingress whose `tls.hosts` still said `*.<domain>` made
-ingress-nginx serve its self-signed default for `portal.<domain>`. The
-front-door certificate therefore names EXACT hosts only (`api.`, `identity.`,
-`mcp.`, `portal.`, the apex); every Ingress lists exactly its own exact rule
-hosts under `tls`; and the union of those lists equals the dnsNames
-(`deploy/k8s/overlays/frontdoor_hosts_test.go` gates all three). The wildcard
-RULE stays and has no certificate behind it: a customer site hostname on the
-cloud front door needs its own Certificate and exact-host Ingress until a
-DNS-01 solver exists. The portal carries an exact rule because ingress-nginx
-builds a certificate-bearing server block per RULE host, never per tls host --
-it is the one site whose name exists before any row does. (The host set was
-once the product of role x ENVIRONMENT, with a label that hyphenated into role
-hosts and nested into site hosts; epic memql#3943 removed the environment
-dimension, so the product has one factor left.)
+**Every host is a SINGLE label under the domain, and that is a ROUTING fact.**
+An Ingress wildcard matches exactly ONE label, so the one `*.<domain>` rule
+routes every present and future site to the edge.
+
+**It is NOT a certificate fact (memql#4224).** The cloud ClusterIssuer solves
+HTTP-01 only: ACME cannot issue a wildcard over HTTP-01, and ONE wildcard
+dnsName fails the WHOLE order. So the front-door certificate names EXACT hosts
+only (`api.`, `identity.`, `mcp.`, `portal.`, the apex); every Ingress lists
+exactly its own exact rule hosts under `tls`; and the union of those lists
+equals the dnsNames (`deploy/k8s/overlays/frontdoor_hosts_test.go` gates all
+three). The wildcard RULE stays with no certificate behind it: a customer site
+hostname on the cloud front door needs its own Certificate and exact-host
+Ingress until a DNS-01 solver exists. The portal carries an exact rule because
+ingress-nginx builds a certificate-bearing server block per RULE host, never
+per tls host.
 
 `cmd/frontdoorhosts` writes `front-door.generated.yaml` into each instance
-overlay (`overlays/cloud`, `overlays/cloud-entry`);
-`component/envregistry/domain.go` composes the node's own issuer / CORS origins /
-redirect URIs from the SAME rule through `component/frontdoor`; and
-`component/memql`'s SeedMaterializer seeds the portal site row's hostname from
-it (`frontdoor.PortalHost`). One derivation, three consumers: a second copy of
-the rule would disagree, and the disagreement is an issuer nothing is served at
--- or a certificate naming a host the site row does not carry -- which presents
-as "sign-in is broken" with every manifest looking correct.
+overlay; `component/envregistry/domain.go` composes the node's own issuer /
+CORS origins / redirect URIs from the SAME rule through `component/frontdoor`;
+and `component/memql`'s SeedMaterializer seeds the portal site row's hostname
+from it. One derivation, three consumers -- a second copy would disagree, and
+the disagreement is an issuer nothing is served at, which presents as "sign-in
+is broken" with every manifest looking correct.
 
 Adding a ROLE is a design change, not a configuration change. The LOCAL
-overlay's five front-door files stay hand-authored (traefik, not nginx, and they
-carry the measured priority reasoning from memql#3810), but they are gated
-against the same derivation, so they cannot drift from it. Locally the mkcert
-pair is still a `*.<domain>` + apex wildcard, which is a TLS-source VALUE and
-the one place local is more permissive than the cloud: a site that works over
-https locally is no evidence it has a certificate in the cloud.
-
-Details: [docs/public/operate/front-door.md](docs/public/operate/front-door.md).
+overlay's five front-door files stay hand-authored (traefik, not nginx) but are
+gated against the same derivation. Locally the mkcert pair is still a wildcard,
+which is a TLS-source VALUE and the one place local is more permissive than the
+cloud: **a site that works over https locally is no evidence it has a
+certificate in the cloud.** Details:
+[docs/public/operate/front-door.md](docs/public/operate/front-door.md).
 
 ### How an HTTP path reaches the front door (GENERATED, memql#3703)
 
 Every HTTP path above needs its own Ingress rule, and **that rule list is
-generated, not authored**. An ingress controller's backend protocol is a
-per-**Service** setting, so the bff's gRPC edge (`bff`, :50051, h2c) and its HTTP
-edge (`bff-http`, :8085) are two Services over one Deployment -- and a path with
-no rule falls through to the `/` h2c catch-all. **That is not a 404: it is an
-HTTP/1.1 request handed to an h2c backend, which fails with a protocol error
-naming nothing.** Hand-maintaining the list left `/inbound/{source}` and
-`GET+POST /unsubscribe` -- two of the exceptions in the table above, both dialled
-by third parties -- routed by no overlay in this repository at all.
+generated, not authored** (`cmd/frontdoorpaths`, emitted between the markers in
+`deploy/k8s/overlays/local/api-front-door.yaml`). An ingress controller's
+backend protocol is a per-**Service** setting, so the bff's gRPC edge (`bff`,
+:50051, h2c) and its HTTP edge (`bff-http`, :8085) are two Services over one
+Deployment -- and a path with no rule falls through to the `/` h2c catch-all.
+**That is not a 404: it is an HTTP/1.1 request handed to an h2c backend, which
+fails with a protocol error naming nothing.**
 
-`cmd/frontdoorpaths` emits the block between the markers in
-`deploy/k8s/overlays/local/api-front-door.yaml`. Three things about the
-derivation are load-bearing:
+Three things about the derivation are load-bearing:
 
-- **It is per-ROUTE, not per-authentication-tier.** `server.PublicPaths()` +
+- **It is per-ROUTE, not per-authentication-tier.** `PublicPaths()` +
   `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` answer *who may reach
   this without a bearer*. An **authenticated** HTTP route appears in none of
-  them, which is how `/spaces/` (attachment upload), `/polyphon/room-token` and
-  `/polyphon/status` came to be served by the bff and routed by nothing. The
-  generator unions the aggregates **and** every per-route declaration a
-  bff-tagged build mounts.
-- **It over-approximates for a path the bff does NOT serve.** Paths only the
-  identity node serves (`JWKSPaths()`, `IdentityDiscoveryPaths()`) are kept:
-  adding a rule for a path this backend does not serve costs a 404, while
-  omitting one for a path it does costs a protocol error naming nothing.
-- **That pricing INVERTS for a path the bff does serve, and this is the trap.**
-  There, adding a rule does not cost a 404 -- it makes the endpoint externally
-  reachable, and for anything in `PublicPaths()` (which the verifier bypasses)
-  that means exposure. `/metrics` is the case: it is unauthenticated *because* it
-  is in-cluster-only, and it is mounted on every node type. So there is a fourth
-  classification, `servedButNotExternallyRouted`, for "the bff serves it and it
-  must stay off the public ingress" -- `/metrics` and `/api/concepts*` are in it.
+  them, which is how `/spaces/` and `/polyphon/*` came to be served by the bff
+  and routed by nothing. The generator unions the aggregates **and** every
+  per-route declaration a bff-tagged build mounts.
+- **It over-approximates for a path the bff does NOT serve.** Identity-only
+  paths are kept: a rule for a path this backend does not serve costs a 404,
+  while omitting one for a path it does costs a protocol error naming nothing.
+- **That pricing INVERTS for a path the bff DOES serve, and this is the trap.**
+  There, adding a rule makes the endpoint externally reachable, and for
+  anything in `PublicPaths()` (which the verifier bypasses) that means
+  exposure. `/metrics` is the case: unauthenticated *because* in-cluster-only,
+  and mounted on every node type. Hence a fourth classification,
+  `servedButNotExternallyRouted` (`/metrics`, `/api/concepts*`).
   **"When in doubt, include" applies only to the previous bullet.**
 
-Two gates make it non-recurring. `TestFrontDoorPathsAreNotStale` fails when the
-checked-in block is not what the generator produces
-(`make frontdoor-paths-check`), and `TestEveryServerPathDeclarationIsClassified`
-AST-scans `component/server` for every `func …Paths() []string` /
-`…Routes() []string` and fails when one is classified by none of the generator's
-four maps. **So a new HTTP path DECLARATION either reaches the front door or
-breaks the build.**
+Two gates make it non-recurring: `TestFrontDoorPathsAreNotStale`
+(`make frontdoor-paths-check`) and `TestEveryServerPathDeclarationIsClassified`,
+which AST-scans `component/server` for every `func …Paths() []string` and fails
+when one is classified by none of the four maps. **So a new HTTP path
+DECLARATION either reaches the front door or breaks the build.**
 
-Note the word *declaration*, because the stronger claim is false on the bff: a
-route mounted through `handleRoute` with an inline path literal and no `*Paths()`
-declaration of its own is invisible to the generator, and the boot check that
-would otherwise catch it (`AssertUnauthenticatedSurface`) runs only when the node
-installs **no** verifier (`app/transport.go:265`) -- which the bff does. Declare
-new HTTP routes with a `*Paths()` function; that is what puts them inside the
-gate. Do not hand-edit the block, and do not "simplify" the generator back to the
-three aggregates -- its package comment says why, at length, because both changes
-look like cleanups.
+Note the word *declaration*: a route mounted through `handleRoute` with an
+inline path literal and no `*Paths()` declaration is invisible to the
+generator, and the boot check that would catch it
+(`AssertUnauthenticatedSurface`) runs only when the node installs **no**
+verifier -- which the bff does. **Declare new HTTP routes with a `*Paths()`
+function**; that is what puts them inside the gate. Do not hand-edit the
+generated block, and do not "simplify" the generator back to the three
+aggregates -- both changes look like cleanups.
 
 ### gRPC-Only Endpoints
 
@@ -945,593 +730,366 @@ When implementing new functionality in MemQL:
 ## AI Integration
 
 MemQL centralizes all AI operations through a pluggable provider system:
+unified interfaces (`ChatAIProvider`, `VisionAIProvider`, `TTSAIProvider`,
+`ChatStreamProvider`) over OpenAI (chat, vision, TTS, STT) and Anthropic (chat,
+vision) backends. Provider records live in `dsl/providers/providers.memql`;
+selection is the configured default, or per-request via the `provider`
+parameter.
 
-### Provider System
-- **Multi-provider architecture** - Unified interfaces (`ChatAIProvider`, `VisionAIProvider`, `TTSAIProvider`, `ChatStreamProvider`) with pluggable backends
-- **OpenAI providers** - GPT-4, GPT-5-mini for chat, vision, TTS, and STT
-- **Anthropic providers** - Claude Opus, Sonnet, Haiku for chat and vision
-- **Provider configuration** - MemQL provider records in `dsl/providers/providers.memql`
-- **Provider selection** - Default provider via config, or per-request via `provider` parameter
-- **Anthropic credential** - a static key locally, **workload identity federation** in the cloud (epic memql#4333). The engine presents the pod's projected Kubernetes token and the SDK exchanges it for a one-hour bearer, so no long-lived vendor key is at rest. All four ids or none; a partial config REFUSES BOOT rather than falling back to a key the cutover deletes. Cutover, deny reasons and `memql provider-auth check`: [docs/public/operate/auth/anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md)
+**The Anthropic credential is a static key locally and workload identity
+federation in the cloud** (epic memql#4333). The engine presents the pod's
+projected Kubernetes token and the SDK exchanges it for a one-hour bearer, so
+no long-lived vendor key is at rest. All four ids or none: a partial config
+REFUSES BOOT rather than falling back to a key the cutover deletes. Cutover,
+deny reasons and `memql provider-auth check`:
+[docs/public/operate/auth/anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md).
 
 ### AI Endpoints (gRPC on `MemqlService.Stream`)
-
-All AI operations go through gRPC message types on the single bidirectional
-stream `MemqlService.Stream`:
 
 - `AiChatMsg` / `AiChatResult` / `AiStreamChunk` -- chat completions (streaming + non-streaming)
 - `AiSpeechMsg` / `AiSpeechResult` -- text-to-speech
 - `AiTranscribeMsg` / `AiTranscribeResult` -- speech-to-text (batch)
 - `AiTranscribeStreamStart` / `Chunk` / `End` -> `AiTranscribeStreamDelta` / `Complete` -- real-time streaming transcription
-- `AiSuggestMsg` / `AiSuggestResult` -- carries `domain` ∈ {spaces, spaceTitle, agents, groups, groupDescription, agentCardSummary, spaceCardSummary, groupCardSummary, knowledge}. `spaceTitle` is the lightweight purpose -> title path used by Create Space; `groupDescription` is its mirror (name -> one-line description) used by Create Group. The rich `spaces` / `agents` / `groups` domains return full payloads (description + suggested members + roles). The three `*CardSummary` domains generate the LLM body that lands on the agent / space / group canvas-creation cards. `knowledge` powers the product SPA's knowledge-domain picker.
+- `AiSuggestMsg` / `AiSuggestResult` -- carries `domain` ∈ {spaces, spaceTitle,
+  agents, groups, groupDescription, agentCardSummary, spaceCardSummary,
+  groupCardSummary, knowledge}. The rich `spaces` / `agents` / `groups` domains
+  return full payloads (description + suggested members + roles); `spaceTitle`
+  and `groupDescription` are the lightweight one-line paths used by Create
+  Space / Create Group; the three `*CardSummary` domains generate the LLM body
+  that lands on a canvas-creation card.
 
-Cross-node proxying (BFF -> Voice, BFF -> Agent, etc.) rides
-`AiForwardRequest` / `AiForwardResponse` on `NodeService.Stream`.
-Handlers: `component/grpc/ai_handlers.go`, `ai_transcribe_stream.go`,
-`ai_forward.go`.
-
-### Error Handling
-gRPC handlers emit a short error id via `generateErrorId()` in
-`component/grpc/ai_handlers.go` (format `ERR-{6 hex}`) and log errors
-with context. Error ids are visible in slog JSON output as
-`"errorId":"ERR-..."`.
+Cross-node proxying (BFF -> Voice, BFF -> Agent, ...) rides `AiForwardRequest` /
+`AiForwardResponse` on `NodeService.Stream`. Handlers:
+`component/grpc/{ai_handlers,ai_transcribe_stream,ai_forward}.go`. Handlers emit
+a short error id via `generateErrorId()` (format `ERR-{6 hex}`), visible in slog
+JSON output as `"errorId":"ERR-..."`.
 
 ### Voice + Video Pipeline (Go voice-agent)
 
-The realtime voice + video channel is owned by the **Go voice-agent**
-in [`integrations/voice/agent/`](integrations/voice/agent/), shipped as
-the `voice-agent` subcommand of the `memql-voice` binary
-(`memql-voice voice-agent`; build with `make voice`, CGO_ENABLED=1,
-`-tags voice`). It joins LiveKit rooms as the General Assistant's
-voice + video participant. Specialists are text-only by design (per
-Initiative C); they never publish into the LiveKit room.
+The realtime voice + video channel is owned by the **Go voice-agent** in
+[`integrations/voice/agent/`](integrations/voice/agent/), shipped as the
+`voice-agent` subcommand of the `memql-voice` binary (`make voice`,
+CGO_ENABLED=1, `-tags voice`). It joins LiveKit rooms as the General
+Assistant's voice + video participant. Specialists are text-only by design;
+they never publish into the LiveKit room.
 
 ```
 LiveKit room
    |
-   |  (voice-agent subcommand -- Go, integrations/voice/agent)
-   |
    +-- OpenAI Realtime STT (user audio in)
-   |              |
    |              v
    |        memql gRPC client         (VoiceAgentTurnRequest -> Delta)
-   |              |
    |              v
    |        memql cognition           (BYO conductor + agent tool loop)
-   |              |
    |              v
    +-- OpenAI TTS                     (token-by-token input streaming)
-   |              |
    |              v
    +-- Anam or Simli avatar           (lip-synced video)
 ```
 
-The agent supports two executors selected by `MEMQL_VOICE_EXECUTOR`:
-`realtime` (default -- OpenAI gpt-realtime speech-to-speech) and
-`cascade` (the OpenAI STT -> cognition -> OpenAI TTS path above).
-
-Key files (all under `integrations/voice/agent/`):
-- `config.go` / `bootstrap.go` -- env loading + class="voice_agent"
-  token resolution (`ResolveVoiceAgentToken`).
-- `grpc_client.go` -- speaks memql's `VoiceAgent*` gRPC contract on
-  `MemqlService.Stream`. TurnRequest in, TurnDelta stream out;
-  specialists are dispatched server-side and land in chat via the
-  normal agent path.
-- `cascade.go` / `stt_pipeline.go` / `tts_pipeline.go` /
-  `turntaking.go` -- the STT/TTS cascade + turn-taking / barge-in.
-- `realtime_executor.go` / `realtime_lifecycle.go` /
-  `realtime_budget.go` -- the gpt-realtime executor + guardrails.
-- `persona.go` / `grounding.go` / `instructions.go` -- persona +
-  grounding parity.
-- `avatar_room_voice.go` (`//go:build voice`) -- the LiveKit room/media
-  glue that mints the avatar's join token, forwards the assistant's PCM
-  to the avatar, and handles barge-in. The CGO-free vendor REST/dispatch
-  core it drives lives in the shared `integrations/avatarvendor` package
-  (Anam default or Simli, selected by `MEMQL_AVATAR_VENDOR`; the persona's
-  stamped `avatarVendor` wins over the runtime knob when set), so the
-  direct/Guide avatar capability can reuse it too.
+Two executors, selected by `MEMQL_VOICE_EXECUTOR`: `realtime` (default --
+OpenAI gpt-realtime speech-to-speech) and `cascade` (the STT -> cognition ->
+TTS path above). Key files under `integrations/voice/agent/`: `config.go` /
+`bootstrap.go` (env + `class="voice_agent"` token resolution), `grpc_client.go`
+(the `VoiceAgent*` contract on `MemqlService.Stream`), `cascade.go` /
+`stt_pipeline.go` / `tts_pipeline.go` / `turntaking.go`,
+`realtime_executor.go` / `realtime_lifecycle.go` / `realtime_budget.go`,
+`persona.go` / `grounding.go` / `instructions.go`, and
+`avatar_room_voice.go` (`//go:build voice`) whose CGO-free vendor REST core
+lives in the shared `integrations/avatarvendor` package.
 
 Auth: identity-issued `class="voice_agent"` JWT bearer, pinned to the
 `VoiceAgent*` message surface by
-`component/grpc/voice_agent_stream_interceptor.go`. The voice-agent
-cannot write graph rows directly; memql does that server-side.
+`component/grpc/voice_agent_stream_interceptor.go`. The voice-agent cannot
+write graph rows directly; memql does that server-side. Mint via
+`make voice-agent-token`, or self-bootstrap with `MEMQL_NODE_BOOTSTRAP_TOKEN` +
+`MEMQL_IDENTITY_VERIFIER_BASE_URL` + `MEMQL_VOICE_AGENT_INSTANCE_ID` (see
+`docs/public/operate/auth/voice-agent-jwt.md`).
 
-Env:
-- `MEMQL_GRPC_ADDR` -- the BFF's gRPC address (e.g. `bff:50051`).
-- `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` -- room
-  transport.
-- `MEMQL_OPENAI_API_KEY` -- OpenAI (STT + TTS + realtime); required.
-- `MEMQL_VOICE_EXECUTOR` -- `realtime` (default) or `cascade`.
-- `MEMQL_VOICE_ROOM_NAME` -- room to join (falls back when no
-  `--room` flag is passed).
-- `MEMQL_VOICE_IDLE_TEARDOWN_SECONDS` -- zero-human grace period
-  before a joined session tears down (default 60) so the auto-join
-  dispatcher can't wedge on an empty room (#1378).
-- `MEMQL_VOICE_MAX_ROOMS` -- max rooms a single voice-agent replica
-  serves concurrently in auto-join mode (default 8, #1395). The
-  dispatcher discovers every human-occupied polyphon room with no
-  voice-agent already present and serves each in its own isolated
-  session, so two users in different spaces both get the GA at once;
-  cross-replica double-serve is prevented by skipping rooms that
-  already contain a `-ga` participant.
-- `MEMQL_REALTIME_*` -- realtime executor tuning knobs.
-- `VOICE_AGENT_TOKEN` -- identity-issued `class="voice_agent"` JWT
-  (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
-  (`make voice-agent-token`); or self-bootstrap via
-  `MEMQL_NODE_BOOTSTRAP_TOKEN` + `MEMQL_IDENTITY_VERIFIER_BASE_URL` +
-  `MEMQL_VOICE_AGENT_INSTANCE_ID`. See `docs/public/operate/auth/voice-agent-jwt.md`.
-- `MEMQL_AVATAR_VENDOR` -- `anam` (default) or `simli` or `none`.
-- `MEMQL_ANAM_API_KEY` / `MEMQL_SIMLI_API_KEY` -- vendor keys.
+Env (full list in the runbook): `MEMQL_GRPC_ADDR`, `LIVEKIT_URL` /
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`, `MEMQL_OPENAI_API_KEY` (required),
+`MEMQL_VOICE_EXECUTOR`, `MEMQL_VOICE_ROOM_NAME`,
+`MEMQL_VOICE_IDLE_TEARDOWN_SECONDS` (default 60 -- stops the auto-join
+dispatcher wedging on an empty room, #1378), `MEMQL_VOICE_MAX_ROOMS` (default
+8, #1395 -- the dispatcher serves each human-occupied room in its own isolated
+session; cross-replica double-serve is prevented by skipping rooms that already
+contain a `-ga` participant), `MEMQL_REALTIME_*`, `VOICE_AGENT_TOKEN`,
+`MEMQL_AVATAR_VENDOR` (`anam` default / `simli` / `none`) + the vendor key.
 
-Make targets:
-- `make voice` -- build the `memql-voice` binary (carries the
-  `voice-agent` subcommand).
-- `make voice-agent-token` -- mint a `class="voice_agent"` JWT for the
-  local k3d cluster (execs `/app/memql voice-agent-token mint` in the
-  identity pod via `kubectl exec`).
-
-Deployment: the `voice` Deployment runs the `memql-voice` image (the
-`voice-runtime` CGO stage) with the `voice-agent` subcommand. LOCALLY the
-voice lane uses a **LiveKit Cloud** project (Epic #2184; the local overlay
-removes the self-hosted livekit-server), and the lane is GATED on the
-operator's credentials (memql#2416): without `LIVEKIT_URL` /
-`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` in the environment at `make up` /
-`make secrets`, voice + voice-agent scale to 0 with a loud warning (the
-binaries fail-fast on the missing env by design, so running them without
-creds is a guaranteed crash-loop). Export the creds and re-run
-`make secrets` to enable. The cloud stays self-hosted
+**Deployment gotcha:** LOCALLY the voice lane uses a **LiveKit Cloud** project
+(Epic #2184) and is GATED on the operator's credentials (memql#2416) -- without
+`LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` in the environment at
+`make up` / `make secrets`, voice + voice-agent scale to 0 with a loud warning,
+because the binaries fail-fast on the missing env by design. Export the creds
+and re-run `make secrets` to enable. The cloud stays self-hosted
 (`deploy/k8s/base/livekit.yaml`) via ESO/Key Vault.
 
-`integrations/openai/` on the Go side also serves the `/memql/audio`
-WebSocket path for voice-first creation modals.
+**Canonical voice catalog (`integrations/voice/voices.go`).** Every agent
+carries a canonical, provider-agnostic voice name (alto / soprano / tenor /
+baritone / ...) on `providerConfig.voice.voiceId`, plus a `gender` enum;
+cognition resolves canonical -> provider voice id at TTS-publish time via
+`MEMQL_POLYPHON_VOICE_PROVIDER`. Voice is auto-assigned at agent creation and
+never edited by the user. Builtins: `voicePickForGender` + `voiceResolve`. The
+General Assistant is hardcoded to "alto"; specialists pick from whatever the
+owner's other agents have not used.
 
-**Canonical voice catalog (`integrations/voice/voices.go`).** Every
-agent carries a canonical voice name (alto / soprano / tenor /
-baritone / ...) on `providerConfig.voice.voiceId`, plus a
-`gender` enum on the agent record. The catalog is gender-bucketed
-and provider-agnostic; the cognition handler resolves canonical ->
-provider voice id at TTS-publish time via the active
-`MEMQL_POLYPHON_VOICE_PROVIDER`. Voice is auto-assigned at agent creation
-(the product SPA's create-agent modal) and never edited by
-the user. Two DSL builtins expose the catalog: `voicePickForGender`
-+ `voiceResolve`. The General Assistant is hardcoded to canonical
-"alto" (female); specialists pick from whichever voices are still
-unused by the owner's other agents.
-
-**Per-agent audio + video control.** `v1:agents:agent.audioControl`
-+ `videoControl` (`always_on` | `always_off` | `mirror_user`, default
-`mirror_user` for every new agent) seed the per-channel defaults.
-`v1:cognition:audioOverride` + `videoOverride` carry per-(space, agent)
-session overrides written by the PresencePanel orb-corner overlay
-(`AgentOrbChannelToggle` -- click to toggle, long-press for the three-
-mode menu). The voice-agent's avatar-gating path consults override ->
-default for video at session start; audio mirrors the user's mic state
-under `mirror_user`. Mutations: `setAgentAudioOverride`,
-`setAgentVideoOverride`. Queries: `audioOverridesForSpace`,
-`videoOverridesForSpace`.
-
-**Avatar persona.** `v1:agents:agent.avatarPersonaId` +
-`avatarVendor` carry the vendor-issued persona / face id minted from a
-still image uploaded via the agent edit modal. Empty for legacy or
-specialist agents -- voice-agent disables the avatar plugin and falls
-back to audio-only.
-
-See [integrations/CLAUDE.md](integrations/CLAUDE.md) for the Go-side
-voice-related integrations (openai, voices catalog) that
-the `/memql/audio` WebSocket still consumes.
+**Per-agent audio + video control.** `v1:agents:agent.audioControl` +
+`videoControl` (`always_on` | `always_off` | `mirror_user`, default
+`mirror_user`) seed the defaults; `v1:cognition:audioOverride` +
+`videoOverride` carry per-(space, agent) session overrides. The voice-agent
+consults override -> default for video at session start; audio mirrors the
+user's mic state under `mirror_user`. Mutations `setAgentAudioOverride` /
+`setAgentVideoOverride`; queries `audioOverridesForSpace` /
+`videoOverridesForSpace`. `avatarPersonaId` + `avatarVendor` carry the
+vendor-issued persona id minted from a still image -- empty for legacy or
+specialist agents, which makes the voice-agent disable the avatar plugin and
+fall back to audio-only.
 
 ### Cognition (Routing + Conductor)
 
-Cognition decides whether and which agent should respond to an utterance,
-then dispatches the turn. The text path uses a **single LLM brain**: the
-conductor (`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the
-routing decision (fitScore / turnMode / handoff / severity) and the
-per-agent plan (primary / sequence / chime-ins / instructions) in one
-structured-output call. The standalone router LLM call only fires for
-voice utterances now (latency-sensitive); fast-path mention dispatch
-bypasses both. Lives in `integrations/cognition/cognition_handler.go`,
-`conductor_consult.go`, `ai_router.go`.
+Cognition decides whether and which agent should respond to an utterance, then
+dispatches the turn. The text path uses a **single LLM brain**: the conductor
+(`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the routing decision
+(fitScore / turnMode / handoff / severity) and the per-agent plan (primary /
+sequence / chime-ins / instructions) in one structured-output call. The
+standalone router LLM call fires only for voice utterances now
+(latency-sensitive); fast-path mention dispatch bypasses both. Lives in
+`integrations/cognition/{cognition_handler,conductor_consult,ai_router}.go`.
 
-**Capability-aware routing.** Both the conductor (and the voice-path
-router) see each candidate agent's tool list, so a specialist whose
-keywords loosely match an action it has no tool for ("guide me around
-the app" hitting an HR specialist) gets penalized; the general
-assistant with `uiDescribe` / `uiClick` / `uiNarrate` wins. Tool-fit
-mismatch drops fitScore by 0.4+; total tool gap routes to the GA with
-`turnMode=escalation_notice`.
+**Capability-aware routing.** Both the conductor and the voice-path router see
+each candidate agent's tool list, so a specialist whose keywords loosely match
+an action it has no tool for gets penalized. Tool-fit mismatch drops fitScore
+by 0.4+; a total tool gap routes to the GA with `turnMode=escalation_notice`.
 
 **Conversational continuity.** The conductor receives an explicit
-`lastResponder` input (computed in `conductor_consult.go` from the
-transcript -- the most-recent AI participant to speak before this
-human utterance). The "Conversational continuity" meta-principle in
-`conductorTurn.tmpl` requires the primary to stay with that agent
-when the user's turn is a follow-up shape ("ok cool", "btw", "what
-about", "tell me more") and there's no @-mention or domain pivot.
-Plugs the "GA jumps in to defer to the specialist" failure mode --
-"how can you help me" after Faye's teaching turn now stays with
-Faye instead of being routed to Sofia.
+`lastResponder` input (computed in `conductor_consult.go`). The continuity
+meta-principle in `conductorTurn.tmpl` requires the primary to stay with that
+agent when the user's turn is a follow-up shape ("ok cool", "btw", "what
+about") and there's no @-mention or domain pivot. Plugs the "GA jumps in to
+defer to the specialist" failure mode.
 
-**Greet-on-join pacing.** `integrations/cognition/greet_on_join.go`
-serializes greetings per-space: 3s initial delay before the first
-greeting fires (giving the SPA time to dismiss the create modal +
-finish the route transition), 4s minimum gap between consecutive
-greetings (so multiple `greetOnJoin` agents don't all shout hi at
-once). That per-space serialization is process-local; cross-replica
-exactly-once is enforced by `dispatchGate.tryGreet` (#1386), the
-same Postgres advisory-lock gate as the utterance dispatch path
-(`tryDispatch`) but keyed on (space, agent) under a distinct lock
-class -- so in a 2-replica deployment exactly one replica posts the
-greeting instead of both. The greeting directive is "familiar" by
-default for ALL agents -- every agent in the product is one the user
-created and named themselves, so the directive forbids the
-"Hi, I'm X" opener across the board.
+**Greet-on-join pacing.** `integrations/cognition/greet_on_join.go` serializes
+greetings per-space: 3s initial delay, 4s minimum gap between consecutive
+greetings. That serialization is process-local; cross-replica exactly-once is
+enforced by `dispatchGate.tryGreet` (#1386), the same Postgres advisory-lock
+gate as `tryDispatch` but keyed on (space, agent) under a distinct lock class.
+The greeting directive is "familiar" for ALL agents -- every agent is one the
+user created and named, so the "Hi, I'm X" opener is forbidden across the board.
 
 ### Agent reply envelope (`respondToUser`)
 
-Every user-facing chat reply from an agent is delivered through a
-single structured-output envelope, not free-form prose. The agent
-ends every turn with a sentinel `respondToUser` tool call carrying
-`{response, citations[]}`; the streaming tool loop intercepts the
-call by name (no engine executor exists for it), parses the args as
-`Envelope`, and uses that as the turn's final text + citations. See
-`integrations/agent/envelope.go` for the schema and
-`integrations/agent/streaming.go` for the interception path. The
-prompt enforces it via the OUTPUT CONTRACT block at the top of
-`dsl/cognition/prompts/cognitionReply.tmpl`.
+Every user-facing chat reply from an agent is delivered through a single
+structured-output envelope, not free-form prose. The agent ends every turn with
+a sentinel `respondToUser` tool call carrying `{response, citations[]}`; the
+streaming tool loop intercepts the call by name (no engine executor exists for
+it), parses the args as `Envelope`, and uses that as the turn's final text +
+citations. See `integrations/agent/envelope.go` and
+`integrations/agent/streaming.go`; the prompt enforces it via the OUTPUT
+CONTRACT block at the top of `dsl/cognition/prompts/cognitionReply.tmpl`.
 
 `citations` is a list of `{domainId, matchedPhrase}` pairs naming
-knowledge-domain sources the agent drew from; cognition stamps them
-on the inserted `v1:cognition:utterance.citations` field via the
-`AgentTurnCitation` proto on `AgentGenerateTurnComplete`. The
-frontend wraps each `matchedPhrase` substring of the rendered text
-with a clickable chip linking to the named knowledge domain. When
-the agent used no trained sources, citations is an empty array.
+knowledge-domain sources the agent drew from; cognition stamps them on the
+inserted `v1:cognition:utterance.citations` field. The frontend wraps each
+`matchedPhrase` substring with a clickable chip linking to the named domain.
+When the agent used no trained sources, citations is an empty array.
 
 ### Coding Agent (OpenClaw / NemoClaw) -- a SEAM, not a running deployment
 
-**Nothing in this repository runs a coding agent.** What exists is the
-extension point one would plug into, plus the graph fields and display
-strings that assume it. This section says which is which, because it
-previously read as a description of a shipped deployment and named an AKS
-sidecar no manifest implements (memql#4120).
+**Nothing in this repository runs a coding agent** (memql#4120). What exists is
+the extension point one would plug into, plus the graph fields and display
+strings that assume it:
 
-What is IN the tree:
-
-- **The seam.** `component/planner`'s `RegisterContainerExecutor(name,
-  exec)` is the registry a container-executor backend self-registers into
-  from `init()`; a Task routes to it by `executionSurface="containerExecutor"`
-  + `executorBackend` (`dsl/planner/concepts.memql`). `"nemoclaw"` is the
-  name the doc comments reserve for the first backend. **No package in this
-  repo calls `RegisterContainerExecutor`**, so the registry is empty at
-  runtime and a `containerExecutor` Task has nowhere to land.
-- **The agent flag.** `v1:agents:agent.claw` (bool) + `clawWorkspace`
-  (`dsl/agents/concepts.memql:46-47`), read by
-  `integrations/cognition/ai_responder.go`'s `ClawCapable()`. The
-  per-agent workspace convention `/workspaces/{agentId}/` is stated in
+- **The seam.** `component/planner`'s `RegisterContainerExecutor(name, exec)`
+  is the registry a container-executor backend self-registers into from
+  `init()`; a Task routes to it by `executionSurface="containerExecutor"` +
+  `executorBackend`. **No package in this repo calls it**, so the registry is
+  empty at runtime and a `containerExecutor` Task has nowhere to land.
+- **The agent flag.** `v1:agents:agent.claw` (bool) + `clawWorkspace`, read by
+  `integrations/cognition/ai_responder.go`'s `ClawCapable()`. The per-agent
+  workspace convention `/workspaces/{agentId}/` is stated in
   `component/planner/executor.go`, not implemented here.
-- **Display strings.** `integrations/cognition/tool_labels.go` formats
-  progress labels for `clawExecuteTask` / `clawReadFile` / `clawListFiles`
-  / `clawSearchCode`, and two cognition prompt templates name them as an
-  example of a capability gap. Formatting a label for a tool does not
-  define it.
+- **Display strings** in `integrations/cognition/tool_labels.go` for
+  `clawExecuteTask` / `clawReadFile` / `clawListFiles` / `clawSearchCode`.
 
-What is NOT in the tree, despite having been claimed here:
-
-- **No sidecar, cloud or local.** `deploy/k8s/base/agent.yaml` has exactly
-  one container (`agent`); `grep -ri 'nemoclaw\|openclaw' deploy/` is empty.
-  The parity-cluster sidecar was tracked in memql#1310 (now closed); the absence of any manifest here is tracked in memql#4120.
-- **No tool definitions.** No `tool claw*` exists anywhere under `dsl/`.
-  A product could ship them in its own bundle at `MEMQL_DSL_PATH`; the
-  engine does not. (`component/memql/tool_claw_test.go` asserted they load
-  and is `t.Skip`ped -- it covers the retired `dsl/v1` tree.)
-- **No image, pin, or gateway config.** There is no OpenClaw/NemoClaw image
-  reference, version pin, or gateway/network setting in this repo, so the
-  hardening posture that used to be described here (version pin, internal-
-  only gateway, disabled community skills) documents nothing that exists.
-  Whoever registers the first backend owns re-establishing it.
-- **No env vars.** No `NEMOCLAW_*` / `OPENCLAW_*` / `CLAW_*` name is read by
-  any Go code or registered in `component/envregistry/manifest.yaml`.
+What does NOT exist, despite having been claimed here: no sidecar in any
+manifest, no `tool claw*` anywhere under `dsl/`, no image/pin/gateway config,
+and no `NEMOCLAW_*` / `OPENCLAW_*` / `CLAW_*` env var. Whoever registers the
+first backend owns re-establishing the hardening posture with it.
 
 ### Workers (computer_use_headless / computer_use_embodied)
 
-The "workers" feature lets agents drive the user's own machine
-via a tool surface: shell exec, filesystem, HTTP fetch, and (under
-the computer-use build) mouse + keyboard + screenshot. Runbook:
+The "workers" feature lets agents drive the user's own machine via a tool
+surface: shell exec, filesystem, HTTP fetch, and (under the computer-use build)
+mouse + keyboard + screenshot. Runbook:
 [docs/public/operate/workers-runbook.md](docs/public/operate/workers-runbook.md).
 
-The capability is split into two mode-specific slugs so the headless
-slice (shell / fs / http) and the embodied slice (mouse / keyboard /
-screenshot) can be granted independently. Authorization (scope grants,
-kill switch, knowledge domain) stays unified -- both modes act on the
-user's machine, so the consent is one decision. See
-`component/memql/worker_caps.go` for the slug expansion map. The
-sandboxed first-choice surface for headless work is the Workbench,
-documented in the next section.
+The capability is split into two mode-specific slugs so the headless slice and
+the embodied slice can be granted independently. Authorization stays unified --
+both modes act on the user's machine, so the consent is one decision. The
+sandboxed first-choice surface for headless work is the Workbench, below.
 
-- **Agent capabilities (split slugs):**
-  - `computer_use_headless` -- expands to `workerHost` + the
-    cross-cutting trio (`workerStatus`, `requestComputerUseScope`,
-    `canvasPublish`). Shell / fs / http on the user's machine.
-  - `computer_use_embodied` -- expands to `workerComputer` + the
-    same cross-cutting trio. Mouse / keyboard / screenshot on the
-    user's machine.
-- **Tools:** `workerHost` (HEADLESS) and `workerComputer` (COMPUTERUSE),
-  both discriminated-union tools under the `dsl/worker/` namespace.
-- **Gateway:** `WorkerService.Stream` gRPC service on the agent
-  node. Auth via worker-specific tokens
-  (`mql_wkr_<43 base64url chars>` -- the `worker_token` variant on
-  `v1:identity:identity`). The gRPC interceptor admits these
-  tokens on the WorkerService path only and rejects them
-  everywhere else.
-- **Token mint:** server-side via `CreateWorkerTokenMsg` /
-  `RevokeWorkerTokenMsg` on `MemqlService.Stream`. The plain
-  token comes back in the reply ONCE; only the SHA-256 hash
-  persists. Mint via `component/identity/workertoken/` (mirrors
-  the `pat` package). The frontend's AddWorkerModal calls these
-  directly so plaintext never lives outside the gRPC reply.
-- **Worker side:** `memql-cockpit worker run` is a separate run
-  mode of the Cockpit binary, built from the `memql-cockpit` repo
-  (`make cockpit` / `make cockpit-computeruse`). The computer-use build wraps RobotGo
-  for screenshot + mouse + keyboard. macOS TCC / Linux X11 pre-flight
-  via `memql-cockpit-computeruse worker setup`.
+- **Agent capabilities:** `computer_use_headless` -> `workerHost` + the
+  cross-cutting trio (`workerStatus`, `requestComputerUseScope`,
+  `canvasPublish`); `computer_use_embodied` -> `workerComputer` + the same
+  trio. Slug expansion map: `component/memql/worker_caps.go`.
+- **Tools:** `workerHost` (HEADLESS) and `workerComputer` (COMPUTERUSE), both
+  discriminated-union tools under `dsl/worker/`.
+- **Gateway:** `WorkerService.Stream` gRPC on the agent node. Auth via
+  worker-specific tokens (`mql_wkr_<43 base64url chars>`, the `worker_token`
+  variant on `v1:identity:identity`). The interceptor admits these tokens on
+  the WorkerService path only and rejects them everywhere else.
+- **Token mint:** server-side via `CreateWorkerTokenMsg` / `RevokeWorkerTokenMsg`
+  on `MemqlService.Stream`. The plain token comes back in the reply ONCE; only
+  the SHA-256 hash persists (`component/identity/workertoken/`).
+- **Worker side:** `memql-cockpit worker run`, a run mode of the Cockpit binary
+  built from the `memql-cockpit` repo. macOS TCC / Linux X11 pre-flight via
+  `memql-cockpit-computeruse worker setup`.
 - **Per-user routing:** every worker is owned by exactly one
-  v1:identity:user; agents in that user's sessions are the only
-  callers admitted by the registry.
-- **Permission model:** three layers checked BEFORE dispatch
-  -- agent capability flag, standing scope on
-  `v1:agents:agentAuthorization.computerUseScope` (observe /
-  interact / full), per-Plan kill switch on
-  `v1:identity:user.preferences.computerUseEnabled`. Out-of-scope
-  calls transition the calling Plan to `awaitingFeedback` with
+  `v1:identity:user`; agents in that user's sessions are the only callers
+  admitted by the registry.
+- **Permission model:** three layers checked BEFORE dispatch -- agent
+  capability flag, standing scope on
+  `v1:agents:agentAuthorization.computerUseScope` (observe / interact / full),
+  per-Plan kill switch on `v1:identity:user.preferences.computerUseEnabled`.
+  Out-of-scope calls transition the calling Plan to `awaitingFeedback` with
   `feedbackReason=scope_elevation_required`.
-- **Audit:** security signals on `v1:identity:auditEvent`;
-  per-call telemetry on `v1:worker:invocation` with
-  `WORKER_INVOCATION_RETENTION_DAYS` default 90.
-- **Hardening:** per-call rlimits (`RLIMIT_CPU`, `RLIMIT_AS`,
-  `RLIMIT_NOFILE`) on Linux + Darwin via
-  `policy.shell.max_*` knobs; optional setuid drop to a
-  dedicated user via `policy.shell.run_as_user`. Prometheus
-  metrics endpoint at `127.0.0.1:9100/metrics` (loopback-only,
-  no auth).
-- **Frontend:** `?panel=workers` in the product SPA shows the
-  WorkersListPanel; the floating ComputerUseKillSwitch widget in
-  the session chrome flips `computerUseEnabled`.
-- **Install:** `scripts/install/install-{mac,linux}.sh` install
-  the binary, write `~/.memql/worker.yaml`, and register a
-  LaunchAgent / user-systemd service.
+- **Audit + hardening:** security signals on `v1:identity:auditEvent`;
+  per-call telemetry on `v1:worker:invocation`
+  (`WORKER_INVOCATION_RETENTION_DAYS` default 90); per-call rlimits on Linux +
+  Darwin via `policy.shell.max_*`; optional setuid drop via
+  `policy.shell.run_as_user`; loopback-only metrics at `127.0.0.1:9100/metrics`.
+- **Install:** `scripts/install/install-{mac,linux}.sh`.
 
 ### Workbench (workbench_use)
 
-The "workbench" is the default first-choice surface for any
-HEADLESS work an agent needs to do -- writing files, running
-shell commands, fetching URLs. It is a per-Plan sandboxed Linux
-working directory in the cluster; the agent drives it, the user
-does not see it as a filesystem they can browse, and nothing on
-the user's machine is touched. Computer-use (the user's machine)
-is the FALLBACK for headless work the workbench cannot do
-(macOS-only tooling, computer-use control, files already on the user's
-computer).
+The "workbench" is the default first-choice surface for any HEADLESS work an
+agent needs to do -- writing files, running shell commands, fetching URLs. It is
+a per-Plan sandboxed Linux working directory in the cluster; nothing on the
+user's machine is touched. Computer-use is the FALLBACK for headless work the
+workbench cannot do (macOS-only tooling, computer-use control, files already on
+the user's computer). See
+[docs/public/operate/workbench-runbook.md](docs/public/operate/workbench-runbook.md)
+and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-production.md).
 
-See [docs/public/operate/workbench-runbook.md](docs/public/operate/workbench-runbook.md) for the
-test path and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-production.md)
-for the cluster-mode deployment detail.
-
-- **Agent capability:** `workbench_use` slug. Universal --
-  injected into every role's `lockedToolSlugs` so newly-created
-  agents always have it. No scope grants, no kill switch, no
-  per-agent gating; the blast radius is contained to the per-Plan
-  directory tree.
-- **Tools:** `workbenchHost` (discriminated by `action`: exec /
-  fs_read / fs_write / fs_list / fs_stat / http_fetch). Lives in
-  a product DSL bundle (`MEMQL_DSL_PATH`), not the engine tree; the wire
-  path goes through the `workbenchDispatchHost` builtin in
-  `dsl/workbench/builtins.memql` to `integration.workbench.dispatchHost`.
-- **Per-Plan workspace:** filesystem state lives under
-  `MEMQL_WORKBENCH_ROOT/{planId}/` (default
-  `/var/lib/memql/workbenches/`). Lazy-provisioned on first call.
-  Persists across calls within a Plan so multi-Task agents can
-  share files; torn down on Plan terminal status via the
-  `releaseWorkspaceOnPlanTerminal` automation calling the
-  `workbenchTeardownDirectory` builtin.
-- **Concept:** `v1:workbench:workspace` -- per-Plan row carrying
-  status (provisioned / released), storageRoot, lifecycle
-  timestamps. Defined in `dsl/workbench/concepts.memql`.
-- **Modes:**
-  - **Cluster mode (the deployed default).** A dedicated `workbench`
-    node-type binary (`make workbench`, `deploy/k8s/base/workbench.yaml`)
-    hosts the workspaces; agent nodes route via `NodeService.Stream`
-    (`WorkbenchForwardRequest` / `WorkbenchForwardResponse`). Base sets
-    `MEMQL_WORKBENCH_REMOTE=1` on the agent; the dialer needs
-    `MEMQL_WORKER_PEERS=workbench=<addr>`.
-    **The remote flag is an ASSERTION, not a preference:** with it set
-    and no reachable workbench peer, a workbench call is REFUSED
-    (`no_workbench_peer`) rather than run on the agent's own disk. It
-    used to degrade silently, which is how a dropped peer seed -- every
-    call running on the agent pod -- stayed invisible for its whole life.
-  - **In-process fallback.** `MEMQL_WORKBENCH_REMOTE` unset or falsy runs
-    the integration on the agent node itself, with workspaces on that
-    container's disk. Under the remote flag the same behaviour is its own
-    explicit opt-in, `MEMQL_WORKBENCH_LOCAL_FALLBACK=1`, so "run this
-    remotely" and "run it here if you must" are spelled differently.
-- **Routing preference:** the agent's reply template
-  (`dsl/cognition/prompts/cognitionReply.tmpl`) and the workbench
-  knowledge domain (5 chunks in
-  `integrations/knowledge/seed.go`) instruct the agent to prefer
-  workbench over computer-use whenever both are available, and
-  to surface a "workbench can't do this -- needs computer use"
-  message when it hits a Linux/macOS or sandbox/host limitation
-  rather than silently retrying.
-- **Knowledge domain:** `workbench` -- auto-attached via
-  `replier.go` when the agent's expanded tool list includes
-  `workbenchHost`. Treated as a system-owned domain (no audible
-  citations) per `appStructureDomainIds`.
+- **Agent capability:** `workbench_use`. Universal -- injected into every role's
+  `lockedToolSlugs`. No scope grants, no kill switch; the blast radius is the
+  per-Plan directory tree.
+- **Tools:** `workbenchHost` (discriminated by `action`: exec / fs_read /
+  fs_write / fs_list / fs_stat / http_fetch). Lives in a product DSL bundle,
+  not the engine tree; the wire path goes through the `workbenchDispatchHost`
+  builtin in `dsl/workbench/builtins.memql` to
+  `integration.workbench.dispatchHost`.
+- **Per-Plan workspace:** under `MEMQL_WORKBENCH_ROOT/{planId}/` (default
+  `/var/lib/memql/workbenches/`), lazy-provisioned on first call, persisting
+  across calls within a Plan, torn down on Plan terminal status via the
+  `releaseWorkspaceOnPlanTerminal` automation.
+- **Concept:** `v1:workbench:workspace` -- per-Plan row carrying status
+  (provisioned / released), storageRoot, lifecycle timestamps.
+- **Modes.** Cluster mode is the deployed default: a dedicated `workbench`
+  node-type binary hosts the workspaces and agent nodes route via
+  `NodeService.Stream` (`WorkbenchForwardRequest` / `Response`). Base sets
+  `MEMQL_WORKBENCH_REMOTE=1` on the agent; the dialer needs
+  `MEMQL_WORKER_PEERS=workbench=<addr>`. **The remote flag is an ASSERTION, not
+  a preference:** with it set and no reachable workbench peer, a call is REFUSED
+  (`no_workbench_peer`) rather than run on the agent's own disk -- it used to
+  degrade silently, which is how a dropped peer seed stayed invisible for its
+  whole life. In-process fallback is `MEMQL_WORKBENCH_REMOTE` unset, or the
+  explicit `MEMQL_WORKBENCH_LOCAL_FALLBACK=1` under the remote flag.
+- **Routing preference:** `dsl/cognition/prompts/cognitionReply.tmpl` and the
+  `workbench` knowledge domain (auto-attached via `replier.go` when the
+  expanded tool list includes `workbenchHost`) instruct the agent to prefer
+  workbench over computer-use, and to surface a "workbench can't do this --
+  needs computer use" message rather than silently retrying.
 
 ---
 
 ## Authentication
 
-The in-house **identity service** (`component/identity`) is the
-authentication provider for the cluster. It runs as its own
-node-type binary (`make identity`) and owns:
+The in-house **identity service** (`component/identity`) is the authentication
+provider for the cluster. It runs as its own node-type binary (`make identity`)
+and owns magic-link auth, WebAuthn passkeys, enrolment tokens, OAuth-style
+token endpoints (`/oauth/token`, `/auth/refresh`), the JWKS feed at
+`/.well-known/jwks.json`, a public web UI (`/login`, `/auth/complete`,
+`/setup`, `/legal/*`, `/me/*`), and PAT issuance for CLI clients
+(`mql_pat_<...>`).
 
-- Magic-link auth as the primary login path, **device-bound and
-  approve-on-click** (epic memql#4300). Issue mints a 32-byte nonce alongside
-  the token, stores only its digest as `magicLinkRequest.bindingHash`, and
-  hands the plaintext to the requesting browser as `memql_ml`
-  (`HttpOnly; Secure; SameSite=Lax; Path=/auth`). A link only COMPLETES in a
-  browser holding that cookie; a click anywhere else only APPROVES the
-  request, and the requesting tab -- sitting on `/check-email` -- polls, sees
-  `approved`, and finishes itself. **A session can only ever land on the
-  device that asked for it: if B clicks A's link, A signs in and B gets
-  nothing.** That closes the group-alias race, where whoever read a shared
-  mailbox first got the session -- on the identity path, a first-party cookie
-  with no PKCE and no device check, enough to enrol their own passkey and hold
-  permanent, mailbox-independent access A could neither see nor revoke.
-  `GET /auth/complete` renders and writes nothing (so prefetchers are
-  harmless), and consume is a compare-and-swap under a Postgres advisory lock
-  -- load-bearing, because approve-on-click gives one request two legitimate
-  finishers. What it does NOT fix is a colleague requesting their OWN link to
-  the same mailbox; `signInPolicy` below is the answer to that.
-- `sharedMailbox` + `signInPolicy` on `v1:identity:user` (memql#4304). The
-  first is a hint set by a local-part heuristic
-  (`component/identity/registration/shared_mailbox.go`) that gates nothing and
-  drives copy. The second is `any` (default) or `passkey_only`, which disables
-  sign-in LINKS: a request writes no row, sends no link, redirects identically
-  (no enumeration signal) and mails a notice instead. Enabling it requires an
-  active passkey, server-enforced. Owners and admins can RESET it to `any`
-  over `IdentityAdminMsg` -- one direction only, so an admin cannot lock a
-  colleague out of their own account.
-- A new-sign-in email on every `authSession` row, fired from the one seam that
-  creates them (memql#4305). No action link, deliberately: an unauthenticated
-  revoke link mailed to a shared mailbox is a denial-of-service handle for
-  everyone who can read it. Refresh rotations never send it.
-- WebAuthn passkey **registration** (`POST /auth/webauthn/register/{begin,finish}`,
-  memql#3406). Ceremony logic in `component/identity/webauthn/`; the RP id
-  derives from `MEMQL_IDENTITY_BASE_URL`, challenges are single-use and
-  TTL'd, and credentials are minted `residentKey=required` /
-  `userVerification=required` so they are discoverable. Enrolment
-  authorization is memql#3408.
-- WebAuthn passkey **login** (`POST /auth/webauthn/login/{begin,finish}`,
-  memql#3407). Usernameless: the challenge carries an EMPTY
-  `allowCredentials` (no email has been typed) and resolves the assertion to
-  a row by credential id alone, which is why that id is unique cluster-wide.
-  The challenge also carries the in-flight OAuth context -- the same
-  `clientId` / `redirectURI` / `state` / `codeChallenge` /
-  `codeChallengeMethod` that `IssueMagicLink` stamps on a magic-link row --
-  validated at begin and held server-side, so `finish` mints an auth code
-  via `Store.CreateAuthCode` and returns the same client callback target a
-  magic-link click produces. **No client learns which factor ran**: what
-  reaches `/oauth/token` is an auth code, PKCE binding intact. A sign-count
-  regression is refused and audited as the cloned-authenticator signal (a
-  zero counter from an authenticator that does not implement one is not
-  that case). The `/login` page carries a "Sign in with a passkey" control
-  as a progressive enhancement; the magic-link form remains the path when
-  no passkey exists, WebAuthn is unavailable, or no relying party is in
-  scope.
-- Passkey **management** on `/me/devices` (memql#3409): list (label,
-  added, last used, AAGUID-derived model, and the backup posture that
-  says whether losing the device loses the credential), rename, revoke,
-  and enrol another via the #3406 ceremony. Revoke is a SOFT delete
-  (`active=false`) -- the row is audit history and its credential id must
-  stay taken, because revoking a row does not make the authenticator
-  forget its private key. A revoke that would leave the account with NO
-  sign-in route (no `magic_link` identity, no other passkey) is warned
-  about explicitly before it happens; `component/identity/web/me_passkeys.go`
-  resolves the target out of the caller's OWN self-scoped list, which is
-  the ownership check, while the write runs under the system credential
-  actor the memql#2513 guard requires.
-- **Enrolment tokens + `GET /enroll`** (memql#3408) -- the task that removes
-  email from the critical path. `mql_enr_<43>` (32 CSPRNG bytes, SHA-256 hex at
-  rest, plaintext never persisted or logged), single-use via a `consumedAt`
-  stamp, 15-minute default TTL capped at 24h. It authorizes exactly ONE action:
-  register a passkey as the named user. `/enroll` validates and renders the
-  registration page; the ceremony that follows presents
-  `Authorization: Enrolment <token>` (the `/pair/redeem` shape). The four
-  rejection states -- invalid / expired / already-used / revoked -- each render
-  their own message, because each asks the holder for a different next step.
-  Package: `component/identity/enrolment/`. Issued by an owner/admin from the
-  portal's People surface over `IdentityAdminMsg` (gate in
-  `component/identity/adminops`), or by the install wizard's `enrolmentLink`
-  graph step via `memql enrolment-token mint` inside the identity pod -- which
-  is the only authority available at that moment, since nothing can authenticate
-  to a cluster whose owner has just been bootstrapped from env.
-- OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
-- The JWKS feed at `/.well-known/jwks.json`.
-- A public web UI (`/login`, `/auth/complete`, `/setup`,
-  `/legal/*`, `/me/*`).
-- What remains of the admin web app at `/admin/*`: the sign-in pages,
-  and an `/admin/` root that answers `410 Gone`. The admin screens live
-  in the MemQL portal; their owner/admin gate is
-  `component/identity/adminops`, riding `IdentityAdminMsg` on
-  `MemqlService.Stream`. `DeployControlService` shells out against an
-  on-disk overlay checkout and so exists only on the identity node, but
-  a bff FORWARDS the deploy RPCs here over `NodeService.Stream`
-  (`DeployControlForwardRequest` / `Response`), carrying the caller as a
-  verified `ForwardedAuthority` so the owner-only rollback and repair gates
-  run against the originating human rather than the relaying node
-  (`component/grpc/deploy_control_forward.go`). Repair (memql#4209) is an
-  owner-only, observed re-sync of the installation's ArgoCD Application
-  through the same Executor, recorded on the deployment timeline
-  (`component/deploycontrol/repair.go`).
-- Personal Access Token (PAT) issuance for CLI clients
-  (`mql_pat_<...>`).
-
-Other binaries (bff / voice / cognition / agent / planner / workbench /
-mcp) verify identity-issued JWTs locally via the per-node verifier
-(`component/identity/verifier`), which fetches the JWKS document
-on a 5-min background refresh and on demand for unknown `kid`
-headers. They never see the private key.
-
+Other binaries (bff / voice / cognition / agent / planner / workbench / mcp)
+verify identity-issued JWTs locally via the per-node verifier
+(`component/identity/verifier`), which fetches JWKS on a 5-min background
+refresh and on demand for unknown `kid` headers. They never see the private key.
 `MEMQL_IDENTITY_VERIFIER_BASE_URL` configures the verifier;
-`MEMQL_IDENTITY_BASE_URL` configures the identity service itself. See
-[docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
-the operator-side narrative.
+`MEMQL_IDENTITY_BASE_URL` configures the identity service itself.
+
+**What is worth knowing before touching this tree:**
+
+- **Magic links are device-bound and approve-on-click** (epic memql#4300).
+  Issue mints a nonce whose digest is stored as `magicLinkRequest.bindingHash`
+  and hands the plaintext to the requesting browser as `memql_ml`
+  (`HttpOnly; Secure; SameSite=Lax; Path=/auth`). A link only COMPLETES in a
+  browser holding that cookie; a click anywhere else only APPROVES, and the
+  requesting tab polls and finishes itself. **A session can only ever land on
+  the device that asked for it.** `GET /auth/complete` renders and writes
+  nothing (prefetchers are harmless); consume is a compare-and-swap under a
+  Postgres advisory lock, which is load-bearing because approve-on-click gives
+  one request two legitimate finishers.
+- **`signInPolicy` on `v1:identity:user`** (memql#4304) is `any` (default) or
+  `passkey_only`, which disables sign-in LINKS: a request writes no row, sends
+  no link, redirects identically (no enumeration signal) and mails a notice.
+  Enabling it requires an active passkey, server-enforced. Owners/admins can
+  RESET it to `any` over `IdentityAdminMsg` -- one direction only, so an admin
+  cannot lock a colleague out of their own account. `sharedMailbox` is a hint
+  from a local-part heuristic that gates nothing and drives copy.
+- **A new-sign-in email fires on every `authSession` row** (memql#4305), from
+  the one seam that creates them. No action link, deliberately: an
+  unauthenticated revoke link mailed to a shared mailbox is a DoS handle for
+  everyone who can read it. Refresh rotations never send it.
+- **Passkeys are usernameless** (memql#3407): the login challenge carries an
+  EMPTY `allowCredentials` and resolves the assertion by credential id alone,
+  which is why that id is unique cluster-wide. RP id derives from
+  `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The challenge holds
+  the in-flight OAuth context server-side, so `finish` mints an auth code and
+  **no client learns which factor ran**. A sign-count regression is refused and
+  audited as the cloned-authenticator signal. Revoke on `/me/devices` is a SOFT
+  delete -- the row is audit history and its credential id must stay taken.
+- **Enrolment tokens** (`mql_enr_<43>`, memql#3408) are the task that removes
+  email from the critical path: single-use, TTL'd, authorizing exactly ONE
+  action -- register a passkey as the named user. `GET /enroll` renders; the
+  ceremony presents `Authorization: Enrolment <token>`. Issued by an
+  owner/admin from the portal's People surface, or by the install wizard via
+  `memql enrolment-token mint` inside the identity pod.
+- **The admin web app is gone.** What remains at `/admin/*` is the sign-in
+  pages and a root that answers `410 Gone`; the screens live in the MemQL
+  portal, gated by `component/identity/adminops` over `IdentityAdminMsg`.
+  `DeployControlService` exists only on the identity node, but a bff FORWARDS
+  the deploy RPCs over `NodeService.Stream` carrying the caller as a verified
+  `ForwardedAuthority`, so owner-only gates run against the originating human
+  rather than the relaying node (`component/grpc/deploy_control_forward.go`).
 
 **Authentication is ON by default everywhere** (local and cloud alike -- env
-parity). The master toggle is `MEMQL_IDENTITY_ENABLED`:
-on verifier-consuming nodes it defaults to `true` (auth enforced) and is set
-explicitly `false` ONLY to disable auth for troubleshooting -- the node then
-skips the verifier and admits every stream as a synthetic `local-dev` cluster
-owner (see `component/grpc/local_dev_stream_interceptor.go`), with a loud
-boot-time SECURITY warning and the `memql_auth_enabled` gauge pinned to 0. The
-toggle is a config value present everywhere, never an architecture branch;
-**never set it false in a cloud cluster.** Disabling auth is the toggle, NOT
-blanking `MEMQL_IDENTITY_VERIFIER_BASE_URL` (an empty verifier URL fatals the
-node).
+parity). The master toggle is `MEMQL_IDENTITY_ENABLED`: on verifier-consuming
+nodes it defaults to `true` and is set explicitly `false` ONLY to disable auth
+for troubleshooting -- the node then skips the verifier and admits every stream
+as a synthetic `local-dev` cluster owner
+(`component/grpc/local_dev_stream_interceptor.go`), with a loud boot-time
+SECURITY warning and the `memql_auth_enabled` gauge pinned to 0. It is a config
+value present everywhere, never an architecture branch; **never set it false in
+a cloud cluster.** Disabling auth is the toggle, NOT blanking
+`MEMQL_IDENTITY_VERIFIER_BASE_URL` (an empty verifier URL fatals the node).
+
+**Two operator credentials, deliberately separate since memql#3519.**
+`MEMQL_MASTER_KEY` DECRYPTS; `MEMQL_OPERATOR_KEY` AUTHENTICATES the
+`Authorization: Operator <key>` bearer that admits a stream as a synthetic
+cluster owner. They were one value, which made a key the installer wrote into a
+world-readable `~/.bashrc` a cluster-owner bearer token over the network. No
+fallback -- an unseeded cluster refuses operator streams.
 
 See [docs/public/operate/auth/](docs/public/operate/auth/):
-- [access-model.md](docs/public/operate/auth/access-model.md) -- enforcement
-  layers and role spectrum.
-- [user-provisioning.md](docs/public/operate/auth/user-provisioning.md) --
-  registration modes and magic-link flow.
-- [identity-service.md](docs/public/operate/auth/identity-service.md) --
-  operator-side env vars + key management.
-- [operator-credential.md](docs/public/operate/auth/operator-credential.md) --
-  `MEMQL_OPERATOR_KEY`, the `Authorization: Operator <key>` bearer token that
-  admits a stream as a synthetic cluster owner so tooling can reach a cluster
-  before any user exists. **A different secret from `MEMQL_MASTER_KEY` since
-  memql#3519**: the master key DECRYPTS, the operator key AUTHENTICATES. They
-  were one value, which made a key the installer wrote into a world-readable
-  `~/.bashrc` (and ESO delivers to production pods) a cluster-owner bearer
-  token over the network. No fallback -- a cluster that has not been seeded
-  `MEMQL_OPERATOR_KEY` refuses operator streams rather than accepting the old
-  one. Rotation sequencing for both keys lives here.
-- [recovery-key.md](docs/public/operate/auth/recovery-key.md) -- the owner
-  BREAK-GLASS credential (epic memql#3958): `mql_rec_<43>`, SHA-256 at rest,
-  bound to one owner, minted automatically with its plaintext never logged, and
-  claimed on demand from inside the identity pod. It authorizes exactly one
-  action -- register a passkey as that owner -- and is REFUSED while the owner
-  still holds a usable sign-in route, which is what keeps it a break-glass key
-  rather than a second password. Single-use: redeeming spends it and mints an
-  unclaimed successor in the same breath, so a leaked key is worth one passkey
-  registration and the cluster is never without a route back in. What replaced
-  the sealed genesis envelope's one irreplaceable job, without a second bearer
-  that also decrypts config.
-- [service-account-jwt.md](docs/public/operate/auth/service-account-jwt.md) --
-  the `class="service_account"` machine identity (#691): the deploy
-  gate / automation credential that verifies on the BFF/mesh via
-  JWKS (where a PAT can't), surface-pinned to the read/query path.
-  Mint -> verify -> gate-usage, with diagrams.
+- [access-model.md](docs/public/operate/auth/access-model.md) -- enforcement layers and role spectrum.
+- [user-provisioning.md](docs/public/operate/auth/user-provisioning.md) -- registration modes and magic-link flow.
+- [identity-service.md](docs/public/operate/auth/identity-service.md) -- operator-side env vars + key management.
+- [operator-credential.md](docs/public/operate/auth/operator-credential.md) -- `MEMQL_OPERATOR_KEY` + rotation sequencing for both keys.
+- [recovery-key.md](docs/public/operate/auth/recovery-key.md) -- the owner BREAK-GLASS credential (epic memql#3958): `mql_rec_<43>`, bound to one owner, authorizing exactly one action (register a passkey as that owner) and REFUSED while the owner still holds a usable sign-in route. Single-use: redeeming spends it and mints an unclaimed successor, so a leaked key is worth one passkey registration and the cluster is never without a route back in.
+- [service-account-jwt.md](docs/public/operate/auth/service-account-jwt.md) -- the `class="service_account"` machine identity (#691): the deploy gate / automation credential that verifies on the BFF/mesh via JWKS (where a PAT can't), surface-pinned to the read/query path.
 
 ---
 
@@ -1588,100 +1146,38 @@ at `MEMQL_DSL_PATH` (see `deploy/k8s/base`). Also handy for dev hacking
 ## DSL dependency tree
 
 How the DSL constructs lean on each other. Each layer can only depend
-*downward* on the layers above it; cycles are rejected at load time.
+*downward*; cycles are rejected at load time.
 
 ```
-  ┌─────────────────────────────────────────────────────────────────┐
-  │  Concepts                                                       │
-  │  schemas + reserved intrinsics. The base of everything.         │
-  └─────────────────────────────────────────────────────────────────┘
-        │           │           │             │
-        ▼           ▼           ▼             ▼
-   ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌────────────┐
-   │ Shapes  │ │Mutations│ │ Builtins │ │ Providers  │
-   │ @row /  │ │ inserts │ │ Go-backed│ │ AI vendor  │
-   │ @actor  │ │ on rows │ │ executors│ │ + model    │
-   │ + traits│ │         │ │          │ │            │
-   └────┬────┘ └─────────┘ └──────────┘ └────────────┘
-        │                                       │
-        ▼                                       ▼
-   ┌─────────┐                              ┌────────┐
-   │  Specs  │                              │Prompts │
-   │signature│                              │tmpl +  │
-   │predicate│                              │schema  │
-   └────┬────┘                              └────┬───┘
-        │                                        │
-        ▼                                        │
-   ┌─────────┐                                   │
-   │ Queries │                                   │
-   │ filter+ │                                   │
-   │ shape   │                                   │
-   └────┬────┘                                   │
-        │                                        │
-        └────────┬───────────────────────────────┘
-                 ▼
-           ┌────────────┐    ┌────────────┐
-           │ Automations│    │   Tools    │
-           │ event →    │◄───┤ AI-callable│
-           │ side-effect│    │ definitions│
-           └────────────┘    └────────────┘
-                 │
-                 ▼
-           ┌────────────┐
-           │  Policies  │
-           │ provider-  │
-           │ selection  │
-           └────────────┘
+Concepts                    schemas + reserved intrinsics; the base of everything
+  |-- Shapes                @row / @actor field projections (+ traits)
+  |     '-- Specs           signature-bound predicates
+  |           '-- Queries   concept + filter (specs) + projection (shapes) + args
+  |-- Mutations             insert / update on rows
+  |-- Builtins              Go-backed executors
+  '-- Providers             AI vendor + model
+        '-- Prompts         template + input schema
+
+Queries + Prompts --> Automations  (event -> side-effect)  <-- Tools (AI-callable)
+                          '-- Policies  (provider selection)
 ```
 
-**How to read this:**
+**One line each** (each construct has its own full section below):
 
-- **Concepts** are pure schema. Every other construct references one
-  or more concept ids.
-- **Shapes** are reusable field-projection templates. Every shape
-  declares its kind via `@row` (concept payload + row intrinsics; the
-  concept is named by the `shape <Concept> <name>` signature) and/or
-  `@actor` (engine envelope, no signature concept). Trait shapes are
-  `@row` shapes signature-bound to a generic trait concept —
-  scaffolds for cross-concept predicates (`activeRowTrait`,
-  `statusRowTrait`, etc.). Shapes have no composition verb -- to share
-  a projection, repeat the paths or take the default projection.
-- **Specs** are atomic boolean predicates. A spec **binds one shape XOR
-  concept in its signature** (`spec <boundName> <name>`) and the body
-  `return`s a boolean over bare field names. The binding picks the eval
-  strategy (epic #2281):
-  - concept or `@row` shape binding → row-spec, compiles to a SQL
-    `WHERE` fragment.
-  - `@actor` shape binding → context-spec, evaluates in-process against
-    the auth envelope (named as a bare conjunct, e.g. `requiresAdmin`).
-  A spec body never reads `actor.*` / `row.*` directly. A `trait` is the
-  one deliberately-unbound row predicate (bare payload fields).
-- **Mutations** write to concepts via the bare `insert { ... }` /
-  `update { ... }` block (target from the signature). One write per
-  body.
-- **Builtins** wrap Go integrations behind a declarative schema, so
-  they look like regular DSL function calls.
-- **Providers** are AI vendor + model + auth records; **prompts**
-  pin a default provider and pull rendered templates over it.
-- **Queries** stitch concept + filter (specs) + projection (shapes)
-  + args into a typed read. The struct form
-  `query NAME { concept ... filter ... shape ... }` is the only
-  author-facing shape.
-- **Automations** are event-triggered side-effects. They consume
-  the layers above them and never the other way around.
-- **Tools** are the AI-facing surface of queries + mutations +
-  builtins. The tool loop binds tool-call args to handler args and
-  forwards.
-- **Policies** are empty-bodied AI provider-selection records
-  (`@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`),
-  consumed by the AI Router to resolve a provider chain. Caller-based
-  authz / feature-gating decisions are **specs**, not policies.
+- **Concepts** are pure schema; every other construct references one or more concept ids.
+- **Shapes** are reusable field-projection templates, `@row` and/or `@actor`. No composition verb.
+- **Specs** are atomic boolean predicates, signature-bound to one shape XOR concept. The binding picks the eval strategy: concept / `@row` → SQL `WHERE` fragment; `@actor` → in-process context-spec. A `trait` is the one deliberately-unbound row predicate.
+- **Mutations** write via the bare `insert { }` / `update { }` block. One write per body.
+- **Builtins** wrap Go integrations behind a declarative schema.
+- **Providers** are AI vendor + model + auth records; **prompts** pin a default provider and render templates over it.
+- **Queries** stitch concept + filter (specs) + projection (shapes) + args into a typed read.
+- **Automations** are event-triggered side-effects; they consume the layers above and never the reverse.
+- **Tools** are the AI-facing surface of queries + mutations + builtins.
+- **Policies** are empty-bodied AI provider-selection records. Caller-based authz / feature-gating decisions are **specs**, not policies.
 
-**Construct files live under `dsl/<namespace>/<construct>s.memql`**
-(concepts, specs, shapes, mutations, queries, builtins, providers,
-prompts, tools, automations, traits — one consolidated file per
-construct kind per namespace; policies are consolidated in
-`dsl/policies/policies.memql`).
+**Construct files live under `dsl/<namespace>/<construct>s.memql`** — one
+consolidated file per construct kind per namespace; policies are consolidated
+in `dsl/policies/policies.memql`.
 
 ## Argument resolution
 
@@ -1939,17 +1435,12 @@ concept id.
 > canonical short forms) stay test-only -- failing a fleet's boot over a
 > convention would be worse than the drift.
 >
-> **The entry point is `dslgate.ScanFiles`, and it takes the whole corpus.**
-> Init used to loop `ScanSource` per file, which can express only per-file
-> rules -- so the cross-namespace import gate (memql#3803), whose question is
-> "where is this name DECLARED", could not be one of them. It lived on
-> `ScanTree`, whose only caller was a conformance test, and was therefore
-> enforced over this repo's `dsl/` at PR time and over a product bundle
-> **nowhere**. memql#4051 ruled that a gap rather than a deliberate exemption:
-> boot already holds the merged file set (`baseloader.ReadAll`), so the corpus
-> pass adds no I/O, just ~79ms of regex over bytes already read. Write a new
-> gate against `ScanFiles`; there is no longer a tier of gate that boot cannot
-> reach, and reintroducing one is the mistake to avoid.
+> **Write a new gate against `dslgate.ScanFiles`, which takes the whole
+> corpus.** Init used to loop `ScanSource` per file, so a cross-corpus rule
+> ("where is this name DECLARED") could not be one of them and lived on a
+> conformance test instead -- enforced over this repo at PR time and over a
+> product bundle nowhere. There is no longer a tier of gate that boot cannot
+> reach; reintroducing one is the mistake to avoid.
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
   `<conceptName>.<field>`.
@@ -2111,9 +1602,16 @@ prompt agentReply {
 ```
 
 ### Providers
-AI provider configurations (OpenAI, Anthropic -- the only supported
-vendors). Struct form, mirrors concepts / shapes / tools.
+AI provider configurations (OpenAI, Anthropic -- the only supported vendors).
+Struct form, mirrors concepts / shapes / tools; base providers carry
+vendor-level auth + type.
 ```memql
+@base
+@type("OpenAI")
+provider openai {
+  auth { apiKey env("MEMQL_AI_OPENAI_API_KEY") }
+}
+
 @description("OpenAI GPT-5.4 Mini -- balanced cost/latency chat")
 @extends("openai")
 @model("gpt-5.4-mini")
@@ -2126,49 +1624,24 @@ provider chat54Mini {
   }
 }
 ```
-Base providers (vendor-level auth + type) use the same form:
-```memql
-@base
-@type("OpenAI")
-provider openai {
-  auth {
-    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
-  }
-}
-```
 
-**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept
-the same lifecycle flags as functions / builtins / prompts / specs /
-seeds. `@enabled` is the explicit-on default (a no-op). `@disabled`
-skips the provider at load -- it is **not registered and no auth
-resolution is attempted**, so it emits zero "registered as unavailable"
-warnings while staying in the tree for a future re-enable. `@disabled`
-on a `@base` **propagates**: every child that `@extends` it is skipped
-too. Use it to turn a keyless vendor lane off cleanly (mark the `@base`
-`@disabled` until its `MEMQL_SI_*_API_KEY` is seeded). Dependents
-degrade gracefully -- a
-policy whose `@primary` is disabled routes via its `@fallback`; a prompt
+**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same
+lifecycle flags as functions / builtins / prompts / specs / seeds. `@enabled`
+is the explicit-on default (a no-op). `@disabled` skips the provider at load --
+**not registered, no auth resolution attempted**, so it emits zero "registered
+as unavailable" warnings while staying in the tree for a future re-enable.
+`@disabled` on a `@base` **propagates** to every child that `@extends` it: mark
+the base disabled until its API key is seeded. Dependents degrade gracefully --
+a policy whose `@primary` is disabled routes via its `@fallback`; a prompt
 whose `@defaultProvider` is disabled falls back to the default.
 
-```memql
-@disabled
-@base
-@type("Acme")
-provider acme {
-  auth { apiKey env("MEMQL_SI_ACME_API_KEY") }
-}
-```
-
-> **Semantics of `@disabled` (shared across every construct that takes
-> it).** `@disabled` means the construct is **not loaded/active at
-> runtime right now**. It does NOT mean the construct is deprecated,
-> abandoned, exempt from updates / maintenance / refactors /
-> conformance, or that it will not be used in the future. It is a
-> reversible on/off switch; disabled constructs are still maintained and
-> may be re-enabled at any time. ("Deprecated / abandoned" is a separate
-> axis carried by `@deprecated`.) The canonical statement lives in
-> `component/language/ast/ast.go` at the `AttrEnabled` / `AttrDisabled`
-> const definition.
+> **Semantics of `@disabled` (shared across every construct that takes it).**
+> It means the construct is **not loaded/active at runtime right now**. It does
+> NOT mean deprecated, abandoned, or exempt from updates / maintenance /
+> refactors / conformance. It is a reversible on/off switch; disabled
+> constructs are still maintained. ("Deprecated / abandoned" is a separate axis
+> carried by `@deprecated`.) Canonical statement:
+> `component/language/ast/ast.go` at the `AttrEnabled` / `AttrDisabled` consts.
 
 ### Shapes
 Reusable data projections — declared in struct form. Each shape
@@ -2392,61 +1865,75 @@ Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
 
 Package: `component/memql/sense/` -- pure Go, no gRPC dependency. gRPC handlers in `component/grpc/sense_handlers.go`.
 
-### Platform Concepts
-Platform-level metadata (dsl/platform/concepts.memql)
-- `v1:platform:site` -- a hosted web surface; the edge node resolves the request `Host` header to one of these rows and serves its `bundleRef`
-- `v1:platform:globalSecret` / `globalVariable` -- cluster-scoped config storage
-- `v1:platform:outboundRequest` / `inboundRequest` -- request bookkeeping
-- `v1:platform:missingCapability` -- capability gaps recorded at runtime
+### Infrastructure concepts
 
-### Cluster Concepts
-Distributed node system metadata (dsl/cluster/concepts.memql)
-- `v1:cluster:node` -- Registered node in the cluster
-- `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner). Optional `codeReference` field links this row to its architecture-model service id (consumed by the cockpit's Topology drill-down).
-- `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions
-- `v1:cluster:deployment` -- Append-only deployment record (one timeline per deploymentId; status pending -> in_progress -> succeeded|failed; superseded/rolled_back). The deploy-as-a-pack source of truth for a deploy (#1872)
-- `v1:cluster:deploymentNodeSpec` -- Per-node-type spec child of a deployment (Epic 2 / #2094): one append-only timeline per (deploymentId, nodeType) carrying version + replicas + imageDigest. Engine-as-spine: empty `version` resolves against the deployment's engine version; non-empty pins the node type. Read a deployment's full per-node set via `nodeSpecsForDeployment`
-- `v1:cluster:cluster`, `v1:cluster:database`, `v1:cluster:identityProvider` -- topology bookkeeping
+Inventories live in the `.memql` files; what follows is what a reader needs to
+know that the schema does not say.
 
-### Observability Concepts
-Runtime side of the architecture framework (dsl/observability/; infrastructure metadata every node loads).
-See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
-- `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
-- `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
-- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node). Clients read it through `codeMetricsInWindow` (`dsl/observability/queries.memql`, memql#4208): one bucket, one `[windowStart, windowEnd)` range, `codeReference startsWith` any of the caller's prefixes or equal to an exact key -- the prefix-scoped read the portal's module drill-in uses instead of a capped client-side walk.
+**Platform** (`dsl/platform/concepts.memql`): `site` (a hosted web surface --
+the edge node resolves the request `Host` header to one of these rows and
+serves its `bundleRef`), `globalSecret` / `globalVariable` (cluster-scoped
+config), `outboundRequest` / `inboundRequest`, `missingCapability`.
 
-### Identity Concepts
-Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads)
-- `v1:identity:user` -- the person; cluster-wide role (owner / admin / developer / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
-- `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
-- `v1:identity:authSession` -- per-token session record (used for revocation)
-- `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
-- `v1:identity:auditEvent` -- append-only audit trail for the identity service: DECISIONS and
-  SECURITY SIGNALS only since memql#4328 (sign-in, session created/revoked, role change, admin
-  action, `refresh_token_reuse_detected`). `action` stays an unconstrained string -- many writers,
-  and a closed enum would refuse a new decision at insert time
-- `v1:identity:authActivity` -- routine authentication MECHANICS, split out of `auditEvent`
-  (memql#4328): refresh-token rotations, the blocked ones, grace-window accepts,
-  PAT-authenticated requests. Two orders of magnitude more numerous, so the Trail is clean by
-  construction rather than by a filter. Four writers and a CLOSED `action` enum;
-  `@rowAuthz(owner="actorUserId", clusterOwner)` -- the first composite tier in the tree, which is
-  what lets a person read their own activity and a cluster owner read everyone's. Its
-  `retiredTokenHash` is the evidence refresh-token reuse detection keys on (memql#4329), and REAL
-  retention applies: `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS` (default 30), hard-deleted daily
-  from Go by `component/identity/authactivity` -- so detection reaches back exactly that far
-- `v1:identity:accessRequest` -- waitlist-mode access request
-- `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
-- `v1:identity:enrolmentToken` -- single-use, TTL'd credential authorizing exactly one action:
-  register a passkey as the named user (memql#3408). What makes a FIRST credential obtainable
-  with no mailbox. Mirrors `v1:identity:workerPairingCode` rather than extending `invitation` --
-  an enrolment token has no invitee, no inviter to render into a message and no product scope,
-  and its single-use marker is a `consumedAt` stamp rather than `respondedAt` + a participation
-  status. Same SHA-256-hex hashing convention as every other credential row. Redeemed at
-  `GET /enroll?code=...`; issued by an owner/admin over `IdentityAdminMsg`, or by the install
-  wizard via `memql enrolment-token mint`
-- `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
+**Cluster** (`dsl/cluster/concepts.memql`): `node`, `nodeType` (optional
+`codeReference` links the row to its architecture-model service id, consumed by
+the cockpit's Topology drill-down), `spawnEvent`, `cluster` / `database` /
+`identityProvider`, plus the deploy pair:
+- `deployment` -- append-only, one timeline per deploymentId (pending ->
+  in_progress -> succeeded|failed; superseded/rolled_back). The
+  deploy-as-a-pack source of truth (#1872).
+- `deploymentNodeSpec` -- per-node-type child, one timeline per (deploymentId,
+  nodeType) carrying version + replicas + imageDigest. **Engine-as-spine:** an
+  empty `version` resolves against the deployment's engine version, a non-empty
+  one pins the node type. Read the full set via `nodeSpecsForDeployment`.
 
-See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-model.md) for the full model.
+**Observability** (`dsl/observability/`, loaded by every node --
+[design](docs/internal/design/auto-generated-diagrams.md)): `codeProfile`
+(live per-FQN verbosity override; CDC events feed the observe runtime's cache
+via `CodeProfileSubscriber`), `invocation` (per-call records on the
+`code_invocation` hypertable), `codeMetric` (per-(FQN, window) aggregates on
+the `code_invocation_1m` / `_1h` continuous aggregates, driving the cockpit
+Topology overlay). Clients read metrics through `codeMetricsInWindow`
+(memql#4208): one bucket, one `[windowStart, windowEnd)` range, `codeReference
+startsWith` any of the caller's prefixes -- the prefix-scoped read the portal's
+module drill-in uses instead of a capped client-side walk.
+
+**Identity** (`dsl/identity/concepts.memql`, loaded by every node -- full model
+in [access-model.md](docs/public/operate/auth/access-model.md)): `user` (the
+person; cluster-wide role owner / admin / developer / writer / reader; prefs),
+`authSession` (per-token, used for revocation), `magiclink`,
+`accessRequest`, `invitation`, `delegation` (agent acting through a user's
+identity, bounded role/scope/lifetime), plus:
+- `identity` -- a credential set owned by a user, a discriminated union keyed
+  on `identityType` (magic-link verified email, oauth token, api key/PAT,
+  service account, worker token, badge, account token, passkey). The `passkey`
+  variant is the only one whose stored material is PUBLIC (a COSE key),
+  because possession is proved by a signature rather than a digest match.
+- `auditEvent` / `authActivity` -- TWO logs since memql#4328, and the split is
+  what keeps the portal's Audit Trail readable. `auditEvent` records DECISIONS
+  and security signals (sign-in, session created/revoked, role change,
+  `refresh_token_reuse_detected`); `authActivity` records routine MECHANICS --
+  refresh-token rotations, the blocked ones, grace-window accepts,
+  PAT-authenticated requests -- which are two orders of magnitude more numerous.
+  The Trail is a generic concept walk with no filter, so the split is
+  structural rather than something every reader has to remember.
+  `authActivity.action` is a CLOSED enum of four values, unlike its sibling's;
+  it is the first concept in the tree to declare
+  `@rowAuthz(owner="<field>", clusterOwner)`, which is what lets a person read
+  their OWN activity and a cluster owner read everyone's (a non-owner admin
+  gets `authActivityForSelf` -- the composite's escape is the owner ROLE); and
+  its `retiredTokenHash` is the evidence refresh-token reuse detection keys on
+  (memql#4329). Real retention applies:
+  `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS` (default 30), hard-deleted
+  daily from Go, unlike `auditEvent`'s count-only sweep -- so detection reaches
+  back exactly that far.
+- `enrolmentToken` -- single-use, TTL'd, authorizing exactly one action:
+  register a passkey as the named user (memql#3408). What makes a FIRST
+  credential obtainable with no mailbox. Mirrors `workerPairingCode` rather
+  than extending `invitation` -- it has no invitee, no inviter to render into a
+  message and no product scope, and its single-use marker is a `consumedAt`
+  stamp rather than `respondedAt` + a participation status.
+
 
 ---
 
@@ -2454,331 +1941,237 @@ See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-m
 
 ### Canvas + Spaces
 
-Under platform consolidation (#2472), the space lifecycle (three-state +
-daily spaces) is an **engine-generic feature** rather than product code:
-spaces are already a core, generic data model (Epic 3), and daily-space is
-one of the reusable-capability absorptions. The core
+Under platform consolidation (#2472) the space lifecycle (three-state + daily
+spaces) is an **engine-generic feature** rather than product code; the core
 participant/session/utterance machinery is engine-side
 (`dsl/cognition/mutations.memql`: joinSpaceAsHuman, leaveSpace,
 addAgentToSpace, ...).
 
-The canvas timeline (the `canvasState` concept) is still delivered as
-**product DSL** -- supplied at runtime through the product's DSL bundle
-(`MEMQL_DSL_PATH`); its physical absorption into the engine is mid-migration,
-so treat canvas as product-owned for now. Product rows ride the chat-reply
-delivery substrate via `node.RegisterChatReplyConcept`.
+The canvas timeline (the `canvasState` concept) is still delivered as **product
+DSL** at runtime through the product's bundle (`MEMQL_DSL_PATH`); its physical
+absorption into the engine is mid-migration, so treat canvas as product-owned
+for now. Product rows ride the chat-reply delivery substrate via
+`node.RegisterChatReplyConcept`.
 
 ### Invitations (Identity Primitive)
 
-Token-hashed invitation credential for user and guest flows. Lives
-under `v1:identity:invitation`; product-specific mutations layer on
-top (e.g. `sendGuestInvite` in `dsl/cognition/mutations.memql`).
+Token-hashed invitation credential for user and guest flows, under
+`v1:identity:invitation`. Two gRPC messages drive the guest flow:
 
-Two gRPC messages drive the guest flow:
+- `SendGuestInviteMsg` -- authenticated space owner. Mints a 32-byte token,
+  stores only its SHA-256 hash on the `Invitation` record, sends the email via
+  the `email` integration plug-in.
+- `ResolveGuestInviteMsg` -- unauthenticated public call from the product
+  `/join/<token>` landing page. Returns scope + inviter metadata or a typed
+  status (`invalid` / `expired` / `already_accepted` / `cancelled`).
 
-- `SendGuestInviteMsg` -- authenticated space owner. Mints a 32-byte
-  token, stores only its SHA-256 hash on the `Invitation` record, and
-  sends the invitation email via the `email` integration plug-in.
-- `ResolveGuestInviteMsg` -- unauthenticated public call from the
-  product `/join/<token>` landing page. Returns scope + inviter
-  metadata or a typed status (`invalid` / `expired` /
-  `already_accepted` / `cancelled`).
+Guest authentication is `Authorization: Guest <token>`.
+`NewGuestAwareStreamInterceptor` wraps the identity-verifier interceptor,
+validates the token against the invitation registry, and builds a guest
+`AccessContext` under the `identity.guest` claim key (subject
+`guest:<invitationId>`). The MemQL WS bridge accepts it as
+`?guest_token=<token>` since browsers cannot set custom headers on the upgrade.
 
-Guest authentication is `Authorization: Guest <token>`. The
-`NewGuestAwareStreamInterceptor` wraps the identity-verifier
-interceptor, validates the token against the invitation registry,
-and builds a guest `AccessContext` under the `identity.guest`
-claim key (subject
-`guest:<invitationId>`; scope carried in claims for downstream
-partition checks). The MemQL WS bridge accepts the token as
-`?guest_token=<token>` since browsers cannot set custom headers on
-the WebSocket upgrade.
-
-Key files:
-- `dsl/identity/concepts.memql` -- the identity-owned `invitation` schema.
-- `dsl/identity/queries.memql` -- `invitationByTokenHash` + `invitationById`.
-- `dsl/identity/shapes.memql` -- the `invitationFull` shape.
-- `component/grpc/guest_handlers.go` + `guest_stream_interceptor.go`.
-- `integrations/email/` -- self-registering plug-in exposing
-  `integration.email.sendEmail`. GraphSender (OAuth client-credentials
-  against Microsoft Graph `sendMail`; preferred), SMTPSender
-  (fallback), LogSender (dev). Env: `AZURE_TENANT_ID` /
-  `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `MAIL_SENDER` /
-  `MAIL_FROM_NAME` for Graph; `SMTP_HOST` / `SMTP_PORT` /
-  `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM_ADDR` /
-  `SMTP_FROM_NAME` for SMTP; leave both unset for LogSender.
+Key files: `dsl/identity/{concepts,queries,shapes}.memql`,
+`component/grpc/guest_handlers.go` + `guest_stream_interceptor.go`, and
+`integrations/email/` (self-registering plug-in exposing
+`integration.email.sendEmail` -- GraphSender via Microsoft Graph `sendMail`
+preferred, SMTPSender fallback, LogSender for dev; env `AZURE_TENANT_ID` /
+`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `MAIL_SENDER` / `MAIL_FROM_NAME`,
+or the `SMTP_*` family, or neither).
 
 **The guest write path is ENGINE DSL, split across two domains** (memql#4258).
-This section used to say the guest mutations were product-specific and lived
-in `dsl/cognition/mutations.memql`. They were in neither place: the five
-constructs `component/grpc/guest_handlers.go` names existed in no `.memql`
-file anywhere, so on a cluster running the embedded tree every guest-invite
-write failed at execute with `function "..." not found`. They are declared
-now, and the split follows what each half is about:
+The five constructs `guest_handlers.go` names once existed in no `.memql` file
+at all, so every guest-invite write failed at execute with `function "..." not
+found`. The split follows what each half is about:
 
 | Construct | Where | Why there |
 |---|---|---|
-| `createGuestInvitation` | `dsl/identity/mutations.memql` | the credential -- beside the `kind="user"` twins `createUserInvitation` / `revokeUserInvitation` and the `invitation` concept itself |
+| `createGuestInvitation` | `dsl/identity/mutations.memql` | the credential -- beside `createUserInvitation` / `revokeUserInvitation` |
 | `markGuestInvitationAccepted` | same | same |
 | `markGuestInvitationKicked` | same | also the CANCEL path; a soft cancel, so the tokenHash stays taken |
 | `rotateGuestInvitationToken` | same | resend keeps one generation on `previousTokenHash` |
-| `createGuestParticipant` | `dsl/cognition/mutations.memql` | the membership -- the SPACE is cognition's, not identity's |
+| `createGuestParticipant` | `dsl/cognition/mutations.memql` | the membership -- the SPACE is cognition's |
 
 All five are `@serverOnly`: each writes a `tokenHash`, which is the whole
-credential the guest-auth interceptor matches on, so a client-reachable
-version of the create is a credential-forging primitive. The authorization
-that belongs in front of them -- the inviter's relationship to the space, the
-guest's valid token -- is held by the handlers, so the boundary sits where the
-authorization already lives.
+credential the guest-auth interceptor matches on, so a client-reachable create
+is a credential-forging primitive.
 
-The three update-shaped ones take MINIMAL arguments. Their call sites used to
-re-supply every discriminator "so the latest-wins projection keeps the
-context", which stopped being true at memql#1628 when `update{}` became a
-read-merge. `revokeAuthSession` in the same tree had the identical defect from
-two packages -- seven arguments against a two-argument declaration -- and it
-survived because an undeclared argument is DISCARDED rather than refused
-(`rejectUnknownArgs` is gated behind the MCP boundary).
-`component/grpc/render_query_args_parse_test.go` now gates both directions:
-every rendered call site resolves through the real front end, and every
-argument name it passes must be one the mutation declares.
+The three update-shaped ones take MINIMAL arguments -- `update{}` has been a
+read-merge since memql#1628, so re-supplying every discriminator is dead weight
+that an undeclared-argument DISCARD hides.
+`component/grpc/render_query_args_parse_test.go` gates both directions: every
+rendered call site resolves through the real front end, and every argument name
+it passes must be one the mutation declares.
 
 ### Email campaigns + the sending engine
 
 Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
-(memql#3348). Seven concepts under `dsl/campaigns/`: five operator-facing
-and owned-tier (`audience`, `recipient`, `template`, `campaign`,
-`delivery`), two engine-owned and clusterOwner-tier (`sendJob`,
-`suppression`).
+(memql#3348). Seven concepts under `dsl/campaigns/`: five operator-facing and
+owned-tier (`audience`, `recipient`, `template`, `campaign`, `delivery`), two
+engine-owned and clusterOwner-tier (`sendJob`, `suppression`).
 
-**The two identities is the design.** A send touches rows belonging to
-somebody else, and the engine BORROWS the owner's authority rather than
-out-ranking it. `component/campaigns`' drain worker runs its
-clusterOwner-tier reads (the job queue, the suppression list) under the
-engine's own operator identity, and everything owned -- the campaign, its
-template, its audience, the delivery ledger -- under
-`auth.ContextWithUserActor(ctx, job.campaignOwnerUserId)`. That owner value
-is copied off a campaign row the STARTING CALLER had already read under
-their own actor, so it can never name a user the caller could not act as.
-Consequence: no path here reads or writes a row the campaign's owner could
-not, and `delivery.ownerUserId` is stamped from `actor.userId` like every
-other write in the domain -- which is what took the concept off
-`ownerGateExemptions`.
+**The two identities is the design.** A send touches rows belonging to somebody
+else, and the engine BORROWS the owner's authority rather than out-ranking it.
+`component/campaigns`' drain worker runs its clusterOwner-tier reads (the job
+queue, the suppression list) under the engine's own operator identity, and
+everything owned under
+`auth.ContextWithUserActor(ctx, job.campaignOwnerUserId)`. That owner value is
+copied off a campaign row the STARTING CALLER had already read under their own
+actor, so it can never name a user the caller could not act as.
 
 **Four product decisions, each recorded next to its code:**
-- *Suppression is CLUSTER-WIDE and digest-keyed.* One deployment, one
-  sending mailbox, one SPF/DKIM identity, one reputation -- so one list.
-  The row id is the SHA-256 of the normalized address and the only readable
-  field is the domain, so being cluster-wide discloses no mailbox. Enforced
-  at the POINT OF SEND, before the recipient row's own status, which is what
-  "outranks every audience" means: a re-imported address whose row says
-  `subscribed` is still refused.
+- *Suppression is CLUSTER-WIDE and digest-keyed.* One deployment, one sending
+  mailbox, one reputation -- so one list. The row id is the SHA-256 of the
+  normalized address and the only readable field is the domain. Enforced at the
+  POINT OF SEND, before the recipient row's own status.
 - *A hard bounce suppresses; it does NOT delete the membership.* Deleting
-  destroys the audit trail and lets the next import resurrect a dead
-  address. A soft bounce does neither.
-- *Idempotency is the ledger.* One `v1:campaigns:delivery` row per
-  (campaign, recipient) at a derived id; the batch is "roster minus ledger,
-  plus retries that are due". The absence of the row IS the work queue, so a
-  resumed send needs nothing to remember.
+  destroys the audit trail and lets the next import resurrect a dead address.
+- *Idempotency is the ledger.* One `v1:campaigns:delivery` row per (campaign,
+  recipient) at a derived id; the batch is "roster minus ledger, plus retries
+  that are due". The absence of the row IS the work queue.
 - *Two rate limits.* Ours is a per-process token bucket
   (`MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`); theirs is the 429, surfaced as a
   typed `email.SendError` and honoured by parking the job until its
   `Retry-After`.
 
 **RFC 8058 one-click** rides two headers, which forced the Graph sender onto
-its base64-MIME form -- Graph's structured payload only carries `x-`
-headers, and `List-Unsubscribe` is not one. `GET+POST /unsubscribe` is a
-documented HTTP exception (see the table above).
+its base64-MIME form (Graph's structured payload only carries `x-` headers).
+`GET+POST /unsubscribe` is a documented HTTP exception.
 
-**The unsubscribe token names its key** (`u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>`,
-memql#3458), and the node verifies against a ring of two:
-`MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` signs, `..._SECRET_PREVIOUS` only
-verifies. The key id is a truncated HMAC **of the key**, not a slot or a
-counter -- a link minted today is clicked on a node where that secret has since
-become the previous one, so a positional label would be wrong exactly when it
-matters. `_PREVIOUS` is a permanent second reader key, NOT a migration window:
-an unsubscribe link has no expiry, so an old link keeps working forever until a
-SECOND rotation retires the key that signed it. The window is counted in
-rotations, not days; rotate at most once for any reason short of key
-compromise. The worker warns at boot when a deployment that has already sent
-holds only one key.
+**The unsubscribe token names its key**
+(`u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>`, memql#3458), verified
+against a ring of two: `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` signs,
+`..._SECRET_PREVIOUS` only verifies. The key id is a truncated HMAC **of the
+key**, not a slot -- a link minted today is clicked on a node where that secret
+has since become the previous one. `_PREVIOUS` is a permanent second reader
+key, NOT a migration window: unsubscribe links never expire, so **the window is
+counted in rotations, not days** -- rotate at most once for any reason short of
+key compromise.
 
-Not built: an automated warming ramp (needs reputation telemetry that does
-not exist) and a scheduler for `scheduledAt`. Runbook:
-[docs/public/operate/campaign-sending.md](docs/public/operate/campaign-sending.md).
+Not built: an automated warming ramp, and a scheduler for `scheduledAt`.
+Runbook: [docs/public/operate/campaign-sending.md](docs/public/operate/campaign-sending.md).
 
 ### Planner / Knowledge / Validation
 
-The schema is stable, so new features add fields/automations without
-migrations.
+The schema is stable, so new features add fields/automations without migrations.
 
 **Concepts**:
-
-- `v1:planner:plan` -- a user-visible unit of work. Carries
-  parentPlanId (sub-plan nesting), kind, status (queued / routing
-  / running / paused / awaitingFeedback / needsAgent / succeeded
-  / failed / cancelled), goal, ownerAgentId, requestedBy,
-  triggerSource, recommendationCardId, input / output,
-  refinementContext, phases[], estimate, tokenBudget / tokenSpent /
-  tokenAllocatedToChildren / tokenCapDisabled, metrics, pause +
-  feedback + chat-anchor bookkeeping.
-- `v1:planner:task` -- one executable step inside a Plan, never
-  recursive. Carries phase tag, executionSurface (inProcess /
-  containerExecutor) + executorBackend, metrics, parking fields.
+- `v1:planner:plan` -- a user-visible unit of work. parentPlanId (sub-plan
+  nesting), kind, status (queued / routing / running / paused / awaitingFeedback
+  / needsAgent / succeeded / failed / cancelled), goal, ownerAgentId,
+  requestedBy, triggerSource, recommendationCardId, input / output,
+  refinementContext, phases[], estimate, token budget/spend bookkeeping,
+  metrics, pause + feedback + chat-anchor bookkeeping.
+- `v1:planner:task` -- one executable step inside a Plan, never recursive.
+  Carries phase tag, executionSurface (inProcess / containerExecutor) +
+  executorBackend, metrics, parking fields.
+- `v1:planner:taskState` -- persisted Task working state for async parking.
 - `v1:agents:agentAuthorization` -- standing tiered-trust authorization.
-- `v1:planner:taskState` -- persisted Task working state for
-  async parking + planner re-invocation.
-- `v1:knowledge:document` -- container/manifest for analyzed user
-  files. Owns attached-domain list, validation rollup,
-  supersession back-pointers, lazy-embedding status.
-- `v1:knowledge:spreadsheetRow`, `v1:knowledge:imageRegion` --
-  typed per-format item concepts. Native column predicates
-  for spreadsheet rows; bbox + caption + embedding for images.
-- `v1:knowledge:validationEvent` -- append-only audit log for
-  every validation transition.
-- `v1:knowledge:domainEntitySchema` -- per-domain entity schema
-  for cross-file dedup. Inferred on second-Document trigger;
-  user-confirmed once.
-- `v1:knowledge:entityIndex` -- the dedup lookup table keyed by
-  sha256(normalized key field values). Force-add escape
-  valve for entity-schema misfires.
+- `v1:knowledge:document` -- container/manifest for analyzed user files.
+- `v1:knowledge:spreadsheetRow` / `imageRegion` -- typed per-format items.
+- `v1:knowledge:validationEvent` -- append-only validation audit log.
+- `v1:knowledge:domainEntitySchema` / `entityIndex` -- cross-file dedup:
+  per-domain entity schema (inferred on second-Document trigger,
+  user-confirmed once) and the sha256-keyed lookup table, with a force-add
+  escape valve for entity-schema misfires.
 
-`v1:common:knowledgeDomain` carries scope (workspace / private) +
-ownerId; `v1:common:documentChunk` carries documentId +
-validationStatus.
+`v1:common:knowledgeDomain` carries scope (workspace / private) + ownerId;
+`v1:common:documentChunk` carries documentId + validationStatus.
 
 **Analysis path.** The attachment HTTP handler creates the queued Plan +
 `plan.created` card synchronously, then runs extract + summarize +
-`CompleteAnalyzePlan` on a detached goroutine with a background context, so
-the user gets instant acknowledgement and the `plan.completed` card lands
-when the work finishes (`runAnalysisAsync` in
-`component/server/attachment_handler.go`). A heuristic estimate is stamped
-on `Plan.estimate` at creation time so the card's estimate strip renders
-immediately; `historicalPlanMetrics` backs the blending logic.
-`cascadeSupersession` + `cascadeValidationToItems` propagate
-Document-level validation transitions to predecessors and per-row items.
+`CompleteAnalyzePlan` on a detached goroutine, so the user gets instant
+acknowledgement and the `plan.completed` card lands when the work finishes
+(`runAnalysisAsync` in `component/server/attachment_handler.go`).
 
-**Planner Agent loop.** The planner-node-owned decompose loop
-(`integrations/planner/agent_loop.go`) invokes the `plannerAgent` prompt
-on a new userGoal Plan; the prompt emits a structured decision (decompose
-/ dispatchTask / createSpecialist / markPlanSucceeded / escalate) and the
-loop dispatches it, re-invoking until terminal.
+**Planner Agent loop.** `integrations/planner/agent_loop.go` invokes the
+`plannerAgent` prompt on a new userGoal Plan; the prompt emits a structured
+decision (decompose / dispatchTask / createSpecialist / markPlanSucceeded /
+escalate) and the loop dispatches it, re-invoking until terminal.
 
-**The cost-safety structure around that loop is the part to respect.**
-It is defense in depth and every layer is load-bearing:
+**The cost-safety structure around that loop is the part to respect.** It is
+defense in depth and every layer is load-bearing:
 
-- A hard process-wide LLM rate ceiling and an identical-request circuit
-  breaker at the provider HTTP chokepoint (`component/memql/ai_guard.go`).
-- A CUMULATIVE per-plan token/call budget checked before every
-  `plannerAgent` call, persisted so it survives cycles and retries; on
-  exceed the Plan parks rather than making another call
-  (`component/planner/budget.go`, `integrations/planner/agent_loop_budget.go`).
-- Complexity triage that routes a trivial deliverable to ONE cheap path
-  instead of the decompose loop; model tiering that defaults to a cheap
-  tier and escalates only on an explicit stuck signal.
-- An up-front token estimate + user-approval gate that parks an expensive
-  plan before it spends, gated specialist creation/training, phased
-  execution with per-phase checkpoints, deterministic-first result
-  verification, and a no-task-`markPlanSucceeded` convergence guard.
+- A hard process-wide LLM rate ceiling and an identical-request circuit breaker
+  at the provider HTTP chokepoint (`component/memql/ai_guard.go`).
+- A CUMULATIVE per-plan token/call budget checked before every `plannerAgent`
+  call, persisted so it survives cycles and retries; on exceed the Plan parks
+  rather than making another call (`component/planner/budget.go`).
+- Complexity triage that routes a trivial deliverable to ONE cheap path instead
+  of the decompose loop; model tiering that defaults cheap and escalates only
+  on an explicit stuck signal.
+- An up-front estimate + user-approval gate, gated specialist
+  creation/training, phased execution with per-phase checkpoints,
+  deterministic-first result verification, and a no-task-`markPlanSucceeded`
+  convergence guard.
 
 Read [docs/public/ai/llm-cost-control.md](docs/public/ai/llm-cost-control.md)
-before touching any of it. `produceArtifact` (the conversational "make me a
-file" deliverable) rides the unified loop rather than a bypass: triage
-recognizes it as a known single deliverable and shortcuts to ONE direct
-production turn (`startPlanDirect` -> running -> the owning agent writes the
-file via the workbench), with the rate ceiling, caps and tiering as
-structural backstops. An earlier hardcoded bypass was reverted precisely
-because those backstops did not yet exist -- do not reintroduce one.
-
-## Need Help?
-
-1. **Documentation:** Check [GLOSSARY.md](GLOSSARY.md)
-2. **Quick start:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
-3. **Logs:** `kubectl logs -n memql deploy/<node> -f`
-
----
+before touching any of it. `produceArtifact` rides the unified loop rather than
+a bypass: triage shortcuts to ONE direct production turn (`startPlanDirect`),
+with the rate ceiling, caps and tiering as structural backstops. An earlier
+hardcoded bypass was reverted precisely because those backstops did not yet
+exist -- do not reintroduce one.
 
 ## Notes for Claude Code CLI
 
-- Several directories carry their own CLAUDE.md, and it is the first thing
-  to read before editing that tree: `component/`, `component/language/`,
+- Use [GLOSSARY.md](GLOSSARY.md) to find specific documentation.
+- Several directories carry their own CLAUDE.md, and it is the first thing to
+  read before editing that tree: `component/`, `component/language/`,
   `component/node/`, `component/architecture/`, `component/observe/`,
   `integrations/`, `sdk/go/`, `docs/`. This is a list, not a rule -- a
-  directory without one is normal, and the root claim used to read as
-  though every directory had one (memql#4121).
-- Use GLOSSARY.md to find specific documentation
-- The local k3d cluster is self-contained (`make up`; no manual setup needed)
-- Migrations run automatically on startup
+  directory without one is normal (memql#4121).
+- The local k3d cluster is self-contained (`make up`; no manual setup needed),
+  and migrations run automatically on startup.
 
 ### Makefile + shell-script convention
 
 The Makefile is for **simple commands and target wiring**. Anything
-multi-step, conditional, or long enough to need line-continuations
-gets extracted into a shell script under `scripts/` and the
-Makefile target becomes a one-liner that calls it.
+multi-step, conditional, or long enough to need line-continuations gets
+extracted into a shell script under `scripts/`, and the Makefile target becomes
+a one-liner that calls it.
 
-Concretely:
+- **Stays inline:** single commands (`go build`, `go test`, `kubectl rollout
+  restart`), short pipelines (~3 lines or fewer), `.PHONY`, target
+  dependencies, simple variable substitutions.
+- **Goes into `scripts/<area>/<name>.sh`:** conditionals, retry loops,
+  multi-step orchestration, user-facing error messages -- anything "complex
+  enough that you'd want to test it independently of make."
 
-- **Stays inline in the Makefile:** single commands (`go build`,
-  `go test`, `kubectl rollout restart`), short pipelines (~3 lines or
-  fewer), `.PHONY` declarations, target dependencies, simple
-  variable substitutions like `make secret-set NAME=... VALUE=...`.
-- **Goes into `scripts/<area>/<name>.sh`:** anything with
-  conditionals, retry loops, multi-step orchestration, friendly
-  user-facing error messages, or "complex enough that you'd want
-  to test it independently of make."
-
-Shell-script rules (per the global convention in
-`~/.claude/CLAUDE.md`, applied here):
-
-- `#!/usr/bin/env bash` shebang, `set -euo pipefail` at the top
-  (drop `-e` for status-reporter scripts where individual
-  failures shouldn't abort the rest).
-- **Function-based structure** -- one function per responsibility,
-  `main()` at the bottom calls them in order. No long sequential
-  blob of commands.
-- **Source a shared `scripts/<area>/*.sh` helper** for common
-  functions (`check_docker`, cluster waits, etc.) so individual
-  scripts stay focused.
-- File extension `.sh`, executable (`chmod +x`).
-- Named "shell scripts" in docs (the umbrella term); they're
-  technically Bash scripts since we use `[[`, arrays, `function`
-  keyword, etc.
-
-Current example: `scripts/k3d/{up,dev,status}.sh` implements
-`make up`, `make dev`, and `make status`. The Makefile targets are
-one-liners (`bash scripts/k3d/up.sh`).
+Shell-script rules: `#!/usr/bin/env bash` + `set -euo pipefail` (drop `-e` for
+status reporters where one failure shouldn't abort the rest); **function-based
+structure** with `main()` at the bottom, never a sequential blob; source a
+shared `scripts/<area>/*.sh` helper for common functions; `.sh` extension,
+executable. Reference: `scripts/k3d/{up,dev,status}.sh` behind one-liner
+targets.
 
 #### Capability scripts (the hardened successor)
 
-A **capability script** is a deploy/ops script that is also the
-deterministic backend behind a DSL `action` -- so it must run
-**identically** whether an automation/action executor or a human
-invokes it. These scripts adopt the **capability-script contract**
+A **capability script** is a deploy/ops script that is also the deterministic
+backend behind a DSL `action`, so it must run **identically** whether an
+automation or a human invokes it. It adopts the **capability-script contract**
 ([docs/internal/design/capability-script-contract.md](docs/internal/design/capability-script-contract.md),
-#2221), which is the function-based convention above **plus**:
+#2221) -- the convention above **plus**:
 
-- **non-interactive** -- no `read -p` / `select` prompts; a
-  destructive confirmation is an explicit `--confirm=<phrase>` param,
-  never a blocking prompt;
-- **structured params in** -- `--flag=value` > stdin JSON
-  (`--params-stdin`) > documented defaults (cap_param has no env tier;
-  a script passes an env-resolved value as the default); no positional args;
-- **structured result out** -- exactly one JSON envelope on **stdout**,
-  all human logs on **stderr**;
-- **honest, stable exit codes** (0 ok; 2 bad param; 3 refused; 4
-  prerequisite missing; 5 op failed);
-- **no decisions inside** -- no branching on environment/version/role
-  (that lives in DSL `logic`); only mechanical idempotency branches.
+- **non-interactive** -- no `read -p` / `select`; a destructive confirmation is
+  an explicit `--confirm=<phrase>` param, never a blocking prompt;
+- **structured params in** -- `--flag=value` > stdin JSON (`--params-stdin`) >
+  documented defaults (no env tier; a script passes an env-resolved value as
+  the default); no positional args;
+- **structured result out** -- exactly one JSON envelope on **stdout**, all
+  human logs on **stderr**;
+- **honest, stable exit codes** (0 ok; 2 bad param; 3 refused; 4 prerequisite
+  missing; 5 op failed);
+- **no decisions inside** -- no branching on environment/version/role (that
+  lives in DSL `logic`); only mechanical idempotency branches.
 
-They `source scripts/lib/capability.sh` (the shared runtime:
-`cap_init` / `cap_param` / `cap_ok` / `cap_fail` / `cap_info`-to-stderr
-/ `--print-spec`). The reference implementation is the `scripts/k3d/*`
-engine-local path; `scripts/lib/capability_contract_test.go` enforces
-the contract on every script that sources the library (and gates
-non-interactivity across `scripts/{k3d,deploy,release}`). The
-Go effect seam parses the envelope via
-`deploycontrol.ParseCapabilityResult`. Use this contract for any new
-script a DSL `action` will drive.
+They `source scripts/lib/capability.sh` (`cap_init` / `cap_param` / `cap_ok` /
+`cap_fail` / `cap_info`-to-stderr / `--print-spec`).
+`scripts/lib/capability_contract_test.go` enforces the contract on every script
+that sources the library and gates non-interactivity across
+`scripts/{k3d,deploy,release}`; the Go effect seam parses the envelope via
+`deploycontrol.ParseCapabilityResult`. Use this contract for any new script a
+DSL `action` will drive.
 
 ### Documentation Style Guidelines
 

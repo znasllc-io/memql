@@ -56,14 +56,8 @@ component/node/
 ├── routing_automation_run.go # Routing rules for automation-run events
 ├── dedup.go               # Ring buffer dedup for distributed events
 ├── bootstrap.go           # NodeBootstrap interface, BootstrapFor() factory, DiscoverPeerAddress()
-├── bootstrap_bff.go
-├── bootstrap_voice.go
-├── bootstrap_cognition.go
-├── bootstrap_agent.go
-├── bootstrap_planner.go
-├── bootstrap_mcp.go
-├── bootstrap_token.go
-├── bootstrap_workbench.go
+│                          #   bootstrap_{bff,voice,cognition,agent,planner,
+│                          #   mcp,workbench,token}.go -- per-type bootstraps
 ├── capability_router.go   # Route capability lookups across the mesh
 ├── parent_connector.go    # ParentConnector -- child dials its MEMQL_PARENT_ADDRESS
 ├── worker_dialer.go       # WorkerDialer -- BFF opens outbound streams to workers
@@ -73,14 +67,9 @@ component/node/
 ├── chat_reply_delivery.go # Chat-reply concept delivery over the substrate
 ├── chat_reply_registry.go # RegisterChatReplyConcept registry
 ├── client_tool_rpc.go     # Client-tool relay RPC plumbing
-├── compiled_agent.go      # Build-tag-selected compiled node type (agent)
-├── compiled_bff.go        # Build-tag-selected compiled node type (bff, default)
-├── compiled_cognition.go  # Build-tag-selected compiled node type (cognition)
-├── compiled_default.go    # Build-tag-selected compiled node type (fallback)
-├── compiled_mcp.go        # Build-tag-selected compiled node type (mcp)
-├── compiled_planner.go    # Build-tag-selected compiled node type (planner)
-├── compiled_voice.go      # Build-tag-selected compiled node type (voice)
-├── compiled_workbench.go  # Build-tag-selected compiled node type (workbench)
+├── compiled_*.go          # Build-tag-selected compiled node type, one per
+│                          #   type (agent/bff/cognition/mcp/planner/voice/
+│                          #   workbench) + compiled_default.go fallback
 ├── delivery_retention.go  # Substrate delivery retention/backlog bounds
 ├── delivery_store_pg.go   # Postgres-backed outbox+cursor store
 ├── delivery_substrate.go  # DeliverySubstrate: Publish/Subscribe/Ack contract
@@ -127,48 +116,40 @@ unchanged. Idempotent self-edges (`X -> X`) are no-ops. `NodeLifecycle` is
 concurrency-safe (the node is multi-goroutine) and notifies an optional
 observer on every actual change.
 
-How it is wired (in `app/cluster.go` + `app/run.go`):
+How it is wired (`app/cluster.go` + `app/run.go`):
 
 - **Boot:** the PeerManager constructs the lifecycle in `Starting`.
-- **Ready (clean startup, memql#1269):** `app.MarkNodeReady()` flips it to
-  `Ready` only AFTER every dependency has signalled `Ready()` (DB, engine, mesh
-  registration actually up) -- `Run` waits on each dep's `Ready()` channel
-  (bounded by `DefaultStartupReadyTimeout`) before flipping, so the node never
+- **Ready (memql#1269):** `app.MarkNodeReady()` flips to `Ready` only AFTER
+  every dependency has signalled `Ready()` (DB, engine, mesh registration
+  actually up), bounded by `DefaultStartupReadyTimeout` -- so the node never
   advertises Ready / readiness-200 while deps are still wiring up.
-- **Draining (graceful SIGTERM drain, memql#1269):** `app.BeginNodeDrain()`
-  flips it to `Draining` on the shutdown signal. `Run` then keeps serving for
-  the endpoint-removal window (`MEMQL_SHUTDOWN_DRAIN_DELAY`) and waits, bounded
-  by `MEMQL_SHUTDOWN_GRACE_PERIOD`, for in-flight user streams
-  (`server.ActiveStreams`) to finish before tearing down -- in-flight that
-  outlives the grace is cut off at the deadline by the bounded #1119
-  `GracefulStop`.
-- **Operator-triggered drain (memql#1270):** the SAME drain above, initiated
-  on demand by an owner/admin operator instead of by SIGTERM (epic decision
-  #4: one drain mechanism, two triggers). An owner/admin sends the gRPC
-  `NodeMaintenanceMsg` on `MemqlService.Stream` to a target node; the
-  owner/admin-gated `handleNodeMaintenance` calls `app.RequestOperatorDrain`,
-  which closes the operator-drain channel `app.Run`'s wait path selects on
-  (alongside the OS signal). The drain orchestration that follows is byte-for-
-  byte the #1269 path -- there is no separate drain code. The
-  `scripts/cluster/rolling-drain` Go tool fires the per-node trigger, and
-  `scripts/cluster/rolling-drain.sh` is the ordered-rollout driver that drains
-  one replica at a time, waiting for a Ready replacement before the next.
-- **Stopped (memql#1269):** `app.MarkNodeStopped()` flips it to the terminal
-  `Stopped` at the END of the drain -- after in-flight finishes -- immediately
-  before the dependency Stop sweep, so the node leaves the mesh as cleanly
-  Stopped rather than vanishing mid-Draining.
-- **Gossip advertisement:** `LifecycleState.Health()` maps the state onto the
-  existing `NodeHealthStatus` wire enum (`Starting`->CONNECTING,
-  `Ready`->HEALTHY, `Draining`->DRAINING, `Stopped`->STOPPED). The outbound
-  heartbeat (`peerConnection` healthFn, set by ParentConnector + WorkerDialer)
-  and the server-side heartbeat (`buildServerHeartbeat`) stamp this, so peers
-  learn the state via the unchanged gossip contract and route AROUND a
-  Draining node at once instead of after a missed-heartbeat timeout. Backward-
-  compatible: a connection with no lifecycle source still advertises HEALTHY.
-- **Readiness != liveness:** an observer (wired in `app/cluster.go`) bridges
-  `Draining`/`Stopped` to `component/server.SetDraining(true)`, so `/healthz`
-  + `/readyz` (READINESS) report 503 while `/livez` (pure LIVENESS, #1117)
-  stays 200. A draining node is de-routed but NOT liveness-killed.
+- **Draining (memql#1269):** `app.BeginNodeDrain()` flips to `Draining` on the
+  shutdown signal. `Run` keeps serving for the endpoint-removal window
+  (`MEMQL_SHUTDOWN_DRAIN_DELAY`) and waits, bounded by
+  `MEMQL_SHUTDOWN_GRACE_PERIOD`, for in-flight user streams
+  (`server.ActiveStreams`); anything outliving the grace is cut at the deadline
+  by the bounded #1119 `GracefulStop`.
+- **Operator-triggered drain (memql#1270):** the SAME drain, initiated by an
+  owner/admin instead of by SIGTERM (epic decision #4: one mechanism, two
+  triggers). `NodeMaintenanceMsg` on `MemqlService.Stream` ->
+  owner/admin-gated `handleNodeMaintenance` -> `app.RequestOperatorDrain`,
+  which closes the channel `app.Run`'s wait path selects on alongside the OS
+  signal. **There is no separate drain code.** `scripts/cluster/rolling-drain`
+  fires the per-node trigger; `rolling-drain.sh` drains one replica at a time,
+  waiting for a Ready replacement before the next.
+- **Stopped (memql#1269):** `app.MarkNodeStopped()` at the END of the drain,
+  immediately before the dependency Stop sweep, so the node leaves the mesh
+  cleanly Stopped rather than vanishing mid-Draining.
+- **Gossip advertisement:** `LifecycleState.Health()` maps onto the existing
+  `NodeHealthStatus` wire enum (Starting->CONNECTING, Ready->HEALTHY,
+  Draining->DRAINING, Stopped->STOPPED), stamped by both the outbound
+  heartbeat and `buildServerHeartbeat`. Peers therefore route AROUND a Draining
+  node at once instead of after a missed-heartbeat timeout. A connection with
+  no lifecycle source still advertises HEALTHY.
+- **Readiness != liveness:** an observer bridges `Draining`/`Stopped` to
+  `component/server.SetDraining(true)`, so `/healthz` + `/readyz` report 503
+  while `/livez` (pure liveness, #1117) stays 200. A draining node is
+  de-routed, NOT liveness-killed.
 
 ### WorkerDialer (`worker_dialer.go`, BFF-only)
 On BFF binaries, opens one outbound NodeService stream per worker-type peer
