@@ -413,6 +413,120 @@ Same field name, different type, different job.
 
 ---
 
+## Fleet
+
+`/fleet` is **where work runs** (epic memql#4349): the computers registered to
+this cluster as workers, and the cluster's own sandboxed workbenches. It is its
+own rail group, sitting between Build and Cluster because it is neither. A
+machine is somebody's own computer, reached over a stream it opened and
+revocable by its owner -- so it is not cluster administration, and gating it
+behind the admin items would hide from a person the list of their own
+computers. A workbench is the cluster's own sandbox rather than anyone's data,
+so it is not a View either.
+
+**Both entries are visible at every role, deliberately.** The reads behind them
+are caller-scoped in the ENGINE -- a person sees their own machines and
+workspaces, and the all-cluster reads open on `actor.isClusterOwner==true` -- so
+the rail is not advertising a door that will not open. `/fleet` itself redirects
+to Machines; there is no landing page above two destinations, because the tab
+strip already is the index.
+
+### `/fleet/machines`
+
+Every computer registered as a worker, one card each:
+
+- **Online or not, derived rather than stored.** Green when the machine is
+  unrevoked and its `lastSeenAt` is within 30 seconds -- two heartbeat flushes.
+  The rule has exactly two implementations, this page's and
+  `component/worker.IsOnline`, and `TestFleetOnlineWindowMatchesPortal` fails
+  the build when their windows disagree. It is NOT read from a per-replica
+  connection table, which would answer "connected to the replica I am talking
+  to" rather than "connected at all".
+- **Which replica holds its stream** (`connectedNodeId`), which is what makes a
+  machine dispatchable from a replica that is not holding it.
+- **The label merge, marked by side.** A machine carries two maps: `labels`, as
+  the cockpit reports them and OVERWRITTEN on every reconnect, and
+  `operatorLabels`, which the owner sets here and which no reconnect touches.
+  Routing matches the merge with the operator side winning, so the page shows
+  the merge -- and shows which side each value came from, because a reported
+  value an owner has overridden is a fact about their configuration rather than
+  about the machine.
+- **Rename, edit operator labels, revoke.** A rename writes `displayName`;
+  `name` stays the cockpit's hostname, which the next reconnect re-stamps.
+- **Add a machine**, which mints a worker token, shows the plain
+  `mql_wkr_...` value **once** (only its SHA-256 hash persists), and hands over
+  the install one-liner. It reports success by watching the machine population
+  GROW, not by the mint succeeding -- a minted token proves nothing about the
+  machine.
+- **Recent calls**, per machine, rendering the routing record: the strategy that
+  chose it, the candidates considered in the order they would have been tried,
+  what was rejected and why, and what the call was rerouted from. An empty
+  record renders as "not recorded", never as an empty table -- "chose nothing"
+  and "we did not write down what was chosen" are different facts.
+- **The routing policy editor**, one panel for the whole fleet: strategy
+  (`firstFit` / `roundRobin` / `leastLoaded` / `labelMatch`), required labels,
+  preferred labels, fallback. The empty form opens on `firstFit` +
+  `nextMatching` because that is what the router applies to a person with no
+  policy row -- a form whose defaults differed from the no-policy behaviour
+  would mean pressing Save with nothing typed CHANGED the routing.
+
+**What a cluster owner sees that a plain user does not:** a scope selector
+offering "Every machine in this cluster", which switches the read from
+`myWorkersWithStatus` to `allWorkersWithStatus` and adds an owner column. The
+toggle is a courtesy, not a gate -- the all-machines read opens
+`actor.isClusterOwner==true` in the engine, so a non-owner who reached it would
+get an empty set whatever the browser renders. The **activity list is the
+exception**: it calls the self-scoped `invocationsForWorker`, so a cluster owner
+inspecting somebody else's machine sees no calls on a machine the page can
+otherwise fully describe. (`invocationsForWorkerAsOperator` exists in the DSL
+for that read; the page does not yet call it.)
+
+### `/fleet/workbenches`
+
+The cluster's own sandboxed working directories -- nothing here touches
+anybody's machine.
+
+- **The replicas**, from `v1:cluster:node` narrowed to `nodeType=workbench`,
+  collapsed to the latest row per id (the concept is append-only, so one replica
+  would otherwise render once per liveness transition it has ever written). A
+  replica that STOPPED is kept rather than hidden: it is the most interesting
+  row on a screen whose job is saying where a workspace's files went.
+- **The workspaces on each**, live and released, with the release reason
+  rendered in words. `node_lost` is the one an operator has to be able to read
+  off the page: the replica holding that directory left the mesh and the files
+  were **not** migrated, which is a design decision rather than a failure to
+  recover them (see the [workbench runbook](workbench-runbook.md), section 11).
+- **Release**, per workspace, behind a confirmation.
+
+**What a cluster owner sees that a plain user does not:** the same scope
+selector, switching `myWorkspaces` for `allWorkspaces` -- which is the read that
+answers "why is this workbench node full".
+
+WARNING: the per-node number is a COUNT of the workspaces this page has loaded
+that name that node, not a fill level. `v1:cluster:node` declares no capacity
+field -- no disk figure, no cap, no quota -- and the page captions it as exactly
+what it is.
+
+### Both pages are live, and say so when they are not
+
+Machines and workspaces are subscribed rather than polled, and the events are
+FOLDED into the loaded rows rather than used as refetch triggers -- a
+heartbeat-driven concept re-read on every event is a read every few seconds on
+an idle page. `graph.node.created` / `updated` for `v1:worker:registration`,
+`v1:worker:routingPolicy` and `v1:workbench:workspace` carry routing rules in
+`component/node/routing.go` for exactly this reason: these rows are WRITTEN on
+the agent node and READ on the page the bff serves, and under default-deny the
+event would stay on the agent. The machine list would then be correct on load
+and frozen thereafter, which is the worst of the three possible behaviours
+because it looks like it is working. `v1:worker:invocation` is deliberately
+excluded on volume grounds -- one row per tool call is not something the mesh
+needs to carry, and the page reads a machine's recent calls on demand.
+
+When a subscription cannot be established the page says so in a banner rather
+than silently going static.
+
+---
+
 ## Administration
 
 `/admin` is the operator console: the cluster's own state, rather than

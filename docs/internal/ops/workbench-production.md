@@ -143,6 +143,33 @@ IS the answer; without the row there is no record that anything moved.
     bundle fired off the `node_lost` release -- and nothing in this repository
     can emit one.
 
+### The operator surface for all of this
+
+`/fleet/workbenches` in the MemQL Portal (memql#4356) is where the above is
+read rather than queried: the workbench replicas the cluster knows about, and
+the per-plan workspaces living on each -- live and released, with the release
+reason spelled out, so a `node_lost` row is legible without going to the
+source. A cluster owner can widen the scope from their own workspaces to every
+workspace in the cluster; that is the read that answers "why is this workbench
+node full".
+
+Two reads back it, both caller-scoped in the ENGINE rather than in the page
+(`dsl/workbench/queries.memql`):
+
+| Query | Who | Scope |
+|---|---|---|
+| `myWorkspaces` | anyone signed in | `ownerUserId==actor.userId`, live and released, newest first |
+| `allWorkspaces` | cluster owner (`actor.isClusterOwner==true`) | every workspace, optionally narrowed to one `status` |
+
+The existing `provisionedWorkspaces` inventory read is unchanged, and is now
+row-gated like everything else.
+
+WARNING: the page cannot show a **fill level**. `v1:cluster:node` declares no
+capacity field -- no disk figure, no workspace cap, no quota -- so the per-node
+number is the count of workspaces the page has LOADED that name that node, and
+it is captioned as exactly that. Any node label shaped like a capacity is
+rendered beside it, because an operator who set one meant it to be read.
+
 ## 2. Storage model: ephemeral scratch + durable blob
 
 ### Durability design

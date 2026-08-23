@@ -196,7 +196,7 @@ function harness(
     if (call === "query myRoutingPolicies()") {
       return new Result({ bundle: { nodes: overrides.policies ?? [] } });
     }
-    if (call.startsWith("query invocationsForWorker(")) {
+    if (call.startsWith("query invocationsForWorker")) {
       return new Result({ bundle: { nodes: [INVOCATION_ROW] } });
     }
     // Mutations: nothing reads the reply, so an empty envelope is enough.
@@ -502,6 +502,40 @@ describe("the machine verbs", () => {
     expect(call).toContain('revokeReason: "returned"');
   });
 
+  // v1:worker:invocation declares no row tier, so the caller scope lives in the
+  // FILTER -- and one filter cannot be both "mine" and "any, if you are a
+  // cluster owner". Calling the self-scoped read from the all-machines view
+  // returns NOTHING for a machine the operator does not personally own, and an
+  // empty activity list reads as "this machine is idle" rather than "wrong
+  // query". So which name goes on the wire is the assertion.
+  it("reads a person's own machine through the self-scoped query", async () => {
+    const h = harness();
+    renderFleet(h);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "jose-mac-mini" })).toBeTruthy());
+    fireEvent.click(within(cardFor("jose-mac-mini")).getByRole("button", { name: "Recent calls" }));
+
+    await waitFor(() =>
+      expect(h.calls).toContain('query invocationsForWorker(workerId: "wk-1")'),
+    );
+    expect(h.calls.some((call) => call.includes("invocationsForWorkerAsOperator"))).toBe(false);
+  });
+
+  it("reads through the operator-scoped query on the all-machines view", async () => {
+    const h = harness();
+    renderFleet(h);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "jose-mac-mini" })).toBeTruthy());
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Whose machines" }), {
+      target: { value: "all" },
+    });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "ci-runner" })).toBeTruthy());
+
+    fireEvent.click(within(cardFor("ci-runner")).getByRole("button", { name: "Recent calls" }));
+    await waitFor(() =>
+      expect(h.calls).toContain('query invocationsForWorkerAsOperator(workerId: "wk-2")'),
+    );
+  });
+
   it("shows a machine's recent calls with the routing that chose it", async () => {
     const h = harness();
     renderFleet(h);
@@ -709,3 +743,4 @@ describe("the nav rail", () => {
     );
   });
 });
+

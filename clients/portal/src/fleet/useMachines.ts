@@ -328,7 +328,11 @@ export interface MachineActivityState {
 //
 // `enabled` rather than a conditional call: hook order cannot vary between
 // renders (the parameter useMyAccess takes, for the same reason).
-export function useMachineActivity(workerId: string, enabled: boolean): MachineActivityState {
+export function useMachineActivity(
+  workerId: string,
+  enabled: boolean,
+  asOperator: boolean,
+): MachineActivityState {
   const { query } = useCluster();
   const [invocations, setInvocations] = useState<Invocation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -346,7 +350,7 @@ export function useMachineActivity(workerId: string, enabled: boolean): MachineA
     setError("");
 
     void fleet
-      .invocationsForWorker(query, workerId)
+      .invocationsForWorker(query, workerId, asOperator)
       .then((result) => {
         if (live) setInvocations(result.rows().map(invocationFromRow));
       })
@@ -360,7 +364,7 @@ export function useMachineActivity(workerId: string, enabled: boolean): MachineA
     return () => {
       live = false;
     };
-  }, [query, workerId, enabled]);
+  }, [query, workerId, enabled, asOperator]);
 
   return useMemo(
     () => ({ invocations, loading, error }),

@@ -85,14 +85,23 @@ export function myRoutingPolicies(query: QueryClient): Promise<Result> {
 
 // Recent calls dispatched to one machine, newest first.
 //
-// Scoped to the CALLER's own machines server-side (`ownerUserId==actor.userId`
-// is a conjunct of the query's filter, not just the concept's tier), so a
-// cluster owner reading another person's machine gets nothing here. The page
-// says so rather than rendering an empty list that reads as "idle".
-export function invocationsForWorker(query: QueryClient, workerId: string): Promise<Result> {
+// TWO QUERIES FOR ONE LIST, and the split is server-side. v1:worker:invocation
+// declares no row tier, so the caller scope has to live in the FILTER -- and
+// one filter cannot be both "mine" and "any, if you are a cluster owner".
+// invocationsForWorker is `ownerUserId==actor.userId`; the operator variant is
+// `actor.isClusterOwner==true`. Calling the self-scoped one from the
+// all-machines view would render an empty list for every machine the operator
+// does not personally own, which reads as "this machine is idle" rather than
+// "you are not its owner".
+export function invocationsForWorker(
+  query: QueryClient,
+  workerId: string,
+  asOperator: boolean,
+): Promise<Result> {
+  const name = asOperator ? "invocationsForWorkerAsOperator" : "invocationsForWorker";
   return query.executeNamed(
-    "invocationsForWorker",
-    "query invocationsForWorker(workerId: " + renderMemQLValue(workerId) + ")",
+    name,
+    "query " + name + "(workerId: " + renderMemQLValue(workerId) + ")",
   );
 }
 

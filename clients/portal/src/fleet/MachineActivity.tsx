@@ -34,8 +34,16 @@ const OUTCOME_TONE: Record<string, StatusTone> = {
   rerouted: "warn",
 };
 
-export function MachineActivity({ workerId }: { workerId: string }): ReactNode {
-  const { invocations, loading, error } = useMachineActivity(workerId, true);
+export function MachineActivity({
+  workerId,
+  asOperator,
+}: {
+  workerId: string;
+  // True on the all-machines view. It selects the operator-scoped read, which
+  // is the only one that returns rows for a machine the caller does not own.
+  asOperator: boolean;
+}): ReactNode {
+  const { invocations, loading, error } = useMachineActivity(workerId, true, asOperator);
 
   if (loading && invocations.length === 0) return <Skeleton variant="rows" rows={3} />;
 
@@ -51,8 +59,9 @@ export function MachineActivity({ workerId }: { workerId: string }): ReactNode {
     return (
       <EmptyState
         statement={
-          "No calls recorded against this machine. The read is scoped to your own machines, " +
-          "so this is also what a cluster owner sees when looking at somebody else's."
+          asOperator
+            ? "No calls recorded against this machine."
+            : "No calls recorded against this machine. This list is scoped to machines you own."
         }
       />
     );
