@@ -1202,6 +1202,26 @@ QueryClient.prototype.authSessionByTokenHash = function (this: QueryClient, args
   return this.executeNamed("authSessionByTokenHash", buildAuthSessionByTokenHash(args), opts);
 };
 
+/** Returns the caller's own live auth-session rows. No token hashes; revoked and expired excluded. */
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSelf"] in generated_concepts.ts).
+export interface AuthSessionsForSelfArgs {
+}
+
+export function buildAuthSessionsForSelf(args: AuthSessionsForSelfArgs): string {
+  void args;
+  return "query authSessionsForSelf()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    authSessionsForSelf(args?: AuthSessionsForSelfArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.authSessionsForSelf = function (this: QueryClient, args: AuthSessionsForSelfArgs = {} as AuthSessionsForSelfArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("authSessionsForSelf", buildAuthSessionsForSelf(args), opts);
+};
+
 /** Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows. */
 // Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSubject"] in generated_concepts.ts).
 export interface AuthSessionsForSubjectArgs {

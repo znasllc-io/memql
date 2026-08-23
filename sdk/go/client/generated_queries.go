@@ -1162,6 +1162,23 @@ func AuthSessionByTokenHashBuild(args AuthSessionByTokenHashArgs) string {
 	return b.String()
 }
 
+// AuthSessionsForSelf -- Returns the caller's own live auth-session rows. No token hashes; revoked and expired excluded.
+//
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSelf"] in generated_concepts.go).
+type AuthSessionsForSelfArgs struct {
+}
+
+// AuthSessionsForSelf calls the engine query authSessionsForSelf.
+func (qc *QueryClient) AuthSessionsForSelf(ctx context.Context, args AuthSessionsForSelfArgs) (*Result, error) {
+	call := AuthSessionsForSelfBuild(args)
+	return qc.executeNamed(ctx, "authSessionsForSelf", call)
+}
+
+func AuthSessionsForSelfBuild(args AuthSessionsForSelfArgs) string {
+	_ = args
+	return "query authSessionsForSelf()"
+}
+
 // AuthSessionsForSubject -- Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.
 //
 // Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSubject"] in generated_concepts.go).
