@@ -364,3 +364,178 @@ mutate registration updateWorkerApps {
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
 }
+
+// ---- mutations/v1/worker/createAppSession.memql ----
+
+// createAppSession
+// ================
+//
+// Opens the row for one delegated app run (memql#4360). Written
+// BEFORE AppSessionStart goes on the wire, so a session that the
+// worker never acknowledges still has a row saying it was attempted
+// -- the alternative loses the attempt entirely, and "nothing
+// happened" and "it failed to start" then read identically.
+//
+// @serverOnly: the row carries the credential's identity handle and
+// the workspace the consent card approved. A client-reachable create
+// would let a caller name its own workspace and its own credential.
+
+@serverOnly
+/// Open the row for a delegated app-session run.
+mutate appSession createAppSession {
+  args {
+    sessionId      string!
+    ownerUserId    string!
+    workerId       string!
+    app            string!  @enum("claude-code", "codex")
+    kind           string!  @enum("run", "open", "attach")
+    planId         string
+    taskId         string
+    workspace      string
+    prompt         string
+    inputArtifactIds  array
+    mcpEndpoint    string
+    credentialIdentityId  string
+    credentialExpiresAt   string
+    startedAt      string!
+  }
+  insert {
+    id: args.sessionId
+    args.ownerUserId
+    args.workerId
+    args.app
+    args.kind
+    planId: args.planId ?? ""
+    taskId: args.taskId ?? ""
+    status: "starting"
+    workspace: args.workspace ?? ""
+    prompt: args.prompt ?? ""
+    inputArtifactIds: args.inputArtifactIds ?? []
+    transcript: ""
+    transcriptBytes: 0
+    transcriptTruncated: false
+    usage: {}
+    billing: "unknown"
+    mcpEndpoint: args.mcpEndpoint ?? ""
+    credentialIdentityId: args.credentialIdentityId ?? ""
+    credentialExpiresAt: args.credentialExpiresAt ?? ""
+    args.startedAt
+  }
+}
+
+// ---- mutations/v1/worker/appendAppSessionTranscript.memql ----
+
+// appendAppSessionTranscript
+// ==========================
+//
+// Flushes the accumulated transcript onto a live session row. The
+// engine holds the buffer and writes the whole bounded string rather
+// than one row-write per chunk: a chatty run emits thousands of
+// chunks a minute, and a write each would saturate the engine to
+// deliver text nobody is reading between flushes.
+//
+// `transcriptTruncated` and `transcriptBytes` travel with it so a
+// reader can see that truncation happened and by how much. A
+// transcript that stops without saying why reads as a run that
+// stopped.
+
+@serverOnly
+/// Flush the accumulated transcript onto a live app-session row.
+mutate appSession appendAppSessionTranscript {
+  args {
+    sessionId      string!
+    transcript     string
+    transcriptBytes  int
+    transcriptTruncated  bool
+    status         string  @enum("starting", "running")
+  }
+  update {
+    id: args.sessionId
+    transcript: args.transcript ?? ""
+    transcriptBytes: args.transcriptBytes ?? 0
+    transcriptTruncated: args.transcriptTruncated ?? false
+    status: args.status ?? "running"
+  }
+}
+
+// ---- mutations/v1/worker/endAppSession.memql ----
+
+// endAppSession
+// =============
+//
+// Drives a session to a terminal status with everything the app
+// reported. `usage` is recorded VERBATIM: an app that reports
+// nothing gets known=false and zeroes, and the billing enum says
+// `unknown` rather than folding silence into either `metered` or
+// `subscription`. Inferring here is what would make the number the
+// owner asked for -- what the subscription covered -- untrustworthy.
+
+@serverOnly
+/// Drive an app session to a terminal status with its reported usage.
+mutate appSession endAppSession {
+  args {
+    sessionId      string!
+    status         string!  @enum("ended", "failed", "cancelled")
+    exitCode       int
+    usage          object
+    billing        string  @enum("metered", "subscription", "unknown")
+    transcript     string
+    transcriptBytes  int
+    transcriptTruncated  bool
+    producedArtifactIds  array
+    appSessionRef  string
+    errorMessage   string
+    cancelReason   string
+    endedAt        string!
+  }
+  update {
+    id: args.sessionId
+    args.status
+    exitCode: args.exitCode ?? 0
+    usage: args.usage ?? {}
+    billing: args.billing ?? "unknown"
+    transcript: args.transcript ?? ""
+    transcriptBytes: args.transcriptBytes ?? 0
+    transcriptTruncated: args.transcriptTruncated ?? false
+    producedArtifactIds: args.producedArtifactIds ?? []
+    appSessionRef: args.appSessionRef ?? ""
+    errorMessage: args.errorMessage ?? ""
+    cancelReason: args.cancelReason ?? ""
+    args.endedAt
+  }
+}
+
+// ---- mutations/v1/worker/setDelegationPolicy.memql ----
+
+// setDelegationPolicy
+// ===================
+//
+// Upserts the caller's delegation preference (memql#4362). One row
+// per user at a derived id, so a second write updates rather than
+// forking a second policy the planner would have to choose between.
+
+/// Create or update the caller's app-delegation policy.
+mutate delegationPolicy setDelegationPolicy {
+  args {
+    policyId       string!
+    ownerUserId    string!
+    preferSubscriptionApps  bool
+    eligibleKinds  array
+    appOrder       array
+    maxConcurrentSessions  int
+    workspaceRoot  string
+    credentialLifetimeSeconds  int
+    updatedAt      string!
+  }
+  insert {
+    id: args.policyId
+    args.ownerUserId
+    preferSubscriptionApps: args.preferSubscriptionApps ?? false
+    eligibleKinds: args.eligibleKinds ?? []
+    appOrder: args.appOrder ?? []
+    maxConcurrentSessions: args.maxConcurrentSessions ?? 1
+    workspaceRoot: args.workspaceRoot ?? ""
+    credentialLifetimeSeconds: args.credentialLifetimeSeconds ?? 14400
+    args.updatedAt
+  }
+}

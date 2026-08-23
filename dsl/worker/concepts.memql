@@ -74,3 +74,65 @@ concept registration {
   @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
   @relationship(type="parent", field="revokedBy", target=user, direction="outgoing")
 }
+
+/// One delegated run of a local app on a cockpit machine (memql#4360). A session is the unit
+/// because a headless `claude -p` can run for an hour: the row is created at start, its transcript
+/// appends from streamed chunks while the run is live, and it reaches a terminal status at end.
+/// The transcript on the row is BOUNDED -- the full one is pushed to the Library as a produced
+/// artifact when the session ends, so the row stays a readable summary rather than growing without
+/// limit. Owner-tier with the cluster-owner gate ORed in: an operator debugging a delegated run
+/// must be able to read it, and a plain owner tier would hide every other user's sessions from
+/// them.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="app", secondary="kind", tertiary="startedAt", status="status")
+concept appSession {
+  ownerUserId    string!  @description("v1:identity:user.id the session runs AS. The back-channel credential is minted with this as its subject, so everything the app reads over MCP is what this user could read -- row authz applies to a delegated app exactly as it does to a browser.")
+  workerId       string!  @description("v1:worker:registration.id of the machine the app ran on.")
+  app            enum("claude-code", "codex")!  @description("Which local app. The engine's runnable set is closed; a cockpit that reports another app can store it on the registration but can never open a session for it.")
+  kind           enum("run", "open", "attach")!  @description("run = headless and autonomous, the engine reads the output. open = launch the app for the HUMAN with the workspace and prompt loaded; it ends when the window closes, or immediately with a failure if the app cannot be opened. attach = stream a run the human started, named by appSessionRef.")
+  planId         string  @description("v1:planner:plan.id this session serves. Empty for a session opened outside a plan.")
+  taskId         string  @description("v1:planner:task.id this session serves. Empty for a session opened outside a task.")
+  status         enum("starting", "running", "ended", "failed", "cancelled")!  @default("starting")  @description("Lifecycle. starting = the row exists and AppSessionStart has been sent; running = the first chunk arrived; ended = a clean AppSessionEnd; failed = the worker reported an error or disconnected mid-run; cancelled = a cancel was honoured. A session that never reaches a terminal status is one whose node died holding it -- the sweep in workerAppSessionStaleSweep marks those failed.")
+  workspace      string  @description("Absolute directory on the machine the app ran in. Named on the consent card, so the user approved this specific path.")
+  prompt         string  @description("The prompt the app was given. Kept because the transcript alone does not say what was asked.")
+  inputArtifactIds  []string  @description("Library artifact ids the cockpit pulled with the session credential before the run started. The consent card named them; keeping them is what makes a later 'what was this agent shown' answerable.")
+  transcript     string  @description("Streamed output, appended from AppSessionChunk in seq order and BOUNDED by the delegation policy's maxTranscriptBytes. Truncation is marked inline rather than silent: a transcript that stops without saying why reads as a run that stopped.")
+  transcriptBytes  int  @description("Bytes appended so far, including those dropped past the bound. Lets a reader see that truncation happened and by how much.")
+  transcriptTruncated  bool  @description("True once the bound was reached. The full transcript is the artifact named in producedArtifactIds.")
+  usage          object  @description("What the app REPORTED about its own spend: {inputTokens, outputTokens, costUSD, known}. known=false means the app said nothing, which the ledger records as billing 'unknown' -- never as a free call. Never inferred from anything else.")
+  billing        enum("metered", "subscription", "unknown")!  @default("unknown")  @description("Who paid. subscription = the run went through an app the user already pays for, so the tokens are covered and excluded from the plan's dollar ceiling. metered = MemQL's own vendor spend. unknown = the app reported nothing; counted in the loop caps, excluded from the dollar ceiling, and visible as unknown rather than quietly folded into either side.")
+  exitCode       int  @description("The app process's exit code. 0 on a clean run.")
+  producedArtifactIds  []string  @description("Library artifact ids the cockpit pushed at end, including the full transcript.")
+  appSessionRef  string  @description("The app's OWN session id, as it reported at end. What a later kind='attach' resumes by; empty when the app has no such notion.")
+  credentialIdentityId  string  @description("v1:identity:identity.id of the per-run service-account credential, when one was persisted. The revocation handle: ending the session revokes this row rather than waiting out the token's lifetime.")
+  credentialExpiresAt  datetime  @description("When the current back-channel bearer expires. A run that outlives it gets a renew_credential control message carrying a replacement.")
+  mcpEndpoint    string  @description("The streamable-HTTP MCP URL the app was pointed at (https://mcp.<domain>/mcp). Recorded so an audit reader can see which surface the credential was good for.")
+  errorMessage   string  @description("Populated when status reaches failed. Empty otherwise.")
+  cancelReason   string  @description("Free text carried from the cancel that ended the session.")
+  startedAt      datetime!  @description("When the session row was created and AppSessionStart went on the wire.")
+  endedAt        datetime  @description("When the session reached a terminal status. Empty while live.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
+  @relationship(type="parent", field="taskId", target=task, direction="outgoing")
+}
+
+/// Per-user preference deciding when the planner delegates a task to a local app instead of running
+/// it in-process (memql#4362). Delegation is a PREFERENCE with a fallback, never a requirement: the
+/// planner asks whether a machine with an allowed, signed-in app is online, and runs in-process
+/// when none is. A plan never waits for a laptop to wake up.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="ownerUserId", secondary="workspaceRoot", tertiary="updatedAt", status="preferSubscriptionApps")
+concept delegationPolicy {
+  ownerUserId    string!  @description("v1:identity:user.id this policy belongs to. One row per user; the id is derived from the user id so a second write updates rather than forks.")
+  preferSubscriptionApps  bool  @default("false")  @description("The master switch. False means never delegate, whatever else the row says -- so a user who has not opted in is not surprised by an agent running on their laptop.")
+  eligibleKinds  []string  @description("Planner task kinds that may be delegated, starting with the coding and file-production kinds. A kind absent from this list runs in-process regardless of what is online.")
+  appOrder       []string  @description("Which apps to try, in order. The first app in this list that a machine has allowed and signed in wins; an app not listed is never selected even when it is available.")
+  maxConcurrentSessions  int  @default("1")  @description("How many app sessions this user may have live at once, across every machine. Zero reads as the default rather than as 'none', because a zero here would silently disable a feature the user turned on.")
+  workspaceRoot  string  @description("Directory under which per-run workspaces are created on the machine. The cockpit refuses a workspace outside its own policy.yaml roots, so this is a preference the machine still gets to veto.")
+  credentialLifetimeSeconds  int  @default("14400")  @description("How long the back-channel bearer is good for. Default 4 hours; a run that outlives it is handed a replacement rather than being killed.")
+  updatedAt      datetime  @description("When the policy was last written.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

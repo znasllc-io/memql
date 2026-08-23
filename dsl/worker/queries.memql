@@ -185,3 +185,106 @@ query registration workersForUser {
   paginate 50
   shape   workerRegistrationFull
 }
+
+// ---- queries/v1/worker/appSessionById.memql ----
+
+// appSessionById
+// ==============
+//
+// One delegated app-session row with its transcript. Backs the live
+// transcript panel on a task (memql#4363).
+
+/// Read one app-session row, transcript included.
+query appSession appSessionById {
+  args {
+    sessionId  string!
+  }
+  filter  row.id==args.sessionId
+  shape   workerAppSessionFull
+}
+
+// ---- queries/v1/worker/appSessionsForTask.memql ----
+
+// appSessionsForTask
+// ==================
+//
+// Every app session a Task opened. A Task normally has one, but a
+// retry opens a second: showing only the latest would hide the
+// attempt that failed, which is the one worth reading.
+
+/// List the app sessions belonging to a Task.
+query appSession appSessionsForTask {
+  args {
+    taskId  string!
+  }
+  filter  taskId==args.taskId
+  sort    "row.createdAt", "desc"
+  shape   workerAppSessionFull
+}
+
+// ---- queries/v1/worker/appSessionsForUser.memql ----
+
+// appSessionsForUser
+// ==================
+//
+// The user's delegated runs, newest first. Card projection: the
+// transcript is the largest field on the row by orders of magnitude,
+// so a list that projected it would pull megabytes to render a
+// handful of lines.
+
+@actor
+/// List the caller's app sessions, newest first, without transcripts.
+query appSession appSessionsForUser {
+  args {
+    ownerUserId  string!
+    app          string
+  }
+  // Caller-scoped: the engine's own reads run under the owner's actor
+  // (auth.ContextWithUserActor), the same borrowed-authority pattern the
+  // campaign sender uses, so the engine never out-ranks the user whose
+  // rows it is reading.
+  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId && when(args.app) { app==args.app }
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    workerAppSessionCard
+}
+
+// ---- queries/v1/worker/liveAppSessionsForUser.memql ----
+
+// liveAppSessionsForUser
+// ======================
+//
+// The user's sessions that have not reached a terminal status. What
+// the delegation policy's maxConcurrentSessions is checked against
+// BEFORE a new session is opened -- counting terminal rows would make
+// the cap tighten permanently as history accumulated.
+
+@actor
+/// List the caller's app sessions that are still live.
+query appSession liveAppSessionsForUser {
+  args {
+    ownerUserId  string!
+  }
+  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId && status in ["starting", "running"]
+  shape   workerAppSessionCard
+}
+
+// ---- queries/v1/worker/delegationPolicyForUser.memql ----
+
+// delegationPolicyForUser
+// =======================
+//
+// The caller's delegation preference. Absent means "never delegate":
+// the planner treats a missing row as preferSubscriptionApps=false,
+// so a user who has not opted in is never surprised by an agent
+// running on their laptop.
+
+@actor
+/// Read the caller's app-delegation policy.
+query delegationPolicy delegationPolicyForUser {
+  args {
+    ownerUserId  string!
+  }
+  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId
+  shape   workerDelegationPolicyFull
+}
