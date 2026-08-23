@@ -750,3 +750,44 @@ func (e *revocationEngine) Execute(_ context.Context, q string) (*memqlengine.Ex
 		Nodes: []*memqlv1.MemoryNode{{Id: "sess-1", Payload: &structpb.Struct{Fields: fields}}},
 	}}, nil
 }
+
+// TestRevokedCookieCannotMintAFreshSession closes the escalation one step
+// beyond the /me/* check.
+//
+// redirectIfAuthenticated feeds sessionClaims into the SSO fast path, which
+// mints a fresh auth code -- and that code redeems into a relying-party
+// session with a 30-day refresh window. A browser holding a revoked but
+// unexpired cookie could therefore convert it into a session LONGER-LIVED
+// than the one it just lost, touching neither a mailbox nor a passkey. That
+// is the design's problem statement one step further along, and closing the
+// cookie hole without closing this one would leave "sign out everywhere"
+// reassuring and wrong.
+func TestRevokedCookieCannotMintAFreshSession(t *testing.T) {
+	const bearer = "a-signed-jwt"
+	revoked := false
+
+	s, err := NewServer(identity.Config{Enabled: true, BaseURL: "https://identity.test", JWTAudience: "memql"}, slog.Default(), nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	s.Store = &identity.Store{
+		Engine: &revocationEngine{tokenHash: identity.HashSessionToken(bearer), revoked: &revoked},
+		Logger: slog.Default(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/authorize", nil)
+	req.AddCookie(&http.Cookie{Name: "memql_admin", Value: bearer})
+
+	// With no issuer wired the probe is nil either way, so this test asserts
+	// the REVOCATION arm specifically: the store says revoked, and
+	// sessionRevoked is what sessionClaims consults.
+	if s.sessionRevoked(req, bearer) {
+		t.Fatal("a live session was reported revoked")
+	}
+	revoked = true
+	if !s.sessionRevoked(req, bearer) {
+		t.Fatal("the SSO fast path's probe does not consult the session row.\n" +
+			"A revoked cookie would mint a fresh auth code, and that code redeems into a session " +
+			"with a longer life than the one the user just revoked.")
+	}
+}

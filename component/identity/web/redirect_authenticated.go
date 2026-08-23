@@ -69,10 +69,9 @@ func (s *Server) SetMintSSOAuthCode(fn MintSSOAuthCodeFunc) {
 // caller is unauthenticated -- missing token, invalid signature,
 // expired, or unwired issuer dependency.
 //
-// This is the cheap "is the user signed in?" probe; it does NOT
-// hit the database. If a future change wants to additionally check
-// for revoked sessions, layer that on top -- the cookie check is
-// the necessary-but-not-sufficient gate.
+// This is the "is the user signed in?" probe. It used to be purely
+// in-memory, and its own comment invited the layering that memql#4306
+// added: it now also asks whether the session has been REVOKED.
 func (s *Server) hasValidSession(r *http.Request) bool {
 	return s.sessionClaims(r) != nil
 }
@@ -80,6 +79,24 @@ func (s *Server) hasValidSession(r *http.Request) bool {
 // sessionClaims is the same probe as hasValidSession but returns
 // the verified claims for downstream use (SSO auth-code mint).
 // Returns nil on any failure path.
+//
+// # Why this one has to consult the row
+//
+// It is not only a probe. `redirectIfAuthenticated` feeds these claims into
+// the SSO fast path, which mints a FRESH auth code -- and that code redeems
+// into a full relying-party session with a 30-day refresh window. So a
+// browser holding a revoked-but-unexpired cookie could convert it into a
+// brand-new session LONGER-LIVED than the one it just lost, without ever
+// touching a mailbox or a passkey.
+//
+// That is the escalation the magic-link hardening design names in its
+// problem statement, one step further along: closing the browser-cookie hole
+// without closing this one would leave "sign out everywhere" reassuring and
+// wrong for the remaining life of an access token.
+//
+// The read fails open, exactly as requireUser's does -- see sessionRevoked.
+// A signed, unexpired token stays usable when the row cannot be read, because
+// the alternative is a database blip signing everybody out.
 func (s *Server) sessionClaims(r *http.Request) *identity.AccessTokenClaims {
 	if s == nil || s.meTokens == nil || s.meTokens.Issuer == nil {
 		return nil
@@ -90,6 +107,9 @@ func (s *Server) sessionClaims(r *http.Request) *identity.AccessTokenClaims {
 	}
 	claims, err := s.meTokens.Issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil {
+		return nil
+	}
+	if s.sessionRevoked(r, raw) {
 		return nil
 	}
 	return claims
