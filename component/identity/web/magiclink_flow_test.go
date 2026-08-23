@@ -606,3 +606,66 @@ func auditActions(a *recordingAudit) []string {
 	}
 	return out
 }
+
+// TestCheckEmailRendersAWorkingPoller asserts the page the requesting tab
+// sits on actually carries everything the poller needs.
+//
+// It is the join between the two halves of the flow, and it fails silently
+// if it is wrong: the page renders, the person waits, and nothing ever
+// happens. Three ways that can happen, all checked here --
+//
+//   - no request id, so the poller has nothing to ask about;
+//   - no script, so nothing polls;
+//   - an EMPTY CSRF token in the finish form, so the POST the poller
+//     eventually submits is rejected by the middleware. That one is the
+//     subtle one: the token is minted by the middleware on this very GET and
+//     reaches the template through the request context, so it is only
+//     non-empty because that plumbing works.
+func TestCheckEmailRendersAWorkingPoller(t *testing.T) {
+	fx := newFlowFixture(t)
+	mux := http.NewServeMux()
+	fx.server.Mount(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/check-email?email=team%40acme.test&request="+testRequestId, nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /check-email status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `data-request="`+testRequestId+`"`) {
+		t.Error("the page does not carry the request id; the poller has nothing to ask about")
+	}
+	if !strings.Contains(body, "check-email.js") {
+		t.Error("the poller script is not loaded; nothing will ever notice the approval")
+	}
+	if !strings.Contains(body, `action="/auth/magic-link/finish"`) {
+		t.Error("the finish form is missing; the poller has nothing to submit")
+	}
+
+	// The CSRF field must carry a REAL token, not an empty attribute.
+	idx := strings.Index(body, CSRFFormField)
+	if idx < 0 {
+		t.Fatal("the finish form carries no CSRF field, so the middleware will reject the POST")
+	}
+	segment := body[idx:]
+	if end := strings.Index(segment, ">"); end >= 0 {
+		segment = segment[:end]
+	}
+	if strings.Contains(segment, `value=""`) {
+		t.Errorf("the CSRF field is empty: %s\n\n"+
+			"The token is minted by the middleware on THIS GET and reaches the template through "+
+			"the request context. An empty value means that plumbing broke, and the failure is "+
+			"silent: the page renders, the person waits, and the finish POST is rejected.", segment)
+	}
+
+	// And a page with no request id renders no poller at all, rather than one
+	// that will ask about nothing forever.
+	bare := httptest.NewRecorder()
+	mux.ServeHTTP(bare, httptest.NewRequest(http.MethodGet, "/check-email?email=team%40acme.test", nil))
+	if strings.Contains(bare.Body.String(), "check-email.js") {
+		t.Error("a check-email page with no request id still loaded the poller")
+	}
+}
