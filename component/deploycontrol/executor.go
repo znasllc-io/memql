@@ -101,14 +101,39 @@ func newExecExecutor(repoRoot string) *execExecutor {
 	return &execExecutor{repoRoot: repoRoot}
 }
 
-// NewExecutor returns the real os/exec-backed Executor anchored at
-// repoRoot -- the SAME side-effect boundary the deploy-control Service
-// uses (git / kubectl argo rollouts), exported so the
-// deploy PACK (examples/deploypack, Epic 2 / #2095) can drive the same
-// effects through the IntegrationProvider boundary without duplicating
-// the shell-out wiring. An empty repoRoot anchors at the process
-// working directory, matching NewService's RepoRoot default.
+// NewExecutor returns the real Executor anchored at repoRoot -- the SAME
+// side-effect boundary the deploy-control Service uses, exported so the deploy
+// PACK (examples/deploypack, Epic 2 / #2095) can drive the same effects
+// through the IntegrationProvider boundary without duplicating the wiring. An
+// empty repoRoot anchors at the process working directory, matching
+// NewService's RepoRoot default.
+//
+// WHICH SUBSTRATE, and why it is detected rather than configured (memql#4257).
+// Inside a cluster the effects go through the Kubernetes API with the pod's
+// own ServiceAccount (k8sapi.go); outside one they shell out to kubectl + git
+// as they always have. The choice is made by asking whether a ServiceAccount
+// token is actually projected here, because that is the fact that decides
+// whether the in-cluster path can work at all -- an env var would let an
+// operator select a substrate this process cannot use, and the failure would
+// arrive at the first deploy verb rather than at boot.
+//
+// It is NOT an `if env == "..."` branch, and the distinction matters because
+// this repository forbids those outright (TestNoEnvironmentBranchingInEngineCode,
+// empty exemption map). There is no environment here to read. A pod in the k3d
+// parity cluster and a pod on AKS take the SAME branch, for the same reason,
+// and an operator machine takes the other one -- that is the local/cloud deploy
+// TARGET axis the design keeps, resolved from an observable fact about the
+// process rather than from a label somebody set.
+//
+// A construction failure is not fatal: it falls back to the exec substrate and
+// the verbs refuse as they did before, which is strictly better than a node
+// that will not start because its deploy console cannot reach ArgoCD.
 func NewExecutor(repoRoot string) Executor {
+	if InClusterAvailable() {
+		if e, err := newInClusterExecutor(repoRoot); err == nil {
+			return e
+		}
+	}
 	return newExecExecutor(repoRoot)
 }
 

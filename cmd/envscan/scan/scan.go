@@ -114,6 +114,24 @@ var external = map[string]bool{
 	"LIVEKIT_URL":        true,
 	"LIVEKIT_API_KEY":    true,
 	"LIVEKIT_API_SECRET": true,
+	// Injected into every pod by the KUBELET, not by any MemQL manifest
+	// (memql#4257). component/deploycontrol's in-cluster substrate reads them
+	// to address the API server, which is what a ServiceAccount-authenticated
+	// client has to do.
+	//
+	// `external` rather than a registry entry, and the distinction is the one
+	// this map's own contract draws: these are not MemQL's variables. There is
+	// nothing for an operator to set -- Kubernetes writes them, and writing
+	// them yourself would only mis-address the API server -- so registering
+	// them would put two uneditable, unsettable rows on the cockpit's
+	// Configuration screen and imply the opposite. They are also not
+	// pre-convention MemQL names, so the memql#3831 exit (rename to MEMQL_,
+	// alias the old spelling) does not apply: it is not MemQL's name to change.
+	//
+	// Same category as LIVEKIT_URL above, one layer down: a platform's own
+	// convention that MemQL consumes rather than owns.
+	"KUBERNETES_SERVICE_HOST": true,
+	"KUBERNETES_SERVICE_PORT": true,
 }
 
 // externalPrefixes are key prefixes owned by the CI / build / Go

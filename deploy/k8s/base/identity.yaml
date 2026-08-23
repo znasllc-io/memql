@@ -35,7 +35,7 @@
 # Config.Validate refuses to boot without it unless the issuer is a loopback
 # host (one process, no possible second replica) or the operator explicitly
 # sets MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true. Locally,
-# scripts/k3d/seed-secrets.sh generates and preserves it; in staging/prod it
+# scripts/k3d/seed-secrets.sh generates and preserves it; in a cloud install it
 # comes from the out-of-band memql-secrets create / ESO. `make status` asserts
 # every replica publishes the same keyset.
 apiVersion: apps/v1
@@ -69,6 +69,12 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: identity
     spec:
+      # The deploy console's in-cluster substrate authenticates to the
+      # Kubernetes API with THIS ServiceAccount (memql#4257). Its grants are in
+      # identity-rbac.yaml: get+patch on one named ArgoCD Application, and
+      # read-only on Rollouts / AnalysisRuns. Only the identity node carries
+      # it -- it is the only node that runs the Executor.
+      serviceAccountName: memql-deploy
       volumes:
         - name: identity-tls
           secret:

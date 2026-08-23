@@ -1035,3 +1035,64 @@ mutate session updateSessionStreams {
 // which must NOT become the space owner. The sweep preserves the
 // real ownerUserId in the payload it passes.
 
+
+// ---- mutations/v1/cognition/createGuestParticipant.memql ----
+
+// createGuestParticipant (memql#4258)
+// ============================================
+//
+// The guest's side of the invitation flow. `component/grpc/guest_handlers.go`
+// has always named this construct and it existed in no .memql file anywhere in
+// this repository, so every guest join failed at execute on a cluster running
+// the embedded tree. Its four invitation siblings are declared in
+// dsl/identity/mutations.memql; this one is here because the SPACE is the
+// cognition domain's, not identity's -- the credential half is identity's, the
+// membership half is not.
+//
+// WHY NOT joinSpaceAsHuman. That mutation content-addresses the participant id
+// on (space, user) so a repeat join is idempotent, and it requires `userId`. A
+// guest HAS no user row -- that is the definition of a guest, and the
+// participant concept says so at `participantType`: "Guests use \"human\" with
+// isGuest=true and userId empty." With nothing to hash, the caller supplies the
+// id, which is why this is a separate construct rather than an optional
+// argument on that one.
+//
+// @serverOnly. The gate in front of a guest join is a valid, unexpired,
+// unaccepted invitation token, which the handler has already resolved and this
+// mutation cannot see. Client-reachable, it would let any authenticated caller
+// place a participant carrying isGuest=true into any space by id, bypassing the
+// invitation entirely -- and `isGuest` is a authorization-relevant flag, not
+// decoration.
+
+/// Create the participant row for a guest who has just redeemed an invitation. The caller supplies
+/// the id (a guest has no user row to content-address on) and the handler has already verified the
+/// invitation token.
+///
+/// WHY actor.userId SCOPING IS NOT THE FIX. There is nothing for it to name. The caller is the
+/// guest, who has no v1:identity:user row -- the concept says so at `participantType` ("Guests use
+/// \"human\" with isGuest=true and userId empty"), and this mutation writes userId as the empty
+/// string for exactly that reason. A self-scoped filter would match zero rows for the only caller
+/// that runs it, which is the circular case memql#2800 names. What actually gates the write is a
+/// valid, unexpired, unaccepted invitation token, resolved by the handler before this runs and
+/// invisible from here. Client-reachable, it would let any authenticated caller place a row
+/// carrying isGuest=true into any space by id and skip the invitation entirely -- and isGuest is
+/// authorization-relevant, not decoration.
+@serverOnly
+mutate participant createGuestParticipant {
+  args {
+    participantId  string!
+    partitionId    string!
+    displayName    string!
+  }
+  insert {
+    accept { partitionId, displayName }
+    stamp {
+      id: args.participantId
+      participantType: "human"
+      isGuest: true
+      userId: ""
+      status: "active"
+      joinedAt: now
+    }
+  }
+}

@@ -6,9 +6,11 @@
 # ENGINE-ONLY (decoupling P3): the PRODUCT Applications (the product's own bff /
 # SPA / rollouts surface) live in the downstream product pack's app-of-apps --
 # the pack owns reconciling those. What is listed below is the ENGINE's own
-# estate: the AppProject, this root, the two environment Applications added by
-# epic memql#3748 / #3766, and the cluster OPERATOR stack added by epic
-# memql#3842 / #3845 (cert-manager and CloudNativePG + the Barman Cloud plugin).
+# estate: the AppProject, this root, the ONE installation Application (epic
+# memql#3943 removed the environment dimension that briefly made it two), the
+# deploy console's grant on that Application (memql#4257), and the cluster
+# OPERATOR stack added by epic memql#3842 / #3845 (cert-manager and
+# CloudNativePG + the Barman Cloud plugin).
 #
 # The operator Applications carry sync-waves -- cert-manager at -2, CNPG at -1 --
 # so the CRDs land before anything declares a Certificate against them, and both
@@ -36,7 +38,7 @@ spec:
     path: deploy/argocd/apps
     directory:
       recurse: true
-      include: '{project.yaml,root.yaml,memql.yaml,cert-manager.yaml,cnpg-operator.yaml}'
+      include: '{project.yaml,root.yaml,memql.yaml,deploy-console-rbac.yaml,cert-manager.yaml,cnpg-operator.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

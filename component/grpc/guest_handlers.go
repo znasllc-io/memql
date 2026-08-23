@@ -274,24 +274,22 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 }
 
 // kickGuestInvitation marks a single guest invitation as kicked by
-// running mutationMarkGuestInvitationKicked. Preserves all guest
-// fields from `inv` so the latest-wins projection keeps the context.
+// running markGuestInvitationKicked.
+//
+// It used to re-supply every guest field from `inv` "so the latest-wins
+// projection keeps the context". That was true before memql#1628 and has not
+// been since: the mutation is an update{}, which read-merges the persisted
+// row, so an omitted field inherits rather than blanking. Re-supplying a row
+// read a moment earlier is a lost update waiting for a second writer, and the
+// extra names were not declared on the mutation at all -- they were being
+// dropped on the floor (memql#4258).
 func kickGuestInvitation(ctx context.Context, engine *memqlengine.MemQLEngine, inv *invitationSummary) error {
 	if inv == nil || strings.TrimSpace(inv.ID) == "" {
 		return fmt.Errorf("invitation summary required")
 	}
-	args := map[string]any{
-		"invitationId": inv.ID,
-		"partitionId":  inv.PartitionId,
-		"spaceName":    inv.SpaceName,
-		"inviterId":    inv.InviterId,
-		"inviterName":  inv.InviterName,
-		"inviteeEmail": inv.InviteeEmail,
-		"inviteeName":  inv.InviteeName,
-		"tokenHash":    inv.TokenHash,
-	}
+	args := map[string]any{"invitationId": inv.ID}
 	argsJSON, _ := json.Marshal(args)
-	query := fmt.Sprintf("mutationMarkGuestInvitationKicked(%s)", renderQueryArgs(argsJSON))
+	query := fmt.Sprintf("markGuestInvitationKicked(%s)", renderQueryArgs(argsJSON))
 	if _, err := engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("kick guest invitation: %w", err)
 	}
@@ -378,7 +376,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	// auth middleware and is the only thing persisted on the row;
 	// the plain token leaves the server in the email and is never
 	// stored. Resend mints a NEW token and rotates the hash via
-	// mutationRotateGuestInvitationToken (see memql#108).
+	// rotateGuestInvitationToken (see memql#108).
 	plainToken, tokenHash, err := mintGuestToken()
 	if err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: token mint", err)
@@ -412,7 +410,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		"expiresAt":    expiresAt.Format(time.RFC3339),
 	}
 	argsJSON, _ := json.Marshal(args)
-	query := fmt.Sprintf("mutationCreateGuestInvitation(%s)", renderQueryArgs(argsJSON))
+	query := fmt.Sprintf("createGuestInvitation(%s)", renderQueryArgs(argsJSON))
 
 	if _, err := s.service.engine.Execute(ctx, query); err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: persist invitation", err)
@@ -708,19 +706,16 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 
 	ctx := contextWithSystemActor(s.stream.Context())
 
-	// Mutation 1: stamp the invitation as accepted.
+	// Mutation 1: stamp the invitation as accepted. Only the two fields
+	// acceptance actually changes -- the mutation read-merges everything else
+	// off the persisted row (memql#1628), and the discriminators this used to
+	// re-supply were not declared on it in the first place (memql#4258).
 	markArgs := map[string]any{
 		"invitationId": invitationId,
-		"partitionId":  partitionId,
-		"spaceName":    invite.SpaceName,
-		"inviterId":    invite.InviterId,
-		"inviterName":  invite.InviterName,
-		"inviteeEmail": invite.InviteeEmail,
 		"inviteeName":  displayName,
-		"tokenHash":    invite.TokenHash,
 	}
 	markJSON, _ := json.Marshal(markArgs)
-	markQuery := fmt.Sprintf("mutationMarkGuestInvitationAccepted(%s)", renderQueryArgs(markJSON))
+	markQuery := fmt.Sprintf("markGuestInvitationAccepted(%s)", renderQueryArgs(markJSON))
 	if _, err := s.service.engine.Execute(ctx, markQuery); err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "join: mark invitation accepted", err)
 	}
@@ -732,7 +727,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 		"displayName":   displayName,
 	}
 	pJSON, _ := json.Marshal(pArgs)
-	pQuery := fmt.Sprintf("mutationCreateGuestParticipant(%s)", renderQueryArgs(pJSON))
+	pQuery := fmt.Sprintf("createGuestParticipant(%s)", renderQueryArgs(pJSON))
 	if _, err := s.service.engine.Execute(ctx, pQuery); err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "join: create participant", err)
 	}
@@ -881,7 +876,7 @@ func (s *streamSession) handleCancelGuestInvite(envelope *memqlv1.MemqlClientMes
 // the row and replay the same email. That left a recoverable token
 // at rest. We now:
 //  1. Mint a fresh plain token + hash.
-//  2. Call mutationRotateGuestInvitationToken to swap the row's
+//  2. Call rotateGuestInvitationToken to swap the row's
 //     hash to the new one AND stamp the prior hash as
 //     previousTokenHash (so /join/<oldToken> returns `superseded`
 //     instead of `invalid`).
@@ -972,7 +967,7 @@ func (s *streamSession) handleResendGuestInviteEmail(envelope *memqlv1.MemqlClie
 		"previousTokenHash": inv.TokenHash,
 	}
 	rotateJSON, _ := json.Marshal(rotateArgs)
-	rotateQuery := fmt.Sprintf("mutationRotateGuestInvitationToken(%s)", renderQueryArgs(rotateJSON))
+	rotateQuery := fmt.Sprintf("rotateGuestInvitationToken(%s)", renderQueryArgs(rotateJSON))
 	if _, err := s.service.engine.Execute(ctx, rotateQuery); err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "resend: rotate token", err)
 	}

@@ -333,21 +333,21 @@ func (s *streamSession) handleRevokeAllSessions(envelope *memqlv1.MemqlClientMes
 }
 
 // RevokeAuthSessionRow persists a single revocation by running
-// revokeAuthSession with the discriminator fields the
-// latest-wins projection requires. Exported so the LogoutHandler
-// adapter (in app/) can revoke a row directly without dispatching
-// through the gRPC stream.
+// revokeAuthSession. Exported so the LogoutHandler adapter (in app/) can
+// revoke a row directly without dispatching through the gRPC stream.
+//
+// It used to pass the discriminator fields too -- subject / tokenHash /
+// source / expiresAt / userId -- "the fields the latest-wins projection
+// requires". memql#1628 made the mutation read-merge the persisted row, and
+// its doc comment has said so since: those fields "inherit from the persisted
+// row instead of being re-supplied". The mutation declares exactly two
+// arguments, so the other five were being dropped silently (memql#4258).
 func RevokeAuthSessionRow(ctx context.Context, engine *memqlengine.MemQLEngine, sess *authSessionSummary, reason string) error {
 	if sess == nil || strings.TrimSpace(sess.ID) == "" {
 		return fmt.Errorf("session summary required")
 	}
 	args := map[string]any{
 		"sessionId":     sess.ID,
-		"userId":        sess.UserId,
-		"subject":       sess.Subject,
-		"tokenHash":     sess.TokenHash,
-		"source":        sess.Source,
-		"expiresAt":     sess.ExpiresAt.Format(time.RFC3339),
 		"revokedReason": reason,
 	}
 	argsJSON, _ := json.Marshal(args)
