@@ -36,6 +36,20 @@ type fakeRegistrationStore struct {
 	// lookupOwners records the owner each WorkerByIdentityId was asked
 	// under. An empty one means the real store would have read zero rows.
 	lookupOwners []string
+
+	// appUpdates records UpdateApps calls (memql#4359).
+	appUpdates []appUpdate
+	appsErr    error
+}
+
+// appUpdate records one UpdateApps call WHOLE -- the labels matter as
+// much as the inventory, because they are what routing reads.
+type appUpdate struct {
+	registrationId string
+	ownerUserId    string
+	apps           []AppInfo
+	labels         map[string]string
+	at             time.Time
 }
 
 // lastSeenFlush is one UpdateLastSeen call, recorded whole.
@@ -57,6 +71,20 @@ func (f *fakeRegistrationStore) CreateRegistration(ctx context.Context, row Regi
 
 func (f *fakeRegistrationStore) RefreshRegistration(ctx context.Context, row RegistrationRow) error {
 	f.refreshed = append(f.refreshed, row)
+	return nil
+}
+
+func (f *fakeRegistrationStore) UpdateApps(ctx context.Context, registrationId, ownerUserId string, apps []AppInfo, labels map[string]string, at time.Time, sourceIP string) error {
+	if f.appsErr != nil {
+		return f.appsErr
+	}
+	f.appUpdates = append(f.appUpdates, appUpdate{
+		registrationId: registrationId,
+		ownerUserId:    ownerUserId,
+		apps:           apps,
+		labels:         labels,
+		at:             at,
+	})
 	return nil
 }
 

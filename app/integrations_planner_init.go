@@ -61,6 +61,16 @@ func (a *App) setupPlannerIntegration() {
 		a.Logger.Info("planner: agent-turn forwarder installed early")
 	}
 
+	// The delegation triage (memql#4362). The planner node holds no
+	// worker registry -- streams terminate on the agent -- so the probe
+	// is built with a nil registry and answers from persisted
+	// registration rows instead. Wiring it only on the agent would leave
+	// every planner in a real cluster answering "no machine".
+	if resolver := a.delegationResolver(nil); resolver != nil {
+		plannerIntegration.SetDelegationResolver(resolver)
+		a.Logger.Info("planner: app-delegation triage installed (row-backed probe)")
+	}
+
 	a.Dependencies = append(a.Dependencies, plannerIntegration)
 	a.Logger.Info("planner integration registered")
 }

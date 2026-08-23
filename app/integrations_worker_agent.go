@@ -4,6 +4,8 @@ package app
 
 import (
 	"errors"
+	"os"
+	"strings"
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
@@ -74,6 +76,8 @@ func (a *App) setupWorkerService() {
 		a.fatal("worker integration: register failed", "error", err)
 	}
 
+	a.setupCockpitAppExecutor(svc, dispatcher, store, auditor)
+
 	a.workerService = svc
 	a.Dependencies = append(a.Dependencies, svc)
 	a.Logger.Info("worker service registered on agent node")
@@ -117,4 +121,65 @@ func (a *App) lookupWorkerIntegration() *agentworker.Integration {
 		return integ
 	}
 	return nil
+}
+
+// setupCockpitAppExecutor completes the container-executor
+// registration made at init() by integrations/agent/worker
+// (memql#4361). The seam registers a NAME on every agent binary so
+// ValidateExecutorBackend can accept "cockpit-app:*" at task
+// creation; the implementation needs a worker registry and an engine,
+// neither of which exists at init() time, so it is installed here.
+//
+// A node that cannot mint the back-channel credential still installs
+// the executor. The refusal then comes from Run with a reason naming
+// the missing credential, which is far more useful than the executor
+// being silently absent and a Task failing with "no backend
+// registered" on a node that plainly has one.
+func (a *App) setupCockpitAppExecutor(
+	svc *worker.Service,
+	dispatcher *agentworker.Dispatcher,
+	store *worker.EngineStore,
+	auditor worker.Auditor,
+) {
+	minter := worker.NewBootstrapCredentialMinter(
+		os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL"),
+		os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN"),
+	)
+	if minter == nil {
+		a.Logger.Warn("cockpit-app executor: no back-channel credential minter",
+			"reason", "MEMQL_IDENTITY_VERIFIER_BASE_URL or MEMQL_NODE_BOOTSTRAP_TOKEN is unset",
+			"effect", "delegated app sessions will refuse with a named reason rather than run without MemQL's tools",
+		)
+	}
+
+	mcpEndpoint := strings.TrimRight(os.Getenv("MEMQL_MCP_PUBLIC_URL"), "/")
+	if mcpEndpoint != "" {
+		mcpEndpoint += "/mcp"
+	}
+
+	runner := &worker.SessionRunner{
+		Logger:      a.Logger,
+		Registry:    svc.Registry(),
+		Store:       store,
+		Auditor:     auditor,
+		MCPEndpoint: mcpEndpoint,
+	}
+	if minter != nil {
+		runner.Minter = minter
+	}
+
+	exec, err := agentworker.NewCockpitAppExecutor(
+		a.Logger, dispatcher, runner, &agentworker.EngineStore{Engine: a.engine},
+	)
+
+	if err != nil {
+		a.fatal("cockpit-app executor: build failed", "error", err)
+	}
+	agentworker.InstallCockpitAppExecutor(
+		exec.WithLedger(&agentworker.LedgerWriter{Engine: a.engine}),
+	)
+	a.Logger.Info("cockpit-app container executor installed",
+		"mcp_endpoint", mcpEndpoint,
+		"credential_minter", minter != nil,
+	)
 }

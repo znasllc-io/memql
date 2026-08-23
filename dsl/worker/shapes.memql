@@ -62,6 +62,76 @@ shape registration workerRegistrationFull {
   row.createdAt
 }
 
+/// Full projection of a v1:worker:appSession row (memql#4360). Backs the live transcript on a task,
+/// the machine card's recent-sessions list and the accounting rollup.
+@row
+shape appSession workerAppSessionFull {
+  row.id
+  ownerUserId
+  workerId
+  app
+  kind
+  planId
+  taskId
+  status
+  workspace
+  prompt
+  inputArtifactIds
+  transcript
+  transcriptBytes
+  transcriptTruncated
+  usage
+  billing
+  exitCode
+  producedArtifactIds
+  appSessionRef
+  credentialRef
+  credentialExpiresAt
+  mcpEndpoint
+  errorMessage
+  cancelReason
+  startedAt
+  endedAt
+  row.createdAt
+}
+
+/// Card projection of a v1:worker:appSession row: everything a list needs and no transcript. The
+/// transcript is the largest field on the row by orders of magnitude, so a list that projected it
+/// would pull megabytes to render a handful of lines.
+@row
+shape appSession workerAppSessionCard {
+  row.id
+  ownerUserId
+  workerId
+  app
+  kind
+  planId
+  taskId
+  status
+  billing
+  usage
+  exitCode
+  startedAt
+  endedAt
+  row.createdAt
+}
+
+/// Full projection of a v1:worker:delegationPolicy row (memql#4362). Backs the policy editor and
+/// the planner's triage read.
+@row
+shape delegationPolicy workerDelegationPolicyFull {
+  row.id
+  ownerUserId
+  preferSubscriptionApps
+  eligibleKinds
+  appOrder
+  maxConcurrentSessions
+  workspaceRoot
+  credentialLifetimeSeconds
+  updatedAt
+  row.createdAt
+}
+
 /// Full projection of a v1:worker:routingPolicy row. Backs routingPolicyForOwner (the router's
 /// read) and the Fleet page's policy editor.
 @row

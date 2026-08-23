@@ -2255,7 +2255,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -5616,6 +5616,13 @@ type CreateSemanticTaskArgs struct {
 	Phase         string
 	DependsOn     []string
 	Input         map[string]any
+	// inProcess (the default) or containerExecutor when the delegation triage found a machine with an allowed, signed-in app online.
+	// Enum: inProcess | containerExecutor
+	ExecutionSurface string
+	// The registered backend, e.g. "cockpit-app:claude-code". Empty for an inProcess task.
+	ExecutorBackend string
+	// Why this Task got the surface it did -- recorded on BOTH branches.
+	DelegationReason string
 }
 
 // CreateSemanticTask calls the engine mutation createSemanticTask.
@@ -5677,6 +5684,27 @@ func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
+	if args.ExecutionSurface != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("executionSurface: ")
+		b.WriteString(quoteMemQL(args.ExecutionSurface))
+	}
+	if args.ExecutorBackend != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("executorBackend: ")
+		b.WriteString(quoteMemQL(args.ExecutorBackend))
+	}
+	if args.DelegationReason != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("delegationReason: ")
+		b.WriteString(quoteMemQL(args.DelegationReason))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6082,6 +6110,8 @@ type CreateTaskArgs struct {
 	Phase            string
 	ExecutionSurface string
 	ExecutorBackend  string
+	// Why this Task got the surface it did (memql#4362).
+	DelegationReason string
 	Input            map[string]any
 }
 
@@ -6140,6 +6170,13 @@ func CreateTaskBuild(args CreateTaskArgs) string {
 		}
 		b.WriteString("executorBackend: ")
 		b.WriteString(quoteMemQL(args.ExecutorBackend))
+	}
+	if args.DelegationReason != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("delegationReason: ")
+		b.WriteString(quoteMemQL(args.DelegationReason))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
@@ -6791,10 +6828,12 @@ type CreateWorkerRegistrationArgs struct {
 	Permissions          map[string]any
 	Version              string
 	BuildTag             string
-	RegisteredAt         string
-	LastSeenAt           string
-	LastConnectedFromIP  string
-	ConnectedNodeId      string
+	// Local-app inventory the cockpit reported (memql#4359): a list of {id, version, signedIn, subscription, allowed}. Stored verbatim, including apps this engine cannot drive.
+	Apps                []any
+	RegisteredAt        string
+	LastSeenAt          string
+	LastConnectedFromIP string
+	ConnectedNodeId     string
 }
 
 // CreateWorkerRegistration calls the engine mutation createWorkerRegistration.
@@ -6869,6 +6908,13 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(quoteMemQL(args.BuildTag))
+	}
+	if args.Apps != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apps: ")
+		b.WriteString(renderMemQLValue(args.Apps))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
@@ -9830,6 +9876,11 @@ type RecordRouterCallArgs struct {
 	ErrorCategory        string
 	ErrorMessage         string
 	FallbackFromModel    string
+	// Who paid: metered | subscription | unknown. Absent reads as metered.
+	// Enum: metered | subscription | unknown
+	Billing string
+	// Where the call ran; empty for MemQL's own provider calls.
+	ExecutionSurface string
 }
 
 // RecordRouterCall calls the engine mutation recordRouterCall.
@@ -9995,6 +10046,20 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("fallbackFromModel: ")
 		b.WriteString(quoteMemQL(args.FallbackFromModel))
+	}
+	if args.Billing != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("billing: ")
+		b.WriteString(quoteMemQL(args.Billing))
+	}
+	if args.ExecutionSurface != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("executionSurface: ")
+		b.WriteString(quoteMemQL(args.ExecutionSurface))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10276,9 +10341,11 @@ type RefreshWorkerRegistrationArgs struct {
 	Permissions          map[string]any
 	Version              string
 	BuildTag             string
-	LastSeenAt           string
-	LastConnectedFromIP  string
-	ConnectedNodeId      string
+	// Local-app inventory from the latest Register (memql#4359). An omitted list CLEARS the persisted one, the same way the capability descriptor does: the worker no longer reports apps.
+	Apps                []any
+	LastSeenAt          string
+	LastConnectedFromIP string
+	ConnectedNodeId     string
 }
 
 // RefreshWorkerRegistration calls the engine mutation refreshWorkerRegistration.
@@ -10348,6 +10415,13 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(quoteMemQL(args.BuildTag))
+	}
+	if args.Apps != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apps: ")
+		b.WriteString(renderMemQLValue(args.Apps))
 	}
 	if b.Len() > 35 {
 		b.WriteString(", ")
@@ -12142,6 +12216,83 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	}
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetDelegationPolicy wraps the mutation named "setDelegationPolicy".
+//
+// Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.go).
+type SetDelegationPolicyArgs struct {
+	PolicyId                  string
+	PreferSubscriptionApps    bool
+	PreferSubscriptionAppsSet bool // set true to send preferSubscriptionApps; required because zero-value bool is ambiguous
+	EligibleKinds             []any
+	AppOrder                  []any
+	MaxConcurrentSessions     int
+	WorkspaceRoot             string
+	CredentialLifetimeSeconds int
+	UpdatedAt                 string
+}
+
+// SetDelegationPolicy calls the engine mutation setDelegationPolicy.
+func (qc *QueryClient) SetDelegationPolicy(ctx context.Context, args SetDelegationPolicyArgs) (*Result, error) {
+	call := SetDelegationPolicyBuild(args)
+	return qc.executeNamed(ctx, "setDelegationPolicy", call)
+}
+
+func SetDelegationPolicyBuild(args SetDelegationPolicyArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setDelegationPolicy(")
+	b.WriteString("policyId: ")
+	b.WriteString(quoteMemQL(args.PolicyId))
+	if args.PreferSubscriptionAppsSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preferSubscriptionApps: ")
+		b.WriteString(fmt.Sprintf("%v", args.PreferSubscriptionApps))
+	}
+	if args.EligibleKinds != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("eligibleKinds: ")
+		b.WriteString(renderMemQLValue(args.EligibleKinds))
+	}
+	if args.AppOrder != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("appOrder: ")
+		b.WriteString(renderMemQLValue(args.AppOrder))
+	}
+	if args.MaxConcurrentSessions != 0 {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxConcurrentSessions: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxConcurrentSessions))
+	}
+	if args.WorkspaceRoot != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("workspaceRoot: ")
+		b.WriteString(quoteMemQL(args.WorkspaceRoot))
+	}
+	if args.CredentialLifetimeSeconds != 0 {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("credentialLifetimeSeconds: ")
+		b.WriteString(fmt.Sprintf("%v", args.CredentialLifetimeSeconds))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("updatedAt: ")
+	b.WriteString(quoteMemQL(args.UpdatedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -15188,6 +15339,60 @@ func UpdateTodoBuild(args UpdateTodoArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateWorkerApps -- Re-stamp a worker's reported app inventory and its derived routing labels.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerApps"] in generated_concepts.go).
+type UpdateWorkerAppsArgs struct {
+	RegistrationId string
+	// The full reported inventory: {id, version, signedIn, subscription, allowed}. An empty list is a machine reporting that it now has none.
+	Apps []any
+	// The complete label set, operator-set labels included. Replaces the stored one wholesale -- a merge here could not remove the label of an app the user just signed out of.
+	Labels              map[string]any
+	LastSeenAt          string
+	LastConnectedFromIP string
+}
+
+// UpdateWorkerApps calls the engine mutation updateWorkerApps.
+func (qc *QueryClient) UpdateWorkerApps(ctx context.Context, args UpdateWorkerAppsArgs) (*Result, error) {
+	call := UpdateWorkerAppsBuild(args)
+	return qc.executeNamed(ctx, "updateWorkerApps", call)
+}
+
+func UpdateWorkerAppsBuild(args UpdateWorkerAppsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateWorkerApps(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Apps != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apps: ")
+		b.WriteString(renderMemQLValue(args.Apps))
+	}
+	if args.Labels != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
+	}
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastSeenAt: ")
+	b.WriteString(quoteMemQL(args.LastSeenAt))
+	if args.LastConnectedFromIP != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastConnectedFromIP: ")
+		b.WriteString(quoteMemQL(args.LastConnectedFromIP))
+	}
 	b.WriteString(")")
 	return b.String()
 }

@@ -143,6 +143,12 @@ const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks }
 // is hidden below owner/admin because there the whole surface is refused.
 const FLEET: readonly NavItem[] = [
   { to: fleetPath("machines"), label: "Machines", icon: Monitor },
+  // Local apps (memql#4363) sits beside Machines rather than under Cluster:
+  // it is about work running on the person's OWN computer, which is the
+  // question this group answers. Two doors to one thing is what the rail's
+  // reshuffle removed, so the apps surface is a Fleet tab, not a second
+  // Machines entry.
+  { to: fleetPath("apps"), label: "Local apps", icon: Bot },
   { to: fleetPath("workbenches"), label: "Workbenches", icon: Wrench },
 ];
 

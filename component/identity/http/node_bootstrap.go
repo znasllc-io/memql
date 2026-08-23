@@ -96,7 +96,36 @@ type NodeBootstrapRequest struct {
 	// (e.g. "voice-agent-prod-us-east-1"). Required when
 	// TokenClass="voice_agent"; ignored otherwise.
 	InstanceId string `json:"instanceId,omitempty"`
+	// OwnerUserId is the v1:identity:user this app-session credential
+	// ACTS AS. Required when TokenClass="app_session"; ignored
+	// otherwise. It becomes the JWT `sub`, which is what makes row
+	// authz apply to a delegated app exactly as it does to that
+	// user's browser -- the credential reads what they could read and
+	// nothing more.
+	OwnerUserId string `json:"ownerUserId,omitempty"`
+	// SessionId is the v1:worker:appSession this credential belongs
+	// to. Required when TokenClass="app_session". It becomes the
+	// token label, so every audit line names the session, and it is
+	// how a leaked bearer is traced back to the run that was given it.
+	SessionId string `json:"sessionId,omitempty"`
+	// TTLSeconds is the requested credential lifetime. Clamped to
+	// appSessionCredentialMaxTTL regardless of what is asked for.
+	TTLSeconds int64 `json:"ttlSeconds,omitempty"`
 }
+
+// appSessionCredentialMaxTTL is the hard ceiling on an app-session
+// back-channel credential, applied whatever the delegation policy
+// asks for. A run that outlives it is handed a REPLACEMENT through
+// AppSessionControl{renew_credential} rather than being given a
+// longer-lived bearer up front: the file the cockpit writes it into
+// lives on somebody's laptop, so shortening the window it is worth
+// anything is the only mitigation that does not depend on that file
+// being deleted.
+const appSessionCredentialMaxTTL = 8 * time.Hour
+
+// appSessionCredentialDefaultTTL is used when the caller asks for
+// nothing.
+const appSessionCredentialDefaultTTL = 4 * time.Hour
 
 // NodeBootstrapResponse carries the minted JWT (or a structured
 // error). Mirrors the shape of PairRedeemResponse so node-startup
@@ -166,10 +195,12 @@ func (s *Server) handleNodeBootstrap(w http.ResponseWriter, r *http.Request) {
 		s.mintNodeBootstrapToken(w, r, body)
 	case "voice_agent":
 		s.mintVoiceAgentBootstrapToken(w, r, body)
+	case "app_session":
+		s.mintAppSessionCredential(w, r, body)
 	default:
 		writeJSON(w, http.StatusBadRequest, NodeBootstrapResponse{
 			Success:   false,
-			Error:     "tokenClass must be \"node\" or \"voice_agent\", got " + tokenClass,
+			Error:     "tokenClass must be \"node\", \"voice_agent\" or \"app_session\", got " + tokenClass,
 			ErrorCode: "bad_request",
 		})
 	}
@@ -534,4 +565,154 @@ func (s *Server) requireSecureBootstrapRequest(w http.ResponseWriter, r *http.Re
 		ErrorCode: "insecure_transport",
 	})
 	return false
+}
+
+// mintAppSessionCredential is the class="service_account" mint path
+// for a delegated app run's MCP back-channel (memql#4360).
+//
+// WHAT IS DIFFERENT ABOUT THIS ONE, and why it is gated the way it
+// is. The `node` and `voice_agent` paths mint MACHINE principals:
+// their subjects name a binary, and no user's rows follow from
+// holding one. This path mints a credential whose `sub` is a HUMAN
+// USER's id, because that is what makes row authz apply to the
+// delegated app -- it reads what that user could read and nothing
+// more, which is the entire security story of D1's back-channel.
+//
+// That means the bootstrap secret, which previously bought only
+// machine identities, now also buys a user-scoped one. Four things
+// narrow that:
+//
+//  1. The named user must EXIST. A forged or mistyped id mints
+//     nothing, so the credential is always attributable to a real
+//     account rather than to an invented subject.
+//  2. The lifetime is CAPPED at appSessionCredentialMaxTTL whatever
+//     the caller asks for. The bearer ends up in a file on somebody's
+//     laptop; shortening the window it is worth anything is the only
+//     mitigation that does not depend on that file being deleted.
+//  3. The surface is pinned by the service-account interceptor to the
+//     read/query path -- every credential and admin mutation is
+//     refused -- and the role is `system`, not `owner`, so the
+//     credential cannot reach a cluster-owner gate.
+//  4. Every mint is audited with the session id as the label, so a
+//     leaked bearer traces back to the run that was handed it.
+//
+// An operator who does not want this path at all leaves
+// MEMQL_NODE_BOOTSTRAP_TOKEN unset, which darkens the whole endpoint
+// exactly as it does today.
+func (s *Server) mintAppSessionCredential(w http.ResponseWriter, r *http.Request, body NodeBootstrapRequest) {
+	ownerUserId := strings.TrimSpace(body.OwnerUserId)
+	sessionId := strings.TrimSpace(body.SessionId)
+	if ownerUserId == "" || sessionId == "" {
+		writeJSON(w, http.StatusBadRequest, NodeBootstrapResponse{
+			Success:   false,
+			Error:     "ownerUserId and sessionId are required for tokenClass=app_session",
+			ErrorCode: "bad_request",
+		})
+		return
+	}
+
+	// The named user must exist. Without this the bootstrap secret
+	// could mint a credential for an invented subject, which would
+	// verify (the verify path is JWKS-only and DB-free) and then act
+	// as a user nobody can point at in an audit.
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, NodeBootstrapResponse{
+			Success:   false,
+			Error:     "app-session credentials require an engine-backed identity store",
+			ErrorCode: "store_unavailable",
+		})
+		return
+	}
+	user, err := s.Store.LookupUserById(r.Context(), ownerUserId)
+	if err != nil || user == nil {
+		errorId := generateErrorId()
+		if s.Logger != nil {
+			s.Logger.Warn("app_session_credential_refused",
+				"error_id", errorId,
+				"reason", "unknown_owner",
+				"owner_user_id", ownerUserId,
+				"session_id", sessionId,
+				"remote", clientIP(r),
+			)
+		}
+		// Deliberately the same shape as any other bad request: the
+		// caller already holds the bootstrap secret, but there is no
+		// reason to turn this endpoint into a user-existence oracle.
+		writeJSON(w, http.StatusBadRequest, NodeBootstrapResponse{
+			Success:   false,
+			Error:     "ownerUserId does not name a user (errorId=" + errorId + ")",
+			ErrorCode: "bad_request",
+		})
+		return
+	}
+
+	ttl := time.Duration(body.TTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = appSessionCredentialDefaultTTL
+	}
+	if ttl > appSessionCredentialMaxTTL {
+		ttl = appSessionCredentialMaxTTL
+	}
+
+	now := time.Now().UTC()
+	token, expiresAt, err := s.Issuer.IssueServiceAccountAccessToken(identity.ServiceAccountIssueInput{
+		// The subject IS the user: row authz then applies to the
+		// delegated app exactly as it does to that user's browser.
+		Subject: ownerUserId,
+		// The label is the session, so audit attributes every use of
+		// this bearer to the run it was minted for.
+		Label:       "app-session:" + sessionId,
+		TTLOverride: ttl,
+	}, now)
+	if err != nil {
+		errorId := generateErrorId()
+		if s.Logger != nil {
+			s.Logger.Error("node_bootstrap_mint_failed",
+				"error_id", errorId,
+				"error", err.Error(),
+				"token_class", "app_session",
+				"session_id", sessionId,
+			)
+		}
+		writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
+			Success:   false,
+			Error:     "app-session credential mint failed; see identity logs (errorId=" + errorId + ")",
+			ErrorCode: "mint_failed",
+		})
+		return
+	}
+
+	if s.Logger != nil {
+		s.Logger.Info("node_bootstrap_issued",
+			"token_class", "app_session",
+			"session_id", sessionId,
+			"owner_user_id", ownerUserId,
+			"expires_at", expiresAt.Format(time.RFC3339),
+			"ttl_seconds", int(ttl.Seconds()),
+			"remote", clientIP(r),
+		)
+	}
+	if s.Audit != nil {
+		s.Audit.Log(r.Context(), identity.AuditEvent{
+			OccurredAt:  now,
+			Category:    identity.AuditCategoryAuth,
+			Action:      "app_session_credential_issued",
+			ActorUserId: ownerUserId,
+			TargetType:  "appSession",
+			TargetId:    sessionId,
+			SourceIP:    clientIP(r),
+			Detail: map[string]any{
+				"expiresAt":  expiresAt.Format(time.RFC3339),
+				"ttlSeconds": int(ttl.Seconds()),
+			},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, NodeBootstrapResponse{
+		Success:    true,
+		PlainToken: token,
+		IdentityId: "app-session:" + sessionId,
+		NodeId:     sessionId,
+		ExpiresAt:  expiresAt.Format(time.RFC3339),
+	})
 }

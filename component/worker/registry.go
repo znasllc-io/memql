@@ -60,11 +60,15 @@ type Worker struct {
 	SourceIP             string
 
 	dispatchFn   DispatchFunc
+	appSessionFn AppSessionFunc
 	cancelStream func()
 
 	mu           sync.Mutex
 	activePerCap map[string]uint32
 	queue        []chan struct{}
+	// apps is the reported local-app inventory. Guarded by mu because
+	// heartbeats rewrite it while selection reads it.
+	apps []AppInfo
 }
 
 // DispatchFunc is the worker-side dispatch hook owned by the
@@ -214,6 +218,79 @@ func (r *Registry) Snapshot() []*Worker {
 		return out[i].RegistrationId < out[j].RegistrationId
 	})
 	return out
+}
+
+// SetApps replaces the worker's app inventory and re-derives its
+// `app:` routing labels (memql#4359). Called on register and on every
+// heartbeat that carries an inventory, so signing into -- or out of --
+// an app changes what the router can select within one beat rather than
+// at the next reconnect.
+//
+// The derived labels go into Labels, the COCKPIT's side of the label
+// pair, not OperatorLabels: the engine derives them from what the
+// machine reported, and the owner does not set them. MergeLabels then
+// lets an operator label win, which is the right precedence -- an owner
+// pinning a machine should out-rank a derived hint.
+func (w *Worker) SetApps(apps []AppInfo) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.apps = apps
+	w.Labels = mergeAppLabels(w.Labels, apps)
+}
+
+// Apps returns a copy of the worker's app inventory.
+func (w *Worker) Apps() []AppInfo {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.apps) == 0 {
+		return nil
+	}
+	out := make([]AppInfo, len(w.apps))
+	copy(out, w.apps)
+	return out
+}
+
+// LabelsSnapshot returns a copy of the worker's current labels,
+// including the derived `app:` ones.
+func (w *Worker) LabelsSnapshot() map[string]string {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.Labels) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(w.Labels))
+	for k, v := range w.Labels {
+		out[k] = v
+	}
+	return out
+}
+
+// App returns the reported entry for appId and whether it was found.
+func (w *Worker) App(appId string) (AppInfo, bool) {
+	for _, a := range w.Apps() {
+		if a.Id == appId {
+			return a, true
+		}
+	}
+	return AppInfo{}, false
+}
+
+// RunsApp reports whether this worker can actually run appId: the id is
+// one the engine drives, the machine allows it, and the app is signed
+// in. The same test the label derivation applies, asked of one worker --
+// the two must agree, or the router picks a machine that then refuses.
+func (w *Worker) RunsApp(appId string) bool {
+	a, ok := w.App(appId)
+	return ok && a.Runnable()
 }
 
 // SupportsCapability reports whether the worker advertised the

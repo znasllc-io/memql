@@ -205,6 +205,49 @@ The user approves or denies on the canvas card.
 
 ---
 
+## 4b. Local apps on a worker (epic memql#4358)
+
+A worker is not only a tool surface. If the machine has **Claude Code** or
+**Codex** installed and signed in, the planner can hand it a whole Task and let
+that app do the work — on the user's own subscription, with MemQL's tools
+reachable from inside the app over MCP. Full record:
+[local-apps.md](local-apps.md). The parts an operator of *this* runbook needs:
+
+**The cockpit reports its apps on `Register` and every `Heartbeat`**, and the
+engine derives `app:<id>` routing labels from them. A label appears only when
+the entry is BOTH `allowed` (this machine's `policy.yaml apps.allow`) and
+`signedIn` — so a machine that merely has the binary is never selected, and
+signing in takes effect on the next beat rather than the next reconnect.
+
+```yaml
+# policy.yaml on the machine
+apps:
+  allow:
+    - claude-code
+    - codex
+```
+
+**A run is a session, not a tool call.** `AppSessionStart / Chunk / Control /
+End` on the same `WorkerService.Stream`, with kinds `run` (headless), `open`
+(hand off to the human) and `attach` (stream a run they started). Sessions do
+NOT take a slot from the per-capability tool concurrency pools: a session is
+bounded by the delegation policy's `maxConcurrentSessions`, and blocking an
+hour-long run behind a five-minute tool queue would deadlock the caller for
+reasons nothing in the request states.
+
+**Consent is this runbook's model, unchanged.** The app-session path calls the
+same `preDispatchCheck` `workerHost` does — per-task approval, kill switch,
+standing scope at `full`, the classifier — plus `apps.allow`. There is no
+weaker consent tier for app runs, because an app run does exactly what a shell
+command does: edits files and runs commands on the user's computer.
+
+**Per-user delegation policy** (`v1:worker:delegationPolicy`, edited at
+`/machines` in the portal) decides *when*. An absent row means never delegate.
+If no machine with an allowed, signed-in app is online, the task runs
+in-process — a plan never waits for a laptop to wake up.
+
+## 5. Audit + observability
+
 ## 5. The Fleet: labels, routing, and where a call lands
 
 Epic memql#4349. Everything here is **per-user**: a machine belongs to exactly

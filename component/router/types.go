@@ -135,4 +135,24 @@ type CallRecord struct {
 	ErrorCategory     string
 	ErrorMessage      string
 	FallbackFromModel string // set on fallback_used rows: the model that failed
+
+	// Billing says who PAID (memql#4362): "metered" (MemQL's own
+	// vendor spend, which is what the cost fields above are about),
+	// "subscription" (the call ran inside an app the user already
+	// pays for) or "unknown". Empty reads as metered on the row, so
+	// every existing writer keeps its meaning without a migration.
+	Billing string
+	// ExecutionSurface names where the call ran: empty for MemQL's
+	// own provider calls, "cockpit-app:<appId>" for one made by a
+	// local app on a user's machine.
+	ExecutionSurface string
 }
+
+// Billing values. They mirror v1:router:call.billing,
+// v1:worker:appSession.billing and planner.Billing* so one vocabulary
+// spans the ledger, the session row and the executor seam.
+const (
+	BillingMetered      = "metered"
+	BillingSubscription = "subscription"
+	BillingUnknown      = "unknown"
+)

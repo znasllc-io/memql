@@ -904,28 +904,107 @@ inserted `v1:cognition:utterance.citations` field. The frontend wraps each
 `matchedPhrase` substring with a clickable chip linking to the named domain.
 When the agent used no trained sources, citations is an empty array.
 
-### Coding Agent (OpenClaw / NemoClaw) -- a SEAM, not a running deployment
+### Coding Agent -- the seam, and its one inhabitant
 
-**Nothing in this repository runs a coding agent** (memql#4120). What exists is
-the extension point one would plug into, plus the graph fields and display
-strings that assume it:
+The container-executor seam spent its whole life EMPTY (memql#4120):
+`RegisterContainerExecutor` existed, `Task.executionSurface="containerExecutor"`
++ `executorBackend` existed, and nothing in the tree called the registry -- so
+a `containerExecutor` Task had nowhere to land. **`cockpit-app` is now its
+first and only inhabitant** (epic memql#4358): it runs Claude Code or Codex
+headless on a machine the USER owns, through the worker stream, with MemQL's
+tools reachable from inside the app over MCP.
 
-- **The seam.** `component/planner`'s `RegisterContainerExecutor(name, exec)`
-  is the registry a container-executor backend self-registers into from
-  `init()`; a Task routes to it by `executionSurface="containerExecutor"` +
-  `executorBackend`. **No package in this repo calls it**, so the registry is
-  empty at runtime and a `containerExecutor` Task has nowhere to land.
-- **The agent flag.** `v1:agents:agent.claw` (bool) + `clawWorkspace`, read by
-  `integrations/cognition/ai_responder.go`'s `ClawCapable()`. The per-agent
-  workspace convention `/workspaces/{agentId}/` is stated in
-  `component/planner/executor.go`, not implemented here.
-- **Display strings** in `integrations/cognition/tool_labels.go` for
-  `clawExecuteTask` / `clawReadFile` / `clawListFiles` / `clawSearchCode`.
+- **The seam.** `component/planner`'s `RegisterContainerExecutor(name, exec)`.
+  Lookup keys on the part BEFORE the colon, so a Task naming
+  `cockpit-app:claude-code` reaches the one registered `cockpit-app` backend
+  and the app id rides the suffix -- growing the app list is a value change,
+  not a release. `ValidateExecutorBackend` refuses an unregistered name at
+  TASK CREATION rather than at dispatch: the old behaviour produced a Task
+  that looked queued, sat there, and failed much later with an error naming a
+  registry lookup rather than the typo.
+- **The backend.** `integrations/agent/worker/cockpitapp.go`, registered from
+  `init()` under the `agent` build tag -- only an agent node holds worker
+  streams, so only an agent node can serve one. It reuses `preDispatchCheck`
+  UNEXPORTED, in the same package, on purpose: an app run needs exactly the
+  gates `workerHost` needs (per-task approval, kill switch, standing scope,
+  classifier), and a second copy of those gates is a copy that drifts.
+- **Legacy fields, still present, still unused by anything here.**
+  `v1:agents:agent.claw` (bool) + `clawWorkspace`, read by
+  `integrations/cognition/ai_responder.go`'s `ClawCapable()`; display strings
+  in `integrations/cognition/tool_labels.go` for `clawExecuteTask` /
+  `clawReadFile` / `clawListFiles` / `clawSearchCode`. No `tool claw*` exists
+  under `dsl/`, no sidecar in any manifest, and no `NEMOCLAW_*` / `OPENCLAW_*`
+  / `CLAW_*` env var. These are NOT what `cockpit-app` uses -- do not wire
+  them together on the assumption that they are.
 
-What does NOT exist, despite having been claimed here: no sidecar in any
-manifest, no `tool claw*` anywhere under `dsl/`, no image/pin/gateway config,
-and no `NEMOCLAW_*` / `OPENCLAW_*` / `CLAW_*` env var. Whoever registers the
-first backend owns re-establishing the hardening posture with it.
+### Local apps as execution surfaces (epic memql#4358)
+
+Delegating a task to an app the user already pays for, on a machine they own.
+Full record:
+[docs/public/operate/local-apps.md](docs/public/operate/local-apps.md).
+
+**Transport is the worker stream; MCP is the back-channel.** The engine cannot
+dial a machine behind NAT -- the stream the cockpit opened outward IS the
+tunnel. Each run is handed a per-run credential and the `mcp.<domain>`
+endpoint so the app can use MemQL's tools.
+
+Four rules carry the design, and each has a failure mode that motivated it:
+
+- **The runnable app set is CLOSED in the engine** (`claude-code`, `codex`). A
+  cockpit may report any id; unknown ids are stored on the registration and
+  produce no routing label, so a newer cockpit never makes the engine attempt
+  a protocol it does not have.
+- **A machine is selectable for an app only when it is BOTH `allowed` (the
+  machine's own `policy.yaml apps.allow`) and `signedIn`.** Otherwise
+  selection commits a plan to a machine that then refuses the run. Selection
+  itself is the **Fleet router** (`integrations/agent/worker/router.go`, epic
+  memql#4349) asked for the `app:<id>` label; nothing here picks between
+  machines, because a second selector disagrees with the first. A session runs
+  only on the replica holding that machine's stream -- the app-session envelope
+  has no cross-node forward yet, so a machine on a sibling replica is SKIPPED
+  during selection rather than failing the run.
+- **A run is a SESSION, not a dispatch.** `AppSessionStart / Chunk / Control /
+  End` on `WorkerService.Stream`; a `ToolDispatch` carries one timeout and
+  returns one result, and a headless `claude -p` runs for an hour emitting
+  output the whole way. Chunk `seq` is monotonic and out-of-order or duplicate
+  chunks are DROPPED -- a transcript is a record, and interleaving a replayed
+  chunk corrupts it in a way no later reader can detect.
+- **Delegation is a PREFERENCE WITH A FALLBACK** (`v1:worker:delegationPolicy`).
+  If no machine with an allowed, signed-in app is online, the task runs
+  in-process. A plan never waits for a laptop to wake up.
+
+**The back-channel credential's `sub` is the OWNING USER's id.** That is the
+whole security story: the delegated app reads over MCP as that user, so row
+authz applies to it exactly as to their browser, and the service-account
+interceptor's surface pin plus `role=system` keep it off every credential
+mutation and every cluster-owner gate. It is minted through
+`POST /node/bootstrap` with `tokenClass="app_session"`, which WIDENS what the
+bootstrap secret buys -- previously machine principals only. Four things
+narrow it: the named user must exist, the TTL is hard-capped at 8h, the
+surface stays read/query-pinned, and the session id is the token label.
+
+**It is NOT revocable, and nothing should imply otherwise.** The DB-free
+JWKS verify path is what lets it work on every node without a lookup, so
+there is no row to strike and revoking one token means rotating the cluster
+signing key. Standing in for revocation: the short hard-capped lifetime, the
+cockpit deleting the MCP config file at end, and renewal-in-place so no single
+bearer is ever long-lived.
+
+**Subscription spend is counted and does not burn the dollar ceiling.**
+`v1:router:call.billing` + `executionSurface`, `plan.tokenSpentSubscription`.
+The two caps want opposite answers: the DOLLAR ceiling must EXCLUDE
+subscription tokens (MemQL was not billed, so counting them parks a plan over
+money nobody was charged -- and the more the user leans on what they already
+pay for, the sooner their plans would stop), while the LOOP caps must INCLUDE
+the call (a runaway loop that routed through a subscription is still a runaway
+loop). Billing falls to `unknown` whenever the app's usage report OR the
+machine's subscription signal is silent; it is never inferred, because the
+number the owner asked for is only worth having if silence stays visible.
+
+**The cockpit half lives in `memql-cockpit`** -- app detection, `apps.allow`,
+the session runner, the MCP config writer and its cleanup, the Library
+pull/push, and the `open` kind. This repo fixes the protocol and the engine
+side.
 
 ### Workers (computer_use_headless / computer_use_embodied)
 

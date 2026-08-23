@@ -98,6 +98,10 @@ mutate registration createWorkerRegistration {
     permissions          object
     version              string
     buildTag             string
+    /// Local-app inventory the cockpit reported (memql#4359): a list of
+    /// {id, version, signedIn, subscription, allowed}. Stored verbatim,
+    /// including apps this engine cannot drive.
+    apps                 array
     registeredAt         string!
     lastSeenAt           string
     lastConnectedFromIP  string
@@ -116,6 +120,7 @@ mutate registration createWorkerRegistration {
     permissions: args.permissions ?? {}
     version: args.version ?? ""
     buildTag: args.buildTag ?? ""
+    apps: args.apps ?? []
     args.registeredAt
     lastSeenAt: args.lastSeenAt ?? args.registeredAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
@@ -162,6 +167,10 @@ mutate registration refreshWorkerRegistration {
     permissions          object
     version              string
     buildTag             string
+    /// Local-app inventory from the latest Register (memql#4359). An
+    /// omitted list CLEARS the persisted one, the same way the
+    /// capability descriptor does: the worker no longer reports apps.
+    apps                 array
     lastSeenAt           string!
     lastConnectedFromIP  string
     connectedNodeId      string
@@ -177,6 +186,7 @@ mutate registration refreshWorkerRegistration {
     permissions: args.permissions ?? {}
     version: args.version ?? ""
     buildTag: args.buildTag ?? ""
+    apps: args.apps ?? []
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
     connectedNodeId: args.connectedNodeId ?? ""
@@ -513,5 +523,258 @@ mutate routingPolicy deactivateRoutingPolicy {
   update {
     id: args.policyId
     active: false
+  }
+}
+
+// ---- mutations/v1/worker/updateWorkerApps.memql ----
+
+// updateWorkerApps
+// ================
+//
+// Re-stamps the reported local-app inventory and the labels derived
+// from it (memql#4359). Separate from updateWorkerLastSeen because an
+// inventory change is a ROUTING change, and routing must not wait for
+// the 60s heartbeat flush window: signing into Claude Code makes the
+// machine selectable on the next beat, and signing out removes it
+// just as fast.
+//
+// The two fields travel TOGETHER on purpose. `labels` carries the
+// derived `app:<id>` entries alongside whatever the operator set by
+// hand; writing the inventory without the labels would leave a row
+// whose apps say one thing and whose routing labels say another, and
+// nothing downstream could tell which was current.
+
+/// Re-stamp a worker's reported app inventory and its derived routing labels.
+mutate registration updateWorkerApps {
+  args {
+    registrationId       string!
+    /// The full reported inventory: {id, version, signedIn, subscription, allowed}.
+    /// An empty list is a machine reporting that it now has none.
+    apps                 array
+    /// The complete label set, operator-set labels included. Replaces
+    /// the stored one wholesale -- a merge here could not remove the
+    /// label of an app the user just signed out of.
+    labels               object
+    lastSeenAt           string!
+    lastConnectedFromIP  string
+  }
+  update {
+    id: args.registrationId
+    apps: args.apps ?? []
+    labels: args.labels ?? {}
+    args.lastSeenAt
+    lastConnectedFromIP: args.lastConnectedFromIP ?? ""
+  }
+}
+
+// ---- mutations/v1/worker/createAppSession.memql ----
+
+// createAppSession
+// ================
+//
+// Opens the row for one delegated app run (memql#4360). Written
+// BEFORE AppSessionStart goes on the wire, so a session that the
+// worker never acknowledges still has a row saying it was attempted
+// -- the alternative loses the attempt entirely, and "nothing
+// happened" and "it failed to start" then read identically.
+//
+// @serverOnly: the row carries the credential's identity handle and
+// the workspace the consent card approved. A client-reachable create
+// would let a caller name its own workspace and its own credential.
+
+/// Open the row for a delegated app-session run.
+///
+/// @serverOnly because the row carries the WORKSPACE the consent card approved and the label of the
+/// per-run back-channel credential. A wire-reachable create would let a caller name its own
+/// workspace on somebody's machine and its own credential reference, which is a forging primitive
+/// for the two facts the whole consent story rests on.
+///
+/// actor.userId scoping is not the fix, and this is the subtle part: the caller IS the owner here,
+/// so a self-scoped filter would admit exactly this call. Scoping answers "whose row is it", and the
+/// hazard is not whose -- it is that a legitimate owner could open a session naming a directory
+/// nobody approved. Only the server knows which workspace the card actually named, so only the
+/// server may write it.
+@actor
+@serverOnly
+mutate appSession createAppSession {
+  args {
+    sessionId      string!
+    workerId       string!
+    app            enum("claude-code", "codex")!
+    kind           enum("run", "open", "attach")!
+    planId         string
+    taskId         string
+    workspace      string
+    prompt         string
+    inputArtifactIds  array
+    mcpEndpoint    string
+    credentialRef  string
+    credentialExpiresAt   string
+    startedAt      string!
+  }
+  insert {
+    id: args.sessionId
+    // Stamped from the actor, never accepted as an argument.
+    // @rowAuthz(owner="ownerUserId") asserts this field identifies the
+    // row's owner, and that assertion is worthless -- worse, actively
+    // misleading -- if a caller can write it. The engine borrows the
+    // owner's actor for this write (auth.ContextWithUserActor), the
+    // same way the campaign sender does.
+    ownerUserId: actor.userId
+    args.workerId
+    args.app
+    args.kind
+    planId: args.planId ?? ""
+    taskId: args.taskId ?? ""
+    status: "starting"
+    workspace: args.workspace ?? ""
+    prompt: args.prompt ?? ""
+    inputArtifactIds: args.inputArtifactIds ?? []
+    transcript: ""
+    transcriptBytes: 0
+    transcriptTruncated: false
+    usage: {}
+    billing: "unknown"
+    mcpEndpoint: args.mcpEndpoint ?? ""
+    credentialRef: args.credentialRef ?? ""
+    credentialExpiresAt: args.credentialExpiresAt ?? ""
+    args.startedAt
+  }
+}
+
+// ---- mutations/v1/worker/appendAppSessionTranscript.memql ----
+
+// appendAppSessionTranscript
+// ==========================
+//
+// Flushes the accumulated transcript onto a live session row. The
+// engine holds the buffer and writes the whole bounded string rather
+// than one row-write per chunk: a chatty run emits thousands of
+// chunks a minute, and a write each would saturate the engine to
+// deliver text nobody is reading between flushes.
+//
+// `transcriptTruncated` and `transcriptBytes` travel with it so a
+// reader can see that truncation happened and by how much. A
+// transcript that stops without saying why reads as a run that
+// stopped.
+
+/// Flush the accumulated transcript onto a live app-session row.
+///
+/// @serverOnly because the transcript is EVIDENCE. It is what a later reader consults to answer
+/// what an agent did on somebody's computer, and a wire-reachable write would let the owner of a
+/// run rewrite that record after the fact -- including the run whose behaviour is the reason
+/// anybody is reading it.
+///
+/// actor.userId scoping is not the fix: the person best placed to edit the record is its owner, so
+/// self-scoping admits precisely the write that must not happen. The engine appends from chunks it
+/// received on the stream; nothing else may.
+@serverOnly
+mutate appSession appendAppSessionTranscript {
+  args {
+    sessionId      string!
+    transcript     string
+    transcriptBytes  int
+    transcriptTruncated  bool
+    status         enum("starting", "running")
+  }
+  update {
+    id: args.sessionId
+    transcript: args.transcript ?? ""
+    transcriptBytes: args.transcriptBytes ?? 0
+    transcriptTruncated: args.transcriptTruncated ?? false
+    status: args.status ?? "running"
+  }
+}
+
+// ---- mutations/v1/worker/endAppSession.memql ----
+
+// endAppSession
+// =============
+//
+// Drives a session to a terminal status with everything the app
+// reported. `usage` is recorded VERBATIM: an app that reports
+// nothing gets known=false and zeroes, and the billing enum says
+// `unknown` rather than folding silence into either `metered` or
+// `subscription`. Inferring here is what would make the number the
+// owner asked for -- what the subscription covered -- untrustworthy.
+
+/// Drive an app session to a terminal status with its reported usage.
+///
+/// @serverOnly for the same reason as the transcript flush, plus one of its own: this write carries
+/// `billing` and `usage`, which feed the plan's spend rollup and the AI ledger. A wire-reachable
+/// version would let a caller declare their own run subscription-covered and its token count zero,
+/// which is the one write that can make the dollar ceiling stop working.
+///
+/// actor.userId scoping is not the fix: the caller who would benefit from misreporting spend is the
+/// owner, so self-scoping admits exactly the write the gate exists to refuse. The engine writes it
+/// from what the app reported over the session stream.
+@serverOnly
+mutate appSession endAppSession {
+  args {
+    sessionId      string!
+    status         enum("ended", "failed", "cancelled")!
+    exitCode       int
+    usage          object
+    billing        enum("metered", "subscription", "unknown")
+    transcript     string
+    transcriptBytes  int
+    transcriptTruncated  bool
+    producedArtifactIds  array
+    appSessionRef  string
+    errorMessage   string
+    cancelReason   string
+    endedAt        string!
+  }
+  update {
+    id: args.sessionId
+    args.status
+    exitCode: args.exitCode ?? 0
+    usage: args.usage ?? {}
+    billing: args.billing ?? "unknown"
+    transcript: args.transcript ?? ""
+    transcriptBytes: args.transcriptBytes ?? 0
+    transcriptTruncated: args.transcriptTruncated ?? false
+    producedArtifactIds: args.producedArtifactIds ?? []
+    appSessionRef: args.appSessionRef ?? ""
+    errorMessage: args.errorMessage ?? ""
+    cancelReason: args.cancelReason ?? ""
+    args.endedAt
+  }
+}
+
+// ---- mutations/v1/worker/setDelegationPolicy.memql ----
+
+// setDelegationPolicy
+// ===================
+//
+// Upserts the caller's delegation preference (memql#4362). One row
+// per user at a derived id, so a second write updates rather than
+// forking a second policy the planner would have to choose between.
+
+@actor
+/// Create or update the caller's app-delegation policy.
+mutate delegationPolicy setDelegationPolicy {
+  args {
+    policyId       string!
+    preferSubscriptionApps  bool
+    eligibleKinds  array
+    appOrder       array
+    maxConcurrentSessions  int
+    workspaceRoot  string
+    credentialLifetimeSeconds  int
+    updatedAt      string!
+  }
+  insert {
+    id: args.policyId
+    // Stamped, not accepted: a caller writing this field could author a
+    // policy attributed to somebody else.
+    ownerUserId: actor.userId
+    preferSubscriptionApps: args.preferSubscriptionApps ?? false
+    eligibleKinds: args.eligibleKinds ?? []
+    appOrder: args.appOrder ?? []
+    maxConcurrentSessions: args.maxConcurrentSessions ?? 1
+    workspaceRoot: args.workspaceRoot ?? ""
+    credentialLifetimeSeconds: args.credentialLifetimeSeconds ?? 14400
+    args.updatedAt
   }
 }

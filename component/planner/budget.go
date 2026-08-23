@@ -39,6 +39,32 @@ type TokenState struct {
 	Spent         int  // Plan.tokenSpent
 	AllocatedToCh int  // Plan.tokenAllocatedToChildren
 	CapDisabled   bool // Plan.tokenCapDisabled
+
+	// SpentSubscription is Plan.tokenSpentSubscription: tokens spent
+	// through an app the USER already pays for (memql#4362), or
+	// through a run whose billing could not be determined.
+	//
+	// It is tracked SEPARATELY from Spent rather than added to it,
+	// because the two caps want opposite answers about it:
+	//
+	//   - the DOLLAR ceiling must exclude it. MemQL was not billed
+	//     for these tokens, so counting them would park a plan over
+	//     money nobody was charged -- and the more the user leans on
+	//     the subscription they already pay for, the sooner their
+	//     plans would stop, which is exactly backwards.
+	//
+	//   - the LOOP caps must include it. A runaway decompose loop that
+	//     happened to route through a subscription is still a runaway
+	//     loop, and a cap that could not see those calls would be a
+	//     hole the cheapest path walks straight through.
+	//
+	// So this field is subtracted from the ceiling check here and
+	// counted by CallsMade, which the planner loop reads.
+	SpentSubscription int
+
+	// CallsMade is the Plan's cumulative LLM/executor call count,
+	// every billing kind included. The loop cap reads this.
+	CallsMade int
 }
 
 // EngineTokenBudget is the default implementation. Reads the Plan's
@@ -83,10 +109,30 @@ func (b *EngineTokenBudget) CheckCall(ctx context.Context, planId string, estima
 		// No effective budget configured -> no enforcement.
 		return nil
 	}
+	// The ceiling is a DOLLAR ceiling, so it counts only what MemQL
+	// paid for. state.SpentSubscription is deliberately absent from
+	// this arithmetic (memql#4362) -- see the field's comment for why
+	// including it would park plans over money nobody was charged.
 	available := budget - state.Spent - state.AllocatedToCh
 	if estimatedCallTokens > available {
 		return fmt.Errorf("planner: tokenBudgetExceeded for plan %s -- %d estimated, %d available",
 			planId, estimatedCallTokens, available)
 	}
 	return nil
+}
+
+// SplitSpend routes a completed executor's token spend to the right
+// counter (memql#4362). Returns the amounts to add to Plan.tokenSpent
+// and Plan.tokenSpentSubscription respectively; exactly one is
+// non-zero.
+//
+// An executor that reports no billing is treated as METERED, the
+// conservative direction: unattributed spend counts against the
+// ceiling rather than vanishing into the covered bucket, where it
+// would be invisible to the one control that stops runaway cost.
+func SplitSpend(result ExecutorResult) (metered int, subscription int) {
+	if result.CountsAgainstDollarCeiling() {
+		return result.TokensSpent, 0
+	}
+	return 0, result.TokensSpent
 }

@@ -63,6 +63,9 @@ concept call {
   errorCategory       string  @description("Short classifier when outcome=error: timeout, rate_limit, auth, upstream, cancelled, other.")
   errorMessage        string  @description("Truncated error string for debugging (max 500 chars). Must not contain PII or secrets.")
   fallbackFromModel   string  @description("On outcome=fallback_used rows, the model that failed and triggered the retry. Empty on ok/error/cancelled rows.")
+
+  billing             enum("metered", "subscription", "unknown")  @default("metered")  @description("Who PAID for this call (memql#4362). metered = MemQL's own vendor spend, which is what totalCost is about and what the dollar ceiling counts. subscription = the call ran inside an app the user already pays for, so the tokens are real but MemQL was not billed for them. unknown = the surface could not tell, which is recorded AS unknown rather than folded into either side -- the number the owner asked for, what the subscription covered, is only worth having if silence stays visible. An absent value reads as metered, the conservative direction: unattributed spend counts against the ceiling rather than disappearing into the covered bucket.")
+  executionSurface    string  @description("Where the call ran (memql#4362): empty for MemQL's own provider calls, 'cockpit-app:<appId>' for a call made by a local app on a user's machine through a delegated session. Lets a cost reader separate 'what we spent' from 'what ran somewhere we do not pay for' without joining to the session row.")
 }
 
 /// Virtual projection of a registered AI provider entry. Never persisted -- rows are produced at

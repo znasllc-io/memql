@@ -207,6 +207,26 @@ func NewDispatcher(opts Options) (*Dispatcher, error) {
 	return d, nil
 }
 
+// Router exposes the dispatcher's router so another consumer on this node
+// -- the cockpit-app executor (memql#4361) -- routes through the SAME one.
+// Building a second would give the two paths different answers to "which
+// machine", with the same owner policy read twice and possibly at
+// different moments.
+func (d *Dispatcher) Router() *Router {
+	if d == nil {
+		return nil
+	}
+	return d.router
+}
+
+// Registry exposes the connected-worker registry for the same reason.
+func (d *Dispatcher) Registry() *workerservice.Registry {
+	if d == nil {
+		return nil
+	}
+	return d.registry
+}
+
 // FleetStore exposes the store the router reads through, so the cluster phase
 // can hand the same one to the receiving side of the forward. Sharing it
 // rather than building a second is what keeps "which machines does this owner

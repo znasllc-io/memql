@@ -114,6 +114,25 @@ The blessed local environment that provides identity + a database is the k3d
 parity cluster (`make up`); mint a local token against the identity service via
 its port-forward (`localhost:8085`).
 
+## A delegated app connects here too (epic memql#4358)
+
+When the planner hands a Task to Claude Code or Codex on a user's own machine,
+the engine mints a per-run `class="service_account"` JWT and sends it to the
+cockpit along with `https://mcp.<domain>/mcp`. The cockpit writes the app's MCP
+configuration naming both, runs the app, and deletes that file when the session
+ends. From this server's point of view it is an ordinary service-account
+bearer on the ordinary streamable-HTTP endpoint — `MEMQL_MCP_MODE` and the
+role posture below apply unchanged.
+
+The one thing worth knowing: **its `sub` is the owning USER's id**, not a
+machine principal. That is deliberate — it makes row authz apply to the
+delegated app exactly as it does to that user's browser, so the app sees what
+they can see and nothing more. The credential cannot be revoked individually
+(the verify path is JWKS-only and DB-free by design); its lifetime is
+hard-capped at 8 hours instead, and a long run is handed a replacement rather
+than a longer-lived bearer up front. See
+[local-apps.md](local-apps.md#the-back-channel-credential).
+
 ## Environment surface
 
 | Variable | Default | Meaning |

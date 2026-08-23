@@ -2,9 +2,11 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { AppSessionPage } from "./AppSessionPage";
+import { LocalAppsPage } from "./LocalAppsPage";
 import { MachinesPage } from "./MachinesPage";
 import { WorkbenchesPage } from "./WorkbenchesPage";
-import { fleetPath } from "./urls";
+import { fleetPath, SESSION_ROUTE_PATTERN } from "./urls";
 
 // The Fleet (epic memql#4349) owns everything under /fleet.
 //
@@ -17,6 +19,8 @@ import { fleetPath } from "./urls";
 // TWO ADDRESSES:
 //
 //   /fleet/machines      the computers registered to this cluster as workers
+//   /fleet/apps          delegating work to a local app on somebody's machine
+//   /fleet/apps/sessions/:id   one delegated run's live transcript
 //   /fleet/workbenches   the cluster's own sandboxed working directories
 //
 // /fleet itself redirects to Machines rather than rendering a landing page.
@@ -28,6 +32,8 @@ export function FleetRoutes(): ReactNode {
     <Routes>
       <Route index element={<Navigate to={fleetPath("machines")} replace />} />
       <Route path="machines" element={<MachinesPage />} />
+      <Route path="apps" element={<LocalAppsPage />} />
+      <Route path={SESSION_ROUTE_PATTERN} element={<AppSessionPage />} />
       <Route path="workbenches" element={<WorkbenchesPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

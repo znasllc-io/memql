@@ -121,6 +121,37 @@ Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 (per-space / plan-lineage) for cumulative bounding.
 
+## Layer 4 — subscription spend, counted but not charged (memql#4362)
+
+A Task delegated to a local app (epic memql#4358) spends **real tokens that
+MemQL was not billed for**. That breaks a single spend counter in a way worth
+being explicit about, because the two existing controls want opposite answers:
+
+| Control | Subscription tokens | Why |
+|---|---|---|
+| The **dollar ceiling** (`plan.tokenBudget`) | **excluded** | MemQL was not charged. Counting them parks a plan over money nobody paid — and the more a user leans on the subscription they already pay for, the sooner their plans stop, which is exactly backwards |
+| The **loop caps** (per-plan call counts, the identical-request breaker) | **included** | A runaway decompose loop that happened to route through a subscription is still a runaway loop. A cap blind to those calls is a hole the cheapest path walks straight through |
+
+So the spend is split rather than summed:
+
+- `v1:planner:plan.tokenSpentSubscription` accumulates covered tokens,
+  separately from `tokenSpent`. `component/planner/budget.go`'s `CheckCall`
+  subtracts only `tokenSpent` from the ceiling.
+- `v1:router:call.billing` (`metered | subscription | unknown`) and
+  `executionSurface` carry it on the ledger, so a cost reader can separate
+  "what we spent" from "what ran somewhere we do not pay for" without a join.
+
+**`unknown` is a real answer, not a rounding.** An app that reports no usage
+gets `unknown` and zeroes — never "free", never "metered by omission". The
+number this whole layer exists to produce (what the subscription covered) is
+only trustworthy if silence stays visible as silence.
+
+**An executor that reports NO billing is treated as metered.** Unattributed
+spend counts against the ceiling rather than vanishing into the covered bucket,
+where it would be invisible to the one control that stops runaway cost. That is
+the fail-safe direction, and it is why `ExecutorResult.EffectiveBilling()`
+defaults the empty string to `metered` rather than to `unknown`.
+
 ## Environment reference
 
 ### Layer 0 — kill-switch

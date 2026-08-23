@@ -61,6 +61,10 @@ type PlannerAgentLoop struct {
 	// planExecutionClaimKey design. Cross-replica exactly-once is the planner's
 	// ClusterExecutionGuard (planId@startedAt) one layer down.
 	resumed *handledPlanSet
+	// delegation decides whether a Task goes to a local app on the
+	// owner's machine (memql#4362). Nil means never delegate, which is
+	// the behaviour that predates it.
+	delegation DelegationResolver
 }
 
 // NewPlannerAgentLoop constructs a loop pinned to the planner integration's
@@ -994,15 +998,38 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	// authority on "who runs the tasks under this Plan"). We DO
 	// still stamp ownerAgentId on the Plan below so the UI can show
 	// the assigned agent next to the plan row.
+	// The delegation triage (memql#4362). Runs at task CREATION so the
+	// decision, and the reason for it, are visible on the row before
+	// anything dispatches -- rather than being re-derived at dispatch
+	// where a machine going offline in between would look like a
+	// different failure.
+	//
+	// The owner comes off the PLAN (requestedBy), never off the task
+	// input: a machine-touching backend must not be attributable to a
+	// value the emitting model chose.
+	ownerUserId := ""
+	if plan, err := l.loadPlan(ctx, planId); err == nil {
+		ownerUserId = getString(plan, "requestedBy")
+	}
+	decision := l.decideDelegation(ctx, ownerUserId, task.Kind)
+	if decision.Delegate {
+		l.logger.Info("planner agent loop: task delegated to a local app",
+			"planId", planId, "taskId", taskId, "kind", task.Kind,
+			"backend", decision.Backend, "machine", decision.WorkerId)
+	}
+
 	args := map[string]any{
-		"taskId":        taskId,
-		"planId":        planId,
-		"kind":          task.Kind,
-		"seq":           seq,
-		"logicalStepId": logicalStepId,
-		"attemptNumber": 1,
-		"phase":         task.Phase,
-		"input":         input,
+		"taskId":           taskId,
+		"planId":           planId,
+		"kind":             task.Kind,
+		"seq":              seq,
+		"logicalStepId":    logicalStepId,
+		"attemptNumber":    1,
+		"phase":            task.Phase,
+		"input":            input,
+		"executionSurface": decision.Surface(),
+		"executorBackend":  decision.Backend,
+		"delegationReason": decision.Reason,
 	}
 	argsJSON, err := json.Marshal(args)
 	if err != nil {

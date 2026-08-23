@@ -117,6 +117,16 @@ type Store interface {
 	// register handshake has already resolved the WorkerIdentity, which
 	// names the owner, before it asks this question.
 	WorkerByIdentityId(ctx context.Context, identityId, ownerUserId string) (*RegistrationRow, error)
+	// UpdateApps re-stamps the reported app inventory and the labels
+	// derived from it (memql#4359). Called out of band from the
+	// throttled lastSeenAt flush because an inventory change alters
+	// ROUTING, and a row whose `app:` labels disagree with the live
+	// registry entry is a split no reader can detect.
+	//
+	// Owner-scoped like the reads above, and for the same reason:
+	// v1:worker:registration declares an owned tier, so the write needs
+	// a context carrying an actor.
+	UpdateApps(ctx context.Context, registrationId, ownerUserId string, apps []AppInfo, labels map[string]string, at time.Time, sourceIP string) error
 	WorkersForUser(ctx context.Context, ownerUserId string) ([]RegistrationRow, error)
 	CreateInvocation(ctx context.Context, row InvocationRow) error
 	IdentityByTokenHash(ctx context.Context, tokenHash string) (*WorkerIdentity, error)
@@ -177,10 +187,19 @@ type RegistrationRow struct {
 	// flush. Best-effort and up to one interval stale: a routing input
 	// for leastLoaded, never a correctness one -- Worker.Acquire is the
 	// real valve.
-	ActiveCount         int
-	Concurrency         map[string]uint32
-	Platform            map[string]any
-	Permissions         map[string]any
+	ActiveCount int
+	Concurrency map[string]uint32
+	Platform    map[string]any
+	Permissions map[string]any
+	// Apps is the local-app inventory the cockpit reported
+	// (memql#4359). Stored verbatim, ids the engine cannot drive
+	// included; only a runnable entry becomes an `app:` routing label.
+	//
+	// Those labels go into Labels -- the COCKPIT's side of the pair --
+	// rather than OperatorLabels: the engine derives them from what the
+	// machine reported, and the owner does not set them. MergeLabels
+	// then lets an operator label win, which is the right precedence.
+	Apps                []AppInfo
 	Version             string
 	BuildTag            string
 	RegisteredAt        time.Time

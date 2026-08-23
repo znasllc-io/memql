@@ -274,7 +274,22 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"errorCategory":      rec.ErrorCategory,
 		"errorMessage":       rec.ErrorMessage,
 		"fallbackFromModel":  rec.FallbackFromModel,
+		"billing":            billingOrMetered(rec.Billing),
+		"executionSurface":   rec.ExecutionSurface,
 	}
+}
+
+// billingOrMetered normalizes a record's billing for the ledger. An
+// empty value reads as metered, which keeps every writer that predates
+// memql#4362 meaning exactly what it did -- and is the conservative
+// direction besides: unattributed spend counts against the dollar
+// ceiling rather than disappearing into the covered bucket.
+func billingOrMetered(billing string) string {
+	switch billing {
+	case BillingSubscription, BillingUnknown:
+		return billing
+	}
+	return BillingMetered
 }
 
 // recordCall writes one v1:router:call row via the router mutation.

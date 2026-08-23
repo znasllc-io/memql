@@ -84,6 +84,74 @@ export interface Machine {
   registeredAt: string;
   revokedAt: string;
   revokeReason: string;
+  // The local apps this machine reported (memql#4359). `runnable` is the
+  // ENGINE's rule -- a known id, allowed by the machine's own policy.yaml,
+  // AND signed in -- computed once here so the card cannot disagree with the
+  // router about which machines a delegated run can land on.
+  apps: MachineApp[];
+}
+
+// MachineApp is one local app on a machine.
+export interface MachineApp {
+  id: string;
+  label: string;
+  version: string;
+  signedIn: boolean;
+  allowed: boolean;
+  // unknown | none | present, as the app REPORTS it. Never inferred.
+  subscription: string;
+  runnable: boolean;
+  // why is empty when runnable; otherwise it names which half is missing, so
+  // a person reading the card knows what to go fix.
+  why: string;
+}
+
+// The engine's CLOSED runnable set, mirrored so the card agrees with
+// selection. An id outside it is displayed -- the machine really has it --
+// and never marked runnable, because this engine has no protocol for it.
+const RUNNABLE_APP_IDS = new Set(["claude-code", "codex"]);
+
+const APP_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+};
+
+export function appLabel(appId: string): string {
+  return APP_LABELS[appId] ?? appId;
+}
+
+function appsFromRow(row: Row): MachineApp[] {
+  const raw = (row as Record<string, unknown>)["apps"];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item): MachineApp | null => {
+      if (typeof item !== "object" || item === null) return null;
+      const entry = item as Record<string, unknown>;
+      const id = typeof entry["id"] === "string" ? entry["id"] : "";
+      if (id === "") return null;
+      const allowed = entry["allowed"] === true;
+      const signedIn = entry["signedIn"] === true;
+      const known = RUNNABLE_APP_IDS.has(id);
+      const runnable = known && allowed && signedIn;
+      return {
+        id,
+        label: appLabel(id),
+        version: typeof entry["version"] === "string" ? entry["version"] : "",
+        signedIn,
+        allowed,
+        subscription: typeof entry["subscription"] === "string" ? entry["subscription"] : "unknown",
+        runnable,
+        why: runnable
+          ? ""
+          : !known
+            ? "this engine does not drive it"
+            : !allowed
+              ? "not in the machine's apps.allow"
+              : "not signed in",
+      };
+    })
+    .filter((app): app is MachineApp => app !== null)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function machineFromRow(row: Row): Machine {
@@ -117,6 +185,7 @@ export function machineFromRow(row: Row): Machine {
     lastSeenAt: rowString(row, "lastSeenAt"),
     connectedNodeId: rowString(row, "connectedNodeId"),
     lastSelectedAt: rowString(row, "lastSelectedAt"),
+    apps: appsFromRow(row),
     version: rowString(row, "version"),
     buildTag: rowString(row, "buildTag"),
     registeredAt: rowString(row, "registeredAt"),

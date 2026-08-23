@@ -32,6 +32,8 @@ message WorkerClientMessage {
     ToolStream tool_stream = 13;
     AuditEvent audit_event = 14;
     RotationRequest rotation_request = 15;
+    AppSessionChunk app_session_chunk = 16;
+    AppSessionEnd app_session_end = 17;
   }
 }
 
@@ -47,6 +49,8 @@ message WorkerServerMessage {
     Drain drain = 13;
     RotationResponse rotation_response = 14;
     RegisterError register_error = 15;
+    AppSessionStart app_session_start = 16;
+    AppSessionControl app_session_control = 17;
   }
 }
 
@@ -80,6 +84,32 @@ message Register {
   // omit it register exactly as before; HEADLESS/COMPUTERUSE capability
   // strings keep their scope-check semantics unchanged.
   string capability_descriptor_json = 9;
+  // Local apps the cockpit found on this machine (memql#4359). The
+  // engine's runnable set is closed (claude-code, codex); an app the
+  // engine does not know is stored on the registration and never
+  // produces a routing label, so a cockpit may report more than the
+  // engine can drive without a coordinated release.
+  repeated AppInfo apps = 10;
+}
+
+// AppInfo is one local app the cockpit detected. `allowed` is the
+// machine's own `policy.yaml apps.allow` verdict and `signed_in` is
+// the app's auth state as the cockpit can observe it; BOTH must be
+// true before the engine derives an `app:<id>` routing label, so a
+// machine that has the binary but cannot actually run it is never
+// selected.
+message AppInfo {
+  // id is the app's stable identifier: "claude-code" or "codex".
+  string id = 1;
+  // version is the CLI's own version string, reported verbatim.
+  string version = 2;
+  // signed_in is the app's auth state as the cockpit can detect it.
+  bool signed_in = 3;
+  // subscription is what the app REPORTS -- "unknown", "none" or
+  // "present". Never inferred from anything else.
+  string subscription = 4;
+  // allowed mirrors `policy.yaml apps.allow` on the machine.
+  bool allowed = 5;
 }
 
 message PlatformInfo {
@@ -115,6 +145,16 @@ message Heartbeat {
   google.protobuf.Timestamp ts = 1;
   uint32 active_calls_total = 2;
   map<string, uint32> active_calls_per_capability = 3;
+  // apps re-reports the local app inventory (memql#4359). A cockpit
+  // that signs into Claude Code mid-connection becomes routable on
+  // the next beat instead of on the next reconnect. Omitting the
+  // field leaves the registration's apps untouched -- an empty list
+  // is how a cockpit says "I now have none".
+  repeated AppInfo apps = 4;
+  // apps_present distinguishes "I am reporting an empty inventory"
+  // from "I am not reporting apps at all", which proto3 repeated
+  // fields cannot express on their own.
+  bool apps_present = 5;
 }
 
 // -----------------------------------------------------------------------------
@@ -210,4 +250,110 @@ message AuditEvent {
   string action = 1;
   bytes detail_json = 2;
   google.protobuf.Timestamp ts = 3;
+}
+
+// -----------------------------------------------------------------------------
+// App sessions (memql#4359)
+//
+// A one-shot ToolDispatch carries a single timeout and returns one
+// result; a headless `claude -p` can run for an hour and produces
+// output the whole way. So an app run is a SESSION, not a dispatch:
+// start / chunk / control / end, correlated by session_id, with no
+// ceiling but the delegation policy's.
+// -----------------------------------------------------------------------------
+
+// AppSessionStart opens a session. Server -> worker.
+message AppSessionStart {
+  // session_id correlates every later message. Server-minted; it is
+  // the v1:worker:appSession row's short id.
+  string session_id = 1;
+  // app is one of the engine's closed ids ("claude-code", "codex").
+  string app = 2;
+  // kind selects what opening the app means:
+  //   run    -- headless and autonomous; the engine reads the output.
+  //   open   -- launch it for the HUMAN with the workspace and prompt
+  //             loaded; ends when the window closes, or immediately
+  //             with a failure if the app cannot be opened.
+  //   attach -- stream a run the human started, named by app_session_ref.
+  string kind = 3;
+  string prompt = 4;
+  // inputs are Library artifact ids the cockpit pulls with the
+  // session credential before the run starts.
+  repeated string inputs = 5;
+  // workspace is the absolute directory on the machine the app runs in.
+  string workspace = 6;
+  // credential is the per-run bearer for mcp_endpoint. Short-lived,
+  // user-scoped, revoked at end; the cockpit writes it into the app's
+  // MCP configuration and deletes that file when the session ends.
+  string credential = 7;
+  // mcp_endpoint is the streamable-HTTP MCP URL (https://mcp.<domain>/mcp).
+  string mcp_endpoint = 8;
+  // limits carries the delegation policy's ceilings for this run.
+  AppSessionLimits limits = 9;
+  // plan_id / task_id attribute the session for the portal and the ledger.
+  string plan_id = 10;
+  string task_id = 11;
+  // app_session_ref names the app's OWN session id on the kind=attach
+  // path. Empty for run and open.
+  string app_session_ref = 12;
+}
+
+// AppSessionLimits are the policy ceilings a session runs under.
+message AppSessionLimits {
+  // credential_lifetime_seconds is when the bearer in AppSessionStart
+  // expires. The worker asks for a renewal before then; the engine
+  // sends AppSessionControl{action: "renew_credential"}.
+  int64 credential_lifetime_seconds = 1;
+  // max_duration_seconds is the wall-clock ceiling, 0 for none.
+  int64 max_duration_seconds = 2;
+  // max_transcript_bytes bounds what the engine will keep on the row.
+  int64 max_transcript_bytes = 3;
+}
+
+// AppSessionControl steers a running session. Server -> worker.
+message AppSessionControl {
+  string session_id = 1;
+  // action is "cancel" or "renew_credential".
+  string action = 2;
+  // credential is the replacement bearer on the renew path.
+  string credential = 3;
+  // reason is free text carried into the transcript on cancel.
+  string reason = 4;
+}
+
+// AppSessionChunk is one piece of session output. Worker -> server.
+message AppSessionChunk {
+  string session_id = 1;
+  // stream is "stdout", "stderr" or "event". An "event" chunk carries
+  // a JSON body the engine maps to a planner ProgressEvent.
+  string stream = 2;
+  bytes data = 3;
+  // seq is monotonic per session; the engine drops out-of-order and
+  // duplicate chunks rather than corrupting the transcript.
+  uint64 seq = 4;
+}
+
+// AppSessionEnd closes a session. Worker -> server.
+message AppSessionEnd {
+  string session_id = 1;
+  int32 exit_code = 2;
+  AppSessionUsage usage = 3;
+  // app_session_ref is the app's own session id, so a later
+  // kind=attach can resume this run.
+  string app_session_ref = 4;
+  // produced_artifact_ids are Library artifact ids the cockpit pushed.
+  repeated string produced_artifact_ids = 5;
+  // error is empty on a clean end.
+  string error = 6;
+}
+
+// AppSessionUsage is what the app REPORTED about its own spend.
+// Never inferred: an app that reports nothing sets known=false and
+// leaves the counts at zero, which the ledger records as billing
+// "unknown" rather than as a free call.
+message AppSessionUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  double cost_usd = 3;
+  bool known = 4;
 }

@@ -164,10 +164,12 @@ func (s *server) admitRegistration(
 		LastSeenAt:           now,
 		SourceIP:             sourceIP,
 	}
+	w.SetApps(registration.Apps)
 
 	streamCtx, cancel := context.WithCancel(stream.Context())
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
 	w.SetDispatchFunc(session.dispatch, cancel)
+	w.SetAppSessionFunc(session.openAppSession)
 	s.registry.Add(w)
 
 	if err := stream.Send(&memqlv1.WorkerServerMessage{
@@ -197,6 +199,7 @@ func (s *server) admitRegistration(
 				"version":      registration.Version,
 				"sourceIP":     sourceIP,
 				"connectedAt":  now.Format(time.RFC3339),
+				"apps":         auditAppDetail(registration.Apps),
 			},
 			Timestamp: now,
 		})
@@ -238,20 +241,27 @@ func (s *server) upsertRegistration(
 		return RegistrationRow{}, fmt.Errorf("worker lookup: %w", err)
 	}
 
+	apps := AppsFromProto(register.GetApps())
 	registration := RegistrationRow{
 		IdentityId:           identity.IdentityId,
 		OwnerUserId:          identity.OwnerUserId,
 		Name:                 stringFallback(register.GetName(), platformHostname(register.GetPlatform())),
 		Capabilities:         normalizeCapabilities(register.GetCapabilities()),
 		CapabilityDescriptor: descriptor,
-		Labels:               copyStringMap(register.GetLabels()),
-		Concurrency:          register.GetConcurrency(),
-		Platform:             platformInfoToMap(register.GetPlatform()),
-		Permissions:          permissionStatusToMap(register.GetPermissions()),
-		Version:              register.GetVersion(),
-		BuildTag:             register.GetBuildTag(),
-		LastSeenAt:           now,
-		LastConnectedFromIP:  sourceIP,
+		// The persisted labels carry the derived `app:` labels alongside
+		// whatever the cockpit reported (memql#4359), so a routing
+		// decision made against the ROW agrees with one made against the
+		// live registry entry -- which is what lets a planner node, with
+		// no registry at all, answer the same question.
+		Labels:              mergeAppLabels(copyStringMap(register.GetLabels()), apps),
+		Apps:                apps,
+		Concurrency:         register.GetConcurrency(),
+		Platform:            platformInfoToMap(register.GetPlatform()),
+		Permissions:         permissionStatusToMap(register.GetPermissions()),
+		Version:             register.GetVersion(),
+		BuildTag:            register.GetBuildTag(),
+		LastSeenAt:          now,
+		LastConnectedFromIP: sourceIP,
 		// This replica now holds the stream, so it is where a dispatch for
 		// this machine has to be forwarded. Stamped on register and
 		// re-asserted on every heartbeat flush; cleared on disconnect.
@@ -303,9 +313,13 @@ type streamSession struct {
 	// chunks get an entry, so a missing key is the ordinary case rather
 	// than an error.
 	chunkSinks map[string]func(*memqlv1.ToolStream)
-	sendMu     sync.Mutex
-	sendErr    error
-	closeOnce  sync.Once
+	// sessions holds the live app-session handles (memql#4359), under
+	// the same lock and for the same reason chunkSinks is: a session's
+	// lifetime is the stream's, and a disconnect must end every one.
+	sessions  map[string]*AppSessionHandle
+	sendMu    sync.Mutex
+	sendErr   error
+	closeOnce sync.Once
 
 	// lastPersistedAt is the heartbeat timestamp of the most recent
 	// successful lastSeenAt DB flush (memql#1340). Zero until the
@@ -330,6 +344,7 @@ func newStreamSession(
 		cancel:     cancel,
 		pending:    make(map[string]chan *memqlv1.ToolResult),
 		chunkSinks: make(map[string]func(*memqlv1.ToolStream)),
+		sessions:   make(map[string]*AppSessionHandle),
 	}
 }
 
@@ -346,7 +361,19 @@ func (s *streamSession) close() {
 		}
 		s.pending = nil
 		s.chunkSinks = nil
+		// A disconnect ends every live app session with a NAMED error.
+		// Without this a caller parked in Wait would sit there until its
+		// own context expired, with nothing in the log saying the machine
+		// had gone away.
+		liveSessions := make([]*AppSessionHandle, 0, len(s.sessions))
+		for _, h := range s.sessions {
+			liveSessions = append(liveSessions, h)
+		}
+		s.sessions = nil
 		s.mu.Unlock()
+		for _, h := range liveSessions {
+			h.finish(AppSessionOutcome{Error: "worker_disconnected"}, ErrWorkerDisconnected)
+		}
 		s.clearConnectedNode()
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
@@ -363,6 +390,9 @@ func (s *streamSession) close() {
 			if pendingCount > 0 {
 				fields = append(fields, "pending_calls_aborted", pendingCount)
 			}
+			if len(liveSessions) > 0 {
+				fields = append(fields, "app_sessions_aborted", len(liveSessions))
+			}
 			s.server.logger.Info("worker disconnected", fields...)
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
@@ -378,6 +408,7 @@ func (s *streamSession) close() {
 					"name":                s.worker.Name,
 					"connectedAt":         s.worker.ConnectedAt.Format(time.RFC3339),
 					"pendingCallsAborted": pendingCount,
+					"appSessionsAborted":  len(liveSessions),
 				},
 				Timestamp: time.Now().UTC(),
 			})
@@ -489,6 +520,10 @@ func (s *streamSession) handle(ctx context.Context, msg *memqlv1.WorkerClientMes
 		// reach locally first, and the cross-node forward reads them from
 		// this same callback.
 		s.handleToolStream(payload.ToolStream)
+	case *memqlv1.WorkerClientMessage_AppSessionChunk:
+		s.handleAppSessionChunk(payload.AppSessionChunk)
+	case *memqlv1.WorkerClientMessage_AppSessionEnd:
+		s.handleAppSessionEnd(payload.AppSessionEnd)
 	case *memqlv1.WorkerClientMessage_RotationRequest:
 		s.handleRotationRequest(ctx, payload.RotationRequest)
 	case *memqlv1.WorkerClientMessage_AuditEvent:
@@ -509,6 +544,24 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	}
 	s.worker.TouchLastSeen(at, sourceIP)
 
+	// An app inventory on the beat is applied IMMEDIATELY to the
+	// live registry entry (memql#4359): signing into Claude Code
+	// makes the machine selectable on the next beat rather than on
+	// the next reconnect, and signing out removes it just as fast.
+	// The DB flush below is throttled; selection is not.
+	//
+	// apps_present distinguishes "reporting an empty inventory" from
+	// "not reporting apps", which a proto3 repeated field cannot.
+	// A beat that says nothing leaves the inventory alone.
+	appsChanged := false
+	if hb.GetAppsPresent() {
+		reported := AppsFromProto(hb.GetApps())
+		if !appsEqual(s.worker.Apps(), reported) {
+			s.worker.SetApps(reported)
+			appsChanged = true
+		}
+	}
+
 	// Persist lastSeenAt at most once per HeartbeatBatchInterval
 	// (memql#1340). The FIRST heartbeat of a stream always persists
 	// (lastPersistedAt zero value), so a (re)connected worker's row is
@@ -528,6 +581,25 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	// than the interval, or a reconnect storm, cannot turn into a write
 	// storm -- but it is no longer suppressing the ordinary case.
 	if s.server == nil || s.server.store == nil {
+		return
+	}
+	// An inventory CHANGE always persists, throttle or not: the
+	// derived app: labels live on the registration row as well as in
+	// the registry, and a row that disagrees with the live entry is
+	// exactly the split a reader cannot detect.
+	if appsChanged {
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		defer cancel()
+		if err := s.server.store.UpdateApps(ctx, s.worker.RegistrationId, s.worker.OwnerUserId, s.worker.Apps(), s.worker.LabelsSnapshot(), at, sourceIP); err != nil {
+			if s.server.logger != nil {
+				s.server.logger.Warn("worker: persist app inventory failed",
+					"registration_id", s.worker.RegistrationId,
+					"error", err,
+				)
+			}
+			return
+		}
+		s.lastPersistedAt = at
 		return
 	}
 	if !s.lastPersistedAt.IsZero() && at.Sub(s.lastPersistedAt) < HeartbeatBatchInterval {
@@ -764,4 +836,156 @@ func peerAddrFromContext(ctx context.Context) string {
 		return ""
 	}
 	return p.Addr.String()
+}
+
+// -----------------------------------------------------------------------------
+// App sessions (memql#4359)
+// -----------------------------------------------------------------------------
+
+// openAppSession is the per-stream hook behind Worker.StartAppSession.
+// It registers the session BEFORE sending Start, so a worker that
+// answers instantly cannot deliver a chunk for a session this side has
+// not yet recorded.
+func (s *streamSession) openAppSession(ctx context.Context, req AppSessionRequest) (*AppSessionHandle, error) {
+	if req.SessionId == "" {
+		return nil, fmt.Errorf("worker: app session requires a session id")
+	}
+	handle := &AppSessionHandle{
+		sessionId: req.SessionId,
+		worker:    s.worker,
+		chunks:    make(chan AppSessionChunk, appSessionChunkBuffer),
+		done:      make(chan struct{}),
+		control:   s.sendAppSessionControl,
+	}
+	handle.detach = func() {
+		s.mu.Lock()
+		if s.sessions != nil {
+			delete(s.sessions, req.SessionId)
+		}
+		s.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	if s.sessions == nil {
+		s.mu.Unlock()
+		return nil, ErrWorkerDisconnected
+	}
+	if _, exists := s.sessions[req.SessionId]; exists {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("worker: app session %s already open", req.SessionId)
+	}
+	s.sessions[req.SessionId] = handle
+	s.mu.Unlock()
+
+	start := &memqlv1.AppSessionStart{
+		SessionId:     req.SessionId,
+		App:           req.App,
+		Kind:          req.Kind,
+		Prompt:        req.Prompt,
+		Inputs:        req.Inputs,
+		Workspace:     req.Workspace,
+		Credential:    req.Credential,
+		McpEndpoint:   req.MCPEndpoint,
+		Limits:        req.Limits.toProto(),
+		PlanId:        req.PlanId,
+		TaskId:        req.TaskId,
+		AppSessionRef: req.AppSessionRef,
+	}
+	if err := s.send(&memqlv1.WorkerServerMessage{
+		Payload: &memqlv1.WorkerServerMessage_AppSessionStart{AppSessionStart: start},
+	}); err != nil {
+		handle.finish(AppSessionOutcome{Error: "start_send_failed"}, err)
+		return nil, fmt.Errorf("worker: send app session start: %w", err)
+	}
+
+	// A caller context that dies before the session ends cancels the
+	// run on the machine. Without this a headless agent keeps working
+	// on somebody's laptop after the plan that asked for it is gone.
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = handle.Cancel("caller_context_done")
+		case <-handle.done:
+		case <-s.ctx.Done():
+		}
+	}()
+
+	return handle, nil
+}
+
+// appSessionChunkBuffer is how many chunks the handle buffers before
+// a slow consumer backpressures the stream-recv goroutine.
+const appSessionChunkBuffer = 64
+
+func (s *streamSession) sendAppSessionControl(control *memqlv1.AppSessionControl) error {
+	if control == nil {
+		return nil
+	}
+	return s.send(&memqlv1.WorkerServerMessage{
+		Payload: &memqlv1.WorkerServerMessage_AppSessionControl{AppSessionControl: control},
+	})
+}
+
+func (s *streamSession) lookupAppSession(sessionId string) *AppSessionHandle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		return nil
+	}
+	return s.sessions[sessionId]
+}
+
+func (s *streamSession) handleAppSessionChunk(chunk *memqlv1.AppSessionChunk) {
+	if chunk == nil || chunk.GetSessionId() == "" {
+		return
+	}
+	handle := s.lookupAppSession(chunk.GetSessionId())
+	if handle == nil {
+		// A chunk for a session this node is not hosting. Logged, not
+		// fatal: a worker that reconnected to a different replica
+		// mid-run will do exactly this, and dropping it is correct.
+		if s.server != nil && s.server.logger != nil {
+			s.server.logger.Debug("worker: app session chunk for unknown session",
+				"session_id", chunk.GetSessionId(),
+				"registration_id", s.worker.RegistrationId,
+			)
+		}
+		return
+	}
+	handle.deliverChunk(AppSessionChunk{
+		Stream: chunk.GetStream(),
+		Data:   chunk.GetData(),
+		Seq:    chunk.GetSeq(),
+	})
+}
+
+func (s *streamSession) handleAppSessionEnd(end *memqlv1.AppSessionEnd) {
+	if end == nil || end.GetSessionId() == "" {
+		return
+	}
+	handle := s.lookupAppSession(end.GetSessionId())
+	if handle == nil {
+		return
+	}
+	usage := AppSessionUsage{}
+	if u := end.GetUsage(); u != nil {
+		usage = AppSessionUsage{
+			InputTokens:  u.GetInputTokens(),
+			OutputTokens: u.GetOutputTokens(),
+			CostUSD:      u.GetCostUsd(),
+			Known:        u.GetKnown(),
+		}
+	}
+	outcome := AppSessionOutcome{
+		ExitCode:            end.GetExitCode(),
+		Usage:               usage,
+		AppSessionRef:       end.GetAppSessionRef(),
+		ProducedArtifactIds: end.GetProducedArtifactIds(),
+		Error:               end.GetError(),
+	}
+	var err error
+	if outcome.Error != "" {
+		err = fmt.Errorf("worker: app session failed: %s", outcome.Error)
+	}
+	handle.finish(outcome, err)
 }

@@ -14,7 +14,7 @@ import { formatFreshness, formatMoment } from "./format";
 import { chipsFromMap, mapFromChips, parseLabelChip, type MergedLabel } from "./labels";
 import { MachineActivity } from "./MachineActivity";
 import { isWorkerOnline, ONLINE_WINDOW_SECONDS } from "./online";
-import type { Machine } from "./rows";
+import type { Machine, MachineApp } from "./rows";
 
 // One machine.
 //
@@ -264,6 +264,17 @@ export function MachineCard({
           />
         </div>
 
+        {/* Local apps (memql#4359). "Selectable" is the ENGINE's rule --
+            a known id, allowed by this machine's own policy.yaml, AND
+            signed in -- not the presence of the entry. A card that said
+            otherwise would show a ready row for a machine the router will
+            never pick, and the reader would go hunting a routing bug that
+            is not there. */}
+        <div className="border-t border-line pt-3">
+          <h4 className="text-xs font-medium text-fg">Local apps</h4>
+          <AppList apps={machine.apps} />
+        </div>
+
         {/* Verbs */}
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <Button size="xs" pressed={expanded} onClick={() => setExpanded((open) => !open)}>
@@ -372,5 +383,37 @@ function Reading({
         {kind === undefined ? value : <DataText kind={kind}>{value}</DataText>}
       </dd>
     </>
+  );
+}
+
+// AppList renders a machine's reported local apps, saying for each one
+// whether a delegated run can actually land on it -- and when it cannot,
+// which half is missing.
+function AppList({ apps }: { apps: readonly MachineApp[] }): ReactNode {
+  if (apps.length === 0) {
+    return (
+      <p className="mt-0.5 text-xs text-subtle">
+        This machine reports no local apps. A cockpit older than the app
+        protocol reports none, and so does one that found neither app on PATH.
+      </p>
+    );
+  }
+  return (
+    <ul className="mt-1 flex flex-col gap-1">
+      {apps.map((app) => (
+        <li key={app.id} className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-medium text-fg">{app.label}</span>
+          <span className="text-subtle">{app.version || "version unknown"}</span>
+          <Badge tone={app.runnable ? "ok" : "neutral"}>
+            {app.runnable ? "selectable" : "not selectable"}
+          </Badge>
+          {app.why === "" ? null : <span className="text-subtle">{app.why}</span>}
+          {app.subscription === "present" ? <Badge tone="ok">subscription</Badge> : null}
+          {app.subscription === "unknown" ? (
+            <span className="text-subtle">subscription unreported</span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }

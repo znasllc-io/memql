@@ -173,8 +173,34 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//     component/identity/admin carry for exactly this reason.
 		"component/identity/workertoken": "worker-token store -- REQUEST-DERIVED; precondition (userId is always the authenticated caller's subject) asserted by component/grpc/worker_token_caller_scope_test.go, memql#3063",
 		"component/memql":                "seed materialiser and authoring capability store, both boot-time",
-		"integrations/agent/worker":      "worker store, server-initiated",
-		"integrations/dailyspace":        "scheduled space provisioning, no caller in scope",
+		// SERVER-INITIATED, not request-derived -- the same class as
+		// integrations/agent/worker below rather than the three exceptions
+		// above, and the distinction is worth stating because this package
+		// sits next to a wire surface.
+		//
+		// The three app-session mutations are @serverOnly (memql#4360), and
+		// OriginClient is the zero value, so without the stamp every session
+		// row write is refused with only a WARN -- sessions that never appear,
+		// evidence at a log level nobody watches.
+		//
+		// What makes it server-initiated: nothing here takes a caller-supplied
+		// identifier off a wire request. The session id is engine-minted, the
+		// worker id is resolved from the registry by the engine's own
+		// selection, the transcript is chunk data arriving on a stream the
+		// COCKPIT opened outward, and ownerUserId comes from the planner's
+		// resolution of the Task's owner. WorkerService's own request path
+		// (component/worker/server.go) stamps nothing and must not: it is on
+		// the wire-path deny list below, and the registration writes it makes
+		// go through mutations that are not @serverOnly.
+		//
+		// The stamp is scoped to ONE Execute call and cannot escape --
+		// appSessionWriteContext's result is a local in each store method and
+		// is never returned, so no later frame inherits the mark. That is the
+		// memql#2989 escalation shape, and it is asserted rather than asserted
+		// here: component/worker/appsession_store_test.go.
+		"component/worker":          "app-session row writes -- server-initiated; the ids are engine-minted and the payload arrives on a stream the cockpit opened, with no caller-supplied identifier in scope (memql#4360)",
+		"integrations/agent/worker": "worker store, server-initiated",
+		"integrations/dailyspace":   "scheduled space provisioning, no caller in scope",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler

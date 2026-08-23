@@ -96,6 +96,34 @@ func fleetCallSites() []struct {
 		{"provisionWorkspace", []string{"workspaceId", "planId", "storageRoot", "nodeId"}, "workbench/workspace_store.go"},
 		{"touchWorkspace", []string{"workspaceId"}, "workbench/workspace_store.go"},
 		{"releaseWorkspace", []string{"workspaceId", "reason"}, "workbench/workspace_store.go"},
+
+		// The local-apps call sites (epic memql#4358). Same table, same
+		// reason: these run against a fake stream in their own tests, which
+		// asserts the envelope and parses no query at all.
+		//
+		// The three appSession writes deliberately do NOT pass ownerUserId --
+		// the concept marks it @serverSet and the mutation stamps it from the
+		// actor, so passing it would be REFUSED at load rather than silently
+		// discarded. That is the one argument-shape in this table whose
+		// absence is the assertion.
+		{"updateWorkerApps", []string{
+			"registrationId", "apps", "labels", "lastSeenAt", "lastConnectedFromIP",
+		}, "component/worker/store.go UpdateApps"},
+		{"createAppSession", []string{
+			"sessionId", "workerId", "app", "kind", "planId", "taskId", "workspace",
+			"prompt", "inputArtifactIds", "mcpEndpoint", "credentialRef",
+			"credentialExpiresAt", "startedAt",
+		}, "component/worker/appsession_store.go CreateAppSession"},
+		{"appendAppSessionTranscript", []string{
+			"sessionId", "transcript", "transcriptBytes", "transcriptTruncated", "status",
+		}, "component/worker/appsession_store.go AppendAppSessionTranscript"},
+		{"endAppSession", []string{
+			"sessionId", "status", "exitCode", "usage", "billing", "transcript",
+			"transcriptBytes", "transcriptTruncated", "producedArtifactIds",
+			"appSessionRef", "errorMessage", "cancelReason", "endedAt",
+		}, "component/worker/appsession_store.go EndAppSession"},
+		{"liveAppSessionsForUser", nil, "component/worker/delegation_probe.go LiveSessionCount"},
+		{"delegationPolicyForUser", nil, "component/worker/delegation_probe.go + agent/worker/store.go"},
 	}
 }
 
@@ -164,6 +192,12 @@ func TestFleetCallSitesCoverTheGoCallers(t *testing.T) {
 		"../../integrations/agent/worker/store.go",
 		"../../component/worker/store.go",
 		"../../integrations/workbench/workspace_store.go",
+		// memql#4360. A file the scan does not read is a file whose call
+		// sites nothing checks -- this list's own premise -- so the
+		// app-session writes and the delegation probe join it rather than
+		// sitting outside the gate that exists for exactly their shape.
+		"../../component/worker/appsession_store.go",
+		"../../component/worker/delegation_probe.go",
 	}
 	// `query name(` and `name(` inside a Go raw string or format string. The
 	// leading backtick-or-quote is what keeps this off ordinary Go calls.
@@ -197,7 +231,7 @@ func TestFleetCallSitesCoverTheGoCallers(t *testing.T) {
 		}
 	}
 	if found == 0 {
-		t.Fatal("scanned three files and matched no engine construct -- the pattern has stopped " +
+		t.Fatal("scanned every listed file and matched no engine construct -- the pattern has stopped " +
 			"resolving, so this gate would now pass vacuously")
 	}
 }
