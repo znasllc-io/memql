@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // appsession_store.go persists v1:worker:appSession rows (memql#4360).
@@ -27,32 +29,32 @@ const (
 
 // AppSessionRow is the persistence projection of v1:worker:appSession.
 type AppSessionRow struct {
-	ID                   string
-	OwnerUserId          string
-	WorkerId             string
-	App                  string
-	Kind                 string
-	PlanId               string
-	TaskId               string
-	Status               string
-	Workspace            string
-	Prompt               string
-	InputArtifactIds     []string
-	Transcript           string
-	TranscriptBytes      int
-	TranscriptTruncated  bool
-	Usage                AppSessionUsage
-	Billing              string
-	ExitCode             int
-	ProducedArtifactIds  []string
-	AppSessionRef        string
-	CredentialIdentityId string
-	CredentialExpiresAt  time.Time
-	MCPEndpoint          string
-	ErrorMessage         string
-	CancelReason         string
-	StartedAt            time.Time
-	EndedAt              time.Time
+	ID                  string
+	OwnerUserId         string
+	WorkerId            string
+	App                 string
+	Kind                string
+	PlanId              string
+	TaskId              string
+	Status              string
+	Workspace           string
+	Prompt              string
+	InputArtifactIds    []string
+	Transcript          string
+	TranscriptBytes     int
+	TranscriptTruncated bool
+	Usage               AppSessionUsage
+	Billing             string
+	ExitCode            int
+	ProducedArtifactIds []string
+	AppSessionRef       string
+	CredentialRef       string
+	CredentialExpiresAt time.Time
+	MCPEndpoint         string
+	ErrorMessage        string
+	CancelReason        string
+	StartedAt           time.Time
+	EndedAt             time.Time
 }
 
 // AppSessionStore is the persistence surface for session rows. Kept
@@ -70,24 +72,26 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 		return fmt.Errorf("worker.store: engine not configured")
 	}
 	args := map[string]any{
-		"sessionId":            row.ID,
-		"ownerUserId":          row.OwnerUserId,
-		"workerId":             row.WorkerId,
-		"app":                  row.App,
-		"kind":                 row.Kind,
-		"planId":               row.PlanId,
-		"taskId":               row.TaskId,
-		"workspace":            row.Workspace,
-		"prompt":               row.Prompt,
-		"inputArtifactIds":     stringsOrEmpty(row.InputArtifactIds),
-		"mcpEndpoint":          row.MCPEndpoint,
-		"credentialIdentityId": row.CredentialIdentityId,
-		"startedAt":            row.StartedAt.UTC().Format(time.RFC3339Nano),
+		"sessionId": row.ID,
+		// ownerUserId is NOT passed: the mutation stamps it from the actor,
+		// so a caller cannot forge the field @rowAuthz(owner=...) keys on.
+		// The write runs under the owner's actor -- see writeCtx below.
+		"workerId":         row.WorkerId,
+		"app":              row.App,
+		"kind":             row.Kind,
+		"planId":           row.PlanId,
+		"taskId":           row.TaskId,
+		"workspace":        row.Workspace,
+		"prompt":           row.Prompt,
+		"inputArtifactIds": stringsOrEmpty(row.InputArtifactIds),
+		"mcpEndpoint":      row.MCPEndpoint,
+		"credentialRef":    row.CredentialRef,
+		"startedAt":        row.StartedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if !row.CredentialExpiresAt.IsZero() {
 		args["credentialExpiresAt"] = row.CredentialExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	return s.executeMutation(ctx, "createAppSession", args)
+	return s.executeMutation(ownerActorContext(ctx, row.OwnerUserId), "createAppSession", args)
 }
 
 // AppendAppSessionTranscript flushes the accumulated transcript.
@@ -113,7 +117,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 	// known=false and zeroes, and billing stays "unknown" -- folding
 	// silence into either metered or subscription is precisely what
 	// would make "what did the subscription cover" untrustworthy.
-	return s.executeMutation(ctx, "endAppSession", map[string]any{
+	return s.executeMutation(ownerActorContext(ctx, row.OwnerUserId), "endAppSession", map[string]any{
 		"sessionId": row.ID,
 		"status":    row.Status,
 		"exitCode":  row.ExitCode,
@@ -133,6 +137,17 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"cancelReason":        row.CancelReason,
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
 	})
+}
+
+// ownerActorContext borrows the owning user's authority for a write that
+// stamps ownerUserId from the actor. The engine never out-ranks the user
+// whose row it is writing; it acts AS them, the same way the campaign
+// sender does.
+func ownerActorContext(ctx context.Context, ownerUserId string) context.Context {
+	if ownerUserId == "" {
+		return ctx
+	}
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 func (s *EngineStore) executeMutation(ctx context.Context, name string, args map[string]any) error {

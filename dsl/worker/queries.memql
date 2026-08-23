@@ -194,12 +194,23 @@ query registration workersForUser {
 // One delegated app-session row with its transcript. Backs the live
 // transcript panel on a task (memql#4363).
 
+@actor
 /// Read one app-session row, transcript included.
 query appSession appSessionById {
   args {
     sessionId  string!
   }
-  filter  row.id==args.sessionId
+  // Caller-scoped. `ownerUserId==actor.userId` implies the composite tier's
+  // floor (`owner || clusterOwner`) -- A implies A||B -- so this satisfies
+  // the land gate as a plain top-level conjunct. Writing the disjunction
+  // here instead would be UNDECIDABLE to the enforcement analyzer, which
+  // reads a disjunction inside a conjunct as opaque.
+  //
+  // The cluster-owner arm is therefore NOT reachable through this named
+  // query: it lives in the tier's injected row admission, which is what an
+  // operator's generic concept read goes through. That split is deliberate
+  // -- a named read is somebody asking for their own sessions.
+  filter  ownerUserId==actor.userId && row.id==args.sessionId
   shape   workerAppSessionFull
 }
 
@@ -212,14 +223,16 @@ query appSession appSessionById {
 // retry opens a second: showing only the latest would hide the
 // attempt that failed, which is the one worth reading.
 
+@actor
 /// List the app sessions belonging to a Task.
 query appSession appSessionsForTask {
   args {
     taskId  string!
   }
-  filter  taskId==args.taskId
-  sort    "row.createdAt", "desc"
-  shape   workerAppSessionFull
+  filter   ownerUserId==actor.userId && taskId==args.taskId
+  sort     "row.createdAt", "desc"
+  paginate 20
+  shape    workerAppSessionFull
 }
 
 // ---- queries/v1/worker/appSessionsForUser.memql ----
@@ -235,15 +248,16 @@ query appSession appSessionsForTask {
 @actor
 /// List the caller's app sessions, newest first, without transcripts.
 query appSession appSessionsForUser {
-  args {
-    ownerUserId  string!
-    app          string
-  }
   // Caller-scoped: the engine's own reads run under the owner's actor
   // (auth.ContextWithUserActor), the same borrowed-authority pattern the
   // campaign sender uses, so the engine never out-ranks the user whose
   // rows it is reading.
-  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId && when(args.app) { app==args.app }
+  // No when() guard here on purpose: a ConditionalFilterExpression makes
+  // the whole filter undecidable to the row-authz analyzer, so it cannot
+  // prove the ownership floor holds. A decidable filter that always
+  // enforces the floor is worth more than an optional app narrowing the
+  // one consumer does not use.
+  filter   ownerUserId==actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    workerAppSessionCard
@@ -260,12 +274,10 @@ query appSession appSessionsForUser {
 // the cap tighten permanently as history accumulated.
 
 @actor
+@unbounded("the concurrency-cap read -- it must see EVERY live session the user has, and a paginated read would undercount and let maxConcurrentSessions be exceeded. Bounded in practice by that same cap.")
 /// List the caller's app sessions that are still live.
 query appSession liveAppSessionsForUser {
-  args {
-    ownerUserId  string!
-  }
-  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId && status in ["starting", "running"]
+  filter  ownerUserId==actor.userId && status in ["starting", "running"]
   shape   workerAppSessionCard
 }
 
@@ -280,11 +292,9 @@ query appSession liveAppSessionsForUser {
 // running on their laptop.
 
 @actor
+@unbounded("one row per user by construction -- the id is derived from the user id, so setDelegationPolicy updates rather than forking. The full set for one caller is at most one row.")
 /// Read the caller's app-delegation policy.
 query delegationPolicy delegationPolicyForUser {
-  args {
-    ownerUserId  string!
-  }
-  filter  ownerUserId==args.ownerUserId && args.ownerUserId==actor.userId
+  filter  ownerUserId==actor.userId
   shape   workerDelegationPolicyFull
 }

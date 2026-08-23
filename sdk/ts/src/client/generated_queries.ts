@@ -870,7 +870,7 @@ QueryClient.prototype.allSafetyClassifications = function (this: QueryClient, ar
   return this.executeNamed("allSafetyClassifications", buildAllSafetyClassifications(args), opts);
 };
 
-/** Read one app-session row, transcript included. */
+/** appSessionById wraps the query named "appSessionById". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.ts).
 export interface AppSessionByIdArgs {
   sessionId: string;
@@ -892,7 +892,7 @@ QueryClient.prototype.appSessionById = function (this: QueryClient, args: AppSes
   return this.executeNamed("appSessionById", buildAppSessionById(args), opts);
 };
 
-/** List the app sessions belonging to a Task. */
+/** appSessionsForTask wraps the query named "appSessionsForTask". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForTask"] in generated_concepts.ts).
 export interface AppSessionsForTaskArgs {
   taskId: string;
@@ -917,20 +917,16 @@ QueryClient.prototype.appSessionsForTask = function (this: QueryClient, args: Ap
 /** appSessionsForUser wraps the query named "appSessionsForUser". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForUser"] in generated_concepts.ts).
 export interface AppSessionsForUserArgs {
-  ownerUserId: string;
-  app?: string;
 }
 
 export function buildAppSessionsForUser(args: AppSessionsForUserArgs): string {
-  const parts: string[] = [];
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
-  if (args.app !== undefined) parts.push("app: " + renderMemQLValue(args.app));
-  return "query appSessionsForUser(" + parts.join(", ") + ")";
+  void args;
+  return "query appSessionsForUser()";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    appSessionsForUser(args: AppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+    appSessionsForUser(args?: AppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -2045,18 +2041,16 @@ QueryClient.prototype.currentUser = function (this: QueryClient, args: CurrentUs
 /** delegationPolicyForUser wraps the query named "delegationPolicyForUser". */
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["delegationPolicyForUser"] in generated_concepts.ts).
 export interface DelegationPolicyForUserArgs {
-  ownerUserId: string;
 }
 
 export function buildDelegationPolicyForUser(args: DelegationPolicyForUserArgs): string {
-  const parts: string[] = [];
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
-  return "query delegationPolicyForUser(" + parts.join(", ") + ")";
+  void args;
+  return "query delegationPolicyForUser()";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    delegationPolicyForUser(args: DelegationPolicyForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+    delegationPolicyForUser(args?: DelegationPolicyForUserArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -3244,18 +3238,16 @@ QueryClient.prototype.libraryWorkspaceLiveSources = function (this: QueryClient,
 /** liveAppSessionsForUser wraps the query named "liveAppSessionsForUser". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.ts).
 export interface LiveAppSessionsForUserArgs {
-  ownerUserId: string;
 }
 
 export function buildLiveAppSessionsForUser(args: LiveAppSessionsForUserArgs): string {
-  const parts: string[] = [];
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
-  return "query liveAppSessionsForUser(" + parts.join(", ") + ")";
+  void args;
+  return "query liveAppSessionsForUser()";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    liveAppSessionsForUser(args: LiveAppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+    liveAppSessionsForUser(args?: LiveAppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 

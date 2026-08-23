@@ -141,22 +141,22 @@ func (r *SessionRunner) Run(ctx context.Context, spec RunSpec, progress Progress
 
 	startedAt := r.now()
 	row := AppSessionRow{
-		ID:                   spec.SessionId,
-		OwnerUserId:          spec.OwnerUserId,
-		WorkerId:             w.RegistrationId,
-		App:                  spec.App,
-		Kind:                 spec.Kind,
-		PlanId:               spec.PlanId,
-		TaskId:               spec.TaskId,
-		Status:               AppSessionStatusStarting,
-		Workspace:            spec.Workspace,
-		Prompt:               spec.Prompt,
-		InputArtifactIds:     spec.Inputs,
-		Billing:              BillingUnknown,
-		CredentialIdentityId: cred.IdentityId,
-		CredentialExpiresAt:  cred.ExpiresAt,
-		MCPEndpoint:          r.MCPEndpoint,
-		StartedAt:            startedAt,
+		ID:                  spec.SessionId,
+		OwnerUserId:         spec.OwnerUserId,
+		WorkerId:            w.RegistrationId,
+		App:                 spec.App,
+		Kind:                spec.Kind,
+		PlanId:              spec.PlanId,
+		TaskId:              spec.TaskId,
+		Status:              AppSessionStatusStarting,
+		Workspace:           spec.Workspace,
+		Prompt:              spec.Prompt,
+		InputArtifactIds:    spec.Inputs,
+		Billing:             BillingUnknown,
+		CredentialRef:       cred.IdentityId,
+		CredentialExpiresAt: cred.ExpiresAt,
+		MCPEndpoint:         r.MCPEndpoint,
+		StartedAt:           startedAt,
 	}
 	if r.Store != nil {
 		if err := r.Store.CreateAppSession(ctx, row); err != nil {

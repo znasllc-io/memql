@@ -63,7 +63,7 @@ mutate task createSemanticTask {
     input           object!
     /// inProcess (the default) or containerExecutor when the delegation
     /// triage found a machine with an allowed, signed-in app online.
-    executionSurface  string  @enum("inProcess", "containerExecutor")
+    executionSurface  enum("inProcess", "containerExecutor")
     /// The registered backend, e.g. "cockpit-app:claude-code". Empty for
     /// an inProcess task.
     executorBackend   string

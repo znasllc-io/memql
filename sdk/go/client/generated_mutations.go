@@ -2233,7 +2233,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -12068,12 +12068,11 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	return b.String()
 }
 
-// SetDelegationPolicy -- Create or update the caller's app-delegation policy.
+// SetDelegationPolicy wraps the mutation named "setDelegationPolicy".
 //
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.go).
 type SetDelegationPolicyArgs struct {
 	PolicyId                  string
-	OwnerUserId               string
 	PreferSubscriptionApps    bool
 	PreferSubscriptionAppsSet bool // set true to send preferSubscriptionApps; required because zero-value bool is ambiguous
 	EligibleKinds             []any
@@ -12095,11 +12094,6 @@ func SetDelegationPolicyBuild(args SetDelegationPolicyArgs) string {
 	b.WriteString("mutation setDelegationPolicy(")
 	b.WriteString("policyId: ")
 	b.WriteString(quoteMemQL(args.PolicyId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
 	if args.PreferSubscriptionAppsSet {
 		if b.Len() > 29 {
 			b.WriteString(", ")

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
@@ -170,8 +169,12 @@ func (p *DelegationProbe) LiveSessionCount(ctx context.Context, ownerUserId stri
 	if p == nil || p.Engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return 0
 	}
-	query := fmt.Sprintf(`query liveAppSessionsForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	res, err := p.Engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), query)
+	// No ownerUserId argument: the query scopes on actor.userId, and the
+	// engine BORROWS the owner's actor for the read rather than passing an
+	// id it could get wrong. That is what makes the query caller-scoped in
+	// the engine's own terms instead of trusting this call site.
+	res, err := p.Engine.Execute(
+		auth.ContextWithUserActor(ctx, ownerUserId), "query liveAppSessionsForUser()")
 	if err != nil {
 		return 0
 	}

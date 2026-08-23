@@ -104,7 +104,7 @@ concept appSession {
   exitCode       int  @description("The app process's exit code. 0 on a clean run.")
   producedArtifactIds  []string  @description("Library artifact ids the cockpit pushed at end, including the full transcript.")
   appSessionRef  string  @description("The app's OWN session id, as it reported at end. What a later kind='attach' resumes by; empty when the app has no such notion.")
-  credentialIdentityId  string  @description("v1:identity:identity.id of the per-run service-account credential, when one was persisted. The revocation handle: ending the session revokes this row rather than waiting out the token's lifetime.")
+  credentialRef  string  @description("The label the per-run back-channel credential was minted under (`app-session:<sessionId>`). NOT a v1:identity:identity row id and deliberately not named like one: the credential is a class=\"service_account\" JWT verified through the DB-free JWKS path, so no row exists to point at and no revocation handle exists either. It is here for audit correlation -- matching this against the identity service's app_session_credential_issued lines is how a reader ties a bearer to the run it was handed to.")
   credentialExpiresAt  datetime  @description("When the current back-channel bearer expires. A run that outlives it gets a renew_credential control message carrying a replacement.")
   mcpEndpoint    string  @description("The streamable-HTTP MCP URL the app was pointed at (https://mcp.<domain>/mcp). Recorded so an audit reader can see which surface the credential was good for.")
   errorMessage   string  @description("Populated when status reaches failed. Empty otherwise.")

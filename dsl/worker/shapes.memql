@@ -79,7 +79,7 @@ shape appSession workerAppSessionFull {
   exitCode
   producedArtifactIds
   appSessionRef
-  credentialIdentityId
+  credentialRef
   credentialExpiresAt
   mcpEndpoint
   errorMessage

@@ -267,8 +267,12 @@ func (s *EngineStore) DelegationPolicy(ctx context.Context, ownerUserId string) 
 	if s == nil || s.Engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return DelegationPolicy{}, nil
 	}
-	query := fmt.Sprintf(`query delegationPolicyForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	res, err := s.Engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), query)
+	// No ownerUserId argument: the query scopes on actor.userId. The engine
+	// BORROWS the owner's actor for the read -- the same borrowed-authority
+	// pattern the campaign sender uses -- rather than out-ranking them with
+	// a system read that would work for anyone else's row too.
+	res, err := s.Engine.Execute(
+		auth.ContextWithUserActor(ctx, ownerUserId), "query delegationPolicyForUser()")
 	if err != nil {
 		return DelegationPolicy{}, fmt.Errorf("delegation policy lookup: %w", err)
 	}

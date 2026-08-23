@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { useMyAccess } from "../cluster/useMyAccess";
 
 // Delegated app sessions: the caller's list, and one session's live
 // transcript (memql#4363).
@@ -138,22 +137,22 @@ export interface AppSessionsState {
 
 export function useAppSessions(): AppSessionsState {
   const { query } = useCluster();
-  const { access } = useMyAccess();
-  const ownerUserId = access?.userId ?? "";
-
   const [sessions, setSessions] = useState<AppSessionCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
-    if (query === null || ownerUserId === "") return;
+    if (query === null) return;
     let live = true;
     setLoading(true);
     setError("");
 
+    // No ownerUserId argument: the query scopes on actor.userId at the
+    // engine. Passing an id the client chose would be a scope the server
+    // then has to distrust anyway.
     void query
-      .appSessionsForUser({ ownerUserId })
+      .appSessionsForUser({})
       .then((res) => {
         if (live) setSessions(res.rows().map(cardFrom));
       })
@@ -167,7 +166,7 @@ export function useAppSessions(): AppSessionsState {
     return () => {
       live = false;
     };
-  }, [query, ownerUserId, epoch]);
+  }, [query, epoch]);
 
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
   return { sessions, loading, error, reload };

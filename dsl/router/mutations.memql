@@ -34,14 +34,21 @@ mutate call recordRouterCall {
     errorMessage        string
     fallbackFromModel   string
     /// Who paid: metered | subscription | unknown. Absent reads as metered.
-    billing             string  @enum("metered", "subscription", "unknown")
+    billing             enum("metered", "subscription", "unknown")
     /// Where the call ran; empty for MemQL's own provider calls.
     executionSurface    string
   }
   insert {
-    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, billing, executionSurface }
+    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface }
     stamp {
       id: args.callId
+      // NOT in accept{}: a concept-level @default is documentation and is
+      // never applied on insert, so the "absent reads as metered" rule has
+      // to be written here to be real. It is the fail-safe direction --
+      // unattributed spend counts against the dollar ceiling rather than
+      // disappearing into the covered bucket, where the one control that
+      // stops runaway cost could not see it.
+      billing: args.billing ?? "metered"
     }
   }
 }

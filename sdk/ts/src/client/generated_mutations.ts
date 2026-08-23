@@ -1364,7 +1364,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -6749,11 +6749,10 @@ QueryClient.prototype.setConstructStatus = function (this: QueryClient, args: Se
   return this.executeNamed("setConstructStatus", buildSetConstructStatus(args), opts);
 };
 
-/** Create or update the caller's app-delegation policy. */
+/** setDelegationPolicy wraps the mutation named "setDelegationPolicy". */
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.ts).
 export interface SetDelegationPolicyArgs {
   policyId: string;
-  ownerUserId: string;
   preferSubscriptionApps?: boolean;
   eligibleKinds?: unknown[];
   appOrder?: unknown[];
@@ -6766,7 +6765,6 @@ export interface SetDelegationPolicyArgs {
 export function buildSetDelegationPolicy(args: SetDelegationPolicyArgs): string {
   const parts: string[] = [];
   parts.push("policyId: " + renderMemQLValue(args.policyId));
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
   if (args.preferSubscriptionApps !== undefined) parts.push("preferSubscriptionApps: " + renderMemQLValue(args.preferSubscriptionApps));
   if (args.eligibleKinds !== undefined) parts.push("eligibleKinds: " + renderMemQLValue(args.eligibleKinds));
   if (args.appOrder !== undefined) parts.push("appOrder: " + renderMemQLValue(args.appOrder));

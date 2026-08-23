@@ -93,7 +93,7 @@ export function useDelegationPolicy(): DelegationPolicyState {
     setError("");
 
     void query
-      .delegationPolicyForUser({ ownerUserId })
+      .delegationPolicyForUser({})
       .then((res) => {
         if (!live) return;
         const row = res.rows()[0];
@@ -130,9 +130,10 @@ export function useDelegationPolicy(): DelegationPolicyState {
       setSaving(true);
       setSaveError("");
       try {
+        // ownerUserId is NOT passed: the mutation stamps it from the actor,
+        // so a caller cannot author a policy attributed to somebody else.
         await query.setDelegationPolicy({
           policyId: policyRowId(ownerUserId),
-          ownerUserId,
           preferSubscriptionApps: next.preferSubscriptionApps,
           eligibleKinds: next.eligibleKinds,
           appOrder: next.appOrder,

@@ -449,6 +449,31 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// people's tokens.
 		{Path: "identity/mutations.memql", Name: "createAuthActivity"}:      true,
 		{Path: "identity/queries.memql", Name: "authActivityByRetiredHash"}: true,
+		// memql#4360. The three writes on a delegated app-session row, and the
+		// argument they share is one this list has not carried before: the
+		// caller IS the owner in every legitimate case, so caller-scoping does
+		// not merely fail to help -- it admits exactly the write that must not
+		// happen.
+		//
+		// createAppSession carries the WORKSPACE the consent card approved and
+		// the label of the per-run back-channel credential. Scoping answers
+		// "whose row is it", and the hazard is not whose: a legitimate owner
+		// could open a session naming a directory nobody approved. Only the
+		// server knows which workspace the card actually named.
+		//
+		// appendAppSessionTranscript writes EVIDENCE -- the record a later
+		// reader consults to answer what an agent did on somebody's computer.
+		// The person best placed to edit it is its owner, including for the
+		// run whose behaviour is the reason anyone is reading it.
+		//
+		// endAppSession carries `billing` and `usage`, which feed the plan's
+		// spend rollup and the AI ledger. A client-reachable version would let
+		// a caller declare their own run subscription-covered and its token
+		// count zero, which is the one write that can make the dollar ceiling
+		// stop working -- and again, the caller who benefits is the owner.
+		{Path: "worker/mutations.memql", Name: "createAppSession"}:           true,
+		{Path: "worker/mutations.memql", Name: "appendAppSessionTranscript"}: true,
+		{Path: "worker/mutations.memql", Name: "endAppSession"}:              true,
 	}
 	for k := range want {
 		if !set[k] {

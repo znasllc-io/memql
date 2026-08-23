@@ -827,7 +827,7 @@ func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 	return "query allSafetyClassifications()"
 }
 
-// AppSessionById -- Read one app-session row, transcript included.
+// AppSessionById wraps the query named "appSessionById".
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.go).
 type AppSessionByIdArgs struct {
@@ -849,7 +849,7 @@ func AppSessionByIdBuild(args AppSessionByIdArgs) string {
 	return b.String()
 }
 
-// AppSessionsForTask -- List the app sessions belonging to a Task.
+// AppSessionsForTask wraps the query named "appSessionsForTask".
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForTask"] in generated_concepts.go).
 type AppSessionsForTaskArgs struct {
@@ -875,8 +875,6 @@ func AppSessionsForTaskBuild(args AppSessionsForTaskArgs) string {
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForUser"] in generated_concepts.go).
 type AppSessionsForUserArgs struct {
-	OwnerUserId string
-	App         string
 }
 
 // AppSessionsForUser calls the engine query appSessionsForUser.
@@ -886,19 +884,8 @@ func (qc *QueryClient) AppSessionsForUser(ctx context.Context, args AppSessionsF
 }
 
 func AppSessionsForUserBuild(args AppSessionsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query appSessionsForUser(")
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
-	if args.App != "" {
-		if b.Len() > 25 {
-			b.WriteString(", ")
-		}
-		b.WriteString("app: ")
-		b.WriteString(quoteMemQL(args.App))
-	}
-	b.WriteString(")")
-	return b.String()
+	_ = args
+	return "query appSessionsForUser()"
 }
 
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
@@ -2025,7 +2012,6 @@ func CurrentUserBuild(args CurrentUserArgs) string {
 //
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["delegationPolicyForUser"] in generated_concepts.go).
 type DelegationPolicyForUserArgs struct {
-	OwnerUserId string
 }
 
 // DelegationPolicyForUser calls the engine query delegationPolicyForUser.
@@ -2035,12 +2021,8 @@ func (qc *QueryClient) DelegationPolicyForUser(ctx context.Context, args Delegat
 }
 
 func DelegationPolicyForUserBuild(args DelegationPolicyForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query delegationPolicyForUser(")
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
-	b.WriteString(")")
-	return b.String()
+	_ = args
+	return "query delegationPolicyForUser()"
 }
 
 // DelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
@@ -3248,7 +3230,6 @@ func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) stri
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.go).
 type LiveAppSessionsForUserArgs struct {
-	OwnerUserId string
 }
 
 // LiveAppSessionsForUser calls the engine query liveAppSessionsForUser.
@@ -3258,12 +3239,8 @@ func (qc *QueryClient) LiveAppSessionsForUser(ctx context.Context, args LiveAppS
 }
 
 func LiveAppSessionsForUserBuild(args LiveAppSessionsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query liveAppSessionsForUser(")
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
-	b.WriteString(")")
-	return b.String()
+	_ = args
+	return "query liveAppSessionsForUser()"
 }
 
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.

@@ -380,28 +380,45 @@ mutate registration updateWorkerApps {
 // the workspace the consent card approved. A client-reachable create
 // would let a caller name its own workspace and its own credential.
 
-@serverOnly
 /// Open the row for a delegated app-session run.
+///
+/// @serverOnly because the row carries the WORKSPACE the consent card approved and the label of the
+/// per-run back-channel credential. A wire-reachable create would let a caller name its own
+/// workspace on somebody's machine and its own credential reference, which is a forging primitive
+/// for the two facts the whole consent story rests on.
+///
+/// actor.userId scoping is not the fix, and this is the subtle part: the caller IS the owner here,
+/// so a self-scoped filter would admit exactly this call. Scoping answers "whose row is it", and the
+/// hazard is not whose -- it is that a legitimate owner could open a session naming a directory
+/// nobody approved. Only the server knows which workspace the card actually named, so only the
+/// server may write it.
+@actor
+@serverOnly
 mutate appSession createAppSession {
   args {
     sessionId      string!
-    ownerUserId    string!
     workerId       string!
-    app            string!  @enum("claude-code", "codex")
-    kind           string!  @enum("run", "open", "attach")
+    app            enum("claude-code", "codex")!
+    kind           enum("run", "open", "attach")!
     planId         string
     taskId         string
     workspace      string
     prompt         string
     inputArtifactIds  array
     mcpEndpoint    string
-    credentialIdentityId  string
+    credentialRef  string
     credentialExpiresAt   string
     startedAt      string!
   }
   insert {
     id: args.sessionId
-    args.ownerUserId
+    // Stamped from the actor, never accepted as an argument.
+    // @rowAuthz(owner="ownerUserId") asserts this field identifies the
+    // row's owner, and that assertion is worthless -- worse, actively
+    // misleading -- if a caller can write it. The engine borrows the
+    // owner's actor for this write (auth.ContextWithUserActor), the
+    // same way the campaign sender does.
+    ownerUserId: actor.userId
     args.workerId
     args.app
     args.kind
@@ -417,7 +434,7 @@ mutate appSession createAppSession {
     usage: {}
     billing: "unknown"
     mcpEndpoint: args.mcpEndpoint ?? ""
-    credentialIdentityId: args.credentialIdentityId ?? ""
+    credentialRef: args.credentialRef ?? ""
     credentialExpiresAt: args.credentialExpiresAt ?? ""
     args.startedAt
   }
@@ -439,15 +456,24 @@ mutate appSession createAppSession {
 // transcript that stops without saying why reads as a run that
 // stopped.
 
-@serverOnly
 /// Flush the accumulated transcript onto a live app-session row.
+///
+/// @serverOnly because the transcript is EVIDENCE. It is what a later reader consults to answer
+/// what an agent did on somebody's computer, and a wire-reachable write would let the owner of a
+/// run rewrite that record after the fact -- including the run whose behaviour is the reason
+/// anybody is reading it.
+///
+/// actor.userId scoping is not the fix: the person best placed to edit the record is its owner, so
+/// self-scoping admits precisely the write that must not happen. The engine appends from chunks it
+/// received on the stream; nothing else may.
+@serverOnly
 mutate appSession appendAppSessionTranscript {
   args {
     sessionId      string!
     transcript     string
     transcriptBytes  int
     transcriptTruncated  bool
-    status         string  @enum("starting", "running")
+    status         enum("starting", "running")
   }
   update {
     id: args.sessionId
@@ -470,15 +496,24 @@ mutate appSession appendAppSessionTranscript {
 // `subscription`. Inferring here is what would make the number the
 // owner asked for -- what the subscription covered -- untrustworthy.
 
-@serverOnly
 /// Drive an app session to a terminal status with its reported usage.
+///
+/// @serverOnly for the same reason as the transcript flush, plus one of its own: this write carries
+/// `billing` and `usage`, which feed the plan's spend rollup and the AI ledger. A wire-reachable
+/// version would let a caller declare their own run subscription-covered and its token count zero,
+/// which is the one write that can make the dollar ceiling stop working.
+///
+/// actor.userId scoping is not the fix: the caller who would benefit from misreporting spend is the
+/// owner, so self-scoping admits exactly the write the gate exists to refuse. The engine writes it
+/// from what the app reported over the session stream.
+@serverOnly
 mutate appSession endAppSession {
   args {
     sessionId      string!
-    status         string!  @enum("ended", "failed", "cancelled")
+    status         enum("ended", "failed", "cancelled")!
     exitCode       int
     usage          object
-    billing        string  @enum("metered", "subscription", "unknown")
+    billing        enum("metered", "subscription", "unknown")
     transcript     string
     transcriptBytes  int
     transcriptTruncated  bool
@@ -514,11 +549,11 @@ mutate appSession endAppSession {
 // per user at a derived id, so a second write updates rather than
 // forking a second policy the planner would have to choose between.
 
+@actor
 /// Create or update the caller's app-delegation policy.
 mutate delegationPolicy setDelegationPolicy {
   args {
     policyId       string!
-    ownerUserId    string!
     preferSubscriptionApps  bool
     eligibleKinds  array
     appOrder       array
@@ -529,7 +564,9 @@ mutate delegationPolicy setDelegationPolicy {
   }
   insert {
     id: args.policyId
-    args.ownerUserId
+    // Stamped, not accepted: a caller writing this field could author a
+    // policy attributed to somebody else.
+    ownerUserId: actor.userId
     preferSubscriptionApps: args.preferSubscriptionApps ?? false
     eligibleKinds: args.eligibleKinds ?? []
     appOrder: args.appOrder ?? []

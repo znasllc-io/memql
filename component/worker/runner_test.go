@@ -162,7 +162,7 @@ func TestRunnerRecordsSubscriptionBilling(t *testing.T) {
 	if len(store.created) != 1 {
 		t.Fatalf("expected the row to be created before the run, got %d", len(store.created))
 	}
-	if store.created[0].CredentialIdentityId == "" || store.created[0].MCPEndpoint == "" {
+	if store.created[0].CredentialRef == "" || store.created[0].MCPEndpoint == "" {
 		t.Fatalf("the back-channel was not recorded on the row: %+v", store.created[0])
 	}
 	terminal := store.terminal()
