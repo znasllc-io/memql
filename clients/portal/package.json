@@ -13,12 +13,15 @@
     "clean": "rm -rf dist node_modules/.vite"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
     "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
     "lucide-react": "^1.33.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.9.0"
+    "react-router-dom": "^7.9.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",

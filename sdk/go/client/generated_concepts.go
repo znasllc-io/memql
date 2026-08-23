@@ -455,6 +455,7 @@ var BoundConcepts = map[string]string{
 	"planById":                              "v1:planner:plan",
 	"plansForResponsibility":                "v1:planner:plan",
 	"plansForSpace":                         "v1:planner:plan",
+	"plansForUser":                          "v1:planner:plan",
 	"policy":                                "v1:data:policy",
 	"projectById":                           "v1:forge:project",
 	"projectBySlug":                         "v1:forge:project",

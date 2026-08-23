@@ -4026,6 +4026,23 @@ func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 	return b.String()
 }
 
+// PlansForUser -- Every Plan the caller requested, newest first, whatever its status. Owned: requestedBy==actor.userId binds server-side so a caller only ever sees their own. Backs the Nexus goal picker and its recent-goals strip (memql#4373), which pin the running ones to the top client-side from the status already on each row -- distinct from activePlansForUser / waitingPlansForUser, neither of which can name a goal that has finished.
+//
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["plansForUser"] in generated_concepts.go).
+type PlansForUserArgs struct {
+}
+
+// PlansForUser calls the engine query plansForUser.
+func (qc *QueryClient) PlansForUser(ctx context.Context, args PlansForUserArgs) (*Result, error) {
+	call := PlansForUserBuild(args)
+	return qc.executeNamed(ctx, "plansForUser", call)
+}
+
+func PlansForUserBuild(args PlansForUserArgs) string {
+	_ = args
+	return "query plansForUser()"
+}
+
 // Policy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.
 //
 // Bound concept: v1:data:policy (machine-readable: BoundConcepts["policy"] in generated_concepts.go).

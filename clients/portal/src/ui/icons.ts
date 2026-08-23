@@ -20,6 +20,7 @@ export {
   LogOut,
   Monitor,
   Moon,
+  Orbit,
   Plug,
   Plus,
   RefreshCw,

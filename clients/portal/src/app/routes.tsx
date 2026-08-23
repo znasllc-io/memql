@@ -18,6 +18,7 @@ import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
 import { MeRoutes } from "../me/MeRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
+import { NexusRoutes } from "../nexus/NexusRoutes";
 import { HomePage } from "../home/HomePage";
 import {
   CONCEPTS_ROUTE_PATTERN,
@@ -94,6 +95,8 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //                     (memql#3717)
 //   /artifacts/*      the Library, browsed and labelled
+//   /nexus/*          Nexus: a goal's world in 3D, its constructs, its
+//                     replay (memql#4369)
 //   /me/*             the signed-in person: account, sessions, security
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
@@ -126,6 +129,7 @@ export function AppRoutes(): ReactNode {
           <Route path="fleet/*" element={<FleetRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
+          <Route path="nexus/*" element={<NexusRoutes />} />
           {/* The person, rather than the cluster: the account this
               connection resolved, its live sessions, and how it can be
               entered. Reached from the rail's profile row. Identity's own

@@ -20,6 +20,7 @@ import {
   Gauge,
   LayoutGrid,
   Monitor,
+  Orbit,
   Plug,
   Plus,
   Rocket,
@@ -178,6 +179,20 @@ const CLUSTER_ADMIN: readonly NavItem[] = [
 // `end` matching keeps it inactive on deep routes.
 const CONSOLE_ITEM: NavItem = { to: "/", label: "Console", icon: Gauge };
 
+// NEXUS (memql#4369) is its own group rather than an entry under Views or
+// Cluster, and the distinction it draws is real. A view is a designed screen
+// over a POPULATION of rows; Cluster is the machine. Nexus is neither: it is
+// ONE GOAL OF YOURS, seen whole -- what is working on it, what it built, and
+// how it got here. It is the only surface in this console whose subject is a
+// single piece of your own work rather than a table or a machine, and filing
+// it under either of those would make it look like something it is not.
+//
+// One item today. The group exists because the section will grow into it
+// (the cluster-wide view the design explicitly leaves out of scope is a
+// second inhabitant), and because a rail caption is how a person learns a
+// section's name.
+const NEXUS: readonly NavItem[] = [{ to: "/nexus", label: "Goals", icon: Orbit }];
+
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
 function readStoredRail(): "expanded" | "collapsed" {
@@ -312,6 +327,7 @@ export function AppShell(): ReactNode {
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <NavGroup items={[CONSOLE_ITEM]} collapsed={collapsed} end />
+            <NavGroup label="Nexus" items={NEXUS} collapsed={collapsed} />
             <NavGroup label="Views" items={PREDEFINED_VIEWS} collapsed={collapsed} />
             {/* The composer's own output, under the same caption as the views
                 that ship with the product -- because to the person reading the

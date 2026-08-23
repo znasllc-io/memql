@@ -4042,6 +4042,26 @@ QueryClient.prototype.plansForSpace = function (this: QueryClient, args: PlansFo
   return this.executeNamed("plansForSpace", buildPlansForSpace(args), opts);
 };
 
+/** Every Plan the caller requested, newest first, whatever its status. Owned: requestedBy==actor.userId binds server-side so a caller only ever sees their own. Backs the Nexus goal picker and its recent-goals strip (memql#4373), which pin the running ones to the top client-side from the status already on each row -- distinct from activePlansForUser / waitingPlansForUser, neither of which can name a goal that has finished. */
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["plansForUser"] in generated_concepts.ts).
+export interface PlansForUserArgs {
+}
+
+export function buildPlansForUser(args: PlansForUserArgs): string {
+  void args;
+  return "query plansForUser()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    plansForUser(args?: PlansForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.plansForUser = function (this: QueryClient, args: PlansForUserArgs = {} as PlansForUserArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("plansForUser", buildPlansForUser(args), opts);
+};
+
 /** Returns the validation policy for a record type. Space-specific policies take precedence over global. */
 // Bound concept: v1:data:policy (machine-readable: BoundConcepts["policy"] in generated_concepts.ts).
 export interface PolicyArgs {
