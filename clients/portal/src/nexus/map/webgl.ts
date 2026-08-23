@@ -26,6 +26,13 @@
 // caller does it once per mount.
 export function probeWebGL(): boolean {
   if (typeof document === "undefined") return false;
+  // Asked BEFORE touching a canvas, and not only as a fast path: an
+  // environment with no WebGL at all (jsdom, and any embedded browser built
+  // without it) implements getContext as a stub that logs a loud
+  // "not implemented" through its virtual console every time it is called.
+  // The answer is the same either way; this is the one that does not fill a
+  // test run's output with a failure that is not one.
+  if (typeof WebGLRenderingContext === "undefined") return false;
   try {
     const canvas = document.createElement("canvas");
     // webgl2 first because that is what three.js asks for; webgl as the

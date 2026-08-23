@@ -83,3 +83,29 @@ export function easeOutBack(t: number, overshoot: number): number {
   const c3 = c1 + 1;
   return 1 + c3 * Math.pow(clamped - 1, 3) + c1 * Math.pow(clamped - 1, 2);
 }
+
+// sceneIsAnimating is the demand-mode predicate, as arithmetic.
+//
+// It lives here rather than inside the canvas because it is the whole of the
+// "idle frame loop when nothing changes" guarantee (design 4.5), and a
+// guarantee asserted only by watching a GPU is a guarantee nothing checks.
+// NexusCanvas's Governor calls it once per frame; nexusMap.test.ts asserts it
+// directly, including the case that matters most -- a settled scene under
+// reduced motion, where the answer must be a flat no.
+export function sceneIsAnimating(input: {
+  // Age of the most recent arrival, in milliseconds. Infinity when nothing
+  // has arrived (a scene that has been up a while), which is the settled
+  // case rather than a special one.
+  newestArrivalAgeMs: number;
+  anyTaskRunning: boolean;
+  timings: Timings;
+}): boolean {
+  const window = Math.max(input.timings.condenseMs, input.timings.scaleInMs);
+  if (input.newestArrivalAgeMs < window) return true;
+  // A running task breathes, so the loop stays awake while work is in
+  // flight. Under reduced motion breathAmplitude is 0 and this term
+  // disappears entirely -- which is why a reduced-motion map settles as soon
+  // as its arrivals have faded and then costs nothing at all, even over a
+  // goal that is still running.
+  return input.timings.breathAmplitude > 0 && input.anyTaskRunning;
+}

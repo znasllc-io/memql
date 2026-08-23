@@ -34,7 +34,15 @@ export function EventList({
   // yanked back to the middle on every tick.
   useEffect(() => {
     const node = listRef.current?.querySelector(`[data-event-index="${index}"]`);
-    if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest" });
+    // GUARDED, because scrollIntoView is not universal. jsdom does not
+    // implement it at all, and calling it there THREW OUT OF AN EFFECT --
+    // which React treats as a component error and unmounts the tree for, so
+    // a convenience scroll took the whole page down. The same is true of any
+    // embedded browser that ships a partial DOM. A list that does not
+    // auto-scroll is a small annoyance; a list that erases the page is not.
+    if (node instanceof HTMLElement && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({ block: "nearest" });
+    }
   }, [index]);
 
   if (events.length === 0) {

@@ -32,7 +32,7 @@
 // "whatever it is now" at every point in the past.
 
 import type { BundleRow, ConstructRow, GoalWorld, PlanRow, TaskRow } from "./world";
-import { semanticTasks } from "./world";
+import { latestAttempts, semanticTasks } from "./world";
 
 // "" means NOW -- the whole world, unnarrowed. Used by the Map, which is not
 // scrubbing, so it does not pay for a full copy of every collection.
@@ -149,8 +149,16 @@ export interface GoalProgress {
 
 // goalProgress is what fills the beacon (design 4.3): completed semantic
 // tasks over all of them, at whatever moment the world represents.
+//
+// COUNTED PER NODE, NOT PER ROW, and that is a correctness matter rather
+// than a preference. A retried step is several task ROWS sharing one
+// logicalStepId (world.ts's header), and counting rows puts every failed
+// attempt in the denominator forever -- so a goal that retried one step
+// twice and then succeeded completely would fill to six sevenths and stop,
+// with a beacon that can never light on a plan that ever had to try again.
+// The map draws one node for the step; the beacon counts the same one.
 export function goalProgress(world: GoalWorld): GoalProgress {
-  const tasks = semanticTasks(world.tasks);
+  const tasks = [...latestAttempts(semanticTasks(world.tasks)).values()];
   const completed = tasks.filter((task) => task.status === "succeeded").length;
   const total = tasks.length;
   return {

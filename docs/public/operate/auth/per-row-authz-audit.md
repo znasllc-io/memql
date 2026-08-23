@@ -791,6 +791,37 @@ vs per-construct-override question: `authoringBundlesForOwner` is
 caller-scoped while `systemActiveAuthoringBundles` is admin-gated, so
 its two queries disagree about who may read the concept's rows.
 
+### The residuals a client is filtering today (memql#4369)
+
+The portal's Nexus surface draws one goal's world -- the plan, its tasks, the
+agents it raised, the bundle it authored and the artifacts it produced -- and
+four of those concepts reach it through reads this document classifies as
+**undeclared**. The narrowing that is actually applied is therefore partly in
+a browser, which is recorded here rather than left to be discovered:
+
+| Concept | State | What Nexus does |
+|---|---|---|
+| `v1:planner:plan` | undeclared; blocked on #4366 | the client refuses to draw a goal whose `requestedBy` is not the caller's own user id, and says so on the page |
+| `v1:planner:task` | undeclared; blocked on #4366 | filtered by `planId` client-side |
+| `v1:agents:agent` | undeclared, long tail | `agentsForPlan` is `@public` and narrows by `lineage.originatingPlanId`; filtered again client-side |
+| `v1:authoring:bundle` | undeclared, long tail | narrowed by `sourcePlanId` on an owner-gated read; filtered again client-side |
+
+Two things follow, and neither is a criticism of the surface:
+
+- **A client-side filter is not a gate.** It closes the deep-link hole a
+  goal-shaped URL would otherwise open -- following someone else's link shows
+  you a refusal rather than their goal -- and it changes nothing about what
+  the underlying reads admit. The reads are exactly as wide as they were
+  before Nexus existed.
+- **The client needs no change when the tier lands.** Every live event the
+  page consumes is already resolved through the authorized read and dropped
+  when that read refuses (the `granted` tier's id-only shape, #4309), so the
+  declaration #4366 is waiting on narrows the surface without touching it.
+
+`v1:library:artifact`, `v1:authoring:construct` and
+`v1:authoring:dependencyEdge` are owner-gated in their reads and are not part
+of this residual.
+
 ### The constraint carried forward, not solved
 
 `userByIdSystem` **bootstraps the actor**:

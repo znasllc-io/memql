@@ -44,8 +44,15 @@ export function CompletionCard({
   const elapsed = formatElapsed(receipt.elapsedMs);
 
   return (
-    <Panel>
-      <div className="flex flex-col gap-3">
+    // A named REGION, not a bare panel. The receipt is the one part of this
+    // surface a person may want to jump straight to -- it is the answer to
+    // "what did this cost" -- and a canvas has no landmarks of its own, so
+    // this is the only one the page can offer. It is also what lets a test
+    // say "inside the receipt" rather than matching a word that the tab
+    // strip happens to use too.
+    <section aria-label="Goal receipt">
+      <Panel>
+        <div className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <div className="flex items-center gap-2">
             <Badge tone={tone}>
@@ -114,7 +121,8 @@ export function CompletionCard({
             {"."}
           </p>
         ) : null}
-      </div>
-    </Panel>
+        </div>
+      </Panel>
+    </section>
   );
 }

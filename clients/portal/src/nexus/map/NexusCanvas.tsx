@@ -8,7 +8,7 @@ import type { LayoutNode, LayoutResult } from "../scene/layout";
 import type { GoalWorld, NodeKind } from "../scene/world";
 import { latestAttempts } from "../scene/world";
 import { colourForTask, readPalette, type ScenePalette } from "./palette";
-import { easeOutBack, timingsFor } from "./motion";
+import { easeOutBack, sceneIsAnimating, timingsFor } from "./motion";
 
 // The scene.
 //
@@ -134,10 +134,18 @@ interface Arrival {
   particleSlot: number;
 }
 
-function useArrivals(
-  nodeIds: readonly string[],
-  epoch: number,
-): { arrivals: Map<string, Arrival>; anyAnimating: (now: number, condenseMs: number, scaleMs: number) => boolean } {
+// newestArrivalAge is how long ago the most recent node landed. Infinity when
+// nothing has arrived, which is the settled case: motion.ts's predicate reads
+// it as "no arrival is in flight" without a second branch.
+function newestArrivalAge(arrivals: Map<string, Arrival>, now: number): number {
+  let youngest = Number.POSITIVE_INFINITY;
+  for (const arrival of arrivals.values()) {
+    youngest = Math.min(youngest, now - arrival.at);
+  }
+  return youngest;
+}
+
+function useArrivals(nodeIds: readonly string[], epoch: number): { arrivals: Map<string, Arrival> } {
   const arrivals = useRef(new Map<string, Arrival>());
   const nextSlot = useRef(0);
   const lastEpoch = useRef(epoch);
@@ -161,16 +169,7 @@ function useArrivals(
     if (!present.has(id)) arrivals.current.delete(id);
   }
 
-  return {
-    arrivals: arrivals.current,
-    anyAnimating: (at: number, condenseMs: number, scaleMs: number) => {
-      const window = Math.max(condenseMs, scaleMs);
-      for (const arrival of arrivals.current.values()) {
-        if (at - arrival.at < window) return true;
-      }
-      return false;
-    },
-  };
+  return { arrivals: arrivals.current };
 }
 
 // ---------------------------------------------------------------------------
@@ -591,7 +590,7 @@ export default function NexusCanvas({
   const palette = useMemo(() => readPalette(), []);
   const nodes = useMemo(() => [...scene.nodes.values()], [scene]);
   const nodeIds = useMemo(() => nodes.map((n) => n.id), [nodes]);
-  const { arrivals, anyAnimating } = useArrivals(nodeIds, arrivalEpoch);
+  const { arrivals } = useArrivals(nodeIds, arrivalEpoch);
   const timings = timingsFor(reducedMotion);
 
   // Task status by NODE id, from the latest attempt of each step -- the same
@@ -629,15 +628,17 @@ export default function NexusCanvas({
 
   // Evaluated per frame by the Governor, never at render time -- see its own
   // comment for why a boolean here would either spin forever or never start.
-  const shouldAnimate = (): boolean => {
-    const now = typeof performance === "undefined" ? 0 : performance.now();
-    if (anyAnimating(now, timings.condenseMs, timings.scaleInMs)) return true;
-    // A running task breathes, so the loop stays awake while any work is in
-    // flight. Under reduced motion breathAmplitude is 0 and this term
-    // disappears entirely, which is why a reduced-motion map settles as soon
-    // as its arrivals have faded in and then costs nothing at all.
-    return timings.breathAmplitude > 0 && runningRef.current;
-  };
+  // The arithmetic itself is in motion.ts so the idle guarantee is asserted
+  // by a test rather than by watching a GPU.
+  const shouldAnimate = (): boolean =>
+    sceneIsAnimating({
+      newestArrivalAgeMs: newestArrivalAge(
+        arrivals,
+        typeof performance === "undefined" ? 0 : performance.now(),
+      ),
+      anyTaskRunning: runningRef.current,
+      timings,
+    });
 
   return (
     <Canvas

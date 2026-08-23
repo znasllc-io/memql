@@ -199,6 +199,13 @@ export function useGoalWorld(planId: string): GoalWorldState {
           return;
         }
 
+        // Published as soon as it is read, before the rest of the seed. The
+        // goal's title, status and beacon are what the page is ABOUT, and
+        // holding them behind six more reads means a skeleton where a header
+        // could already be. It also puts the map in the state the feature is
+        // named for: a goal on its own, with its world materializing into it.
+        setFeed((current) => foldRow(current, "plan", plan));
+
         const ownerAgentId =
           typeof plan["ownerAgentId"] === "string" ? (plan["ownerAgentId"] as string) : "";
 
@@ -231,7 +238,7 @@ export function useGoalWorld(planId: string): GoalWorldState {
         // seed is a snapshot, and folding it would run the watermark rule
         // against an empty map seven hundred times to reach the same answer.
         // Follow events fold; the seed replaces.
-        let next: FeedState = {
+        const seeded: FeedState = {
           plan,
           planner: planner === null ? null : (planner.rows()[0] ?? null),
           tasks: byId(tasks.rows()),
@@ -245,8 +252,14 @@ export function useGoalWorld(planId: string): GoalWorldState {
         // roll those rows backwards. Re-folding the freshly-seeded rows over
         // whatever the follow put there is what applies the watermark rule to
         // exactly that race.
-        setFeed((current) => (current === EMPTY_FEED ? next : reconcile(current, next)));
-        next = EMPTY_FEED;
+        //
+        // `seeded` is a const, and that is load-bearing rather than style: a
+        // state updater runs when React commits, not when setState is called,
+        // so a variable reassigned on the next line would be read AFTER the
+        // reassignment and the whole seed would land as an empty world. The
+        // feed test that emits an event before the seed settles is what
+        // catches it.
+        setFeed((current) => (current === EMPTY_FEED ? seeded : reconcile(current, seeded)));
         setLoading(false);
       } catch (err: unknown) {
         if (!live) return;
