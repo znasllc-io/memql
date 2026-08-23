@@ -1,0 +1,26 @@
+# JSON 6902 patch: mount the `memql-domain` ConfigMap as env on every engine
+# node (memql#3593, memql#4222, memql#4281).
+#
+# WHAT SEEDS IT: the install's `memql-domain` ConfigMap, carrying exactly ONE
+# key, MEMQL_DOMAIN, from which component/envregistry/domain.go derives
+# identity's base URL, the issuer every node verifies against, the discovery
+# endpoint, the CORS origins, the OAuth redirect URIs and the MCP public URL.
+# Locally that is scripts/k3d/seed-secrets.sh, from the --domain the bring-up
+# was given; in a cloud install it is written by the ArgoCD Application.
+# Missing one of those six is not a visible failure: memql#3315 was a single
+# forgotten CORS origin, and it presented as sign-in dying with an empty
+# identity log.
+#
+# WHY APPEND RATHER THAN A STRATEGIC MERGE: `envFrom` has no patch merge key, so
+# a strategic-merge patch REPLACES the whole list -- which would silently drop
+# `memql-secrets` (the master key, the operator key, the database DSN) from
+# every node it touched. `add` at `envFrom/-` appends, leaving what is there
+# alone. Same reasoning as bootstrap-secret-envfrom.yaml in the local overlay.
+#
+# WHY NOT `optional`, unlike memql-bootstrap: a node with no domain derives
+# nothing. Refusing to start is the honest failure, and re-seeding is the fix.
+- op: add
+  path: /spec/template/spec/containers/0/envFrom/-
+  value:
+    configMapRef:
+      name: memql-domain

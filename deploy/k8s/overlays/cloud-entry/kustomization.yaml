@@ -106,15 +106,13 @@ patches:
       - { op: remove, path: /spec/loadBalancerSourceRanges }
       - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
 
-  # The domain, delivered once (memql#4222 / #3593).
-  # Every rematerializing engine node reads MEMQL_DOMAIN from the
-  # memql-domain ConfigMap so SeedMaterializer can derive the portal
-  # site hostname. envFrom has no merge key -- JSON 6902 append only.
-  # No hostname is committed here.
-  - path: patches/domain-envfrom.yaml
-    target:
-      kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
+  # The domain is delivered by the components/domain-derive component at the
+  # bottom of this file (memql#4281), not by a patch here. It used to be a
+  # patch here, and it was HALF the job: it appended the memql-domain ConfigMap
+  # to envFrom and did not delete the base's pinned placeholders, which beat
+  # envFrom -- so this overlay rendered eleven workloads pinned to an issuer at
+  # example.com and a cloud-entry install rejected every token. No hostname is
+  # committed here or there.
 
   # -------------------------------------------------------------------------
   # DATABASE -- same cloud VALUES as overlays/cloud; SIZES come from entry.
@@ -188,5 +186,8 @@ images:
 
 components:
   - ../../components/engine-bff
+  # AFTER engine-bff: domain-derive patches the `bff` Deployment that component
+  # adds, and components apply in listed order.
+  - ../../components/domain-derive
   - ../../components/cnpg-db
   - ../../components/cnpg-db/presets/entry

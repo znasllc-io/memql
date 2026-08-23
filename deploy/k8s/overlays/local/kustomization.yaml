@@ -400,200 +400,20 @@ patches:
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: IfNotPresent
   # ---------------------------------------------------------------------------
-  # The domain, delivered once (memql#3593)
+  # The domain, delivered once (memql#3593, memql#3600, memql#4281)
   #
-  # Every node's expected issuer used to be pinned here, eight times, each a
-  # separate copy of one fact -- and identity's own base URL, bootstrap domain,
-  # discovery endpoint, CORS origins and OAuth redirect URIs were pinned again
-  # in its patch. They are all DERIVED now, from the single MEMQL_DOMAIN key of
-  # the memql-domain ConfigMap, by component/envregistry/domain.go at boot. This
-  # overlay states the RELATIONSHIP and never the value, which is why no file
-  # under deploy/ names a domain any more except the two Ingress hosts.
+  # Both halves -- appending the memql-domain ConfigMap to envFrom, and deleting
+  # the base's pinned placeholders that would otherwise beat it -- now live
+  # together in ../../components/domain-derive, listed at the bottom of this
+  # file. They were 160 lines here, and this overlay was the only one that had
+  # both: cloud-entry appended the ConfigMap and skipped the deletes, which is
+  # the silent half. The component's header carries the memql#3600 incident this
+  # overlay recorded -- a magic link at a domain nobody owns, so no owner account
+  # was ever created and the cluster could not be signed into at all.
   #
-  # TWO PATCHES, because they need different mechanisms:
-  #   - envFrom has no merge key, so the ConfigMap reference must be APPENDED
-  #     with JSON 6902 or a strategic merge would replace the whole list (and
-  #     with it memql-secrets);
-  #   - an explicit `env` entry BEATS envFrom in Kubernetes regardless of order,
-  #     so the base's placeholder issuer must be REMOVED or the ConfigMap is
-  #     mounted and ignored, and the mesh rejects every node token with
-  #     "invalid issuer" while everything looks correctly configured.
-  #
-  # Neither patch names a domain.
+  # WHAT SEEDS IT LOCALLY: scripts/k3d/seed-secrets.sh, from the --domain the
+  # bring-up was given. Neither this overlay nor the component names a domain.
   # ---------------------------------------------------------------------------
-  - path: patches/domain-envfrom.yaml
-    target:
-      kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
-  - target: { kind: Deployment, name: identity }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: identity
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: identity
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-                  # ALL SIX, not just the issuer (memql#3600). The base sets
-                  # every one of these to a staging placeholder, and an explicit
-                  # env entry beats envFrom -- so leaving any of them in place
-                  # means the derivation never runs for it and identity serves a
-                  # domain nothing resolves. That is not hypothetical: the first
-                  # install after memql#3593 produced a magic link at
-                  # https://identity.staging.example.com, which nobody can click,
-                  # so no owner account was ever created and the cluster could
-                  # not be signed into at all.
-                  - name: MEMQL_IDENTITY_BASE_URL
-                    $patch: delete
-                  - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
-                    $patch: delete
-                  - name: MEMQL_DISCOVERY_GRPC_ENDPOINT
-                    $patch: delete
-                  - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
-                    $patch: delete
-                  - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
-                    $patch: delete
-  - target: { kind: Deployment, name: bff }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: bff
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: bff
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: cognition }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: cognition
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: cognition
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: agent }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: agent
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: agent
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: planner }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: planner
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: planner
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: workbench }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: workbench
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: workbench
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: mcp }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: mcp
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: mcp
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: voice
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: voice-agent
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice-agent
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: edge }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: edge
-        namespace: memql
-      spec:
-        template:
-          spec:
-            containers:
-              - name: edge
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
   # identity-specific local overrides that carry NO domain: the vite dev-server
   # origins and running migrations on start.
   - path: patches/identity-local-config.yaml
@@ -692,6 +512,9 @@ images:
 
 components:
   - ../../components/engine-bff
+  # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
+  # adds the `bff` Deployment this patches; components apply in order.
+  - ../../components/domain-derive
   # The database, as the SAME component staging, production and every tenant
   # deployment composes (epic memql#3842 / #3851). Local supplies its own values
   # rather than a tier preset: the presets describe what a customer buys, and a

@@ -220,6 +220,13 @@ images:
 
 components:
   - ../../components/engine-bff
+  # THE DOMAIN, delivered once (memql#4281). This overlay used to pin the six
+  # domain-shaped identity values to base's example.com placeholders on eleven
+  # workloads and mount no ConfigMap at all -- so an install of it could not
+  # verify a token until somebody patched all six through the Application. The
+  # component states the RELATIONSHIP: MEMQL_DOMAIN in, six derived values out.
+  # It must follow engine-bff, which adds the `bff` Deployment it patches.
+  - ../../components/domain-derive
   # THE DATABASE (epic memql#3842 / #3847 / #3850), with the `top` preset's
   # numbers: 3 instances across 3 zones, 4 vCPU / 16 GiB, 256 + 64 GiB. The
   # SHAPE comes from the component; the preset supplies only sizes.
