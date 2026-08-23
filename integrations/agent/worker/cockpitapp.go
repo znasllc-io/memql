@@ -50,6 +50,18 @@ type CockpitAppExecutor struct {
 	dispatcher *Dispatcher
 	runner     *workerservice.SessionRunner
 	policies   DelegationPolicyReader
+	// ledger records the run's reported spend on v1:router:call. Nil
+	// disables the write; the run still happens, because losing a
+	// cost row must not lose the work.
+	ledger *LedgerWriter
+}
+
+// WithLedger installs the AI-ledger writer.
+func (e *CockpitAppExecutor) WithLedger(ledger *LedgerWriter) *CockpitAppExecutor {
+	if e != nil {
+		e.ledger = ledger
+	}
+	return e
 }
 
 // DelegationPolicyReader resolves a user's delegation preference.
@@ -237,6 +249,17 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 	}
 
 	result, runErr := e.runner.Run(ctx, spec, progressBridge(progress))
+
+	// The ledger row is written on EVERY outcome, failures included.
+	// A run that burned an hour of somebody's subscription and then
+	// crashed still spent it, and a cost surface that only records
+	// successes systematically understates what the work cost.
+	if e.ledger != nil && result.SessionId != "" {
+		if err := e.ledger.RecordAppSession(ctx, result, spec); err != nil {
+			e.logger.Warn("cockpit-app: ledger write failed",
+				"session_id", result.SessionId, "error", err)
+		}
+	}
 
 	out := planner.ExecutorResult{
 		Output: map[string]interface{}{

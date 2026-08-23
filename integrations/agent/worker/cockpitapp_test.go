@@ -181,3 +181,65 @@ func newTestCockpitAppExecutor(t *testing.T) *CockpitAppExecutor {
 	}
 	return exec
 }
+
+// TestDelegationProbeSatisfiesThePlannerInterface: the probe lives on
+// the agent node because that is where worker streams terminate, and
+// the planner consumes it through its own narrow interface. A drift
+// between the two would only show up at wiring time.
+func TestDelegationProbeSatisfiesThePlannerInterface(t *testing.T) {
+	var _ planner.DelegationProbe = (*DelegationProbe)(nil)
+}
+
+// TestDelegationProbeAgreesWithSelection is the property that keeps
+// the triage honest: the probe must use the SAME allowed-and-signed-in
+// test dispatch uses, or the triage promises a machine that dispatch
+// then refuses -- and the plan fails for a reason the triage said was
+// fine.
+func TestDelegationProbeAgreesWithSelection(t *testing.T) {
+	registry := workerservice.NewRegistry(slog.Default(), nil)
+	probe := &DelegationProbe{Registry: registry}
+
+	if got := probe.FindMachineForApp(context.Background(), "user-1", workerservice.AppIdClaudeCode); got != "" {
+		t.Fatalf("found %q with nothing online", got)
+	}
+
+	w := &workerservice.Worker{
+		RegistrationId: "reg-a",
+		OwnerUserId:    "user-1",
+		Capabilities:   []string{workerservice.CapabilityHeadless},
+	}
+	w.SetApps([]workerservice.AppInfo{
+		{Id: workerservice.AppIdClaudeCode, Version: "2.1", Allowed: true, SignedIn: false},
+	})
+	registry.Add(w)
+	if got := probe.FindMachineForApp(context.Background(), "user-1", workerservice.AppIdClaudeCode); got != "" {
+		t.Fatalf("probe found %q for an app that is not signed in", got)
+	}
+
+	w.SetApps([]workerservice.AppInfo{
+		{Id: workerservice.AppIdClaudeCode, Version: "2.1", Allowed: true, SignedIn: true},
+	})
+	if got := probe.FindMachineForApp(context.Background(), "user-1", workerservice.AppIdClaudeCode); got != "reg-a" {
+		t.Fatalf("probe = %q, want reg-a", got)
+	}
+
+	// Another user's machine is never offered.
+	if got := probe.FindMachineForApp(context.Background(), "user-2", workerservice.AppIdClaudeCode); got != "" {
+		t.Fatalf("probe crossed a user boundary: %q", got)
+	}
+}
+
+// TestAppVendorIsNamed: the ledger groups by vendor across metered and
+// subscription spend, so an app whose vendor is unknown must say so
+// rather than borrowing somebody else's name.
+func TestAppVendorIsNamed(t *testing.T) {
+	for app, want := range map[string]string{
+		workerservice.AppIdClaudeCode: "anthropic",
+		workerservice.AppIdCodex:      "openai",
+		"something-else":              "unknown",
+	} {
+		if got := appVendor(app); got != want {
+			t.Errorf("appVendor(%q) = %q, want %q", app, got, want)
+		}
+	}
+}

@@ -61,15 +61,23 @@ mutate task createSemanticTask {
     phase           string
     dependsOn       []string
     input           object!
+    /// inProcess (the default) or containerExecutor when the delegation
+    /// triage found a machine with an allowed, signed-in app online.
+    executionSurface  string  @enum("inProcess", "containerExecutor")
+    /// The registered backend, e.g. "cockpit-app:claude-code". Empty for
+    /// an inProcess task.
+    executorBackend   string
+    /// Why this Task got the surface it did -- recorded on BOTH branches.
+    delegationReason  string
   }
   insert {
-    accept { planId, kind, seq, phase, logicalStepId, dependsOn, input }
+    accept { planId, kind, seq, phase, logicalStepId, dependsOn, input, executorBackend, delegationReason }
     stamp {
       id: args.taskId
       category: "semantic"
       status: "queued"
       attemptNumber: args.attemptNumber ?? 1
-      executionSurface: "inProcess"
+      executionSurface: args.executionSurface ?? "inProcess"
     }
   }
 }
@@ -417,6 +425,8 @@ mutate task createTask {
     phase             string
     executionSurface  string
     executorBackend   string
+    /// Why this Task got the surface it did (memql#4362).
+    delegationReason  string
     input             object!
   }
   insert {
@@ -433,6 +443,7 @@ mutate task createTask {
     args.phase
     executionSurface: args.executionSurface ?? "inProcess"
     args.executorBackend
+    args.delegationReason
     args.input
   }
 }

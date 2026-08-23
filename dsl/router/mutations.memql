@@ -33,9 +33,13 @@ mutate call recordRouterCall {
     errorCategory       string
     errorMessage        string
     fallbackFromModel   string
+    /// Who paid: metered | subscription | unknown. Absent reads as metered.
+    billing             string  @enum("metered", "subscription", "unknown")
+    /// Where the call ran; empty for MemQL's own provider calls.
+    executionSurface    string
   }
   insert {
-    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel }
+    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, billing, executionSurface }
     stamp {
       id: args.callId
     }

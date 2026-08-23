@@ -167,7 +167,9 @@ func (a *App) setupCockpitAppExecutor(
 	if err != nil {
 		a.fatal("cockpit-app executor: build failed", "error", err)
 	}
-	agentworker.InstallCockpitAppExecutor(exec)
+	agentworker.InstallCockpitAppExecutor(
+		exec.WithLedger(&agentworker.LedgerWriter{Engine: a.engine}),
+	)
 	a.Logger.Info("cockpit-app container executor installed",
 		"mcp_endpoint", mcpEndpoint,
 		"credential_minter", minter != nil,
