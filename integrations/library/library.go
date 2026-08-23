@@ -50,6 +50,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -578,10 +579,13 @@ func mergeLabelAdd(labels []string, label string) (merged []string, changed bool
 			return labels, false
 		}
 	}
-	out := make([]string, 0, len(labels)+1)
-	out = append(out, labels...)
-	out = append(out, label)
-	return out, true
+	// slices.Clone rather than make([]string, 0, len(labels)+1): CodeQL's
+	// go/allocation-size-overflow traces a taint path from the caller's
+	// label set to that capacity arithmetic. The overflow is not reachable
+	// -- it needs len(labels) at MaxInt, which is one API call per label --
+	// but this repo's code-scanning dashboard is at zero open alerts, and a
+	// dashboard nobody trusts is worth less than the arithmetic saved.
+	return append(slices.Clone(labels), label), true
 }
 
 // mergeLabelRemove returns labels with label dropped if present.
