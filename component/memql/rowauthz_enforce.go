@@ -123,13 +123,49 @@ func rowAuthzPredicateExpr(decl *langparser.RowAuthzDecl) (ExpressionNode, error
 // the injected term in place -- rewriteFilterFieldRefs does exactly that,
 // turning the bare `ownerUserId` into `payload.ownerUserId` -- cannot
 // corrupt the cache entry every later query is handed.
+//
+// It RECURSES, and that is not a tidy-up. Until the composite tier
+// (memql#4312) every rendered predicate was a single comparison, so a
+// one-level copy was a complete copy and the shape of the function said
+// so. The composite renders a disjunction; a one-level copy of it copies
+// the LogicalExpression and shares both branches, so the first query to
+// rewrite `requestedBy` -> `payload.requestedBy` would rewrite it inside
+// the cache -- and the second query over the concept would get a term
+// reading `payload.payload.requestedBy`. Silent, and it narrows to
+// nothing rather than failing.
 func cloneRowAuthzPredicate(expr ExpressionNode) ExpressionNode {
-	cmp, ok := expr.(*ComparisonExpression)
-	if !ok {
+	switch n := expr.(type) {
+	case *ComparisonExpression:
+		copied := *n
+		return &copied
+	case *LogicalExpression:
+		copied := *n
+		copied.Left = cloneRowAuthzPredicate(n.Left)
+		copied.Right = cloneRowAuthzPredicate(n.Right)
+		return &copied
+	default:
+		// A SpecReferenceExpression (the granted tier) carries a name and
+		// nothing mutable; anything else is a node this renderer does not
+		// produce. Returning it as-is preserves today's behaviour for both.
 		return expr
 	}
-	copied := *cmp
-	return &copied
+}
+
+// stampRowAuthzConcept marks every comparison in an injected term with the
+// concept whose declaration produced it.
+//
+// One stamp per comparison, because the composite tier's term has TWO --
+// the owner equality and the admin gate -- and the canonicalize-RHS pass
+// runs over whichever it finds. See ComparisonExpression.RowAuthzConcept
+// for why an unstamped injected term matches nothing at all.
+func stampRowAuthzConcept(expr ExpressionNode, conceptName string) {
+	switch n := expr.(type) {
+	case *ComparisonExpression:
+		n.RowAuthzConcept = conceptName
+	case *LogicalExpression:
+		stampRowAuthzConcept(n.Left, conceptName)
+		stampRowAuthzConcept(n.Right, conceptName)
+	}
 }
 
 // enforceRowAuthzOnPlan ANDs the plan's declared tier into its root.
@@ -169,9 +205,7 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 	// is an @relationship -- so the term would compare the bare
 	// `actor.userId` against a canonical stored `v1:identity:user:<id>`
 	// and match nothing at all.
-	if cmp, isCmp := predicate.(*ComparisonExpression); isCmp {
-		cmp.RowAuthzConcept = conceptName
-	}
+	stampRowAuthzConcept(predicate, conceptName)
 	plan.Root = &LogicalExpression{Op: LogicalAnd, Left: plan.Root, Right: predicate}
 	plan.RowAuthzInjected = true
 	plan.RowAuthzConcept = conceptName
@@ -291,7 +325,22 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 		caller := strings.TrimSpace(rowAuthzActorUserId(ctx))
 		if caller == "" {
 			// Finding 4 again, on the row side: no identity, no rows.
+			//
+			// CHECKED BEFORE the composite bypass below, deliberately. A
+			// caller with no access context resolves isClusterOwner as
+			// false (memql#2801), so the order does not change the answer
+			// today -- but "no identity, no rows" is the stronger of the
+			// two statements and reading it first is what keeps it true if
+			// the envelope ever learns to answer differently.
 			return rowAuthzDeny
+		}
+		// The COMPOSITE tier (memql#4312), `owner="<field>", clusterOwner`:
+		// the owner, OR a cluster owner. Checked before the owner
+		// comparison because the admin branch does not read the owner field
+		// at all -- a row that cannot say who owns it is still an
+		// administrable row.
+		if decl.ClusterOwnerBypass && rowAuthzIsClusterOwner(ctx) {
+			return rowAuthzAdmit
 		}
 		if strings.TrimSpace(decl.Owner) == langparser.RowAuthzSelfOwnedField {
 			// SELF-OWNED (memql#3029): the row IS the owner, so the

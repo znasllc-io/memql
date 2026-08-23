@@ -196,7 +196,15 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 		// An empty filter guarantees nothing, so a query with no clause can
 		// never classify as owned/admin on this path.
 		hasAdmin = hasAdmin && ClauseGuarantees(clause, AdminGateLeaf)
-		hasOwner = hasOwner && ClauseGuarantees(clause, OwnerScopeLeaf)
+		// The COMPOSITE row-authz tier (memql#4312) is spelled
+		// `<owner>==actor.userId || actor.isClusterOwner==true`, on which
+		// neither leaf holds across both arms while their DISJUNCTION holds on
+		// every one. Without the second test that shape falls through to the
+		// flagged bucket -- so the one filter an author adjudicating a
+		// composite-declared read is asked to write would be reported ungated,
+		// which trains a reader to ignore the bucket.
+		hasOwner = hasOwner && (ClauseGuarantees(clause, OwnerScopeLeaf) ||
+			ClauseGuarantees(clause, CallerScopeLeaf))
 	}
 	switch {
 	case hasOwner:
@@ -234,6 +242,14 @@ func adminCompositionViolation(path string, c construct, clause string) (Violati
 		return Violation{}, false
 	}
 	if ClauseGuarantees(clause, AdminGateLeaf) {
+		return Violation{}, false
+	}
+	// The COMPOSITE row-authz tier's own predicate (memql#4312). Every arm is
+	// either the ownership term or the admin gate, so a false gate leaves the
+	// caller's own rows rather than everybody's -- the floor, not a way around
+	// it. See CallerScopeLeaf for why this does not readmit the fail-open
+	// shape this gate was written for.
+	if ClauseGuarantees(clause, CallerScopeLeaf) {
 		return Violation{}, false
 	}
 	return Violation{

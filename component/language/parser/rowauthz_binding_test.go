@@ -624,3 +624,120 @@ func TestRewriteRowAuthzOutputLoadsBack(t *testing.T) {
 		t.Fatalf("rewritten source declares %+v, want %+v", *got, want)
 	}
 }
+
+// ---- the composite tier (memql#4312) ----
+
+// `@rowAuthz(owner="<field>", clusterOwner)` -- "the owner, or a cluster
+// owner". The two arguments are order-independent, because an annotation
+// argument list is a MAP: there is no order to depend on, and a form that
+// parsed one way round and not the other would be a lie about the grammar.
+func TestParseRowAuthzAcceptsTheCompositeTier(t *testing.T) {
+	want := RowAuthzDecl{Tier: RowAuthzOwned, Owner: "requestedBy", ClusterOwnerBypass: true}
+	for _, line := range []string{
+		`@rowAuthz(owner="requestedBy", clusterOwner)`,
+		`@rowAuthz(clusterOwner, owner="requestedBy")`,
+	} {
+		t.Run(line, func(t *testing.T) {
+			got, err := ParseRowAuthz(rowAuthzAttr(t, line))
+			if err != nil {
+				t.Fatalf("ParseRowAuthz(%s): unexpected error: %v", line, err)
+			}
+			if *got != want {
+				t.Fatalf("ParseRowAuthz(%s) = %+v, want %+v", line, *got, want)
+			}
+		})
+	}
+}
+
+// The single-argument forms keep EXACTLY today's meaning. The composite
+// is an addition, and the one way to get it wrong that would not show up
+// as a parse failure is to make `owner=` alone start carrying the bypass.
+func TestParseRowAuthzSingleArgumentFormsAreUnchangedByTheComposite(t *testing.T) {
+	got, err := ParseRowAuthz(rowAuthzAttr(t, `@rowAuthz(owner="ownerUserId")`))
+	if err != nil {
+		t.Fatalf("ParseRowAuthz: %v", err)
+	}
+	if got.ClusterOwnerBypass {
+		t.Fatal(`@rowAuthz(owner="ownerUserId") parsed WITH the cluster-owner bypass. ` +
+			"The plain owned tier admits the owner and nobody else; silently widening it " +
+			"to every cluster owner would change what 31 declared concepts return without " +
+			"a single declaration being edited.")
+	}
+	if got.Tier != RowAuthzOwned || got.Owner != "ownerUserId" {
+		t.Fatalf("plain owned tier drifted: %+v", *got)
+	}
+}
+
+// Any OTHER two-argument combination is refused, and the diagnostic names
+// the forms that are accepted.
+func TestParseRowAuthzRejectsNonCompositeCombinations(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+	}{
+		{"public plus clusterOwner", `@rowAuthz(public, clusterOwner)`},
+		{"owner plus public", `@rowAuthz(owner="ownerUserId", public)`},
+		{"via plus clusterOwner", `@rowAuthz(via="spaceMember", clusterOwner)`},
+		{"owner plus via", `@rowAuthz(owner="ownerUserId", via="spaceMember")`},
+		{"clusterOwner carrying a value", `@rowAuthz(owner="ownerUserId", clusterOwner="yes")`},
+		{"owner as a flag beside clusterOwner", `@rowAuthz(owner, clusterOwner)`},
+		{"empty owner beside clusterOwner", `@rowAuthz(owner="", clusterOwner)`},
+		{"three arguments", `@rowAuthz(owner="ownerUserId", clusterOwner, public)`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRowAuthz(rowAuthzAttr(t, tc.line))
+			if err == nil {
+				t.Fatalf("ParseRowAuthz(%s): want error, got nil", tc.line)
+			}
+			// Every refusal has to say what IS accepted; a bare "invalid"
+			// leaves the author guessing at a security declaration.
+			if !strings.Contains(err.Error(), `owner="<field>", clusterOwner`) {
+				t.Fatalf("ParseRowAuthz(%s) error = %q, want it to name the accepted composite form",
+					tc.line, err)
+			}
+		})
+	}
+}
+
+// The codemod emits through FormatRowAuthz and the loader reads through
+// ParseRowAuthz; the composite has to survive that round trip like every
+// other form, or a re-run writes a tree the loader rejects.
+func TestRowAuthzCompositeFormatParseRoundTrip(t *testing.T) {
+	want := RowAuthzDecl{Tier: RowAuthzOwned, Owner: "actorUserId", ClusterOwnerBypass: true}
+	line, err := FormatRowAuthz(want)
+	if err != nil {
+		t.Fatalf("FormatRowAuthz(%+v): %v", want, err)
+	}
+	if line != `@rowAuthz(owner="actorUserId", clusterOwner)` {
+		t.Fatalf("FormatRowAuthz(%+v) = %q, want the canonical composite spelling", want, line)
+	}
+	got, err := ParseRowAuthz(rowAuthzAttr(t, line))
+	if err != nil {
+		t.Fatalf("ParseRowAuthz(%s): %v", line, err)
+	}
+	if *got != want {
+		t.Fatalf("round trip of %+v via %q = %+v", want, line, *got)
+	}
+}
+
+// A bypass declared without an owner field is not a tier -- it is
+// `clusterOwner` with a stray flag -- and FormatRowAuthz must refuse it
+// rather than emit something ParseRowAuthz reads back differently.
+func TestFormatRowAuthzRejectsABypassWithNoOwner(t *testing.T) {
+	if _, err := FormatRowAuthz(RowAuthzDecl{Tier: RowAuthzOwned, ClusterOwnerBypass: true}); err == nil {
+		t.Fatal("FormatRowAuthz accepted a composite with no owner field")
+	}
+	// The bypass is meaningless on every other tier, and silently dropping
+	// it would let a caller believe it applied.
+	for _, d := range []RowAuthzDecl{
+		{Tier: RowAuthzPublic, ClusterOwnerBypass: true},
+		{Tier: RowAuthzClusterOwner, ClusterOwnerBypass: true},
+		{Tier: RowAuthzGranted, Spec: "spaceMember", ClusterOwnerBypass: true},
+	} {
+		if _, err := FormatRowAuthz(d); err == nil {
+			t.Fatalf("FormatRowAuthz(%+v): want error, got nil -- the bypass is an owned-tier "+
+				"argument and cannot be silently discarded", d)
+		}
+	}
+}

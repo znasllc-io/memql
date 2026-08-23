@@ -95,6 +95,13 @@ const (
 // the predicate, and a wrong spelling here is a wrong authorization outcome
 // rather than a wrong log line. That is why the self-owned arm below labours
 // over `row.id` versus a bare `id`.
+// rowAuthzClusterOwnerTerm is the admin gate, spelled once. The
+// standalone `clusterOwner` tier renders it alone and the composite
+// tier ORs it onto the owner comparison; two spellings of one gate is
+// how a renderer and a matcher drift into disagreeing about the very
+// thing they both exist to describe.
+const rowAuthzClusterOwnerTerm = "actor.isClusterOwner==true"
+
 func InjectedPredicate(decl *langparser.RowAuthzDecl) string {
 	if decl == nil {
 		return ""
@@ -110,12 +117,23 @@ func InjectedPredicate(decl *langparser.RowAuthzDecl) string {
 		// payload property named `id` and compiles to an entirely different
 		// SQL path -- a silently wrong predicate, which is the one outcome
 		// this renderer must never produce.
+		ownerTerm := decl.Owner + "==actor.userId"
 		if decl.Owner == langparser.RowAuthzSelfOwnedField {
-			return "row.id==actor.userId"
+			ownerTerm = "row.id==actor.userId"
 		}
-		return decl.Owner + "==actor.userId"
+		if decl.ClusterOwnerBypass {
+			// The COMPOSITE tier (memql#4312): "the owner, OR a cluster
+			// owner". Both arms are parenthesised rather than relying on
+			// `&&` binding tighter than `||`, because this string is ANDed
+			// into a plan root -- `a || b` ANDed with an author's filter
+			// must narrow to `(filter) && (a || b)`, and an unparenthesised
+			// rendering is one precedence surprise away from
+			// `(filter && a) || b`, which is WIDER than the filter alone.
+			return "(" + ownerTerm + ")||(" + rowAuthzClusterOwnerTerm + ")"
+		}
+		return ownerTerm
 	case langparser.RowAuthzClusterOwner:
-		return "actor.isClusterOwner==true"
+		return rowAuthzClusterOwnerTerm
 	case langparser.RowAuthzPublic:
 		return "" // public injects nothing, explicitly
 	case langparser.RowAuthzGranted:

@@ -110,6 +110,25 @@ type RowAuthzDecl struct {
 	// Spec is the relationship spec that grants visibility.
 	// Set only for RowAuthzGranted.
 	Spec string `json:"spec,omitempty"`
+	// ClusterOwnerBypass widens the owned tier to "the owner, OR a
+	// cluster owner" -- the COMPOSITE form
+	// `@rowAuthz(owner="<field>", clusterOwner)` (memql#4312).
+	//
+	// It is a FLAG ON THE OWNED TIER rather than a fifth RowAuthzTier
+	// value, and that is the load-bearing choice. "Who owns this row"
+	// must keep exactly one answer: every site that resolves an owner
+	// field -- the loader's owner-property validation
+	// (component/database/memory-nodes/concept_parser.go), the insert
+	// stamp (component/memql/rowauthz_insert_stamp.go), the actorless-read
+	// refusal, the conformance classifier's owned-tier bucket -- switches
+	// on Tier == RowAuthzOwned, and a new tier value would have silently
+	// fallen out of all four while looking like a tidy addition. The
+	// bypass is purely ADDITIVE: it ORs the cluster-owner gate onto the
+	// owner comparison and changes nothing else.
+	//
+	// Set only for RowAuthzOwned. On any other tier it is meaningless and
+	// FormatRowAuthz refuses it rather than dropping it silently.
+	ClusterOwnerBypass bool `json:"clusterOwnerBypass,omitempty"`
 }
 
 // The declaration forms. The two parameterised tiers use the house
@@ -125,6 +144,14 @@ type RowAuthzDecl struct {
 //	@rowAuthz(clusterOwner)
 //	@rowAuthz(owner="ownerUserId")
 //	@rowAuthz(via="spaceMember")
+//	@rowAuthz(owner="ownerUserId", clusterOwner)
+//
+// The last is the COMPOSITE form (memql#4312) and the only argument
+// list with two entries. It is not a fifth tier: it is the owned tier
+// carrying ClusterOwnerBypass, so "the owner, or a cluster owner". The
+// two arguments are order-independent because an attribute's argument
+// list is a MAP -- there is no order to depend on, and accepting one
+// spelling and not the other would be a lie about the grammar.
 //
 // The flag tiers and the keyword tiers occupy separate namespaces
 // inside the argument list, which is what leaves room for the escape
@@ -160,7 +187,50 @@ var rowAuthzKeywordTiers = map[string]RowAuthzTier{
 // rowAuthzSpellings renders the accepted forms for a diagnostic, in a
 // stable order.
 func rowAuthzSpellings() string {
-	return `@rowAuthz(public), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>")`
+	return `@rowAuthz(public), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner)`
+}
+
+// rowAuthzArgClusterOwner is the flag spelling that, BESIDE an `owner=`
+// argument, forms the composite tier. Named as a constant because two
+// places have to agree on it: the composite branch below, and the
+// flag-tier map where the same word means the standalone tier.
+const rowAuthzArgClusterOwner = "clusterOwner"
+
+// parseRowAuthzComposite reads the two-argument form
+// `@rowAuthz(owner="<field>", clusterOwner)`.
+//
+// It is the ONLY accepted argument list with more than one entry. Every
+// other pair names two tiers, which is not a wider tier but an ambiguous
+// declaration -- and an ambiguous authorization statement is the one
+// thing this parser must never resolve by picking a side.
+//
+// Returns (nil, false) when the args are not that shape, so the caller
+// emits the shared "takes exactly one tier" diagnostic with the composite
+// named among the accepted forms.
+func parseRowAuthzComposite(args map[string]any) (*RowAuthzDecl, bool) {
+	if len(args) != 2 {
+		return nil, false
+	}
+	rawOwner, hasOwner := args[rowAuthzArgOwner]
+	rawBypass, hasBypass := args[rowAuthzArgClusterOwner]
+	if !hasOwner || !hasBypass {
+		return nil, false
+	}
+	// `clusterOwner` must be the BARE flag: the parser stores a bare
+	// identifier as `true`. `clusterOwner="yes"` is a different shape and
+	// is not a spelling of this tier -- the same rule the single-argument
+	// flag branch applies.
+	if b, isBool := rawBypass.(bool); !isBool || !b {
+		return nil, false
+	}
+	owner, isString := rawOwner.(string)
+	if !isString {
+		return nil, false
+	}
+	if owner = strings.TrimSpace(owner); owner == "" {
+		return nil, false
+	}
+	return &RowAuthzDecl{Tier: RowAuthzOwned, Owner: owner, ClusterOwnerBypass: true}, true
 }
 
 // ParseRowAuthz is THE detector: it turns an `@rowAuthz(...)`
@@ -191,8 +261,16 @@ func ParseRowAuthz(attr *Attribute) (*RowAuthzDecl, error) {
 			RowAuthzAnnotation, rowAuthzSpellings())
 	}
 	if len(attr.Args) > 1 {
-		return nil, fmt.Errorf("@%s takes exactly one tier, got %d (%s) -- a concept declares a single floor",
-			RowAuthzAnnotation, len(attr.Args), strings.Join(sortedArgNames(attr.Args), ", "))
+		// The one legal multi-argument list: the COMPOSITE tier
+		// (memql#4312). "The owner, or a cluster owner" is a single floor
+		// -- it is the owned tier with the admin gate ORed in, not two
+		// tiers -- so it does not violate the rule the message below
+		// states.
+		if decl, ok := parseRowAuthzComposite(attr.Args); ok {
+			return decl, nil
+		}
+		return nil, fmt.Errorf("@%s takes exactly one tier, got %d (%s) -- a concept declares a single floor. Write one of: %s",
+			RowAuthzAnnotation, len(attr.Args), strings.Join(sortedArgNames(attr.Args), ", "), rowAuthzSpellings())
 	}
 
 	// Exactly one entry; pull it out.
@@ -268,12 +346,24 @@ func sortedArgNames(m map[string]any) []string {
 // is by construction something ParseRowAuthz reads back to the same
 // decl -- the round-trip the loader/codemod agreement test asserts.
 func FormatRowAuthz(d RowAuthzDecl) (string, error) {
+	// ClusterOwnerBypass widens the OWNED tier and means nothing on any
+	// other. Refused rather than dropped: a renderer that silently
+	// discards half of a declaration emits something ParseRowAuthz reads
+	// back as a DIFFERENT decl, which is precisely the round-trip this
+	// function exists to guarantee.
+	if d.ClusterOwnerBypass && d.Tier != RowAuthzOwned {
+		return "", fmt.Errorf("@%s: the clusterOwner bypass is an argument of the owned tier -- it has no meaning on tier %q; write @%s(%s=\"<field>\", %s)",
+			RowAuthzAnnotation, d.Tier, RowAuthzAnnotation, rowAuthzArgOwner, rowAuthzArgClusterOwner)
+	}
 	switch d.Tier {
 	case RowAuthzPublic, RowAuthzClusterOwner:
 		return fmt.Sprintf("@%s(%s)", RowAuthzAnnotation, d.Tier), nil
 	case RowAuthzOwned:
 		if strings.TrimSpace(d.Owner) == "" {
 			return "", fmt.Errorf("@%s: tier %q needs an owner field", RowAuthzAnnotation, d.Tier)
+		}
+		if d.ClusterOwnerBypass {
+			return fmt.Sprintf("@%s(%s=%q, %s)", RowAuthzAnnotation, rowAuthzArgOwner, d.Owner, rowAuthzArgClusterOwner), nil
 		}
 		return fmt.Sprintf("@%s(%s=%q)", RowAuthzAnnotation, rowAuthzArgOwner, d.Owner), nil
 	case RowAuthzGranted:
