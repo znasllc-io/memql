@@ -83,7 +83,13 @@ export function useArtifacts(label: string): ArtifactsState {
   const { query } = useCluster();
   const [allRows, setAllRows] = useState<Row[]>([]);
   const [filteredRows, setFilteredRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true: a fetch is effectively in flight from the moment this hook
+  // mounts (or is about to be, the instant a connection exists), so "loading"
+  // is the honest initial state -- not "confirmed empty," which is what
+  // false would silently claim before any read has even been attempted. See
+  // the useEffect below for why `query === null` must not override this
+  // back to false either.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [epoch, setEpoch] = useState(0);
   const [createBusy, setCreateBusy] = useState(false);
@@ -92,10 +98,15 @@ export function useArtifacts(label: string): ArtifactsState {
 
   useEffect(() => {
     if (query === null) {
-      setAllRows([]);
-      setFilteredRows([]);
-      setLoading(false);
-      setError("");
+      // Not yet connected -- NOT a definitive "no artifacts" answer. Leave
+      // `loading` exactly as it is (true from mount, or from a read this
+      // effect already has outstanding) rather than asserting emptiness
+      // before a read has even been attempted. Fix round 1: this branch
+      // used to force loading=false here, which is what let the empty
+      // state render on the very first paint, before the connection (let
+      // alone the read) had a chance to happen -- on every single visit,
+      // not just a rare race, because `query` is genuinely null for at
+      // least the first render of every mount.
       return;
     }
     let live = true;
@@ -150,13 +161,7 @@ export function useArtifacts(label: string): ArtifactsState {
           title: input.title,
           summary: omitBlank(input.summary),
           body: omitBlank(input.body),
-          // None of the four provenance values names "typed directly into
-          // the portal's create form" -- the enum was written for
-          // workbench / computer-use / agent producers
-          // (dsl/library/mutations.memql). "derived" is the least-wrong of
-          // the four: it is the one value that does not falsely attribute
-          // the output to a pipeline that did not produce it.
-          source: "derived",
+          source: "user_created",
         })
         .then(() => {
           setCreateMessage(
@@ -213,7 +218,12 @@ export interface ArtifactDetailState {
 export function useArtifactDetail(artifactId: string): ArtifactDetailState {
   const { query } = useCluster();
   const [artifact, setArtifact] = useState<Row | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Starts true, for the same reason useArtifacts' does: a fetch is
+  // effectively in flight from mount, so "loading" is the truthful initial
+  // state. See the useEffect below for why an empty artifactId and a null
+  // query are handled as two DIFFERENT cases rather than one combined
+  // guard -- only the first is a genuine terminal answer.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
   const [labelBusy, setLabelBusy] = useState(false);
@@ -221,11 +231,24 @@ export function useArtifactDetail(artifactId: string): ArtifactDetailState {
   const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
-    if (query === null || artifactId === "") {
+    if (artifactId === "") {
+      // Structurally nothing to fetch, ever, given the current route -- a
+      // genuine terminal state, unlike the connection race below.
       setArtifact(null);
       setLoading(false);
       setError("");
       setLabels([]);
+      return;
+    }
+    if (query === null) {
+      // Not yet connected -- NOT a definitive "no artifact" answer. Leave
+      // `loading` exactly as it is (true from mount, or from a read this
+      // effect already has outstanding) rather than asserting "not found"
+      // before a read has even been attempted. Fix round 1: this used to be
+      // one combined guard with the branch above, which forced loading=false
+      // and artifact=null here too -- rendering "No artifact has that id"
+      // for a perfectly valid id, on every single visit (query is null for
+      // at least the first render of every mount), not just a rare race.
       return;
     }
     let live = true;

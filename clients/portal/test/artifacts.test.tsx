@@ -238,6 +238,33 @@ describe("the artifacts list", () => {
     await waitFor(() => expect(screen.getByText(/No artifacts yet/)).toBeTruthy());
   });
 
+  // Fix round 1 (CRITICAL/IMPORTANT review findings). Deliberately no
+  // preceding await/waitFor before the first assertion in each of these two
+  // tests: render() returns before the fake connection's dial() has
+  // resolved, so `query` is genuinely still null at that exact point --
+  // true on every mount, not a rare race. Before the fix, useArtifacts'
+  // `loading` initialized to false AND its query===null effect branch
+  // re-asserted false, so this frame rendered the empty state on every
+  // single visit to /artifacts, including a perfectly populated one. These
+  // tests fail against that code and pass against the fix (verified by
+  // temporarily reverting useArtifacts.ts to its pre-fix-round-1 content and
+  // re-running).
+  it("does not flash the empty state before the read has even started", async () => {
+    renderAt("/artifacts");
+    expect(screen.queryByText(/No artifacts yet/)).toBeNull();
+    // Drain the pending connect + read so no async work is left dangling
+    // for a later test to trip over.
+    await waitFor(() =>
+      expect(screen.getAllByText("Ten most beautiful birds").length).toBeGreaterThan(0),
+    );
+  });
+
+  it("does not flash the label-filtered empty state before the read has even started", async () => {
+    renderAt("/artifacts?label=finance");
+    expect(screen.queryByText(/No artifacts labelled/)).toBeNull();
+    await waitFor(() => expect(screen.getAllByText("Q3 budget").length).toBeGreaterThan(0));
+  });
+
   it("shows an error state when the read fails", async () => {
     renderAt("/artifacts", ARTIFACT_ROWS, { failArtifacts: true });
     await waitFor(() => expect(screen.getByText(/Could not read artifacts/)).toBeTruthy());
@@ -269,6 +296,12 @@ describe("the artifacts list", () => {
     const call = callsNamed(calls, "createGeneratedOutput")[0] ?? "";
     expect(call.startsWith("mutation createGeneratedOutput(")).toBe(true);
     expect(call).toContain(`title: "September notes"`);
+    // Fix round 1 (CRITICAL): "derived" persists into the artifact index
+    // row's own `source` field and renders as its permanent provenance
+    // label -- a person's own portal-authored artifact must never carry a
+    // label claiming a tool computed it from another artifact.
+    expect(call).toContain(`source: "user_created"`);
+    expect(call).not.toContain(`source: "derived"`);
     // Never libraryArtifacts / createArtifact directly -- a bare index row has
     // nothing behind it and renders as broken (D5).
     expect(callsNamed(calls, "createArtifact").length).toBe(0);
@@ -279,6 +312,19 @@ describe("the artifacts list", () => {
 describe("the artifact detail", () => {
   it("renders at /artifacts/:artifactId", async () => {
     renderAt("/artifacts/artifact-aaa");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Ten most beautiful birds" })).toBeTruthy(),
+    );
+  });
+
+  // Fix round 1: same shape as the list page's pair above, and the same
+  // reason -- useArtifactDetail's query===null branch used to force
+  // loading=false and artifact=null together, so a perfectly valid id
+  // rendered "No artifact has that id" on every visit, for the entire
+  // window before the connection (let alone the read) resolved.
+  it("does not flash 'not found' before the read has even started", async () => {
+    renderAt("/artifacts/artifact-aaa");
+    expect(screen.queryByText(/No artifact has that id/)).toBeNull();
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Ten most beautiful birds" })).toBeTruthy(),
     );
