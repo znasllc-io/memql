@@ -42,6 +42,11 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runNodeTokenSubcommand(args[1:])
 	case "service-account-token":
 		return true, runServiceAccountTokenSubcommand(args[1:])
+	// Available on EVERY node binary (memql#4335): it reports the VENDOR
+	// credential this particular node holds, and the answer can differ per
+	// node, which is what makes running it per node worth anything.
+	case "provider-auth":
+		return true, runProviderAuthSubcommand(args[1:])
 	}
 	return false, 0
 }

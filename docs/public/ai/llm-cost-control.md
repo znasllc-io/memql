@@ -69,6 +69,31 @@ so the process backstop is **opt-in**. The on-by-default conservative
 protection is the per-scope latch (Layer 4). Local repro:
 `MEMQL_LLM_MAX_TOTAL_CALLS=20`.
 
+### What the guard deliberately does NOT count: the federation token exchange
+
+Once a cluster authenticates to Anthropic by workload identity federation
+(memql#4333), one more request leaves the process through this same
+`guardedTransport`: the SDK's `POST /v1/oauth/token`, which trades the pod's
+projected Kubernetes token for a one-hour bearer. It is **outside the guard's
+fingerprint by design** — `isGuardedLLMPath` matches only `/messages` and
+`/chat/completions`, and a test holds that the exchange path is not one of
+them.
+
+That is not an oversight to be tidied up later, and it must not be "fixed":
+the exchange spends no tokens and has no completion to price, so costing it
+would inflate a budget meant to bound spend. Worse, it is byte-identical every
+time and happens on a schedule, which is precisely the shape the loop breaker
+exists to stop — guarding it would let a routine hourly refresh trip the
+breaker and take the cluster's Claude access down, in the name of cost control
+that saved nothing.
+
+It is not unobserved, though. It has its own counter,
+`memql_ai_federation_exchanges_total{outcome=ok|denied|error}`, and a denial
+logs Anthropic's own error body. Alert on `denied`: the last good bearer keeps
+working until it expires, so a broken credential does not surface as an outage
+for up to an hour after the change that caused it. Runbook:
+[../operate/auth/anthropic-federation.md](../operate/auth/anthropic-federation.md).
+
 ## Layer 2 — automation budget
 
 A misfiring automation (one that re-fires on its own failure, or a

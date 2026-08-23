@@ -61,12 +61,32 @@ registry, or the environment — never in application logic.
 | TLS cert source | mkcert `*.memql.localhost` (`memql-front-door-tls`) | cert-manager / Let's Encrypt |
 | Ingress controller | k3s-bundled **traefik** (`serversscheme: h2c`) | **nginx** (`backend-protocol: GRPC`) |
 | Secrets source | `make secrets` writes `memql-secrets` directly | External Secrets + Key Vault |
+| Credential source for a vendor | Anthropic API key | Anthropic workload identity federation |
 
 Everything in this table is a config cell. The topology above it is untouched.
 The ingress-controller row is the one place the *manifest* genuinely differs
 (k3d ships traefik, the cloud runs nginx) — that divergence is annotation-level,
 sits entirely below the connection abstraction, and is the same divergence
 accepted for every host (`identity.memql.localhost`, `api.memql.localhost`).
+
+The **credential-source** row is the newest one and passes the same test the
+others do, so it is worth saying exactly how (memql#4333). The manifests are
+IDENTICAL: `deploy/k8s/base` gives every engine Deployment the same
+`memql-engine` ServiceAccount, the same projected `anthropic-identity` token
+volume with audience `https://api.anthropic.com`, and the same
+`MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE`. What varies is four ids in one
+ConfigMap: the cloud overlay fills them, the local overlay leaves them empty,
+and empty means "not federating", so `make up` keeps booting on the API key
+with the very YAML the cloud runs. The engine branches on the VALUES, never on
+a target — there is no environment for it to read, and
+`TestNoEnvironmentBranchingInEngineCode` still holds.
+
+The reason local cannot federate is a fact about k3d rather than a choice:
+its OIDC issuer is `https://kubernetes.default.svc.cluster.local`, whose JWKS
+sits on a node IP Anthropic cannot reach. The alternative (`inline` JWKS mode)
+would mean registering an issuer per developer cluster and re-pasting it after
+every `make up-refresh` — not a reproducible path. Runbook:
+[auth/anthropic-federation.md](auth/anthropic-federation.md).
 
 ## The connection model in practice
 

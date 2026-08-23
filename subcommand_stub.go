@@ -34,6 +34,11 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runRecoveryKeySubcommand(args[1:])
 	case "backup":
 		return true, runBackupSubcommand(args[1:])
+	// Available on EVERY node binary (memql#4335): it reports the VENDOR
+	// credential this particular node holds, and the answer can differ per
+	// node, which is what makes running it per node worth anything.
+	case "provider-auth":
+		return true, runProviderAuthSubcommand(args[1:])
 	case "voice-agent-token":
 		fmt.Fprintln(os.Stderr, "voice-agent-token requires the identity binary (build with -tags identity).")
 		return true, 2

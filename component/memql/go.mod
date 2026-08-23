@@ -40,6 +40,15 @@ require (
 )
 
 require (
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/prometheus/client_golang v1.24.1 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/common v0.70.1 // indirect
+	github.com/prometheus/procfs v0.21.1 // indirect
+)
+
+require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -60,6 +69,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/metrics v0.0.0
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
@@ -116,3 +126,5 @@ replace github.com/znasllc-io/memql/docs => ../../docs
 replace github.com/znasllc-io/memql/dsl => ../../dsl
 
 replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
+
+replace github.com/znasllc-io/memql/component/metrics => ../metrics

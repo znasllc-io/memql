@@ -256,6 +256,37 @@ Live `--apply` stays owner-gated. See
 [deploy-bundle-runbook.md](deploy-bundle-runbook.md). No
 `overlays/cloud`. No `top`. No extra monitoring addon.
 
+## Anthropic: federate instead of seeding a key (optional, after bring-up)
+
+`MEMQL_AI_ANTHROPIC_API_KEY` is one of the keys `memql-secrets` carries at
+bring-up. It can be removed entirely once the cluster authenticates to
+Anthropic by workload identity federation: the pod presents the token
+Kubernetes projects for it and Anthropic returns a one-hour bearer, so no
+long-lived vendor credential is left in the cluster.
+
+The manifests are already in place -- `deploy/k8s/base` gives every engine
+Deployment the `memql-engine` ServiceAccount, the projected
+`anthropic-identity` token and the empty `memql-anthropic-federation`
+ConfigMap -- so the cutover is Console work plus three ids in the overlay.
+
+Four values join this instance's per-cluster install values, alongside the
+domain, the DB identity client id and the mail tenant ids:
+
+```
+MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID    fdrl_...
+MEMQL_AI_ANTHROPIC_ORGANIZATION_ID       <organization uuid>
+MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID    svac_...
+MEMQL_AI_ANTHROPIC_WORKSPACE_ID          (usually empty)
+```
+
+They are bound to THIS cluster's OIDC issuer. A re-created cluster gets a new
+issuer, which invalidates the federation rule -- record them with the rest of
+the per-cluster values, and expect to redo the Console steps if the cluster is
+rebuilt.
+
+Steps, deny reasons and the verification command:
+[auth/anthropic-federation.md](auth/anthropic-federation.md).
+
 ## Mail: the Graph sender lives on the mailbox tenant
 
 Magic links, invitations and admin notifications leave the identity

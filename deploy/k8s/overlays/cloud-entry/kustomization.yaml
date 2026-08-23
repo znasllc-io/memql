@@ -151,6 +151,32 @@ patches:
           inheritFromAzureAD: true
       - { op: replace, path: /spec/retentionPolicy, value: "30d" }
 
+  # ANTHROPIC WORKLOAD IDENTITY FEDERATION -- the four ids (memql#4336).
+  #
+  # These are the ONLY per-cluster values federation needs, and they are values
+  # rather than shape: the ServiceAccount, the projected token and the mount
+  # path are in the base and identical everywhere, so the local cluster runs
+  # this same YAML with these four left empty and keeps booting on the API key
+  # (docs/public/operate/environment-parity.md -- credential source for a
+  # vendor is an allowed value difference).
+  #
+  # FILL THESE FROM THE CONSOLE, NOT FROM ANOTHER CLUSTER. They identify one
+  # federation rule bound to one cluster's OIDC issuer; a re-created cluster
+  # has a NEW issuer and needs a new rule and new ids. Step 3 of
+  # docs/public/operate/auth/anthropic-federation.md.
+  #
+  # Leave a value as its REPLACE-WITH- placeholder and the engine treats the
+  # set as half-configured and REFUSES BOOT, naming what is missing. That is
+  # deliberate: the alternative is falling back to a key the cutover deletes.
+  #
+  # MEMQL_AI_ANTHROPIC_WORKSPACE_ID stays empty unless the rule spans more than
+  # one workspace (Anthropic answers workspace_id_required when it needs one).
+  - target: { kind: ConfigMap, name: memql-anthropic-federation }
+    patch: |
+      - { op: replace, path: /data/MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID, value: "REPLACE-WITH-ANTHROPIC-FEDERATION-RULE-ID" }
+      - { op: replace, path: /data/MEMQL_AI_ANTHROPIC_ORGANIZATION_ID, value: "REPLACE-WITH-ANTHROPIC-ORGANIZATION-ID" }
+      - { op: replace, path: /data/MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID, value: "REPLACE-WITH-ANTHROPIC-SERVICE-ACCOUNT-ID" }
+
 images:
   # Engine pins from v0.19.6 (actions run 32514995614). overlays/cloud
   # is untouched. MCP is omitted on purpose: replicas 0, so there is

@@ -144,6 +144,16 @@ var (
 		[]string{"concept"},
 	)
 
+	aiFederationExchanges = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "ai",
+			Name:      "federation_exchanges_total",
+			Help:      "Anthropic workload identity federation token exchanges (POST /v1/oauth/token), labelled by outcome: ok, denied (Anthropic refused the assertion -- 4xx; the reason is in the warn log and in the Console's authentication-events tab), error (the exchange never got an answer, or got a 5xx). This is NOT an LLM call: it is deliberately outside the guard's fingerprint, so it counts toward no rate ceiling and no cost budget (memql#4335). A steady low rate of `ok` is the healthy shape -- the SDK re-exchanges as a one-hour token nears expiry, so roughly one per token lifetime per client. ANY sustained `denied` means the cluster is running on a credential Anthropic will not renew: alert on it, because the last good token keeps working until it expires and the outage arrives up to an hour after the cause.",
+		},
+		[]string{"outcome"},
+	)
+
 	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "identity",
@@ -164,6 +174,7 @@ func init() {
 		identitySigningKeyAgeKnown,
 		identitySigningKeyRotationSupported,
 		subscriptionRowsDenied,
+		aiFederationExchanges,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about
@@ -345,4 +356,41 @@ func KeysetFingerprint(kids []string) float64 {
 	}
 	v &= (uint64(1) << 52) - 1 // keep float64-exact
 	return float64(v)
+}
+
+// Federation-exchange outcomes (memql#4335). Closed set: an outcome label is
+// a dimension of an alert, so it is these three and never a free string.
+const (
+	FederationExchangeOK     = "ok"
+	FederationExchangeDenied = "denied"
+	FederationExchangeError  = "error"
+)
+
+// AIFederationExchange records one Anthropic federation token exchange.
+//
+// Labelled by OUTCOME and by nothing else. The tempting extra labels -- the
+// federation rule id, the service account, the HTTP status -- are all either
+// unbounded or an identifier of a credential, and this series is scraped into
+// a store that is usually read more widely than the config is. The reason a
+// denial happened belongs in the warn log beside it, which carries Anthropic's
+// own error body.
+func AIFederationExchange(outcome string) {
+	aiFederationExchanges.WithLabelValues(outcome).Inc()
+}
+
+// AIFederationExchangesValue returns the current count for one outcome, for
+// tests.
+func AIFederationExchangesValue(outcome string) float64 {
+	var m dto.Metric
+	c, err := aiFederationExchanges.GetMetricWithLabelValues(outcome)
+	if err != nil {
+		return 0
+	}
+	if err := c.(prometheus.Metric).Write(&m); err != nil {
+		return 0
+	}
+	if m.Counter == nil {
+		return 0
+	}
+	return m.Counter.GetValue()
 }
