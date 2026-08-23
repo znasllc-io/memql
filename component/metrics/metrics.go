@@ -134,6 +134,16 @@ var (
 		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this series at a constant 0 because it holds no signing key, so an unqualified alert fires forever on most of the mesh and buries the one case this measures. 1 when this replica knows when its active signing key was really created, 0 when it does not. An env-provided seed (MEMQL_IDENTITY_SIGNING_KEY_B64) carries no creation date, so without MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT the only date available is process start -- which measures pod uptime, not key age. Alert on 0 WHERE app=\"identity\": key age is UNOBSERVABLE, not zero.",
 	})
 
+	subscriptionRowsDenied = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "subscription",
+			Name:      "rows_denied_total",
+			Help:      "Graph-subscription events dropped at fan-out because the subscribing stream's actor may not read the row, labelled by concept. Row admission on subscriptions landed in memql#4309; before it, a signed-in stream received every user's rows for any concept it subscribed to. A steady non-zero rate is NORMAL and means the gate is working -- it counts rows a stream asked for and was not entitled to. Alert on a SUSTAINED SPIKE against its own baseline, which is a client subscribing far wider than it can read, not on any non-zero value.",
+		},
+		[]string{"concept"},
+	)
+
 	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "identity",
@@ -153,6 +163,7 @@ func init() {
 		identitySigningKeyCreatedTimestamp,
 		identitySigningKeyAgeKnown,
 		identitySigningKeyRotationSupported,
+		subscriptionRowsDenied,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about
@@ -179,6 +190,33 @@ func init() {
 	identitySigningKeyCreatedTimestamp.Set(0)
 	identitySigningKeyAgeKnown.Set(0)
 	identitySigningKeyRotationSupported.Set(0)
+}
+
+// SubscriptionRowDenied records one graph-subscription event dropped at
+// fan-out because the subscribing stream may not read the row
+// (memql#4309).
+//
+// Labelled by CONCEPT and by nothing else. Concept ids are a closed,
+// low-cardinality set, so they are safe to label on; the row id and the
+// actor are not, and labelling by either would put the identifier of a row
+// somebody could not read into a metrics store that is usually read more
+// widely than the data is.
+func SubscriptionRowDenied(concept string) {
+	subscriptionRowsDenied.WithLabelValues(concept).Inc()
+}
+
+// SubscriptionRowsDeniedValue returns the current count for one concept,
+// for tests.
+func SubscriptionRowsDeniedValue(concept string) float64 {
+	var m dto.Metric
+	c, err := subscriptionRowsDenied.GetMetricWithLabelValues(concept)
+	if err != nil {
+		return 0
+	}
+	if err := c.(prometheus.Metric).Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
 }
 
 // SetIdentitySigningKey publishes the age surface for the ACTIVE Ed25519

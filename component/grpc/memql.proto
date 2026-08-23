@@ -705,6 +705,18 @@ message EventNotification {
   EventKind kind = 2;
   google.protobuf.Timestamp ts = 3;
   google.protobuf.Struct payload = 4;
+  // payload_omitted marks an ID-ONLY notification: the row's concept
+  // declares the `granted` row-authz tier, whose predicate is a
+  // relationship spec that cannot be decided against a single row in
+  // isolation (memql#4309, design D3). The engine sends
+  // {concept, id, action, createdAt} and nothing else; the client must
+  // re-read the row through the authorized read path, which performs the
+  // join, and drop the event when that read refuses.
+  //
+  // Dropping such an event silently instead would make a future granted
+  // concept's live feed die without a trace. A client that ignores this
+  // flag sees an event whose payload carries only those four keys.
+  bool payload_omitted = 5;
 }
 
 enum EventKind {

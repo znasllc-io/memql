@@ -58,6 +58,13 @@ var docNamedTests = []string{
 	// and because a security seam whose only test can be deleted without
 	// breaking anything is a seam that will be.
 	"TestTopLevelBuiltinAppliesTheRowGate",
+	// memql#4309. SUBSCRIPTIONS were the one egress of rows that never
+	// asked -- and, unlike the four above, they were missing from the
+	// enumeration in per-row-authz-audit.md as well as from the code, so
+	// the gap was unrecorded rather than accepted. Cited here so the doc
+	// has to keep saying that a declared tier gates the live feed too, and
+	// so the seam's only test cannot be deleted without breaking anything.
+	"TestSubscriptionFanOutAppliesTheRowGate",
 }
 
 func TestRowAuthzDocDoesNotClaimEnforcementIsInert(t *testing.T) {

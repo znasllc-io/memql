@@ -32,6 +32,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/component/provenance"
@@ -1161,6 +1162,47 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 	// left verbatim.
 	memqlengine.BareifyEventPayload(payload)
 
+	// ROW AUTHORIZATION (memql#4309). Subscriptions were the one egress of
+	// rows that never asked: this function matched a topic and sent the
+	// whole flattened payload, and for the concepts that declare a tier
+	// that is a leak the read path already refuses.
+	//
+	// Decided ONCE per event, not once per subscription: a stream holds
+	// exactly one access context, so every subscription on it reaches the
+	// same verdict and deciding inside the Range below would re-derive the
+	// same answer N times.
+	//
+	// Admission runs against the INTERNAL event payload, not the bare-ified
+	// wire copy built above -- that is the spelling the read path's gate
+	// sees. (sameRowAuthzOwner normalizes canonical against bare, so both
+	// would work; using the canonical one keeps this from depending on
+	// that.) Forwarded mesh events are re-published on the receiving node's
+	// bus, so this runs where the SUBSCRIBER is, with the subscriber's
+	// context, and needs no forwarding change.
+	admission := memqlengine.SubscriptionAdmit
+	if concept, rowId, rowPayload, isGraphRow := graphRowFromEvent(event); isGraphRow {
+		admission = memqlengine.AdmitSubscriptionRow(
+			context.Background(), s.currentAccess(), concept, rowId, rowPayload)
+		switch admission {
+		case memqlengine.SubscriptionDeny:
+			// Dropped silently for the subscriber: being told that a row
+			// exists which you may not read is itself a disclosure. The
+			// operator still sees it, at debug level and on a counter.
+			metrics.SubscriptionRowDenied(concept)
+			if s.logger != nil {
+				s.logger.Debug("subscription row denied at fan-out",
+					"topic", event.Topic, "concept", concept, "nodeId", rowId)
+			}
+			return
+		case memqlengine.SubscriptionIdOnly:
+			// The `granted` tier cannot be decided against one row: its
+			// predicate is a relationship spec needing the join a filter
+			// performs. Send the identity and let the client re-read
+			// through the authorized read path (design D3).
+			payload = idOnlyEventPayload(payload)
+		}
+	}
+
 	structPayload, err := structpb.NewStruct(payload)
 	if err != nil {
 		if s.logger != nil {
@@ -1209,6 +1251,7 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 			Kind:           events.ToProtoEventKind(event.Kind),
 			Ts:             timestamppb.New(event.Timestamp),
 			Payload:        structPayload,
+			PayloadOmitted: admission == memqlengine.SubscriptionIdOnly,
 		}
 
 		_ = s.sendServerMessage("", &memqlv1.MemqlServerMessage{
@@ -2041,6 +2084,43 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	}
 	if s.logger != nil {
 		s.logger.Info("handleSubscribe called", "kind", msg.GetKind().String(), "filter", msg.GetFilter(), "concept", msg.GetConcept())
+	}
+
+	// NON-GRAPH KINDS ARE OWNER/ADMIN-ONLY (memql#4311).
+	//
+	// TELEMETRY, MESSAGE and AI_STREAM carry NODE-LEVEL events: there is
+	// no row, so there is no owner, so the per-row gate the graph topics
+	// get at fan-out (memql#4309) has nothing to ask. ALL (`#`) is both --
+	// every node-level topic AND every graph topic. The only thing these
+	// subscriptions do carry is the caller, so the only honest place to
+	// decide them is here, against the caller's role.
+	//
+	// Refused as a DEVELOPER ERROR, not as a security event: a
+	// subscription-error notification carrying the PermissionDenied code
+	// and a reason, plus a log line and no audit row. Deliberately not a
+	// returned gRPC error -- that would tear down the whole stream, so a
+	// client that asked for one thing it may not have would lose every
+	// other request in flight on the same connection.
+	//
+	// An ALL subscription an admin does hold still passes each graph event
+	// through row admission at fan-out: the topic-prefix check there keys
+	// on the EVENT, not on the subscription's kind, so `#` cannot be used
+	// to reach rows a GRAPH_EVENTS subscription would have been denied.
+	if msg.GetKind() != memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS {
+		if !isOwnerOrAdmin(s.currentAccess()) {
+			if s.logger != nil {
+				s.logger.Info("subscription rejected: non-graph kind requires owner or admin",
+					"kind", msg.GetKind().String(),
+					"subscriptionId", strings.TrimSpace(msg.GetSubscriptionId()))
+			}
+			return s.sendEventNotification(envelope.GetMessageId(), strings.TrimSpace(msg.GetSubscriptionId()), "subscription-error", map[string]any{
+				"status": "error",
+				"code":   codes.PermissionDenied.String(),
+				"message": fmt.Sprintf(
+					"%s: subscription kind %s carries node-level events with no row owner to authorize against, so it is restricted to the owner and admin roles (memql#4311). Use SUBSCRIPTION_KIND_GRAPH_EVENTS, which is authorized per row at delivery.",
+					codes.PermissionDenied.String(), msg.GetKind().String()),
+			})
+		}
 	}
 
 	// Compose the bus topic pattern(s) SERVER-SIDE (#2460). Graph
