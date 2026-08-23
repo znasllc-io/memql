@@ -13179,6 +13179,28 @@ func TouchSessionBuild(args TouchSessionArgs) string {
 	return b.String()
 }
 
+// TouchWorkerSelected -- Stamp lastSelectedAt on the machine the router just picked. NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier already refuses a write onto a row the caller does not own, and @serverOnly would add a third entry to the server-only inventory to buy nothing beyond it. The residue is that a person could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin rotation, which is a preference they already control from the Fleet page.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["touchWorkerSelected"] in generated_concepts.go).
+type TouchWorkerSelectedArgs struct {
+	RegistrationId string
+}
+
+// TouchWorkerSelected calls the engine mutation touchWorkerSelected.
+func (qc *QueryClient) TouchWorkerSelected(ctx context.Context, args TouchWorkerSelectedArgs) (*Result, error) {
+	call := TouchWorkerSelectedBuild(args)
+	return qc.executeNamed(ctx, "touchWorkerSelected", call)
+}
+
+func TouchWorkerSelectedBuild(args TouchWorkerSelectedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation touchWorkerSelected(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // TouchWorkspace -- Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["touchWorkspace"] in generated_concepts.go).

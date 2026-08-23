@@ -3369,7 +3369,8 @@ func MyRoutingPoliciesBuild(args MyRoutingPoliciesArgs) string {
 	return "query myRoutingPolicies()"
 }
 
-// MyWorkersWithStatus -- The signed-in person's own machines. Backs /fleet/machines.
+// MyWorkersWithStatus -- The caller's own machines, with everything the router orders and filters on.
+// ONE QUERY FOR TWO READERS, and that is the point. The design had a separate `workersForOwnerWithStatus(ownerUserId)` for the router, @serverOnly because a caller-supplied owner id is not a caller check. It is not needed: the router has no caller of its own -- it dispatches on behalf of the session's owner -- and therefore already runs under auth.ContextWithUserActor for that owner. Reading `actor.userId` is then both simpler and strictly safer than accepting an argument: there is no id to supply, so there is nothing to enumerate, and no @serverOnly annotation to keep honest.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myWorkersWithStatus"] in generated_concepts.go).
 type MyWorkersWithStatusArgs struct {
@@ -4077,7 +4078,8 @@ func ProjectRequestsBuild(args ProjectRequestsArgs) string {
 	return b.String()
 }
 
-// ProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
+// ProvisionedWorkspaces -- The caller's provisioned workspaces. Filtered to status=provisioned so released rows don't clutter the view.
+// It was an unscoped "internal lifecycle sweep that must see all", and no Go sweep ever called it -- the release path is driven by the releaseWorkspaceOnPlanTerminal automation off a plan event, not by scanning. The operator inventory it was standing in for is allWorkspaces, which says so in its own gate.
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionedWorkspaces"] in generated_concepts.go).
 type ProvisionedWorkspacesArgs struct {
@@ -4409,6 +4411,24 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// RoutingPolicyForOwner -- The caller's active routing policy, or nothing when they never set one (the common case -- the router then applies firstFit + nextMatching).
+// Caller-scoped for the same reason myWorkersWithStatus is: the router runs under the session owner's actor, so an ownerUserId argument would be a caller-supplied id standing in for a caller check it already has.
+//
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["routingPolicyForOwner"] in generated_concepts.go).
+type RoutingPolicyForOwnerArgs struct {
+}
+
+// RoutingPolicyForOwner calls the engine query routingPolicyForOwner.
+func (qc *QueryClient) RoutingPolicyForOwner(ctx context.Context, args RoutingPolicyForOwnerArgs) (*Result, error) {
+	call := RoutingPolicyForOwnerBuild(args)
+	return qc.executeNamed(ctx, "routingPolicyForOwner", call)
+}
+
+func RoutingPolicyForOwnerBuild(args RoutingPolicyForOwnerArgs) string {
+	_ = args
+	return "query routingPolicyForOwner()"
 }
 
 // ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
@@ -5407,6 +5427,7 @@ func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
+// The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.go).
 type WorkerByIdentityIdArgs struct {
@@ -5472,7 +5493,7 @@ func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 	return b.String()
 }
 
-// WorkersForUser -- List all workers owned by a user.
+// WorkersForUser -- List all workers owned by a user. Caller-scoped: the supplied owner must be the actor.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workersForUser"] in generated_concepts.go).
 type WorkersForUserArgs struct {
@@ -5495,6 +5516,7 @@ func WorkersForUserBuild(args WorkersForUserArgs) string {
 }
 
 // WorkspaceForPlan -- Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.
+// The `ownerUserId==actor.userId` conjunct keeps this read's result set the SAME before and after the concept's tier is enforced (TestRowAuthzEnforcementLandGate). It is satisfied at runtime because the integration runs under auth.ContextWithUserActor for the parent plan's requestedBy -- which it has already resolved in order to know whose plan it is executing. Without that stamp this returns nothing, and "no workspace row" is indistinguishable from "not provisioned yet", so the integration would provision a second directory on every call.
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["workspaceForPlan"] in generated_concepts.go).
 type WorkspaceForPlanArgs struct {

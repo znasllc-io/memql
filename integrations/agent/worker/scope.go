@@ -88,9 +88,9 @@ func workerComputerScope(action string) ScopeRequirement {
 		// mandatory on every registration (COMPUTERUSE workers
 		// advertise it too), so requiring CapabilityHeadless admits
 		// every worker. Requiring CapabilityComputerUse here would make
-		// PickWorker skip a headless-only worker and wrongly return
-		// no_worker_available for an introspection / timing call the
-		// worker can actually serve.
+		// the router filter out a headless-only worker and wrongly
+		// return no_worker_available for an introspection / timing call
+		// the worker can actually serve.
 		return ScopeRequirement{Capability: workerservice.CapabilityHeadless, Scope: "observe"}
 	case "screenshot", "cursor_position", "display_info", "window_list":
 		return ScopeRequirement{Capability: workerservice.CapabilityComputerUse, Scope: "observe"}

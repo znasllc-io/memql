@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ isNotDeleted, statusIsRunning }
+use common.traits.{ isActiveRecord, isNotDeleted, statusIsRunning }
 use planner.concepts.{ plan }
 use planner.shapes.{ planFull }
 
@@ -138,12 +138,21 @@ query plan runningPlansForUser {
 //   identityId (string, required) - v1:identity:identity.id
 
 /// Look up the worker registration owned by an identity row.
+///
+/// The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is
+/// what makes this read's result set the SAME before and after enforcement, which
+/// TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only
+/// caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the
+/// owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without
+/// that stamp this read returns nothing at all -- which is the failure that reads as "this
+/// machine has never registered" and silently creates a duplicate row on every reconnect.
+@actor
 @unbounded("worker by identityId -- bounded to a single row")
 query registration workerByIdentityId {
   args {
     identityId  string!
   }
-  filter  identityId==args.identityId
+  filter  identityId==args.identityId && ownerUserId==actor.userId
   shape   workerRegistrationFull
 }
 
@@ -165,19 +174,24 @@ query registration workerByIdentityId {
 //   Array of registration rows in workerRegistrationFull shape,
 //   most recently seen first.
 
-// `@public` marks this query as intentionally not caller-scoped.
-// Callsites: the worker dispatcher's "has any worker registered"
-// probe (`integrations/agent/worker/integration.go:workerHasConfigured`)
-// and the worker registration sweep (`component/worker/store.go`),
-// both system-actor paths. Splitting into self + system variants
-// tracked under #54.
-/// List all workers owned by a user.
-@public
+// NO LONGER @public (epic memql#4349). It carried that annotation because its
+// three callers were server-side paths passing an ownerUserId with no caller
+// check -- the shape #54 tracked splitting. v1:worker:registration now declares
+// the composite owner tier, and every one of those callers stamps
+// auth.ContextWithUserActor for the owner before it reads, so the caller check
+// the annotation excused now EXISTS. Keeping @public would have left a
+// caller-supplied ownerUserId reachable over the wire against a concept whose
+// rows carry a hostname, a platform and a last-connect IP.
+//
+// The args stay: they are what the callers pass, and with the actor conjunct
+// beside them a mismatch returns nothing rather than somebody else's fleet.
+/// List all workers owned by a user. Caller-scoped: the supplied owner must be the actor.
+@actor
 query registration workersForUser {
   args {
     ownerUserId  string!
   }
-  filter  ownerUserId==args.ownerUserId
+  filter  ownerUserId==args.ownerUserId && ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -212,30 +226,15 @@ query registration workersForUser {
 // design refuses: the registry is one replica's stream table, so it answers
 // "connected to ME", and the fleet needs "connected to ANY replica".
 
-/// Every machine registered to a user, with the fields the router orders and filters on.
-/// memql#4351: SERVER-SIDE ONLY. It takes a caller-supplied ownerUserId, which is not a caller
-/// check -- over the wire this enumerated any user's machines, their hostnames and the IPs they
-/// last connected from. Its caller is the router (integrations/agent/worker/router.go), which is
-/// dispatching a turn on behalf of the session's owner and therefore has no caller actor of its
-/// own; it stamps auth.ContextWithUserActor for that owner so the concept's tier still decides,
-/// and auth.ContextWithInternalOrigin so this annotation admits it. The page reads
-/// myWorkersWithStatus / allWorkersWithStatus instead, which are caller-scoped.
-@serverOnly
-query registration workersForOwnerWithStatus {
-  args {
-    ownerUserId  string!
-  }
-  filter   ownerUserId==args.ownerUserId
-  // Registration order, and it is load-bearing: `firstFit` IS this order, and
-  // `roundRobin` / `leastLoaded` break their own ties with it. Two agent
-  // replicas ordering candidates differently is the bug class this epic
-  // closes, so the order must come from the row, never from arrival.
-  sort     "row.createdAt", "asc"
-  paginate 200
-  shape    workerRegistrationFull
-}
-
-/// The signed-in person's own machines. Backs /fleet/machines.
+/// The caller's own machines, with everything the router orders and filters on.
+///
+/// ONE QUERY FOR TWO READERS, and that is the point. The design had a separate
+/// `workersForOwnerWithStatus(ownerUserId)` for the router, @serverOnly because a caller-supplied
+/// owner id is not a caller check. It is not needed: the router has no caller of its own -- it
+/// dispatches on behalf of the session's owner -- and therefore already runs under
+/// auth.ContextWithUserActor for that owner. Reading `actor.userId` is then both simpler and
+/// strictly safer than accepting an argument: there is no id to supply, so there is nothing to
+/// enumerate, and no @serverOnly annotation to keep honest.
 @actor
 query registration myWorkersWithStatus {
   filter   ownerUserId==actor.userId
@@ -257,16 +256,15 @@ query registration allWorkersWithStatus {
   shape    workerRegistrationFull
 }
 
-/// The active routing policy for a user, or nothing when they never set one (the common case --
+/// The caller's active routing policy, or nothing when they never set one (the common case --
 /// the router then applies firstFit + nextMatching).
-/// memql#4351: SERVER-SIDE ONLY, same argument as workersForOwnerWithStatus -- a caller-supplied
-/// ownerUserId, read by the router on behalf of a session owner who is not the caller.
-@serverOnly
+///
+/// Caller-scoped for the same reason myWorkersWithStatus is: the router runs under the session
+/// owner's actor, so an ownerUserId argument would be a caller-supplied id standing in for a
+/// caller check it already has.
+@actor
 query routingPolicy routingPolicyForOwner {
-  args {
-    ownerUserId  string!
-  }
-  filter   ownerUserId==args.ownerUserId && active==true
+  filter   ownerUserId==actor.userId && isActiveRecord
   // NEWEST FIRST, and the router takes the first row. One active policy per
   // user is the model, but the DSL cannot enforce it (@unique is declared
   // metadata with no check, memql#2960), so the READ is what makes two active

@@ -424,9 +424,12 @@ mutate registration setWorkerOperatorLabels {
   }
 }
 
-/// Stamp lastSelectedAt on the machine the router just picked. Server-side: the router runs on
-/// behalf of the session's owner, and a client that could stamp this could steer roundRobin.
-@serverOnly
+/// Stamp lastSelectedAt on the machine the router just picked.
+/// NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier
+/// already refuses a write onto a row the caller does not own, and @serverOnly would add a third
+/// entry to the server-only inventory to buy nothing beyond it. The residue is that a person
+/// could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin
+/// rotation, which is a preference they already control from the Fleet page.
 mutate registration touchWorkerSelected {
   args {
     registrationId  string!
@@ -465,10 +468,10 @@ mutate registration touchWorkerSelected {
 mutate routingPolicy createRoutingPolicy {
   args {
     policyId       string!
-    strategy       string!  @enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")
+    strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!
     requireLabels  object
     preferLabels   object
-    fallback       string!  @enum("none", "nextMatching")
+    fallback       enum("none", "nextMatching")!
   }
   insert {
     id: args.policyId
@@ -486,10 +489,10 @@ mutate routingPolicy createRoutingPolicy {
 mutate routingPolicy updateRoutingPolicy {
   args {
     policyId       string!
-    strategy       string!  @enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")
+    strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!
     requireLabels  object
     preferLabels   object
-    fallback       string!  @enum("none", "nextMatching")
+    fallback       enum("none", "nextMatching")!
   }
   update {
     id: args.policyId

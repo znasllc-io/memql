@@ -33,8 +33,8 @@ func TestActionRequiredScope_Table(t *testing.T) {
 		// --- workerComputer introspection / timing (cockpit #162 /
 		// #177): served by BOTH cockpit builds, so they gate on
 		// HEADLESS (mandatory on every registration) -- requiring
-		// COMPUTERUSE would make PickWorker refuse a headless-only worker that
-		// can actually answer.
+		// COMPUTERUSE would make the router filter out a headless-only
+		// worker that can actually answer.
 		{"workerComputer", "capabilities", ScopeRequirement{Capability: headless, Scope: "observe"}},
 		{"workerComputer", "wait", ScopeRequirement{Capability: headless, Scope: "observe"}},
 

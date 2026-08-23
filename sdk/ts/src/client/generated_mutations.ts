@@ -7519,6 +7519,28 @@ QueryClient.prototype.touchSession = function (this: QueryClient, args: TouchSes
   return this.executeNamed("touchSession", buildTouchSession(args), opts);
 };
 
+/** Stamp lastSelectedAt on the machine the router just picked. NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier already refuses a write onto a row the caller does not own, and @serverOnly would add a third entry to the server-only inventory to buy nothing beyond it. The residue is that a person could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin rotation, which is a preference they already control from the Fleet page. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["touchWorkerSelected"] in generated_concepts.ts).
+export interface TouchWorkerSelectedArgs {
+  registrationId: string;
+}
+
+export function buildTouchWorkerSelected(args: TouchWorkerSelectedArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "mutation touchWorkerSelected(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    touchWorkerSelected(args: TouchWorkerSelectedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.touchWorkerSelected = function (this: QueryClient, args: TouchWorkerSelectedArgs = {} as TouchWorkerSelectedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("touchWorkerSelected", buildTouchWorkerSelected(args), opts);
+};
+
 /** Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call. */
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["touchWorkspace"] in generated_concepts.ts).
 export interface TouchWorkspaceArgs {

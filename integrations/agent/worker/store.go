@@ -203,35 +203,32 @@ func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.Inv
 
 // -- the fleet reads (memql#4351) --------------------------------------------
 //
-// THE TWO STAMPS, and why both are needed on the same context.
+// ONE STAMP, and why it is the actor rather than internal origin.
 //
-// `workersForOwnerWithStatus` and `routingPolicyForOwner` are @serverOnly:
-// they take a caller-supplied ownerUserId, which is not a caller check, so
-// over the wire they would enumerate any user's machines and their last
-// connect IPs. @serverOnly is admitted only for a context carrying INTERNAL
-// ORIGIN, and integrations/agent/worker is on call_origin.go's allowlist
-// precisely for reads of this shape.
+// v1:worker:registration and v1:worker:routingPolicy declare the composite
+// owner tier, and rowAuthzAdmits has NO internal-origin escape on the read
+// path: a context with no actor resolves the owner comparison against an empty
+// caller and denies every row -- silently, with no error, which is the failure
+// that reads as "this user has no machines". So the ACTOR is what these reads
+// need, and it is the owner whose fleet this turn is routing.
 //
-// Internal origin does NOT satisfy the row gate. v1:worker:registration and
-// v1:worker:routingPolicy declare the composite owner tier, and
-// rowAuthzAdmits has no internal-origin escape on the READ path: a context
-// with no actor resolves the owner comparison against an empty caller and
-// denies every row. So the ACTOR is stamped as well -- the owner whose fleet
-// this turn is routing.
+// The queries themselves are caller-scoped (`ownerUserId==actor.userId`)
+// rather than argument-scoped, which is why none of them is @serverOnly and
+// why none needs an internal-origin stamp. The earlier shape took an
+// ownerUserId argument and carried @serverOnly to excuse it; taking the owner
+// from the actor instead removes the argument, so there is no id to supply and
+// nothing to enumerate.
 //
-// The two are independent facts about the call, and each is refused for its
-// own reason. Stamping only origin returns zero rows with no error, which is
-// the failure that reads as "this user has no machines". Stamping only the
-// actor is refused by the annotation with a log line. Both are built inline as
-// the argument to one Execute, never onto the request's own context -- the
-// memql#2989 shape.
+// The actor context is built inline as the argument to one Execute and never
+// stamped onto the request's own context -- the memql#3072 shape, not the
+// memql#2989 one.
 //
 // The ownerUserId is not caller-supplied in any meaningful sense: it is
 // resolved from the AGENT row (replier.go) before the tool loop runs, the same
 // value AgentAuthorization above scopes on.
 
 func (s *EngineStore) fleetContext(ctx context.Context, ownerUserId string) context.Context {
-	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, ownerUserId))
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 // WorkersForOwner returns the owner's machines in registration order.
@@ -242,8 +239,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("agent.worker store: ownerUserId is required")
 	}
-	query := fmt.Sprintf(`query workersForOwnerWithStatus(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), query)
+	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), `query myWorkersWithStatus()`)
 	if err != nil {
 		return nil, fmt.Errorf("fleet read: %w", err)
 	}
@@ -290,8 +286,7 @@ func (s *EngineStore) RoutingPolicyForOwner(ctx context.Context, ownerUserId str
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query routingPolicyForOwner(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), query)
+	res, err := s.Engine.Execute(s.fleetContext(ctx, ownerUserId), `query routingPolicyForOwner()`)
 	if err != nil {
 		return nil, fmt.Errorf("routing policy read: %w", err)
 	}

@@ -12,10 +12,6 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// ErrNoWorkerAvailable indicates dispatch found no online worker
-// matching the caller's requirements.
-var ErrNoWorkerAvailable = errors.New("worker: no worker available for owner")
-
 // ErrWorkerBusy indicates the worker is at its concurrency cap and
 // the FIFO queue declined further calls within the timeout window.
 var ErrWorkerBusy = errors.New("worker: worker busy at concurrency cap")
@@ -220,26 +216,6 @@ func (r *Registry) Snapshot() []*Worker {
 	return out
 }
 
-// PickWorker selects a worker for the given owner that satisfies the
-// capability requirement. The simple MVP implementation returns the
-// first online matching worker; future capacity-aware routing slots
-// in here.
-func (r *Registry) PickWorker(ownerUserId string, capability string, labels map[string]string) (*Worker, error) {
-	if r == nil {
-		return nil, ErrNoWorkerAvailable
-	}
-	for _, w := range r.WorkersForUser(ownerUserId) {
-		if !w.SupportsCapability(capability) {
-			continue
-		}
-		if !w.MatchesLabels(labels) {
-			continue
-		}
-		return w, nil
-	}
-	return nil, ErrNoWorkerAvailable
-}
-
 // SupportsCapability reports whether the worker advertised the
 // supplied capability.
 func (w *Worker) SupportsCapability(name string) bool {
@@ -255,24 +231,6 @@ func (w *Worker) SupportsCapability(name string) bool {
 		}
 	}
 	return false
-}
-
-// MatchesLabels reports whether every label in the requirement is
-// present on the worker. Empty requirement matches anything.
-func (w *Worker) MatchesLabels(req map[string]string) bool {
-	if len(req) == 0 {
-		return true
-	}
-	if w == nil || w.Labels == nil {
-		return false
-	}
-	for k, v := range req {
-		got, ok := w.Labels[k]
-		if !ok || got != v {
-			return false
-		}
-	}
-	return true
 }
 
 // ConcurrencyCap returns the per-capability cap; 0 means unbounded.
