@@ -870,6 +870,74 @@ QueryClient.prototype.allSafetyClassifications = function (this: QueryClient, ar
   return this.executeNamed("allSafetyClassifications", buildAllSafetyClassifications(args), opts);
 };
 
+/** Read one app-session row, transcript included. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.ts).
+export interface AppSessionByIdArgs {
+  sessionId: string;
+}
+
+export function buildAppSessionById(args: AppSessionByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("sessionId: " + renderMemQLValue(args.sessionId));
+  return "query appSessionById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appSessionById(args: AppSessionByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appSessionById = function (this: QueryClient, args: AppSessionByIdArgs = {} as AppSessionByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appSessionById", buildAppSessionById(args), opts);
+};
+
+/** List the app sessions belonging to a Task. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForTask"] in generated_concepts.ts).
+export interface AppSessionsForTaskArgs {
+  taskId: string;
+}
+
+export function buildAppSessionsForTask(args: AppSessionsForTaskArgs): string {
+  const parts: string[] = [];
+  parts.push("taskId: " + renderMemQLValue(args.taskId));
+  return "query appSessionsForTask(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appSessionsForTask(args: AppSessionsForTaskArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appSessionsForTask = function (this: QueryClient, args: AppSessionsForTaskArgs = {} as AppSessionsForTaskArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appSessionsForTask", buildAppSessionsForTask(args), opts);
+};
+
+/** appSessionsForUser wraps the query named "appSessionsForUser". */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForUser"] in generated_concepts.ts).
+export interface AppSessionsForUserArgs {
+  ownerUserId: string;
+  app?: string;
+}
+
+export function buildAppSessionsForUser(args: AppSessionsForUserArgs): string {
+  const parts: string[] = [];
+  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.app !== undefined) parts.push("app: " + renderMemQLValue(args.app));
+  return "query appSessionsForUser(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appSessionsForUser(args: AppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appSessionsForUser = function (this: QueryClient, args: AppSessionsForUserArgs = {} as AppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appSessionsForUser", buildAppSessionsForUser(args), opts);
+};
+
 /** The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover). */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.ts).
 export interface ApprovalQueueArgs {
@@ -1972,6 +2040,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.currentUser = function (this: QueryClient, args: CurrentUserArgs = {} as CurrentUserArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("currentUser", buildCurrentUser(args), opts);
+};
+
+/** delegationPolicyForUser wraps the query named "delegationPolicyForUser". */
+// Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["delegationPolicyForUser"] in generated_concepts.ts).
+export interface DelegationPolicyForUserArgs {
+  ownerUserId: string;
+}
+
+export function buildDelegationPolicyForUser(args: DelegationPolicyForUserArgs): string {
+  const parts: string[] = [];
+  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  return "query delegationPolicyForUser(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    delegationPolicyForUser(args: DelegationPolicyForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.delegationPolicyForUser = function (this: QueryClient, args: DelegationPolicyForUserArgs = {} as DelegationPolicyForUserArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("delegationPolicyForUser", buildDelegationPolicyForUser(args), opts);
 };
 
 /** Get all delegations (active and revoked) for a given identity ID */
@@ -3149,6 +3239,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryWorkspaceLiveSources = function (this: QueryClient, args: LibraryWorkspaceLiveSourcesArgs = {} as LibraryWorkspaceLiveSourcesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryWorkspaceLiveSources", buildLibraryWorkspaceLiveSources(args), opts);
+};
+
+/** liveAppSessionsForUser wraps the query named "liveAppSessionsForUser". */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.ts).
+export interface LiveAppSessionsForUserArgs {
+  ownerUserId: string;
+}
+
+export function buildLiveAppSessionsForUser(args: LiveAppSessionsForUserArgs): string {
+  const parts: string[] = [];
+  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  return "query liveAppSessionsForUser(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    liveAppSessionsForUser(args: LiveAppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.liveAppSessionsForUser = function (this: QueryClient, args: LiveAppSessionsForUserArgs = {} as LiveAppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("liveAppSessionsForUser", buildLiveAppSessionsForUser(args), opts);
 };
 
 /** Returns the magic-link request whose tokenHash matches the argument. Zero or one result. */

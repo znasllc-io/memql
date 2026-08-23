@@ -2979,6 +2979,13 @@ export interface CreateSemanticTaskArgs {
   phase?: string;
   dependsOn?: string[];
   input: Record<string, unknown>;
+  /** inProcess (the default) or containerExecutor when the delegation triage found a machine with an allowed, signed-in app online. */
+  // Enum: inProcess | containerExecutor
+  executionSurface?: string;
+  /** The registered backend, e.g. "cockpit-app:claude-code". Empty for an inProcess task. */
+  executorBackend?: string;
+  /** Why this Task got the surface it did -- recorded on BOTH branches. */
+  delegationReason?: string;
 }
 
 export function buildCreateSemanticTask(args: CreateSemanticTaskArgs): string {
@@ -2992,6 +2999,9 @@ export function buildCreateSemanticTask(args: CreateSemanticTaskArgs): string {
   if (args.phase !== undefined) parts.push("phase: " + renderMemQLValue(args.phase));
   if (args.dependsOn !== undefined) parts.push("dependsOn: " + renderMemQLValue(args.dependsOn));
   parts.push("input: " + renderMemQLValue(args.input));
+  if (args.executionSurface !== undefined) parts.push("executionSurface: " + renderMemQLValue(args.executionSurface));
+  if (args.executorBackend !== undefined) parts.push("executorBackend: " + renderMemQLValue(args.executorBackend));
+  if (args.delegationReason !== undefined) parts.push("delegationReason: " + renderMemQLValue(args.delegationReason));
   return "mutation createSemanticTask(" + parts.join(", ") + ")";
 }
 
@@ -3203,6 +3213,8 @@ export interface CreateTaskArgs {
   phase?: string;
   executionSurface?: string;
   executorBackend?: string;
+  /** Why this Task got the surface it did (memql#4362). */
+  delegationReason?: string;
   input: Record<string, unknown>;
 }
 
@@ -3216,6 +3228,7 @@ export function buildCreateTask(args: CreateTaskArgs): string {
   if (args.phase !== undefined) parts.push("phase: " + renderMemQLValue(args.phase));
   if (args.executionSurface !== undefined) parts.push("executionSurface: " + renderMemQLValue(args.executionSurface));
   if (args.executorBackend !== undefined) parts.push("executorBackend: " + renderMemQLValue(args.executorBackend));
+  if (args.delegationReason !== undefined) parts.push("delegationReason: " + renderMemQLValue(args.delegationReason));
   parts.push("input: " + renderMemQLValue(args.input));
   return "mutation createTask(" + parts.join(", ") + ")";
 }
@@ -3548,6 +3561,8 @@ export interface CreateWorkerRegistrationArgs {
   permissions?: Record<string, unknown>;
   version?: string;
   buildTag?: string;
+  /** Local-app inventory the cockpit reported (memql#4359): a list of {id, version, signedIn, subscription, allowed}. Stored verbatim, including apps this engine cannot drive. */
+  apps?: unknown[];
   registeredAt: string;
   lastSeenAt?: string;
   lastConnectedFromIP?: string;
@@ -3567,6 +3582,7 @@ export function buildCreateWorkerRegistration(args: CreateWorkerRegistrationArgs
   if (args.permissions !== undefined) parts.push("permissions: " + renderMemQLValue(args.permissions));
   if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
   if (args.buildTag !== undefined) parts.push("buildTag: " + renderMemQLValue(args.buildTag));
+  if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
   parts.push("registeredAt: " + renderMemQLValue(args.registeredAt));
   if (args.lastSeenAt !== undefined) parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
@@ -5272,6 +5288,11 @@ export interface RecordRouterCallArgs {
   errorCategory?: string;
   errorMessage?: string;
   fallbackFromModel?: string;
+  /** Who paid: metered | subscription | unknown. Absent reads as metered. */
+  // Enum: metered | subscription | unknown
+  billing?: string;
+  /** Where the call ran; empty for MemQL's own provider calls. */
+  executionSurface?: string;
 }
 
 export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
@@ -5302,6 +5323,8 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   if (args.errorCategory !== undefined) parts.push("errorCategory: " + renderMemQLValue(args.errorCategory));
   if (args.errorMessage !== undefined) parts.push("errorMessage: " + renderMemQLValue(args.errorMessage));
   if (args.fallbackFromModel !== undefined) parts.push("fallbackFromModel: " + renderMemQLValue(args.fallbackFromModel));
+  if (args.billing !== undefined) parts.push("billing: " + renderMemQLValue(args.billing));
+  if (args.executionSurface !== undefined) parts.push("executionSurface: " + renderMemQLValue(args.executionSurface));
   return "mutation recordRouterCall(" + parts.join(", ") + ")";
 }
 
@@ -5484,6 +5507,8 @@ export interface RefreshWorkerRegistrationArgs {
   permissions?: Record<string, unknown>;
   version?: string;
   buildTag?: string;
+  /** Local-app inventory from the latest Register (memql#4359). An omitted list CLEARS the persisted one, the same way the capability descriptor does: the worker no longer reports apps. */
+  apps?: unknown[];
   lastSeenAt: string;
   lastConnectedFromIP?: string;
 }
@@ -5500,6 +5525,7 @@ export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationAr
   if (args.permissions !== undefined) parts.push("permissions: " + renderMemQLValue(args.permissions));
   if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
   if (args.buildTag !== undefined) parts.push("buildTag: " + renderMemQLValue(args.buildTag));
+  if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
   parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
   return "mutation refreshWorkerRegistration(" + parts.join(", ") + ")";
@@ -6721,6 +6747,44 @@ declare module "./query.js" {
 
 QueryClient.prototype.setConstructStatus = function (this: QueryClient, args: SetConstructStatusArgs = {} as SetConstructStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setConstructStatus", buildSetConstructStatus(args), opts);
+};
+
+/** Create or update the caller's app-delegation policy. */
+// Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.ts).
+export interface SetDelegationPolicyArgs {
+  policyId: string;
+  ownerUserId: string;
+  preferSubscriptionApps?: boolean;
+  eligibleKinds?: unknown[];
+  appOrder?: unknown[];
+  maxConcurrentSessions?: number;
+  workspaceRoot?: string;
+  credentialLifetimeSeconds?: number;
+  updatedAt: string;
+}
+
+export function buildSetDelegationPolicy(args: SetDelegationPolicyArgs): string {
+  const parts: string[] = [];
+  parts.push("policyId: " + renderMemQLValue(args.policyId));
+  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.preferSubscriptionApps !== undefined) parts.push("preferSubscriptionApps: " + renderMemQLValue(args.preferSubscriptionApps));
+  if (args.eligibleKinds !== undefined) parts.push("eligibleKinds: " + renderMemQLValue(args.eligibleKinds));
+  if (args.appOrder !== undefined) parts.push("appOrder: " + renderMemQLValue(args.appOrder));
+  if (args.maxConcurrentSessions !== undefined) parts.push("maxConcurrentSessions: " + renderMemQLValue(args.maxConcurrentSessions));
+  if (args.workspaceRoot !== undefined) parts.push("workspaceRoot: " + renderMemQLValue(args.workspaceRoot));
+  if (args.credentialLifetimeSeconds !== undefined) parts.push("credentialLifetimeSeconds: " + renderMemQLValue(args.credentialLifetimeSeconds));
+  parts.push("updatedAt: " + renderMemQLValue(args.updatedAt));
+  return "mutation setDelegationPolicy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setDelegationPolicy(args: SetDelegationPolicyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setDelegationPolicy = function (this: QueryClient, args: SetDelegationPolicyArgs = {} as SetDelegationPolicyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setDelegationPolicy", buildSetDelegationPolicy(args), opts);
 };
 
 /** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
@@ -8459,6 +8523,38 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateTodo = function (this: QueryClient, args: UpdateTodoArgs = {} as UpdateTodoArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateTodo", buildUpdateTodo(args), opts);
+};
+
+/** Re-stamp a worker's reported app inventory and its derived routing labels. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerApps"] in generated_concepts.ts).
+export interface UpdateWorkerAppsArgs {
+  registrationId: string;
+  /** The full reported inventory: {id, version, signedIn, subscription, allowed}. An empty list is a machine reporting that it now has none. */
+  apps?: unknown[];
+  /** The complete label set, operator-set labels included. Replaces the stored one wholesale -- a merge here could not remove the label of an app the user just signed out of. */
+  labels?: Record<string, unknown>;
+  lastSeenAt: string;
+  lastConnectedFromIP?: string;
+}
+
+export function buildUpdateWorkerApps(args: UpdateWorkerAppsArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
+  if (args.labels !== undefined) parts.push("labels: " + renderMemQLValue(args.labels));
+  parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
+  if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
+  return "mutation updateWorkerApps(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateWorkerApps(args: UpdateWorkerAppsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateWorkerApps = function (this: QueryClient, args: UpdateWorkerAppsArgs = {} as UpdateWorkerAppsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateWorkerApps", buildUpdateWorkerApps(args), opts);
 };
 
 /** Bump lastSeenAt + lastConnectedFromIP on a worker registration. */

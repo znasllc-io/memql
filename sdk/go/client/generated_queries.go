@@ -827,6 +827,80 @@ func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 	return "query allSafetyClassifications()"
 }
 
+// AppSessionById -- Read one app-session row, transcript included.
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.go).
+type AppSessionByIdArgs struct {
+	SessionId string
+}
+
+// AppSessionById calls the engine query appSessionById.
+func (qc *QueryClient) AppSessionById(ctx context.Context, args AppSessionByIdArgs) (*Result, error) {
+	call := AppSessionByIdBuild(args)
+	return qc.executeNamed(ctx, "appSessionById", call)
+}
+
+func AppSessionByIdBuild(args AppSessionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query appSessionById(")
+	b.WriteString("sessionId: ")
+	b.WriteString(quoteMemQL(args.SessionId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AppSessionsForTask -- List the app sessions belonging to a Task.
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForTask"] in generated_concepts.go).
+type AppSessionsForTaskArgs struct {
+	TaskId string
+}
+
+// AppSessionsForTask calls the engine query appSessionsForTask.
+func (qc *QueryClient) AppSessionsForTask(ctx context.Context, args AppSessionsForTaskArgs) (*Result, error) {
+	call := AppSessionsForTaskBuild(args)
+	return qc.executeNamed(ctx, "appSessionsForTask", call)
+}
+
+func AppSessionsForTaskBuild(args AppSessionsForTaskArgs) string {
+	var b strings.Builder
+	b.WriteString("query appSessionsForTask(")
+	b.WriteString("taskId: ")
+	b.WriteString(quoteMemQL(args.TaskId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AppSessionsForUser wraps the query named "appSessionsForUser".
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionsForUser"] in generated_concepts.go).
+type AppSessionsForUserArgs struct {
+	OwnerUserId string
+	App         string
+}
+
+// AppSessionsForUser calls the engine query appSessionsForUser.
+func (qc *QueryClient) AppSessionsForUser(ctx context.Context, args AppSessionsForUserArgs) (*Result, error) {
+	call := AppSessionsForUserBuild(args)
+	return qc.executeNamed(ctx, "appSessionsForUser", call)
+}
+
+func AppSessionsForUserBuild(args AppSessionsForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("query appSessionsForUser(")
+	b.WriteString("ownerUserId: ")
+	b.WriteString(quoteMemQL(args.OwnerUserId))
+	if args.App != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("app: ")
+		b.WriteString(quoteMemQL(args.App))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.go).
@@ -1945,6 +2019,28 @@ func (qc *QueryClient) CurrentUser(ctx context.Context, args CurrentUserArgs) (*
 func CurrentUserBuild(args CurrentUserArgs) string {
 	_ = args
 	return "query currentUser()"
+}
+
+// DelegationPolicyForUser wraps the query named "delegationPolicyForUser".
+//
+// Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["delegationPolicyForUser"] in generated_concepts.go).
+type DelegationPolicyForUserArgs struct {
+	OwnerUserId string
+}
+
+// DelegationPolicyForUser calls the engine query delegationPolicyForUser.
+func (qc *QueryClient) DelegationPolicyForUser(ctx context.Context, args DelegationPolicyForUserArgs) (*Result, error) {
+	call := DelegationPolicyForUserBuild(args)
+	return qc.executeNamed(ctx, "delegationPolicyForUser", call)
+}
+
+func DelegationPolicyForUserBuild(args DelegationPolicyForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("query delegationPolicyForUser(")
+	b.WriteString("ownerUserId: ")
+	b.WriteString(quoteMemQL(args.OwnerUserId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // DelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
@@ -3146,6 +3242,28 @@ func (qc *QueryClient) LibraryWorkspaceLiveSources(ctx context.Context, args Lib
 func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) string {
 	_ = args
 	return "query libraryWorkspaceLiveSources()"
+}
+
+// LiveAppSessionsForUser wraps the query named "liveAppSessionsForUser".
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.go).
+type LiveAppSessionsForUserArgs struct {
+	OwnerUserId string
+}
+
+// LiveAppSessionsForUser calls the engine query liveAppSessionsForUser.
+func (qc *QueryClient) LiveAppSessionsForUser(ctx context.Context, args LiveAppSessionsForUserArgs) (*Result, error) {
+	call := LiveAppSessionsForUserBuild(args)
+	return qc.executeNamed(ctx, "liveAppSessionsForUser", call)
+}
+
+func LiveAppSessionsForUserBuild(args LiveAppSessionsForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("query liveAppSessionsForUser(")
+	b.WriteString("ownerUserId: ")
+	b.WriteString(quoteMemQL(args.OwnerUserId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.

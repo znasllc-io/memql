@@ -19,6 +19,7 @@ import {
   Inbox,
   Gauge,
   LayoutGrid,
+  Monitor,
   Plug,
   Plus,
   Rocket,
@@ -137,6 +138,12 @@ const CLUSTER: readonly NavItem[] = [
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/sites", label: "Sites", icon: Globe },
   { to: "/artifacts", label: "Artifacts", icon: Archive },
+  // Machines is the one entry in this group that is about the OPERATOR's own
+  // computers rather than the cluster's (memql#4363). It sits here anyway,
+  // because a person looking for "where does my work actually run" reaches
+  // for the cluster group -- and every read behind it is caller-scoped at the
+  // engine, so no role gate is needed or offered.
+  { to: "/machines", label: "Machines", icon: Monitor },
 ];
 // People is NOT here. It is one of the views, and the verbs an admin needs
 // live on the row detail there (memql#4264) -- which is what removed the
