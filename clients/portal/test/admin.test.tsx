@@ -232,6 +232,10 @@ function renderAdmin(
     userId: "user-ada",
     primaryEmail: "ada@example.com",
     clusterRole: role,
+    // The session behind this connection. Always a string on the wire
+    // (the server fills it from the verified claims, empty for a
+    // credential with no session); a fixture has none.
+    sessionId: "",
   };
 
   const query = asQueryClient({
