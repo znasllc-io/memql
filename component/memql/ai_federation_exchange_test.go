@@ -402,3 +402,59 @@ func TestCheckProviderAuthModelsCallCarriesNoKey(t *testing.T) {
 		t.Fatalf("models.list Authorization = %q, want the federated bearer", got)
 	}
 }
+
+// TestFederationSurvivesAnAmbientAnthropicKey is the regression test for the
+// one failure mode no configuration of ours controls.
+//
+// anthropic.NewClient prepends DefaultClientOptions, which walks the SDK's own
+// credential chain. A bare ANTHROPIC_API_KEY in the process environment --
+// an operator's shell, a base image, a Helm chart that sets the conventional
+// name -- becomes a persistent X-Api-Key header on the request config, and the
+// federation middleware then SKIPS ITSELF because the request already carries
+// static auth (SDK internal/auth/middleware.go:34-36).
+//
+// The cluster would go on working, on a long-lived key, while every log line
+// and `provider-auth check` said federation. Nothing else in this change would
+// notice: the credential path is decided from our own auth map, which still
+// says federate.
+func TestFederationSurvivesAnAmbientAnthropicKey(t *testing.T) {
+	for _, ambient := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
+		t.Run(ambient, func(t *testing.T) {
+			f := newFakeAnthropic(t)
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+			t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+			t.Setenv(ambient, "sk-ant-ambient-should-be-ignored")
+
+			cfg := ProviderConfig{
+				Name:  "claudeTest",
+				Model: "claude-test",
+				Auth:  federatedAuth(validIdentityToken(t)),
+			}
+			p, err := newAnthropicProvider(cfg)
+			if err != nil {
+				t.Fatalf("newAnthropicProvider: %v", err)
+			}
+			if err := callMessages(context.Background(), p.(*anthropicProvider)); err != nil {
+				t.Fatalf("Messages.New: %v", err)
+			}
+
+			f.mu.Lock()
+			defer f.mu.Unlock()
+
+			// The exchange must actually have happened. Without the header
+			// deletions the middleware short-circuits and this is zero.
+			if len(f.exchangeRequests) != 1 {
+				t.Fatalf("exchange count = %d, want 1 -- the ambient %s suppressed the federation middleware",
+					len(f.exchangeRequests), ambient)
+			}
+			h := f.messageHeaders[0]
+			if got := h.Get("x-api-key"); got != "" {
+				t.Fatalf("Messages carried x-api-key %q from the ambient %s", got, ambient)
+			}
+			if got := h.Get("Authorization"); got != "Bearer sk-ant-oat01-fake" {
+				t.Fatalf("Messages Authorization = %q, want the federated bearer", got)
+			}
+		})
+	}
+}
