@@ -232,12 +232,14 @@ describe("/me/sessions (memql#4319)", () => {
         sessionRow({ id: CURRENT_SESSION, clientLabel: "Mozilla/5.0 (X11; Linux x86_64)" }),
       ],
     });
-    await waitFor(() => expect(screen.getByText("This device")).toBeTruthy());
+    const table = await waitFor(() => screen.getByRole("table"));
     // Both rows share a user agent -- which is the point: two tabs of one
     // browser do too, so a label derived from it would mark the wrong row and
-    // invite somebody to revoke the session they are sitting in.
-    expect(screen.getAllByText("This device")).toHaveLength(1);
-    const marked = screen.getByText("This device").closest("tr");
+    // invite somebody to revoke the session they are sitting in. Scoped to the
+    // TABLE because the revoke band below repeats the badge deliberately: it
+    // is what tells a person which row they are about to end.
+    await waitFor(() => expect(within(table).getAllByText("This device")).toHaveLength(1));
+    const marked = within(table).getByText("This device").closest("tr");
     expect(marked?.textContent).toContain("Linux");
   });
 
@@ -286,7 +288,7 @@ describe("/me/sessions (memql#4319)", () => {
     // on two different reads, so a click that only waited for the row can
     // land while thisDevice is still false -- and would then assert against
     // the generic copy while appearing to test the specific one.
-    await waitFor(() => expect(screen.getByText("This device")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("This device").length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
 
     const dialog = await waitFor(() => screen.getByRole("dialog"));
@@ -311,7 +313,7 @@ describe("/me/sessions (memql#4319)", () => {
       },
     });
 
-    await waitFor(() => expect(screen.getByText("This device")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("This device").length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
     const dialog = await waitFor(() => screen.getByRole("dialog"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
@@ -333,12 +335,27 @@ describe("/me/sessions (memql#4319)", () => {
     expect(dialog.textContent).toContain("this browser included");
   });
 
+  it("draws the list through the shared table element, not a hand-rolled one", async () => {
+    // One implementation draws every table in the portal. The only other
+    // hand-rolled <table> in the app is ConceptSchemaPane, whose content is a
+    // concept's declared FIELDS rather than a row set.
+    renderMe("/me/sessions", { sessions: [sessionRow()] });
+    const table = await waitFor(() => screen.getByRole("table"));
+    // view-kit stamps its own class prefix on everything it draws, so this
+    // fails the moment somebody replaces the element with hand-written markup.
+    const drawnByViewKit =
+      table.className.includes("vk-") || table.closest("[class*='vk-']") !== null;
+    expect(drawnByViewKit).toBe(true);
+  });
+
   it("says the read failed rather than showing an empty table", async () => {
     renderMe("/me/sessions", { failReads: true });
     await waitFor(() => expect(screen.getByText(/could not read your sessions/)).toBeTruthy());
     // An empty table here reads as "no other device can reach your account",
-    // which is the one wrong answer that reassures.
+    // which is the one wrong answer that reassures -- and neither the table
+    // nor the revoke band may render.
     expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();
   });
 });
 

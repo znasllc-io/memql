@@ -1,8 +1,11 @@
 import { useState, type ReactNode } from "react";
+import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { useAuth } from "../auth/AuthProvider";
-import { Badge, Band, Button, Callout, ConfirmDialog, DataText, EmptyState, Panel, Skeleton } from "../ui";
+import { Badge, Band, Button, Callout, ConfirmDialog, EmptyState, Panel, Skeleton } from "../ui";
+import { ViewElement } from "../views/ViewElement";
 import { formatMoment } from "./MeLayout";
+import { SESSION_CONCEPT, sessionTableRows } from "./rows";
 import { useMySessions } from "./useMySessions";
 
 // /me/sessions -- what can currently enter this account (memql#4319).
@@ -12,9 +15,18 @@ import { useMySessions } from "./useMySessions";
 // Until memql#4303 a browser session had no row at all, so a colleague who
 // clicked your magic link first held a session that WAS NOT LISTED ANYWHERE
 // and could not be revoked by anybody. The row exists now. This is where a
-// person sees it, and the reason the page is not just informational: every
+// person sees it, and the reason the page is not merely informational: every
 // row here is a way in, and the point of showing them is that you can close
 // one.
+//
+// # The table is view-kit's, and the revokes are their own band
+//
+// TABLE_ELEMENT draws the list, over an adapted row set (src/me/rows.ts) --
+// the arrangement /admin/tokens uses for exactly this problem, a credential
+// list with per-item revoke. The element supports one row action and it is
+// hardcoded "View", so the destructive verb cannot live in the row; putting it
+// in a following band is what TokensPage does and keeps one implementation
+// drawing every table in the portal.
 //
 // # "This device" is a claim, not a guess
 //
@@ -26,19 +38,19 @@ import { useMySessions } from "./useMySessions";
 //
 // Revoke ends one row. Sign out everywhere ends them ALL, this one included,
 // because that is the call the engine has -- there is no everywhere-else
-// message, and looping the single revoke over the other rows client-side
-// would be a different operation wearing this one's name (a partial failure
-// would leave a person believing they had closed a device they had not). So
-// the button is labelled for what happens.
+// message, and looping the single revoke over the other rows client-side would
+// be a different operation wearing this one's name (a partial failure would
+// leave a person believing they had closed a device they had not). So the
+// button is labelled for what happens.
 //
 // Both confirm. The one that ends the session you are sitting in says so.
 
 export function SessionsTab(): ReactNode {
   const { signOut } = useAuth();
   const sessions = useMySessions();
-  const [pending, setPending] = useState<{ kind: "one"; id: string; thisDevice: boolean } | { kind: "all" } | null>(
-    null,
-  );
+  const [pending, setPending] = useState<
+    { kind: "one"; id: string; thisDevice: boolean } | { kind: "all" } | null
+  >(null);
 
   async function confirm(): Promise<void> {
     if (pending === null) return;
@@ -52,6 +64,9 @@ export function SessionsTab(): ReactNode {
     // would be refused.
     if (signedOut) signOut();
   }
+
+  const rows = sessionTableRows(sessions.sessions, formatMoment);
+  const empty = !sessions.loading && sessions.error === "" && rows.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,67 +82,53 @@ export function SessionsTab(): ReactNode {
           would read as &ldquo;no other device can reach your account&rdquo;, which is exactly the
           wrong thing to be reassured by.
         </Callout>
-      ) : sessions.loading ? (
+      ) : sessions.loading && rows.length === 0 ? (
         <Panel>
           <Skeleton variant="rows" rows={3} />
         </Panel>
-      ) : sessions.sessions.length === 0 ? (
+      ) : empty ? (
         <EmptyState statement="No live sessions are recorded for this account. If you are reading this, your own credential carries no session row -- a personal access token or an operator key, rather than a browser sign-in." />
       ) : (
-        <Band title="Live sessions" meta={`${sessions.sessions.length} active`} panel>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs tracking-wide text-subtle uppercase">
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Device
-                </th>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Source
-                </th>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Signed in
-                </th>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Last active
-                </th>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.sessions.map((session) => (
-                <tr key={session.id} className="border-t border-line align-top">
-                  <td className="px-3 py-2">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="min-w-0 break-all">{session.device}</span>
-                      {session.thisDevice ? <Badge tone="ok">This device</Badge> : null}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">{session.source}</td>
-                  <td className="px-3 py-2">
-                    <DataText kind="time">{formatMoment(session.signedIn)}</DataText>
-                  </td>
-                  <td className="px-3 py-2">
-                    <DataText kind="time">{formatMoment(session.lastActive)}</DataText>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      size="xs"
-                      tone="danger"
-                      busy={sessions.busyId === session.id}
-                      busyLabel="Revoking"
-                      onClick={() =>
-                        setPending({ kind: "one", id: session.id, thisDevice: session.thisDevice })
-                      }
-                    >
-                      Revoke
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Band title="Live sessions" meta={`${rows.length} active`} panel>
+          <ViewElement
+            element={TABLE_ELEMENT}
+            rows={rows}
+            concept={SESSION_CONCEPT}
+            options={{
+              bindings: {
+                column: ["device", "source", "signedIn", "lastActive", "thisDevice"],
+              },
+            }}
+          />
+        </Band>
+      )}
+
+      {rows.length === 0 ? null : (
+        <Band title="End a session" meta="Takes effect on the next request that presents it">
+          <ul className="flex flex-col gap-1">
+            {sessions.sessions.map((session) => (
+              <li
+                key={session.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-surface px-3 py-1.5"
+              >
+                <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                  <span className="min-w-0 break-all">{session.device}</span>
+                  {session.thisDevice ? <Badge tone="ok">This device</Badge> : null}
+                </span>
+                <Button
+                  size="xs"
+                  tone="danger"
+                  busy={sessions.busyId === session.id}
+                  busyLabel="Revoking"
+                  onClick={() =>
+                    setPending({ kind: "one", id: session.id, thisDevice: session.thisDevice })
+                  }
+                >
+                  Revoke
+                </Button>
+              </li>
+            ))}
+          </ul>
         </Band>
       )}
 
@@ -136,7 +137,7 @@ export function SessionsTab(): ReactNode {
           tone="danger"
           busy={sessions.busyId === "all"}
           busyLabel="Signing out"
-          disabled={sessions.sessions.length === 0}
+          disabled={rows.length === 0}
           onClick={() => setPending({ kind: "all" })}
         >
           Sign out everywhere
