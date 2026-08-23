@@ -54,6 +54,8 @@ resources:
   # (znasllc-io/memql#1858).
   - db-pool-config.yaml
   - identity.yaml
+  # RBAC for the deploy console's in-cluster substrate (memql#4257).
+  - identity-rbac.yaml
   - cognition.yaml
   - voice.yaml
   - agent.yaml

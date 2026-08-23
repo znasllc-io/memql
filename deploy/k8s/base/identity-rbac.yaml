@@ -1,0 +1,90 @@
+# RBAC for the deploy console's in-cluster substrate (memql#4257).
+#
+# WHAT THIS GRANTS, AND WHY IT IS THIS NARROW
+#
+# component/deploycontrol runs on the identity node and, in a cluster, reaches
+# ArgoCD through the Kubernetes API with this ServiceAccount's token rather
+# than through a kubectl binary the distroless image does not contain
+# (component/deploycontrol/k8sapi.go). The substrate's resource map is CLOSED,
+# so the grants across this file and its argocd-namespace sibling are the
+# complete set of API calls it can make; a fifth kind is a compile-time change
+# with a matching rule, never a string that happens to route.
+#
+# This file carries the ServiceAccount and the MESH-namespace half:
+#
+#   get + list on Rollouts and AnalysisRuns, for the read path that reports
+#   progressive-rollout state. READ ONLY -- the rollout promote/abort verb is a
+#   kubectl plugin with no single API-call form, so the substrate refuses it by
+#   name rather than approximating it, and no grant is issued for a write it
+#   will not attempt.
+#
+# The ARGOCD-namespace half -- get + patch on one named Application, which is
+# repair and status -- is in deploy/argocd/apps/deploy-console-rbac.yaml. See
+# the note at the bottom of this comment for why it cannot live here.
+#
+# Across both files there is deliberately NO create, delete, update or watch,
+# no wildcard verb, no wildcard resource, and no ClusterRole. `patch` on a
+# named Application is the largest privilege granted anywhere, and what it can
+# express is bounded by what ArgoCD does with the object: re-fetch manifests,
+# and sync to the revision the Application already points at. It cannot repoint
+# the source, add a repo, or reach a cluster.
+#
+# WHY NOT resourceNames ON THE ROLLOUT RULE. `list` cannot be restricted by
+# resourceNames -- Kubernetes RBAC ignores it for list/watch, which would make
+# the rule read as narrower than it is. A get+list on two read-only CRD kinds
+# in the mesh's own namespace is the honest scope.
+#
+# WHY THE ARGOCD-NAMESPACE HALF IS NOT IN THIS FILE, which is the part that
+# would otherwise be got wrong quietly. It was here first, and every overlay
+# rendered it into `memql`: kustomize's `namespace:` transformer rewrites
+# metadata.namespace on every namespaced resource it accumulates, including one
+# that states a different namespace explicitly. Measured on all three overlays
+# before moving it. A Role relocated that way is not an error -- it applies
+# cleanly, binds cleanly, and grants nothing, surfacing at the first repair as
+# a 403 naming a ServiceAccount that looks correctly bound.
+#
+# So the Application grant lives in deploy/argocd/apps/deploy-console-rbac.yaml,
+# rendered by the app-of-apps root with `directory:` rather than kustomize --
+# no transformer runs there, and it is the right home anyway: a grant INTO
+# ArgoCD's own namespace is the operator's, made when ArgoCD is stood up,
+# alongside the AppProject that already permits it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memql-deploy
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: identity
+    app.kubernetes.io/part-of: memql
+# The token is projected because the deploy substrate authenticates with it.
+# Every other node type keeps the default ServiceAccount and is unaffected.
+automountServiceAccountToken: true
+---
+# Progressive-rollout reads, in the mesh's own namespace. No write verb.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-deploy-rollouts
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts", "analysisruns"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-deploy-rollouts
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-deploy-rollouts
+subjects:
+  - kind: ServiceAccount
+    name: memql-deploy
+    namespace: memql

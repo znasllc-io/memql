@@ -194,7 +194,8 @@ func NewService(opts Options) (*Service, error) {
 	}
 	executor := opts.Executor
 	if executor == nil {
-		executor = newExecExecutor(repoRoot)
+		// Same substrate choice the exported NewExecutor makes (memql#4257).
+		executor = NewExecutor(repoRoot)
 	}
 	clock := opts.Clock
 	if clock == nil {

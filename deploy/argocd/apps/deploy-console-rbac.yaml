@@ -1,0 +1,56 @@
+# The deploy console's grant on THIS installation's Application (memql#4257).
+#
+# component/deploycontrol runs on the identity node and, in a cluster, reaches
+# ArgoCD through the Kubernetes API with the `memql-deploy` ServiceAccount
+# rather than through a kubectl binary the distroless image does not contain
+# (component/deploycontrol/k8sapi.go). Repair is a hard-refresh annotation and
+# a sync operation -- two merge patches on this one Application -- and status
+# is a get on the same object. That is the whole grant.
+#
+# WHY IT LIVES HERE AND NOT IN deploy/k8s/base. A grant into ArgoCD's own
+# namespace is the operator's, made when ArgoCD is stood up, which is what this
+# directory is. There is also a mechanical reason, found by measuring rather
+# than by reasoning: the base is composed by overlays that set `namespace:
+# memql`, and kustomize's namespace transformer rewrites metadata.namespace on
+# every namespaced resource it accumulates -- including one that states
+# `argocd` explicitly. All three overlays relocated this Role into `memql`,
+# where it applies cleanly, binds cleanly and grants nothing. The app-of-apps
+# root renders this directory with `directory:` rather than kustomize, so no
+# transformer runs.
+#
+# The ServiceAccount itself is in deploy/k8s/base/identity-rbac.yaml, together
+# with its read-only Rollouts / AnalysisRuns Role -- those are in the mesh's
+# own namespace and belong with the mesh.
+#
+# resourceNames PINS IT TO ONE OBJECT. ArgoCD's namespace is where every
+# installation's Application would live; without the pin, a token issued for
+# this installation's deploy console could patch a neighbour's. There is no
+# create, delete, update or watch here, no wildcard verb and no ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-deploy-argocd
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: memql
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    resourceNames: ["memql"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-deploy-argocd
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: memql
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-deploy-argocd
+subjects:
+  - kind: ServiceAccount
+    name: memql-deploy
+    namespace: memql
