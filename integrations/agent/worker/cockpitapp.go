@@ -321,13 +321,22 @@ func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, app
 	if e.router == nil || e.registry == nil {
 		return nil, fmt.Errorf("cockpit-app: no fleet router on this node; a Task can only reach one on an agent node running WorkerService")
 	}
-	need := mergeRequireLabels(require, appId)
-	if need == nil {
-		need = map[string]string{}
-	}
-	need[workerservice.AppLabelKey(appId)] = ""
-
-	plan, err := e.router.Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, need, nil)
+	// The app is NOT passed as a require-label, and that is deliberate.
+	// The derived label's VALUE is the app's version (`app:claude-code`
+	// -> "2.1"), and satisfiesLabels compares values with `got != v` --
+	// exact equality. Requiring the label with an empty value, the
+	// natural spelling of "any version", would match no machine that
+	// reports one, which is every real machine. Nothing would fail
+	// loudly: the router would return candidates, none would match, and
+	// the triage would report `no_machine_with_app_online` --
+	// indistinguishable from a laptop being asleep.
+	//
+	// So the ROUTER applies the owner's policy and ordering over the
+	// Task's own requirements, and the app filter is RunsApp below --
+	// the same predicate the label derivation uses, so the two cannot
+	// disagree. TestAppRequirementIsNotAnExactLabelMatch pins the
+	// semantics that force this.
+	plan, err := e.router.Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, require, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cockpit-app: routing %s: %w", appId, err)
 	}
@@ -349,10 +358,14 @@ func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, app
 		plan.Total, appId)
 }
 
-// mergeRequireLabels adds the app's own routing label to whatever the
-// Task declared. Both must match: a Task that pinned a machine label
-// keeps that pin, and the app requirement is added on top rather than
-// replacing it.
+// mergeRequireLabels returns the Task's own require-labels with any
+// app: entry STRIPPED.
+//
+// It strips rather than adds: the app filter is RunsApp, not a label
+// require (see selectMachine), and a synthesised version pin would
+// refuse a machine running a NEWER app for a reason nobody stated. A
+// Task that genuinely needs a version floor says so itself, and that
+// pin survives here untouched.
 func mergeRequireLabels(taskLabels map[string]string, appId string) map[string]string {
 	out := make(map[string]string, len(taskLabels))
 	for k, v := range taskLabels {

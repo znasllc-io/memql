@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
@@ -319,5 +320,122 @@ func TestBillingVocabularyIsOneVocabulary(t *testing.T) {
 		t.Error("an unrecognised billing value must map to unknown, not to metered -- the " +
 			"executor seam defaults empty to metered on its own, and doing it twice would " +
 			"hide a genuinely unknown value behind the fail-safe")
+	}
+}
+
+// TestAppRequirementIsNotAnExactLabelMatch is the regression guard for a
+// selection bug that would have made the whole feature silently never fire.
+//
+// The derived routing label carries the app's VERSION as its value
+// (`app:claude-code` -> "2.1"), and the router's satisfiesLabels compares
+// values with `got != v` -- exact equality. So requiring the label with an
+// empty value, the natural spelling of "any version", matches NO machine that
+// reports a version, which is every real one. Nothing would have failed: the
+// router would return candidates, none would match, and the triage would say
+// `no_machine_with_app_online` -- indistinguishable from a laptop being
+// asleep.
+//
+// The fix is to let the ROUTER apply policy and ordering, and filter for the
+// app with RunsApp afterwards. This test pins the label semantics that forced
+// that, so a future change back to a require-label fails here.
+func TestAppRequirementIsNotAnExactLabelMatch(t *testing.T) {
+	have := map[string]string{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): "2.1"}
+
+	if satisfiesLabels(have, map[string]string{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): ""}) {
+		t.Fatal("an empty required value must NOT be read as 'any version' -- if this " +
+			"ever becomes true, the require-label spelling is safe again and " +
+			"selectMachine can go back to it")
+	}
+	if !satisfiesLabels(have, map[string]string{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): "2.1"}) {
+		t.Fatal("an exact version require must match")
+	}
+
+	// And the merge helper must not synthesise one, for the same reason: a
+	// pinned version nobody asked for refuses a machine running a NEWER app.
+	got := mergeRequireLabels(nil, workerservice.AppIdClaudeCode)
+	if _, pinned := got[workerservice.AppLabelKey(workerservice.AppIdClaudeCode)]; pinned {
+		t.Fatalf("mergeRequireLabels synthesised an app label: %v", got)
+	}
+}
+
+// fakeFleetStore is a FleetStore double: it returns the candidates it was
+// given, in the order it was given them, and no policy.
+type fakeFleetStore struct{ candidates []Candidate }
+
+func (f fakeFleetStore) WorkersForOwner(context.Context, string) ([]Candidate, error) {
+	return f.candidates, nil
+}
+func (f fakeFleetStore) RoutingPolicyForOwner(context.Context, string) (*Policy, error) {
+	return nil, nil
+}
+func (f fakeFleetStore) TouchWorkerSelected(context.Context, string, string) error { return nil }
+
+// TestSelectMachineFindsTheAppMachine is the POSITIVE control for the test
+// above. "Requiring the label matches nothing" is only worth pinning if the
+// path that replaced it actually finds a machine -- otherwise both tests pass
+// for a selector that can never select.
+func TestSelectMachineFindsTheAppMachine(t *testing.T) {
+	logger := slog.Default()
+	registry := workerservice.NewRegistry(logger, nil)
+
+	// Two machines: the first has no app, the second does. The router
+	// returns both in registration order; the filter is what picks.
+	for _, spec := range []struct {
+		id     string
+		apps   []workerservice.AppInfo
+		hasApp bool
+	}{
+		{id: "reg-plain", apps: nil},
+		{id: "reg-app", apps: []workerservice.AppInfo{
+			{Id: workerservice.AppIdClaudeCode, Version: "2.1.4", Allowed: true, SignedIn: true},
+		}, hasApp: true},
+	} {
+		w := &workerservice.Worker{
+			RegistrationId: spec.id,
+			OwnerUserId:    "user-1",
+			Capabilities:   []string{workerservice.CapabilityHeadless},
+		}
+		w.SetApps(spec.apps)
+		registry.Add(w)
+	}
+
+	// LastSeenAt must be fresh: the router drops a candidate as "offline"
+	// before it looks at labels or capabilities, so a zero timestamp makes
+	// every fixture invisible and the test pass for the wrong reason.
+	now := time.Now().UTC()
+	store := fakeFleetStore{candidates: []Candidate{
+		{RegistrationId: "reg-plain", LastSeenAt: now,
+			Capabilities: []string{workerservice.CapabilityHeadless}},
+		{RegistrationId: "reg-app", LastSeenAt: now,
+			Capabilities: []string{workerservice.CapabilityHeadless},
+			Labels:       map[string]string{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): "2.1"}},
+	}}
+
+	exec := &CockpitAppExecutor{
+		logger:   logger,
+		router:   NewRouter(store, logger, nil),
+		registry: registry,
+	}
+
+	got, err := exec.selectMachine(context.Background(), "user-1", workerservice.AppIdClaudeCode, nil)
+	if err != nil {
+		t.Fatalf("selectMachine: %v", err)
+	}
+	if got.RegistrationId != "reg-app" {
+		t.Fatalf("selected %q, want reg-app -- the filter must skip the machine "+
+			"without the app rather than taking the router's first candidate", got.RegistrationId)
+	}
+
+	// With the app signed out everywhere, the refusal must name what is
+	// wrong rather than reporting "no machines".
+	registry.WorkerById("reg-app").SetApps([]workerservice.AppInfo{
+		{Id: workerservice.AppIdClaudeCode, Version: "2.1.4", Allowed: true, SignedIn: false},
+	})
+	_, err = exec.selectMachine(context.Background(), "user-1", workerservice.AppIdClaudeCode, nil)
+	if err == nil {
+		t.Fatal("selected a machine that is not signed in to the app")
+	}
+	if !strings.Contains(err.Error(), "allowed and signed in") {
+		t.Fatalf("the refusal must say which half is missing, got %v", err)
 	}
 }
