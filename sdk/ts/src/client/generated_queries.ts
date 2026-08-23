@@ -750,6 +750,28 @@ QueryClient.prototype.agentRoleSlugsInUse = function (this: QueryClient, args: A
   return this.executeNamed("agentRoleSlugsInUse", buildAgentRoleSlugsInUse(args), opts);
 };
 
+/** The agents raised while working one goal -- every agent whose lineage.originatingPlanId names the plan. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the plan id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById. */
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForPlan"] in generated_concepts.ts).
+export interface AgentsForPlanArgs {
+  planId: string;
+}
+
+export function buildAgentsForPlan(args: AgentsForPlanArgs): string {
+  const parts: string[] = [];
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "query agentsForPlan(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentsForPlan(args: AgentsForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentsForPlan = function (this: QueryClient, args: AgentsForPlanArgs = {} as AgentsForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentsForPlan", buildAgentsForPlan(args), opts);
+};
+
 /** Returns all AI agent templates regardless of active status. */
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["allAgents"] in generated_concepts.ts).
 export interface AllAgentsArgs {
@@ -955,6 +977,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.approvalRequestById = function (this: QueryClient, args: ApprovalRequestByIdArgs = {} as ApprovalRequestByIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("approvalRequestById", buildApprovalRequestById(args), opts);
+};
+
+/** The Library artifacts one goal produced -- index rows whose producedByPlanId names the plan. Owned: ownerUserId==actor.userId gates the row set server-side and the plan id narrows it. Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced" count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that generatedOutputsForPlan returns. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["artifactsForPlan"] in generated_concepts.ts).
+export interface ArtifactsForPlanArgs {
+  planId: string;
+}
+
+export function buildArtifactsForPlan(args: ArtifactsForPlanArgs): string {
+  const parts: string[] = [];
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "query artifactsForPlan(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    artifactsForPlan(args: ArtifactsForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.artifactsForPlan = function (this: QueryClient, args: ArtifactsForPlanArgs = {} as ArtifactsForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("artifactsForPlan", buildArtifactsForPlan(args), opts);
 };
 
 /** Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273. */
