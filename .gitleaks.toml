@@ -166,3 +166,24 @@ regexes = [
   '''oidc-federation-2026-04-01''',
   '''oauth-2025-04-20''',
 ]
+
+[[allowlists]]
+description = "Fake magic-link token in the VS Code install-receipt test. NOT a credential: `abcdef0123456789abcdef0123456789` is a counting sequence, and the test it appears in (`editors/vscode/test/receiptSecrets.test.ts`) exists to assert that install receipts do NOT carry live credentials -- the commit that introduced it is literally `fix(install): stop writing live credentials into the install receipt`. A real token there would defeat the test's purpose. Value-keyed with no `paths` (memql#3484): the literal is a self-identifying counting sequence, and `gitleaks git .` scans COMMITS, so the tree spelling has already changed and the historical finding survives it -- which is what this entry is for."
+regexTarget = "match"
+regexes = [
+  '''abcdef0123456789abcdef0123456789''',
+]
+
+[[allowlists]]
+description = "Secret-key FINGERPRINT in the backup format fixture. NOT a credential and not truncated key material: `secretKeyFingerprint` is the 4-character-style display hash `component/secret/encryption.go` emits so a UI can say WHICH key encrypted a row without showing it, and this occurrence is in `component/backup/testdata/format-v1.jsonl`, a golden fixture for the v1 manifest shape. `generic-api-key` matches it purely on the entropy of 16 hex characters. Value-keyed rather than path-scoped so a renamed or relocated fixture does not resurface the historical finding."
+regexTarget = "match"
+regexes = [
+  '''3f6a1c9d20b74e58''',
+]
+
+[[allowlists]]
+description = "Placeholder key-encryption-key in the custom-local-domain PLAN document. NOT a credential: `0123456789abcdef0123` is a counting sequence in a Go snippet inside `docs/superpowers/plans/2026-08-12-custom-local-domain.md`, illustrating the branch of an identity guard -- and the line above it in the same snippet says `SigningKeyB64 unset -- the branch the guard lives in`. It is documentation of a code path, not configuration of one. Same value-keyed reasoning as the dummy KEK entry above it, which is the same class of literal in the test that plan describes."
+regexTarget = "match"
+regexes = [
+  '''0123456789abcdef0123''',
+]
