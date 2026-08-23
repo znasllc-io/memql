@@ -187,7 +187,7 @@ func newTestCockpitAppExecutor(t *testing.T) *CockpitAppExecutor {
 // the planner consumes it through its own narrow interface. A drift
 // between the two would only show up at wiring time.
 func TestDelegationProbeSatisfiesThePlannerInterface(t *testing.T) {
-	var _ planner.DelegationProbe = (*DelegationProbe)(nil)
+	var _ planner.DelegationProbe = (*workerservice.DelegationProbe)(nil)
 }
 
 // TestDelegationProbeAgreesWithSelection is the property that keeps
@@ -197,7 +197,7 @@ func TestDelegationProbeSatisfiesThePlannerInterface(t *testing.T) {
 // fine.
 func TestDelegationProbeAgreesWithSelection(t *testing.T) {
 	registry := workerservice.NewRegistry(slog.Default(), nil)
-	probe := &DelegationProbe{Registry: registry}
+	probe := workerservice.NewDelegationProbe(registry, nil)
 
 	if got := probe.FindMachineForApp(context.Background(), "user-1", workerservice.AppIdClaudeCode); got != "" {
 		t.Fatalf("found %q with nothing online", got)

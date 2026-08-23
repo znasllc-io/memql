@@ -17,8 +17,10 @@ import (
 )
 
 // cockpitapp_ledger.go writes the v1:router:call row for a delegated
-// app session, and answers the planner's delegation probe
-// (memql#4362).
+// app session (memql#4362). The delegation probe used to live here and
+// now sits in component/worker, untagged: this file is //go:build agent,
+// and a probe the PLANNER node cannot compile answers "no machine" on
+// every planner in a real cluster.
 //
 // Why an app session writes a LEDGER row at all: the ledger is where
 // "what did this cost" is answered, and a delegated run that skipped
@@ -126,57 +128,4 @@ func truncateForLedger(msg string) string {
 		return msg[:500]
 	}
 	return msg
-}
-
-// DelegationProbe answers the planner's two live questions from the
-// agent node's own registry (memql#4362).
-//
-// It lives on the agent node because that is where the worker streams
-// terminate: only this node knows which machines are connected right
-// now. A planner node asking the question reaches here through the
-// same path a dispatch does.
-type DelegationProbe struct {
-	Registry *workerservice.Registry
-	Engine   *memqlengine.MemQLEngine
-}
-
-// FindMachineForApp returns an online machine that can actually run
-// appId, or "" when none can. "Can actually run" is the same
-// allowed-AND-signed-in test selection uses, so the triage cannot
-// promise a machine that dispatch would then refuse.
-func (p *DelegationProbe) FindMachineForApp(_ context.Context, ownerUserId, appId string) string {
-	if p == nil || p.Registry == nil {
-		return ""
-	}
-	w, err := p.Registry.PickWorkerForApp(ownerUserId, appId, nil)
-	if err != nil || w == nil {
-		return ""
-	}
-	return w.RegistrationId
-}
-
-// LiveSessionCount counts the user's sessions that have not reached a
-// terminal status.
-//
-// It reads the ROW, not the local registry: sessions live on whichever
-// agent replica holds the machine's stream, so counting in-memory
-// would give each replica its own private view of a cap that is
-// supposed to be per-user across the cluster. A read failure returns
-// 0, which fails OPEN -- the cap is a courtesy limit on the user's own
-// machines, and refusing their work because a query blipped is the
-// worse error.
-func (p *DelegationProbe) LiveSessionCount(ctx context.Context, ownerUserId string) int {
-	if p == nil || p.Engine == nil || strings.TrimSpace(ownerUserId) == "" {
-		return 0
-	}
-	// No ownerUserId argument: the query scopes on actor.userId, and the
-	// engine BORROWS the owner's actor for the read rather than passing an
-	// id it could get wrong. That is what makes the query caller-scoped in
-	// the engine's own terms instead of trusting this call site.
-	res, err := p.Engine.Execute(
-		auth.ContextWithUserActor(ctx, ownerUserId), "query liveAppSessionsForUser()")
-	if err != nil {
-		return 0
-	}
-	return len(outputPayloadRows(res.OutputPayload()))
 }

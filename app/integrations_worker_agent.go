@@ -164,6 +164,7 @@ func (a *App) setupCockpitAppExecutor(
 	exec, err := agentworker.NewCockpitAppExecutor(
 		a.Logger, dispatcher, runner, &agentworker.EngineStore{Engine: a.engine},
 	)
+
 	if err != nil {
 		a.fatal("cockpit-app executor: build failed", "error", err)
 	}
