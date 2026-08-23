@@ -138,10 +138,12 @@ MemQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
 the local cluster's prerequisites (`docker`, `k3d`, `kubectl`) have no
 platform-specific step on either, and the `make up` dev flow is exercised
 on both. Linux/amd64 is a fully supported target in its own right, not a
-fallback from macOS. The one-command **installer** is a separate, narrower
-lane: `scripts/install/detect.sh`'s `SUPPORTED_OS`/`SUPPORTED_ARCH` pair
-targets Linux/amd64 only and refuses macOS by design -- on macOS, use the
-`make up` dev flow directly instead.
+fallback from macOS. The one-command **installer** targets the same two:
+`SUPPORTED_PLATFORMS` in `scripts/lib/platform.sh` is `linux/amd64` and
+`darwin/arm64`, and every tool it downloads carries a verified digest for
+each (memql#4295). `make up` remains the supported path on both, and is
+what an operator who already has the tools should reach for; the installer
+is for a machine that has none of them.
 
 **Software:**
 - Go 1.26.1+

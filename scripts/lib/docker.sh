@@ -89,6 +89,11 @@ function docker_access_state() {
 # without the evidence for it would be a confident wrong diagnosis, and the
 # less specific one is still true.
 function docker_group_pending() {
+    # macOS has no `docker` group at all -- Docker Desktop's socket is owned by
+    # the logged-in user -- so the whole applied-not-yet-in-effect state cannot
+    # arise there, and asking `id` about a group that does not exist would
+    # answer "no" for the wrong reason (memql#4295).
+    [[ "$(uname -s 2>/dev/null || true)" != "Darwin" ]] || return 1
     command -v id &>/dev/null || return 1
     local user recorded current
     user="$(id -un 2>/dev/null)" || return 1
@@ -108,7 +113,28 @@ function docker_group_pending() {
 # `missing` has no single command: installing Docker differs per distribution
 # and picking one would be a guess presented as an instruction. It returns "",
 # and the caller says where to look instead.
+#
+# THE REMEDIES ARE PLATFORM-SPECIFIC, and the macOS ones are not cosmetic
+# variants (memql#4295). On a Mac there is no systemd, so
+# `sudo systemctl start docker` is not a worse suggestion than the right one --
+# it is a command that does not exist, offered to an operator whose Docker is
+# simply not launched. And there is no `docker` group: Docker Desktop's socket
+# is owned by the logged-in user, so `usermod -aG docker` names a group that
+# does not exist on a system that has no `usermod` either. Both would have been
+# typed into a terminal by the wizard, which is why they are worth splitting
+# rather than leaving as an approximation.
 function docker_access_remedy() {
+    if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]]; then
+        case "$1" in
+            # Docker Desktop is an application, not a service. `open -a` is the
+            # supported way to start it and returns as soon as it launches --
+            # the daemon takes a few more seconds, which is why the gate is
+            # re-run rather than chained.
+            stopped|denied) printf 'open -a Docker\n' ;;
+            *)              printf '' ;;
+        esac
+        return
+    fi
     case "$1" in
         denied)  printf 'sudo usermod -aG docker %s\n' "$(id -un)" ;;
         # NO COMMAND. Nothing run inside this session can give it a group it did
@@ -122,6 +148,18 @@ function docker_access_remedy() {
 
 # docker_access_explanation <state> -- one sentence an operator can act on.
 function docker_access_explanation() {
+    if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]]; then
+        case "$1" in
+            ok)      printf 'Docker is running and reachable.\n' ;;
+            missing) printf 'Docker is not installed on this machine. Install Docker Desktop for Mac (https://docs.docker.com/desktop/install/mac-install/), then run this again.\n' ;;
+            # On macOS these collapse: there is no `docker` group to be outside
+            # of, so a socket that refuses is a Desktop that is not running (or
+            # still starting) rather than a permissions problem.
+            stopped|denied) printf 'Docker Desktop is not running -- start it from Applications (or `open -a Docker`), give it a few seconds to finish starting, then run this again.\n' ;;
+            *)       printf 'The state of Docker on this machine could not be determined.\n' ;;
+        esac
+        return
+    fi
     case "$1" in
         ok)      printf 'Docker is running and reachable.\n' ;;
         missing) printf 'Docker is not installed on this machine. Install Docker Engine for your distribution, then run this again.\n' ;;

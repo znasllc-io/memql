@@ -19,8 +19,16 @@
 # A missing tool is DATA, not an error -- reporting present=false is the whole
 # point, so a bare machine still exits 0. The one refusal is an unsupported
 # platform: exit 3 (refused), NOT 4 (prerequisite missing). 4 would promise that
-# installing something and retrying will help, and on macOS that is a lie --
-# this epic is Linux/amd64 only.
+# installing something and retrying will help, and on a platform with no pinned
+# artifacts that is a lie.
+#
+# THE SUPPORTED SET IS NOT A CONSTANT HERE (memql#4295). It lives in
+# scripts/lib/platform.sh together with the uname normalisation, because
+# install-binary.sh composes a pin key from the same answer and
+# refresh-tool-pins.sh generates a block per platform in the same vocabulary.
+# Three copies of that rule would be three copies that can disagree, and a
+# disagreement is either a platform refused despite having pins or a Linux
+# binary downloaded onto a Mac. darwin/arm64 joined linux/amd64 there.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -42,6 +50,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/docker.sh
 source "${SCRIPT_DIR}/../lib/docker.sh"
+# shellcheck source=../lib/platform.sh
+source "${SCRIPT_DIR}/../lib/platform.sh"
 
 cap_init "install.detect" "Inventory the local machine's installer dependencies (read-only)."
 cap_spec_param "ports" "comma-separated TCP ports to probe (default: 80,443)"
@@ -49,29 +59,6 @@ cap_spec_param "path"  "filesystem path to measure free space on (default: \$HOM
 
 # The tool graph the installer depends on. Every one gets a present flag.
 readonly DETECT_TOOLS=(docker k3d kubectl git mkcert)
-
-readonly SUPPORTED_OS="linux"
-readonly SUPPORTED_ARCH="amd64"
-
-#=============================================================================
-# PLATFORM
-#=============================================================================
-
-# normalize_os <uname -s> -- lowercased kernel name.
-function normalize_os() {
-    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
-}
-
-# normalize_arch <uname -m> -- the Go/OCI spelling, so the answer lines up with
-# the artifact names in tool-pins.env.
-function normalize_arch() {
-    case "$1" in
-        x86_64|amd64)   printf 'amd64' ;;
-        aarch64|arm64)  printf 'arm64' ;;
-        armv7l|armv7)   printf 'arm' ;;
-        *)              printf '%s' "$1" ;;
-    esac
-}
 
 #=============================================================================
 # TOOL PROBES
@@ -168,18 +155,16 @@ function main() {
     cap_require path  "$path"
 
     # --- platform -------------------------------------------------------
-    local os arch supported=false
-    os="$(normalize_os  "$(uname -s 2>/dev/null || printf 'unknown')")"
-    arch="$(normalize_arch "$(uname -m 2>/dev/null || printf 'unknown')")"
-    cap_info "Platform: ${os}/${arch}"
-    if [[ "$os" == "$SUPPORTED_OS" && "$arch" == "$SUPPORTED_ARCH" ]]; then
-        supported=true
-    fi
-    if [[ "$supported" != "true" ]]; then
+    local os arch id
+    os="$(platform_os)"
+    arch="$(platform_arch)"
+    id="$(platform_id "$os" "$arch")"
+    cap_info "Platform: ${id}"
+    if ! platform_supported "$id"; then
         cap_result_set     os        "$os"
         cap_result_set     arch      "$arch"
         cap_result_set_raw supported false
-        cap_fail 3 "unsupported platform ${os}/${arch}: the local cluster installer targets ${SUPPORTED_OS}/${SUPPORTED_ARCH} only"
+        cap_fail 3 "unsupported platform ${id}: the local cluster installer targets $(platform_supported_csv)"
     fi
 
     # --- tools ----------------------------------------------------------

@@ -22,14 +22,27 @@ import (
 )
 
 // pinnedTools is the tool graph the local-cluster installer downloads. Every
-// one of them must carry a full pin triple. Linux/amd64 only -- this epic is
-// Linux-only by design.
+// one of them must carry a full pin triple ON EVERY SUPPORTED PLATFORM.
 var pinnedTools = []string{"K3D", "KUBECTL", "MKCERT"}
+
+// pinnedPlatforms mirrors SUPPORTED_PLATFORMS in scripts/lib/platform.sh --
+// the set detect.sh refuses against and install-binary.sh composes keys from
+// (memql#4295). The two must agree, and
+// TestPinnedPlatformsMatchTheSupportedSet asserts it in both directions rather
+// than trusting this comment: a platform admitted by the shell and unpinned
+// here fails at the first download, and a platform pinned here and refused by
+// the shell is dead weight nobody notices.
+var pinnedPlatforms = []string{"LINUX_AMD64", "DARWIN_ARM64"}
 
 var (
 	reSemver = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.\-+]+)?$`)
 	reSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	rePinKey = regexp.MustCompile(`^([A-Z0-9]+)_(VERSION|URL|SHA256)$`)
+	// Keys are <TOOL>_<OS>_<ARCH>_<FIELD>; the tool group is non-greedy so a
+	// two-segment platform suffix is peeled off the end rather than swallowed.
+	rePinKey = regexp.MustCompile(`^([A-Z0-9]+)_([A-Z0-9]+_[A-Z0-9]+)_(VERSION|URL|SHA256)$`)
+	// platformSlug turns LINUX_AMD64 into the `linux/amd64` an artifact URL
+	// spells, so the URL can be checked against the platform it claims.
+	reSupportedLine = regexp.MustCompile(`^readonly SUPPORTED_PLATFORMS=\((.*)\)$`)
 )
 
 // sha256OfNothing is the digest of the empty byte string. A pin carrying it
@@ -79,7 +92,21 @@ func TestEveryToolHasVersionAndDigest(t *testing.T) {
 	pins := parsePins(t, pinsPath(t))
 
 	for _, tool := range pinnedTools {
-		t.Run(tool, func(t *testing.T) {
+		for _, platform := range pinnedPlatforms {
+			tool, platform := tool, platform
+			t.Run(tool+"/"+platform, func(t *testing.T) {
+				assertFullPin(t, pins, tool+"_"+platform, platform)
+			})
+		}
+	}
+}
+
+// assertFullPin is THE assertion of #3358 for one (tool, platform) cell.
+func assertFullPin(t *testing.T, pins map[string]string, key, platform string) {
+	t.Helper()
+	{
+		tool := key
+		{
 			version, ok := pins[tool+"_VERSION"]
 			if !ok || version == "" {
 				t.Fatalf("%s_VERSION is missing or empty", tool)
@@ -115,7 +142,19 @@ func TestEveryToolHasVersionAndDigest(t *testing.T) {
 			if isPlaceholder(digest) {
 				t.Errorf("%s_SHA256 = %q looks like a placeholder, not a real digest", tool, digest)
 			}
-		})
+
+			// THE PIN MUST NAME THE PLATFORM IT IS FILED UNDER. This is the
+			// failure that a platform-qualified key exists to prevent and
+			// would otherwise be invisible: a DARWIN_ARM64 block whose URL
+			// still points at the linux artifact is a Mac downloading a Linux
+			// binary, with a digest that matches, so every verification the
+			// installer performs passes.
+			os, arch, _ := strings.Cut(strings.ToLower(platform), "_")
+			if !strings.Contains(url, os) || !strings.Contains(url, arch) {
+				t.Errorf("%s_URL = %q does not name %s/%s -- this pin is filed under a "+
+					"platform its artifact is not for", tool, url, os, arch)
+			}
+		}
 	}
 }
 
@@ -137,18 +176,89 @@ func TestPinsFileHasNoStrayKeys(t *testing.T) {
 	for _, tool := range pinnedTools {
 		known[tool] = true
 	}
+	knownPlatform := map[string]bool{}
+	for _, p := range pinnedPlatforms {
+		knownPlatform[p] = true
+	}
 	for k := range pins {
 		m := rePinKey.FindStringSubmatch(k)
 		if m == nil {
-			t.Errorf("stray key %q -- expected <TOOL>_VERSION / <TOOL>_URL / <TOOL>_SHA256", k)
+			t.Errorf("stray key %q -- expected <TOOL>_<OS>_<ARCH>_{VERSION,URL,SHA256}", k)
 			continue
 		}
 		if !known[m[1]] {
 			t.Errorf("key %q names tool %q which is not in the pinned tool graph %v", k, m[1], pinnedTools)
 		}
+		if !knownPlatform[m[2]] {
+			t.Errorf("key %q names platform %q which is not in the pinned platform set %v", k, m[2], pinnedPlatforms)
+		}
 	}
-	if want, got := len(pinnedTools)*3, len(pins); got != want {
-		t.Errorf("tool-pins.env has %d keys, want %d (3 per tool x %d tools)", got, want, len(pinnedTools))
+	if want, got := len(pinnedTools)*len(pinnedPlatforms)*3, len(pins); got != want {
+		t.Errorf("tool-pins.env has %d keys, want %d (3 per tool x %d tools x %d platforms) -- "+
+			"a MISSING cell is the dangerous direction: install-binary.sh would refuse that "+
+			"platform at the moment an operator ran it",
+			got, want, len(pinnedTools), len(pinnedPlatforms))
+	}
+}
+
+// TestPinnedPlatformsMatchTheSupportedSet reads SUPPORTED_PLATFORMS out of
+// scripts/lib/platform.sh and asserts it agrees with the pins, both ways.
+//
+// Parsing the shell rather than duplicating the list is the point. The shell is
+// the authority -- detect.sh refuses against it and install-binary.sh composes
+// keys from it -- so a Go copy that drifted would assert about itself. The two
+// disagreements have different costs and both are real: a platform the shell
+// admits with no pins fails at the first download, on an operator's machine; a
+// platform pinned with no shell support is bytes nobody can reach.
+func TestPinnedPlatformsMatchTheSupportedSet(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	path := filepath.Join(wd, "..", "lib", "platform.sh")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v -- it is the one place the supported set is declared", path, err)
+	}
+
+	var shell []string
+	for _, line := range strings.Split(string(b), "\n") {
+		m := reSupportedLine.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		for _, f := range strings.Fields(m[1]) {
+			f = strings.Trim(f, `"`)
+			if f == "" {
+				continue
+			}
+			shell = append(shell, strings.ToUpper(strings.ReplaceAll(f, "/", "_")))
+		}
+	}
+	if len(shell) == 0 {
+		t.Fatalf("found no SUPPORTED_PLATFORMS declaration in %s -- this gate cannot pass "+
+			"without reading the list it is comparing against", path)
+	}
+
+	inShell := map[string]bool{}
+	for _, p := range shell {
+		inShell[p] = true
+	}
+	inGo := map[string]bool{}
+	for _, p := range pinnedPlatforms {
+		inGo[p] = true
+	}
+	for _, p := range shell {
+		if !inGo[p] {
+			t.Errorf("platform.sh supports %s but tool-pins.env pins nothing for it -- an "+
+				"operator on that platform gets a refusal at the first download", p)
+		}
+	}
+	for _, p := range pinnedPlatforms {
+		if !inShell[p] {
+			t.Errorf("tool-pins.env pins %s but platform.sh does not support it -- detect.sh "+
+				"refuses that platform, so those pins are unreachable", p)
+		}
 	}
 }
 

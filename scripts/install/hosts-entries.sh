@@ -363,7 +363,41 @@ function write_elevated() {
         offer_terminal_handoff "$path" \
             "could not write ${path} as root -- the password prompt was cancelled, or the password was not accepted"
     fi
+    flush_dns_cache "$path"
     elevate_end
+}
+
+# flush_dns_cache <path> -- macOS only, and only for the REAL /etc/hosts.
+#
+# WHY THIS IS NOT SYMMETRIC WITH LINUX (memql#4295). On Linux the resolver
+# consults /etc/hosts on every lookup through nsswitch, so an edit is live the
+# moment it lands and there is nothing to flush. macOS answers from
+# mDNSResponder, which caches -- including NEGATIVE answers. The installer's
+# hostnames are exactly the ones something will already have tried and failed to
+# resolve: the wizard probes the front door, and a browser left open on the
+# previous attempt has queried them too. So on a Mac the ordinary case is an
+# edit that is correct and a name that still does not resolve, which reads as
+# the hosts step having silently failed.
+#
+# BEST-EFFORT BY CONSTRUCTION. It runs inside the elevation this function
+# already holds, so it costs no second prompt; a failure is logged and ignored,
+# because the hosts entry -- the thing this capability is responsible for -- is
+# already written and correct. Failing the step over a cache flush would undo a
+# successful privileged write for a warming problem that resolves itself.
+#
+# Skipped for a --hosts-file pointing anywhere else, which is what the tests
+# pass: flushing the machine's resolver because a temp file changed would be a
+# side effect on a system the caller did not ask us to touch.
+function flush_dns_cache() {
+    local path="$1"
+    [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] || return 0
+    [[ "$path" == "/etc/hosts" ]] || return 0
+    command -v dscacheutil &>/dev/null || return 0
+    cap_info "flushing the macOS DNS cache so the new names resolve immediately"
+    elevate_run dscacheutil -flushcache >/dev/null 2>&1 || \
+        cap_info "dscacheutil -flushcache did not succeed; the entries are written and will resolve shortly"
+    elevate_run killall -HUP mDNSResponder >/dev/null 2>&1 || \
+        cap_info "killall -HUP mDNSResponder did not succeed; the entries are written and will resolve shortly"
 }
 
 # offer_terminal_handoff <path> <message> -- refuse, naming the exact command

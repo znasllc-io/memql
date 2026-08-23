@@ -459,13 +459,18 @@ func TestDetectDefaultPortsAreTheIngressPair(t *testing.T) {
 	}
 }
 
-// TestUnsupportedOSIsRefusedNotMissing pins the exit code. An unsupported OS is
-// a REFUSAL (3): the request is well-formed and every prerequisite question is
-// moot. Reporting 4 would say "install something and retry", which is a lie --
-// there is nothing to install that makes this epic support macOS.
+// TestUnsupportedOSIsRefusedNotMissing pins the exit code. An unsupported
+// platform is a REFUSAL (3): the request is well-formed and every prerequisite
+// question is moot. Reporting 4 would say "install something and retry", which
+// is a lie -- there is nothing to install that produces pinned artifacts for a
+// platform nobody has verified digests for.
+//
+// The fixture used to be Darwin/arm64, which is SUPPORTED since memql#4295, so
+// this now uses a platform genuinely outside the set. Its positive twin below
+// is what stops that edit from having quietly weakened the assertion.
 func TestUnsupportedOSIsRefusedNotMissing(t *testing.T) {
 	home := t.TempDir()
-	dir := stubPATH(t, "Darwin", "arm64")
+	dir := stubPATH(t, "OpenBSD", "sparc64")
 
 	env, out, code := runDetect(t, dir, home)
 	if code != 3 {
@@ -479,6 +484,35 @@ func TestUnsupportedOSIsRefusedNotMissing(t *testing.T) {
 	}
 	if env.Changed {
 		t.Error("changed=true on the refusal path -- detection must never mutate")
+	}
+}
+
+// TestDarwinArm64IsSupported is the positive half, and it is the assertion that
+// memql#4295 actually landed rather than merely being described.
+//
+// It also pins the uname NORMALISATION, which is where an Apple Silicon Mac
+// differs from Linux for the same architecture: `uname -m` says `arm64` there
+// and `aarch64` on a Linux arm box, and the pin keys are written in the Go/OCI
+// spelling. Both inputs must normalise to arm64, or a Mac is refused by a
+// platform check that has its pins.
+func TestDarwinArm64IsSupported(t *testing.T) {
+	for _, machine := range []string{"arm64", "aarch64"} {
+		t.Run("uname -m = "+machine, func(t *testing.T) {
+			home := t.TempDir()
+			dir := stubPATH(t, "Darwin", machine)
+
+			r := decodeDetect(t, mustDetect(t, dir, home))
+			if r.OS != "darwin" {
+				t.Errorf("os = %q, want darwin", r.OS)
+			}
+			if r.Arch != "arm64" {
+				t.Errorf("arch = %q, want arm64 -- uname -m is normalised to the Go/OCI "+
+					"spelling so it lines up with the artifact names in tool-pins.env", r.Arch)
+			}
+			if !r.Supported {
+				t.Error("darwin/arm64 reported unsupported; it has verified pins for every tool")
+			}
+		})
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,7 +49,12 @@ type installResult struct {
 func installPATH(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	linkReal(t, dir, "bash", "dirname", "tr", "mktemp", "mkdir", "chmod",
+	// `uname` joined the set with memql#4295: install-binary.sh composes a
+	// PLATFORM-QUALIFIED pin key, so it has to know what platform this is.
+	// Without it every run refuses with "unsupported platform unknown/unknown",
+	// which is the correct behaviour and a useless test fixture.
+	// `sed` is used by the pinned-tool lister to strip a platform suffix.
+	linkReal(t, dir, "bash", "dirname", "tr", "sed", "uname", "mktemp", "mkdir", "chmod",
 		"mv", "rm", "cp", "wc", "sha256sum")
 	return dir
 }
@@ -71,14 +77,22 @@ func fakeArtifact(t *testing.T, name, body string) (url, digest string) {
 }
 
 // writePins renders a pins manifest in the committed file's format.
+//
+// Keys are PLATFORM-QUALIFIED since memql#4295, and a fixture writes the same
+// triple under EVERY supported platform. That is deliberate rather than lazy:
+// these tests are about download/verify/place, not about platform resolution
+// (pins_test.go owns that), and writing only the runner's platform would make
+// every one of them fail on a Mac for a reason unrelated to what they assert.
 func writePins(t *testing.T, entries map[string][3]string) string {
 	t.Helper()
 	var sb strings.Builder
 	sb.WriteString("# test pins\n")
 	for tool, triple := range entries {
-		key := strings.ToUpper(tool)
-		fmt.Fprintf(&sb, "\n%s_VERSION=%s\n%s_URL=%s\n%s_SHA256=%s\n",
-			key, triple[0], key, triple[1], key, triple[2])
+		for _, platform := range pinnedPlatforms {
+			key := strings.ToUpper(tool) + "_" + platform
+			fmt.Fprintf(&sb, "\n%s_VERSION=%s\n%s_URL=%s\n%s_SHA256=%s\n",
+				key, triple[0], key, triple[1], key, triple[2])
+		}
 	}
 	p := filepath.Join(t.TempDir(), "tool-pins.env")
 	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
@@ -428,12 +442,18 @@ func TestDefaultPinsIsTheCommittedManifest(t *testing.T) {
 		t.Fatalf("dry run against the committed pins exited %d\noutput:\n%s", code, out)
 	}
 	r := decodeInstall(t, env)
+	// The committed manifest is platform-qualified, so the key this run should
+	// have resolved is the one for the platform the test is running on --
+	// which is the whole contract install-binary.sh gained in memql#4295.
 	pins := parsePins(t, pinsPath(t))
-	if r.SHA256 != pins["K3D_SHA256"] {
-		t.Errorf("default run used sha256 %q, want the committed %q", r.SHA256, pins["K3D_SHA256"])
+	suffix := runnerPinSuffix(t)
+	if r.SHA256 != pins["K3D_"+suffix+"_SHA256"] {
+		t.Errorf("default run used sha256 %q, want the committed %q for %s",
+			r.SHA256, pins["K3D_"+suffix+"_SHA256"], suffix)
 	}
-	if r.URL != pins["K3D_URL"] {
-		t.Errorf("default run used url %q, want the committed %q", r.URL, pins["K3D_URL"])
+	if r.URL != pins["K3D_"+suffix+"_URL"] {
+		t.Errorf("default run used url %q, want the committed %q for %s",
+			r.URL, pins["K3D_"+suffix+"_URL"], suffix)
 	}
 }
 
@@ -481,4 +501,26 @@ func mustInstall(t *testing.T, pathDir, home string, args ...string) capEnvelope
 		t.Fatalf("install exited %d, want 0\noutput:\n%s", code, out)
 	}
 	return env
+}
+
+// runnerPinSuffix is the tool-pins.env key fragment for the platform these
+// tests are running on -- the Go spelling of what scripts/lib/platform.sh
+// computes from uname (memql#4295).
+//
+// runtime.GOARCH rather than parsing `uname -m`, because Go already normalises
+// what the shell has to normalise by hand: GOARCH is `arm64` on an Apple
+// Silicon Mac and `amd64` on x86_64, which is exactly the spelling the pin keys
+// use. That the two agree is not assumed here -- detect_test.go asserts the
+// shell's normalisation directly, on both `arm64` and `aarch64` inputs.
+func runnerPinSuffix(t *testing.T) string {
+	t.Helper()
+	suffix := strings.ToUpper(runtime.GOOS + "_" + runtime.GOARCH)
+	for _, p := range pinnedPlatforms {
+		if p == suffix {
+			return suffix
+		}
+	}
+	t.Skipf("this runner is %s/%s, which the installer does not target; "+
+		"the committed pins carry %v", runtime.GOOS, runtime.GOARCH, pinnedPlatforms)
+	return ""
 }
