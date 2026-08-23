@@ -330,6 +330,7 @@ describe("the sites list", () => {
       subscriptionId: "s",
       kind: "NODE_CREATED",
       timestamp: new Date(),
+      payloadOmitted: false,
       payload: {
         id: "site-new",
         concept: SITE,

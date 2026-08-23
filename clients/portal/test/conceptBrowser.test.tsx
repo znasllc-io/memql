@@ -119,6 +119,11 @@ function harness(
     // Cursors whose FIRST browse attempt fails. A second attempt at the same
     // cursor succeeds, which is what makes "retry resumes the walk" testable.
     failOnce?: string[];
+    // Makes the authoritative single-row read REFUSE. That is the answer an
+    // id-only CDC notification gets when the caller may not read the row
+    // (memql#4309), and it is distinct from the read succeeding and finding
+    // nothing -- "you may not see this" and "it is gone" are different facts.
+    rowReadThrows?: Error;
   } = {},
 ): Harness {
   const browseCalls: string[] = [];
@@ -131,6 +136,7 @@ function harness(
     executeNamed: vi.fn(
       async (name: string, _call: string, opts: { cursor?: string } = {}) => {
         if (name === "conceptRow") {
+          if (overrides.rowReadThrows) throw overrides.rowReadThrows;
           // `_call` is `concept==X && id==Y`; the fake only needs the id.
           const match = /id==(\S+)/.exec(_call);
           const id = match?.[1] ?? "";
@@ -409,6 +415,7 @@ describe("live updates", () => {
       subscriptionId: "s",
       kind: "NODE_CREATED",
       timestamp: new Date(),
+      payloadOmitted: false,
       payload: { id: "node-900", concept: NODE, name: "pod-brand-new", state: "healthy" },
     });
 
@@ -432,6 +439,7 @@ describe("live updates", () => {
       subscriptionId: "s",
       kind: "NODE_UPDATED",
       timestamp: new Date(),
+      payloadOmitted: false,
       payload: { id: "node-000", concept: NODE },
     });
 
@@ -452,6 +460,7 @@ describe("live updates", () => {
       subscriptionId: "s",
       kind: "NODE_CREATED",
       timestamp: new Date(),
+      payloadOmitted: false,
       payload: { id: "node-900", concept: NODE, name: "pod-brand-new" },
     });
     await waitFor(() => expect(screen.getByText(/New since you opened this/)).toBeTruthy());
@@ -523,5 +532,95 @@ describe("the schema view", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Rows" }));
     await waitFor(() => expect(screen.getByText("pod-0")).toBeTruthy());
+  });
+});
+
+// ID-ONLY live notifications (memql#4309).
+//
+// A row whose concept declares the `granted` row-authz tier cannot be
+// decided at fan-out -- its predicate is a relationship spec needing a join
+// -- so the engine sends the row's identity with payload_omitted set and
+// leaves the decision to a read. The pane resolves it with the SAME
+// authoritative read the detail pane performs.
+//
+// No concept declares `via=` today, so this path is exercised by fixture
+// only. That is deliberate: a future granted concept must not be the thing
+// that discovers the live band dies silently.
+describe("id-only live notifications", () => {
+  it("re-reads an id-only created event and puts the resolved row in the band", async () => {
+    const h = harness();
+    renderBrowser(h, `/concepts/${NODE}`);
+    await waitFor(() => expect(screen.getByText("pod-0")).toBeTruthy());
+
+    // node-005 is readable and outside the first page, so it belongs in the
+    // band rather than being dropped as already-on-screen.
+    h.emit({
+      subscriptionId: "s",
+      kind: "NODE_CREATED",
+      timestamp: new Date(),
+      payloadOmitted: true,
+      payload: { id: "node-005", concept: NODE },
+    });
+
+    await waitFor(() => expect(screen.getByText(/New since you opened this/)).toBeTruthy());
+    // The NAME proves the re-read happened: it was never on the wire -- the
+    // id-only notification carried the identity and nothing else.
+    expect(screen.getByText("pod-5")).toBeTruthy();
+    expect(screen.getAllByText(/^pod-\d$/)).toHaveLength(PAGE_SIZE + 1);
+  });
+
+  it("drops an id-only event whose authoritative read is refused", async () => {
+    const h = harness({ rowReadThrows: new Error("row-authz: refused") });
+    renderBrowser(h, `/concepts/${NODE}`);
+    await waitFor(() => expect(screen.getByText("pod-0")).toBeTruthy());
+
+    h.emit({
+      subscriptionId: "s",
+      kind: "NODE_CREATED",
+      timestamp: new Date(),
+      payloadOmitted: true,
+      payload: { id: "node-005", concept: NODE },
+    });
+
+    // Nothing appears, and nothing is ANNOUNCED either: a band reading
+    // "1 new row" for a row the operator may not see would leak its
+    // existence, which is exactly what the gate withheld.
+    await Promise.resolve();
+    expect(screen.queryByText(/New since you opened this/)).toBeNull();
+    expect(screen.getAllByText(/^pod-\d$/)).toHaveLength(PAGE_SIZE);
+  });
+
+  it("still counts an id-only update, which needs no payload at all", async () => {
+    const h = harness();
+    renderBrowser(h, `/concepts/${NODE}`);
+    await waitFor(() => expect(screen.getByText("pod-0")).toBeTruthy());
+
+    h.emit({
+      subscriptionId: "s",
+      kind: "NODE_UPDATED",
+      timestamp: new Date(),
+      payloadOmitted: true,
+      payload: { id: "node-000", concept: NODE },
+    });
+
+    await waitFor(() => expect(screen.getByText(/1 existing row changed/)).toBeTruthy());
+  });
+
+  it("leaves a full-payload event untouched", async () => {
+    const h = harness({ rowReadThrows: new Error("the read path must not be consulted") });
+    renderBrowser(h, `/concepts/${NODE}`);
+    await waitFor(() => expect(screen.getByText("pod-0")).toBeTruthy());
+
+    h.emit({
+      subscriptionId: "s",
+      kind: "NODE_CREATED",
+      timestamp: new Date(),
+      payloadOmitted: false,
+      payload: { id: "node-900", concept: NODE, name: "pod-brand-new", state: "healthy" },
+    });
+
+    // It renders from the event's own payload -- rowReadThrows would have
+    // dropped it had the pane re-read a full-payload event.
+    await waitFor(() => expect(screen.getByText("pod-brand-new")).toBeTruthy());
   });
 });

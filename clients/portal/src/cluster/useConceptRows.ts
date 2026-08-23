@@ -29,7 +29,9 @@ import {
 
 import {
   EMPTY_LIVE_BAND,
+  KIND_CREATED,
   applyGraphEvent,
+  eventRowId,
   type LiveBandState,
 } from "../concepts/liveBand";
 import {
@@ -157,17 +159,85 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
       setLiveDegraded("");
       return;
     }
+    let live_ = true;
+    const fold = (event: Parameters<typeof applyGraphEvent>[1]) => {
+      if (!live_) return;
+      setLive((current) =>
+        applyGraphEvent(current, event, {
+          conceptId,
+          pagedRowIds: pagedRowIdsRef.current,
+        }),
+      );
+    };
+
     let unsubscribe: (() => void) | null = null;
     try {
       unsubscribe = subscriptions.subscribeGraph(
         (event) => {
           bumpActivity();
-          setLive((current) =>
-            applyGraphEvent(current, event, {
-              conceptId,
-              pagedRowIds: pagedRowIdsRef.current,
-            }),
-          );
+          if (!event.payloadOmitted) {
+            fold(event);
+            return;
+          }
+          // ID-ONLY notification (memql#4309). The row's concept declares
+          // the `granted` row-authz tier, which cannot be decided against a
+          // single row at fan-out -- its predicate is a relationship spec
+          // needing a join -- so the engine sent the identity and left the
+          // decision to a read.
+          //
+          // Resolved by the SAME authoritative read useRowDetail performs,
+          // deliberately: that read is already the pane's answer to "what is
+          // this row really", it goes through the authorized path, and using
+          // a second one here would be a second answer to drift from.
+          //
+          // A REFUSED read drops the event silently. The caller was not
+          // entitled to the row, and a console that announced "1 row you may
+          // not see changed" would leak the row's existence -- which is the
+          // thing the gate withheld.
+          const rowId = eventRowId(event);
+          if (query === null || rowId === "") return;
+          void getRowByConceptAndId(query, conceptId, rowId)
+            .then((row) => {
+              if (row === null) {
+                // The read succeeded and found nothing. For an update or a
+                // delete the band only records the id, so the event still
+                // means something; for a create there is no row left to show.
+                if (event.kind === KIND_CREATED) return;
+                fold(event);
+                return;
+              }
+              // Enter the band exactly as a full-payload event would --
+              // which means rebuilding the ENGINE'S event shape, not just
+              // attaching the row.
+              //
+              // A read returns a Row whose concept fields sit NESTED under
+              // `payload`; the engine's CDC envelope flattens those same
+              // fields alongside the intrinsics and keeps the nested copy
+              // too (executor_mutation.go). liveBand's eventRow() reads the
+              // flattened form and drops `payload` outright, so handing it
+              // the un-flattened row yields a card with every concept field
+              // missing -- rendered, blank, and wrong in the direction that
+              // looks like a rendering bug rather than a shape mismatch.
+              //
+              // The identity keys stay underneath so eventRowId /
+              // eventConceptId resolve even if the projection omits them.
+              // liveBand's policy is untouched, which is the point: this
+              // hands it the input it already understands.
+              const nested = row["payload"];
+              const flattened =
+                nested && typeof nested === "object" && !Array.isArray(nested)
+                  ? (nested as Record<string, unknown>)
+                  : {};
+              fold({
+                ...event,
+                payloadOmitted: false,
+                payload: { ...(event.payload ?? {}), ...row, ...flattened },
+              });
+            })
+            .catch(() => {
+              // Refused, or the connection dropped. Either way there is
+              // nothing honest to put in the band.
+            });
         },
         { concept: conceptId, actions: ["created", "updated", "deleted"] },
       );
@@ -180,9 +250,10 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
       setLiveDegraded(err instanceof Error ? err.message : String(err));
     }
     return () => {
+      live_ = false;
       unsubscribe?.();
     };
-  }, [subscriptions, conceptId, epoch]);
+  }, [subscriptions, conceptId, epoch, query]);
 
   const loadMore = useCallback(() => {
     if (!canRequest(walk)) return;

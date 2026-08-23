@@ -650,6 +650,12 @@ export interface EventPayload {
   kind?: string; // EventKind enum string e.g. "EVENT_KIND_NODE_CREATED"
   ts?: string;
   payload?: unknown;
+  // payloadOmitted marks an ID-ONLY notification (memql#4309). The row's
+  // concept declares the `granted` row-authz tier, which cannot be decided
+  // against a single row in isolation, so the engine sends the identity
+  // and nothing else. Absent (rather than false) on every ordinary event,
+  // because protojson omits a false bool.
+  payloadOmitted?: boolean;
 }
 
 export interface ConceptsListResultPayload {

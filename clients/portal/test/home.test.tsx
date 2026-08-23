@@ -125,5 +125,24 @@ describe("the console home", () => {
       bump!();
     });
     await waitFor(() => expect(screen.getByText("audit_action_1")).toBeTruthy());
+
+    // ...and an ID-ONLY arrival does the same (memql#4309). This tile FIRES A
+    // REFETCH rather than merging the event's payload, so it needs no change
+    // for the id-only notification -- but "needs no change" is a claim worth
+    // holding down: the refetch goes through the authorized read path, which
+    // is exactly the re-read an id-only event is asking the client to do, so
+    // a future "optimisation" that merged the payload here would silently
+    // start rendering blank rows.
+    auditCount = 3;
+    await act(async () => {
+      (bump as unknown as (e: unknown) => void)({
+        subscriptionId: "s",
+        kind: "NODE_CREATED",
+        timestamp: new Date(),
+        payloadOmitted: true,
+        payload: { id: "v1:identity:auditEvent:x", concept: "v1:identity:auditEvent" },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("audit_action_2")).toBeTruthy());
   });
 });

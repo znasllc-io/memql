@@ -140,3 +140,59 @@ test("subscribeGraph unsubscribe stops delivery and sends an unsubscribe", () =>
   } as ServerMessage);
   assert.equal(got.length, 0, "no delivery after unsubscribe");
 });
+
+// payload_omitted -- the ID-ONLY notification (memql#4309).
+//
+// A `granted`-tier row cannot be decided at fan-out (its predicate is a
+// relationship spec needing a join), so the engine sends the row's
+// identity with the flag set and the client re-reads through the
+// authorized read path. Silently dropping such an event instead would
+// make a granted concept's live feed die without a trace.
+
+test("an id-only event surfaces payloadOmitted and carries only the identity", () => {
+  const d = new MockDispatcher();
+  const sm = new SubscriptionManager(d.asDispatcher());
+  const got: Event[] = [];
+  sm.subscribeGraph((e) => got.push(e), { concept: "v1:cognition:utterance" });
+  const subscriptionId = d.lastSubscribe().subscriptionId;
+
+  d.emit({
+    event: {
+      subscriptionId,
+      kind: "EVENT_KIND_NODE_CREATED",
+      payload: { id: "abc", concept: "v1:cognition:utterance", topic: "graph.node.created" },
+      payloadOmitted: true,
+    },
+  } as unknown as ServerMessage);
+
+  assert.equal(got.length, 1);
+  const idOnly = got[0]!;
+  assert.equal(idOnly.payloadOmitted, true, "the flag did not reach the consumer");
+  assert.equal(idOnly.payload?.id, "abc", "the identity a re-read needs was lost");
+  assert.equal(idOnly.payload?.body, undefined, "an id-only event must not carry the row");
+});
+
+// protojson omits a false bool, so the wire field is ABSENT on every
+// ordinary event. It must normalise to `false`, not `undefined` -- a
+// consumer writing `if (e.payloadOmitted)` is fine either way, but one
+// writing `e.payloadOmitted === false` is not, and the type says boolean.
+test("an ordinary event reports payloadOmitted false, not undefined", () => {
+  const d = new MockDispatcher();
+  const sm = new SubscriptionManager(d.asDispatcher());
+  const got: Event[] = [];
+  sm.subscribeGraph((e) => got.push(e), {});
+  const subscriptionId = d.lastSubscribe().subscriptionId;
+
+  d.emit({
+    event: {
+      subscriptionId,
+      kind: "EVENT_KIND_NODE_CREATED",
+      payload: { id: "abc", body: "the whole row" },
+    },
+  } as unknown as ServerMessage);
+
+  assert.equal(got.length, 1);
+  const full = got[0]!;
+  assert.equal(full.payloadOmitted, false);
+  assert.equal(full.payload?.body, "the whole row", "a full-payload event was altered");
+});

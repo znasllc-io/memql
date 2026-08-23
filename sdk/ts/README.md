@@ -81,14 +81,54 @@ either carry.
 
 ### Subscriptions
 
+Graph subscriptions are STRUCTURED: you name a concept and the CDC verbs,
+and the SERVER composes the bus topic (memql#2460). The
+`graph.node.<action>.<concept>` grammar never appears on the client wire,
+and `subscribe(pattern, ...)` throws for `graph_events` — use
+`subscribeGraph`:
+
 ```ts
-const unsubscribe = conn.subscriptions.subscribe(
-  "graph.node.created.*.v1:cognition:utterance",
+const unsubscribe = conn.subscriptions.subscribeGraph(
   (event) => render(event),
+  { concept: "v1:cognition:utterance", actions: ["created", "updated"] },
 );
 ```
 
-The pattern grammar matches the server topic grammar verbatim.
+`subscribe(pattern, ...)` survives for the non-graph kinds only
+(`telemetry`, `message`, `ai_stream`, `all`), and those now require the
+`owner` or `admin` cluster role: they carry node-level events with no row
+owner to authorize against (memql#4311).
+
+#### `payloadOmitted` — the id-only notification
+
+**A graph event only reaches you if you may read the row.** Since
+memql#4309 the engine runs the same row-authorization gate at fan-out that
+it runs on a read, so a subscription is no longer a way around one. Rows
+you may not read are dropped; you are not told they existed.
+
+One case cannot be decided against a single row — a concept whose tier is
+`granted`, whose predicate is a relationship spec needing a join. Those
+arrive with `event.payloadOmitted === true` and a payload carrying only the
+row's identity (`concept`, `id`, `createdAt`, plus the topic/kind that say
+which action fired). **Re-read the row through the normal read path and use
+what that returns; if the read refuses, drop the event.**
+
+```ts
+conn.subscriptions.subscribeGraph(async (event) => {
+  if (!event.payloadOmitted) return render(event.payload);
+  try {
+    const row = await getRowByConceptAndId(conn.query, conceptId, event.payload!.id as string);
+    if (row !== null) render(row);
+  } catch {
+    // Refused: you were not entitled to this row.
+  }
+}, { concept: conceptId });
+```
+
+Ignoring the flag is safe but useless: you get a row whose fields are all
+`undefined`, so a consumer degrades to rendering blanks rather than to
+leaking anything. It is always `false` on an ordinary event (the wire omits
+a false bool; the SDK normalises it).
 
 ### Voice
 
