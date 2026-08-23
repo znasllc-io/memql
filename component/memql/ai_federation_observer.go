@@ -124,6 +124,21 @@ func observeFederationExchange(base http.RoundTripper, req *http.Request) (*http
 		return nil, err
 	}
 
+	// net/http guarantees a non-nil Body from a real Transport, but this
+	// wraps whatever RoundTripper it was given -- and a nil here would panic
+	// on the credential path, taking the process down over an observation.
+	// Hand the response back unread rather than that.
+	if resp.Body == nil {
+		metrics.AIFederationExchange(metrics.FederationExchangeError)
+		recordFederationExchange(federationExchangeRecord{
+			At:      started,
+			Outcome: metrics.FederationExchangeError,
+			Status:  resp.StatusCode,
+			Detail:  "response carried no body",
+		})
+		return resp, nil
+	}
+
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	_ = resp.Body.Close()
 	if readErr != nil {
