@@ -91,7 +91,7 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 	if !row.CredentialExpiresAt.IsZero() {
 		args["credentialExpiresAt"] = row.CredentialExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	return s.executeMutation(ownerActorContext(ctx, row.OwnerUserId), "createAppSession", args)
+	return s.executeMutation(appSessionWriteContext(ctx, row.OwnerUserId), "createAppSession", args)
 }
 
 // AppendAppSessionTranscript flushes the accumulated transcript.
@@ -99,7 +99,10 @@ func (s *EngineStore) AppendAppSessionTranscript(ctx context.Context, sessionId,
 	if s == nil || s.Engine == nil {
 		return nil
 	}
-	return s.executeMutation(ctx, "appendAppSessionTranscript", map[string]any{
+	// No owner to borrow here -- the transcript flush names only the session
+	// -- but the internal-origin stamp is still required: the mutation is
+	// @serverOnly and an unstamped context reads as a client call.
+	return s.executeMutation(appSessionWriteContext(ctx, ""), "appendAppSessionTranscript", map[string]any{
 		"sessionId":           sessionId,
 		"transcript":          transcript,
 		"transcriptBytes":     bytes,
@@ -117,7 +120,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 	// known=false and zeroes, and billing stays "unknown" -- folding
 	// silence into either metered or subscription is precisely what
 	// would make "what did the subscription cover" untrustworthy.
-	return s.executeMutation(ownerActorContext(ctx, row.OwnerUserId), "endAppSession", map[string]any{
+	return s.executeMutation(appSessionWriteContext(ctx, row.OwnerUserId), "endAppSession", map[string]any{
 		"sessionId": row.ID,
 		"status":    row.Status,
 		"exitCode":  row.ExitCode,
@@ -139,11 +142,25 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 	})
 }
 
-// ownerActorContext borrows the owning user's authority for a write that
-// stamps ownerUserId from the actor. The engine never out-ranks the user
-// whose row it is writing; it acts AS them, the same way the campaign
-// sender does.
-func ownerActorContext(ctx context.Context, ownerUserId string) context.Context {
+// appSessionWriteContext prepares the context every app-session row write
+// needs. It does TWO things, and dropping either one fails in a way that is
+// hard to see:
+//
+//   - It borrows the owning user's authority. The three mutations stamp
+//     ownerUserId from the actor (so a caller cannot forge the field
+//     @rowAuthz keys on), which means the write must RUN as that user. The
+//     engine never out-ranks the user whose row it is writing; it acts as
+//     them, the same way the campaign sender does.
+//
+//   - It stamps INTERNAL origin. All three mutations are @serverOnly, and
+//     OriginClient is the zero value -- so an unstamped context is treated
+//     as an untrusted client call and the write is REFUSED. The refusal
+//     carries only a WARN, so the visible symptom is a session row that
+//     never appears, with the engine logging at a level nobody is watching
+//     and the caller seeing success. This line is what makes the whole
+//     @serverOnly decision workable rather than self-defeating.
+func appSessionWriteContext(ctx context.Context, ownerUserId string) context.Context {
+	ctx = auth.ContextWithInternalOrigin(ctx)
 	if ownerUserId == "" {
 		return ctx
 	}
