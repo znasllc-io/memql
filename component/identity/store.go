@@ -1152,22 +1152,19 @@ func (s *Store) RotateAuthSession(ctx context.Context, sessionId, newRefreshToke
 	return nil
 }
 
-// RevokeAuthSession stamps a session row as revoked. Preserves the
-// discriminator fields the projection requires; callers must pass the
-// session's existing subject / tokenHash / source / expiresAt.
-func (s *Store) RevokeAuthSession(
-	ctx context.Context,
-	sessionId, subject, tokenHash, source, expiresAt, reason, userId string,
-) error {
+// RevokeAuthSession stamps a session row as revoked.
+//
+// Two arguments, because that is what the mutation declares. It used to take
+// six more -- subject / tokenHash / source / expiresAt / userId -- on the
+// theory that the projection needed them re-supplied. memql#1628 replaced that
+// with a read-merge: the mutation inherits every field it is not given, and
+// its declared args are `sessionId` and `revokedReason` alone, so the extras
+// were silently discarded on every call (memql#4258).
+func (s *Store) RevokeAuthSession(ctx context.Context, sessionId, reason string) error {
 	var b strings.Builder
 	b.WriteString(`mutation revokeAuthSession(`)
 	writeKVString(&b, "sessionId", sessionId, true)
-	writeKVString(&b, "subject", subject, false)
-	writeKVString(&b, "tokenHash", tokenHash, false)
-	writeKVString(&b, "source", source, false)
-	writeKVString(&b, "expiresAt", expiresAt, false)
 	writeKVString(&b, "revokedReason", reason, false)
-	writeKVString(&b, "userId", userId, false)
 	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: revoke auth session: %w", err)

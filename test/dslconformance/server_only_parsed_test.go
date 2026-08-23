@@ -355,6 +355,54 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/mutations.memql", Name: "claimRecoveryKey"}:          true,
 		{Path: "identity/mutations.memql", Name: "redeemRecoveryKey"}:         true,
 		{Path: "identity/mutations.memql", Name: "deactivateRecoveryKey"}:     true,
+		// memql#4258. The guest-invitation write path, declared for the first
+		// time -- component/grpc/guest_handlers.go named all five and no .memql
+		// file declared any of them, so every guest-invite write failed at
+		// execute on a cluster running the embedded tree.
+		//
+		// Caller-scoping is not merely hard here, it names the wrong person on
+		// three of the five and is impossible on the other two.
+		//
+		// All four invitation mutations write `tokenHash`, which IS the
+		// credential: the guest-auth interceptor admits
+		// `Authorization: Guest <token>` by hashing the presented bearer and
+		// matching this column. On the wire, createGuestInvitation is a
+		// credential-FORGING primitive -- any authenticated caller could mint a
+		// row carrying a digest they chose and then present its preimage. No
+		// actor filter fixes that, because the caller legitimately IS an
+		// authenticated user; what gates the write is the inviter's
+		// relationship to the SPACE, which is not a field on this concept.
+		//
+		// The two redemption-side ones cannot be caller-scoped at all: the
+		// actor is the GUEST, who by definition has no v1:identity:user row for
+		// actor.userId to name (the accept path runs under
+		// contextWithSystemActor for exactly that reason). A self-scoped filter
+		// would match zero rows for the only caller that ever runs them.
+		//
+		// Scoping to `inviterId` -- the one plausible filter -- is the wrong
+		// POLICY rather than an unavailable one, and revokeUserInvitation right
+		// beside them records the same finding: it would mean only the original
+		// inviter can cancel, and the case cancellation exists for is precisely
+		// the one where that is wrong.
+		//
+		// The authorization is real and it is upstream: the handlers resolve
+		// the invitation, check status and expiry, and verify the caller before
+		// any of these run. The boundary therefore sits where the authorization
+		// already lives -- the argument setOAuthClientCORSOrigins makes above.
+		{Path: "identity/mutations.memql", Name: "createGuestInvitation"}:       true,
+		{Path: "identity/mutations.memql", Name: "markGuestInvitationAccepted"}: true,
+		{Path: "identity/mutations.memql", Name: "markGuestInvitationKicked"}:   true,
+		{Path: "identity/mutations.memql", Name: "rotateGuestInvitationToken"}:  true,
+		// The membership half, in cognition because the SPACE is cognition's.
+		// Same gate, different asset: `isGuest` is authorization-relevant, not
+		// decoration, so a client-reachable version would let any authenticated
+		// caller place a guest participant into any space by id and skip the
+		// invitation entirely. It cannot be caller-scoped for the same reason
+		// as its two redemption siblings -- the guest has no user row -- and it
+		// exists separately from joinSpaceAsHuman precisely because that one
+		// content-addresses the participant id on (space, user) and requires
+		// the userId a guest does not have.
+		{Path: "cognition/mutations.memql", Name: "createGuestParticipant"}: true,
 	}
 	for k := range want {
 		if !set[k] {

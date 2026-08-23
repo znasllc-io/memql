@@ -2445,9 +2445,39 @@ Key files:
   `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM_ADDR` /
   `SMTP_FROM_NAME` for SMTP; leave both unset for LogSender.
 
-Product-specific mutations (creating product-scoped invitations,
-joining spaces as a guest, participation lifecycle) live in
-`dsl/cognition/mutations.memql`.
+**The guest write path is ENGINE DSL, split across two domains** (memql#4258).
+This section used to say the guest mutations were product-specific and lived
+in `dsl/cognition/mutations.memql`. They were in neither place: the five
+constructs `component/grpc/guest_handlers.go` names existed in no `.memql`
+file anywhere, so on a cluster running the embedded tree every guest-invite
+write failed at execute with `function "..." not found`. They are declared
+now, and the split follows what each half is about:
+
+| Construct | Where | Why there |
+|---|---|---|
+| `createGuestInvitation` | `dsl/identity/mutations.memql` | the credential -- beside the `kind="user"` twins `createUserInvitation` / `revokeUserInvitation` and the `invitation` concept itself |
+| `markGuestInvitationAccepted` | same | same |
+| `markGuestInvitationKicked` | same | also the CANCEL path; a soft cancel, so the tokenHash stays taken |
+| `rotateGuestInvitationToken` | same | resend keeps one generation on `previousTokenHash` |
+| `createGuestParticipant` | `dsl/cognition/mutations.memql` | the membership -- the SPACE is cognition's, not identity's |
+
+All five are `@serverOnly`: each writes a `tokenHash`, which is the whole
+credential the guest-auth interceptor matches on, so a client-reachable
+version of the create is a credential-forging primitive. The authorization
+that belongs in front of them -- the inviter's relationship to the space, the
+guest's valid token -- is held by the handlers, so the boundary sits where the
+authorization already lives.
+
+The three update-shaped ones take MINIMAL arguments. Their call sites used to
+re-supply every discriminator "so the latest-wins projection keeps the
+context", which stopped being true at memql#1628 when `update{}` became a
+read-merge. `revokeAuthSession` in the same tree had the identical defect from
+two packages -- seven arguments against a two-argument declaration -- and it
+survived because an undeclared argument is DISCARDED rather than refused
+(`rejectUnknownArgs` is gated behind the MCP boundary).
+`component/grpc/render_query_args_parse_test.go` now gates both directions:
+every rendered call site resolves through the real front end, and every
+argument name it passes must be one the mutation declares.
 
 ### Email campaigns + the sending engine
 

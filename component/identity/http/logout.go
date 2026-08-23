@@ -3,7 +3,6 @@ package http
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/refresh"
@@ -41,16 +40,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if row.RevokedAt.IsZero() {
 		// Best-effort revoke. Failures don't block the response — the
 		// cookie is already cleared.
-		_ = s.Store.RevokeAuthSession(
-			r.Context(),
-			row.ID,
-			row.Subject,
-			row.TokenHash,
-			row.Source,
-			row.ExpiresAt.Format(time.RFC3339Nano),
-			"user_action",
-			row.UserId,
-		)
+		_ = s.Store.RevokeAuthSession(r.Context(), row.ID, "user_action")
 		s.audit(r, identity.AuditEvent{
 			Category:    identity.AuditCategoryAuth,
 			Action:      "session_revoked",

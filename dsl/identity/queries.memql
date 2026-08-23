@@ -1050,7 +1050,7 @@ query invitation invitationByTokenHash {
 // ==================================================================================
 //
 // Companion to invitationByTokenHash. After
-// mutationRotateGuestInvitationToken runs (the resend path), the
+// rotateGuestInvitationToken runs (the resend path), the
 // row's tokenHash is the FRESH hash and previousTokenHash is the
 // one the row carried immediately before. A recipient who clicks
 // the older /join/<token> link presents a token whose hash matches
