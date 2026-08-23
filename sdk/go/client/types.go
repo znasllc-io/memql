@@ -163,6 +163,21 @@ type Event struct {
 	Kind           string
 	Timestamp      time.Time
 	Payload        map[string]any
+	// PayloadOmitted marks an ID-ONLY notification: Payload carries the
+	// row's identity (concept / id / createdAt, plus the topic and kind
+	// naming the action) and NOT the row (memql#4309).
+	//
+	// It happens when the row's concept declares the `granted` row-authz
+	// tier, whose predicate is a relationship spec: deciding it needs a
+	// join the fan-out cannot perform against one row in isolation.
+	// RE-READ the row through the normal authorized read path and use what
+	// that returns; if the read refuses, the caller was not entitled to
+	// the row and the event should be dropped.
+	//
+	// A consumer that ignores this sees a row whose fields are absent, so
+	// it degrades to rendering nothing rather than to leaking anything.
+	// False on every ordinary event.
+	PayloadOmitted bool
 }
 
 // eventFromProto translates memqlv1.EventNotification -> Event.
@@ -175,6 +190,7 @@ func eventFromProto(ev *memqlv1.EventNotification) (Event, error) {
 	out := Event{
 		SubscriptionId: ev.GetSubscriptionId(),
 		Kind:           eventKindString(ev.GetKind()),
+		PayloadOmitted: ev.GetPayloadOmitted(),
 	}
 	if ts := ev.GetTs(); ts != nil {
 		out.Timestamp = ts.AsTime()

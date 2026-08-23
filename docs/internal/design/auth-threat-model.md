@@ -115,6 +115,7 @@ For each surface above, the audit walks this checklist. Findings tracked on #86.
 | Plaintext credential on the wire (pair codes) | `requireSecureRequest` on `/pair/codes` and `/pair/redeem` (F5) |
 | Credential leak via claims-map logging | Guest interceptor stores `tokenHash`, not plain token (F9 in #98); worker identity claim mirrors the hash-only pattern |
 | Privilege escalation through delegation | Delegation resolver is interface-only today; see §5.6 |
+| **Subscribe to a concept's change feed and receive other users' rows** | **BEFORE (until memql#4309): delivered.** A signed-in stream could `Subscribe` to any concept and receive every user's rows -- `handleBusEvent` matched the topic and sent the whole flattened payload, `handleSubscribe` applied no gate, and the event bus carries no AccessContext at all. Subscriptions were the ONE egress of rows that never called `rowAuthzAdmits`, and they were absent from the row-authz audit's egress list, so the gap was unrecorded rather than accepted. **AFTER: every `graph.node.*` event is admitted by the same function that gates a read.** Denied rows are dropped without telling the stream they existed; a `granted` row arrives id-only (`payload_omitted`) for the client to re-read through the authorized path; undeclared concepts are delivered to everyone exactly as their reads already return to everyone. Non-graph kinds (`TELEMETRY` / `MESSAGE` / `AI_STREAM` / `ALL`) are owner/admin-only at subscribe time (memql#4311) -- they carry node-level events with no row owner to decide by. See [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md#subscriptions-are-an-egress-memql4309) |
 
 ---
 
@@ -128,6 +129,10 @@ MemQL's authorization model is **per-row, classified, and tested at load time.**
 | **Granted** | relationship predicate gates on `actor.userId` | `spaceParticipants` |
 | **Admin** | `actor.isClusterOwner == true`, or `requiresAdmin` / `requiresOwner` / `requiresOwnerOrAdmin` as a top-level conjunct | admin-only mutations |
 | **Public** | `@public` annotation | `/.well-known/jwks.json`, `/api/concepts` schemas |
+
+A fifth DECLARATION form composes two of these: `@rowAuthz(owner="<field>", clusterOwner)` -- the owner, or a cluster owner (memql#4312). It is the owned bucket with the admin gate ORed in, for the case an operator console has to read across users; a plain `owner=` tier has no cluster-owner bypass, so it hides every other user's rows from the operator too. The write guard ignores the second argument.
+
+**The buckets gate SUBSCRIPTIONS as well as reads** (memql#4309). A concept's declared tier decides what its live feed delivers, by the same function and with the same answer; a concept that declares nothing admits everyone on both paths, which is the standing long tail rather than a subscription defect.
 
 The conformance test `dsl.TestPerRowAuthzClassification` hard-fails on any new unclassified construct, so the classification doesn't drift.
 
