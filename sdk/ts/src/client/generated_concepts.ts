@@ -124,6 +124,7 @@ export const Concepts = {
   WORKBENCH_WORKSPACE: "v1:workbench:workspace",
   WORKER_INVOCATION: "v1:worker:invocation",
   WORKER_REGISTRATION: "v1:worker:registration",
+  WORKER_ROUTING_POLICY: "v1:worker:routingPolicy",
 } as const;
 export type ConceptKey = keyof typeof Concepts;
 export type ConceptId = (typeof Concepts)[ConceptKey];
@@ -177,6 +178,8 @@ export const BoundConcepts = {
   allOutputScreenings: "v1:safety:outputScreening",
   allPlans: "v1:planner:plan",
   allSafetyClassifications: "v1:safety:classification",
+  allWorkersWithStatus: "v1:worker:registration",
+  allWorkspaces: "v1:workbench:workspace",
   appendDocumentVersion: "v1:library:documentVersion",
   applyResponsibilityIntake: "v1:planner:responsibility",
   approvalQueue: "v1:forge:request",
@@ -237,6 +240,7 @@ export const BoundConcepts = {
   catalogueConstruct: "v1:authoring:construct",
   cataloguedConstructsForOwner: "v1:authoring:construct",
   checkRecord: "v1:data:record",
+  clearWorkerConnectedNode: "v1:worker:registration",
   closeCall: "v1:telephony:call",
   clusterNodeTypes: "v1:cluster:nodeType",
   clusterNodes: "v1:cluster:node",
@@ -308,6 +312,7 @@ export const BoundConcepts = {
   createRequest: "v1:forge:request",
   createResponsibility: "v1:planner:responsibility",
   createRole: "v1:rbac:role",
+  createRoutingPolicy: "v1:worker:routingPolicy",
   createScopeElevationPlan: "v1:planner:plan",
   createSemanticTask: "v1:planner:task",
   createSessionForParticipant: "v1:cognition:session",
@@ -327,6 +332,7 @@ export const BoundConcepts = {
   createWorkerRegistration: "v1:worker:registration",
   createWorkerTokenIdentity: "v1:identity:identity",
   currentUser: "v1:identity:user",
+  deactivateRoutingPolicy: "v1:worker:routingPolicy",
   decayAction: "v1:actions:action",
   decayHarnessSemanticMemory: "v1:harness:semanticMemory",
   delegationsByIdentity: "v1:identity:delegation",
@@ -391,6 +397,8 @@ export const BoundConcepts = {
   invitationByTokenHash: "v1:identity:invitation",
   invocationsForPlan: "v1:worker:invocation",
   invocationsForUser: "v1:worker:invocation",
+  invocationsForWorker: "v1:worker:invocation",
+  invocationsForWorkerAsOperator: "v1:worker:invocation",
   joinSpaceAsAI: "v1:cognition:participant",
   joinSpaceAsHuman: "v1:cognition:participant",
   leaveSpace: "v1:cognition:participant",
@@ -411,6 +419,9 @@ export const BoundConcepts = {
   missingCapabilitiesByStatus: "v1:platform:missingCapability",
   missingCapabilityByKindAndName: "v1:platform:missingCapability",
   myRequests: "v1:forge:request",
+  myRoutingPolicies: "v1:worker:routingPolicy",
+  myWorkersWithStatus: "v1:worker:registration",
+  myWorkspaces: "v1:workbench:workspace",
   nodeSpecsForDeployment: "v1:cluster:deploymentNodeSpec",
   nodeTokenIdentitiesAdmin: "v1:identity:identity",
   nodesForDeployment: "v1:cluster:node",
@@ -489,6 +500,7 @@ export const BoundConcepts = {
   releaseWorkspace: "v1:workbench:workspace",
   removeAgentFromSpace: "v1:cognition:participant",
   renamePasskeyIdentity: "v1:identity:identity",
+  renameWorker: "v1:worker:registration",
   reputationWindowsSince: "v1:campaigns:reputationWindow",
   requestById: "v1:forge:request",
   requestChanges: "v1:forge:request",
@@ -549,6 +561,7 @@ export const BoundConcepts = {
   setResponsibilityStatus: "v1:planner:responsibility",
   setSurfaceAvailability: "v1:actions:surface",
   setUserActiveSpace: "v1:identity:user",
+  setWorkerOperatorLabels: "v1:worker:registration",
   shopifyProductById: "v1:shopify:shopifyProduct",
   shopifyProducts: "v1:shopify:shopifyProduct",
   siParticipantForSpace: "v1:cognition:participant",
@@ -615,6 +628,7 @@ export const BoundConcepts = {
   updatePlanStatus: "v1:planner:plan",
   updateRecord: "v1:data:record",
   updateResponsibility: "v1:planner:responsibility",
+  updateRoutingPolicy: "v1:worker:routingPolicy",
   updateSendJob: "v1:campaigns:sendJob",
   updateSessionDevices: "v1:cognition:session",
   updateSessionStreams: "v1:cognition:session",
@@ -1012,6 +1026,9 @@ export const CDCTopics = {
   WORKER_REGISTRATION_CREATED: "graph.node.created.v1:worker:registration",
   WORKER_REGISTRATION_UPDATED: "graph.node.updated.v1:worker:registration",
   WORKER_REGISTRATION_DELETED: "graph.node.deleted.v1:worker:registration",
+  WORKER_ROUTING_POLICY_CREATED: "graph.node.created.v1:worker:routingPolicy",
+  WORKER_ROUTING_POLICY_UPDATED: "graph.node.updated.v1:worker:routingPolicy",
+  WORKER_ROUTING_POLICY_DELETED: "graph.node.deleted.v1:worker:routingPolicy",
 } as const;
 
 /** Subscription filters: node.<action>.<concept> (the backend prepends `graph.`). */
@@ -1379,6 +1396,9 @@ export const CDCFilters = {
   WORKER_REGISTRATION_CREATED: "node.created.v1:worker:registration",
   WORKER_REGISTRATION_UPDATED: "node.updated.v1:worker:registration",
   WORKER_REGISTRATION_DELETED: "node.deleted.v1:worker:registration",
+  WORKER_ROUTING_POLICY_CREATED: "node.created.v1:worker:routingPolicy",
+  WORKER_ROUTING_POLICY_UPDATED: "node.updated.v1:worker:routingPolicy",
+  WORKER_ROUTING_POLICY_DELETED: "node.deleted.v1:worker:routingPolicy",
 } as const;
 
 export type CDCAction = "created" | "updated" | "deleted";

@@ -827,6 +827,55 @@ func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 	return "query allSafetyClassifications()"
 }
 
+// AllWorkersWithStatus -- Every machine in the cluster, for a cluster owner; optionally narrowed to one owner. Backs /fleet/machines' operator view, which adds an owner column.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["allWorkersWithStatus"] in generated_concepts.go).
+type AllWorkersWithStatusArgs struct {
+	OwnerUserId string
+}
+
+// AllWorkersWithStatus calls the engine query allWorkersWithStatus.
+func (qc *QueryClient) AllWorkersWithStatus(ctx context.Context, args AllWorkersWithStatusArgs) (*Result, error) {
+	call := AllWorkersWithStatusBuild(args)
+	return qc.executeNamed(ctx, "allWorkersWithStatus", call)
+}
+
+func AllWorkersWithStatusBuild(args AllWorkersWithStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query allWorkersWithStatus(")
+	if args.OwnerUserId != "" {
+		b.WriteString("ownerUserId: ")
+		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AllWorkspaces -- Every workbench workspace in the cluster, for a cluster owner; optionally narrowed to one status. Backs the operator view of /fleet/workbenches, which answers "why is this workbench node full".
+//
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["allWorkspaces"] in generated_concepts.go).
+type AllWorkspacesArgs struct {
+	// Enum: provisioned | released
+	Status string
+}
+
+// AllWorkspaces calls the engine query allWorkspaces.
+func (qc *QueryClient) AllWorkspaces(ctx context.Context, args AllWorkspacesArgs) (*Result, error) {
+	call := AllWorkspacesBuild(args)
+	return qc.executeNamed(ctx, "allWorkspaces", call)
+}
+
+func AllWorkspacesBuild(args AllWorkspacesArgs) string {
+	var b strings.Builder
+	b.WriteString("query allWorkspaces(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.go).
@@ -3004,6 +3053,50 @@ func InvocationsForUserBuild(args InvocationsForUserArgs) string {
 	return b.String()
 }
 
+// InvocationsForWorker -- Recent calls dispatched to one of the caller's machines, newest first. Backs the per-machine activity list on /fleet/machines, which renders the routing record: the strategy that chose it, the candidates considered, and what it was rerouted from.
+//
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForWorker"] in generated_concepts.go).
+type InvocationsForWorkerArgs struct {
+	WorkerId string
+}
+
+// InvocationsForWorker calls the engine query invocationsForWorker.
+func (qc *QueryClient) InvocationsForWorker(ctx context.Context, args InvocationsForWorkerArgs) (*Result, error) {
+	call := InvocationsForWorkerBuild(args)
+	return qc.executeNamed(ctx, "invocationsForWorker", call)
+}
+
+func InvocationsForWorkerBuild(args InvocationsForWorkerArgs) string {
+	var b strings.Builder
+	b.WriteString("query invocationsForWorker(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InvocationsForWorkerAsOperator -- Recent calls dispatched to ANY machine, for a cluster owner supporting somebody else's fleet. The self-scoped invocationsForWorker above is what a person reads about their own machine; this is its operator counterpart, and the pair exists because v1:worker:invocation declares no tier -- so the caller scope has to be in the FILTER, and one filter cannot be both. Without this, the Fleet page's operator view showed an empty activity list for every machine it could otherwise fully describe, which reads as "this machine is idle" rather than "you are not its owner".
+//
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForWorkerAsOperator"] in generated_concepts.go).
+type InvocationsForWorkerAsOperatorArgs struct {
+	WorkerId string
+}
+
+// InvocationsForWorkerAsOperator calls the engine query invocationsForWorkerAsOperator.
+func (qc *QueryClient) InvocationsForWorkerAsOperator(ctx context.Context, args InvocationsForWorkerAsOperatorArgs) (*Result, error) {
+	call := InvocationsForWorkerAsOperatorBuild(args)
+	return qc.executeNamed(ctx, "invocationsForWorkerAsOperator", call)
+}
+
+func InvocationsForWorkerAsOperatorBuild(args InvocationsForWorkerAsOperatorArgs) string {
+	var b strings.Builder
+	b.WriteString("query invocationsForWorkerAsOperator(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.go).
@@ -3257,6 +3350,57 @@ func (qc *QueryClient) MyRequests(ctx context.Context, args MyRequestsArgs) (*Re
 func MyRequestsBuild(args MyRequestsArgs) string {
 	_ = args
 	return "query myRequests()"
+}
+
+// MyRoutingPolicies -- The signed-in person's routing policies, newest first. The Fleet page's policy editor reads the active one and writes through updateRoutingPolicy; superseded rows are kept because an invocation's routing.policyId points at whichever row made the choice.
+//
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["myRoutingPolicies"] in generated_concepts.go).
+type MyRoutingPoliciesArgs struct {
+}
+
+// MyRoutingPolicies calls the engine query myRoutingPolicies.
+func (qc *QueryClient) MyRoutingPolicies(ctx context.Context, args MyRoutingPoliciesArgs) (*Result, error) {
+	call := MyRoutingPoliciesBuild(args)
+	return qc.executeNamed(ctx, "myRoutingPolicies", call)
+}
+
+func MyRoutingPoliciesBuild(args MyRoutingPoliciesArgs) string {
+	_ = args
+	return "query myRoutingPolicies()"
+}
+
+// MyWorkersWithStatus -- The signed-in person's own machines. Backs /fleet/machines.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myWorkersWithStatus"] in generated_concepts.go).
+type MyWorkersWithStatusArgs struct {
+}
+
+// MyWorkersWithStatus calls the engine query myWorkersWithStatus.
+func (qc *QueryClient) MyWorkersWithStatus(ctx context.Context, args MyWorkersWithStatusArgs) (*Result, error) {
+	call := MyWorkersWithStatusBuild(args)
+	return qc.executeNamed(ctx, "myWorkersWithStatus", call)
+}
+
+func MyWorkersWithStatusBuild(args MyWorkersWithStatusArgs) string {
+	_ = args
+	return "query myWorkersWithStatus()"
+}
+
+// MyWorkspaces -- The caller's own workbench workspaces, live and released, newest first. Backs the workspaces list on /fleet/workbenches for a person who is not a cluster owner.
+//
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["myWorkspaces"] in generated_concepts.go).
+type MyWorkspacesArgs struct {
+}
+
+// MyWorkspaces calls the engine query myWorkspaces.
+func (qc *QueryClient) MyWorkspaces(ctx context.Context, args MyWorkspacesArgs) (*Result, error) {
+	call := MyWorkspacesBuild(args)
+	return qc.executeNamed(ctx, "myWorkspaces", call)
+}
+
+func MyWorkspacesBuild(args MyWorkspacesArgs) string {
+	_ = args
+	return "query myWorkspaces()"
 }
 
 // NodeSpecsForDeployment -- Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.

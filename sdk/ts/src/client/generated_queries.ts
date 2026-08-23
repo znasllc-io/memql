@@ -870,6 +870,51 @@ QueryClient.prototype.allSafetyClassifications = function (this: QueryClient, ar
   return this.executeNamed("allSafetyClassifications", buildAllSafetyClassifications(args), opts);
 };
 
+/** Every machine in the cluster, for a cluster owner; optionally narrowed to one owner. Backs /fleet/machines' operator view, which adds an owner column. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["allWorkersWithStatus"] in generated_concepts.ts).
+export interface AllWorkersWithStatusArgs {
+  ownerUserId?: string;
+}
+
+export function buildAllWorkersWithStatus(args: AllWorkersWithStatusArgs): string {
+  const parts: string[] = [];
+  if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  return "query allWorkersWithStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    allWorkersWithStatus(args: AllWorkersWithStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.allWorkersWithStatus = function (this: QueryClient, args: AllWorkersWithStatusArgs = {} as AllWorkersWithStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("allWorkersWithStatus", buildAllWorkersWithStatus(args), opts);
+};
+
+/** Every workbench workspace in the cluster, for a cluster owner; optionally narrowed to one status. Backs the operator view of /fleet/workbenches, which answers "why is this workbench node full". */
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["allWorkspaces"] in generated_concepts.ts).
+export interface AllWorkspacesArgs {
+  // Enum: provisioned | released
+  status?: string;
+}
+
+export function buildAllWorkspaces(args: AllWorkspacesArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query allWorkspaces(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    allWorkspaces(args: AllWorkspacesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.allWorkspaces = function (this: QueryClient, args: AllWorkspacesArgs = {} as AllWorkspacesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("allWorkspaces", buildAllWorkspaces(args), opts);
+};
+
 /** The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover). */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.ts).
 export interface ApprovalQueueArgs {
@@ -3001,6 +3046,50 @@ QueryClient.prototype.invocationsForUser = function (this: QueryClient, args: In
   return this.executeNamed("invocationsForUser", buildInvocationsForUser(args), opts);
 };
 
+/** Recent calls dispatched to one of the caller's machines, newest first. Backs the per-machine activity list on /fleet/machines, which renders the routing record: the strategy that chose it, the candidates considered, and what it was rerouted from. */
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForWorker"] in generated_concepts.ts).
+export interface InvocationsForWorkerArgs {
+  workerId: string;
+}
+
+export function buildInvocationsForWorker(args: InvocationsForWorkerArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query invocationsForWorker(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    invocationsForWorker(args: InvocationsForWorkerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.invocationsForWorker = function (this: QueryClient, args: InvocationsForWorkerArgs = {} as InvocationsForWorkerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("invocationsForWorker", buildInvocationsForWorker(args), opts);
+};
+
+/** Recent calls dispatched to ANY machine, for a cluster owner supporting somebody else's fleet. The self-scoped invocationsForWorker above is what a person reads about their own machine; this is its operator counterpart, and the pair exists because v1:worker:invocation declares no tier -- so the caller scope has to be in the FILTER, and one filter cannot be both. Without this, the Fleet page's operator view showed an empty activity list for every machine it could otherwise fully describe, which reads as "this machine is idle" rather than "you are not its owner". */
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForWorkerAsOperator"] in generated_concepts.ts).
+export interface InvocationsForWorkerAsOperatorArgs {
+  workerId: string;
+}
+
+export function buildInvocationsForWorkerAsOperator(args: InvocationsForWorkerAsOperatorArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query invocationsForWorkerAsOperator(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    invocationsForWorkerAsOperator(args: InvocationsForWorkerAsOperatorArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.invocationsForWorkerAsOperator = function (this: QueryClient, args: InvocationsForWorkerAsOperatorArgs = {} as InvocationsForWorkerAsOperatorArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("invocationsForWorkerAsOperator", buildInvocationsForWorkerAsOperator(args), opts);
+};
+
 /** Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.ts).
 export interface LibraryArtifactByIdArgs {
@@ -3259,6 +3348,66 @@ declare module "./query.js" {
 
 QueryClient.prototype.myRequests = function (this: QueryClient, args: MyRequestsArgs = {} as MyRequestsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("myRequests", buildMyRequests(args), opts);
+};
+
+/** The signed-in person's routing policies, newest first. The Fleet page's policy editor reads the active one and writes through updateRoutingPolicy; superseded rows are kept because an invocation's routing.policyId points at whichever row made the choice. */
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["myRoutingPolicies"] in generated_concepts.ts).
+export interface MyRoutingPoliciesArgs {
+}
+
+export function buildMyRoutingPolicies(args: MyRoutingPoliciesArgs): string {
+  void args;
+  return "query myRoutingPolicies()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myRoutingPolicies(args?: MyRoutingPoliciesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myRoutingPolicies = function (this: QueryClient, args: MyRoutingPoliciesArgs = {} as MyRoutingPoliciesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myRoutingPolicies", buildMyRoutingPolicies(args), opts);
+};
+
+/** The signed-in person's own machines. Backs /fleet/machines. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myWorkersWithStatus"] in generated_concepts.ts).
+export interface MyWorkersWithStatusArgs {
+}
+
+export function buildMyWorkersWithStatus(args: MyWorkersWithStatusArgs): string {
+  void args;
+  return "query myWorkersWithStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myWorkersWithStatus(args?: MyWorkersWithStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myWorkersWithStatus = function (this: QueryClient, args: MyWorkersWithStatusArgs = {} as MyWorkersWithStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myWorkersWithStatus", buildMyWorkersWithStatus(args), opts);
+};
+
+/** The caller's own workbench workspaces, live and released, newest first. Backs the workspaces list on /fleet/workbenches for a person who is not a cluster owner. */
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["myWorkspaces"] in generated_concepts.ts).
+export interface MyWorkspacesArgs {
+}
+
+export function buildMyWorkspaces(args: MyWorkspacesArgs): string {
+  void args;
+  return "query myWorkspaces()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myWorkspaces(args?: MyWorkspacesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myWorkspaces = function (this: QueryClient, args: MyWorkspacesArgs = {} as MyWorkspacesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myWorkspaces", buildMyWorkspaces(args), opts);
 };
 
 /** Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094. */

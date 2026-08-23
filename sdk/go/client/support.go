@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -326,6 +327,30 @@ func quoteMemQL(s string) string {
 // Scope: scalars (string / bool / number), slices (mapped element-by-
 // element), and nested maps (sorted-key object literals so the output
 // is deterministic for the drift gate).
+// bareIdentifierKey matches what the MemQL lexer delivers as one
+// TokenIdentifier.
+var bareIdentifierKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// renderObjectKey quotes a key the lexer would not deliver as a single
+// identifier.
+//
+// THE BUG THIS FIXES was reachable from the product's own documentation: the
+// workers runbook's example label is `has-blender=true`, and a bare
+// `has-blender` key lexes as `has`, `-`, `blender`, so the call fails to parse
+// in a caller that did nothing wrong. Anything hyphenated, dotted, or
+// digit-leading had it; operatorLabels made it common, because a label key is
+// user-chosen text rather than a schema field name.
+//
+// parseObject takes a quoted key as its FIRST branch, so this is the form the
+// grammar names for the case rather than a way around it. Identifier keys stay
+// bare so nothing already in the corpus changes shape.
+func renderObjectKey(key string) string {
+	if bareIdentifierKey.MatchString(key) {
+		return key
+	}
+	return quoteMemQL(key)
+}
+
 func renderMemQLValue(value any) string {
 	switch v := value.(type) {
 	case nil:
@@ -361,7 +386,7 @@ func renderMemQLValue(value any) string {
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%s: %s", k, renderMemQLValue(v[k])))
+			parts = append(parts, fmt.Sprintf("%s: %s", renderObjectKey(k), renderMemQLValue(v[k])))
 		}
 		return "{" + strings.Join(parts, ", ") + "}"
 	default:

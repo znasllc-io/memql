@@ -300,3 +300,21 @@ query invocation invocationsForWorker {
   paginate 25
   shape   workerInvocationFull
 }
+
+/// Recent calls dispatched to ANY machine, for a cluster owner supporting somebody else's fleet.
+/// The self-scoped invocationsForWorker above is what a person reads about their own machine;
+/// this is its operator counterpart, and the pair exists because v1:worker:invocation declares no
+/// tier -- so the caller scope has to be in the FILTER, and one filter cannot be both. Without
+/// this, the Fleet page's operator view showed an empty activity list for every machine it could
+/// otherwise fully describe, which reads as "this machine is idle" rather than "you are not its
+/// owner".
+@actor
+query invocation invocationsForWorkerAsOperator {
+  args {
+    workerId  string!
+  }
+  filter  actor.isClusterOwner==true && workerId==args.workerId && isNotDeleted
+  sort     "row.createdAt", "desc"
+  paginate 25
+  shape   workerInvocationFull
+}
