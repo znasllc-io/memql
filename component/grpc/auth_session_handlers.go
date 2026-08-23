@@ -490,20 +490,8 @@ func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage
 		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke session: list", err)
 	}
 
-	var owned *authSessionSummary
-	for _, sess := range sessions {
-		if sess != nil && sess.ID == target {
-			owned = sess
-			break
-		}
-	}
-	// An already-revoked or already-expired row is "not found" too: it is not
-	// a live session, so there is nothing here to end, and reporting success
-	// would tell a client its list is stale when the truth is that the row
-	// never needed the write.
-	now := time.Now().UTC()
-	if owned == nil || !owned.RevokedAt.IsZero() ||
-		(!owned.ExpiresAt.IsZero() && now.After(owned.ExpiresAt)) {
+	owned := pickOwnedLiveSession(sessions, target, time.Now().UTC())
+	if owned == nil {
 		return send(&memqlv1.RevokeSessionResult{
 			ErrorCode:    "not_found",
 			ErrorMessage: "no live session of yours has that id",
@@ -526,4 +514,43 @@ func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage
 		SessionId:  owned.ID,
 		WasCurrent: wasCurrent,
 	})
+}
+
+// pickOwnedLiveSession is the ownership check, as a decision rather than a
+// side effect: it returns the caller's own LIVE session with the given id, or
+// nil.
+//
+// A separate function because it is the security-relevant half of
+// handleRevokeSession and the only half worth testing directly -- the rest is
+// transport. `sessions` is the caller's own set, resolved from the verified
+// subject; nothing outside this file may pass it anything else.
+//
+// nil for three distinct situations, deliberately collapsed:
+//
+//   - the id is not the caller's,
+//   - it names a row that is already revoked,
+//   - it names one that has already expired.
+//
+// The first is the security case. The other two are not failures a client
+// needs distinguished: there is no live session to end, so a success would
+// tell it a write happened that did not, and separate codes would give an
+// attacker a way to ask whether an arbitrary id names a real row.
+func pickOwnedLiveSession(sessions []*authSessionSummary, id string, now time.Time) *authSessionSummary {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	for _, sess := range sessions {
+		if sess == nil || sess.ID != id {
+			continue
+		}
+		if !sess.RevokedAt.IsZero() {
+			return nil
+		}
+		if !sess.ExpiresAt.IsZero() && now.After(sess.ExpiresAt) {
+			return nil
+		}
+		return sess
+	}
+	return nil
 }

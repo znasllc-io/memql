@@ -125,24 +125,39 @@ export function useMe(): MeState {
     setLoading(true);
     setError("");
 
-    // The two reads settle together. Staggered arrivals would make the page
-    // render an account whose Security tab still says "checking", and the
-    // switch's disabled reason would flicker.
-    void Promise.all([query.currentUser({}), query.passkeysForSelf({})])
+    // The two reads settle TOGETHER but fail SEPARATELY, and both halves of
+    // that matter.
+    //
+    // Together, because staggered arrivals would render an account whose
+    // Security tab still said "checking" and whose switch flickered between
+    // disabled reasons.
+    //
+    // Separately, because they answer different questions and one failing
+    // does not make the other unknown. Promise.all would have collapsed them:
+    // an unreadable passkey list would blank the account facts, and an
+    // unreadable account row would report the passkey count as unknown when
+    // it had arrived perfectly well.
+    void Promise.allSettled([query.currentUser({}), query.passkeysForSelf({})])
       .then(([user, keys]) => {
         if (!live) return;
-        const rows = user.rows();
-        setAccount(accountFromRow(rows.length > 0 ? (rows[0] ?? null) : null));
-        setPasskeys(keys.rows().map(passkeyFromRow));
-        setPasskeyCountKnown(true);
-      })
-      .catch((err: unknown) => {
-        if (!live) return;
-        setError(describe(err));
-        // FAIL CLOSED on the count, matching the server. An unreadable list
-        // must not render as "you have no passkeys", which would then explain
-        // a disabled switch with a reason that is not true.
-        setPasskeyCountKnown(false);
+
+        if (user.status === "fulfilled") {
+          const rows = user.value.rows();
+          setAccount(accountFromRow(rows.length > 0 ? (rows[0] ?? null) : null));
+        } else {
+          setError(describe(user.reason));
+        }
+
+        if (keys.status === "fulfilled") {
+          setPasskeys(keys.value.rows().map(passkeyFromRow));
+          setPasskeyCountKnown(true);
+        } else {
+          // FAIL CLOSED on the count, matching the server. An unreadable list
+          // must not render as "you have no passkeys", which would then
+          // explain a disabled switch with a reason that is not true.
+          setPasskeys([]);
+          setPasskeyCountKnown(false);
+        }
       })
       .finally(() => {
         if (live) setLoading(false);
