@@ -189,6 +189,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// compared against the row's bindingHash in Go before either runs.
 		{Path: "identity/queries.memql", Name: "magicLinkRequestById"}:      true,
 		{Path: "identity/mutations.memql", Name: "approveMagicLinkRequest"}: true,
+		// memql#4304. The two magic-link hardening fields on v1:identity:user.
+		// Both have an ADMIN caller acting on somebody else's row -- the
+		// sign-in-policy RESET is the rescue path for a person who turned
+		// links off and lost their passkey -- which actor.userId scoping
+		// would refuse outright. The self-service caller is checked against
+		// actor.userId in Go, alongside a precondition no row filter can
+		// express: "holds at least one active passkey" is a fact on
+		// v1:identity:identity, not on the row being written.
+		{Path: "identity/mutations.memql", Name: "setUserSignInPolicy"}:     true,
+		{Path: "identity/mutations.memql", Name: "setUserSharedMailbox"}:    true,
 		{Path: "identity/queries.memql", Name: "usersForSeedSweep"}:         true,
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,

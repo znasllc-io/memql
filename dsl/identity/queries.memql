@@ -738,6 +738,53 @@ query authSession authSessionsForSubject {
   shape   authSessionFull
 }
 
+// ---- queries/v1/identity/authSessionsForSelf.memql ----
+
+// authSessionsForSelf - The caller's own live sessions
+// =====================================================
+//
+// The self-service read behind the "Active sessions" panel (memql#4306).
+// Every other authSession query in this file is a SERVER read: by token
+// hash for the auth hot path, by refresh hash for rotation, by subject for
+// the revoke fan-out. This one is a PERSON read, and it is shaped and
+// filtered differently for that reason.
+//
+// OWNED TIER. userId==actor.userId, so the query answers about the caller
+// and nobody else -- there is no argument to point it at another person,
+// which is what makes it safe to reach from a browser at all.
+//
+// WHY userId AND NOT subject. authSessionsForSubject keys on `subject`
+// because it runs BEFORE anything is certain about the user row: a session
+// is written at token-issuance time, which can race ahead of the first-login
+// user insert. This query runs for a signed-in caller, so actor.userId is
+// populated by definition. The concept's own description says subject is the
+// canonical key and userId is "optional because rows are written at
+// token-issuance time" -- so a row whose userId never landed is invisible
+// here. That is the honest trade: showing rows this caller might not own,
+// by matching a subject that is not gated by the row-authz tier, would be
+// the worse failure.
+//
+// LIVE ONLY. Revoked and expired rows are excluded -- the panel's purpose is
+// "what can currently enter my account", and a list padded with dead rows
+// makes the live ones harder to see. Revocation history belongs to the audit
+// trail, which is where it already is.
+//
+// Arguments:
+//   none -- the caller IS the argument
+//
+// Returns:
+//   Zero or more session rows in authSessionSelf shape (no token hashes).
+//
+
+/// Returns the caller's own live auth-session rows. No token hashes; revoked and expired excluded.
+@actor
+query authSession authSessionsForSelf {
+  filter  userId==actor.userId && revokedAt=="" && expiresAt>now
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   authSessionSelf
+}
+
 // ---- queries/v1/identity/clusterSettingsCurrent.memql ----
 
 // clusterSettingsCurrent - Read the active cluster-settings row

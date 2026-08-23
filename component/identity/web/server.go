@@ -497,6 +497,18 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// whether the adapter is wired -- so only the two writes are
 	// conditional here.
 	if s.passkeysWired() {
+		// The sign-in-security controls (memql#4304). Mounted with the
+		// passkey routes because the passkey-only switch has a passkey-count
+		// precondition it cannot check without that adapter -- a page that
+		// offered the control and then refused every submission would be
+		// worse than one that does not offer it.
+		// The sessions panel's two actions (memql#4306). POST
+		// /me/devices/revoke-all has had a form on the page since the card was
+		// written and was mounted nowhere, so the button did nothing.
+		mux.HandleFunc("POST /me/devices/sessions/revoke", wrap(s.handleMeSessionRevoke))
+		mux.HandleFunc("POST /me/devices/revoke-all", wrap(s.handleMeSessionRevokeAll))
+		mux.HandleFunc("POST /me/settings/sign-in-policy", wrap(s.handleMeSignInPolicy))
+		mux.HandleFunc("POST /me/settings/shared-mailbox", wrap(s.handleMeSharedMailbox))
 		mux.HandleFunc("POST /me/devices/passkeys/rename", wrap(s.handleMePasskeysRename))
 		mux.HandleFunc("POST /me/devices/passkeys/revoke", wrap(s.handleMePasskeysRevoke))
 	}

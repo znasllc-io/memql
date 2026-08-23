@@ -6,6 +6,41 @@ package webtempl
 type MeSettingsData struct {
 	Layout               LayoutData
 	DeletionCooldownDays int
+	Flash                *Flash
+
+	// SignInSecurity drives the shared-mailbox / passkey-only card
+	// (memql#4304). Zero value renders nothing, which is what an
+	// engine-less binary and a failed lookup both get.
+	SignInSecurity SignInSecurityData
+}
+
+// SignInSecurityData is the state of the two sign-in controls for the
+// signed-in caller.
+type SignInSecurityData struct {
+	// Available is false when the card should not render at all -- no store,
+	// no caller, or a lookup that failed. A LISTING ERROR IS NOT AN EMPTY
+	// LIST: rendering "you have no passkeys" because a query timed out would
+	// present a transport blip as a security finding.
+	Available bool
+
+	// SharedMailbox is the current hint.
+	SharedMailbox bool
+
+	// PasskeyOnly is true when signInPolicy is passkey_only.
+	PasskeyOnly bool
+
+	// ActivePasskeys is how many the caller holds, and PasskeyCountKnown
+	// says whether that number is real. When the count is unknown the
+	// enable control renders DISABLED -- the server refuses the change
+	// anyway, and offering a button that will be refused is worse than
+	// offering none.
+	ActivePasskeys    int
+	PasskeyCountKnown bool
+}
+
+// CanEnablePasskeyOnly reports whether the enable control should be live.
+func (d SignInSecurityData) CanEnablePasskeyOnly() bool {
+	return d.PasskeyCountKnown && d.ActivePasskeys > 0
 }
 
 templ MeSettings(data MeSettingsData) {
@@ -13,6 +48,12 @@ templ MeSettings(data MeSettingsData) {
 		<div class="me-shell">
 			@meSidebar("settings", false)
 			<section>
+				if data.Flash != nil {
+					<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+				}
+				if data.SignInSecurity.Available {
+					@signInSecurityCard(data)
+				}
 				<div class="card card-wide">
 					<h1 class="card-title">Profile</h1>
 					<div data-content="profile">
@@ -48,4 +89,77 @@ templ MeSettings(data MeSettingsData) {
 			</section>
 		</div>
 	}
+}
+
+// signInSecurityCard renders the two controls the magic-link hardening design
+// gives an account holder (memql#4304).
+//
+// The copy says the thing that is actually true and is otherwise invisible:
+// anyone who can read this mailbox can sign in. Everything else on this page
+// is a preference; this is the one card that changes who can enter the
+// account.
+templ signInSecurityCard(data MeSettingsData) {
+	<div class="card card-wide">
+		<h1 class="card-title">Sign-in security</h1>
+		if data.SignInSecurity.SharedMailbox {
+			<div class="alert alert-warning">
+				This account's address looks like a shared mailbox. Anyone who can read
+				it can request a sign-in link and enter this account. Consider turning
+				off sign-in links below and using a passkey.
+			</div>
+		}
+		<p class="card-subtitle">
+			Sign-in links are emailed to this account's address, so whoever can read
+			that mailbox can sign in. Turning links off leaves your passkey as the way
+			in. Enrolment links and the owner recovery key are unaffected -- those are
+			the routes back if you lose a passkey.
+		</p>
+		if data.SignInSecurity.PasskeyOnly {
+			<p class="text-small">
+				<strong>Sign-in links are off.</strong> A request for one sends a notice
+				to this address instead, and signs nobody in.
+			</p>
+			<form method="POST" action="/me/settings/sign-in-policy" data-submit-once>
+				@CSRFField(data.Layout.CSRFToken)
+				<input type="hidden" name="policy" value="any"/>
+				<button type="submit" class="btn">Turn sign-in links back on</button>
+			</form>
+		} else if data.SignInSecurity.CanEnablePasskeyOnly() {
+			<form method="POST" action="/me/settings/sign-in-policy" data-submit-once>
+				@CSRFField(data.Layout.CSRFToken)
+				<input type="hidden" name="policy" value="passkey_only"/>
+				<button type="submit" class="btn btn-primary">Turn off sign-in links</button>
+			</form>
+		} else {
+			<p class="text-small text-subtle">
+				if data.SignInSecurity.PasskeyCountKnown {
+					Add a passkey first. Turning off sign-in links with none enrolled would
+					leave you unable to sign in at all.
+				} else {
+					We couldn't check your passkeys just now, so this control is unavailable.
+					Reload the page to try again.
+				}
+			</p>
+		}
+		<hr/>
+		<p class="text-small text-muted">
+			if data.SignInSecurity.SharedMailbox {
+				We think this is a shared mailbox. If it is only yours, say so and the
+				warning above goes away.
+			} else {
+				Is this address read by more than one person? Marking it shows the
+				warning above to anyone looking at this account.
+			}
+		</p>
+		<form method="POST" action="/me/settings/shared-mailbox" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			if data.SignInSecurity.SharedMailbox {
+				<input type="hidden" name="shared" value="false"/>
+				<button type="submit" class="btn">This mailbox is only mine</button>
+			} else {
+				<input type="hidden" name="shared" value="true"/>
+				<button type="submit" class="btn">Mark as a shared mailbox</button>
+			}
+		</form>
+	</div>
 }

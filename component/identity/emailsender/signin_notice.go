@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
@@ -164,6 +165,87 @@ const htmlNewSignInTemplate = `<!DOCTYPE html>
     <tr><td style="font-size:14px;color:#374151;padding-bottom:20px;"><strong>Client:</strong> {{.Client}}</td></tr>
     <tr><td style="font-size:14px;color:#374151;padding-bottom:12px;">If this was you, nothing more to do.</td></tr>
     <tr><td style="font-size:14px;color:#374151;">If it was not, sign in and revoke sessions from your profile page, then set up a passkey. If this address is a shared mailbox, consider turning on passkey-only sign-in so that a sign-in link alone is no longer enough to enter the account.</td></tr>
+  </table>
+</body>
+</html>`
+
+// SendSignInDisabledNotice implements magiclink.Sender's second method: the
+// message a passkey-only account gets INSTEAD of a sign-in link
+// (memql#4304).
+//
+// # What it is worth to the wrong reader
+//
+// Nothing, and that is the requirement. On a shared mailbox this message
+// lands in front of everybody who can read the address, exactly as the link
+// would have. Where the link was a credential, this is a sentence. It
+// carries no token, no URL and no way to act.
+//
+// # Why it is sent at all
+//
+// Because the alternative -- silence -- leaves the account holder unable to
+// tell "the email is slow" from "somebody is trying to get into my account".
+// The request happened either way; the message is the only place that fact
+// can surface. And the response the requester sees is identical to an
+// ordinary issue (same redirect, same page), so the message is also the ONLY
+// difference between the two paths: making it silent would make a
+// passkey-only account indistinguishable from a broken one.
+func (s *EngineEmailSender) SendSignInDisabledNotice(ctx context.Context, in magiclink.NoticeInput) error {
+	if s == nil {
+		return errors.New("emailsender: nil")
+	}
+	brand := in.BrandName
+	if brand == "" {
+		brand = "MemQL"
+	}
+	subject := fmt.Sprintf("Sign-in links are turned off for your %s account", brand)
+
+	sender := s.resolveSender()
+	if sender == nil {
+		if s.Logger != nil {
+			s.Logger.Info("identity: no email sender configured, logging sign-in-disabled notice",
+				slog.String("to", in.Email),
+				slog.String("subject", subject),
+			)
+		}
+		return nil
+	}
+
+	return sender.Send(ctx, email.Message{
+		To:       in.Email,
+		Subject:  subject,
+		TextBody: buildSignInDisabledText(brand),
+		HTMLBody: buildSignInDisabledHTML(brand),
+	})
+}
+
+func buildSignInDisabledText(brand string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Sign-in links are turned off for your %s account\n\n", brand)
+	b.WriteString("Someone asked for a sign-in link for this account. Sign-in links are disabled for it, so none was sent.\n\n")
+	b.WriteString("To sign in, use your passkey.\n\n")
+	b.WriteString("If this wasn't you, nothing has happened -- no link exists and nobody has been signed in. ")
+	b.WriteString("If it keeps happening, ask an administrator to look at the sign-in audit trail.\n")
+	return b.String()
+}
+
+func buildSignInDisabledHTML(brand string) string {
+	tmpl := template.Must(template.New("nolink").Parse(htmlSignInDisabledTemplate))
+	var buf bytes.Buffer
+	_ = tmpl.Execute(&buf, map[string]any{"BrandName": brand})
+	return buf.String()
+}
+
+// htmlSignInDisabledTemplate carries no anchor, for the reason the file
+// comment gives at length.
+const htmlSignInDisabledTemplate = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#f7f7f8;">
+  <table cellpadding="0" cellspacing="0" border="0" align="center" width="520" style="background:#ffffff;border-radius:8px;padding:32px;">
+    <tr><td style="font-size:20px;font-weight:600;color:#111827;padding-bottom:8px;">Sign-in links are turned off for your {{.BrandName}} account</td></tr>
+    <tr><td style="font-size:14px;color:#374151;padding-bottom:16px;">Someone asked for a sign-in link for this account. Sign-in links are disabled for it, so none was sent.</td></tr>
+    <tr><td style="font-size:14px;color:#374151;padding-bottom:16px;">To sign in, use your passkey.</td></tr>
+    <tr><td style="font-size:14px;color:#374151;">If this wasn't you, nothing has happened -- no link exists and nobody has been signed in. If it keeps happening, ask an administrator to look at the sign-in audit trail.</td></tr>
   </table>
 </body>
 </html>`

@@ -133,6 +133,21 @@ type UserRow struct {
 	Internal        bool
 	RevocationEpoch int64
 	CreatedAt       time.Time
+
+	// SharedMailbox is the "several people read this address" hint
+	// (memql#4304). Drives copy, gates nothing.
+	SharedMailbox bool
+	// SignInPolicy is "any" (default) or "passkey_only". An empty string
+	// reads as "any": rows written before the field existed carry no value,
+	// and the safe reading of a missing policy is the permissive one --
+	// treating absence as passkey_only would lock out every account that
+	// predates the field.
+	SignInPolicy string
+}
+
+// PasskeyOnly reports whether sign-in links are disabled for this account.
+func (u *UserRow) PasskeyOnly() bool {
+	return u != nil && strings.TrimSpace(u.SignInPolicy) == "passkey_only"
 }
 
 // AuthSessionRow projects a v1:identity:authSession row.
@@ -734,8 +749,106 @@ func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
 		Active:          g.boolField("active"),
 		Internal:        g.boolField("internal"),
 		RevocationEpoch: g.int64Field("revocationEpoch"),
+		SharedMailbox:   g.boolField("sharedMailbox"),
+		SignInPolicy:    g.str("signInPolicy"),
 		CreatedAt:       g.time("createdAt"),
 	}
+}
+
+// SelfSessionRow is one of the caller's own sessions, as a person sees it.
+//
+// NO TOKEN HASHES, matching the authSessionSelf shape. The digests are the
+// auth hot path's lookup key and there is no reason for a device list to
+// carry them, so they are absent from the shape AND from this struct -- two
+// places rather than one, so adding a field to either does not quietly widen
+// what a browser receives.
+type SelfSessionRow struct {
+	ID          string
+	Source      string
+	ClientLabel string
+	FirstAuthAt time.Time
+	LastSeenAt  time.Time
+	LastRotated time.Time
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
+// SessionsForSelf returns the caller's own live sessions.
+//
+// THE CONTEXT'S ACTOR IS THE ARGUMENT. authSessionsForSelf takes none: it
+// filters userId==actor.userId, so a caller cannot point it at another
+// person, and a context with no actor yields nothing rather than everything.
+// Pass a context carrying the caller (auth.ContextWithUserActor) -- passing a
+// system actor here would return an empty list, not a full one, which is the
+// right direction for a mistake to fail in.
+func (s *Store) SessionsForSelf(ctx context.Context) ([]SelfSessionRow, error) {
+	nodes, err := s.executeAndExtract(ctx, `query authSessionsForSelf()`)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: sessions for self: %w", err)
+	}
+	out := make([]SelfSessionRow, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		g := newFieldGetter(node)
+		out = append(out, SelfSessionRow{
+			ID:          firstNonEmpty(g.str("id"), node.GetId()),
+			Source:      g.str("source"),
+			ClientLabel: g.str("clientLabel"),
+			FirstAuthAt: g.time("firstAuthenticatedAt"),
+			LastSeenAt:  g.time("lastActivityAt"),
+			LastRotated: g.time("lastRefreshedAt"),
+			ExpiresAt:   g.time("expiresAt"),
+			CreatedAt:   g.time("createdAt"),
+		})
+	}
+	return out, nil
+}
+
+// SetUserSignInPolicy sets which factors may enter one account.
+//
+// THE PRECONDITION IS THE CALLER'S, NOT THIS FUNCTION'S. Enabling
+// passkey_only requires the user to hold at least one active passkey, and
+// that check lives where the caller can also explain the refusal to a
+// person. What is enforced here is only that the value is one of the two the
+// enum admits -- a typo would otherwise refuse the row at insert with a
+// schema error nobody can act on.
+func (s *Store) SetUserSignInPolicy(ctx context.Context, userId, policy string) error {
+	policy = strings.TrimSpace(policy)
+	if policy != "any" && policy != "passkey_only" {
+		return fmt.Errorf("identity.store: sign-in policy %q is not one of any|passkey_only", policy)
+	}
+	var b strings.Builder
+	b.WriteString(`mutation setUserSignInPolicy(`)
+	writeKVString(&b, "userId", userId, true)
+	writeKVString(&b, "policy", policy, false)
+	b.WriteString(`)`)
+	// INTERNAL ORIGIN: setUserSignInPolicy is @serverOnly -- the admin reset
+	// is a legitimate caller acting on somebody else's row, which no
+	// actor-scoped filter can express.
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+		return fmt.Errorf("identity.store: set sign-in policy: %w", err)
+	}
+	return nil
+}
+
+// SetUserSharedMailbox sets or clears the shared-mailbox hint.
+func (s *Store) SetUserSharedMailbox(ctx context.Context, userId string, shared bool) error {
+	var b strings.Builder
+	b.WriteString(`mutation setUserSharedMailbox(`)
+	writeKVString(&b, "userId", userId, true)
+	if shared {
+		b.WriteString(`,shared: true`)
+	} else {
+		b.WriteString(`,shared: false`)
+	}
+	b.WriteString(`)`)
+	// INTERNAL ORIGIN: setUserSharedMailbox is @serverOnly, same reasoning.
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+		return fmt.Errorf("identity.store: set shared mailbox: %w", err)
+	}
+	return nil
 }
 
 // UserProfileSeed is the optional bundle of directory-style fields the
@@ -750,6 +863,12 @@ type UserProfileSeed struct {
 	PrimaryRole string
 	Gender      string
 	Birthdate   string
+
+	// SharedMailbox is the registration-time verdict of the local-part
+	// heuristic (memql#4304). Stamped at creation so the flag is right from
+	// the first sign-in rather than appearing later; the user or an admin
+	// can change it afterwards, and the heuristic never runs again.
+	SharedMailbox bool
 }
 
 // CreateUserOnFirstLogin creates a v1:identity:user row at first
@@ -781,6 +900,11 @@ func (s *Store) CreateUserOnFirstLogin(
 		b.WriteString(`,internal: true`)
 	} else {
 		b.WriteString(`,internal: false`)
+	}
+	if seed.SharedMailbox {
+		b.WriteString(`,sharedMailbox: true`)
+	} else {
+		b.WriteString(`,sharedMailbox: false`)
 	}
 	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {

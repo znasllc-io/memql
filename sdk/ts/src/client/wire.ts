@@ -725,6 +725,7 @@ export interface MyAccessResultPayload {
   userId?: string;
   primaryEmail?: string;
   clusterRole?: UserRoleWire | null;
+  sessionId?: string;
 }
 
 export interface RotateAuthResultPayload {

@@ -59,6 +59,24 @@ var (
 // plug-in at call time; tests pass an in-memory recorder.
 type Sender interface {
 	SendMagicLink(ctx context.Context, in SendInput) error
+	// SendSignInDisabledNotice delivers the message a passkey-only account
+	// gets INSTEAD of a link (memql#4304). Informative to the account holder,
+	// useless to anyone else reading the same mailbox.
+	SendSignInDisabledNotice(ctx context.Context, in NoticeInput) error
+}
+
+// NoticeInput is the rendered "sign-in links are off for this account"
+// message.
+//
+// IT CARRIES NO LINK AND NO TOKEN, which is the entire point: on a shared
+// mailbox this message lands in front of everyone who can read the address,
+// and it has to be worth nothing to all of them. What it tells the account
+// holder is that somebody asked, and what to do instead.
+type NoticeInput struct {
+	Email             string
+	BrandName         string
+	BrandPrimaryColor string
+	BrandLogoDataURI  string
 }
 
 // SendInput is the rendered email request the Sender consumes.
@@ -278,6 +296,45 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 	default:
 		// Reject (handled above) or unknown action.
 		return out, ErrEmailNotAllowed
+	}
+
+	// PASSKEY-ONLY ACCOUNTS GET A NOTICE, NOT A LINK (memql#4304, design D6).
+	//
+	// Resolved here, after the registration-mode gate and before anything is
+	// minted, because the policy is a property of an EXISTING account: an
+	// address with no user row is a registration and is unaffected.
+	//
+	// What the caller sees is IDENTICAL either way -- same nil return, same
+	// redirect to /check-email, same page. That is not politeness, it is the
+	// absence of an enumeration oracle: if a passkey-only account answered
+	// differently from any other address, the difference would be a way to
+	// discover which accounts are hardened. The only thing that differs is
+	// which message arrives, and only the mailbox sees that.
+	if user, lookupErr := i.Store.LookupUserByEmail(ctx, email); lookupErr == nil && user.PasskeyOnly() {
+		i.sendSignInDisabledNotice(ctx, email)
+		i.audit(ctx, identity.AuditEvent{
+			Category:      identity.AuditCategoryAuth,
+			Action:        "magic_link_refused_policy",
+			TargetType:    "user",
+			TargetId:      user.ID,
+			TargetEmail:   email,
+			SourceIP:      in.SourceIP,
+			UserAgent:     in.UserAgent,
+			CorrelationId: in.CorrelationId,
+			Outcome:       identity.AuditOutcomeBlocked,
+			FailureReason: "passkey_only",
+			Detail:        map[string]any{"signInPolicy": "passkey_only"},
+		})
+		return out, nil
+	} else if lookupErr != nil && i.Logger != nil {
+		// A lookup failure FALLS THROUGH to the ordinary path rather than
+		// refusing. The alternative -- treating an unreadable user row as
+		// passkey-only -- would turn a transient database blip into a
+		// cluster-wide sign-in outage, and the policy is a hardening measure
+		// rather than a containment one.
+		i.Logger.Warn("magiclink: sign-in policy lookup failed; issuing normally",
+			slog.String("email", email),
+			slog.String("error", lookupErr.Error()))
 	}
 
 	// Mint token + request id.
@@ -581,4 +638,27 @@ func (i *Issuer) resolveInvitation(ctx context.Context, in IssueInput, email str
 	}
 
 	return &registration.Invitation{Id: row.ID, Email: row.Email, Role: row.Role}
+}
+
+// sendSignInDisabledNotice delivers the passkey-only message. Delivery
+// failure is logged, never returned: the caller's response must not differ
+// from the ordinary path, and a mail outage is not the requester's business.
+func (i *Issuer) sendSignInDisabledNotice(ctx context.Context, email string) {
+	if i == nil || i.Sender == nil {
+		return
+	}
+	brandName := i.Cfg.BrandName
+	if brandName == "" {
+		brandName = "MemQL"
+	}
+	if err := i.Sender.SendSignInDisabledNotice(ctx, NoticeInput{
+		Email:             email,
+		BrandName:         brandName,
+		BrandPrimaryColor: i.Cfg.BrandPrimaryColor,
+		BrandLogoDataURI:  i.Cfg.BrandLogoDataURI,
+	}); err != nil && i.Logger != nil {
+		i.Logger.Warn("magiclink: sign-in-disabled notice failed",
+			slog.String("email", email),
+			slog.String("error", err.Error()))
+	}
 }

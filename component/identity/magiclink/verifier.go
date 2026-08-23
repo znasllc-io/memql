@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/registration"
 )
 
 // Sentinel errors the HTTP layer translates to user-facing messages.
@@ -260,7 +261,14 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		// to re-type everything from /admin/users/detail. Failure is
 		// non-fatal -- worst case the operator fills the fields in via
 		// the admin UI.
-		seed := identity.UserProfileSeed{}
+		// THE SHARED-MAILBOX HINT, STAMPED AT CREATION (memql#4304). The
+		// heuristic runs exactly once, here, at the moment the account comes
+		// into existence -- so the flag is right from the first sign-in
+		// rather than appearing later and looking like an accusation. It
+		// blocks nothing; the user or an admin can clear it in one click.
+		seed := identity.UserProfileSeed{
+			SharedMailbox: registration.LooksLikeSharedMailbox(row.Email),
+		}
 		if bootstrap {
 			if cs, err := v.Store.ReadClusterSettings(ctx); err == nil && cs != nil {
 				seed.FirstName = cs.BootstrapFirstName

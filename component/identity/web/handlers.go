@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/registration"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
@@ -271,6 +272,9 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		}
 		next, existingUser := s.routeLoginEmail(r, email, returnTo)
 		if next != nil {
+			// The hint travels with the re-rendered form (memql#4304), from
+			// the address the visitor typed rather than from any row.
+			next.SharedMailboxHint = registration.LooksLikeSharedMailbox(email)
 			s.render(w, r, "login", webtempl.Login(*next))
 			return
 		}
@@ -454,6 +458,11 @@ func (s *Server) handleCheckEmail(w http.ResponseWriter, r *http.Request) {
 		Action:      action,
 		RequestId:   requestId,
 		PollSeconds: pollSeconds,
+		// From the TYPED ADDRESS, never from the account row (memql#4304).
+		// The heuristic is public knowledge; the row is not, and reading it
+		// here would tell an unauthenticated visitor that a given address
+		// has an account.
+		SharedMailboxHint: registration.LooksLikeSharedMailbox(email),
 	}
 	s.render(w, r, "check_email", webtempl.CheckEmail(data))
 }
@@ -820,6 +829,14 @@ func (s *Server) handleMeDashboard(w http.ResponseWriter, r *http.Request) {
 	data := webtempl.MeDashboardData{
 		Layout: s.LayoutData(r, "Dashboard", true, meNavLinks(), extra),
 	}
+	// The shared-mailbox notice is rendered server-side from the caller's own
+	// row (memql#4304), unlike the rest of this page. It says something about
+	// who can enter the account, which is not a thing to hydrate later.
+	if claims := s.optionalUser(r); claims != nil && s.Store != nil {
+		if user, err := s.Store.LookupUserById(r.Context(), claims.Subject); err == nil && user != nil {
+			data.SharedMailboxNotice = user.SharedMailbox && !user.PasskeyOnly()
+		}
+	}
 	s.render(w, r, "me/dashboard", webtempl.MeDashboard(data))
 }
 
@@ -828,6 +845,14 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	data := webtempl.MeSettingsData{
 		Layout:               s.LayoutData(r, "Settings", true, meNavLinks(), extra),
 		DeletionCooldownDays: int(s.Cfg.DeletionCooldown / (24 * time.Hour)),
+		Flash:                flashFromQuery(r),
+	}
+	// The sign-in-security card needs the caller (memql#4304). Unlike the
+	// rest of this page, which is client-hydrated, these two controls change
+	// who can enter the account -- so they are rendered server-side from the
+	// caller's own row, and simply absent when there is no caller to read.
+	if claims := s.optionalUser(r); claims != nil {
+		data.SignInSecurity = s.signInSecurityCard(r, claims)
 	}
 	s.render(w, r, "me/settings", webtempl.MeSettings(data))
 }

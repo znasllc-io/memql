@@ -22,6 +22,18 @@ type CheckEmailData struct {
 	// PollSeconds is the request's remaining lifetime. The poller stops
 	// there rather than running forever in an abandoned tab.
 	PollSeconds int
+
+	// SharedMailboxHint is true when the address just entered LOOKS like a
+	// shared mailbox (memql#4304).
+	//
+	// DERIVED FROM THE TYPED ADDRESS, never from the stored flag, and the
+	// difference is the whole reason it is safe to render here. The
+	// heuristic is public knowledge -- anybody can see that `team@` reads
+	// like a team inbox -- so saying so leaks nothing. Rendering the account
+	// ROW's flag would be an enumeration oracle: it would tell an
+	// unauthenticated visitor that a given address has an account and that
+	// somebody has looked at it.
+	SharedMailboxHint bool
 }
 
 templ CheckEmail(data CheckEmailData) {
@@ -47,6 +59,14 @@ templ CheckEmail(data CheckEmailData) {
 					few minutes, check your spam folder or
 					<a href="/login">request a new link</a>.
 				</p>
+				if data.SharedMailboxHint {
+					<p class="text-small text-subtle mt-2">
+						That address looks like a shared mailbox. Anyone who can read it
+						can use the link we just sent. If it is a team inbox, consider
+						signing in with a passkey and turning sign-in links off for the
+						account from Settings.
+					</p>
+				}
 				if data.RequestId != "" {
 					@checkEmailPoller(data)
 				}
