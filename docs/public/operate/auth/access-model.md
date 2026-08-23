@@ -384,15 +384,104 @@ check runs at stream-open time only -- already-established streams
 keep their socket open until the JWT expires or the client
 disconnects.
 
+## Shared mailboxes and passkey-only sign-in
+
+An account can be registered with a group alias -- `team@example.com`,
+`support@example.com` -- and nothing about it says so. That matters more
+than it looks: anyone who can read the mailbox can request a sign-in link
+and enter the account, so **the account's real sign-in surface is the
+mailbox's reader list**. Two fields on `v1:identity:user` make that fact
+visible and give its owner a way to close it (memql#4300, design
+`docs/superpowers/specs/2026-08-22-magic-link-hardening-design.md`).
+
+### `sharedMailbox` -- a hint
+
+Set at registration by a local-part heuristic in
+`component/identity/registration/shared_mailbox.go`: RFC 2142 role names
+(`postmaster`, `abuse`, `security`, `support`, `info`, `sales`, ...) plus
+the common team names (`team`, `hello`, `contact`, `admin`, `ops`, `hr`,
+`billing`, ...). Exact match on the local part, `+tag` stripped, case
+folded.
+
+**It gates nothing.** It drives copy: a warning on `/me` and `/me/settings`,
+a note on `/login` when a matching address is typed, and a field the
+portal's People view renders like any other. The user or an admin can set
+or clear it; every change is audited `shared_mailbox_changed{by, from, to}`.
+
+The heuristic is a guess, and both directions of correction matter: `info@`
+belongs to plenty of solo operators, and a genuinely shared `orders-uk@`
+will not be recognised. Matching is exact rather than substring precisely so
+that `itzhak@`, `devon@` and `sales.rodriguez@` are not told their personal
+accounts look like team inboxes.
+
+### `signInPolicy` -- `any` (default) or `passkey_only`
+
+`passkey_only` disables sign-in **links** for the account. A request for one
+writes no row, sends no link, redirects the caller to `/check-email` exactly
+as an ordinary request does, and mails a *notice* instead: "sign-in links
+are disabled for this account; use your passkey; if this wasn't you, nothing
+has happened." Audited `magic_link_refused_policy`.
+
+The identical response is deliberate. If a passkey-only account answered a
+sign-in request differently from any other address, the difference would be
+an oracle for which accounts have hardened themselves. The only thing that
+differs is which email arrives, and only the mailbox sees that.
+
+**Turning it on requires at least one active passkey**, enforced by the
+server and not merely by a disabled button -- a policy that can lock its
+owner out is not a security control. The control lives on `/me/settings`.
+
+**Rescue:** an owner or admin resets the policy to `any` over
+`IdentityAdminMsg` (`ResetSignInPolicyRequest`), audited
+`sign_in_policy_reset_by_admin`. The reset is one-directional by design:
+there is no admin path to turn `passkey_only` ON for somebody else, because
+that would let an admin lock a colleague out of their own account and
+nothing operational needs it. It is the same trust level as issuing an
+enrolment token for that user, which admins can already do.
+
+### What this does not cover
+
+**An enrolment or recovery link pasted into a mail to a shared mailbox
+enrols whoever opens it.** They are shown to the issuing admin and never
+emailed for that reason -- `adminops` returns the URL once, in the reply,
+and stores only a digest. Nothing stops a human copying one into a message;
+if that happens, the consequence is a permanent credential for any recipient.
+Enrolment tokens and the owner recovery key are the designed "I lost my
+passkey" routes and are deliberately unaffected by `passkey_only`.
+
+## Sessions a user can see and end
+
+Every session the identity service mints has a `v1:identity:authSession`
+row, including the first-party browser-cookie session (`source=oidc_cookie`)
+-- which for most of its life had none, and so could be neither listed nor
+revoked (memql#4303).
+
+- `authSessionsForSelf` (`dsl/identity/queries.memql`) is the self-scoped
+  read: `userId==actor.userId`, no arguments, live rows only, and a shape
+  that carries **no token hashes**.
+- `/me/devices` renders it server-side, marks the current session, and
+  offers per-session and revoke-all sign-out.
+- `MyAccessResult.session_id` names the session behind the current
+  connection so a client can mark "this device" without decoding the JWT.
+
+**Every new session mails the account** -- when, from where, and with what
+(memql#4305). There is no action link in that message, deliberately: an
+unauthenticated revoke link mailed to a shared mailbox is a
+denial-of-service handle for anybody who can read the mailbox. The copy says
+to sign in and revoke from the profile page. Refresh rotations never send
+it; only a genuinely new session does. Audited
+`sign_in_notification_sent`.
+
 ## Cockpit Settings: My Access
 
 The Cockpit's Settings tab includes a **MY ACCESS** panel showing the
-caller's own identity: user id, primary email, and cluster-wide role. The
-data comes from a dedicated gRPC message (`MyAccessMsg` / `MyAccessResult`,
-`component/grpc/my_access_handler.go`). There is no per-partition grant
-list to show any more -- the proto's `partitions` field is `reserved`
-(`component/grpc/memql.proto`), and a role is the only access-relevant
-fact a `v1:identity:user` row carries (see "Role spectrum," above).
+caller's own identity: user id, primary email, cluster-wide role, and the
+current session id. The data comes from a dedicated gRPC message
+(`MyAccessMsg` / `MyAccessResult`, `component/grpc/my_access_handler.go`).
+There is no per-partition grant list to show any more -- the proto's
+`partitions` field is `reserved` (`component/grpc/memql.proto`), and a role
+is the only access-relevant fact a `v1:identity:user` row carries (see
+"Role spectrum," above).
 
 ## Granting access
 
