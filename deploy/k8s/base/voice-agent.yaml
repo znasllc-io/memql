@@ -40,10 +40,26 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: voice-agent
     spec:
+      serviceAccountName: memql-engine
       volumes:
         - name: memql-ca
           secret:
             secretName: memql-ca
+        # The pod's OWN identity, minted for Anthropic and nobody else
+        # (memql#4336). audience is what makes this token non-interchangeable
+        # with the default kube-api-access one: Anthropic verifies it against
+        # the cluster's public OIDC JWKS and refuses a token minted for
+        # anything but itself. expirationSeconds bounds the blast radius of a
+        # leaked assertion to an hour, and kubelet re-projects the file in
+        # place -- the SDK re-reads it on every exchange, so rotation needs no
+        # restart. It costs nothing on a cluster that is not federating.
+        - name: anthropic-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: https://api.anthropic.com
+                  expirationSeconds: 3600
+                  path: token
       terminationGracePeriodSeconds: 45
       containers:
         - name: voice-agent
@@ -57,8 +73,15 @@ spec:
             # MEMQL_DATABASE_DSN (unused here, harmless).
             - secretRef:
                 name: memql-secrets
+            # The four Anthropic federation ids. optional: true because the
+            # base ships them EMPTY and the local overlay leaves them that
+            # way; a cluster that never applied the ConfigMap still boots.
+            - configMapRef:
+                name: memql-anthropic-federation
+                optional: true
           env:
             - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
+            - { name: MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE, value: "/var/run/secrets/anthropic.com/token" }
             # LiveKit (internal cluster signaling for the agent; the same
             # self-chosen key/secret the BFF mints with). Note the agent reads
             # the non-POLYPHON_-prefixed names.
@@ -113,6 +136,7 @@ spec:
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+            - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }
           resources:
             requests: { cpu: 200m, memory: 256Mi }
             limits: { memory: 1Gi }

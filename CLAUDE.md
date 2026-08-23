@@ -952,6 +952,7 @@ MemQL centralizes all AI operations through a pluggable provider system:
 - **Anthropic providers** - Claude Opus, Sonnet, Haiku for chat and vision
 - **Provider configuration** - MemQL provider records in `dsl/providers/providers.memql`
 - **Provider selection** - Default provider via config, or per-request via `provider` parameter
+- **Anthropic credential** - a static key locally, **workload identity federation** in the cloud (epic memql#4333). The engine presents the pod's projected Kubernetes token and the SDK exchanges it for a one-hour bearer, so no long-lived vendor key is at rest. All four ids or none; a partial config REFUSES BOOT rather than falling back to a key the cutover deletes. Cutover, deny reasons and `memql provider-auth check`: [docs/public/operate/auth/anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md)
 
 ### AI Endpoints (gRPC on `MemqlService.Stream`)
 

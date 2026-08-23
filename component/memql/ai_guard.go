@@ -738,6 +738,21 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	// The Anthropic federation token exchange rides this same transport (the
+	// SDK's credential provider calls the client's handler), and it is NOT an
+	// LLM call: it must never be fingerprinted, rate-limited or costed --
+	// isGuardedLLMPath excludes it by construction and a test holds that. But
+	// it must be OBSERVED, because it is the one call whose failure takes the
+	// whole cluster's Claude access with it, silently and up to an hour after
+	// the cause (memql#4335). So it short-circuits the guard entirely and goes
+	// through the observer instead.
+	//
+	// It is checked BEFORE the guard's enabled check on purpose: whether the
+	// LLM circuit breaker is switched on has nothing to do with whether an
+	// operator can see the exchange working.
+	if isFederationExchange(req.Method, req.URL.Path) {
+		return observeFederationExchange(base, req)
+	}
 	g := t.guard
 	if g == nil || (!g.enabled && !g.rateEnabled && !g.killSwitchEnabled && !g.scopeEnabled) {
 		return base.RoundTrip(req)

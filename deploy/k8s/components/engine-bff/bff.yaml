@@ -41,10 +41,26 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: bff
     spec:
+      serviceAccountName: memql-engine
       volumes:
         - name: memql-ca
           secret:
             secretName: memql-ca
+        # The pod's OWN identity, minted for Anthropic and nobody else
+        # (memql#4336). audience is what makes this token non-interchangeable
+        # with the default kube-api-access one: Anthropic verifies it against
+        # the cluster's public OIDC JWKS and refuses a token minted for
+        # anything but itself. expirationSeconds bounds the blast radius of a
+        # leaked assertion to an hour, and kubelet re-projects the file in
+        # place -- the SDK re-reads it on every exchange, so rotation needs no
+        # restart. It costs nothing on a cluster that is not federating.
+        - name: anthropic-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: https://api.anthropic.com
+                  expirationSeconds: 3600
+                  path: token
       terminationGracePeriodSeconds: 45
       containers:
         - name: bff
@@ -60,10 +76,17 @@ spec:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            # The four Anthropic federation ids. optional: true because the
+            # base ships them EMPTY and the local overlay leaves them that
+            # way; a cluster that never applied the ConfigMap still boots.
+            - configMapRef:
+                name: memql-anthropic-federation
+                optional: true
             - configMapRef:
                 name: memql-db-pool
           env:
             - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
+            - { name: MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE, value: "/var/run/secrets/anthropic.com/token" }
             - { name: MEMQL_NODE_TYPE, value: "bff" }
             - { name: MEMQL_NODE_ADDRESS, value: "bff:50058" }
             # Unique per-pod mesh identity (#1042); overrides the shared genesis
@@ -96,6 +119,7 @@ spec:
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+            - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }
           startupProbe:
             httpGet: { path: /healthz, port: 8085 }
             failureThreshold: 30

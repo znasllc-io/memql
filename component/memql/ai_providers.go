@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/sashabaranov/go-openai"
 
@@ -959,6 +958,15 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 			}
 			if envHit != "" {
 				resolved[key] = envHit
+				continue
+			}
+			// An OPTIONAL placeholder resolves to absent rather than to an
+			// error (memql#4334). The whole set is Anthropic's credential --
+			// see optionalAuthEnvNames for why absence is a legitimate
+			// configuration there and a mistake everywhere else. The key is
+			// simply left out of the resolved map, so a consumer reading it
+			// gets "" and decides for itself.
+			if optionalAuthPlaceholder(envKey) {
 				continue
 			}
 			return nil, fmt.Errorf(
@@ -1938,15 +1946,14 @@ var _ common.ToolCallingChatAIProvider = (*anthropicProvider)(nil)
 var _ common.VisionAIProvider = (*anthropicProvider)(nil)
 
 func newAnthropicProvider(cfg ProviderConfig) (AIProvider, error) {
-	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
-	if apiKey == "" {
-		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
+	// Which credential this client uses -- a static key or a federated,
+	// short-lived bearer -- is anthropicCredential's decision, not this
+	// constructor's (memql#4334). The guarded http.Client (the global LLM
+	// circuit breaker, memql#825) is attached in every branch.
+	client, _, err := newAnthropicClient(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		return nil, err
 	}
-	client := anthropic.NewClient(
-		option.WithAPIKey(apiKey),
-		// Route through the global LLM circuit breaker (memql#825).
-		option.WithHTTPClient(guardedHTTPClient(nil)),
-	)
 	return &anthropicProvider{
 		client: client,
 		model:  cfg.Model,
@@ -2160,14 +2167,12 @@ var _ common.ChatAIProvider = (*anthropicStreamProvider)(nil)
 var _ common.ToolCallingChatAIProvider = (*anthropicStreamProvider)(nil)
 
 func newAnthropicStreamProvider(cfg ProviderConfig) (AIProvider, error) {
-	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
-	if apiKey == "" {
-		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
+	// Same credential decision as the non-streaming constructor, over the
+	// streaming-tuned (and still guarded) http.Client (memql#4334).
+	client, _, err := newAnthropicClient(cfg, streamingHTTPClient())
+	if err != nil {
+		return nil, err
 	}
-	client := anthropic.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithHTTPClient(streamingHTTPClient()),
-	)
 	return &anthropicStreamProvider{
 		client:  client,
 		model:   cfg.Model,

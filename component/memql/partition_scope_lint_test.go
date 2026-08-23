@@ -28,7 +28,6 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 
 	// Core directories expected to become product-agnostic.
 	coreDirs := []string{"component", "app"}
-	const needle = "spaceid" // case-insensitive match against spaceId / SpaceId / SpaceID
 
 	var offenders []string
 	for _, dir := range coreDirs {
@@ -64,7 +63,7 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 			if rerr != nil {
 				return rerr
 			}
-			if strings.Contains(strings.ToLower(string(data)), needle) {
+			if containsBareSpaceID(string(data)) {
 				offenders = append(offenders, rel)
 			}
 			return nil
@@ -132,5 +131,79 @@ func repoRoot(t *testing.T) string {
 			t.Fatal("go.work not found walking up from test file")
 		}
 		dir = parent
+	}
+}
+
+// wordsEndingInSpace are English words that END in "space" and whose "...Id"
+// form is therefore NOT a MemQL space id.
+//
+// This exists because the match is a case-insensitive substring one and
+// `workspaceId` contains `spaceId` (memql#4334, which introduced Anthropic's
+// federation `workspaceId` -- an id in ANOTHER vendor's account model, with no
+// relationship to MemQL's tenant scope). A lint that flags it is simply wrong
+// there, and the cost of being wrong is worse than a miss: the documented
+// escape hatch is the Epic 3 migration baseline, so obeying it would record a
+// false claim that these files hold a spaceId awaiting migration.
+//
+// The exemption is deliberately a short CLOSED list rather than a general
+// "preceded by a letter" boundary. The latter would also exempt
+// `voiceAgentSpaceId` and `ownerSpaceId`, which are exactly the leaks this
+// test is for.
+var wordsEndingInSpace = []string{"work", "name", "sub", "white", "air", "aero", "hyper"}
+
+// containsBareSpaceID reports whether the source names a MemQL space id --
+// spaceId / SpaceId / SpaceID in any casing -- as opposed to the tail of a
+// longer word that happens to end in "space".
+func containsBareSpaceID(src string) bool {
+	lower := strings.ToLower(src)
+	const needle = "spaceid"
+	for i := 0; ; {
+		idx := strings.Index(lower[i:], needle)
+		if idx < 0 {
+			return false
+		}
+		at := i + idx
+		if !precededByWordEndingInSpace(lower[:at]) {
+			return true
+		}
+		i = at + len(needle)
+	}
+}
+
+func precededByWordEndingInSpace(before string) bool {
+	for _, w := range wordsEndingInSpace {
+		if strings.HasSuffix(before, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestContainsBareSpaceIDStillCatchesTheRealThing is the reachable positive
+// for the exemption above: relaxing a lint is only safe if it can still be
+// shown to fire.
+func TestContainsBareSpaceIDStillCatchesTheRealThing(t *testing.T) {
+	hits := []string{
+		`spaceId := ""`,
+		`SpaceID string`,
+		`cfg.SpaceId`,
+		`voiceAgentSpaceId`, // the compound leak the boundary must NOT exempt
+		`ownerSpaceID`,
+	}
+	for _, src := range hits {
+		if !containsBareSpaceID(src) {
+			t.Fatalf("the lint no longer catches %q", src)
+		}
+	}
+	misses := []string{
+		`WorkspaceID string`,
+		`option.FederationOptions{WorkspaceID: id}`,
+		`namespaceId`,
+		`partition := ""`,
+	}
+	for _, src := range misses {
+		if containsBareSpaceID(src) {
+			t.Fatalf("the lint false-positives on %q", src)
+		}
 	}
 }

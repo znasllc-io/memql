@@ -52,10 +52,26 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: edge
     spec:
+      serviceAccountName: memql-engine
       volumes:
         - name: memql-ca
           secret:
             secretName: memql-ca
+        # The pod's OWN identity, minted for Anthropic and nobody else
+        # (memql#4336). audience is what makes this token non-interchangeable
+        # with the default kube-api-access one: Anthropic verifies it against
+        # the cluster's public OIDC JWKS and refuses a token minted for
+        # anything but itself. expirationSeconds bounds the blast radius of a
+        # leaked assertion to an hour, and kubelet re-projects the file in
+        # place -- the SDK re-reads it on every exchange, so rotation needs no
+        # restart. It costs nothing on a cluster that is not federating.
+        - name: anthropic-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: https://api.anthropic.com
+                  expirationSeconds: 3600
+                  path: token
       # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
       # default) + the app Stop budget (30s) so drain + GracefulStop finish.
       terminationGracePeriodSeconds: 45
@@ -77,12 +93,19 @@ spec:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            # The four Anthropic federation ids. optional: true because the
+            # base ships them EMPTY and the local overlay leaves them that
+            # way; a cluster that never applied the ConfigMap still boots.
+            - configMapRef:
+                name: memql-anthropic-federation
+                optional: true
             # Bounded Postgres pool (MAX_OPEN_CONNS/MAX_IDLE_CONNS) so the
             # mesh stays under max_connections during a rollout (memql#1858).
             - configMapRef:
                 name: memql-db-pool
           env:
             - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
+            - { name: MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE, value: "/var/run/secrets/anthropic.com/token" }
             - { name: MEMQL_NODE_TYPE, value: "edge" }
             - { name: MEMQL_NODE_ADDRESS, value: "edge:50062" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -121,6 +144,7 @@ spec:
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+            - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }
           # Slow boot (DSL load + mesh connect) must not trip liveness/readiness (#1117).
           startupProbe:
             httpGet: { path: /healthz, port: 8085 }

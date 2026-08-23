@@ -7,7 +7,20 @@
 @type("Anthropic")
 provider anthropic {
   auth {
-    apiKey  env("MEMQL_AI_ANTHROPIC_API_KEY")
+    apiKey             env("MEMQL_AI_ANTHROPIC_API_KEY")
+    // Workload identity federation (memql#4333). The engine presents its
+    // Kubernetes service-account token instead of holding a key: all four of
+    // rule / organization / service account / token file set means federate,
+    // none means the key, one to three refuses boot. Every one of these is
+    // OPTIONAL at resolution -- unlike a normal auth placeholder, an unset
+    // federation key leaves the field empty and anthropicCredential decides
+    // what that means (see optionalAuthEnvNames in ai_providers.go).
+    // Runbook: docs/public/operate/auth/anthropic-federation.md.
+    federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")
+    organizationId     env("MEMQL_AI_ANTHROPIC_ORGANIZATION_ID")
+    serviceAccountId   env("MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID")
+    workspaceId        env("MEMQL_AI_ANTHROPIC_WORKSPACE_ID")
+    identityTokenFile  env("MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE")
   }
 }
 

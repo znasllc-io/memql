@@ -158,3 +158,11 @@ regexes = ['''eyJhbGciOiJSUzI1NiIsImtpZCI6\.\.\.''']
 description = "Synthetic JWT fixture in the VS Code cluster-registration tests (memql#3484). NOT a credential: it decodes to {\"alg\":\"RS256\"} . {} . the literal string `sig` -- an empty payload and a three-character signature. It names no subject, carries no claim, and authorizes nothing. The tree spelling was later split across a newline to dodge the regex; that did not clear the historical finding, which is what this entry is for."
 regexTarget = "match"
 regexes = ['''eyJhbGciOiJSUzI1NiJ9\.e30\.sig''']
+
+[[allowlists]]
+description = "Anthropic's federation beta-header VALUES (memql#4333). `oidc-federation-2026-04-01` and `oauth-2025-04-20` are the two published `anthropic-beta` opt-in strings the SDK sends on EVERY workload-identity token exchange -- protocol version labels, the OPPOSITE of a secret: an implementation that does not transmit them in the clear cannot federate at all. They are hard-coded as exported constants in the vendored SDK (config/federation.go) and appear in Anthropic's public documentation; `generic-api-key` matches the first purely on the entropy of a hyphenated date-stamped label. Value-keyed with no `paths` (memql#3484): they are exact published strings, so suppressing them wherever they appear is safe, and a path constraint would resurface the finding the moment the design doc or the exchange test moves -- which is not hypothetical here, since one of the two hits is in a spec file and `gitleaks git .` scans commits."
+regexTarget = "match"
+regexes = [
+  '''oidc-federation-2026-04-01''',
+  '''oauth-2025-04-20''',
+]

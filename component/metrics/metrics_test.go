@@ -161,3 +161,34 @@ func TestSetIdentitySigningKey(t *testing.T) {
 		}
 	})
 }
+
+// TestFederationExchangeSeriesExistFromBoot is the reachable positive for the
+// zero-init in init(): the runbook's "alert on denied" rule needs the series
+// to exist before the first denial, or it evaluates to no data on exactly the
+// cluster it is watching.
+func TestFederationExchangeSeriesExistFromBoot(t *testing.T) {
+	for _, outcome := range []string{
+		FederationExchangeOK, FederationExchangeDenied, FederationExchangeError,
+	} {
+		families, err := Registry().Gather()
+		if err != nil {
+			t.Fatalf("gather: %v", err)
+		}
+		var found bool
+		for _, f := range families {
+			if f.GetName() != "memql_ai_federation_exchanges_total" {
+				continue
+			}
+			for _, m := range f.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "outcome" && l.GetValue() == outcome {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("memql_ai_federation_exchanges_total{outcome=%q} does not exist before the first exchange; an alert over it would evaluate to no data", outcome)
+		}
+	}
+}
