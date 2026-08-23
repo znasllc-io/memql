@@ -66,7 +66,7 @@ export function ArtifactsPage(): ReactNode {
         <PageHeader
           eyebrow={ARTIFACT_CONCEPT_ID}
           title="Artifacts"
-          blurb="Everything this cluster's Library has indexed for you -- uploaded documents, generated outputs, and what your agents have produced. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
+          blurb="Everything this cluster's Library has indexed for you -- uploaded documents, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
           actions={
             <Button size="xs" onClick={reload}>
               Refresh
@@ -120,7 +120,7 @@ export function ArtifactsPage(): ReactNode {
                 }
               />
             ) : (
-              <EmptyState statement="No artifacts yet. Uploaded documents and generated outputs will appear here as the Library indexes them, or make one with the form above." />
+              <EmptyState statement="No artifacts yet. Uploaded documents, generated outputs, notes, to-dos, calendar events, and memories will appear here as the Library indexes them, or make one with the form above." />
             )
           ) : concept ? (
             <RowList rows={rows} concept={concept} onSelect={select} />
