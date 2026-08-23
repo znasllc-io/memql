@@ -6,15 +6,33 @@
 // name resolves to this builtin, which forwards to the workbench
 // integration's `dispatchHost` capability.
 
+// `environment` is the OPTIONAL HINT (memql#4353, design 6.1):
+// { os: "<goos>", needs: ["display"|"gpu"|"macos_tooling"|"user_files"] }.
+// The agent says what the action needs; handleDispatchHost compares it with
+// what a workbench IS -- Linux, headless, no user files -- and returns a typed
+// `environment_mismatch` NAMING THE UNMET NEEDS instead of running the action
+// and failing obscurely three layers down (a `defaults read` on Linux, an
+// xdotool with no DISPLAY, a path under /Users that is not there).
+//
+// A mismatch is not a failure and not a switch. The tool loop reroutes to the
+// user's own fleet ONLY when the plan already holds standing scope at the level
+// the needs imply and the task is approved; otherwise it raises the consent
+// card exactly as the knowledge corpus prescribes. The corpus's prohibition on
+// silent switching stands, and is quoted in the Go that implements this.
+//
+// Omitted entirely means "no hint" -- every pre-#4353 caller, and every action
+// that genuinely does not care. There is no default hint; guessing one would
+// make the mismatch fire on calls that would have worked.
 @executor("integration.workbench.dispatchHost")
 @args(profile="object")
 @description("Dispatch a workbenchHost.<action> call to the per-Plan workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.")
 builtin workbenchDispatchHost {
-  action   string!
-  args     object
-  planId   string
-  agentId  string
-  taskId   string
+  action       string!
+  args         object
+  planId       string
+  agentId      string
+  taskId       string
+  environment  object
 }
 
 // workbenchTeardownDirectory -- on-disk teardown of a per-Plan

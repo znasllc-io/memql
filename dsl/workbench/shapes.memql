@@ -6,6 +6,8 @@
 shape workspace workspaceFull {
   row.id
   planId
+  ownerUserId
+  nodeId
   status
   storageRoot
   row.createdAt

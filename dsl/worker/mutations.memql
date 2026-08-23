@@ -30,6 +30,7 @@ mutate invocation createWorkerInvocation {
     bytesIn        int
     bytesOut       int
     outputPreview  string
+    routing        object
   }
   insert {
     id: args.invocationId
@@ -53,6 +54,7 @@ mutate invocation createWorkerInvocation {
     bytesIn: args.bytesIn ?? 0
     bytesOut: args.bytesOut ?? 0
     outputPreview: args.outputPreview ?? ""
+    routing: args.routing ?? {}
   }
 }
 
@@ -74,11 +76,18 @@ mutate invocation createWorkerInvocation {
 // caller -- the worker authenticates as worker:<id>, not as the
 // registering user.
 
-/// Create a worker registration row on first connect.
+/// Create a worker registration row on first connect. ownerUserId is STAMPED FROM THE ACTOR, not
+/// taken from args: the concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and a
+/// declared owner field any mutation writes from caller args fails
+/// TestDeclaredOwnerFieldsAreServerStamped (its exemption list is empty and is meant to stay so).
+/// The worker authenticates as worker:<id> rather than as its owner, so component/worker's store
+/// runs this write under auth.ContextWithUserActor for the owner resolved from the worker_token's
+/// identity row -- the same borrowed-authority shape createAuthActivity uses, and for the same
+/// reason: the service knows whose credential it is before the actor envelope does.
+@actor
 mutate registration createWorkerRegistration {
   args {
     registrationId       string!
-    ownerUserId          string!
     identityId           string!
     name                 string!
     capabilities         array!
@@ -92,10 +101,11 @@ mutate registration createWorkerRegistration {
     registeredAt         string!
     lastSeenAt           string
     lastConnectedFromIP  string
+    connectedNodeId      string
   }
   insert {
     id: args.registrationId
-    args.ownerUserId
+    ownerUserId: actor.userId
     args.identityId
     args.name
     args.capabilities
@@ -109,6 +119,12 @@ mutate registration createWorkerRegistration {
     args.registeredAt
     lastSeenAt: args.lastSeenAt ?? args.registeredAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
+    connectedNodeId: args.connectedNodeId ?? ""
+    // operatorLabels, displayName, lastSelectedAt and activeCount are
+    // deliberately absent. A create has nothing to preserve, and naming them
+    // here would invite the same list to be copied into
+    // refreshWorkerRegistration -- which is exactly the write that must NOT
+    // carry them (memql#4350 / design D3).
   }
 }
 
@@ -148,6 +164,7 @@ mutate registration refreshWorkerRegistration {
     buildTag             string
     lastSeenAt           string!
     lastConnectedFromIP  string
+    connectedNodeId      string
   }
   update {
     id: args.registrationId
@@ -162,6 +179,16 @@ mutate registration refreshWorkerRegistration {
     buildTag: args.buildTag ?? ""
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
+    connectedNodeId: args.connectedNodeId ?? ""
+    // operatorLabels IS NOT WRITTEN HERE, and that is the whole of design D3.
+    // `labels` above is overwritten from the Register message on every
+    // reconnect; an operator tag living in that map would be erased by the
+    // machine that carries it, silently, roughly whenever the laptop's lid
+    // closed. update{} is a read-merge (memql#1628), so a field this body does
+    // not name survives untouched -- which means the prohibition is enforced by
+    // the ABSENCE of a line, and a well-meaning "complete the field list" edit
+    // is what would break it. displayName is absent for the same reason: the
+    // owner's rename must outlive the hostname the cockpit re-reports.
   }
 }
 
@@ -306,10 +333,175 @@ mutate registration updateWorkerLastSeen {
     registrationId       string!
     lastSeenAt           string!
     lastConnectedFromIP  string
+    connectedNodeId      string
+    activeCount          int
   }
   update {
     id: args.registrationId
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
+    connectedNodeId: args.connectedNodeId ?? ""
+    activeCount: args.activeCount ?? 0
+  }
+}
+
+// ---- clearWorkerConnectedNode ----
+//
+// The disconnect half of connectedNodeId. Without it a machine whose
+// stream dropped keeps naming the replica that used to hold it, and the
+// router forwards a dispatch to a node that will refuse it -- a slower,
+// noisier version of the no-worker case, and one that looks like a mesh
+// fault rather than an offline laptop.
+//
+// lastSeenAt is deliberately NOT touched: it is the record of when the
+// machine was last heard from, and moving it on the way out would make a
+// disconnected worker look fresh for one online window.
+
+/// Clear connectedNodeId on a worker registration when its stream closes.
+/// NOT @serverOnly, deliberately. Its caller is component/worker, which is not on
+/// call_origin.go's internal-origin allowlist and should not be: every context in that package
+/// descends from a worker's own inbound stream. The concept's owner tier is the gate instead --
+/// the store stamps auth.ContextWithUserActor for the registration's owner, and the write guard
+/// refuses any other actor. The residue is that a signed-in person could clear the field on their
+/// OWN machine, which the next heartbeat re-stamps within one interval.
+mutate registration clearWorkerConnectedNode {
+  args {
+    registrationId  string!
+  }
+  update {
+    id: args.registrationId
+    connectedNodeId: ""
+    activeCount: 0
+  }
+}
+
+// ---- The Fleet: the owner's own writes (epic memql#4349) ----
+//
+// renameWorker and setWorkerOperatorLabels take a caller-supplied
+// registrationId with no owner predicate in the body, and that is SAFE HERE
+// for exactly one reason: v1:worker:registration declares
+// @rowAuthz(owner="ownerUserId", clusterOwner), so executeWrite resolves the
+// target row BEFORE the read-merge and refuses when its ownerUserId is neither
+// the caller nor a cluster owner (component/memql/rowauthz_write_guard.go,
+// memql#3174). Neither body can write ownerUserId -- both name their fields
+// explicitly rather than splatting a payload -- so the read-merge inherits the
+// owner from the persisted row and the guard cannot be walked past by
+// rewriting the field it checks. That is the same reasoning updateAgentAuthScope
+// above carries, and it is worth restating rather than referring to, because a
+// future body that splats args is where it stops being true.
+
+/// Rename one of the caller's machines. Writes displayName; `name` stays the cockpit's hostname,
+/// which the next reconnect re-stamps.
+mutate registration renameWorker {
+  args {
+    registrationId  string!
+    displayName     string!  @maxLength(120)
+  }
+  update {
+    id: args.registrationId
+    args.displayName
+  }
+}
+
+/// Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not
+/// merged: the Fleet page edits the set as a set, and a merge would make removing a label
+/// impossible through this surface.
+mutate registration setWorkerOperatorLabels {
+  args {
+    registrationId  string!
+    operatorLabels  object!
+  }
+  update {
+    id: args.registrationId
+    args.operatorLabels
+  }
+}
+
+/// Stamp lastSelectedAt on the machine the router just picked. Server-side: the router runs on
+/// behalf of the session's owner, and a client that could stamp this could steer roundRobin.
+@serverOnly
+mutate registration touchWorkerSelected {
+  args {
+    registrationId  string!
+  }
+  update {
+    id: args.registrationId
+    lastSelectedAt: now
+  }
+}
+
+// ---- The routing policy ----
+//
+// ONE ACTIVE POLICY PER USER is the model, and the DSL cannot enforce it:
+// @unique is declared metadata with no check behind it (memql#2960), and a
+// mutation carries no filter to make the write conditional. So the invariant is
+// held on both sides instead of asserted on neither:
+//
+//   - the WRITE side edits in place. The Fleet page reads myRoutingPolicies,
+//     and calls updateRoutingPolicy on the active row when one exists;
+//     createRoutingPolicy runs once, for a user who has none.
+//   - the READ side is DETERMINISTIC regardless. routingPolicyForOwner sorts
+//     newest first and the router takes the first row, so even if two active
+//     rows ever existed, every agent replica would still choose the same
+//     policy. That property is the one that actually matters: a fleet routed
+//     differently depending on which replica served the turn is the bug class
+//     this epic exists to close, and it must not be reintroduced by the
+//     policy read itself.
+//
+// deactivateRoutingPolicy is how a superseded row leaves the active set. Rows
+// are never deleted: an invocation's routing.policyId names the row that made
+// the choice, and deleting it would leave that record pointing at nothing.
+
+/// Create the caller's routing policy. Run once, for a user who has none; edits go through
+/// updateRoutingPolicy.
+@actor
+mutate routingPolicy createRoutingPolicy {
+  args {
+    policyId       string!
+    strategy       string!  @enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")
+    requireLabels  object
+    preferLabels   object
+    fallback       string!  @enum("none", "nextMatching")
+  }
+  insert {
+    id: args.policyId
+    ownerUserId: actor.userId
+    args.strategy
+    requireLabels: args.requireLabels ?? {}
+    preferLabels: args.preferLabels ?? {}
+    args.fallback
+    active: true
+  }
+}
+
+/// Edit the caller's routing policy in place. The concept's owner tier is what scopes this to a
+/// row the caller owns; the body cannot write ownerUserId, so the read-merge keeps it.
+mutate routingPolicy updateRoutingPolicy {
+  args {
+    policyId       string!
+    strategy       string!  @enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")
+    requireLabels  object
+    preferLabels   object
+    fallback       string!  @enum("none", "nextMatching")
+  }
+  update {
+    id: args.policyId
+    args.strategy
+    requireLabels: args.requireLabels ?? {}
+    preferLabels: args.preferLabels ?? {}
+    args.fallback
+    active: true
+  }
+}
+
+/// Take a routing policy out of the active set. The row is kept -- an invocation's
+/// routing.policyId names it.
+mutate routingPolicy deactivateRoutingPolicy {
+  args {
+    policyId  string!
+  }
+  update {
+    id: args.policyId
+    active: false
   }
 }

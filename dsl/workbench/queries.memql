@@ -23,3 +23,36 @@ query workspace provisionedWorkspaces {
   filter  status=="provisioned"
   shape   workspaceFull
 }
+
+// ---- The Fleet: /fleet/workbenches (epic memql#4349, memql#4356) ----
+//
+// v1:workbench:workspace declares @rowAuthz(owner="ownerUserId", clusterOwner),
+// so the engine decides the rows; what these two add is the CALLER SCOPE the
+// classifier reads, and the status axis the page toggles.
+//
+// provisionedWorkspaces above stays as it is -- an inventory read filtered to
+// live rows -- and is now row-gated like everything else.
+
+/// The caller's own workbench workspaces, live and released, newest first. Backs the workspaces
+/// list on /fleet/workbenches for a person who is not a cluster owner.
+@actor
+query workspace myWorkspaces {
+  filter   ownerUserId==actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 100
+  shape    workspaceFull
+}
+
+/// Every workbench workspace in the cluster, for a cluster owner; optionally narrowed to one
+/// status. Backs the operator view of /fleet/workbenches, which answers "why is this workbench
+/// node full".
+@actor
+query workspace allWorkspaces {
+  args {
+    status  string  @enum("provisioned", "released")
+  }
+  filter   actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort     "row.createdAt", "desc"
+  paginate 200
+  shape    workspaceFull
+}

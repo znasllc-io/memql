@@ -3,6 +3,18 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// requireLabels / preferLabels, AND NO workerId (design D4, memql#4351).
+// The agent says what the work NEEDS -- os=darwin, has-gpu=true -- and the
+// owner's routingPolicy decides which of their machines that lands on. There
+// is no argument through which a model can name a machine, so a hallucinated
+// machine id is a failure mode this surface does not have; the worst a wrong
+// label can do is narrow the candidate set to nothing, which is reported as
+// no_worker_available with the candidates considered.
+//
+// requireLabels is AND-ed with the owner's policy requirement and filters;
+// preferLabels only orders. Both are matched against the MERGE of the
+// registration's cockpit `labels` and owner-set `operatorLabels`, operator side
+// winning.
 @executor("integration.agentworker.dispatchComputer")
 @args(profile="object")
 @description("Dispatch a workerComputer.<action> call to the user's computer-use-capable worker.")
@@ -14,6 +26,8 @@ builtin agentworkerDispatchComputer {
   planId         string
   taskId         string
   correlationId  string
+  requireLabels  object
+  preferLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerDispatchHost.memql ----
@@ -35,6 +49,8 @@ builtin agentworkerDispatchHost {
   planId         string
   taskId         string
   correlationId  string
+  requireLabels  object
+  preferLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerListWorkers.memql ----

@@ -185,3 +185,118 @@ query registration workersForUser {
   paginate 50
   shape   workerRegistrationFull
 }
+
+// ---- The Fleet (epic memql#4349) ----
+//
+// THREE READS OF ONE CONCEPT, and the split is the identity/authActivity
+// precedent (dsl/identity/queries.memql), not duplication. v1:worker:registration
+// declares the composite tier `@rowAuthz(owner="ownerUserId", clusterOwner)`, so
+// the ENGINE already ANDs `(ownerUserId==actor.userId)||(actor.isClusterOwner)`
+// onto every row. What differs between the three is WHO ASKS and with what:
+//
+//   workersForOwnerWithStatus  the ROUTER, server-side, for a user who is not
+//                              the caller (there is no caller -- a turn dispatches
+//                              on behalf of the session's owner). @serverOnly, and
+//                              its Go caller stamps BOTH internal origin (for the
+//                              annotation) and a user actor (for the tier).
+//   myWorkersWithStatus        the Fleet page, for the signed-in person.
+//   allWorkersWithStatus       the Fleet page, for a cluster owner, optionally
+//                              narrowed to one owner.
+//
+// `online` is NOT projected, because it cannot be: a shape body is a path list
+// and online is `revokedAt is empty AND lastSeenAt within
+// 2 x HeartbeatFlushInterval`. The rule has exactly two implementations --
+// component/worker.IsOnline and clients/portal/src/fleet/online.ts -- and
+// TestFleetOnlineWindowMatchesPortal fails the build when their windows
+// disagree. Deriving it from the in-memory registry instead is the thing this
+// design refuses: the registry is one replica's stream table, so it answers
+// "connected to ME", and the fleet needs "connected to ANY replica".
+
+/// Every machine registered to a user, with the fields the router orders and filters on.
+/// memql#4351: SERVER-SIDE ONLY. It takes a caller-supplied ownerUserId, which is not a caller
+/// check -- over the wire this enumerated any user's machines, their hostnames and the IPs they
+/// last connected from. Its caller is the router (integrations/agent/worker/router.go), which is
+/// dispatching a turn on behalf of the session's owner and therefore has no caller actor of its
+/// own; it stamps auth.ContextWithUserActor for that owner so the concept's tier still decides,
+/// and auth.ContextWithInternalOrigin so this annotation admits it. The page reads
+/// myWorkersWithStatus / allWorkersWithStatus instead, which are caller-scoped.
+@serverOnly
+query registration workersForOwnerWithStatus {
+  args {
+    ownerUserId  string!
+  }
+  filter   ownerUserId==args.ownerUserId
+  // Registration order, and it is load-bearing: `firstFit` IS this order, and
+  // `roundRobin` / `leastLoaded` break their own ties with it. Two agent
+  // replicas ordering candidates differently is the bug class this epic
+  // closes, so the order must come from the row, never from arrival.
+  sort     "row.createdAt", "asc"
+  paginate 200
+  shape    workerRegistrationFull
+}
+
+/// The signed-in person's own machines. Backs /fleet/machines.
+@actor
+query registration myWorkersWithStatus {
+  filter   ownerUserId==actor.userId
+  sort     "row.createdAt", "asc"
+  paginate 200
+  shape    workerRegistrationFull
+}
+
+/// Every machine in the cluster, for a cluster owner; optionally narrowed to one owner. Backs
+/// /fleet/machines' operator view, which adds an owner column.
+@actor
+query registration allWorkersWithStatus {
+  args {
+    ownerUserId  string
+  }
+  filter   actor.isClusterOwner==true && when(args.ownerUserId) { ownerUserId==args.ownerUserId }
+  sort     "row.createdAt", "asc"
+  paginate 200
+  shape    workerRegistrationFull
+}
+
+/// The active routing policy for a user, or nothing when they never set one (the common case --
+/// the router then applies firstFit + nextMatching).
+/// memql#4351: SERVER-SIDE ONLY, same argument as workersForOwnerWithStatus -- a caller-supplied
+/// ownerUserId, read by the router on behalf of a session owner who is not the caller.
+@serverOnly
+query routingPolicy routingPolicyForOwner {
+  args {
+    ownerUserId  string!
+  }
+  filter   ownerUserId==args.ownerUserId && active==true
+  // NEWEST FIRST, and the router takes the first row. One active policy per
+  // user is the model, but the DSL cannot enforce it (@unique is declared
+  // metadata with no check, memql#2960), so the READ is what makes two active
+  // rows harmless: every replica still resolves the same policy.
+  sort     "row.createdAt", "desc"
+  paginate 5
+  shape    workerRoutingPolicyFull
+}
+
+/// The signed-in person's routing policies, newest first. The Fleet page's policy editor reads the
+/// active one and writes through updateRoutingPolicy; superseded rows are kept because an
+/// invocation's routing.policyId points at whichever row made the choice.
+@actor
+query routingPolicy myRoutingPolicies {
+  filter   ownerUserId==actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 20
+  shape    workerRoutingPolicyFull
+}
+
+/// Recent calls dispatched to one of the caller's machines, newest first. Backs the per-machine
+/// activity list on /fleet/machines, which renders the routing record: the strategy that chose it,
+/// the candidates considered, and what it was rerouted from.
+@actor
+query invocation invocationsForWorker {
+  args {
+    workerId  string!
+  }
+  filter  workerId==args.workerId && ownerUserId==actor.userId && isNotDeleted
+  sort     "row.createdAt", "desc"
+  paginate 25
+  shape   workerInvocationFull
+}
