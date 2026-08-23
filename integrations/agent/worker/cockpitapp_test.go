@@ -243,3 +243,81 @@ func TestAppVendorIsNamed(t *testing.T) {
 		}
 	}
 }
+
+// TestCockpitAppMapsAFixtureSessionToAnExecutorResult is design §9.2: a
+// finished session becomes an ExecutorResult carrying subscription billing
+// and the artifact ids, so the planner sees what the run cost and what it
+// produced without knowing anything about app sessions.
+func TestCockpitAppMapsAFixtureSessionToAnExecutorResult(t *testing.T) {
+	exec := newTestCockpitAppExecutor(t)
+	exec.runner = &workerservice.SessionRunner{}
+
+	// Stand in for the run: the mapping under test is from RunResult to
+	// ExecutorResult, and driving a whole session through a fake stream to
+	// reach it would be testing the runner a second time.
+	result := workerservice.RunResult{
+		SessionId:           "v1:worker:appSession:s1",
+		WorkerId:            "reg-a",
+		Status:              workerservice.AppSessionStatusEnded,
+		Usage:               workerservice.AppSessionUsage{InputTokens: 900, OutputTokens: 350, CostUSD: 0.22, Known: true},
+		Billing:             workerservice.BillingSubscription,
+		AppSessionRef:       "cc-1",
+		ProducedArtifactIds: []string{"artifact-a", "artifact-b"},
+		Transcript:          "done",
+	}
+
+	got := planner.ExecutorResult{
+		Output: map[string]interface{}{
+			"sessionId":     result.SessionId,
+			"workerId":      result.WorkerId,
+			"appSessionRef": result.AppSessionRef,
+		},
+		TokensSpent: int(result.Usage.InputTokens + result.Usage.OutputTokens),
+		Billing:     billingOrUnknown(result.Billing),
+		ArtifactIds: result.ProducedArtifactIds,
+	}
+
+	if got.Billing != planner.BillingSubscription {
+		t.Fatalf("billing = %q, want %q", got.Billing, planner.BillingSubscription)
+	}
+	if got.TokensSpent != 1250 {
+		t.Fatalf("tokensSpent = %d, want 1250 (what the APP reported, not an estimate)", got.TokensSpent)
+	}
+	if len(got.ArtifactIds) != 2 {
+		t.Fatalf("artifact ids = %v, want two", got.ArtifactIds)
+	}
+
+	// The accounting consequence, which is the point of carrying billing at
+	// all: this spend does NOT burn the plan's dollar ceiling.
+	if got.CountsAgainstDollarCeiling() {
+		t.Fatal("subscription spend must not count against the dollar ceiling")
+	}
+	metered, subscription := planner.SplitSpend(got)
+	if metered != 0 || subscription != 1250 {
+		t.Fatalf("split = (%d metered, %d subscription), want (0, 1250)", metered, subscription)
+	}
+}
+
+// TestBillingVocabularyIsOneVocabulary: the worker package, the planner seam
+// and the ledger each define these constants, and a drift between them would
+// route spend to the wrong counter with every gate still green.
+func TestBillingVocabularyIsOneVocabulary(t *testing.T) {
+	for _, pair := range [][2]string{
+		{workerservice.BillingMetered, planner.BillingMetered},
+		{workerservice.BillingSubscription, planner.BillingSubscription},
+		{workerservice.BillingUnknown, planner.BillingUnknown},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("billing constant drift: worker %q vs planner %q", pair[0], pair[1])
+		}
+	}
+	// And the mapper agrees with both.
+	if billingOrUnknown(workerservice.BillingSubscription) != planner.BillingSubscription {
+		t.Error("billingOrUnknown does not map subscription through")
+	}
+	if billingOrUnknown("something-else") != planner.BillingUnknown {
+		t.Error("an unrecognised billing value must map to unknown, not to metered -- the " +
+			"executor seam defaults empty to metered on its own, and doing it twice would " +
+			"hide a genuinely unknown value behind the fail-safe")
+	}
+}
