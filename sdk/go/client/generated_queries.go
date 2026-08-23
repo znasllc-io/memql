@@ -725,6 +725,28 @@ func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 	return "query agentRoleSlugsInUse()"
 }
 
+// AgentsForPlan -- The agents raised while working one goal -- every agent whose lineage.originatingPlanId names the plan. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the plan id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById.
+//
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForPlan"] in generated_concepts.go).
+type AgentsForPlanArgs struct {
+	PlanId string
+}
+
+// AgentsForPlan calls the engine query agentsForPlan.
+func (qc *QueryClient) AgentsForPlan(ctx context.Context, args AgentsForPlanArgs) (*Result, error) {
+	call := AgentsForPlanBuild(args)
+	return qc.executeNamed(ctx, "agentsForPlan", call)
+}
+
+func AgentsForPlanBuild(args AgentsForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("query agentsForPlan(")
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AllAgents -- Returns all AI agent templates regardless of active status.
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["allAgents"] in generated_concepts.go).
@@ -911,6 +933,28 @@ func ApprovalRequestByIdBuild(args ApprovalRequestByIdArgs) string {
 	b.WriteString("query approvalRequestById(")
 	b.WriteString("id: ")
 	b.WriteString(quoteMemQL(args.Id))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ArtifactsForPlan -- The Library artifacts one goal produced -- index rows whose producedByPlanId names the plan. Owned: ownerUserId==actor.userId gates the row set server-side and the plan id narrows it. Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced" count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that generatedOutputsForPlan returns.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["artifactsForPlan"] in generated_concepts.go).
+type ArtifactsForPlanArgs struct {
+	PlanId string
+}
+
+// ArtifactsForPlan calls the engine query artifactsForPlan.
+func (qc *QueryClient) ArtifactsForPlan(ctx context.Context, args ArtifactsForPlanArgs) (*Result, error) {
+	call := ArtifactsForPlanBuild(args)
+	return qc.executeNamed(ctx, "artifactsForPlan", call)
+}
+
+func ArtifactsForPlanBuild(args ArtifactsForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("query artifactsForPlan(")
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3980,6 +4024,23 @@ func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// PlansForUser -- Every Plan the caller requested, newest first, whatever its status. Owned: requestedBy==actor.userId binds server-side so a caller only ever sees their own. Backs the Nexus goal picker and its recent-goals strip (memql#4373), which pin the running ones to the top client-side from the status already on each row -- distinct from activePlansForUser / waitingPlansForUser, neither of which can name a goal that has finished.
+//
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["plansForUser"] in generated_concepts.go).
+type PlansForUserArgs struct {
+}
+
+// PlansForUser calls the engine query plansForUser.
+func (qc *QueryClient) PlansForUser(ctx context.Context, args PlansForUserArgs) (*Result, error) {
+	call := PlansForUserBuild(args)
+	return qc.executeNamed(ctx, "plansForUser", call)
+}
+
+func PlansForUserBuild(args PlansForUserArgs) string {
+	_ = args
+	return "query plansForUser()"
 }
 
 // Policy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.

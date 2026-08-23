@@ -527,6 +527,167 @@ than silently going static.
 
 ---
 
+## Nexus
+
+`/nexus` is where one goal of yours materializes as the system works on it:
+you at the start, the goal at the far end as a beacon, the planner between
+you and the work, the phases marching left to right, the agents it raised
+above the road and what it produced and authored below it. Three pages under
+one goal -- **Map**, **Constructs**, **Replay** -- reached from the **Nexus**
+rail group.
+
+A goal is a `v1:planner:plan`. Nothing in this console creates one: plans come
+from asking an agent to do something, and the portal reads them. `/nexus`
+opens your most recent goal (the running one first); the picker in the header
+moves between them, and a "recent goals" strip sits under the map.
+
+### What becomes a node, and what becomes motion
+
+The grain is **semantic**. These are nodes:
+
+| Node | Row |
+|---|---|
+| you | the signed-in person -- no row |
+| the goal | `v1:planner:plan` |
+| the planner | the plan's `ownerAgentId` |
+| each specialist | `v1:agents:agent` whose `lineage.originatingPlanId` names the plan |
+| each task | `v1:planner:task` with `category="semantic"` |
+| each artifact | `v1:library:artifact` with `producedByPlanId` |
+| each construct | `v1:authoring:construct` |
+| the bundle | `v1:authoring:bundle` with `sourcePlanId` |
+
+**A tool invocation is not a node.** It is a counter on the task it belongs
+to. A busy plan makes hundreds of them, and a node each turns the map into a
+hairball after one goal.
+
+**A retried step is one node, lit twice.** Every attempt is its own task row,
+but they share a `logicalStepId`, so the map draws one cube that re-lights
+rather than a second cube beside it. The Replay event list is where the
+attempts are visible individually, marked "retry".
+
+Activity is motion: a node arrives (particles condense, it scales in, its
+edges draw), a running task breathes with its tool counter ticking, a failed
+one turns to the danger tone, the goal fills with `completed / total` and
+lights when the plan succeeds.
+
+**A phase over 150 semantic tasks collapses to one cluster node** carrying the
+count, and expands when you click it.
+
+### Every node and every moment is a URL; the camera is not
+
+| Address | What it opens |
+|---|---|
+| `/nexus` | your most recent goal |
+| `/nexus/:planId` | the Map |
+| `/nexus/:planId/node/:nodeId` | ...with that node's detail open |
+| `/nexus/:planId/constructs` | Constructs |
+| `/nexus/:planId/replay` | Replay |
+| `/nexus/:planId/replay?at=<rfc3339>` | ...pinned to a moment |
+| `/nexus/:planId/replay/node/:nodeId` | ...with a node open, moment kept |
+
+Opening a node performs a **fresh authorized read** of its row and shows it in
+the portal's own row-detail dialog, with links on to the concept browser, the
+Library or Constructs. The map's own copy is as old as the last event that
+touched it; the dialog is where you go to check a current value.
+
+The **camera is deliberately not** in the URL. It is continuous -- it changes
+on every frame of a drag -- so putting it there means either a history entry
+per frame or an address that lags the view. A link names the node, and the
+camera re-frames it on arrival.
+
+### Replay needs no backend
+
+MemQL is append-only and every row the map draws carries its own timestamps,
+so a goal's history is read out of the rows rather than recorded for the
+purpose. The scrubber moves over **events, not wall-clock time** -- a goal
+that ran for nine hours and one that ran for four seconds both scrub evenly --
+and plays at 1x / 4x / 16x, one arrival per tick.
+
+**Nothing is invented.** A moment with no timestamp produces no event: a task
+marked succeeded whose `completedAt` this cluster never wrote simply never
+lands in the replay, rather than landing at a fabricated time on a scrubber
+you read as evidence.
+
+The **event list beside the scrubber is the map's accessible index**, not a
+decoration. A WebGL canvas has no accessible tree -- no element per node, no
+tab order, no names -- so the list is the representation: every event in time
+order, arrow keys move the scrubber, Enter opens that node's detail. A person
+who never sees the picture can read the whole goal and open anything in it.
+
+### Reduced motion
+
+`prefers-reduced-motion` is read **by the scene**, because the portal's CSS
+rule cannot reach inside a canvas: there is no element per node for a
+stylesheet to disable an animation on. Under the preference there are no
+particles, no overshoot and no ambient drift -- fades only -- and the frame
+loop settles and stays settled even over a goal that is still running.
+
+The frame loop is **on demand** in either case: it renders while something is
+arriving or a task is running, and then stops, so a map left open in a
+background tab costs nothing.
+
+### When the browser cannot draw it
+
+The scene is WebGL. A browser with hardware acceleration off, a locked-down
+profile or a dead GPU process gets an honest panel saying so, plus the phase
+summary and progress in text -- and Replay's event list, which is complete.
+The map is not the only way to read a goal.
+
+### Constructs
+
+`/nexus/:planId/constructs` is what the goal built: the bundle with its
+status, validation and dry-run reports; each construct with its kind, name,
+status and its source in a read-only block; and the dependency edges as a flat
+2D graph drawn from the same rows the map draws. The two verbs the engine has
+today -- **stage** a draft construct, **promote** the bundle -- sit behind
+confirmations and go through the existing owner-gated mutations.
+
+Runtime authoring is off by default. When a goal that **succeeded** left no
+bundle, the page says so plainly rather than showing an empty list that would
+read as "this goal built nothing": see
+[training.md](../language/training.md).
+
+### The completion card, and where its numbers come from
+
+When a goal ends -- succeeded, failed or cancelled -- a card materializes
+under it with elapsed time, tasks, steps, agents raised, artifacts produced,
+constructs authored and tokens spent (`plan.tokenSpent`). A failed goal gets
+the same card with the failure and the task that was still running; a
+cancelled one says who stopped it. The cost is reported whatever the outcome:
+a card that appeared only on success would be a scoreboard rather than a
+record.
+
+Two numbers are worth reading carefully:
+
+- **Tasks and steps are different questions.** Tasks counts task rows; steps
+  counts distinct steps, so a step retried twice is one step and three tasks.
+- **"Covered by subscription" is absent rather than zero** when this cluster's
+  engine does not record it (`plan.tokenSpentSubscription`, epic memql#4358).
+  A subscription that covered nothing and a cluster that does not measure
+  coverage are different facts.
+
+In Replay the card is present **at the moment of success** -- scrub back
+before it and the card goes, because at that moment the goal had no outcome to
+report.
+
+### One goal at a time, yours
+
+The reads behind the picker and the map are owner-scoped server-side
+(`plansForUser` and `artifactsForPlan` gate on `actor.userId`), and the feed
+resolves **every** live event through the authorized read -- whether the event
+carried a payload or arrived as an id-only notification -- and drops it when
+the read refuses.
+
+One narrowing is **client-side today and is labelled as such**:
+`v1:planner:plan` declares no row-authz tier (memql#4366), so `planById`
+answers for any plan id. Nexus refuses to draw a goal whose `requestedBy` is
+not your own user id and says so on the page. That closes the deep-link hole
+this surface would otherwise open; it does not narrow the read underneath, and
+it is not a substitute for the declaration. See
+[per-row-authz-audit.md](auth/per-row-authz-audit.md).
+
+---
+
 ## Administration
 
 `/admin` is the operator console: the cluster's own state, rather than

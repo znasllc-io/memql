@@ -131,7 +131,7 @@ without one is normal.
 | `dsl/policies/policies.memql` | AI provider-selection policies | — |
 | `integrations/` | External service integrations + DSL capabilities (Go) | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps) | [→](clients/README.md) |
-| `clients/portal/` | MemQL Portal -- the graphical ops console, served by `component/edge` as site #1 | [→](clients/README.md) |
+| `clients/portal/` | MemQL Portal -- the graphical ops console, served by `component/edge` as site #1. Nexus (`src/nexus/`) is its 3D surface | [→](clients/README.md) |
 | `component/` | Core service components (Go) | [→](component/CLAUDE.md) |
 | `component/language/` | The MemQL front end: lexer, parser, rewriter, AST, compiler, registries | [→](component/language/CLAUDE.md) |
 | `component/node/` | Distributed node system (bootstrap, peers, mesh) | [→](component/node/CLAUDE.md) |
@@ -2069,6 +2069,42 @@ DSL** at runtime through the product's bundle (`MEMQL_DSL_PATH`); its physical
 absorption into the engine is mid-migration, so treat canvas as product-owned
 for now. Product rows ride the chat-reply delivery substrate via
 `node.RegisterChatReplyConcept`.
+
+### Nexus -- the portal's living map of a goal (memql#4369)
+
+`clients/portal/src/nexus/` is the console's one 3D surface: a
+`v1:planner:plan` and its world -- the planner, the specialists it raised,
+its semantic tasks by phase, the artifacts it produced and the constructs it
+authored -- materializing as the system works, then replayable from the rows'
+own timestamps. Three pages under one goal (Map, Constructs, Replay) behind a
+**Nexus** rail group.
+
+Four things about it are load-bearing rather than stylistic:
+
+- **`scene/` is pure and imports no three.js.** `layout(world)`,
+  `events(world)` and `scene(world, at)` are functions over rows, tested on
+  fixtures with no GPU, and shared by the Map and Replay. The canvas draws
+  what they return. `events()` **invents nothing**: a moment with no
+  timestamp produces no event, because a scrubber is read as evidence.
+- **The feed resolves EVERY live event through the authorized read**, payload
+  or `payload_omitted` alike, and drops it when the read refuses (design D6).
+  One code path, so the branch that would trust a payload does not exist to
+  be forgotten -- and `plan`'s coming `granted` tier changes nothing here.
+- **The scene is a lazy chunk.** three.js + fiber + drei are the portal's
+  largest dependency and no other page uses them; only
+  `map/NexusCanvas.tsx` may import them, and `nexusMap.test.tsx` fails the
+  build if anything else does. The frame loop is `frameloop="demand"` and its
+  governor evaluates the predicate PER FRAME -- a boolean captured at render
+  would either spin forever or never wake.
+- **One goal at a time, YOURS, and part of that is client-side today.**
+  `v1:planner:plan` is undeclared (memql#4366), so `planById` answers for any
+  id; Nexus refuses to draw a goal whose `requestedBy` is not the caller's
+  own user id. That is a client-side filter, labelled as one everywhere it
+  appears, and the residual is recorded in
+  [per-row-authz-audit.md](docs/public/operate/auth/per-row-authz-audit.md).
+
+Operator doc: [portal.md](docs/public/operate/portal.md). Design:
+`docs/superpowers/specs/2026-08-22-nexus-living-map-of-a-goal-design.md`.
 
 ### Invitations (Identity Primitive)
 

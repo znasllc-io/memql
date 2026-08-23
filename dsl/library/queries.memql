@@ -259,3 +259,38 @@ query documentVersion documentVersionsForOwner {
   paginate 50
   shape   documentVersionFull
 }
+
+// artifactsForPlan -- what a goal produced (memql#4372, Nexus)
+// ============================================================
+//
+// The Nexus map draws one node per artifact a goal produced, below the
+// road that runs from you to the goal. `artifact.producedByPlanId` is the
+// provenance back-pointer the Library already stamps at index time, so
+// this is a narrowing of the owned Library rather than a new fact.
+//
+// Owned, exactly like every other read in this file: the row set is gated
+// by `ownerUserId==actor.userId` server-side and the plan id narrows it
+// further. Unlike `agentsForPlan` (whose own header explains why an owner
+// conjunct there would be a silent emptiness), the owner pointer on an
+// artifact is stamped from the actor on every write and is load-bearing --
+// so it is a real gate here, not decoration.
+//
+// Distinct from `generatedOutputsForPlan`, which reads the BACKING
+// v1:library:generatedOutput rows a plan wrote. This reads the Library
+// INDEX rows, which is what the portal already renders through the
+// artifact concept's own display card and what the map's artifact glyph
+// links to (/artifacts/:artifactId).
+/// The Library artifacts one goal produced -- index rows whose producedByPlanId names the plan.
+/// Owned: ownerUserId==actor.userId gates the row set server-side and the plan id narrows it.
+/// Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced"
+/// count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that
+/// generatedOutputsForPlan returns.
+@unbounded("the artifacts produced by one goal -- bounded by the plan; the map draws the whole set at once, and a truncated page silently loses an artifact from the scene and from the completion card's count")
+@actor
+query artifact artifactsForPlan {
+  args {
+    planId  string!
+  }
+  filter  ownerUserId==actor.userId && producedByPlanId==args.planId
+  shape   artifactFull
+}

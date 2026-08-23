@@ -404,3 +404,50 @@ query avatarPersona avatarPersonaById {
   filter  row.id==args.avatarPersonaId
   shape   avatarPersonaFull
 }
+
+// agentsForPlan -- the agents a goal raised (memql#4372, Nexus)
+// =============================================================
+//
+// The Nexus map draws one node per agent working a goal, and this is the
+// read that finds them: every agent whose lineage names the plan as the
+// thing it was raised for. The plan's OWN `ownerAgentId` -- the planner
+// itself -- is resolved separately through `agentById`, because it is a
+// pointer on the plan rather than a lineage stamp on the agent, and the
+// two are genuinely different facts (one agent is the goal's driver, the
+// rest are specialists it raised).
+//
+// WHY `@public` AND NOT AN OWNER CONJUNCT. `v1:agents:agent` is one of the
+// undeclared concepts in the per-row-authz long tail: it carries no
+// `@rowAuthz` tier, and every existing agent read here either declares
+// `@public` (activeAgentsForUser, assistantAgentForUser) or is unclassified.
+// An `ownerUserId==actor.userId` conjunct would LOOK like narrowing and
+// would in fact be a silent emptiness: `createAgent` takes `ownerUserId`
+// as a caller ARGUMENT rather than stamping it from the actor, so a
+// planner-provisioned specialist can carry an empty one -- and the row the
+// map most wants to draw, the system-owned planner agent, is owned by no
+// user at all. A filter that returns nothing is not a gate; it is a blank
+// map with no error.
+//
+// The narrowing that is REAL here is the plan pointer, and the residual --
+// `agent` admits every caller on reads, as it does today through every
+// other path -- is recorded in the row-authz audit rather than hidden
+// behind a conjunct that does not bite. See
+// docs/public/operate/auth/per-row-authz-audit.md and the Nexus design's
+// section 7 (docs/superpowers/specs/2026-08-22-nexus-living-map-of-a-goal-design.md),
+// which rules exactly this: "the client filters by their plan pointers, and
+// the residual is recorded in the undeclared gate, not hidden here."
+/// The agents raised while working one goal -- every agent whose lineage.originatingPlanId names
+/// the plan. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent
+/// declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so
+/// the plan id is the narrowing and the residual is recorded in the per-row-authz audit rather than
+/// masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is
+/// resolved separately through agentById.
+@public
+@unbounded("the agents raised by one goal -- bounded by the plan; the map draws the whole set at once, and a truncated page silently loses an agent from the scene")
+query agent agentsForPlan {
+  args {
+    planId  string!
+  }
+  filter  lineage.originatingPlanId==args.planId && isNotDeleted
+  shape   agentFull
+}
