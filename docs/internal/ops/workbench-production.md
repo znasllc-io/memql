@@ -108,16 +108,23 @@ attachment download endpoint (`GET /spaces/{spaceId}/attachments/{attachmentId}`
 shipped in #804) serves bytes back by calling
 `integrations/azureblob.DownloadURL()` against this stored URL.
 
-## 3. Environment topology (decisions locked #805)
+## 3. Storage topology, by deploy target (decisions locked #805)
 
-MemQL uses a **separate Azure Storage account per environment** —
-strong blast-radius isolation with no cross-env data bleed.
+Each INSTALLATION carries its own Azure Storage account — strong
+blast-radius isolation with no data bleed between installs.
 
-| Environment | Storage backend | Account | Container | Status |
-|-------------|----------------|---------|-----------|--------|
-| **Local dev** | Azurite emulator (Docker) | `devstoreaccount1` (well-known) | `attachments` (created by init script) | Tracked: #806 |
-| **Staging** | Azure Blob Storage | `stmemqlstaging` in `rg-memql-staging` | `attachments` | Tracked: #807 |
-| **Prod** | Azure Blob Storage | Dedicated prod account | `attachments` | DEFERRED — blocked on prod go-live (#809) |
+This table used to have a **Staging** row and a **Prod** row, and that was a
+claim about a dimension the product does not have. MemQL ships ONE
+INSTALLATION SHAPE (epic memql#3943): an operator who wants a second
+environment installs a second instance, with its own domain, its own ArgoCD
+and — by the rule above — its own storage account. What genuinely varies is
+the **deploy target**, which is a different axis and carries its own field,
+`provider`.
+
+| Deploy target | `provider` | Storage backend | Account | Container | Status |
+|---|---|---|---|---|---|
+| **Local** | `docker-local` | Azurite emulator (Docker) | `devstoreaccount1` (well-known) | `attachments` (created by init script) | Tracked: #806 |
+| **Cloud** | `azure` | Azure Blob Storage | `st<install>` in `rg-<install>` | `attachments` | Tracked: #807 |
 
 ### Local dev (Azurite)
 
@@ -138,19 +145,23 @@ The in-cluster hostname is `azurite` (the k8s Service name).
 (`make up` / `make secrets`), which the agent pod reads via `envFrom`.
 See #806 for the full wiring.
 
-### Staging
+### Cloud install
 
-Staging uses the real `stmemqlstaging` storage account in
-`rg-memql-staging`. The connection string is provisioned by the
-`scripts/deploy/provision-blob-staging.sh` script (see #807). It is
-not shared with local dev — each install carries its own secret material.
+A cloud install uses a real Azure Storage account, `st<install>` in
+`rg-<install>` — placeholders, not names: the account and resource group are
+the operator's, supplied at install time, and no file in this repository may
+name one (memql#4286).
 
-### Prod (deferred)
+It is not shared with local dev, and not shared with any other install: each
+one carries its own secret material. A second cloud install is a second
+account by the same rule, which is what the deleted "Prod (deferred)" section
+was reaching for — there is no promotion step between two installs, because
+there is no tier for one to be promoted from.
 
-Prod uses a separate account in the production resource group,
-provisioned when prod goes live. The provisioning script and the delivery
-runbook from staging (#807) apply directly; only the account name and
-resource group change. Tracked in #809.
+**The provisioning script does not exist.** `scripts/deploy/` carries no
+`provision-blob-*.sh`; #807 tracks writing one. Until it does, the connection
+string is set by hand as a key on `memql-secrets` (section 4 below), which is
+the path every other config value takes.
 
 ## 4. Delivering the connection string
 
@@ -168,9 +179,9 @@ Canonical steps (cloud example; local dev writes the same keys through
 
 1. Put each value in Key Vault:
    ```bash
-   az keyvault secret set --vault-name kv-memql-staging \
+   az keyvault secret set --vault-name kv-<install> \
      --name memql-azure-storage-connection-string --value "<connection string>"
-   az keyvault secret set --vault-name kv-memql-staging \
+   az keyvault secret set --vault-name kv-<install> \
      --name memql-azure-blob-container --value "attachments"
    ```
 2. Declare each as a `remoteRef` in

@@ -27,7 +27,7 @@ decided in June 2026 and why, which is the point of keeping it.
 **Author:** Platform/Staff (ZNAS LLC)
 **Date:** 2026-06-02
 **Supersedes:** the imperative `scripts/deploy/aks-deploy.sh` flow (kept until Phase 3 cuts over)
-**Scope:** MemQL engine mesh (6 node-types) + the downstream product carrier + the product SPA, on AKS `aks-memql-staging`, proven in staging ahead of a prod cutover.
+**Scope:** MemQL engine mesh (6 node-types) + the downstream product carrier + the product SPA, on AKS `aks-<install>`, proven in staging ahead of a prod cutover.
 
 ---
 

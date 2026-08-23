@@ -25,10 +25,31 @@
 //     URLs, module paths and image references legitimately name it, and no
 //     entry below matches it -- the domain entries end in a dot, the org has a
 //     hyphen.
-//   - `id-memql-db` / `id-memql-mail` are a NAMING CONVENTION the entry-install
-//     runbook itself suggests (`id-<product>-<purpose>`), not an identity. The
-//     managed identity's client id IS below, because a GUID identifies exactly
-//     one directory object and can mean nothing else.
+//   - `id-memql-db` / `id-memql-mail` / `id-eso-memql` are a NAMING CONVENTION
+//     the entry-install runbook itself suggests (`id-<product>-<purpose>`), not
+//     an identity. The managed identity's client id IS below, because a GUID
+//     identifies exactly one directory object and can mean nothing else.
+//
+// THE SECOND KIND OF OPERATOR NAME, added in memql#4286. The entries ending
+// `-staging` are one operator's estate AND an assertion about the product's
+// shape, and the second is the sharper problem. MemQL ships ONE INSTALLATION
+// SHAPE (epic memql#3943): there is no staging-versus-production dimension, and
+// an operator who wants a second environment installs a second instance.
+// TestNoEnvironmentBranchingInEngineCode already fails the build on Go code so
+// much as NAMING `staging`, with an empty exemption map -- so the tree asserted
+// in Go that staging does not exist while its operator documentation named the
+// cluster `aks-memql-staging` and tabulated a "Staging" row as a deployment
+// target. A reader following those docs learned the opposite of what the design
+// decided.
+//
+// Only the RESOURCE-NAME SPELLINGS are banned here, never the bare word. That
+// is deliberate: `production` is ordinary English ("production traffic", "a
+// production-grade cluster") and `staging` has an innocent sense too (a staging
+// directory, staging a file in git). A naive noun ban fires on prose that is
+// correct, and a guard that cries wolf gets exemptions bolted on until it means
+// nothing. The environment noun asserted as a HEADING or a TABLE ROW -- which is
+// a claim about the product's shape rather than a word in a sentence -- is
+// caught by the sibling gate in environment_tier_claims_test.go.
 //
 // THE CAVEAT, stated where the list is rather than only where it is consumed:
 // this is a banned-NAMES list. It catches these names and not the next one. A
@@ -56,6 +77,15 @@ var banned = []Name{
 	{"aks-znas-memql", "an operator's AKS cluster"},
 	{"stznasmemqlbackup", "an operator's Azure storage account"},
 	{"e946f97f-f9b1-47f5-8b73-d732169d449b", "an operator's managed-identity client id"},
+	// One operator's estate, each spelling also asserting a tier the product
+	// does not have (memql#4286 / epic memql#3943). Write `rg-<install>`,
+	// `aks-<install>`, `st<install>`, `kv-<install>` instead -- a placeholder
+	// that reads as one.
+	{"rg-memql-staging", "an operator's Azure resource group, naming a tier the product does not have"},
+	{"aks-memql-staging", "an operator's AKS cluster, naming a tier the product does not have"},
+	{"stmemqlstaging", "an operator's Azure storage account, naming a tier the product does not have"},
+	{"kv-memql-staging", "an operator's Azure key vault, naming a tier the product does not have"},
+	{"keyvault-staging", "a SecretStore whose OBJECT NAME asserts a tier the product does not have"},
 }
 
 // Banned returns the names, as a copy so a caller cannot edit the list every

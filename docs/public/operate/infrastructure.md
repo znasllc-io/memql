@@ -10,7 +10,7 @@ owner: znas
 # Infrastructure Management Guide
 
 MemQL and its downstream product stack run on **Azure Kubernetes Service**
-(cluster `aks-memql-staging`, namespace `memql`), with a self-hosted
+(cluster `aks-<install>`, namespace `memql`), with a self-hosted
 **CloudNativePG** database in-cluster, images in **ACR** (`acrmemql.azurecr.io`), bootstrap secrets arriving
 as keys on the **memql-secrets** Secret (a plain Kubernetes Secret every node
 `envFrom`s -- the earlier genesis envelope, sealed and decrypted in-process

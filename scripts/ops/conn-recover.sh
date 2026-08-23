@@ -25,7 +25,7 @@
 # mutates the shared Tiger instance (terminates backends + ALTER ROLE). Read
 # before running.
 #
-# Requires: tiger (auth login'd), psql, kubectl (context aks-memql-staging).
+# Requires: tiger (auth login'd), psql, kubectl (context aks-<install>).
 
 set -uo pipefail
 

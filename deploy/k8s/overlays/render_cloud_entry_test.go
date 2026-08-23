@@ -195,12 +195,16 @@ func TestCloudEntryCommitsNoHostname(t *testing.T) {
 	if strings.Contains(string(raw), "portal.") && strings.Contains(string(raw), "hostname") {
 		t.Error("cloud-entry kustomization commits a portal hostname")
 	}
-	patch, err := os.ReadFile(filepath.Join(entryOverlay, "patches", "domain-envfrom.yaml"))
+	// The envFrom append moved into ../components/domain-derive with the
+	// deletes it was always meant to travel with (memql#4281) -- this overlay
+	// had the append alone, which is the silent half. Assert against the
+	// component: it is what this overlay now mounts.
+	patch, err := os.ReadFile(filepath.Join("..", "components", "domain-derive", "patches", "envfrom.yaml"))
 	if err != nil {
-		t.Fatalf("reading domain-envfrom: %v", err)
+		t.Fatalf("reading the domain-derive envFrom patch: %v", err)
 	}
 	if strings.Contains(string(patch), "hostname:") {
-		t.Error("domain-envfrom.yaml commits a hostname")
+		t.Error("the domain-derive envFrom patch commits a hostname")
 	}
 }
 

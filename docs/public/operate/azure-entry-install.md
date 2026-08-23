@@ -412,7 +412,7 @@ cluster: its SecretStore uses a workload-identity federated credential
 issued for ANOTHER cluster's OIDC issuer, and the vault it names holds that
 retired cluster's values. That is why `memql-secrets` is hand-seeded here,
 and why the two base ExternalSecrets (`livekit`, `telephony`) that
-reference `keyvault-staging` are expected to stay unhealthy -- harmless
+reference `keyvault` are expected to stay unhealthy -- harmless
 under voice-off, and part of the OutOfSync / Degraded noise.
 
 **Do not "fix" it by repairing the federated credential or pointing the

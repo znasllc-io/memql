@@ -1,0 +1,206 @@
+# DOMAIN DERIVATION -- both halves, indivisibly (memql#4281).
+#
+# An instance overlay states its domain ONCE, as the single MEMQL_DOMAIN key of
+# the `memql-domain` ConfigMap, and component/envregistry/domain.go derives the
+# six domain-shaped identity values from it at boot. Getting that to actually
+# happen takes TWO patches with different mechanisms, and doing only the first
+# is silent:
+#
+#   1. APPEND the ConfigMap to `envFrom` (JSON 6902 -- envFrom has no merge key,
+#      so a strategic merge would replace the list and drop memql-secrets);
+#   2. DELETE the base's pinned placeholders, because in Kubernetes an explicit
+#      `env` entry BEATS `envFrom` regardless of order, AND because domain.go
+#      derives SET-IF-ABSENT ("an explicitly configured value is a statement of
+#      intent and wins"). A placeholder left in place is such a statement.
+#
+# WHY THIS IS A COMPONENT AND NOT THREE COPIES. It was three copies. `local`
+# did both halves and recorded why (memql#3600: "the first install after
+# memql#3593 produced a magic link at https://identity.staging.example.com,
+# which nobody can click, so no owner account was ever created and the cluster
+# could not be signed into at all"). `cloud-entry` did only half -- it appended
+# the ConfigMap and stopped -- so it rendered eleven workloads pinned to an
+# issuer at a domain nobody owns; the install boots, forms a mesh, and rejects
+# every token, with every manifest looking correct. `cloud` did neither.
+#
+# Half of this is worse than none of it: with no ConfigMap the placeholders are
+# at least consistent, whereas the half-done version looks configured and is
+# not. So the two halves are one artifact that an overlay takes or does not,
+# and there is no way left to spell "mount it and forget the deletes".
+#
+# ORDER: list this AFTER components/engine-bff, which is what adds the `bff`
+# Deployment this patches. Components apply in listed order.
+#
+# NAMES NO DOMAIN. Nothing here, and nothing in deploy/k8s/base, may name one
+# (memql#3593). Gated by ../../overlays/render_domain_derivation_test.go.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  # --- Half one: mount the ConfigMap on every rematerializing engine node. ---
+  - path: patches/envfrom.yaml
+    target:
+      kind: Deployment
+      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
+
+  # --- Half two: remove the pins that would beat it. -----------------------
+  #
+  # ALL SIX on identity, not just the issuer (memql#3600). The base sets every
+  # one of these to a placeholder, and leaving any of them means the derivation
+  # never runs for that one and identity serves a domain nothing resolves.
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: identity
+      spec:
+        template:
+          spec:
+            containers:
+              - name: identity
+                env:
+                  - name: MEMQL_IDENTITY_BASE_URL
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
+                    $patch: delete
+                  - name: MEMQL_DISCOVERY_GRPC_ENDPOINT
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
+                    $patch: delete
+
+  # The derived issuer on every other node. One block per node because the
+  # container is matched by its strategic-merge key `name`, which differs --
+  # a regex target selects the Deployment, not the container inside it.
+  #
+  # voice / voice-agent are included even though an entry install runs them at
+  # replicas 0: scaling voice up later must not re-arm a placeholder issuer.
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: bff
+      spec:
+        template:
+          spec:
+            containers:
+              - name: bff
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cognition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cognition
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: planner
+      spec:
+        template:
+          spec:
+            containers:
+              - name: planner
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: workbench
+      spec:
+        template:
+          spec:
+            containers:
+              - name: workbench
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mcp
+      spec:
+        template:
+          spec:
+            containers:
+              - name: mcp
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: voice
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: voice-agent
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice-agent
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: edge
+      spec:
+        template:
+          spec:
+            containers:
+              - name: edge
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
