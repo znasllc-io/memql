@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
@@ -23,6 +24,28 @@ type fakeRegistrationStore struct {
 	lastSeen    []string
 	lastSeenAts []time.Time
 	lastSeenErr error
+
+	// lastSeenFlushes records the whole flush argument list, not just the
+	// registration id -- connectedNodeId and activeCount are the fields
+	// memql#4350 added and the ones a regression would drop silently.
+	lastSeenFlushes []lastSeenFlush
+	// cleared records ClearConnectedNode calls; clearedOwners is checked
+	// alongside because an unstamped owner is refused by the write guard.
+	cleared       []string
+	clearedOwners []string
+	// lookupOwners records the owner each WorkerByIdentityId was asked
+	// under. An empty one means the real store would have read zero rows.
+	lookupOwners []string
+}
+
+// lastSeenFlush is one UpdateLastSeen call, recorded whole.
+type lastSeenFlush struct {
+	RegistrationId  string
+	OwnerUserId     string
+	At              time.Time
+	SourceIP        string
+	ConnectedNodeId string
+	ActiveCount     int
 }
 
 var _ Store = (*fakeRegistrationStore)(nil)
@@ -37,20 +60,35 @@ func (f *fakeRegistrationStore) RefreshRegistration(ctx context.Context, row Reg
 	return nil
 }
 
-func (f *fakeRegistrationStore) UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error {
+func (f *fakeRegistrationStore) UpdateLastSeen(ctx context.Context, registrationId, ownerUserId string, lastSeenAt time.Time, sourceIP, connectedNodeId string, activeCount int) error {
 	if f.lastSeenErr != nil {
 		return f.lastSeenErr
 	}
 	f.lastSeen = append(f.lastSeen, registrationId)
 	f.lastSeenAts = append(f.lastSeenAts, lastSeenAt)
+	f.lastSeenFlushes = append(f.lastSeenFlushes, lastSeenFlush{
+		RegistrationId:  registrationId,
+		OwnerUserId:     ownerUserId,
+		At:              lastSeenAt,
+		SourceIP:        sourceIP,
+		ConnectedNodeId: connectedNodeId,
+		ActiveCount:     activeCount,
+	})
 	return nil
 }
 
-func (f *fakeRegistrationStore) RevokeRegistration(ctx context.Context, registrationId, revokedBy, reason string, at time.Time) error {
+func (f *fakeRegistrationStore) ClearConnectedNode(ctx context.Context, registrationId, ownerUserId string) error {
+	f.cleared = append(f.cleared, registrationId)
+	f.clearedOwners = append(f.clearedOwners, ownerUserId)
 	return nil
 }
 
-func (f *fakeRegistrationStore) WorkerByIdentityId(ctx context.Context, identityId string) (*RegistrationRow, error) {
+func (f *fakeRegistrationStore) RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error {
+	return nil
+}
+
+func (f *fakeRegistrationStore) WorkerByIdentityId(ctx context.Context, identityId, ownerUserId string) (*RegistrationRow, error) {
+	f.lookupOwners = append(f.lookupOwners, ownerUserId)
 	if f.existing != nil && f.existing.IdentityId == identityId {
 		cp := *f.existing
 		return &cp, nil
@@ -70,9 +108,14 @@ func (f *fakeRegistrationStore) IdentityByTokenHash(ctx context.Context, tokenHa
 	return nil, nil
 }
 
+// testNodeId is the MEMQL_NODE_ID the test servers claim. Named rather than
+// inlined so an assertion reads as "the node that held the stream" instead of
+// as a matching string literal.
+const testNodeId = "agent-7"
+
 func newUpsertTestServer(store Store, now time.Time) *server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newServer(logger, store, NewRegistry(nil, func() time.Time { return now }), nil, func() time.Time { return now })
+	return newServer(logger, store, NewRegistry(nil, func() time.Time { return now }), nil, func() time.Time { return now }, testNodeId)
 }
 
 func upsertTestIdentity() *WorkerIdentity {
@@ -266,14 +309,30 @@ func TestUpsertRegistration_RevokedRowRejected(t *testing.T) {
 	}
 }
 
-// fakeEngineExecutor captures the raw queries EngineStore emits.
+// fakeEngineExecutor captures the raw queries EngineStore emits, and the
+// CONTEXT each was executed on. The context matters as much as the query
+// string here: v1:worker:registration is owner-tiered, so a call on an
+// actor-less context is refused by the write guard (or silently reads nothing)
+// no matter how correct its arguments are.
 type fakeEngineExecutor struct {
 	queries []string
+	ctxs    []context.Context
 }
 
 func (f *fakeEngineExecutor) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
 	f.queries = append(f.queries, query)
+	f.ctxs = append(f.ctxs, ctx)
 	return nil, nil
+}
+
+// actorUserId reads back the actor the store stamped, or "" when it stamped
+// none.
+func actorUserId(ctx context.Context) string {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
+		return ""
+	}
+	return ac.UserId
 }
 
 // TestEngineStoreRefreshRegistration_WireShape asserts the engine
@@ -287,7 +346,10 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 
 	desc := mustDescriptor(t, validDescriptorJSON)
 	row := RegistrationRow{
-		ID:                   "reg-1",
+		ID: "reg-1",
+		// The owner is not decoration: ownerActor refuses a blank one, so a
+		// row without it never reaches the engine at all.
+		OwnerUserId:          "user-1",
 		Name:                 "mbp",
 		Capabilities:         []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptor: desc,

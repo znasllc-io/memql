@@ -546,9 +546,20 @@ BackgroundLoop:
 				}
 			} else {
 				content = result
+				// The same workbench-mismatch reroute the streaming loop runs
+				// (memql#4353). Both loops, or a model on the non-streaming
+				// path would get a mismatch where the streaming path gets the
+				// work done -- the two loops are one behaviour with two
+				// transports, and a divergence here shows up as "it works in
+				// chat but not in a plan".
+				if rerouted, ok := r.rerouteWorkbenchMismatch(ctx, turnCtx, tc.Name, result, args); ok {
+					content = rerouted
+					sink.ToolResult(tc.ID, rerouted, "")
+				} else {
+					sink.ToolResult(tc.ID, result, "")
+				}
 				hadSuccess = true
 				failBreaker.observeSuccess()
-				sink.ToolResult(tc.ID, result, "")
 				// Library promotion (memql#722): mirror published canvas
 				// cards into the user's Library as a generatedOutput.
 				if tc.Name == "canvasPublish" {

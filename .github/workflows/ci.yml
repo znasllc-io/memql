@@ -953,7 +953,7 @@ jobs:
       # These lanes are CGO-free, so they ride the warm go-checks cache.
       - name: go test -tags agent (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -timeout=300s ./integrations/agent/worker/
+        run: go test -tags agent -timeout=300s ./integrations/agent/ ./integrations/agent/worker/
       # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
       # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
       # this lane. Mirrors the engine-load-check step's gating.

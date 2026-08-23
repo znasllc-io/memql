@@ -4,12 +4,18 @@
 // verbs (exec / fs_read / fs_write / fs_list / fs_stat / http_fetch)
 // against them.
 //
-// MVP scope: workspaces live on the agent node's local disk. Concept
-// row persistence (v1:workbench:workspace) is defined in the DSL but
-// not yet written from Go -- the future distributed version (lifting
-// this code into a dedicated workbench node) will wire that. The
-// release-on-plan-terminal automation lives in the DSL too and is a
-// no-op until the persistence layer lands.
+// The directory lives on the disk of whichever node serves the call: the
+// agent node in single-node mode, a workbench replica in cluster mode
+// (MEMQL_WORKBENCH_REMOTE, the deployed default).
+//
+// Which one that is, is RECORDED rather than implied. v1:workbench:workspace
+// rows are written from Go by workspace_store.go (memql#4354), stamped with the
+// serving node's id, and the agent's forward router prefers that replica on
+// every subsequent call. Before that, selection was any-fit against a base
+// manifest running two replicas, so one plan got a directory on each disk and a
+// file written by one call was missing from the next -- with every layer
+// reporting success. This package doc used to say the rows were "defined in the
+// DSL but not yet written from Go", which is what the split was downstream of.
 package workbench
 
 import (

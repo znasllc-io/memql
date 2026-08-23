@@ -12,10 +12,6 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// ErrNoWorkerAvailable indicates dispatch found no online worker
-// matching the caller's requirements.
-var ErrNoWorkerAvailable = errors.New("worker: no worker available for owner")
-
 // ErrWorkerBusy indicates the worker is at its concurrency cap and
 // the FIFO queue declined further calls within the timeout window.
 var ErrWorkerBusy = errors.New("worker: worker busy at concurrency cap")
@@ -74,7 +70,11 @@ type Worker struct {
 // DispatchFunc is the worker-side dispatch hook owned by the
 // stream session. The registry calls it when an agent-side request
 // has been admission-checked.
-type DispatchFunc func(ctx context.Context, dispatch *memqlv1.ToolDispatch) (*memqlv1.ToolResult, error)
+//
+// onChunk may be nil. When it is not, the session invokes it for every
+// ToolStream the worker emits for this call, in arrival order and before the
+// result returns.
+type DispatchFunc func(ctx context.Context, dispatch *memqlv1.ToolDispatch, onChunk func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error)
 
 // NewRegistry constructs an empty registry.
 func NewRegistry(logger *slog.Logger, clock func() time.Time) *Registry {
@@ -177,6 +177,27 @@ func (r *Registry) WorkersForUser(ownerUserId string) []*Worker {
 	return out
 }
 
+// WorkerById returns the live handle for one registration, or nil when this
+// replica does not hold its stream. O(1) over the byId index the registry
+// already maintains -- a router turning a chosen registration id back into a
+// stream handle should not walk WorkersForUser to re-derive an index that
+// exists.
+//
+// Returns nil while draining, for the same reason Add refuses during a drain:
+// the streams are being cancelled and a handle taken now is one whose dispatch
+// is about to fail.
+func (r *Registry) WorkerById(registrationId string) *Worker {
+	if r == nil || registrationId == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.draining {
+		return nil
+	}
+	return r.byId[registrationId]
+}
+
 // Snapshot returns every worker in the registry sorted by registration ID.
 // Used by /admin views that span all owners.
 func (r *Registry) Snapshot() []*Worker {
@@ -195,26 +216,6 @@ func (r *Registry) Snapshot() []*Worker {
 	return out
 }
 
-// PickWorker selects a worker for the given owner that satisfies the
-// capability requirement. The simple MVP implementation returns the
-// first online matching worker; future capacity-aware routing slots
-// in here.
-func (r *Registry) PickWorker(ownerUserId string, capability string, labels map[string]string) (*Worker, error) {
-	if r == nil {
-		return nil, ErrNoWorkerAvailable
-	}
-	for _, w := range r.WorkersForUser(ownerUserId) {
-		if !w.SupportsCapability(capability) {
-			continue
-		}
-		if !w.MatchesLabels(labels) {
-			continue
-		}
-		return w, nil
-	}
-	return nil, ErrNoWorkerAvailable
-}
-
 // SupportsCapability reports whether the worker advertised the
 // supplied capability.
 func (w *Worker) SupportsCapability(name string) bool {
@@ -230,24 +231,6 @@ func (w *Worker) SupportsCapability(name string) bool {
 		}
 	}
 	return false
-}
-
-// MatchesLabels reports whether every label in the requirement is
-// present on the worker. Empty requirement matches anything.
-func (w *Worker) MatchesLabels(req map[string]string) bool {
-	if len(req) == 0 {
-		return true
-	}
-	if w == nil || w.Labels == nil {
-		return false
-	}
-	for k, v := range req {
-		got, ok := w.Labels[k]
-		if !ok || got != v {
-			return false
-		}
-	}
-	return true
 }
 
 // ConcurrencyCap returns the per-capability cap; 0 means unbounded.
@@ -305,14 +288,55 @@ func (w *Worker) Release(capability string) {
 	w.mu.Unlock()
 }
 
+// ActiveCount is this replica's view of how many calls are in flight on the
+// worker: the sum of the per-capability slots Acquire has taken and Release
+// has not yet given back.
+//
+// It is the SERVER's count, not the worker's. The heartbeat carries the
+// worker's own (Heartbeat.active_calls_total) and that is what the persisted
+// activeCount means; this is the fallback for a cockpit build that predates
+// the field, and the two can legitimately differ by whatever is in flight
+// between the dispatch and the beat.
+func (w *Worker) ActiveCount() int {
+	if w == nil {
+		return 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	total := 0
+	for _, n := range w.activePerCap {
+		total += int(n)
+	}
+	return total
+}
+
 // Dispatch sends a ToolDispatch envelope to the worker and waits for
 // the matching ToolResult. The acquired concurrency slot is released
 // when this method returns.
+//
+// Output chunks the worker emits along the way are dropped. Use
+// DispatchWithStream to receive them.
 func (w *Worker) Dispatch(ctx context.Context, dispatch *memqlv1.ToolDispatch) (*memqlv1.ToolResult, error) {
+	return w.DispatchWithStream(ctx, dispatch, nil)
+}
+
+// DispatchWithStream is Dispatch plus a per-chunk callback invoked for every
+// ToolStream the worker emits for this call, in arrival order. onChunk may be
+// nil, in which case this is exactly Dispatch.
+//
+// The callback runs on the stream-recv goroutine, so it must not block: while
+// it runs, nothing else on that worker's connection is read -- not another
+// call's chunks, not any result, not the heartbeat. A forwarder should hand
+// the chunk to a buffered channel and return.
+//
+// Every chunk delivered here precedes the returned ToolResult. A chunk the
+// worker emits AFTER its own result is dropped rather than delivered late,
+// because by then the caller has its answer.
+func (w *Worker) DispatchWithStream(ctx context.Context, dispatch *memqlv1.ToolDispatch, onChunk func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 	if w == nil || w.dispatchFn == nil {
 		return nil, ErrWorkerDisconnected
 	}
-	return w.dispatchFn(ctx, dispatch)
+	return w.dispatchFn(ctx, dispatch, onChunk)
 }
 
 // SetDispatchFunc wires the per-stream dispatch hook. Called once

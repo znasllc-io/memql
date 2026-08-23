@@ -252,7 +252,18 @@ func userHasConfiguredWorker(ctx context.Context, engine *memqlengine.MemQLEngin
 		return false, nil
 	}
 	q := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	res, err := engine.Execute(ctx, q)
+	// The owner's actor, not the caller's (epic memql#4349). workersForUser is
+	// now caller-scoped -- v1:worker:registration declares the composite owner
+	// tier and the read gate has no internal-origin escape -- and the ctx here
+	// belongs to a TURN, whose actor is not reliably the machine's owner: the
+	// owner is resolved from the AGENT row, and an agent answers in spaces its
+	// owner need not be the caller in. Without this stamp the probe reports
+	// "unconfigured" for a user whose laptop is sitting right there, which is
+	// the shape of the bug workerHasConfigured's own doc comment describes.
+	//
+	// Built inline as the argument to this one Execute, never stamped onto the
+	// request's context.
+	res, err := engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), q)
 	if err != nil {
 		return false, err
 	}

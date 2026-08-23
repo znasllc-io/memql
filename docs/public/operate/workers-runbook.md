@@ -205,12 +205,264 @@ The user approves or denies on the canvas card.
 
 ---
 
-## 5. Audit + observability
+## 5. The Fleet: labels, routing, and where a call lands
+
+Epic memql#4349. Everything here is **per-user**: a machine belongs to exactly
+one `v1:identity:user`, and only agents acting in that user's sessions can
+dispatch to it. The operator surface is `/fleet/machines` in the MemQL Portal
+(see [portal.md](portal.md)).
+
+### 5.1 Two label fields, and why they are not one
+
+A registration carries **two** key=value maps:
+
+| Field | Written by | Survives a reconnect? |
+|---|---|---|
+| `labels` | the cockpit, from the `Register` message | **No** -- the whole map is overwritten every time |
+| `operatorLabels` | the owner, from `/fleet/machines` (`setWorkerOperatorLabels`) | Yes -- no register or heartbeat path writes it |
+
+The split is design D3, and it exists because `labels` is **replaced wholesale**
+on every reconnect. An operator tag written into it would survive until the
+laptop's lid next closed and then vanish -- the worst failure mode a routing
+input can have, because the rule still reads correctly and the machine silently
+stops matching it.
+
+`refreshWorkerRegistration` enforces the split by **not naming**
+`operatorLabels`. `update{}` is a read-merge, so a field the body does not name
+survives untouched: the prohibition is carried by the ABSENCE of a line, and a
+well-meaning "complete the field list" edit is what would break it.
+`displayName` is absent for the same reason -- the owner's rename must outlive
+the hostname the cockpit re-reports on every connect.
+
+**Routing matches the MERGE, operator side winning** (`MergeLabels`,
+`integrations/agent/worker/router.go`). The machine gets the last word on facts
+about itself (`os`, `arch`, `hostname`, which it auto-populates); the owner gets
+the last word on anything they deliberately set. `/fleet/machines` renders the
+merge and marks which side each value came from, because a reported value an
+owner has overridden is a fact about their configuration, not about the machine.
+
+### 5.2 The routing policy
+
+`v1:worker:routingPolicy` -- one active row per user, edited from the Routing
+panel on `/fleet/machines`. **Absent is a valid state and the common one:** a
+user who never opened the page has no row, and the router applies
+`firstFit` + `nextMatching`, which is exactly what the pre-router
+`Registry.PickWorker` did.
+
+| Field | What it does |
+|---|---|
+| `strategy` | how the surviving candidates are ORDERED |
+| `requireLabels` | a machine must carry these to be a candidate at all. AND-ed with the agent's own requirement; narrows, never widens |
+| `preferLabels` | ordering hint only, never a filter |
+| `fallback` | `nextMatching` (try the next candidate when one refuses BEFORE starting) or `none` (report the refusal) |
+
+**The four strategies, and what each actually orders by.** Every sort is
+STABLE over registration order (`sort "row.createdAt", "asc"` in
+`workersForOwnerWithStatus`), so ties are deterministic and every replica
+agrees -- two replicas ordering one fleet differently is the bug class this
+epic closes.
+
+| Strategy | Orders by | Why it is expressed that way |
+|---|---|---|
+| `firstFit` | registration order, unchanged | The pre-policy behaviour. The input already arrives in this order, so the sort is a no-op. |
+| `roundRobin` | oldest `lastSelectedAt` first | A TIMESTAMP on the row, not a counter: two agent replicas reading the same row reach the same answer with no shared state. A machine never selected carries the zero time and sorts first, so a newly paired machine gets work before the rotation settles. |
+| `leastLoaded` | `activeCount` against that capability's `concurrency` cap, ties broken on absolute count | A machine that declared no cap reads as UNLOADED -- it asked for no ceiling, so the ceiling is not what to ration it by. The absolute-count tie-break is what stops "least loaded" pinning everything to the first uncapped machine and never moving. |
+| `labelMatch` | most `preferLabels` hits first | Then registration order, from the stable sort. |
+
+`activeCount` is what the machine reported on its most recent heartbeat, so it
+is up to one interval stale by construction. It is a routing input, never a
+correctness one -- the machine's own `Acquire` is the real valve.
+
+An unrecognised `strategy` falls back to `firstFit` with a WARNING rather than
+failing the call, and an unreadable policy row applies the default with a
+WARNING. Refusing a user's work over a preference is the wrong trade; the log
+line is what stops that being invisible.
+
+**A conflicting requirement is left UNSATISFIABLE.** Owner policy says
+`os=darwin`, the agent's call requires `os=linux`: `unionLabels` writes a
+sentinel neither side can match and the call reports `no_worker_available`.
+Silently preferring one side would run the work somewhere the other excluded.
+
+### 5.3 There is no `workerId` argument, by design
+
+`agentworkerDispatchHost` / `agentworkerDispatchComputer` take `requireLabels`
+and `preferLabels` and **nothing that names a machine** (design D4). An agent
+expresses what the work NEEDS; the owner's policy decides where it lands. **A
+hallucinated machine id is therefore a failure mode this surface does not
+have** -- the worst a wrong label can do is empty the candidate set.
+
+`no_worker_available` then names every machine and why it was ruled out
+(`revoked` / `offline` / `missing capability <X>` / `labels do not satisfy
+<k=v>`), together with the requirement it filtered on and how many machines the
+account has at all. "No worker available" on its own is the least useful true
+sentence available to somebody looking at a laptop they can see is on.
+
+The same reasoning shapes the consent card (design D6): the user's **Allow**
+covers the task on ANY of their machines matching the requirement, so the card
+names the requirement AND today's choice -- "on any of your machines matching
+`os=darwin` -- currently Jose's MacBook". A card naming one machine while
+authorizing a set describes something other than what it does.
+
+### 5.4 `online` is DERIVED, and these are the numbers
+
+There is no `online` field, and the DSL deliberately does not project one: a
+shape body is a path list, and this is a predicate over two timestamps and a
+clock. A machine is online when **all three** hold
+(`component/worker/online.go`, `IsOnline`):
+
+- `revokedAt` is empty -- a revoked machine is never online whatever its
+  heartbeat says, and one still beating while revoked is the case that most
+  needs to read as gone;
+- `lastSeenAt` is non-empty -- a registration never heard from is offline, not
+  online-since-the-epoch;
+- `now - lastSeenAt <= OnlineWindow`.
+
+`HeartbeatBatchInterval = 15s` (`component/worker/worker.go`) and
+`OnlineWindow = 2 * HeartbeatBatchInterval = 30s`. The flush WAS 60s, throttled
+on the reasoning that per-beat writes bought freshness nobody read -- which was
+circular: nothing read `lastSeenAt` BECAUSE it was up to a minute stale. 15s is
+the cockpit's own beat, so the flush is one write per machine per beat and the
+flag decays within 30s. At 60s a closed laptop read as online for two more
+minutes.
+
+Two intervals rather than one because one is the boundary itself: a flush a few
+milliseconds late would flap a machine offline and back while nothing was wrong.
+A `lastSeenAt` in the FUTURE (clock skew between the writing replica and whoever
+is asking) counts as online -- deliberately, a skewed clock should not make a
+live machine disappear.
+
+**There are exactly two implementations, and a test holds them together.**
+`component/worker.IsOnline` and `clients/portal/src/fleet/online.ts`;
+`TestFleetOnlineWindowMatchesPortal` reads the TypeScript and fails the build
+when its window disagrees with the Go one. Deriving `online` from the in-memory
+registry instead is what this design refuses: the registry is ONE replica's
+stream table, so it answers "connected to me" rather than "connected to any
+replica".
+
+### 5.5 Pairing a machine from the portal
+
+`/fleet/machines` -> **Add a machine**. It mints a worker token over
+`CreateWorkerTokenMsg` on the connection's own credential, shows the plain
+`mql_wkr_...` value **once**, and renders the install one-liner for macOS or
+Linux with the token and cluster URL filled in. Only the SHA-256 hash persists,
+so a lost token is replaced rather than looked up -- there is no lookup, and the
+value is deliberately never written to browser storage or a URL.
+
+The panel reports success by watching the machine POPULATION grow (a
+`v1:worker:registration` the cluster wrote), not by the mint succeeding: a
+minted token proves nothing about the machine, whose install can fail or whose
+cluster URL can be wrong. It counts rather than matching by name, because the
+token's name is what the operator typed here and the registration's is the
+cockpit's hostname, so the two are routinely different and a name match would
+report failure on a success.
+
+The portal cannot drive identity's `POST /pair/codes` flow: that endpoint
+authenticates with `Authorization: Bearer <access token>` and the portal
+deliberately has no way to read the token it holds. `memql-cockpit worker pair`
+stays the right shape for a machine that can redeem a short code interactively.
+
+### 5.6 The cross-node forward (memql#4352)
+
+A machine's `WorkerService` stream terminates on **exactly one** agent replica.
+The turn that wants it is served wherever the mesh routed the request -- at the
+default two replicas, a coin flip. On the losing side the machine was simply not
+there: the in-memory registry is per-node and is never rehydrated from the rows,
+so the turn reported `no_worker_available` for a laptop the user could see was
+online. This is the event/session bug class CLAUDE.md's multi-node section names
+(#1448, #1412, #1388) arriving on the worker surface, and it gets the same fix
+the workbench already had.
+
+**`connectedNodeId` is what makes a machine reachable from a replica that is not
+holding it.** The registration carries the `MEMQL_NODE_ID` of the replica that
+holds the stream, stamped on register and on every heartbeat flush and CLEARED
+on disconnect (`clearWorkerConnectedNode`). `lastSeenAt` is deliberately NOT
+touched on the way out -- moving it would make a disconnected machine look fresh
+for one whole online window. **Empty means no replica holds the stream**, i.e.
+offline.
+
+The dispatcher compares it with its own `MEMQL_NODE_ID`. Same, or self unset
+(single-node): dispatch locally. Different: forward a `WorkerForwardRequest` to
+that replica over `NodeService.Stream` and route the answer back by
+`request_id` (`WorkerForwardResponse`), with `WorkerForwardStream` relaying
+stdout / stderr / data chunks so streamed output crosses the hop, and
+`WorkerForwardCancel` stopping in-flight work when the turn upstream is
+cancelled. With no forward wired, a candidate held by another replica is
+**skipped** with a logged reason and `worker_unreachable`, never run here --
+running it locally would fail in a way that blames the machine.
+
+**`refused_before_start` is the re-pick predicate**, and it is the one field on
+the wire that must never be guessed. True means the receiver is CERTAIN nothing
+executed -- it held no stream for the registration, or the machine was at its
+concurrency cap -- so the sender may try the next candidate under
+`fallback=nextMatching`. False means the dispatch reached the machine and the
+sender must **not** re-pick even on failure: an exec that lost its stream
+mid-run may have run, and running it elsewhere is a second side effect rather
+than a retry (design D5).
+
+**What the receiver re-checks, and what it deliberately does not.** The consent
+gates -- per-task approval, the kill switch, standing scope, the classifier --
+ran on the SENDER before its pick and are not re-run; answering one question in
+two places is how the two answers drift. What only the receiver can establish is
+that the registration is owned by the principal this envelope ASSERTS -- taken
+from the verified `ForwardedAuthority`, never from the envelope's
+`owner_user_id`, which is a hint used only to read the fleet -- and that it has
+not been revoked in the window since the sender read the row.
+
+Unlike every other forward there is **no enable flag**.
+`MEMQL_WORKBENCH_REMOTE` exists because running a workbench call locally is a
+legitimate alternative; here there is none, because this replica does not hold
+the stream, so local dispatch is not a degraded path but a call that cannot
+work.
+
+INFO: the hop is gated by an **in-process** test
+(`integrations/agent/worker/forward_hop_test.go`), which wires the real
+`ForwardRouter` to the real `ForwardHandler` through a link carrying the same
+envelopes `NodeService.Stream` carries. There is deliberately no
+`test/clustere2e` lane for it: a live-cluster gate is skipped on every CI lane
+and every developer machine, and a gate that is skipped by default cannot be the
+thing standing between this feature and the bug it prevents.
+
+### 5.7 Reading the routing record
+
+Every `v1:worker:invocation` carries a `routing` object saying WHY the call
+landed where it did. It is rendered per machine in the activity list on
+`/fleet/machines`, and readable directly off the row:
+
+| Key | Meaning |
+|---|---|
+| `policyId` | the `v1:worker:routingPolicy` row that decided. Empty when the owner has none and the default applied |
+| `strategy` | `firstFit` / `roundRobin` / `leastLoaded` / `labelMatch` |
+| `candidatesConsidered` | registration ids that survived the filter, IN THE ORDER the router would try them |
+| `rejected` | per machine, why it was NOT a candidate. Present even -- especially -- when the candidate list is empty |
+| `attempts` | 1 unless `fallback=nextMatching` moved past a refusal |
+| `selectedBy` | `policy` / `reroute` / `only_candidate` |
+| `reroutedFrom` | `workbench` (the workbench answered `environment_mismatch`) or `worker:<registrationId>` (a candidate refused before starting) |
+| `requireLabels` / `preferLabels` | the MERGED agent+policy requirement the candidates were filtered and ordered by |
+
+An **empty** `routing` object means "not recorded", never "chose nothing": rows
+written before the router existed carry none, and so does a path denied before
+anything was chosen. The `outcome` enum gained `rerouted` for a call that did
+not run on the machine first chosen.
+
+Superseded policy rows are deactivated rather than deleted, precisely because
+`routing.policyId` points at whichever row made the choice.
+
+Two reads back the activity list: `invocationsForWorker` (self-scoped, the
+caller's own machines) and `invocationsForWorkerAsOperator` (cluster-owner).
+The pair exists because `v1:worker:invocation` declares no row tier, so the
+caller scope has to live in the FILTER and one filter cannot be both. **The
+portal currently calls the self-scoped one only**, so a cluster owner inspecting
+somebody else's machine sees an empty activity list on a machine it can
+otherwise fully describe.
+
+---
+
+## 6. Audit + observability
 
 | Where           | What lands                                         |
 |-----------------|----------------------------------------------------|
 | `v1:identity:auditEvent` | Security signals: `worker_registered`, `worker_revoked`, `scope_elevation_*`, `kill_switch_*`, `worker_call_denied_*`. Default 365-day retention (`MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`). |
-| `v1:worker:invocation` | Per-call telemetry: tool, action, args (redacted), duration, outcome, exit code, byte counts, output preview. Default 90-day retention (`WORKER_INVOCATION_RETENTION_DAYS`). |
+| `v1:worker:invocation` | Per-call telemetry: tool, action, args (redacted), duration, outcome, exit code, byte counts, output preview, plus the `routing` record saying why this machine (section 5.7). Default 90-day retention (`WORKER_INVOCATION_RETENTION_DAYS`). |
 | Cockpit logs    | `~/.memql/state/worker.log` (LaunchAgent / systemd). |
 | Slog stream     | The `audit` slog logger on the agent node. Operator log retention applies here. |
 
@@ -221,11 +473,13 @@ clarity. The registering user is reachable via the
 
 ---
 
-## 6. Common operations
+## 7. Common operations
 
 ### Revoke a worker
 
-UI: Workers panel (`?panel=workers`) → Revoke per row.
+UI: `/fleet/machines` in the portal -> Revoke, per machine. The owner can
+also rename it (`displayName`) and edit its `operatorLabels` from the same
+card; see section 5.
 
 CLI: `memql-cockpit` → connect → run mutation:
 
@@ -267,6 +521,9 @@ a separately-named mutation.
 invocationsForPlan(planId: "plan-...")
 ```
 
+Per machine rather than per plan, with the routing record rendered, use the
+activity list on `/fleet/machines` (section 5.7).
+
 ### Force a token rotation
 
 The worker emits a `RotationRequest` 7 days before
@@ -276,26 +533,31 @@ restarting the worker — the next reconnect refreshes
 
 ---
 
-## 7. Failure modes and remedies
+## 8. Failure modes and remedies
 
 | Symptom                                  | Diagnosis                                           | Remedy                                                  |
 |------------------------------------------|-----------------------------------------------------|---------------------------------------------------------|
-| Worker shows "offline" in /workers       | gRPC stream lost                                    | Check `worker.log`; `launchctl list` / `systemctl --user status` |
+| Machine shows "offline" on `/fleet/machines` | gRPC stream lost, so `lastSeenAt` has aged past the 30s window | Check `worker.log`; `launchctl list` / `systemctl --user status` |
 | `denied_by_policy: shell allow list: <cmd>` | Cmd not on policy allowlist                      | Add to `~/.memql/policy.yaml` shell.allow + SIGHUP      |
 | `denied_by_scope`                        | Action exceeds the agent's standing or plan scope    | Either approve elevation on the plan card OR widen the agentAuthorization row |
 | `kill_switch_engaged`                    | User flipped `computerUseEnabled` to false          | Re-enable from the floating widget; resume plans       |
 | `computeruse_unavailable`                        | Worker is the headless build                         | Reinstall with `--computeruse`                          |
 | `unsupported_on_platform`                | `window_list` / `window_focus` on a platform without WindowServer hooks | Use macOS or X11 Linux; tracked as known gap below |
+| `no_worker_available`, and the message names each machine | Every machine was filtered out. The message says which and why: `revoked` / `offline` / `missing capability <X>` / `labels do not satisfy <k=v>` | Read the reason. `offline` at a machine you can see is on means `lastSeenAt` is older than 30s -- check the stream. `labels do not satisfy` means the merged agent+policy requirement excluded it (section 5.2) |
+| `worker_unreachable`                     | The machine is held by another agent replica (`connectedNodeId`) and this node has no forward wired | Wire the mesh. A single-replica cluster never hits this; in a mesh, both halves of `WorkerForward*` are wired on every agent replica (section 5.6) |
+| `worker_disconnected` on a forwarded call | The dispatch reached the far replica and the answer was lost. NOT re-picked, by design -- the call may have run | Check the far replica's logs for the call id before re-running anything with side effects |
 | Process killed mid-exec on Linux         | `RLIMIT_AS` (memory) or `RLIMIT_CPU` cap reached     | Bump `policy.shell.max_memory_mb` / `max_cpu_seconds`   |
 
 Note: registration rows persisted by pre-#1334 builds stay stale
 (`lastSeenAt` frozen at register time) until the worker's next
 reconnect; the in-memory registry is always fresh, and current builds
-flush `lastSeenAt` at most once per 60s heartbeat batch interval.
+flush `lastSeenAt` once per **15s** heartbeat (memql#4350 -- it was 60s,
+and `online` now derives from that value, so the flush cadence is the
+flag's freshness budget; see section 5.4).
 
 ---
 
-## 8. Worker observability
+## 9. Worker observability
 
 The cockpit-worker exposes a Prometheus text-format metrics
 endpoint on `127.0.0.1:9100/metrics`:
@@ -316,7 +578,7 @@ with `--metrics-port 0` if the port collides.
 
 ---
 
-## 9. Phase status
+## 10. Phase status
 
 All seven phases shipped:
 
@@ -339,7 +601,7 @@ All seven phases shipped:
     and optional setuid drop via
     `policy.shell.{run_as_user,max_cpu_seconds,max_memory_mb,max_open_files}`.
 
-## 10. Known polish gaps (out of initial ship)
+## 11. Known polish gaps (out of initial ship)
 
 - `window_list` / `window_focus` need platform-specific
   WindowServer / X11 wiring on top of RobotGo. They return

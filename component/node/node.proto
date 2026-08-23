@@ -42,6 +42,8 @@ message NodeClientMessage {
     WorkbenchForwardRequest workbench_forward_request = 80;
     WorkbenchForwardCancel workbench_forward_cancel = 81;
     DeployControlForwardRequest deploy_control_forward_request = 90;
+    WorkerForwardRequest worker_forward_request = 100;
+    WorkerForwardCancel worker_forward_cancel = 101;
   }
 }
 
@@ -68,6 +70,8 @@ message NodeServerMessage {
     AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
     DeployControlForwardResponse deploy_control_forward_response = 90;
+    WorkerForwardResponse worker_forward_response = 100;
+    WorkerForwardStream worker_forward_stream = 101;
   }
 }
 
@@ -478,4 +482,97 @@ message DeployControlForwardResponse {
 message NodeShutdown {
   string reason = 1;
   int32 grace_seconds = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Worker (cockpit machine) forwarding
+// ---------------------------------------------------------------------------
+//
+// THE STRUCTURAL FIX (memql#4352, epic memql#4349). A cockpit machine's
+// WorkerService stream terminates on exactly ONE agent replica. The turn that
+// wants to use it is served by whichever replica the mesh routed the request
+// to. With the default topology -- two agent replicas -- that is a coin flip,
+// and on the losing side the machine is simply not there: the in-memory
+// registry is per-node and is never rehydrated from the rows, so a turn on the
+// other replica found no worker and reported no_worker_available for a laptop
+// the user could see was online.
+//
+// This is the same bug class CLAUDE.md's multi-node section names for events
+// and session state -- memql#1448, #1412, #1388 -- arriving on the worker
+// surface. The fix is the same shape the workbench already uses: forward the
+// dispatch to the replica that holds the stream, named by the registration's
+// connectedNodeId, and route the answer back by request_id.
+//
+// `authority` is the mandatory authorization assertion (memql#3205). The GATES
+// run on the SENDER, before the pick -- per-task approval, the kill switch,
+// standing scope, the classifier -- so the receiver does not re-run them. What
+// the receiver DOES re-check is what only it can know: that the registration
+// exists, is owned by the principal this envelope asserts, and is not revoked.
+// Absence of an authority is refusal, not a default.
+message WorkerForwardRequest {
+  string request_id = 1;
+  // The machine to dispatch to. Chosen by the sender's router; the receiver
+  // verifies ownership and revocation rather than re-choosing, because a
+  // second choice on the receiving side could land on a different machine than
+  // the one the consent card named.
+  string registration_id = 2;
+  string owner_user_id = 3;
+  // HEADLESS / COMPUTERUSE. The receiver acquires the concurrency slot for
+  // this capability, which is a local fact about a local stream and therefore
+  // cannot be decided by the sender.
+  string capability = 4;
+  string tool = 5;
+  string action = 6;
+  bytes args_json = 7;
+  string agent_id = 8;
+  string plan_id = 9;
+  string task_id = 10;
+  string correlation_id = 11;
+  // Optional timeout hint; the receiver clamps to its own caps.
+  int32 timeout_sec = 12;
+  ForwardedAuthority authority = 13;
+}
+
+// WorkerForwardResponse carries the dispatch result back to the originating
+// replica. One message per request_id.
+message WorkerForwardResponse {
+  string request_id = 1;
+  bool ok = 2;
+  bytes output_json = 3;
+  string error_code = 4;
+  string error_message = 5;
+  uint64 bytes_in = 6;
+  uint64 bytes_out = 7;
+  string output_preview = 8;
+  // refused_before_start IS THE RE-PICK PREDICATE, and it is the one field on
+  // this message that must never be guessed. True means the receiver is
+  // CERTAIN nothing executed on the machine -- it held no stream for the
+  // registration, or the machine was at its concurrency cap -- so the sender
+  // may try the next candidate under fallback=nextMatching. False means the
+  // dispatch reached the machine, and the sender must not re-pick even if the
+  // call failed: an exec that lost its stream mid-run may have run, and
+  // running it elsewhere is a second side effect rather than a retry
+  // (design D5).
+  bool refused_before_start = 9;
+}
+
+// WorkerForwardStream relays one ToolStream chunk from the machine back to the
+// replica serving the turn, so streamed stdout / stderr crosses the hop
+// instead of stopping at the replica that happens to hold the stream. Ordered
+// per request_id by the underlying connection; chunks may arrive after the
+// response on a cancelled call and are dropped by the sender's router.
+message WorkerForwardStream {
+  string request_id = 1;
+  oneof payload {
+    bytes stdout_chunk = 2;
+    bytes stderr_chunk = 3;
+    bytes data_chunk = 4;
+  }
+}
+
+// WorkerForwardCancel mirrors WorkbenchForwardCancel. The tool loop fires it
+// when the turn upstream is cancelled; the receiving replica stops in-flight
+// work for the request_id and frees the concurrency slot.
+message WorkerForwardCancel {
+  string request_id = 1;
 }

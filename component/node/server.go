@@ -48,6 +48,8 @@ type NodeServer struct {
 	aiForwardResponse        AiForwardResponseSink
 	workbenchForwardHandler  WorkbenchForwardHandler
 	workbenchForwardResponse WorkbenchForwardResponseSink
+	workerForwardHandler     WorkerForwardHandler
+	workerForwardResponse    WorkerForwardResponseSink
 	// deployControlForwardHandler serves inbound deploy-control forwards
 	// (memql#3380). Installed on the identity node -- the only node that
 	// carries a DeployControlService -- and nil everywhere else.
@@ -126,6 +128,26 @@ func (s *NodeServer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRespon
 		return
 	}
 	s.workbenchForwardResponse = sink
+}
+
+// SetWorkerForwardHandler installs the agent-replica-side handler invoked for
+// inbound WorkerForwardRequest messages (memql#4352). Called during bootstrap
+// on agent binaries; every other node type leaves it nil and answers a forward
+// with a transport error naming the absence.
+func (s *NodeServer) SetWorkerForwardHandler(h WorkerForwardHandler) {
+	if s == nil {
+		return
+	}
+	s.workerForwardHandler = h
+}
+
+// SetWorkerForwardResponseSink installs the sink for replies to worker
+// dispatches this node forwarded, arriving over direct peer connections.
+func (s *NodeServer) SetWorkerForwardResponseSink(sink WorkerForwardResponseSink) {
+	if s == nil {
+		return
+	}
+	s.workerForwardResponse = sink
 }
 
 // SetDeployControlForwardHandler installs the identity-node-side handler
@@ -255,6 +277,8 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		aiForwardResponse:        s.aiForwardResponse,
 		workbenchForwardHandler:  s.workbenchForwardHandler,
 		workbenchForwardResponse: s.workbenchForwardResponse,
+		workerForwardHandler:     s.workerForwardHandler,
+		workerForwardResponse:    s.workerForwardResponse,
 		eventInbound:             s.eventInbound,
 
 		deployControlForwardHandler: s.deployControlForwardHandler,

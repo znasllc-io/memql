@@ -13,6 +13,7 @@ import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
+import { FleetRoutes } from "../fleet/FleetRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
 import { MeRoutes } from "../me/MeRoutes";
@@ -89,6 +90,7 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //   /compose/*        the user-composed view builder      (memql#3320)
 //   /admin/*          the absorbed server-rendered admin  (memql#3324)
 //   /sites/*          hosted sites: list, create, publish, roll back, delete
+//   /fleet/*          machines + workbenches -- where work runs (memql#4349)
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //                     (memql#3717)
 //   /artifacts/*      the Library, browsed and labelled
@@ -121,6 +123,7 @@ export function AppRoutes(): ReactNode {
           <Route path="integrations/*" element={<IntegrationsRoutes />} />
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="sites/*" element={<SitesRoutes />} />
+          <Route path="fleet/*" element={<FleetRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
           {/* The person, rather than the cluster: the account this

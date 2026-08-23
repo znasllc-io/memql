@@ -39,9 +39,15 @@ type server struct {
 	registry *Registry
 	auditor  Auditor
 	clock    func() time.Time
+	// nodeId is this replica's MEMQL_NODE_ID, resolved once at
+	// construction and stamped onto every registration whose stream this
+	// node holds. Threaded rather than read per call: a process that
+	// answered "which node am I" differently at register and at heartbeat
+	// would leave a row pointing at a replica that never held the stream.
+	nodeId string
 }
 
-func newServer(logger *slog.Logger, store Store, registry *Registry, auditor Auditor, clock func() time.Time) *server {
+func newServer(logger *slog.Logger, store Store, registry *Registry, auditor Auditor, clock func() time.Time, nodeId string) *server {
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
@@ -51,6 +57,7 @@ func newServer(logger *slog.Logger, store Store, registry *Registry, auditor Aud
 		registry: registry,
 		auditor:  auditor,
 		clock:    clock,
+		nodeId:   nodeId,
 	}
 }
 
@@ -205,6 +212,15 @@ func (s *server) admitRegistration(
 
 // upsertRegistration writes either a new row or refreshes an
 // existing registration belonging to the identityId.
+//
+// Two fields are NOT written here and must stay that way: operatorLabels and
+// displayName. Both are the OWNER's, set from the Fleet page, and both would
+// otherwise be erased by the machine that carries them on the next reconnect
+// -- `labels` and `name` beside them ARE overwritten from the Register
+// message, which is exactly why the operator's versions are separate fields
+// (design D3, memql#4350). The registration row this builds simply leaves them
+// zero, and EngineStore.RefreshRegistration does not name them either, so the
+// update's read-merge preserves whatever the owner set.
 func (s *server) upsertRegistration(
 	ctx context.Context,
 	identity *WorkerIdentity,
@@ -213,7 +229,11 @@ func (s *server) upsertRegistration(
 	now time.Time,
 	sourceIP string,
 ) (RegistrationRow, error) {
-	existing, err := s.store.WorkerByIdentityId(ctx, identity.IdentityId)
+	// The owner comes off the resolved WorkerIdentity, not off the Register
+	// message: the registration concept is owner-tiered, so this read
+	// returns nothing without an actor and the handshake would then insert a
+	// duplicate row on every reconnect. See the note at the top of store.go.
+	existing, err := s.store.WorkerByIdentityId(ctx, identity.IdentityId, identity.OwnerUserId)
 	if err != nil {
 		return RegistrationRow{}, fmt.Errorf("worker lookup: %w", err)
 	}
@@ -232,6 +252,10 @@ func (s *server) upsertRegistration(
 		BuildTag:             register.GetBuildTag(),
 		LastSeenAt:           now,
 		LastConnectedFromIP:  sourceIP,
+		// This replica now holds the stream, so it is where a dispatch for
+		// this machine has to be forwarded. Stamped on register and
+		// re-asserted on every heartbeat flush; cleared on disconnect.
+		ConnectedNodeId: s.nodeId,
 	}
 
 	if existing == nil {
@@ -270,11 +294,18 @@ type streamSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu        sync.Mutex
-	pending   map[string]chan *memqlv1.ToolResult
-	sendMu    sync.Mutex
-	sendErr   error
-	closeOnce sync.Once
+	mu      sync.Mutex
+	pending map[string]chan *memqlv1.ToolResult
+	// chunkSinks holds the per-call ToolStream callback, keyed by call id,
+	// under the SAME lock as pending because the two have the same
+	// lifetime: registered when a dispatch goes out, dropped when its
+	// result lands or the call is abandoned. Only calls that asked for
+	// chunks get an entry, so a missing key is the ordinary case rather
+	// than an error.
+	chunkSinks map[string]func(*memqlv1.ToolStream)
+	sendMu     sync.Mutex
+	sendErr    error
+	closeOnce  sync.Once
 
 	// lastPersistedAt is the heartbeat timestamp of the most recent
 	// successful lastSeenAt DB flush (memql#1340). Zero until the
@@ -292,12 +323,13 @@ func newStreamSession(
 	cancel context.CancelFunc,
 ) *streamSession {
 	return &streamSession{
-		server:  srv,
-		stream:  stream,
-		worker:  w,
-		ctx:     ctx,
-		cancel:  cancel,
-		pending: make(map[string]chan *memqlv1.ToolResult),
+		server:     srv,
+		stream:     stream,
+		worker:     w,
+		ctx:        ctx,
+		cancel:     cancel,
+		pending:    make(map[string]chan *memqlv1.ToolResult),
+		chunkSinks: make(map[string]func(*memqlv1.ToolStream)),
 	}
 }
 
@@ -313,7 +345,9 @@ func (s *streamSession) close() {
 			close(ch)
 		}
 		s.pending = nil
+		s.chunkSinks = nil
 		s.mu.Unlock()
+		s.clearConnectedNode()
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
 		// disconnect -- the only signal was the absence of further
@@ -351,9 +385,41 @@ func (s *streamSession) close() {
 	})
 }
 
+// clearConnectedNode blanks the registration's connectedNodeId now that this
+// replica no longer holds the stream. Until it runs, the row still names this
+// node and a router forwards a dispatch to a replica that will refuse it --
+// which reads as a mesh fault rather than as an offline laptop.
+//
+// THE CONTEXT COMES FROM Background(), NOT from the session. By the time close
+// runs, s.cancel has already fired and s.ctx is done, so a write on it would
+// be cancelled before it left the process -- and the failure would be silent,
+// because the flush is best-effort. The audit Emit just below still passes
+// s.ctx; that is a separate question about a separate sink and is not the
+// pattern to copy here.
+func (s *streamSession) clearConnectedNode() {
+	if s == nil || s.server == nil || s.server.store == nil || s.worker == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId); err != nil {
+		if s.server.logger != nil {
+			s.server.logger.Warn("worker: clear connectedNodeId failed",
+				"registration_id", s.worker.RegistrationId,
+				"error", err,
+			)
+		}
+	}
+}
+
 // dispatch is the hook the registry's dispatcher invokes when an
 // agent-side request has been admission-checked.
-func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDispatch) (*memqlv1.ToolResult, error) {
+//
+// onChunk, when non-nil, receives every ToolStream the worker emits for this
+// call, in arrival order and BEFORE this function returns its result. It runs
+// on the stream-recv goroutine, so a slow callback stalls every other message
+// on the connection -- hand work off rather than doing it there.
+func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDispatch, onChunk func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 	if dispatch == nil {
 		return nil, fmt.Errorf("worker: nil dispatch")
 	}
@@ -367,11 +433,15 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 		return nil, ErrWorkerDisconnected
 	}
 	s.pending[dispatch.GetCallId()] = resCh
+	if onChunk != nil && s.chunkSinks != nil {
+		s.chunkSinks[dispatch.GetCallId()] = onChunk
+	}
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
 		delete(s.pending, dispatch.GetCallId())
+		delete(s.chunkSinks, dispatch.GetCallId())
 		s.mu.Unlock()
 	}()
 
@@ -413,11 +483,12 @@ func (s *streamSession) handle(ctx context.Context, msg *memqlv1.WorkerClientMes
 	case *memqlv1.WorkerClientMessage_ToolResult:
 		s.handleToolResult(payload.ToolResult)
 	case *memqlv1.WorkerClientMessage_ToolStream:
-		// Streaming output is currently bridged at the agent dispatch
-		// boundary; we accept the message but do not relay it further
-		// in MVP. Phase 7 wires a streaming sink for stdout/stderr
-		// pass-through into the agent's tool result.
-		_ = payload
+		// Relayed to the per-call sink the dispatch registered, in arrival
+		// order and before the call's ToolResult returns. That is the local
+		// half of memql#4352: chunks cannot cross a node hop they do not
+		// reach locally first, and the cross-node forward reads them from
+		// this same callback.
+		s.handleToolStream(payload.ToolStream)
 	case *memqlv1.WorkerClientMessage_RotationRequest:
 		s.handleRotationRequest(ctx, payload.RotationRequest)
 	case *memqlv1.WorkerClientMessage_AuditEvent:
@@ -439,24 +510,43 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	s.worker.TouchLastSeen(at, sourceIP)
 
 	// Persist lastSeenAt at most once per HeartbeatBatchInterval
-	// (memql#1340). The cockpit heartbeats every 15s; writing the
-	// row on every beat is a steady DB write per worker per 15s
-	// for zero freshness gain -- the in-memory registry (touched
-	// above) is the live source of truth and stays fresh on every
-	// beat. Only the DB flush is throttled. The FIRST heartbeat of
-	// a stream always persists (lastPersistedAt zero value), so a
-	// (re)connected worker's row is fresh within one beat; a failed
-	// flush does NOT advance lastPersistedAt, so the next beat
-	// retries.
+	// (memql#1340). The FIRST heartbeat of a stream always persists
+	// (lastPersistedAt zero value), so a (re)connected worker's row is
+	// fresh within one beat; a failed flush does NOT advance
+	// lastPersistedAt, so the next beat retries. The in-memory registry
+	// (touched above) is updated on every beat regardless -- only the DB
+	// flush is throttled.
+	//
+	// WHAT THE THROTTLE BUYS CHANGED IN memql#4350, and the old reasoning
+	// here would now mislead. It said a per-beat write bought no freshness
+	// anyone read, and set the interval to 60s. Nothing read lastSeenAt
+	// because a minute-stale timestamp answers no question worth asking;
+	// the Fleet page asks one, deriving `online` from this value against
+	// OnlineWindow. So the interval is now the cockpit's own 15s beat and
+	// this is, in practice, one write per worker per beat. The throttle
+	// still does the job it was built for -- a worker that beats faster
+	// than the interval, or a reconnect storm, cannot turn into a write
+	// storm -- but it is no longer suppressing the ordinary case.
 	if s.server == nil || s.server.store == nil {
 		return
 	}
 	if !s.lastPersistedAt.IsZero() && at.Sub(s.lastPersistedAt) < HeartbeatBatchInterval {
 		return
 	}
+	// activeCount is the WORKER's own report (Heartbeat.active_calls_total),
+	// which is what v1:worker:registration.activeCount documents it to be. A
+	// cockpit build predating that field sends 0, so fall back to this
+	// replica's registry sum -- the dispatches it has admitted and not yet
+	// released. Both are best-effort and up to one interval stale: the field
+	// is a routing input for leastLoaded, never a correctness one, and
+	// Worker.Acquire remains the real valve.
+	active := int(hb.GetActiveCallsTotal())
+	if active == 0 {
+		active = s.worker.ActiveCount()
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
-	if err := s.server.store.UpdateLastSeen(ctx, s.worker.RegistrationId, at, sourceIP); err != nil {
+	if err := s.server.store.UpdateLastSeen(ctx, s.worker.RegistrationId, s.worker.OwnerUserId, at, sourceIP, s.server.nodeId, active); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: persist heartbeat failed",
 				"registration_id", s.worker.RegistrationId,
@@ -476,6 +566,11 @@ func (s *streamSession) handleToolResult(res *memqlv1.ToolResult) {
 	ch, ok := s.pending[res.GetCallId()]
 	if ok {
 		delete(s.pending, res.GetCallId())
+		// The result is the end of the call's output. Retiring the sink here
+		// rather than waiting for dispatch's defer means a chunk the worker
+		// sends after its own result cannot reach a caller that has already
+		// been handed one.
+		delete(s.chunkSinks, res.GetCallId())
 	}
 	s.mu.Unlock()
 	if !ok {
@@ -488,6 +583,31 @@ func (s *streamSession) handleToolResult(res *memqlv1.ToolResult) {
 			"call_id", res.GetCallId(),
 		)
 	}
+}
+
+// handleToolStream relays one output chunk to the sink its call registered.
+//
+// A chunk with no sink is DROPPED, not an error, and there are two ordinary
+// ways to get one: the caller asked for no chunks (most calls), or the chunk
+// arrived after its ToolResult, which the worker is free to do. Both are debug
+// lines, the same treatment handleToolResult gives a result whose caller has
+// already returned.
+func (s *streamSession) handleToolStream(chunk *memqlv1.ToolStream) {
+	if chunk == nil || chunk.GetCallId() == "" {
+		return
+	}
+	s.mu.Lock()
+	sink := s.chunkSinks[chunk.GetCallId()]
+	s.mu.Unlock()
+	if sink == nil {
+		if s.server != nil && s.server.logger != nil {
+			s.server.logger.Debug("dropping tool stream chunk -- no sink for call",
+				"call_id", chunk.GetCallId(),
+			)
+		}
+		return
+	}
+	sink(chunk)
 }
 
 func (s *streamSession) handleRotationRequest(ctx context.Context, req *memqlv1.RotationRequest) {

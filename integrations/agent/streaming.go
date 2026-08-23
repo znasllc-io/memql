@@ -647,9 +647,22 @@ StreamLoop:
 				}
 			} else {
 				content = result
+				// WORKBENCH FIRST, THE FLEET WHEN IT CANNOT (memql#4353).
+				// A workbenchHost call that came back `environment_mismatch`
+				// ran nothing: the workbench compared the action's declared
+				// needs with what it is and refused up front. Either the user
+				// has already consented to this work on their own machine, in
+				// which case it runs there now, or the consent card goes up
+				// exactly as the knowledge corpus prescribes. The decision is
+				// the dispatcher's existing gate, not a second copy of it here.
+				if rerouted, ok := r.rerouteWorkbenchMismatch(ctx, turnCtx, tc.Name, result, args); ok {
+					content = rerouted
+					sink.ToolResult(tc.ID, rerouted, "")
+				} else {
+					sink.ToolResult(tc.ID, result, "")
+				}
 				hadSuccess = true
 				failBreaker.observeSuccess()
-				sink.ToolResult(tc.ID, result, "")
 				// Library promotion (memql#722): publishing a canvas card
 				// is a standalone deliverable the agent emits, so mirror
 				// it into the user's Library as a generatedOutput. Args

@@ -14,10 +14,11 @@ per-Plan Linux working environment that is the default first
 choice for any HEADLESS work an agent needs to do (writing files,
 running shell commands, fetching URLs).
 
-The current MVP runs the workbench in-process on the agent node;
-the cluster-mode + Cloud Run deployment is documented separately
-in [production.md](../../internal/ops/workbench-production.md) and is deferred until you start
-deploying to production.
+Cluster mode is the deployed shape: a dedicated `workbench` node-type binary
+hosts the workspaces and agent nodes route to it over `NodeService.Stream`. The
+in-process path on the agent node survives as the local/no-mesh fallback (see
+section 8). Operational detail lives in
+[workbench-production.md](../../internal/ops/workbench-production.md).
 
 ## 1. Mental model
 
@@ -68,6 +69,10 @@ One tool, `workbenchHost`, discriminated by `action`:
 All paths are RELATIVE to the workspace root; absolute paths and
 `..` traversal are rejected.
 
+The dispatch builtin behind the tool (`workbenchDispatchHost`) also takes an
+optional `environment` hint alongside `action` / `args` / `planId` / `agentId` /
+`taskId`. Section 10 is what it does.
+
 ## 4. Authorization
 
 Universal -- `workbench_use` is injected into every role's
@@ -117,12 +122,14 @@ chunks in `integrations/knowledge/seed.go`) instruct the agent to:
 - Surface a "workbench can't do this -- needs computer use"
   message via `respondToUser` when it hits a Linux/macOS or
   sandbox/host limitation rather than silently retrying.
+- Declare an `environment` hint on calls that need something a workbench is
+  not, so the refusal is typed and arrives before anything runs (section 10).
 
 The planner can grant `computer_use_*` slugs per-Task when the
 goal text indicates they're needed -- see the
 `agentFactoryAnalyze` prompt rules.
 
-## 6. Testing the MVP locally
+## 6. Testing it locally
 
 ```bash
 make up
@@ -138,13 +145,19 @@ Then:
    ten most beautiful birds on earth and save it as `birds.md`."
 3. The agent calls `workbenchHost` with `action=fs_write` (and
    probably `action=exec` for any research it does).
-4. Verify the workspace inside the agent pod (the MVP workbench runs
-   in-process on the agent node):
+4. Verify the workspace inside the **workbench** pod. `deploy/k8s/base`
+   sets `MEMQL_WORKBENCH_REMOTE=1` +
+   `MEMQL_WORKER_PEERS=workbench=workbench:50060` on the agent, so the
+   directory is on a workbench replica rather than on the agent:
 
    ```bash
-   kubectl exec -n memql deploy/agent -- ls /var/lib/memql/workbenches/
-   kubectl exec -n memql deploy/agent -- cat /var/lib/memql/workbenches/<planId>/birds.md
+   kubectl exec -n memql deploy/workbench -- ls /var/lib/memql/workbenches/
+   kubectl exec -n memql deploy/workbench -- cat /var/lib/memql/workbenches/<planId>/birds.md
    ```
+
+   `deploy/k8s/base/workbench.yaml` runs **2 replicas**, so name the pod
+   rather than the Deployment when you want a specific one -- and read
+   `workspace.nodeId` to know which one holds the plan's tree (section 11).
 
 ## 7. Teardown
 
@@ -152,9 +165,10 @@ When the parent Plan reaches a terminal status (succeeded /
 failed / cancelled), the `releaseWorkspaceOnPlanTerminal`
 automation fires:
 
-1. The `releaseWorkspace` mutation flips the v1:workbench:workspace
-   row to status=`released` (cluster mode -- the MVP doesn't write
-   this row yet).
+1. The `releaseWorkspace` mutation flips the `v1:workbench:workspace`
+   row to `status=released`. Since memql#4354 that row is really
+   written -- the concept was declared and written by nothing before
+   then (section 11).
 2. The `workbenchTeardownDirectory` builtin calls the integration's
    `teardownDirectory` capability which `rm -rf`s the per-Plan
    directory.
@@ -209,40 +223,253 @@ at boot if the remote flag is set but the router could not be wired at all
 | `dsl/workbench/`                                       | Concept + mutations + queries + shapes + automation + logic + builtins |
 | the product pack's `tools.memql`                       | `tool workbenchHost { ... }` definition (pack-owned) |
 | `integrations/workbench/`                              | Go integration: Manager, dispatch handlers, forward router/handler |
+| `integrations/workbench/environment.go`                | The `environment` hint: the closed `needs` set, the typed mismatch, the two error codes |
+| `integrations/workbench/workspace_store.go`            | The Go writer for `v1:workbench:workspace` -- provision / touch / release, all under the plan owner's actor |
+| `integrations/agent/workbench_reroute_agent.go`        | The reroute: mismatch -> the fleet, or the consent card |
+| `integrations/agent/worker/scope.go`                   | `needs` -> scope tier and -> routing labels |
 | `integrations/knowledge/seed.go`                       | `workbench` knowledge domain + seed corpus |
 | the product pack's `agentReply.tmpl`                   | `{{if .workbenchAvailable}}` capability block (pack-owned) |
 | `integrations/agent/replier.go`                        | `workbenchAvailable` data injection + domain auto-attach |
 | `dsl/agents/roles/*.memql`                             | `workbench_use` in every role's `lockedToolSlugs` |
 | `dsl/agents/prompts/agentFactoryAnalyze.tmpl`          | Factory rules for granting workbench / computer-use |
 
-## 10. Workbench -> Computer-use fallback (verified path)
+## 10. The environment hint, and the reroute to the fleet
 
-The "workbench first, computer-use fallback" ordering is real and the loop is
-**closed**, but it is **agent-driven and user-gated** -- NOT an automatic
-planner re-route. Verified path (memql#790):
+Shipped in memql#4353 (epic memql#4349). It does not weaken the rule below it:
+the workbench stays first, and the fleet is where it cannot go.
 
-1. The agent prefers the workbench (`workbench_use` is universal). Guidance:
-   the `workbench:preferOverComputerUse` + `workbench:failureFallback` corpus
-   chunks in `integrations/knowledge/seed.go`.
-2. When the workbench genuinely can't do a job (macOS/Xcode, a GUI app, or a
-   file already on the user's machine), the agent does NOT silently switch and
-   does NOT dead-end. If it holds a computer-use slug it calls
-   `requestComputerUseScope({intent, requestedScope, summary})`, naming the
-   workbench limitation, and ends its turn with a short `respondToUser`.
-3. That mints a scope-elevation Plan; the user sees an approval card on the
-   canvas. On **Allow**, `handlePlanApprovedForExecution`
-   (`integrations/planner/plan_execution.go`) dispatches a fresh turn back to
-   the agent with `planApprovedTrigger=true`, where it runs the work on the
-   user's machine via `workerHost` / `workerComputer`.
-4. If the agent has no computer-use slug, it names the limitation and tells the
-   user that enabling Computer Use would unblock it, so the user can grant the
-   capability.
+### 10.1 The hint
 
-There is **no** planner "saw a workbench failure -> auto-granted computer-use
--> retried" path: the planner agent loop's task-completion re-invocation is
-deferred (see the `HandlePlanUpdated` comment in
-`integrations/planner/agent_loop.go`). The consent-gated escalation above is
-the intended fallback and keeps the user in control of anything that touches
-their machine. memql#790 hardened the `workbench:failureFallback` guidance so
-the agent reliably escalates via `requestComputerUseScope` instead of relying
-on a planner re-route that does not fire.
+`workbenchDispatchHost` takes an **optional** `environment` object -- the agent
+saying what the action needs:
+
+```json
+{ "os": "darwin", "needs": ["macos_tooling"] }
+```
+
+- `os` is a GOOS string, compared against the evaluating node's own `runtime.GOOS`.
+- `needs` is a **closed four-value set**: `display`, `gpu`, `macos_tooling`,
+  `user_files`. They name exactly the four things a workbench is not -- a
+  headless Linux sandbox in the cluster with an empty directory tree -- so
+  declaring any of them is by construction a mismatch. It is written as a table
+  (`workbenchProvides`, `integrations/workbench/environment.go`) rather than as
+  `len(needs) > 0`, so the day a GPU-bearing workbench flavour exists one
+  `false` becomes `true` and nothing else moves.
+
+**Omitting `environment` means "no hint", and there is deliberately no
+default.** Every caller predating the field, and every action that genuinely
+does not care, passes nothing. A guessed default would fire the mismatch on
+calls that would have worked.
+
+### 10.2 The typed mismatch
+
+`handleDispatchHost` evaluates the hint **before anything runs** -- above the
+safety classifier, above workspace provisioning, on both the local and the
+forwarded path. On a mismatch it returns `errorCode: environment_mismatch` with
+a structured body on `dispatchResult.payload`:
+
+| Field | Meaning |
+|---|---|
+| `unmetNeeds` | every reason the workbench cannot serve this call, drawn from the four need values plus `os`. Never empty in a mismatch |
+| `requestedOs` | the hint's `os`, when supplied |
+| `workbenchOs` | the GOOS of the node that evaluated the hint |
+
+`os` is an **output-only** reason: it appears in `unmetNeeds` when the hint's
+`os` names a platform this node is not, and it is NOT accepted as an input
+`needs` value. It sits in the same list rather than beside it so a consumer
+reading only `unmetNeeds` is never handed an empty list on a genuine mismatch.
+
+**The action did not run.** No workspace was provisioned, no command executed,
+nothing fetched. What this replaces is a failure that arrived three layers down
+and named nothing -- a `defaults read` on Linux, an xdotool with no `DISPLAY`, a
+path under `/Users` that is simply not there -- which reads to the model as "the
+command is wrong", so it retries with variations.
+
+Consumers read the payload through
+`workbench.EnvironmentMismatchFromPayload`, never by regexing the message: an
+error string a consumer has to parse is a contract that breaks the first time
+somebody improves the wording.
+
+### 10.3 An unknown need is a CALLER error, and never a reroute trigger
+
+A malformed hint -- a non-object `environment`, a non-list `needs`, a
+non-string element, or a need value outside the closed set -- returns
+`errorCode: invalid_environment_hint`. **A separate code, deliberately.**
+
+A mismatch is a fact about the workbench and the tool loop may act on it; an
+invalid hint is the caller getting the contract wrong, and the only useful
+response is to fix the call. Folding the two together would let a typo
+(`macos-tooling`) read as "the workbench cannot do this" -- **a reroute to
+somebody's laptop on the strength of a hyphen**. A test pins the split.
+
+Silently dropping the unknown value would be worse still: the action would then
+run having been told it needs something nobody checked, which is the exact
+failure the hint exists to remove.
+
+### 10.4 The reroute, and exactly when the card is raised instead
+
+The workbench knowledge domain's ruling stands and is quoted in the Go that
+implements the reroute (`integrations/agent/workbench_reroute_agent.go`):
+
+> Never silently switch to the user's own machine. If the workbench cannot do
+> the job, say so and request computer-use scope through
+> `requestComputerUseScope` -- the user approves on the canvas card before any
+> tool touches their machine.
+
+What the automatic path removes is not the consent. It is the second **asking**
+for consent already given.
+
+On `environment_mismatch` the agent tool loop re-dispatches **the same call** --
+same action, same inner arguments -- to `workerHost`, and **the dispatcher's
+existing gate decides**. The gates run entirely before any wire traffic, so an
+attempt that is refused touches nothing.
+
+| The fleet dispatch answers | What the loop does |
+|---|---|
+| `denied_no_per_task_approval` | raises the consent card (`requestComputerUseScope`) and tells the model to end its turn |
+| `denied_by_scope` | same |
+| anything else -- including success, `kill_switch_engaged`, `no_worker_available`, an ordinary failure | that IS the answer; it is returned to the model as-is |
+
+**A kill switch is not a missing card.** `kill_switch_engaged` means the user
+deliberately turned computer use off, so it is surfaced rather than answered
+with a card asking them to turn it back on. Answering a deliberate "no" with a
+consent prompt is nagging, not consent.
+
+**Asking the gate rather than re-deriving its ladder is the point.** A second
+copy of "does this user's standing scope cover this" in the tool loop would
+drift in the direction that reads as safe -- a loop asking for `observe` where
+the ladder says `full` produces a card the user approves for less than what then
+runs.
+
+**Needs map to a scope and to routing labels**
+(`integrations/agent/worker/scope.go`, beside the ladder it reads, importing the
+need vocabulary from `integrations/workbench` rather than restating it):
+
+| Unmet needs | Scope requested | Labels required of the machine |
+|---|---|---|
+| `user_files` alone | `observe` -- the workbench could not see the file and the machine is being asked to look at it | none. "The files are on the user's machine" is true of every machine they own |
+| `display` | `full` | `display=true` |
+| `gpu` | `full` | `gpu=true` |
+| `macos_tooling` | `full` | `os=darwin` -- a need for macOS tooling IS a need for macOS, stated as the os label so a machine the cockpit already tagged `os=darwin` matches without hand-tagging |
+| `os` (the hint named a different platform) | `full` | `os=<the requested goos>` |
+| empty or unrecognised | `full` | -- |
+
+An unrecognised set takes `full`, the conservative direction, for the same
+reason: an unknown need asking for the narrower tier is how a card gets approved
+for less than what runs.
+
+**Both tool loops call it** -- streaming and non-streaming. One behaviour with
+two transports; a divergence would present as "it works in chat but not in a
+plan".
+
+The routing record on the resulting `v1:worker:invocation` carries
+`reroutedFrom: "workbench"`, which is what makes "why did this run on the
+laptop" answerable after the fact (see the
+[workers runbook](workers-runbook.md), section 5.7).
+
+### 10.5 What has NOT changed
+
+There is still **no** planner "saw a workbench failure -> auto-granted
+computer-use -> retried" path, and the reroute is not one: it grants nothing.
+Consent is either already held -- an approved task and standing scope at or
+above the tier the unmet needs imply -- or the card goes up. If the agent holds
+no computer-use slug at all, it names the limitation and tells the user that
+enabling Computer Use would unblock it.
+
+The user-gated escalation described in memql#790 is unchanged and is still what
+runs for every workbench failure that is not an `environment_mismatch`: the
+agent calls `requestComputerUseScope({intent, requestedScope, summary})`, ends
+its turn with a short `respondToUser`, and on **Allow**
+`handlePlanApprovedForExecution` (`integrations/planner/plan_execution.go`)
+dispatches a fresh turn with `planApprovedTrigger=true`.
+
+---
+
+## 11. Replica affinity: a workspace lives on ONE replica
+
+`deploy/k8s/base/workbench.yaml` runs **2 replicas**, and a workspace is a
+**filesystem**. A filesystem does not follow the request, so which replica
+serves a call is not load balancing -- it decides whether the plan's files are
+there.
+
+Until memql#4354 the agent's peer picker was **any-fit**. A plan's first call
+made a directory on one replica; its second call landed on the other with even
+odds and found an empty tree. Both calls reported `ok=true`, neither result
+named a node, and the failure read as the agent having imagined the write. The
+`v1:workbench:workspace` concept was declared in the DSL the whole time and
+**written by nothing**, so there was no record to disagree with.
+
+**How it works now.** The node that creates the directory writes the row and
+stamps its own `MEMQL_NODE_ID` on `workspace.nodeId`. Before forwarding, the
+agent reads the plan's live workspace row and passes that node id to the peer
+picker, which **prefers that replica whenever it is healthy and connected** and
+falls back to any-fit only when it is not. The fallback is still untuned for
+load: with the pinned replica gone there is no better information available.
+
+An affinity read that FAILS degrades to an unpinned pick with a WARNING rather
+than refusing the call -- that is the pre-#4354 behaviour, so a transient read
+problem cannot be worse than the status quo, and the receiving node still
+records the substitution.
+
+### 11.1 When a replica is lost, files are NOT migrated
+
+A workbench replica leaving the mesh takes its directory tree with it. There is
+nothing to copy them from. The design **accepts a fresh empty directory and
+records why**:
+
+1. The pinned replica is gone, so the picker returns a healthy substitute and
+   the agent logs a WARNING naming **both** node ids and the plan -- the only
+   vantage point that can see both at once.
+2. The substitute creates the directory, finds a live row naming a different
+   node, and flips that row to `status=released`,
+   `releasedReason=node_lost`.
+3. It inserts a successor row naming itself, at an id derived from
+   `(planId, nodeId)` -- one row cannot be both released and provisioned.
+4. The plan continues on an **empty** workspace, and the serving node logs the
+   takeover too.
+
+The re-provision happens **exactly once**: subsequent calls find a live row
+naming the serving node and adopt it. A row naming NOBODY (written before
+`nodeId` existed) is also adopted rather than replaced.
+
+INFO: the operator answer to "where did my file go" is a released workspace row
+carrying `releasedReason=node_lost`. `/fleet/workbenches` renders it with that
+reason spelled out; without the row there is no record that anything moved.
+
+[ ] Not implemented: **no notice reaches the user's canvas.** The log line and
+    the row state ship; the card does not. `canvasState` is a pack-only
+    construct the engine core does not load, and there is no canvas path
+    reachable from `integrations/workbench` -- a node-loss card has to arrive
+    the way the others do, from a product-bundle automation firing off the
+    `node_lost` release. Full detail in
+    [workbench-production.md](../../internal/ops/workbench-production.md),
+    section 1a.
+
+### 11.2 A plan whose owner cannot be resolved is REFUSED
+
+`v1:workbench:workspace` now declares
+`@rowAuthz(owner="ownerUserId", clusterOwner)`, and `ownerUserId` is stamped
+from the parent plan's `requestedBy` at provision time -- never from a caller
+argument.
+
+WARNING: a workbench call whose `planId` does not resolve to a readable
+`v1:planner:plan` row is now **refused** with
+`errorCode: workspace_owner_unresolved` rather than run. This is a behaviour
+change. Writing the row anyway would stamp `ownerUserId: ""`, and the row tier
+then hides it from the person whose files it describes AND from the operator;
+the next call would read no row and provision a second workspace, bringing the
+split back wearing a bookkeeping layer. A workspace keyed on a plan that does
+not exist also never reaches the `releaseWorkspaceOnPlanTerminal` automation, so
+its directory is never reclaimed.
+
+The same tier is why every workspace read and write runs under
+`auth.ContextWithUserActor` for that owner: the read gate has no internal-origin
+bypass, so an unactored read returns **zero rows and no error**, which is
+indistinguishable from "this plan has no workspace".
+
+### 11.3 Where to look
+
+`/fleet/workbenches` in the portal lists the workbench replicas and the
+workspaces living on each, live and released, with the release reason spelled
+out. A cluster owner can widen it to every workspace in the cluster. See
+[portal.md](portal.md).

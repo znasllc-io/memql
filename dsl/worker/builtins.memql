@@ -3,6 +3,18 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// requireLabels / preferLabels, AND NO workerId (design D4, memql#4351).
+// The agent says what the work NEEDS -- os=darwin, has-gpu=true -- and the
+// owner's routingPolicy decides which of their machines that lands on. There
+// is no argument through which a model can name a machine, so a hallucinated
+// machine id is a failure mode this surface does not have; the worst a wrong
+// label can do is narrow the candidate set to nothing, which is reported as
+// no_worker_available with the candidates considered.
+//
+// requireLabels is AND-ed with the owner's policy requirement and filters;
+// preferLabels only orders. Both are matched against the MERGE of the
+// registration's cockpit `labels` and owner-set `operatorLabels`, operator side
+// winning.
 @executor("integration.agentworker.dispatchComputer")
 @args(profile="object")
 @description("Dispatch a workerComputer.<action> call to the user's computer-use-capable worker.")
@@ -14,6 +26,8 @@ builtin agentworkerDispatchComputer {
   planId         string
   taskId         string
   correlationId  string
+  requireLabels  object
+  preferLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerDispatchHost.memql ----
@@ -35,6 +49,8 @@ builtin agentworkerDispatchHost {
   planId         string
   taskId         string
   correlationId  string
+  requireLabels  object
+  preferLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerListWorkers.memql ----
@@ -60,6 +76,12 @@ builtin agentworkerListWorkers {
 // emits a canvas card; the agent's tool result is just a small
 // JSON payload acknowledging the request.
 
+// requireLabels is what makes the card's promise honest (design D6). The
+// user's Allow covers the task on ANY of their machines that match, so the
+// card has to SAY which machines those are -- "on any of your machines
+// matching os=darwin -- currently Jose's MacBook". A card that named one
+// machine and then ran the work on another would be a consent surface that
+// described something other than what it authorized.
 @executor("integration.agentworker.requestScope")
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
@@ -70,6 +92,7 @@ builtin agentworkerRequestScope {
   agentId         string!
   ownerUserId     string!
   partitionId         string
+  requireLabels   object
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerStatus.memql ----

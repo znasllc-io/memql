@@ -1018,6 +1018,28 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 	return b.String()
 }
 
+// ClearWorkerConnectedNode -- Clear connectedNodeId on a worker registration when its stream closes. NOT @serverOnly, deliberately. Its caller is component/worker, which is not on call_origin.go's internal-origin allowlist and should not be: every context in that package descends from a worker's own inbound stream. The concept's owner tier is the gate instead -- the store stamps auth.ContextWithUserActor for the registration's owner, and the write guard refuses any other actor. The residue is that a signed-in person could clear the field on their OWN machine, which the next heartbeat re-stamps within one interval.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["clearWorkerConnectedNode"] in generated_concepts.go).
+type ClearWorkerConnectedNodeArgs struct {
+	RegistrationId string
+}
+
+// ClearWorkerConnectedNode calls the engine mutation clearWorkerConnectedNode.
+func (qc *QueryClient) ClearWorkerConnectedNode(ctx context.Context, args ClearWorkerConnectedNodeArgs) (*Result, error) {
+	call := ClearWorkerConnectedNodeBuild(args)
+	return qc.executeNamed(ctx, "clearWorkerConnectedNode", call)
+}
+
+func ClearWorkerConnectedNodeBuild(args ClearWorkerConnectedNodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation clearWorkerConnectedNode(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
 //
 // Bound concept: v1:telephony:call (machine-readable: BoundConcepts["closeCall"] in generated_concepts.go).
@@ -5469,6 +5491,58 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 	return b.String()
 }
 
+// CreateRoutingPolicy -- Create the caller's routing policy. Run once, for a user who has none; edits go through updateRoutingPolicy.
+//
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["createRoutingPolicy"] in generated_concepts.go).
+type CreateRoutingPolicyArgs struct {
+	PolicyId string
+	// Enum: firstFit | roundRobin | leastLoaded | labelMatch
+	Strategy      string
+	RequireLabels map[string]any
+	PreferLabels  map[string]any
+	// Enum: none | nextMatching
+	Fallback string
+}
+
+// CreateRoutingPolicy calls the engine mutation createRoutingPolicy.
+func (qc *QueryClient) CreateRoutingPolicy(ctx context.Context, args CreateRoutingPolicyArgs) (*Result, error) {
+	call := CreateRoutingPolicyBuild(args)
+	return qc.executeNamed(ctx, "createRoutingPolicy", call)
+}
+
+func CreateRoutingPolicyBuild(args CreateRoutingPolicyArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createRoutingPolicy(")
+	b.WriteString("policyId: ")
+	b.WriteString(quoteMemQL(args.PolicyId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("strategy: ")
+	b.WriteString(quoteMemQL(args.Strategy))
+	if args.RequireLabels != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requireLabels: ")
+		b.WriteString(renderMemQLValue(args.RequireLabels))
+	}
+	if args.PreferLabels != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preferLabels: ")
+		b.WriteString(renderMemQLValue(args.PreferLabels))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fallback: ")
+	b.WriteString(quoteMemQL(args.Fallback))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateScopeElevationPlan -- Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createScopeElevationPlan"] in generated_concepts.go).
@@ -6497,6 +6571,7 @@ type CreateWorkerInvocationArgs struct {
 	BytesIn       int
 	BytesOut      int
 	OutputPreview string
+	Routing       map[string]any
 }
 
 // CreateWorkerInvocation calls the engine mutation createWorkerInvocation.
@@ -6636,6 +6711,13 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 		b.WriteString("outputPreview: ")
 		b.WriteString(quoteMemQL(args.OutputPreview))
 	}
+	if args.Routing != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("routing: ")
+		b.WriteString(renderMemQLValue(args.Routing))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6694,12 +6776,11 @@ func CreateWorkerPairingCodeBuild(args CreateWorkerPairingCodeArgs) string {
 	return b.String()
 }
 
-// CreateWorkerRegistration -- Create a worker registration row on first connect.
+// CreateWorkerRegistration -- Create a worker registration row on first connect. ownerUserId is STAMPED FROM THE ACTOR, not taken from args: the concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and a declared owner field any mutation writes from caller args fails TestDeclaredOwnerFieldsAreServerStamped (its exemption list is empty and is meant to stay so). The worker authenticates as worker:<id> rather than as its owner, so component/worker's store runs this write under auth.ContextWithUserActor for the owner resolved from the worker_token's identity row -- the same borrowed-authority shape createAuthActivity uses, and for the same reason: the service knows whose credential it is before the actor envelope does.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["createWorkerRegistration"] in generated_concepts.go).
 type CreateWorkerRegistrationArgs struct {
 	RegistrationId       string
-	OwnerUserId          string
 	IdentityId           string
 	Name                 string
 	Capabilities         []any
@@ -6713,6 +6794,7 @@ type CreateWorkerRegistrationArgs struct {
 	RegisteredAt         string
 	LastSeenAt           string
 	LastConnectedFromIP  string
+	ConnectedNodeId      string
 }
 
 // CreateWorkerRegistration calls the engine mutation createWorkerRegistration.
@@ -6726,11 +6808,6 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 	b.WriteString("mutation createWorkerRegistration(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
@@ -6812,6 +6889,13 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(quoteMemQL(args.LastConnectedFromIP))
 	}
+	if args.ConnectedNodeId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("connectedNodeId: ")
+		b.WriteString(quoteMemQL(args.ConnectedNodeId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6882,6 +6966,28 @@ func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 		b.WriteString("expiresAt: ")
 		b.WriteString(quoteMemQL(args.ExpiresAt))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeactivateRoutingPolicy -- Take a routing policy out of the active set. The row is kept -- an invocation's routing.policyId names it.
+//
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["deactivateRoutingPolicy"] in generated_concepts.go).
+type DeactivateRoutingPolicyArgs struct {
+	PolicyId string
+}
+
+// DeactivateRoutingPolicy calls the engine mutation deactivateRoutingPolicy.
+func (qc *QueryClient) DeactivateRoutingPolicy(ctx context.Context, args DeactivateRoutingPolicyArgs) (*Result, error) {
+	call := DeactivateRoutingPolicyBuild(args)
+	return qc.executeNamed(ctx, "deactivateRoutingPolicy", call)
+}
+
+func DeactivateRoutingPolicyBuild(args DeactivateRoutingPolicyArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation deactivateRoutingPolicy(")
+	b.WriteString("policyId: ")
+	b.WriteString(quoteMemQL(args.PolicyId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8454,12 +8560,15 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 }
 
 // ProvisionWorkspace -- Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
+// ownerUserId is STAMPED FROM THE ACTOR (memql#4354). The concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and a declared owner field written from caller args fails TestDeclaredOwnerFieldsAreServerStamped. The workbench integration therefore runs this write under auth.ContextWithUserActor for the parent plan's requestedBy, which it has already resolved in order to know whose plan it is executing.
+// nodeId is the serving replica's own MEMQL_NODE_ID, supplied by the node that just made the directory. It is an arg rather than a stamp because only that node knows it, and it is not forgeable to any useful end: naming another replica would send the picker somewhere the directory is not, which reads as a node loss and re-provisions.
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionWorkspace"] in generated_concepts.go).
 type ProvisionWorkspaceArgs struct {
 	WorkspaceId string
 	PlanId      string
 	StorageRoot string
+	NodeId      string
 }
 
 // ProvisionWorkspace calls the engine mutation provisionWorkspace.
@@ -8483,6 +8592,13 @@ func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	}
 	b.WriteString("storageRoot: ")
 	b.WriteString(quoteMemQL(args.StorageRoot))
+	if args.NodeId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodeId: ")
+		b.WriteString(quoteMemQL(args.NodeId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -10162,6 +10278,7 @@ type RefreshWorkerRegistrationArgs struct {
 	BuildTag             string
 	LastSeenAt           string
 	LastConnectedFromIP  string
+	ConnectedNodeId      string
 }
 
 // RefreshWorkerRegistration calls the engine mutation refreshWorkerRegistration.
@@ -10243,6 +10360,13 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(quoteMemQL(args.LastConnectedFromIP))
+	}
+	if args.ConnectedNodeId != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("connectedNodeId: ")
+		b.WriteString(quoteMemQL(args.ConnectedNodeId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10451,7 +10575,7 @@ func RejectOverrideBuild(args RejectOverrideArgs) string {
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["releaseWorkspace"] in generated_concepts.go).
 type ReleaseWorkspaceArgs struct {
 	WorkspaceId string
-	// Enum: plan_terminal | explicit | ttl_expired
+	// Enum: plan_terminal | explicit | ttl_expired | node_lost
 	Reason string
 }
 
@@ -10527,6 +10651,34 @@ func RenamePasskeyIdentityBuild(args RenamePasskeyIdentityArgs) string {
 	}
 	b.WriteString("label: ")
 	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RenameWorker -- Rename one of the caller's machines. Writes displayName; `name` stays the cockpit's hostname, which the next reconnect re-stamps.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["renameWorker"] in generated_concepts.go).
+type RenameWorkerArgs struct {
+	RegistrationId string
+	DisplayName    string
+}
+
+// RenameWorker calls the engine mutation renameWorker.
+func (qc *QueryClient) RenameWorker(ctx context.Context, args RenameWorkerArgs) (*Result, error) {
+	call := RenameWorkerBuild(args)
+	return qc.executeNamed(ctx, "renameWorker", call)
+}
+
+func RenameWorkerBuild(args RenameWorkerArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation renameWorker(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("displayName: ")
+	b.WriteString(quoteMemQL(args.DisplayName))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12528,6 +12680,34 @@ func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
 	return b.String()
 }
 
+// SetWorkerOperatorLabels -- Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not merged: the Fleet page edits the set as a set, and a merge would make removing a label impossible through this surface.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerOperatorLabels"] in generated_concepts.go).
+type SetWorkerOperatorLabelsArgs struct {
+	RegistrationId string
+	OperatorLabels map[string]any
+}
+
+// SetWorkerOperatorLabels calls the engine mutation setWorkerOperatorLabels.
+func (qc *QueryClient) SetWorkerOperatorLabels(ctx context.Context, args SetWorkerOperatorLabelsArgs) (*Result, error) {
+	call := SetWorkerOperatorLabelsBuild(args)
+	return qc.executeNamed(ctx, "setWorkerOperatorLabels", call)
+}
+
+func SetWorkerOperatorLabelsBuild(args SetWorkerOperatorLabelsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setWorkerOperatorLabels(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("operatorLabels: ")
+	b.WriteString(renderMemQLValue(args.OperatorLabels))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SoftDeleteWorkerInvocation -- Soft-delete a worker invocation row past retention.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["softDeleteWorkerInvocation"] in generated_concepts.go).
@@ -12995,6 +13175,28 @@ func TouchSessionBuild(args TouchSessionArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TouchWorkerSelected -- Stamp lastSelectedAt on the machine the router just picked. NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier already refuses a write onto a row the caller does not own, and @serverOnly would add a third entry to the server-only inventory to buy nothing beyond it. The residue is that a person could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin rotation, which is a preference they already control from the Fleet page.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["touchWorkerSelected"] in generated_concepts.go).
+type TouchWorkerSelectedArgs struct {
+	RegistrationId string
+}
+
+// TouchWorkerSelected calls the engine mutation touchWorkerSelected.
+func (qc *QueryClient) TouchWorkerSelected(ctx context.Context, args TouchWorkerSelectedArgs) (*Result, error) {
+	call := TouchWorkerSelectedBuild(args)
+	return qc.executeNamed(ctx, "touchWorkerSelected", call)
+}
+
+func TouchWorkerSelectedBuild(args TouchWorkerSelectedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation touchWorkerSelected(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -14552,6 +14754,58 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 	return b.String()
 }
 
+// UpdateRoutingPolicy -- Edit the caller's routing policy in place. The concept's owner tier is what scopes this to a row the caller owns; the body cannot write ownerUserId, so the read-merge keeps it.
+//
+// Bound concept: v1:worker:routingPolicy (machine-readable: BoundConcepts["updateRoutingPolicy"] in generated_concepts.go).
+type UpdateRoutingPolicyArgs struct {
+	PolicyId string
+	// Enum: firstFit | roundRobin | leastLoaded | labelMatch
+	Strategy      string
+	RequireLabels map[string]any
+	PreferLabels  map[string]any
+	// Enum: none | nextMatching
+	Fallback string
+}
+
+// UpdateRoutingPolicy calls the engine mutation updateRoutingPolicy.
+func (qc *QueryClient) UpdateRoutingPolicy(ctx context.Context, args UpdateRoutingPolicyArgs) (*Result, error) {
+	call := UpdateRoutingPolicyBuild(args)
+	return qc.executeNamed(ctx, "updateRoutingPolicy", call)
+}
+
+func UpdateRoutingPolicyBuild(args UpdateRoutingPolicyArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateRoutingPolicy(")
+	b.WriteString("policyId: ")
+	b.WriteString(quoteMemQL(args.PolicyId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("strategy: ")
+	b.WriteString(quoteMemQL(args.Strategy))
+	if args.RequireLabels != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requireLabels: ")
+		b.WriteString(renderMemQLValue(args.RequireLabels))
+	}
+	if args.PreferLabels != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preferLabels: ")
+		b.WriteString(renderMemQLValue(args.PreferLabels))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fallback: ")
+	b.WriteString(quoteMemQL(args.Fallback))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateSendJob -- ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier.
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.go).
@@ -14945,6 +15199,8 @@ type UpdateWorkerLastSeenArgs struct {
 	RegistrationId      string
 	LastSeenAt          string
 	LastConnectedFromIP string
+	ConnectedNodeId     string
+	ActiveCount         int
 }
 
 // UpdateWorkerLastSeen calls the engine mutation updateWorkerLastSeen.
@@ -14969,6 +15225,20 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(quoteMemQL(args.LastConnectedFromIP))
+	}
+	if args.ConnectedNodeId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("connectedNodeId: ")
+		b.WriteString(quoteMemQL(args.ConnectedNodeId))
+	}
+	if args.ActiveCount != 0 {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("activeCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.ActiveCount))
 	}
 	b.WriteString(")")
 	return b.String()

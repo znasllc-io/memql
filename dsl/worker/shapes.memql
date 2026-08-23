@@ -27,6 +27,7 @@ shape invocation workerInvocationFull {
   bytesIn
   bytesOut
   outputPreview
+  routing
   row.createdAt
 }
 
@@ -39,9 +40,14 @@ shape registration workerRegistrationFull {
   ownerUserId
   identityId
   name
+  displayName
   capabilities
   capabilityDescriptor
   labels
+  operatorLabels
+  connectedNodeId
+  lastSelectedAt
+  activeCount
   concurrency
   platformInfo
   permissions
@@ -53,5 +59,19 @@ shape registration workerRegistrationFull {
   revokedAt
   revokedBy
   revokeReason
+  row.createdAt
+}
+
+/// Full projection of a v1:worker:routingPolicy row. Backs routingPolicyForOwner (the router's
+/// read) and the Fleet page's policy editor.
+@row
+shape routingPolicy workerRoutingPolicyFull {
+  row.id
+  ownerUserId
+  strategy
+  requireLabels
+  preferLabels
+  fallback
+  active
   row.createdAt
 }

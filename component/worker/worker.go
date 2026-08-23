@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,19 @@ const (
 	// per interval (the first heartbeat of a stream always
 	// persists). The in-memory registry is updated on every
 	// heartbeat regardless. See streamSession.handleHeartbeat.
-	HeartbeatBatchInterval = 60 * time.Second
+	//
+	// It was 60s, and the reason given was that a per-beat write bought
+	// no freshness anyone read. That reasoning was circular: nothing read
+	// lastSeenAt BECAUSE a minute-stale timestamp answers no question
+	// worth asking, and staleness was therefore the cause of the disuse
+	// rather than a consequence of it. The Fleet (epic memql#4349) asks
+	// the question -- `online` is DERIVED from lastSeenAt against
+	// OnlineWindow, which is two of these intervals -- so this cadence is
+	// now the freshness budget of that flag. At 60s a closed laptop would
+	// have read as online for two more minutes. At 15s, the cockpit's own
+	// beat, the flush is one write per worker per beat and `online`
+	// decays within 30s. See IsOnline in online.go.
+	HeartbeatBatchInterval = 15 * time.Second
 
 	// DispatchTimeoutDefault is the default ToolDispatch timeout when
 	// the calling tool doesn't supply one.
@@ -82,9 +95,28 @@ type Store interface {
 	// worker reconnects. A nil row.CapabilityDescriptor CLEARS the
 	// persisted descriptor -- the worker no longer advertises one.
 	RefreshRegistration(ctx context.Context, row RegistrationRow) error
-	UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error
-	RevokeRegistration(ctx context.Context, registrationId, revokedBy, reason string, at time.Time) error
-	WorkerByIdentityId(ctx context.Context, identityId string) (*RegistrationRow, error)
+	// UpdateLastSeen flushes the batched heartbeat: lastSeenAt plus the
+	// two fields that only mean anything while a stream is live --
+	// connectedNodeId (which replica holds it) and activeCount (how many
+	// calls are in flight on it).
+	UpdateLastSeen(ctx context.Context, registrationId, ownerUserId string, lastSeenAt time.Time, sourceIP, connectedNodeId string, activeCount int) error
+	// ClearConnectedNode is the disconnect half of connectedNodeId.
+	// Without it a machine whose stream dropped keeps naming the replica
+	// that used to hold it, and a router forwards a dispatch to a node
+	// that will refuse it -- which presents as a mesh fault rather than
+	// as an offline laptop. lastSeenAt is deliberately NOT touched: it
+	// records when the machine was last heard from, and moving it on the
+	// way out would make a disconnected worker look fresh for one whole
+	// online window.
+	ClearConnectedNode(ctx context.Context, registrationId, ownerUserId string) error
+	RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error
+	// WorkerByIdentityId takes the OWNER as well as the identity, and the
+	// owner is not redundant: v1:worker:registration declares an owned
+	// tier, so the read returns zero rows unless the context carries an
+	// actor (see the borrowed-authority note at the top of store.go). The
+	// register handshake has already resolved the WorkerIdentity, which
+	// names the owner, before it asks this question.
+	WorkerByIdentityId(ctx context.Context, identityId, ownerUserId string) (*RegistrationRow, error)
 	WorkersForUser(ctx context.Context, ownerUserId string) ([]RegistrationRow, error)
 	CreateInvocation(ctx context.Context, row InvocationRow) error
 	IdentityByTokenHash(ctx context.Context, tokenHash string) (*WorkerIdentity, error)
@@ -121,18 +153,42 @@ type RegistrationRow struct {
 	// self-description from Register.capability_descriptor_json.
 	// Nil when the worker didn't send one.
 	CapabilityDescriptor *CapabilityDescriptor
-	Labels               map[string]string
-	Concurrency          map[string]uint32
-	Platform             map[string]any
-	Permissions          map[string]any
-	Version              string
-	BuildTag             string
-	RegisteredAt         time.Time
-	LastSeenAt           time.Time
-	LastConnectedFromIP  string
-	RevokedAt            time.Time
-	RevokedBy            string
-	RevokeReason         string
+	// Labels are the cockpit's own tags, overwritten from the Register
+	// message on every reconnect. OperatorLabels are the owner's, set
+	// from the Fleet page and never written by register or heartbeat --
+	// which is the whole reason they are a second field rather than a
+	// merge into Labels (design D3, memql#4350).
+	Labels         map[string]string
+	OperatorLabels map[string]string
+	// DisplayName is the name the OWNER gave this machine. Name stays the
+	// cockpit's hostname and is re-stamped on every reconnect, so a
+	// rename kept there would not survive one.
+	DisplayName string
+	// ConnectedNodeId is the MEMQL_NODE_ID of the agent replica currently
+	// holding this worker's stream, or empty when no replica does. It is
+	// what makes a machine reachable from a replica that is NOT holding
+	// its stream: the router forwards there instead of finding nothing.
+	ConnectedNodeId string
+	// LastSelectedAt is stamped by the router (touchWorkerSelected) on
+	// every successful pick -- the shared clock roundRobin rotates on.
+	// component/worker never writes it.
+	LastSelectedAt time.Time
+	// ActiveCount is calls in flight as of the most recent heartbeat
+	// flush. Best-effort and up to one interval stale: a routing input
+	// for leastLoaded, never a correctness one -- Worker.Acquire is the
+	// real valve.
+	ActiveCount         int
+	Concurrency         map[string]uint32
+	Platform            map[string]any
+	Permissions         map[string]any
+	Version             string
+	BuildTag            string
+	RegisteredAt        time.Time
+	LastSeenAt          time.Time
+	LastConnectedFromIP string
+	RevokedAt           time.Time
+	RevokedBy           string
+	RevokeReason        string
 }
 
 // IsActive reports whether the registration is currently usable.
@@ -163,6 +219,11 @@ type InvocationRow struct {
 	BytesIn       int
 	BytesOut      int
 	OutputPreview string
+	// Routing records HOW this machine was chosen -- the policy row, the
+	// strategy it named, the candidates considered (memql#4351). Free
+	// shape because the router owns it; the mutation coalesces a nil to
+	// {}.
+	Routing map[string]any
 }
 
 // WorkerIdentity is the auth-path projection: the minimum needed to
@@ -180,6 +241,13 @@ type Options struct {
 	Store   Store
 	Auditor Auditor
 	Clock   func() time.Time
+	// NodeId is this replica's MEMQL_NODE_ID, stamped onto every
+	// registration this node holds a stream for. Left empty it is read
+	// from the environment once, at construction -- the same shape
+	// component/campaigns and component/node use, and read ONCE rather
+	// than per call so a single process cannot disagree with itself about
+	// which node it is.
+	NodeId string
 }
 
 // NewService constructs a worker subsystem. The returned service is
@@ -204,8 +272,23 @@ func NewService(opts Options) (*Service, error) {
 		auditor:  opts.Auditor,
 		clock:    clock,
 	}
-	svc.server = newServer(opts.Logger, opts.Store, registry, opts.Auditor, clock)
+	svc.server = newServer(opts.Logger, opts.Store, registry, opts.Auditor, clock, resolveNodeId(opts.NodeId))
 	return svc, nil
+}
+
+// resolveNodeId returns the explicit node id when one was configured and
+// otherwise reads MEMQL_NODE_ID. There is no accessor to call: every other
+// component that needs this value reads the variable directly
+// (component/node/identity.go, component/campaigns/config.go), and
+// component/envregistry publishes the manifest entry rather than a getter.
+// An empty result is not an error -- a single-process deployment sets no node
+// id, and an empty connectedNodeId there is honest: there is one replica and
+// nothing to forward to.
+func resolveNodeId(configured string) string {
+	if v := strings.TrimSpace(configured); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("MEMQL_NODE_ID"))
 }
 
 // Register attaches the WorkerService implementation to the supplied
@@ -225,6 +308,19 @@ func (s *Service) Registry() *Registry {
 		return nil
 	}
 	return s.registry
+}
+
+// NodeId reports the replica id this service stamps onto connectedNodeId.
+// The agent-side dispatcher reads it to decide local dispatch versus a
+// cross-node forward (memql#4352), and takes it from HERE rather than reading
+// MEMQL_NODE_ID again: two readings of one variable is two chances to
+// disagree, and the disagreement would be a dispatcher that forwards every
+// call to a peer for machines connected to itself.
+func (s *Service) NodeId() string {
+	if s == nil || s.server == nil {
+		return ""
+	}
+	return s.server.nodeId
 }
 
 // Start begins worker subsystem background work. Currently no-op;
