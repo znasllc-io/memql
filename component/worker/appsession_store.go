@@ -66,6 +66,12 @@ type AppSessionStore interface {
 	EndAppSession(ctx context.Context, row AppSessionRow) error
 }
 
+// EngineStore serves both surfaces. Asserted rather than left to the
+// one assignment in app/ to prove it: a method whose signature drifts
+// should fail HERE, next to the interface, rather than in a wiring file
+// that reads like configuration.
+var _ AppSessionStore = (*EngineStore)(nil)
+
 // CreateAppSession writes the row that says a session was attempted.
 func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) error {
 	if s == nil || s.Engine == nil {
