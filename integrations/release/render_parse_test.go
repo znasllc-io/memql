@@ -1,12 +1,14 @@
 package release
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // render_parse_test.go -- every statement this package composes, run through
@@ -221,5 +223,99 @@ func TestTheParseGateCanActuallyFail(t *testing.T) {
 	if fn, err := eng.Functions().Get("createReleaseCutThatDoesNotExist"); err == nil && fn != nil {
 		t.Fatal("the registry resolved a function nothing declares, so " +
 			"TestEveryRenderedArgumentIsDeclared proves nothing about resolution")
+	}
+}
+
+// TestTheResultNodeSurvivesTheWIREEncoding closes the last gap on the data
+// path: what the portal actually receives.
+//
+// A capability returns ONE synthetic MemoryNode whose Payload is JSON. The
+// engine encodes that as a protobuf Struct, and the TS SDK's flattenNode
+// spreads its entries onto the row -- so every field the Releases card reads
+// (`version`, `status`, `checkError`, and the nested `images` LIST OF OBJECTS)
+// has to survive protobuf's value model, which has no arrays of arbitrary Go
+// types, only ListValue of Value.
+//
+// The portal tests cannot see this: they hand the card a plain object and
+// never encode anything. That is the same shape as a page being fully green
+// against jsdom and rendering blank in a browser -- the assertion is about the
+// fake, and the encoding is where the real answer lives.
+//
+// `images` is the field at risk. A flat payload (the dataOrigins precedent)
+// proves nothing about a nested list.
+func TestTheResultNodeSurvivesTheWIREEncoding(t *testing.T) {
+	out := StatusOutcome{
+		Version: "v1.2.3", BareVersion: "1.2.3", Status: "dispatched",
+		Age: "4 minutes ago", CheckError: "", Repository: "acme/widget",
+		Images: []ImageDetail{
+			{Repository: "acme/widget-identity", Present: true},
+			{Repository: "acme/widget-agent", Present: false},
+		},
+	}
+	nodes, err := resultNode("status", out.Version, out)
+	if err != nil {
+		t.Fatalf("resultNode: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("a capability returns ONE node; got %d", len(nodes))
+	}
+
+	// The engine's own encoding step: payload JSON -> protobuf Struct.
+	var decoded map[string]any
+	if err := json.Unmarshal(nodes[0].Payload, &decoded); err != nil {
+		t.Fatalf("the payload is not JSON: %v", err)
+	}
+	wire, err := structpb.NewStruct(decoded)
+	if err != nil {
+		t.Fatalf("the payload does not encode as a protobuf Struct, so it cannot reach a "+
+			"client at all: %v", err)
+	}
+	row := wire.AsMap()
+
+	// The scalar fields the card reads.
+	for key, want := range map[string]string{
+		"version": "v1.2.3", "bareVersion": "1.2.3", "status": "dispatched",
+		"age": "4 minutes ago", "repository": "acme/widget",
+	} {
+		if got, _ := row[key].(string); got != want {
+			t.Errorf("row[%q] = %v, want %q -- the card reads this key verbatim", key, row[key], want)
+		}
+	}
+
+	// THE ONE AT RISK. flattenNode spreads payload entries onto the row, so
+	// the card indexes row["images"] and expects a list of objects.
+	images, ok := row["images"].([]any)
+	if !ok {
+		t.Fatalf("row[\"images\"] came back as %T, not a list. The card renders 'Not published yet: "+
+			"...' from it, so this is the difference between naming the missing builds and "+
+			"rendering nothing.", row["images"])
+	}
+	if len(images) != 2 {
+		t.Fatalf("images has %d entries, want 2", len(images))
+	}
+	first, ok := images[0].(map[string]any)
+	if !ok {
+		t.Fatalf("images[0] is %T, not an object", images[0])
+	}
+	if repo, _ := first["repository"].(string); repo != "acme/widget-identity" {
+		t.Errorf("images[0].repository = %v, want acme/widget-identity", first["repository"])
+	}
+	if present, _ := first["present"].(bool); !present {
+		t.Error("images[0].present did not survive as a BOOLEAN; the card filters on !present, " +
+			"so a string \"true\" here would report a published image as missing")
+	}
+	// And the false one, because a bool that degrades to a truthy value
+	// would make every image look published.
+	second, _ := images[1].(map[string]any)
+	if present, isBool := second["present"].(bool); !isBool || present {
+		t.Errorf("images[1].present = %v (%T), want the boolean false", second["present"], second["present"])
+	}
+
+	// checkError is OMITTED when empty (`omitempty`), which the card reads as
+	// "the check did not error". Asserted so the tag is not dropped as tidying.
+	if _, present := row["checkError"]; present {
+		t.Error("checkError is present on a clean check; the card branches on it being empty, " +
+			"and an empty-string key is fine -- but a NON-empty one here would render " +
+			"'the check could not tell' over a perfectly good result")
 	}
 }
