@@ -640,7 +640,7 @@ mutate auditEvent createAuditEvent {
     actorEmail       string
     actorRole        string
     actorIdentityId  string
-    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore")
+    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut")
     targetId         string
     targetEmail      string
     detail           object

@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use deployment.specs.{ requiresOwner }
+
 /// Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 @unbounded("node-type registry -- a tiny bounded topology set consumed whole")
 query nodeType clusterNodeTypes {
@@ -145,3 +147,22 @@ query node staleClusterNodes {
 // Deployments view, and the SDK keep resolving them by name. The `query node`
 // topology lookups above (nodesForDeployment / nodesNotInDeployment) stay here
 // because they read the v1:cluster:node concept, not the deployment record.
+
+// ---- The release-cut history (epic memql#4434) ----
+
+/// Every release this cluster cut, newest first. Backs the Releases card on the portal's
+/// Deployments page.
+///
+/// GATED requiresOwner, matching the builtin's Go owner wall rather than the concept's clusterOwner
+/// tier -- and the two are not the same question. The tier decides which ROWS a caller may see; this
+/// gate decides whether cutting a release is a thing this caller does at all, and the answer the
+/// owner ask gives is "only owners". Being the weaker of the two would be the bug: an admin passing
+/// the tier while the cut button refuses them would render a history for an action they cannot take.
+///
+/// This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A
+/// release cut by hand appears here not at all.
+query releaseCut releaseCuts {
+  filter   requiresOwner
+  sort     "row.createdAt", "desc"
+  paginate 50
+}
