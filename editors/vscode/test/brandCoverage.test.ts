@@ -224,20 +224,28 @@ test("the sweep sees all seven panel files and nine documents", () => {
   // -- a renamed directory, a changed suffix -- would satisfy them all while
   // examining nothing.
   const names = panelNames();
-  assert.deepEqual(names, [
-    "addClusterPanel.ts",
-    "automationPanel.ts",
-    "conceptPanel.ts",
-    "connectionPanel.ts",
-    "constructPanel.ts",
-    "deploymentPanel.ts",
-    "runPanel.ts",
-  ]);
+  assert.deepEqual(
+    names,
+    [
+      "addClusterPanel.ts",
+      "automationPanel.ts",
+      "conceptPanel.ts",
+      "connectionPanel.ts",
+      "constructPanel.ts",
+      "deploymentPanel.ts",
+      "runPanel.ts",
+    ],
+    "ADDED OR REMOVED A PANEL? Update this list and the document count below. Failing here on a legitimately-added panel is the intended cost: a new panel is exactly when somebody should be made to look at whether it wears the brand.",
+  );
   const total = names.reduce(
     (sum, name) => sum + documents(read(path.join(PANEL_DIR, name))).length,
     0,
   );
-  assert.equal(total, 9, "seven files, nine panel classes, nine documents");
+  assert.equal(
+    total,
+    9,
+    "seven files, nine panel classes, nine documents -- automationPanel.ts and runPanel.ts host two each. If you added a panel class, bump this; if this dropped without you touching a panel, the document scan has stopped matching and the sweep below is no longer looking at anything.",
+  );
 });
 
 test("every panel document inlines the brand tokens", () => {
