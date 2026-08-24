@@ -1,0 +1,51 @@
+
+// Empty-body, signature-bound shapes: the engine's default projection over
+// each concept (memql#2035). A read with NO shape clause is not projected at
+// all -- it answers with the raw graph bundle, whose rows are node envelopes
+// rather than the concept's fields -- so every consumer would have to know
+// that, and the one that did not would read empty.
+
+/// Every field of a product-content row.
+@row
+shape productContent productContentFull {
+}
+
+/// Every field of a customer note.
+@row
+shape customerNote customerNoteFull {
+}
+
+/// Every field of a company-location note.
+@row
+shape companyLocationNote companyLocationNoteFull {
+}
+
+/// Every field of a credit limit.
+@row
+shape creditLimit creditLimitFull {
+}
+
+/// Every field of a quote, its lines included.
+@row
+shape quote quoteFull {
+}
+
+/// Every field of an approval chain, its steps included.
+@row
+shape approvalChain approvalChainFull {
+}
+
+/// Every field of a sales rep.
+@row
+shape salesRep salesRepFull {
+}
+
+/// Every field of a territory.
+@row
+shape territory territoryFull {
+}
+
+/// Every field of a reorder list.
+@row
+shape reorderList reorderListFull {
+}

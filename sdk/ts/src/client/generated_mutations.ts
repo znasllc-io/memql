@@ -1456,7 +1456,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -2897,6 +2897,52 @@ QueryClient.prototype.createProject = function (this: QueryClient, args: CreateP
   return this.executeNamed("createProject", buildCreateProject(args), opts);
 };
 
+/** Create a quote in draft. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["createQuote"] in generated_concepts.ts).
+export interface CreateQuoteArgs {
+  quoteId: string;
+  storeId: string;
+  quoteNumber: string;
+  companyGid: string;
+  companyLocationGid?: string;
+  companyContactGid?: string;
+  salesRepId?: string;
+  lines?: Record<string, unknown>[];
+  currencyCode: string;
+  totalAmount?: string;
+  terms?: string;
+  validUntil?: string;
+  approvalChainId?: string;
+}
+
+export function buildCreateQuote(args: CreateQuoteArgs): string {
+  const parts: string[] = [];
+  parts.push("quoteId: " + renderMemQLValue(args.quoteId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("quoteNumber: " + renderMemQLValue(args.quoteNumber));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  if (args.companyLocationGid !== undefined) parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  if (args.companyContactGid !== undefined) parts.push("companyContactGid: " + renderMemQLValue(args.companyContactGid));
+  if (args.salesRepId !== undefined) parts.push("salesRepId: " + renderMemQLValue(args.salesRepId));
+  if (args.lines !== undefined) parts.push("lines: " + renderMemQLValue(args.lines));
+  parts.push("currencyCode: " + renderMemQLValue(args.currencyCode));
+  if (args.totalAmount !== undefined) parts.push("totalAmount: " + renderMemQLValue(args.totalAmount));
+  if (args.terms !== undefined) parts.push("terms: " + renderMemQLValue(args.terms));
+  if (args.validUntil !== undefined) parts.push("validUntil: " + renderMemQLValue(args.validUntil));
+  if (args.approvalChainId !== undefined) parts.push("approvalChainId: " + renderMemQLValue(args.approvalChainId));
+  return "mutation createQuote(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createQuote(args: CreateQuoteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createQuote = function (this: QueryClient, args: CreateQuoteArgs = {} as CreateQuoteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createQuote", buildCreateQuote(args), opts);
+};
+
 /** Create a data record in draft validation state awaiting check and confirmation */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["createRecord"] in generated_concepts.ts).
 export interface CreateRecordArgs {
@@ -3403,6 +3449,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.createSpawnEvent = function (this: QueryClient, args: CreateSpawnEventArgs = {} as CreateSpawnEventArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createSpawnEvent", buildCreateSpawnEvent(args), opts);
+};
+
+/** Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.ts).
+export interface CreateStoreArgs {
+  storeId: string;
+  domain: string;
+  name?: string;
+  appClientId?: string;
+  adminTokenRef?: string;
+  storefrontTokenRef?: string;
+  webhookSecretRef?: string;
+  apiVersion?: string;
+  protectedDataLevel?: string;
+  plan?: string;
+  ownerUserId?: string;
+}
+
+export function buildCreateStore(args: CreateStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("domain: " + renderMemQLValue(args.domain));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.appClientId !== undefined) parts.push("appClientId: " + renderMemQLValue(args.appClientId));
+  if (args.adminTokenRef !== undefined) parts.push("adminTokenRef: " + renderMemQLValue(args.adminTokenRef));
+  if (args.storefrontTokenRef !== undefined) parts.push("storefrontTokenRef: " + renderMemQLValue(args.storefrontTokenRef));
+  if (args.webhookSecretRef !== undefined) parts.push("webhookSecretRef: " + renderMemQLValue(args.webhookSecretRef));
+  if (args.apiVersion !== undefined) parts.push("apiVersion: " + renderMemQLValue(args.apiVersion));
+  if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
+  if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
+  if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  return "mutation createStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createStore(args: CreateStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createStore = function (this: QueryClient, args: CreateStoreArgs = {} as CreateStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createStore", buildCreateStore(args), opts);
 };
 
 /** Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition. */
@@ -4554,6 +4642,50 @@ QueryClient.prototype.markChunkSuperseded = function (this: QueryClient, args: M
   return this.executeNamed("markChunkSuperseded", buildMarkChunkSuperseded(args), opts);
 };
 
+/** Stamp the moment a quote was sent to the buyer. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["markQuoteSent"] in generated_concepts.ts).
+export interface MarkQuoteSentArgs {
+  quoteId: string;
+}
+
+export function buildMarkQuoteSent(args: MarkQuoteSentArgs): string {
+  const parts: string[] = [];
+  parts.push("quoteId: " + renderMemQLValue(args.quoteId));
+  return "mutation markQuoteSent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    markQuoteSent(args: MarkQuoteSentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.markQuoteSent = function (this: QueryClient, args: MarkQuoteSentArgs = {} as MarkQuoteSentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("markQuoteSent", buildMarkQuoteSent(args), opts);
+};
+
+/** Stamp a reorder list as ordered from. */
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["markReorderListOrdered"] in generated_concepts.ts).
+export interface MarkReorderListOrderedArgs {
+  listId: string;
+}
+
+export function buildMarkReorderListOrdered(args: MarkReorderListOrderedArgs): string {
+  const parts: string[] = [];
+  parts.push("listId: " + renderMemQLValue(args.listId));
+  return "mutation markReorderListOrdered(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    markReorderListOrdered(args: MarkReorderListOrderedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.markReorderListOrdered = function (this: QueryClient, args: MarkReorderListOrderedArgs = {} as MarkReorderListOrderedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("markReorderListOrdered", buildMarkReorderListOrdered(args), opts);
+};
+
 /** Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips '' -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["markResponsibilityIntakePending"] in generated_concepts.ts).
 export interface MarkResponsibilityIntakePendingArgs {
@@ -4574,6 +4706,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.markResponsibilityIntakePending = function (this: QueryClient, args: MarkResponsibilityIntakePendingArgs = {} as MarkResponsibilityIntakePendingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("markResponsibilityIntakePending", buildMarkResponsibilityIntakePending(args), opts);
+};
+
+/** Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.ts).
+export interface MarkStoreRedactedArgs {
+  storeId: string;
+  redactedAt: string;
+}
+
+export function buildMarkStoreRedacted(args: MarkStoreRedactedArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("redactedAt: " + renderMemQLValue(args.redactedAt));
+  return "mutation markStoreRedacted(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    markStoreRedacted(args: MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: MarkStoreRedactedArgs = {} as MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
 };
 
 /** Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint. */
@@ -4865,6 +5021,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordActionCandidate = function (this: QueryClient, args: RecordActionCandidateArgs = {} as RecordActionCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordActionCandidate", buildRecordActionCandidate(args), opts);
+};
+
+/** Record one approver's decision and, when the chain is finished, its outcome. */
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["recordApprovalDecision"] in generated_concepts.ts).
+export interface RecordApprovalDecisionArgs {
+  chainId: string;
+  steps?: Record<string, unknown>[];
+  status: string;
+}
+
+export function buildRecordApprovalDecision(args: RecordApprovalDecisionArgs): string {
+  const parts: string[] = [];
+  parts.push("chainId: " + renderMemQLValue(args.chainId));
+  if (args.steps !== undefined) parts.push("steps: " + renderMemQLValue(args.steps));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation recordApprovalDecision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recordApprovalDecision(args: RecordApprovalDecisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recordApprovalDecision = function (this: QueryClient, args: RecordApprovalDecisionArgs = {} as RecordApprovalDecisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recordApprovalDecision", buildRecordApprovalDecision(args), opts);
 };
 
 /** Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact). */
@@ -5568,6 +5750,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordRouterCall = function (this: QueryClient, args: RecordRouterCallArgs = {} as RecordRouterCallArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordRouterCall", buildRecordRouterCall(args), opts);
+};
+
+/** Record what the connector last observed about a store. Health is a single object so the connector can publish a shape the portal renders without a schema change every time a new counter is worth showing. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["recordStoreHealth"] in generated_concepts.ts).
+export interface RecordStoreHealthArgs {
+  storeId: string;
+  health: Record<string, unknown>;
+  subscriptionsCheckedAt?: string;
+}
+
+export function buildRecordStoreHealth(args: RecordStoreHealthArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("health: " + renderMemQLValue(args.health));
+  if (args.subscriptionsCheckedAt !== undefined) parts.push("subscriptionsCheckedAt: " + renderMemQLValue(args.subscriptionsCheckedAt));
+  return "mutation recordStoreHealth(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recordStoreHealth(args: RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recordStoreHealth = function (this: QueryClient, args: RecordStoreHealthArgs = {} as RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recordStoreHealth", buildRecordStoreHealth(args), opts);
 };
 
 /** ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex digest of the normalized address -- the address itself never reaches this mutation, which is what makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address appends a version to the same row rather than creating a second one, and the newest reason wins.
@@ -6985,6 +7193,32 @@ QueryClient.prototype.setConstructStatus = function (this: QueryClient, args: Se
   return this.executeNamed("setConstructStatus", buildSetConstructStatus(args), opts);
 };
 
+/** Move a credit limit between enforced, held and waived. */
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["setCreditLimitStatus"] in generated_concepts.ts).
+export interface SetCreditLimitStatusArgs {
+  creditLimitId: string;
+  status: string;
+  reviewedBy?: string;
+}
+
+export function buildSetCreditLimitStatus(args: SetCreditLimitStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("creditLimitId: " + renderMemQLValue(args.creditLimitId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  if (args.reviewedBy !== undefined) parts.push("reviewedBy: " + renderMemQLValue(args.reviewedBy));
+  return "mutation setCreditLimitStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setCreditLimitStatus(args: SetCreditLimitStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setCreditLimitStatus = function (this: QueryClient, args: SetCreditLimitStatusArgs = {} as SetCreditLimitStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setCreditLimitStatus", buildSetCreditLimitStatus(args), opts);
+};
+
 /** setDelegationPolicy wraps the mutation named "setDelegationPolicy". */
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.ts).
 export interface SetDelegationPolicyArgs {
@@ -7275,6 +7509,31 @@ QueryClient.prototype.setPolicy = function (this: QueryClient, args: SetPolicyAr
   return this.executeNamed("setPolicy", buildSetPolicy(args), opts);
 };
 
+/** Move a quote through draft -> sent -> accepted | declined | expired.
+The transitions themselves are checked in Go (component-side, where the approval chain is evaluated); this mutation records the outcome and the timestamps that go with it. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["setQuoteStatus"] in generated_concepts.ts).
+export interface SetQuoteStatusArgs {
+  quoteId: string;
+  status: string;
+}
+
+export function buildSetQuoteStatus(args: SetQuoteStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("quoteId: " + renderMemQLValue(args.quoteId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setQuoteStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setQuoteStatus(args: SetQuoteStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setQuoteStatus = function (this: QueryClient, args: SetQuoteStatusArgs = {} as SetQuoteStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setQuoteStatus", buildSetQuoteStatus(args), opts);
+};
+
 /** Change one recipient's subscription state -- the write behind an operator honouring an unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
 unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later, an unsubscribe forwarded by support) and stamping the clock would date every one of those to the moment the operator got round to it. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["setRecipientSubscription"] in generated_concepts.ts).
@@ -7325,6 +7584,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.setResponsibilityStatus = function (this: QueryClient, args: SetResponsibilityStatusArgs = {} as SetResponsibilityStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setResponsibilityStatus", buildSetResponsibilityStatus(args), opts);
+};
+
+/** Move a store through its lifecycle. Separate from updateStore because status is the switch ingestion reads: pausing a store is an operational act, not a configuration edit, and it wants its own audit line. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["setStoreStatus"] in generated_concepts.ts).
+export interface SetStoreStatusArgs {
+  storeId: string;
+  status: string;
+}
+
+export function buildSetStoreStatus(args: SetStoreStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setStoreStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setStoreStatus(args: SetStoreStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setStoreStatus = function (this: QueryClient, args: SetStoreStatusArgs = {} as SetStoreStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setStoreStatus", buildSetStoreStatus(args), opts);
 };
 
 /** Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737. */
@@ -8524,6 +8807,36 @@ QueryClient.prototype.updatePlanStatus = function (this: QueryClient, args: Upda
   return this.executeNamed("updatePlanStatus", buildUpdatePlanStatus(args), opts);
 };
 
+/** Edit a draft quote's lines and terms. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["updateQuote"] in generated_concepts.ts).
+export interface UpdateQuoteArgs {
+  quoteId: string;
+  lines?: Record<string, unknown>[];
+  totalAmount?: string;
+  terms?: string;
+  validUntil?: string;
+}
+
+export function buildUpdateQuote(args: UpdateQuoteArgs): string {
+  const parts: string[] = [];
+  parts.push("quoteId: " + renderMemQLValue(args.quoteId));
+  if (args.lines !== undefined) parts.push("lines: " + renderMemQLValue(args.lines));
+  if (args.totalAmount !== undefined) parts.push("totalAmount: " + renderMemQLValue(args.totalAmount));
+  if (args.terms !== undefined) parts.push("terms: " + renderMemQLValue(args.terms));
+  if (args.validUntil !== undefined) parts.push("validUntil: " + renderMemQLValue(args.validUntil));
+  return "mutation updateQuote(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateQuote(args: UpdateQuoteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateQuote = function (this: QueryClient, args: UpdateQuoteArgs = {} as UpdateQuoteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateQuote", buildUpdateQuote(args), opts);
+};
+
 /** Update a data record (resets validation state to draft) */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["updateRecord"] in generated_concepts.ts).
 export interface UpdateRecordArgs {
@@ -8780,6 +9093,48 @@ QueryClient.prototype.updateSiteStatus = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteStatus", buildUpdateSiteStatus(args), opts);
 };
 
+/** Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.ts).
+export interface UpdateStoreArgs {
+  storeId: string;
+  name?: string;
+  appClientId?: string;
+  adminTokenRef?: string;
+  storefrontTokenRef?: string;
+  webhookSecretRef?: string;
+  apiVersion?: string;
+  protectedDataLevel?: string;
+  plan?: string;
+  scopesGranted?: string[];
+  ownerUserId?: string;
+}
+
+export function buildUpdateStore(args: UpdateStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.appClientId !== undefined) parts.push("appClientId: " + renderMemQLValue(args.appClientId));
+  if (args.adminTokenRef !== undefined) parts.push("adminTokenRef: " + renderMemQLValue(args.adminTokenRef));
+  if (args.storefrontTokenRef !== undefined) parts.push("storefrontTokenRef: " + renderMemQLValue(args.storefrontTokenRef));
+  if (args.webhookSecretRef !== undefined) parts.push("webhookSecretRef: " + renderMemQLValue(args.webhookSecretRef));
+  if (args.apiVersion !== undefined) parts.push("apiVersion: " + renderMemQLValue(args.apiVersion));
+  if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
+  if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
+  if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
+  if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  return "mutation updateStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateStore(args: UpdateStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateStore = function (this: QueryClient, args: UpdateStoreArgs = {} as UpdateStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateStore", buildUpdateStore(args), opts);
+};
+
 /** Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. */
 // Bound concept: v1:planner:task (machine-readable: BoundConcepts["updateTaskStatus"] in generated_concepts.ts).
 export interface UpdateTaskStatusArgs {
@@ -8934,6 +9289,270 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateWorkerLastSeen = function (this: QueryClient, args: UpdateWorkerLastSeenArgs = {} as UpdateWorkerLastSeenArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateWorkerLastSeen", buildUpdateWorkerLastSeen(args), opts);
+};
+
+/** Define or update an approval chain. */
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["upsertApprovalChain"] in generated_concepts.ts).
+export interface UpsertApprovalChainArgs {
+  chainId: string;
+  storeId: string;
+  name: string;
+  companyGid?: string;
+  thresholdAmount?: string;
+  currencyCode?: string;
+  steps?: Record<string, unknown>[];
+  subjectId?: string;
+}
+
+export function buildUpsertApprovalChain(args: UpsertApprovalChainArgs): string {
+  const parts: string[] = [];
+  parts.push("chainId: " + renderMemQLValue(args.chainId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.companyGid !== undefined) parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  if (args.thresholdAmount !== undefined) parts.push("thresholdAmount: " + renderMemQLValue(args.thresholdAmount));
+  if (args.currencyCode !== undefined) parts.push("currencyCode: " + renderMemQLValue(args.currencyCode));
+  if (args.steps !== undefined) parts.push("steps: " + renderMemQLValue(args.steps));
+  if (args.subjectId !== undefined) parts.push("subjectId: " + renderMemQLValue(args.subjectId));
+  return "mutation upsertApprovalChain(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertApprovalChain(args: UpsertApprovalChainArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertApprovalChain = function (this: QueryClient, args: UpsertApprovalChainArgs = {} as UpsertApprovalChainArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertApprovalChain", buildUpsertApprovalChain(args), opts);
+};
+
+/** Write an internal note about a company location. */
+// Bound concept: v1:commerce:companyLocationNote (machine-readable: BoundConcepts["upsertCompanyLocationNote"] in generated_concepts.ts).
+export interface UpsertCompanyLocationNoteArgs {
+  noteId: string;
+  storeId: string;
+  companyLocationGid: string;
+  note?: string;
+  authoredBy?: string;
+}
+
+export function buildUpsertCompanyLocationNote(args: UpsertCompanyLocationNoteArgs): string {
+  const parts: string[] = [];
+  parts.push("noteId: " + renderMemQLValue(args.noteId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
+  if (args.authoredBy !== undefined) parts.push("authoredBy: " + renderMemQLValue(args.authoredBy));
+  return "mutation upsertCompanyLocationNote(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertCompanyLocationNote(args: UpsertCompanyLocationNoteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertCompanyLocationNote = function (this: QueryClient, args: UpsertCompanyLocationNoteArgs = {} as UpsertCompanyLocationNoteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertCompanyLocationNote", buildUpsertCompanyLocationNote(args), opts);
+};
+
+/** Set a company location's credit limit. */
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["upsertCreditLimit"] in generated_concepts.ts).
+export interface UpsertCreditLimitArgs {
+  creditLimitId: string;
+  storeId: string;
+  companyGid: string;
+  companyLocationGid: string;
+  limitAmount: string;
+  currencyCode: string;
+  outstandingAmount?: string;
+  reviewedBy?: string;
+}
+
+export function buildUpsertCreditLimit(args: UpsertCreditLimitArgs): string {
+  const parts: string[] = [];
+  parts.push("creditLimitId: " + renderMemQLValue(args.creditLimitId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  parts.push("limitAmount: " + renderMemQLValue(args.limitAmount));
+  parts.push("currencyCode: " + renderMemQLValue(args.currencyCode));
+  if (args.outstandingAmount !== undefined) parts.push("outstandingAmount: " + renderMemQLValue(args.outstandingAmount));
+  if (args.reviewedBy !== undefined) parts.push("reviewedBy: " + renderMemQLValue(args.reviewedBy));
+  return "mutation upsertCreditLimit(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertCreditLimit(args: UpsertCreditLimitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertCreditLimit = function (this: QueryClient, args: UpsertCreditLimitArgs = {} as UpsertCreditLimitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertCreditLimit", buildUpsertCreditLimit(args), opts);
+};
+
+/** Write an internal note about a customer. */
+// Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["upsertCustomerNote"] in generated_concepts.ts).
+export interface UpsertCustomerNoteArgs {
+  noteId: string;
+  storeId: string;
+  customerGid: string;
+  note?: string;
+  authoredBy?: string;
+}
+
+export function buildUpsertCustomerNote(args: UpsertCustomerNoteArgs): string {
+  const parts: string[] = [];
+  parts.push("noteId: " + renderMemQLValue(args.noteId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("customerGid: " + renderMemQLValue(args.customerGid));
+  if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
+  if (args.authoredBy !== undefined) parts.push("authoredBy: " + renderMemQLValue(args.authoredBy));
+  return "mutation upsertCustomerNote(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertCustomerNote(args: UpsertCustomerNoteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertCustomerNote = function (this: QueryClient, args: UpsertCustomerNoteArgs = {} as UpsertCustomerNoteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertCustomerNote", buildUpsertCustomerNote(args), opts);
+};
+
+/** Write agent- or operator-authored product copy. The row is MemQL's; the push to Shopify is the outbox's job, triggered by the row change. */
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["upsertProductContent"] in generated_concepts.ts).
+export interface UpsertProductContentArgs {
+  contentId: string;
+  storeId: string;
+  productGid: string;
+  description?: string;
+  summary?: string;
+  keywords?: string[];
+  blocks?: Record<string, unknown>;
+  authoredBy?: string;
+}
+
+export function buildUpsertProductContent(args: UpsertProductContentArgs): string {
+  const parts: string[] = [];
+  parts.push("contentId: " + renderMemQLValue(args.contentId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("productGid: " + renderMemQLValue(args.productGid));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
+  if (args.keywords !== undefined) parts.push("keywords: " + renderMemQLValue(args.keywords));
+  if (args.blocks !== undefined) parts.push("blocks: " + renderMemQLValue(args.blocks));
+  if (args.authoredBy !== undefined) parts.push("authoredBy: " + renderMemQLValue(args.authoredBy));
+  return "mutation upsertProductContent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertProductContent(args: UpsertProductContentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertProductContent = function (this: QueryClient, args: UpsertProductContentArgs = {} as UpsertProductContentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertProductContent", buildUpsertProductContent(args), opts);
+};
+
+/** Create or update a saved reorder list. */
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["upsertReorderList"] in generated_concepts.ts).
+export interface UpsertReorderListArgs {
+  listId: string;
+  storeId: string;
+  name: string;
+  companyGid: string;
+  companyLocationGid?: string;
+  companyContactGid?: string;
+  lines?: Record<string, unknown>[];
+}
+
+export function buildUpsertReorderList(args: UpsertReorderListArgs): string {
+  const parts: string[] = [];
+  parts.push("listId: " + renderMemQLValue(args.listId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  if (args.companyLocationGid !== undefined) parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  if (args.companyContactGid !== undefined) parts.push("companyContactGid: " + renderMemQLValue(args.companyContactGid));
+  if (args.lines !== undefined) parts.push("lines: " + renderMemQLValue(args.lines));
+  return "mutation upsertReorderList(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertReorderList(args: UpsertReorderListArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertReorderList = function (this: QueryClient, args: UpsertReorderListArgs = {} as UpsertReorderListArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertReorderList", buildUpsertReorderList(args), opts);
+};
+
+/** Create or update a sales rep. */
+// Bound concept: v1:commerce:salesRep (machine-readable: BoundConcepts["upsertSalesRep"] in generated_concepts.ts).
+export interface UpsertSalesRepArgs {
+  repId: string;
+  storeId: string;
+  displayName: string;
+  email?: string;
+  userId?: string;
+  territoryId?: string;
+}
+
+export function buildUpsertSalesRep(args: UpsertSalesRepArgs): string {
+  const parts: string[] = [];
+  parts.push("repId: " + renderMemQLValue(args.repId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("displayName: " + renderMemQLValue(args.displayName));
+  if (args.email !== undefined) parts.push("email: " + renderMemQLValue(args.email));
+  if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  if (args.territoryId !== undefined) parts.push("territoryId: " + renderMemQLValue(args.territoryId));
+  return "mutation upsertSalesRep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertSalesRep(args: UpsertSalesRepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertSalesRep = function (this: QueryClient, args: UpsertSalesRepArgs = {} as UpsertSalesRepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertSalesRep", buildUpsertSalesRep(args), opts);
+};
+
+/** Create or update a territory. */
+// Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["upsertTerritory"] in generated_concepts.ts).
+export interface UpsertTerritoryArgs {
+  territoryId: string;
+  storeId: string;
+  name: string;
+  companyGids?: string[];
+  companyLocationGids?: string[];
+}
+
+export function buildUpsertTerritory(args: UpsertTerritoryArgs): string {
+  const parts: string[] = [];
+  parts.push("territoryId: " + renderMemQLValue(args.territoryId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.companyGids !== undefined) parts.push("companyGids: " + renderMemQLValue(args.companyGids));
+  if (args.companyLocationGids !== undefined) parts.push("companyLocationGids: " + renderMemQLValue(args.companyLocationGids));
+  return "mutation upsertTerritory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    upsertTerritory(args: UpsertTerritoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.upsertTerritory = function (this: QueryClient, args: UpsertTerritoryArgs = {} as UpsertTerritoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("upsertTerritory", buildUpsertTerritory(args), opts);
 };
 
 /** Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge. */

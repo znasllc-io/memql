@@ -16,6 +16,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // RoutePrefix is the path the receiver mounts under. A request is
@@ -67,7 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	src, known := h.cfg.Sources[name]
+	src, known := h.resolveSource(r.Context(), name)
 	if !known {
 		// 404 rather than 403: an unauthenticated caller learns nothing about
 		// which sources this deployment has configured. An unlisted source and
@@ -188,6 +189,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{"id": requestID, "status": "received"})
+}
+
+// resolveSource finds the verification policy for a source segment: the
+// env-configured allowlist first, then the bound connectors.
+//
+// A CONNECTOR source is one the environment could not have named. The env
+// tier is resolved once at boot from MEMQL_INBOUND_SOURCE_<NAME>_*, which
+// works for a sender an operator configures with the deployment and cannot
+// work for a multi-tenant connector: one Shopify connector serves many
+// stores, each with its own webhook secret, and a store is added by an
+// operator at runtime. The secret for `shopify-<storeId>` therefore lives on
+// the row that describes the store, and the connector is what can read it.
+//
+// ENV WINS, deliberately. An operator who has pinned a source in the
+// environment has made a statement about it, and a connector that later
+// claims the same name must not silently take it over -- that would move
+// which secret verifies a live sender, with nothing in the environment
+// changed to say so.
+func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig, bool) {
+	if src, ok := h.cfg.Sources[name]; ok {
+		return src, true
+	}
+	src, ok := memqlsync.SourceFor(ctx, name)
+	if !ok {
+		return SourceConfig{}, false
+	}
+	// A connector that answers with no secret and no explicit "none" scheme
+	// is DROPPED rather than admitted: an unresolvable credential reference
+	// (a deleted globalSecret row, a store half-configured) would otherwise
+	// turn into an unverified source, which is the one outcome the whole
+	// deny-by-default design exists to prevent.
+	if src.Scheme != SchemeNone && src.Secret == "" {
+		h.logger.Error("inbound receiver: connector source has no resolvable secret, refusing with 404",
+			"source", name, "secretRef", src.SecretRef)
+		return SourceConfig{}, false
+	}
+	return SourceConfig{
+		Name:            name,
+		Secret:          src.Secret,
+		Scheme:          src.Scheme,
+		SignatureHeader: src.SignatureHeader,
+		SignaturePrefix: src.SignaturePrefix,
+		DedupeHeader:    src.DedupeHeader,
+	}, true
 }
 
 var errBodyTooLarge = fmt.Errorf("body exceeds the configured cap")

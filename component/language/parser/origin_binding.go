@@ -12,9 +12,9 @@ import (
 // three states, and the three states are the whole vocabulary --
 // there is deliberately no fourth.
 //
-//	@origin("shopify")            concept shopifyProduct { ... }   // mirror
+//	@origin("shopify")            concept product { ... }            // mirror
 //	@origin("memql")
-//	@mirroredTo("shopify")        concept wholesalePriceList { ... } // origin
+//	@mirroredTo("shopify")        concept creditLimit { ... }        // origin
 //	                              concept plan { ... }               // native
 //
 // The sentence the docs carry: MemQL is the origin of what it owns, a

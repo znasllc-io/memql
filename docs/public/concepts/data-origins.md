@@ -47,11 +47,11 @@ the origin (see below). If it should not, mirror it.
 
 ```memql fragment
 @origin("shopify")
-concept shopifyProduct { ... }              // a MIRROR
+concept product { ... }                     // a MIRROR
 
 @origin("memql")
 @mirroredTo("shopify")
-concept wholesalePriceList { ... }          // an ORIGIN with an external mirror
+concept creditLimit { ... }                 // an ORIGIN with an external mirror
 
 concept plan { ... }                        // NATIVE: no declaration needed
 ```

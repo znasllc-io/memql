@@ -66,6 +66,20 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # (the root and recoverykey), so the rest are ordinary unit tests that now
 # happen to run beside a database they ignore. The tree took about two seconds
 # of the step's 180s budget when measured.
+#
+# memql#4389 added `integrations/shopify`. The Shopify connector's
+# customers/redact job rewrites the PII fields of every VERSION of every row
+# referencing a customer, through raw SQL, because "every version" is exactly
+# what the engine's append-only model will not let you touch. A fake with one
+# row per id cannot tell the correct implementation from the broken one -- it
+# passes either way, which is the worst kind of green -- so the test needs a
+# real Postgres, and a db-gated test outside this lane only ever runs on the
+# machine of whoever happened to have one up.
+#
+# What the complement now means, having looked: `integrations/shopify` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the package's other suites are ordinary unit tests against a
+# fake Admin endpoint that now happen to run beside a database they ignore.
 readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
@@ -75,6 +89,7 @@ readonly DB_GATED_TREES=(
 	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"
+	"integrations/shopify"
 	"examples/referencepack"
 )
 

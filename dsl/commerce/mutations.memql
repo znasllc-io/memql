@@ -1,0 +1,354 @@
+
+/// Write agent- or operator-authored product copy. The row is MemQL's; the
+/// push to Shopify is the outbox's job, triggered by the row change.
+mutate productContent upsertProductContent {
+  args {
+    contentId    string!
+    storeId      string!
+    productGid   string!
+    description  string
+    summary      string
+    keywords     []string
+    blocks       object
+    authoredBy   string
+  }
+  insert {
+    stamp {
+      id:          args.contentId
+      storeId:     args.storeId
+      productGid:  args.productGid
+      description: args.description ?? ""
+      summary:     args.summary ?? ""
+      keywords:    args.keywords ?? []
+      blocks:      args.blocks ?? {}
+      status:      "draft"
+      authoredBy:  args.authoredBy ?? ""
+    }
+  }
+}
+
+/// Record what the push channel did with a row. Server-only: the caller is
+/// the outbox drain worker running as the connector actor, so actor.userId
+/// names nobody -- and `live` is a claim about the far end that only the
+/// code which talked to it can make.
+@serverOnly
+mutate productContent setProductContentStatus {
+  args {
+    contentId  string!
+    status     string!
+  }
+  update {
+    id:      args.contentId
+    status:  args.status
+  }
+}
+
+/// Write an internal note about a customer.
+mutate customerNote upsertCustomerNote {
+  args {
+    noteId       string!
+    storeId      string!
+    customerGid  string!
+    note         string
+    authoredBy   string
+  }
+  insert {
+    stamp {
+      id:          args.noteId
+      storeId:     args.storeId
+      customerGid: args.customerGid
+      note:        args.note ?? ""
+      status:      "draft"
+      authoredBy:  args.authoredBy ?? ""
+    }
+  }
+}
+
+/// Write an internal note about a company location.
+mutate companyLocationNote upsertCompanyLocationNote {
+  args {
+    noteId              string!
+    storeId             string!
+    companyLocationGid  string!
+    note                string
+    authoredBy          string
+  }
+  insert {
+    stamp {
+      id:                 args.noteId
+      storeId:            args.storeId
+      companyLocationGid: args.companyLocationGid
+      note:               args.note ?? ""
+      status:             "draft"
+      authoredBy:         args.authoredBy ?? ""
+    }
+  }
+}
+
+/// Set a company location's credit limit.
+mutate creditLimit upsertCreditLimit {
+  args {
+    creditLimitId       string!
+    storeId             string!
+    companyGid          string!
+    companyLocationGid  string!
+    limitAmount         string!
+    currencyCode        string!
+    outstandingAmount   string
+    reviewedBy          string
+  }
+  insert {
+    stamp {
+      id:                 args.creditLimitId
+      storeId:            args.storeId
+      companyGid:         args.companyGid
+      companyLocationGid: args.companyLocationGid
+      limitAmount:        args.limitAmount
+      currencyCode:       args.currencyCode
+      outstandingAmount:  args.outstandingAmount ?? "0"
+      status:             "active"
+      reviewedAt:         now
+      reviewedBy:         args.reviewedBy ?? ""
+    }
+  }
+}
+
+/// Move a credit limit between enforced, held and waived.
+mutate creditLimit setCreditLimitStatus {
+  args {
+    creditLimitId  string!
+    status         string!
+    reviewedBy     string
+  }
+  update {
+    accept { status, reviewedBy }
+    stamp {
+      id:          args.creditLimitId
+      reviewedAt:  now
+    }
+  }
+}
+
+/// Create a quote in draft.
+mutate quote createQuote {
+  args {
+    quoteId             string!
+    storeId             string!
+    quoteNumber         string!
+    companyGid          string!
+    companyLocationGid  string
+    companyContactGid   string
+    salesRepId          string
+    lines               []object
+    currencyCode        string!
+    totalAmount         string
+    terms               string
+    validUntil          datetime
+    approvalChainId     string
+  }
+  insert {
+    stamp {
+      id:                 args.quoteId
+      storeId:            args.storeId
+      quoteNumber:        args.quoteNumber
+      companyGid:         args.companyGid
+      companyLocationGid: args.companyLocationGid ?? ""
+      companyContactGid:  args.companyContactGid ?? ""
+      salesRepId:         args.salesRepId ?? ""
+      lines:              args.lines ?? []
+      currencyCode:       args.currencyCode
+      totalAmount:        args.totalAmount ?? "0"
+      terms:              args.terms ?? ""
+      status:             "draft"
+      validUntil:         args.validUntil
+      approvalChainId:    args.approvalChainId ?? ""
+    }
+  }
+}
+
+/// Edit a draft quote's lines and terms.
+mutate quote updateQuote {
+  args {
+    quoteId      string!
+    lines        []object
+    totalAmount  string
+    terms        string
+    validUntil   datetime
+  }
+  update {
+    accept { lines, totalAmount, terms, validUntil }
+    stamp {
+      id:           args.quoteId
+    }
+  }
+}
+
+/// Move a quote through draft -> sent -> accepted | declined | expired.
+///
+/// The transitions themselves are checked in Go (component-side, where the
+/// approval chain is evaluated); this mutation records the outcome and the
+/// timestamps that go with it.
+mutate quote setQuoteStatus {
+  args {
+    quoteId  string!
+    status   string!
+  }
+  update {
+    id:      args.quoteId
+    status:  args.status
+  }
+}
+
+/// Stamp the moment a quote was sent to the buyer.
+mutate quote markQuoteSent {
+  args {
+    quoteId  string!
+  }
+  update {
+    id:      args.quoteId
+    status:  "sent"
+    sentAt:  now
+  }
+}
+
+/// Record acceptance and the Shopify draft order it produced. Server-only:
+/// actor.userId scoping is wrong here because the draft order GID is a claim
+/// about what the connector created in the store, and a client-callable
+/// version would let a caller assert an order that does not exist.
+@serverOnly
+mutate quote markQuoteAccepted {
+  args {
+    quoteId        string!
+    draftOrderGid  string!
+  }
+  update {
+    id:             args.quoteId
+    status:         "accepted"
+    respondedAt:    now
+    draftOrderGid:  args.draftOrderGid
+  }
+}
+
+/// Define or update an approval chain.
+mutate approvalChain upsertApprovalChain {
+  args {
+    chainId          string!
+    storeId          string!
+    name             string!
+    companyGid       string
+    thresholdAmount  string
+    currencyCode     string
+    steps            []object
+    subjectId        string
+  }
+  insert {
+    stamp {
+      id:               args.chainId
+      storeId:          args.storeId
+      name:             args.name
+      companyGid:       args.companyGid ?? ""
+      thresholdAmount:  args.thresholdAmount ?? ""
+      currencyCode:     args.currencyCode ?? ""
+      steps:            args.steps ?? []
+      status:           "inactive"
+      subjectId:        args.subjectId ?? ""
+    }
+  }
+}
+
+/// Record one approver's decision and, when the chain is finished, its
+/// outcome.
+mutate approvalChain recordApprovalDecision {
+  args {
+    chainId  string!
+    steps    []object
+    status   string!
+  }
+  update {
+    accept { steps, status }
+    stamp {
+      id:         args.chainId
+      decidedAt:  now
+    }
+  }
+}
+
+/// Create or update a sales rep.
+mutate salesRep upsertSalesRep {
+  args {
+    repId        string!
+    storeId      string!
+    displayName  string!
+    email        string
+    userId       string
+    territoryId  string
+  }
+  insert {
+    stamp {
+      id:           args.repId
+      storeId:      args.storeId
+      displayName:  args.displayName
+      email:        args.email ?? ""
+      userId:       args.userId ?? ""
+      territoryId:  args.territoryId ?? ""
+      active:       true
+    }
+  }
+}
+
+/// Create or update a territory.
+mutate territory upsertTerritory {
+  args {
+    territoryId          string!
+    storeId              string!
+    name                 string!
+    companyGids          []string
+    companyLocationGids  []string
+  }
+  insert {
+    stamp {
+      id:                   args.territoryId
+      storeId:              args.storeId
+      name:                 args.name
+      companyGids:          args.companyGids ?? []
+      companyLocationGids:  args.companyLocationGids ?? []
+      active:               true
+    }
+  }
+}
+
+/// Create or update a saved reorder list.
+mutate reorderList upsertReorderList {
+  args {
+    listId              string!
+    storeId             string!
+    name                string!
+    companyGid          string!
+    companyLocationGid  string
+    companyContactGid   string
+    lines               []object
+  }
+  insert {
+    stamp {
+      id:                 args.listId
+      storeId:            args.storeId
+      name:               args.name
+      companyGid:         args.companyGid
+      companyLocationGid: args.companyLocationGid ?? ""
+      companyContactGid:  args.companyContactGid ?? ""
+      lines:              args.lines ?? []
+      active:             true
+    }
+  }
+}
+
+/// Stamp a reorder list as ordered from.
+mutate reorderList markReorderListOrdered {
+  args {
+    listId  string!
+  }
+  update {
+    id:             args.listId
+    lastOrderedAt:  now
+  }
+}

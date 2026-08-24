@@ -41,6 +41,7 @@ var walkerExemptions = map[string]string{
 	"scripts/install/mkcert_pair_round_trip_test.go": "walks a t.TempDir() the install capability scripts just wrote into -- a fixture home, not an ancestor of .claude, and it must account for EVERY file in it",
 	"scripts/k3d/up_rendered_manifest_test.go":       "copies deploy/k8s, a narrow subtree with no nested checkout -- and a COPY must skip nothing, or it renders a tree the repository does not have",
 	"test/dslconformance/callgraph_contract_test.go": "walks the DSL tree",
+	"cmd/shopifyschema/shopify_schema_drift_test.go": "walks the two GENERATED directories and the t.TempDir() they were just regenerated into -- a byte-for-byte comparison that must account for every file in both, so it can skip nothing",
 }
 
 // TestRepoWalkersShareOneSkipList is the memql#3678 gate.

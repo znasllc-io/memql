@@ -1,9 +1,0 @@
-/// Thin product projection: GID (row.id), handle, availableForSale, present.
-@row
-shape shopifyProduct shopifyProductFull {
-  row.id
-  handle
-  availableForSale
-  present
-  row.createdAt
-}

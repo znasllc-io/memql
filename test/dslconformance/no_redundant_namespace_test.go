@@ -3,7 +3,6 @@ package dslconformance
 import (
 	"github.com/znasllc-io/memql/dsl"
 	"io"
-	"strings"
 	"testing"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -35,11 +34,21 @@ func TestNoRedundantNamespace(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("read %s: %v", p, readErr)
 		}
-		domain := p
-		if i := strings.IndexByte(domain, '/'); i > 0 {
-			domain = domain[:i]
-		}
-		rewritten, rerr := langparser.RewriteRedundantNamespace(domain, raw)
+		// The derived namespace is the WHOLE directory path, not its first
+		// segment (memql#3898): beta/sub/concepts.memql derives
+		// v1:beta/sub:widget, so `@namespace("beta")` on a file one level
+		// down is load-bearing rather than redundant -- it is the only
+		// thing (with the directory's namespace.pin) holding the concept
+		// in the parent namespace. Comparing against the first segment
+		// called that annotation dead weight and told the author to
+		// delete it, which would have silently re-keyed every concept id
+		// in the file.
+		//
+		// dsl/shopify/generated is the first nested concept directory in
+		// the tree (memql#4389); before it, every concept file sat at a
+		// domain root and the two readings agreed, which is why the gate
+		// could be wrong this long without anything noticing.
+		rewritten, rerr := langparser.RewriteRedundantNamespace(dslfs.NamespaceFromFilePath(p), raw)
 		if rerr != nil {
 			t.Fatalf("rewrite %s: %v", p, rerr)
 		}

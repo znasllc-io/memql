@@ -410,6 +410,14 @@ jobs:
               # at all: dropping a line from the baseline merged green and
               # reddened `main` for the next author.
               - 'component/memql/testdata/**'
+              # The recorded Shopify Admin introspection the mirror generator
+              # reads. Same reasoning as the line above: the drift gate that
+              # consumes it (cmd/shopifyschema) regenerates the whole tree from
+              # it and diffs against what is checked in, so a change to the
+              # fixture IS a change to 155 generated files -- and the gate-inputs
+              # step does not run cmd/**. Routed here rather than to `gates`
+              # because `go` is the bucket that reaches the test.
+              - 'cmd/shopifyschema/testdata/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
@@ -1470,7 +1478,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/... ./examples/referencepack/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the

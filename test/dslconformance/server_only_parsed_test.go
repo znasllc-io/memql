@@ -203,34 +203,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
 		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
-		// epic memql#4378. The two writers of MemQL's first declared MIRROR,
-		// and the argument is unlike every other entry in this map: caller
-		// scoping is not merely impossible here, it is the WRONG SHAPE OF
-		// QUESTION.
-		//
-		// v1:shopify:shopifyProduct declares @origin("shopify"), which means
-		// Shopify owns the data and MemQL holds a faithful copy. The engine
-		// therefore refuses EVERY write to it -- from a user, an agent, a
-		// tool handler, a raw insert or a staged write -- unless it comes
-		// from the shopify connector, and it refuses a cluster owner too. So
-		// there is no caller these mutations could be scoped TO: the answer
-		// for every actor.userId that exists is "no", and the one admitted
-		// writer is not a user at all but auth.ConnectorActor("shopify"), an
-		// AccessContext no request can mint.
-		//
-		// What @serverOnly adds on top of a refusal that already happens is
-		// WHERE the client finds out. Without it both are generated into the
-		// Go and TS SDKs as typed methods that can only ever fail, and a UI
-		// built on one discovers that at runtime in front of a user. With it
-		// they are absent, and the refusal lands at compile time.
-		//
-		// The connector stamps internal origin for exactly these two calls
-		// (integrations/shopify/connector.go's connectorContext, allowlisted
-		// in call_origin_conformance_test.go with the same argument), and it
-		// stamps the connector actor beside it -- which is what bounds the
-		// reach of that stamp to this one three-field product index.
-		{Path: "shopify/mutations.memql", Name: "upsertShopifyProduct"}: true,
-		{Path: "shopify/mutations.memql", Name: "retireShopifyProduct"}: true,
 		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
 		// writers over two engine-owned concepts -- an outbox queue and a
 		// health timeline -- and the argument is one argument, not eight.
@@ -528,6 +500,29 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "worker/mutations.memql", Name: "createAppSession"}:           true,
 		{Path: "worker/mutations.memql", Name: "appendAppSessionTranscript"}: true,
 		{Path: "worker/mutations.memql", Name: "endAppSession"}:              true,
+		// memql#4389. The connector's own writes, and the two halves of
+		// the push channel. What they share is that the caller is a
+		// CONNECTOR rather than a person, so actor.userId names nobody --
+		// and each is a claim about the outside world that only the code
+		// which talked to it can honestly make.
+		//
+		// queueComplianceJob / recordComplianceJob carry a Shopify
+		// privacy request and its outcome. A client-callable queue would
+		// let a caller schedule a purge of a merchant's whole mirror;
+		// `done` is a claim that a legal obligation was met.
+		//
+		// setProductContentStatus records what the far end did with a
+		// pushed row: `live` is a claim about Shopify's acceptance, and
+		// only the drain worker that made the call can make it.
+		//
+		// markQuoteAccepted carries the Shopify draft-order GID the
+		// connector created. A client-callable version would let a caller
+		// assert an order that does not exist -- and the quote's whole
+		// value is that its prices were locked into a real one.
+		{Path: "shopify/overlay/mutations.memql", Name: "queueComplianceJob"}:  true,
+		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
+		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
+		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
 	}
 	for k := range want {
 		if !set[k] {

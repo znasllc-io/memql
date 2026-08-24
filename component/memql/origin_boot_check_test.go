@@ -58,7 +58,7 @@ func TestTheBootCheckRefusesAConnectorTheBuildDoesNotServe(t *testing.T) {
 func TestTheBootCheckAdmitsAConnectorTheBuildServes(t *testing.T) {
 	e, _ := engineWithRecordingLogger()
 	all := []*concept.Concept{
-		conceptDeclaring("v1:shopify:shopifyProduct", "shopify"),
+		conceptDeclaring("v1:shopify:product", "shopify"),
 		conceptDeclaring("v1:wholesale:priceList", "memql", "shopify"),
 		conceptDeclaring("v1:planner:plan", ""),
 	}
@@ -75,7 +75,7 @@ func TestTheBootCheckAdmitsAConnectorTheBuildServes(t *testing.T) {
 func TestTheBootCheckAnnouncesWhenItCannotVerify(t *testing.T) {
 	e, log := engineWithRecordingLogger()
 	all := []*concept.Concept{
-		conceptDeclaring("v1:shopify:shopifyProduct", "shopify"),
+		conceptDeclaring("v1:shopify:product", "shopify"),
 		conceptDeclaring("v1:x:ledger", "memql", "quickBooks"),
 	}
 	if err := e.checkConnectorRefs(collectDeclaredConnectorRefs(all), nil, nil); err != nil {
@@ -85,7 +85,7 @@ func TestTheBootCheckAnnouncesWhenItCannotVerify(t *testing.T) {
 	if !strings.Contains(out, "UNVERIFIED") {
 		t.Fatalf("the blind check said nothing. An operator reading this boot log would conclude the declarations were checked.\nlog: %s", out)
 	}
-	for _, want := range []string{"v1:shopify:shopifyProduct -> shopify", "v1:x:ledger -> quickBooks"} {
+	for _, want := range []string{"v1:shopify:product -> shopify", "v1:x:ledger -> quickBooks"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the announcement does not name %q -- it has to say WHICH declarations went unchecked, not just that some did.\nlog: %s", want, out)
 		}

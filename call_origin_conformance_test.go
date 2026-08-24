@@ -146,15 +146,14 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// argument is different from every entry above and is worth stating
 		// rather than borrowing.
 		//
-		// v1:shopify:shopifyProduct declares @origin("shopify"), which makes
-		// it a MIRROR: the engine refuses every write to it that does not
-		// come from the shopify connector. That in turn makes its two
-		// mutations -- upsertShopifyProduct, retireShopifyProduct --
-		// @serverOnly by necessity rather than by choice: a client-reachable
-		// mutation over a concept the engine will always refuse for clients
-		// is an SDK method that can only fail, so it is removed from the
-		// generated SDK instead. The connector is then the only caller, and
-		// it has to present internal origin to reach them.
+		// Every v1:shopify:* concept declares @origin("shopify"), which makes
+		// each a MIRROR: the engine refuses every write to one that does not
+		// come from the shopify connector. Since memql#4389 the connector
+		// generates no mutations at all -- the runtime performs mirror
+		// writes from the MirrorWrites it returns -- so what needs internal
+		// origin here is the raw insert that write renders, plus the
+		// @serverOnly store and compliance-queue mutations the connector
+		// owns outright.
 		//
 		// SERVER-INITIATED, with no request in scope. A Shopify webhook is
 		// STAGED as a v1:platform:inboundRequest row by the HTTP edge and
@@ -166,11 +165,24 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// STAMP, which is what makes this narrower than the entries above:
 		// connectorContext stamps the CONNECTOR ACTOR alongside it, and that
 		// actor is admitted by row admission to the concepts naming
-		// "shopify" and to nothing else. So even a leaked context reaches
-		// one three-field product index -- handle, availableForSale, present
-		// -- carrying no PII and no credential. The stamp is applied inline
-		// on a context this package constructs and dies at the one Execute
-		// it is passed to.
+		// "shopify" and to nothing else -- including the undeclared concepts
+		// that admit everyone.
+		//
+		// THAT BOUND USED TO BE TRIVIAL AND IS NOT ANY MORE, and saying so is
+		// the point of this paragraph rather than leaving the old sentence
+		// standing. J0 shipped a three-field product index -- handle,
+		// availableForSale, present -- so a leaked context reached nothing
+		// anyone would want. memql#4389 mirrors 65 Shopify types and four
+		// commerce origins, and v1:shopify:customer is in that set. The
+		// justification is therefore no longer "the data is trivial". It is
+		// that the reach is exactly the data this connector already pulls
+		// from Shopify under an Admin token it already holds, and not one row
+		// beyond it: a leaked stamp buys nothing the connector's own
+		// credential did not already buy, and buys it nowhere else in the
+		// graph.
+		//
+		// The stamp is applied inline on a context this package constructs
+		// and dies at the one Execute it is passed to.
 		// The DATA-ORIGINS RUNTIME (epic memql#4378). Server-initiated on
 		// every path, with no request in scope on any of them:
 		//

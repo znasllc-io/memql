@@ -40,7 +40,7 @@
 // Splitting them is not a workaround for the bootstrap order; it is an
 // honest statement that "this build can serve shopify" and "shopify is
 // configured and running here" are different claims. A cluster with no
-// Shopify credentials still loads a shopifyProduct concept -- it just
+// Shopify credentials still loads the v1:shopify:* concepts -- it just
 // has no connector bound to fill it, which is an operational condition
 // the Data origins page reports rather than a boot refusal.
 package sync
@@ -105,7 +105,7 @@ type Connector interface {
 
 // DomainSpec describes one concept a connector handles.
 type DomainSpec struct {
-	// Concept is the canonical concept id, e.g. "v1:shopify:shopifyProduct".
+	// Concept is the canonical concept id, e.g. "v1:shopify:product".
 	Concept string
 	// VersionField names the payload field carrying the ORIGIN's
 	// version of the row -- an updated_at, a sequence, or the delivery

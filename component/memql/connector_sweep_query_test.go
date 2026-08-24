@@ -64,11 +64,11 @@ func TestConnectorReconcileSweepStringParsesAndBindsItsConcept(t *testing.T) {
 	// So the enforcement is the ROW GATE, which decides each row from its
 	// own concept's declaration -- and which is the only one of the two
 	// that knows about connectors.
-	if got := rowAuthzAdmits(connectorCtx("shopify"), testMirrorConcept, "gid://shopify/Product/1", []byte(`{}`)); got != rowAuthzAdmit {
+	if got := rowAuthzAdmits(connectorCtx("shopify"), testMirrorConcept, "shp0123456789abcdef012345", []byte(`{}`)); got != rowAuthzAdmit {
 		t.Errorf("the shopify connector was DENIED its own mirror on the sweep path (admission=%d); the sweep "+
 			"would read zero rows and report a clean run over a mirror it never saw", got)
 	}
-	if got := rowAuthzAdmits(callerCtx("u1"), testMirrorConcept, "gid://shopify/Product/1", []byte(`{}`)); got != rowAuthzDeny {
+	if got := rowAuthzAdmits(callerCtx("u1"), testMirrorConcept, "shp0123456789abcdef012345", []byte(`{}`)); got != rowAuthzDeny {
 		t.Errorf("an ordinary caller issuing this same raw string was ADMITTED (admission=%d) -- the raw "+
 			"browse shape has no injected filter, so the row gate is the whole guard", got)
 	}

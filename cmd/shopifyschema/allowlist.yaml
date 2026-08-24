@@ -1,0 +1,741 @@
+# The Shopify mirror allowlist -- what is mirrored, and how each domain is
+# kept fresh. Read cmd/shopifyschema/allowlist.go for the field meanings and
+# docs/public/operate/shopify-connector.md for the operator view.
+#
+# THIS FILE IS THE REVIEWED PART. Everything below a root type -- every
+# field, every enum value, every child's shape -- comes from the Admin schema
+# and is regenerated. What a person decides here is which root types the
+# mirror carries, which connections are worth their own rows, which webhook
+# topics are subscribed, and how a domain is reconciled when a webhook is
+# lost. Shopify does not guarantee webhook delivery, so `reconcile` is not a
+# backstop, it is the contract.
+#
+# TOPIC ASSIGNMENT, and the rule that is easy to get wrong: a topic is listed
+# on the concept whose GID ITS PAYLOAD CARRIES. `refunds/create` carries a
+# refund id, not an order id, so listing it under `order` would fetch
+# node(<refund gid>) as an Order and get nothing. Refunds, transactions and
+# fulfilments are materialised as children of the order and every one of them
+# also moves the order's own updatedAt, so ORDERS_UPDATED carries them and
+# they are deliberately not subscribed separately.
+
+apiVersion: "2026-07"
+
+types:
+  # ---- Products -----------------------------------------------------
+  - type: Product
+    concept: product
+    query: products
+    scopes: [read_products]
+    reconcile: updated_at
+    bulk: true
+    children:
+      - {connection: variants, type: ProductVariant, page: 100}
+    references: [collections, resourcePublications, sellingPlanGroups, media]
+    topics:
+      PRODUCTS_CREATE: upsert
+      PRODUCTS_UPDATE: upsert
+      PRODUCTS_DELETE: delete
+      PRODUCT_PUBLICATIONS_CREATE: upsert
+      PRODUCT_PUBLICATIONS_UPDATE: upsert
+      PRODUCT_PUBLICATIONS_DELETE: upsert
+      PRODUCT_LISTINGS_ADD: upsert
+      PRODUCT_LISTINGS_UPDATE: upsert
+      PRODUCT_LISTINGS_REMOVE: upsert
+      SCHEDULED_PRODUCT_LISTINGS_ADD: upsert
+      SCHEDULED_PRODUCT_LISTINGS_UPDATE: upsert
+      SCHEDULED_PRODUCT_LISTINGS_REMOVE: upsert
+
+  - type: ProductVariant
+    concept: productVariant
+    query: productVariants
+    scopes: [read_products]
+    reconcile: updated_at
+    bulk: true
+    references: [sellingPlanGroups]
+    topics:
+      VARIANTS_IN_STOCK: upsert
+      VARIANTS_OUT_OF_STOCK: upsert
+
+  - type: Collection
+    concept: collection
+    query: collections
+    scopes: [read_products]
+    reconcile: updated_at
+    bulk: true
+    references: [products, resourcePublications]
+    topics:
+      COLLECTIONS_CREATE: upsert
+      COLLECTIONS_UPDATE: upsert
+      COLLECTIONS_DELETE: delete
+      COLLECTION_PUBLICATIONS_CREATE: upsert
+      COLLECTION_PUBLICATIONS_UPDATE: upsert
+      COLLECTION_PUBLICATIONS_DELETE: upsert
+      COLLECTION_LISTINGS_ADD: upsert
+      COLLECTION_LISTINGS_UPDATE: upsert
+      COLLECTION_LISTINGS_REMOVE: upsert
+
+  - type: Publication
+    concept: publication
+    query: publications
+    scopes: [read_publications]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      PUBLICATIONS_DELETE: delete
+
+  - type: Channel
+    concept: channel
+    query: channels
+    scopes: [read_publications]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      CHANNELS_DELETE: delete
+
+  - type: SellingPlanGroup
+    concept: sellingPlanGroup
+    query: sellingPlanGroups
+    scopes: [read_products]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: true
+    children:
+      - {connection: sellingPlans, type: SellingPlan, page: 100}
+    references: [products, productVariants]
+    topics:
+      SELLING_PLAN_GROUPS_CREATE: upsert
+      SELLING_PLAN_GROUPS_UPDATE: upsert
+      SELLING_PLAN_GROUPS_DELETE: delete
+
+  - type: SellingPlan
+    concept: sellingPlan
+    scopes: [read_products]
+    reconcile: none
+    bulk: false
+
+  - type: ProductFeed
+    concept: productFeed
+    query: productFeeds
+    scopes: [read_product_feeds]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      PRODUCT_FEEDS_CREATE: upsert
+      PRODUCT_FEEDS_UPDATE: upsert
+
+  # ---- Pricing ------------------------------------------------------
+  - type: DiscountNode
+    concept: discountNode
+    query: discountNodes
+    scopes: [read_discounts]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    topics:
+      DISCOUNTS_CREATE: upsert
+      DISCOUNTS_UPDATE: upsert
+      DISCOUNTS_DELETE: delete
+      DISCOUNTS_REDEEMCODE_ADDED: upsert
+      DISCOUNTS_REDEEMCODE_REMOVED: upsert
+
+  - type: GiftCard
+    concept: giftCard
+    query: giftCards
+    scopes: [read_gift_cards]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+
+  - type: PriceList
+    concept: priceList
+    query: priceLists
+    scopes: [read_products]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    children:
+      - {connection: prices, type: PriceListPrice, page: 100}
+      - {connection: quantityRules, type: QuantityRule, page: 100}
+
+  - type: PriceListPrice
+    concept: priceListPrice
+    scopes: [read_products]
+    reconcile: none
+    bulk: false
+
+  - type: QuantityRule
+    concept: quantityRule
+    scopes: [read_products]
+    reconcile: none
+    bulk: false
+
+  - type: Catalog
+    concept: catalog
+    query: catalogs
+    scopes: [read_publications]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: false
+
+  # ---- Inventory ----------------------------------------------------
+  - type: InventoryItem
+    concept: inventoryItem
+    query: inventoryItems
+    scopes: [read_inventory]
+    reconcile: updated_at
+    bulk: true
+    children:
+      - {connection: inventoryLevels, type: InventoryLevel, page: 100}
+    references: [variants]
+    topics:
+      INVENTORY_ITEMS_CREATE: upsert
+      INVENTORY_ITEMS_UPDATE: upsert
+      INVENTORY_ITEMS_DELETE: delete
+
+  - type: InventoryLevel
+    concept: inventoryLevel
+    scopes: [read_inventory]
+    reconcile: none
+    bulk: false
+
+  - type: Location
+    concept: location
+    query: locations
+    scopes: [read_locations]
+    reconcile: updated_at
+    bulk: true
+    references: [inventoryLevels]
+    topics:
+      LOCATIONS_CREATE: upsert
+      LOCATIONS_UPDATE: upsert
+      LOCATIONS_ACTIVATE: upsert
+      LOCATIONS_DEACTIVATE: upsert
+      LOCATIONS_DELETE: delete
+
+  - type: InventoryTransfer
+    concept: inventoryTransfer
+    query: inventoryTransfers
+    scopes: [read_inventory]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    topics:
+      INVENTORY_TRANSFERS_UPDATED: upsert
+      INVENTORY_TRANSFERS_ADD_ITEMS: upsert
+      INVENTORY_TRANSFERS_REMOVE_ITEMS: upsert
+      INVENTORY_TRANSFERS_UPDATE_ITEM_QUANTITIES: upsert
+      INVENTORY_TRANSFERS_CANCEL: upsert
+      INVENTORY_TRANSFERS_COMPLETE: upsert
+      INVENTORY_TRANSFERS_READY_TO_SHIP: upsert
+
+  - type: InventoryShipment
+    concept: inventoryShipment
+    query: inventoryShipments
+    scopes: [read_inventory]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    topics:
+      INVENTORY_SHIPMENTS_CREATE: upsert
+      INVENTORY_SHIPMENTS_DELETE: delete
+      INVENTORY_SHIPMENTS_ADD_ITEMS: upsert
+      INVENTORY_SHIPMENTS_REMOVE_ITEMS: upsert
+      INVENTORY_SHIPMENTS_UPDATE_ITEM_QUANTITIES: upsert
+      INVENTORY_SHIPMENTS_UPDATE_TRACKING: upsert
+      INVENTORY_SHIPMENTS_MARK_IN_TRANSIT: upsert
+      INVENTORY_SHIPMENTS_RECEIVE_ITEMS: upsert
+
+  # ---- Customers ----------------------------------------------------
+  - type: Customer
+    concept: customer
+    query: customers
+    scopes: [read_customers]
+    reconcile: updated_at
+    bulk: true
+    children:
+      - {connection: paymentMethods, type: CustomerPaymentMethod, page: 25}
+      - {connection: storeCreditAccounts, type: StoreCreditAccount, page: 25}
+    references: [orders, subscriptionContracts]
+    topics:
+      CUSTOMERS_CREATE: upsert
+      CUSTOMERS_UPDATE: upsert
+      CUSTOMERS_DELETE: delete
+      CUSTOMERS_ENABLE: upsert
+      CUSTOMERS_DISABLE: upsert
+      CUSTOMERS_MERGE: upsert
+      CUSTOMERS_PURCHASING_SUMMARY: upsert
+      CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE: upsert
+      CUSTOMERS_MARKETING_CONSENT_UPDATE: upsert
+      CUSTOMERS_WHATS_APP_MARKETING_CONSENT_UPDATE: upsert
+      CUSTOMER_TAGS_ADDED: upsert
+      CUSTOMER_TAGS_REMOVED: upsert
+      CUSTOMER_JOINED_SEGMENT: upsert
+      CUSTOMER_LEFT_SEGMENT: upsert
+
+  - type: CustomerPaymentMethod
+    concept: customerPaymentMethod
+    scopes: [read_customer_payment_methods]
+    reconcile: none
+    bulk: false
+
+  - type: StoreCreditAccount
+    concept: storeCreditAccount
+    scopes: [read_store_credit_accounts]
+    reconcile: none
+    bulk: false
+
+  - type: Segment
+    concept: segment
+    query: segments
+    scopes: [read_customers]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: false
+    topics:
+      SEGMENTS_CREATE: upsert
+      SEGMENTS_UPDATE: upsert
+      SEGMENTS_DELETE: delete
+
+  # ---- B2B ----------------------------------------------------------
+  - type: Company
+    concept: company
+    query: companies
+    scopes: [read_customers]
+    reconcile: updated_at
+    bulk: true
+    children:
+      - {connection: locations, type: CompanyLocation, page: 50}
+      - {connection: contacts, type: CompanyContact, page: 50}
+    references: [orders, draftOrders]
+    topics:
+      COMPANIES_CREATE: upsert
+      COMPANIES_UPDATE: upsert
+      COMPANIES_DELETE: delete
+
+  - type: CompanyLocation
+    concept: companyLocation
+    query: companyLocations
+    scopes: [read_customers]
+    reconcile: updated_at
+    bulk: true
+    references: [catalogs, storeCreditAccounts]
+    topics:
+      COMPANY_LOCATIONS_CREATE: upsert
+      COMPANY_LOCATIONS_UPDATE: upsert
+      COMPANY_LOCATIONS_DELETE: delete
+
+  - type: CompanyContact
+    concept: companyContact
+    scopes: [read_customers]
+    reconcile: none
+    bulk: false
+    topics:
+      COMPANY_CONTACTS_CREATE: upsert
+      COMPANY_CONTACTS_UPDATE: upsert
+      COMPANY_CONTACTS_DELETE: delete
+      COMPANY_CONTACT_ROLES_ASSIGN: upsert
+      COMPANY_CONTACT_ROLES_REVOKE: upsert
+
+  - type: PaymentTermsTemplate
+    concept: paymentTermsTemplate
+    scopes: [read_payment_terms]
+    reconcile: none
+    bulk: false
+    topics:
+      PAYMENT_TERMS_CREATE: upsert
+      PAYMENT_TERMS_UPDATE: upsert
+      PAYMENT_TERMS_DELETE: delete
+
+  # ---- Orders -------------------------------------------------------
+  - type: Order
+    concept: order
+    query: orders
+    scopes: [read_orders, read_all_orders]
+    reconcile: updated_at
+    bulk: true
+    children:
+      - {connection: lineItems, type: LineItem, page: 100}
+      - {connection: transactions, type: OrderTransaction, page: 50}
+      - {connection: refunds, type: Refund, page: 50}
+      - {connection: fulfillments, type: Fulfillment, page: 50}
+      - {connection: returns, type: Return, page: 50}
+    references: [fulfillmentOrders, agreements, shippingLines, discountApplications]
+    topics:
+      ORDERS_CREATE: upsert
+      ORDERS_UPDATED: upsert
+      ORDERS_DELETE: delete
+      ORDERS_CANCELLED: upsert
+      ORDERS_EDITED: upsert
+      ORDERS_FULFILLED: upsert
+      ORDERS_PAID: upsert
+      ORDERS_PARTIALLY_FULFILLED: upsert
+      ORDERS_RISK_ASSESSMENT_CHANGED: upsert
+      ORDERS_SHOPIFY_PROTECT_ELIGIBILITY_CHANGED: upsert
+      ORDERS_LINK_REQUESTED: upsert
+
+  - type: LineItem
+    concept: orderLineItem
+    scopes: [read_orders]
+    reconcile: none
+    bulk: false
+
+  - type: OrderTransaction
+    concept: orderTransaction
+    scopes: [read_orders]
+    reconcile: none
+    bulk: false
+
+  - type: Refund
+    concept: refund
+    scopes: [read_orders]
+    reconcile: none
+    bulk: false
+
+  - type: Fulfillment
+    concept: fulfillment
+    scopes: [read_fulfillments]
+    reconcile: none
+    bulk: false
+    references: [fulfillmentOrders]
+    topics:
+      FULFILLMENTS_CREATE: upsert
+      FULFILLMENTS_UPDATE: upsert
+
+  - type: FulfillmentOrder
+    concept: fulfillmentOrder
+    query: fulfillmentOrders
+    scopes: [read_assigned_fulfillment_orders, read_merchant_managed_fulfillment_orders]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    references: [fulfillments]
+    topics:
+      FULFILLMENT_ORDERS_CANCELLED: upsert
+      FULFILLMENT_ORDERS_MOVED: upsert
+      FULFILLMENT_ORDERS_MERGED: upsert
+      FULFILLMENT_ORDERS_SPLIT: upsert
+      FULFILLMENT_ORDERS_PLACED_ON_HOLD: upsert
+      FULFILLMENT_ORDERS_HOLD_RELEASED: upsert
+      FULFILLMENT_ORDERS_RESCHEDULED: upsert
+      FULFILLMENT_ORDERS_ORDER_ROUTING_COMPLETE: upsert
+      FULFILLMENT_ORDERS_FULFILLMENT_REQUEST_SUBMITTED: upsert
+      FULFILLMENT_ORDERS_FULFILLMENT_REQUEST_ACCEPTED: upsert
+      FULFILLMENT_ORDERS_FULFILLMENT_REQUEST_REJECTED: upsert
+      FULFILLMENT_ORDERS_CANCELLATION_REQUEST_SUBMITTED: upsert
+      FULFILLMENT_ORDERS_CANCELLATION_REQUEST_ACCEPTED: upsert
+      FULFILLMENT_ORDERS_CANCELLATION_REQUEST_REJECTED: upsert
+      FULFILLMENT_ORDERS_LINE_ITEMS_PREPARED_FOR_PICKUP: upsert
+      FULFILLMENT_ORDERS_LINE_ITEMS_PREPARED_FOR_LOCAL_DELIVERY: upsert
+      FULFILLMENT_ORDERS_SCHEDULED_FULFILLMENT_ORDER_READY: upsert
+
+  - type: Return
+    concept: shopifyReturn
+    scopes: [read_returns]
+    reconcile: none
+    bulk: false
+    children:
+      - {connection: reverseFulfillmentOrders, type: ReverseFulfillmentOrder, page: 25}
+    references: [refunds, transactions]
+    topics:
+      RETURNS_REQUEST: upsert
+      RETURNS_APPROVE: upsert
+      RETURNS_DECLINE: upsert
+      RETURNS_CANCEL: upsert
+      RETURNS_CLOSE: upsert
+      RETURNS_REOPEN: upsert
+      RETURNS_PROCESS: upsert
+      RETURNS_UPDATE: upsert
+
+  - type: ReverseFulfillmentOrder
+    concept: reverseFulfillmentOrder
+    scopes: [read_returns]
+    reconcile: none
+    bulk: false
+    children:
+      - {connection: reverseDeliveries, type: ReverseDelivery, page: 25}
+    topics:
+      REVERSE_FULFILLMENT_ORDERS_DISPOSE: upsert
+
+  - type: ReverseDelivery
+    concept: reverseDelivery
+    scopes: [read_returns]
+    reconcile: none
+    bulk: false
+
+  - type: DraftOrder
+    concept: draftOrder
+    query: draftOrders
+    scopes: [read_draft_orders]
+    reconcile: updated_at
+    bulk: true
+    topics:
+      DRAFT_ORDERS_CREATE: upsert
+      DRAFT_ORDERS_UPDATE: upsert
+      DRAFT_ORDERS_DELETE: delete
+
+  - type: AbandonedCheckout
+    concept: abandonedCheckout
+    query: abandonedCheckouts
+    scopes: [read_orders]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+
+  - type: TenderTransaction
+    concept: tenderTransaction
+    query: tenderTransactions
+    scopes: [read_orders]
+    reconcile: full_relist
+    cadence: 1h
+    bulk: true
+    topics:
+      TENDER_TRANSACTIONS_CREATE: upsert
+
+  # ---- Shipping -----------------------------------------------------
+  - type: DeliveryProfile
+    concept: deliveryProfile
+    query: deliveryProfiles
+    scopes: [read_shipping]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      PROFILES_CREATE: upsert
+      PROFILES_UPDATE: upsert
+      PROFILES_DELETE: delete
+
+  - type: DeliveryCarrierService
+    concept: deliveryCarrierService
+    query: carrierServices
+    scopes: [read_shipping]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+
+  - type: DeliveryCustomization
+    concept: deliveryCustomization
+    query: deliveryCustomizations
+    scopes: [read_shipping]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+
+  # ---- Markets ------------------------------------------------------
+  - type: Market
+    concept: market
+    query: markets
+    scopes: [read_markets]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    children:
+      - {connection: webPresences, type: MarketWebPresence, page: 25}
+    topics:
+      MARKETS_CREATE: upsert
+      MARKETS_UPDATE: upsert
+      MARKETS_DELETE: delete
+      MARKETS_BACKUP_REGION_UPDATE: upsert
+
+  - type: MarketWebPresence
+    concept: marketWebPresence
+    scopes: [read_markets]
+    reconcile: none
+    bulk: false
+
+  - type: ShopLocale
+    concept: shopLocale
+    scopes: [read_locales]
+    reconcile: none
+    bulk: false
+    topics:
+      LOCALES_CREATE: upsert
+      LOCALES_UPDATE: upsert
+      LOCALES_DESTROY: delete
+
+  # ---- Content ------------------------------------------------------
+  - type: Page
+    concept: page
+    query: pages
+    scopes: [read_content]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: true
+
+  - type: Blog
+    concept: blog
+    query: blogs
+    scopes: [read_content]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: true
+    children:
+      - {connection: articles, type: Article, page: 50}
+
+  - type: Article
+    concept: article
+    query: articles
+    scopes: [read_content]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: false
+    children:
+      - {connection: comments, type: Comment, page: 50}
+
+  - type: Comment
+    concept: articleComment
+    query: comments
+    scopes: [read_content]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: false
+
+  - type: Menu
+    concept: menu
+    query: menus
+    scopes: [read_online_store_navigation]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: false
+
+  - type: UrlRedirect
+    concept: urlRedirect
+    query: urlRedirects
+    scopes: [read_online_store_pages]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: true
+
+  - type: Metaobject
+    concept: metaobject
+    query: metaobjects
+    scopes: [read_metaobjects]
+    reconcile: updated_at
+    bulk: true
+    topics:
+      METAOBJECTS_CREATE: upsert
+      METAOBJECTS_UPDATE: upsert
+      METAOBJECTS_DELETE: delete
+
+  - type: MetaobjectDefinition
+    concept: metaobjectDefinition
+    query: metaobjectDefinitions
+    scopes: [read_metaobject_definitions]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+
+  - type: MetafieldDefinition
+    concept: metafieldDefinition
+    query: metafieldDefinitions
+    scopes: [read_products]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      METAFIELD_DEFINITIONS_CREATE: upsert
+      METAFIELD_DEFINITIONS_UPDATE: upsert
+      METAFIELD_DEFINITIONS_DELETE: delete
+
+  - type: OnlineStoreTheme
+    concept: onlineStoreTheme
+    query: themes
+    scopes: [read_themes]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+    topics:
+      THEMES_CREATE: upsert
+      THEMES_UPDATE: upsert
+      THEMES_PUBLISH: upsert
+      THEMES_DELETE: delete
+
+  # ---- Shop ---------------------------------------------------------
+  - type: Shop
+    concept: shop
+    singleton: shop
+    scopes: [read_products]
+    reconcile: none
+    bulk: false
+    topics:
+      SHOP_UPDATE: upsert
+
+  - type: ShopPolicy
+    concept: shopPolicy
+    scopes: [read_legal_policies]
+    reconcile: none
+    bulk: false
+
+  - type: BusinessEntity
+    concept: businessEntity
+    scopes: [read_products]
+    reconcile: none
+    bulk: false
+
+  # ---- Finance (Shopify Payments only) -------------------------------
+  - type: ShopifyPaymentsPayout
+    concept: shopifyPaymentsPayout
+    scopes: [read_shopify_payments_payouts]
+    reconcile: none
+    bulk: false
+
+  - type: ShopifyPaymentsBalanceTransaction
+    concept: shopifyPaymentsBalanceTransaction
+    scopes: [read_shopify_payments_payouts]
+    reconcile: none
+    bulk: false
+
+  - type: ShopifyPaymentsDispute
+    concept: shopifyPaymentsDispute
+    query: disputes
+    scopes: [read_shopify_payments_disputes]
+    reconcile: full_relist
+    cadence: 6h
+    bulk: false
+    topics:
+      DISPUTES_CREATE: upsert
+      DISPUTES_UPDATE: upsert
+
+  # ---- Marketing -----------------------------------------------------
+  - type: MarketingEvent
+    concept: marketingEvent
+    query: marketingEvents
+    scopes: [read_marketing_events]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+
+  - type: MarketingActivity
+    concept: marketingActivity
+    query: marketingActivities
+    scopes: [read_marketing_events]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false
+
+  # ---- Subscriptions (this app's own contracts only) ------------------
+  - type: SubscriptionContract
+    concept: subscriptionContract
+    query: subscriptionContracts
+    scopes: [read_own_subscription_contracts]
+    reconcile: updated_at
+    bulk: true
+    topics:
+      SUBSCRIPTION_CONTRACTS_CREATE: upsert
+      SUBSCRIPTION_CONTRACTS_UPDATE: upsert
+      SUBSCRIPTION_CONTRACTS_ACTIVATE: upsert
+      SUBSCRIPTION_CONTRACTS_CANCEL: upsert
+      SUBSCRIPTION_CONTRACTS_EXPIRE: upsert
+      SUBSCRIPTION_CONTRACTS_FAIL: upsert
+      SUBSCRIPTION_CONTRACTS_PAUSE: upsert
+
+  # ---- Staff (Plus only) ----------------------------------------------
+  - type: StaffMember
+    concept: staffMember
+    query: staffMembers
+    scopes: [read_users]
+    reconcile: full_relist
+    cadence: 24h
+    bulk: false

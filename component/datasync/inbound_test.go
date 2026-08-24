@@ -10,7 +10,7 @@ import (
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
-const testMirrorConcept = "v1:shopify:shopifyProduct"
+const testMirrorConcept = "v1:shopify:product"
 
 func testSpecs(versionField string) map[string]memqlsync.DomainSpec {
 	return map[string]memqlsync.DomainSpec{

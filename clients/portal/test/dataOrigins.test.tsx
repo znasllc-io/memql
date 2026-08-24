@@ -25,10 +25,10 @@ const AUTH_DISABLED_CLUSTER = {
 };
 
 const MIRROR_CONCEPT = {
-  id: "v1:shopify:shopifyProduct",
+  id: "v1:shopify:product",
   version: "v1",
   domain: "shopify",
-  entity: "shopifyProduct",
+  entity: "product",
   description: "The thin Shopify product index.",
   type: "object",
   dataState: "mirror",
@@ -50,7 +50,7 @@ const NATIVE_CONCEPT = {
 
 const INVENTORY_ROWS = [
   {
-    conceptId: "v1:shopify:shopifyProduct",
+    conceptId: "v1:shopify:product",
     dataState: "mirror",
     origin: "shopify",
     mirroredTo: [],
@@ -67,8 +67,8 @@ const INVENTORY_ROWS = [
 
 const HEALTH_ROWS = [
   {
-    id: "v1:shopify:shopifyProduct|shopify|inbound",
-    conceptId: "v1:shopify:shopifyProduct",
+    id: "v1:shopify:product|shopify|inbound",
+    conceptId: "v1:shopify:product",
     connector: "shopify",
     direction: "inbound",
     backfillStatus: "complete",
@@ -213,7 +213,7 @@ describe("the origin badge", () => {
 
 describe("the concept header", () => {
   it("badges a mirror and says why it is read-only", async () => {
-    renderAt("owner", "/concepts/v1%3Ashopify%3AshopifyProduct");
+    renderAt("owner", "/concepts/v1%3Ashopify%3Aproduct");
     await waitFor(() => expect(screen.getByText("Mirror of shopify")).toBeTruthy());
     expect(screen.getByText(/Read-only: a mirror of shopify/)).toBeTruthy();
     expect(screen.getByText(/change the record at the origin/)).toBeTruthy();
@@ -238,7 +238,7 @@ describe("the data origins page", () => {
 
   it("lists only the concepts that name a connector, with their health", async () => {
     renderAt("owner", "/data-origins");
-    await waitFor(() => expect(screen.getByText("v1:shopify:shopifyProduct")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("v1:shopify:product")).toBeTruthy());
     // The native concept is declared but has no connector, so it is not a
     // domain and does not take a row.
     expect(screen.queryByText("v1:planner:plan")).toBeNull();
@@ -255,14 +255,14 @@ describe("the data origins page", () => {
     await waitFor(() => expect(calls.some((c) => c.name === "datasyncStartBackfill")).toBe(true));
     expect(calls.find((c) => c.name === "datasyncStartBackfill")?.args).toEqual({
       connector: "shopify",
-      conceptId: "v1:shopify:shopifyProduct",
+      conceptId: "v1:shopify:product",
     });
 
     fireEvent.click(screen.getByText("Pause"));
     await waitFor(() => expect(calls.some((c) => c.name === "datasyncSetSyncPaused")).toBe(true));
     expect(calls.find((c) => c.name === "datasyncSetSyncPaused")?.args).toEqual({
       connector: "shopify",
-      conceptId: "v1:shopify:shopifyProduct",
+      conceptId: "v1:shopify:product",
       paused: true,
     });
   });
@@ -273,7 +273,7 @@ describe("the data origins page", () => {
     // per connector and the connector list comes from the inventory, so
     // clicking Load before it lands asks nobody and reports a clean queue --
     // which is why the button is disabled until then.
-    await waitFor(() => expect(screen.getByText("v1:shopify:shopifyProduct")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("v1:shopify:product")).toBeTruthy());
 
     fireEvent.click(screen.getByText("Load"));
     await waitFor(() => expect(screen.getByText("v1:wholesale:priceList")).toBeTruthy());
@@ -340,10 +340,10 @@ describe("the page's row shaping", () => {
 
   it("indexes health by (concept, connector) and reports a never-worked domain as ABSENT", () => {
     const lookup = healthFor(toSyncStateRows(HEALTH_ROWS));
-    expect(lookup("v1:shopify:shopifyProduct", "shopify")?.lagSeconds).toBe(42);
+    expect(lookup("v1:shopify:product", "shopify")?.lagSeconds).toBe(42);
     // Absent, not zeros: "never run" and "ran and found nothing" are
     // different answers and the table renders them differently.
-    expect(lookup("v1:shopify:shopifyProduct", "quickBooks")).toBeNull();
+    expect(lookup("v1:shopify:product", "quickBooks")).toBeNull();
   });
 
   it("collects the connectors the inventory names, sorted and deduplicated", () => {

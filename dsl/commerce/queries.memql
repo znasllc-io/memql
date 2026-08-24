@@ -1,0 +1,190 @@
+use common.traits.{ isActiveRecord }
+
+/// Product copy for one mirrored product.
+@actor
+query productContent productContentForProduct {
+  args {
+    storeId     string!
+    productGid  string!
+  }
+  filter    storeId==args.storeId && productGid==args.productGid && actor.isClusterOwner==true
+  paginate  1
+  shape     productContentFull
+}
+
+/// Everything the push channel still has to deliver for a store, and
+/// everything it already has. `status` narrows to one of them.
+@actor
+query productContent productContentForStore {
+  args {
+    storeId  string!
+    status   string
+  }
+  filter    storeId==args.storeId && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     productContentFull
+}
+
+/// The internal note on one customer.
+@actor
+query customerNote customerNoteFor {
+  args {
+    storeId      string!
+    customerGid  string!
+  }
+  filter    storeId==args.storeId && customerGid==args.customerGid && actor.isClusterOwner==true
+  paginate  1
+  shape     customerNoteFull
+}
+
+/// The internal note on one company location.
+@actor
+query companyLocationNote companyLocationNoteFor {
+  args {
+    storeId             string!
+    companyLocationGid  string!
+  }
+  filter    storeId==args.storeId && companyLocationGid==args.companyLocationGid && actor.isClusterOwner==true
+  paginate  1
+  shape     companyLocationNoteFull
+}
+
+/// The credit limit for one company location -- the read a checkout
+/// validation's backing service makes.
+@actor
+query creditLimit creditLimitForLocation {
+  args {
+    storeId             string!
+    companyLocationGid  string!
+  }
+  filter    storeId==args.storeId && companyLocationGid==args.companyLocationGid && actor.isClusterOwner==true
+  paginate  1
+  shape     creditLimitFull
+}
+
+/// Every credit limit for a company, across its locations.
+@actor
+query creditLimit creditLimitsForCompany {
+  args {
+    storeId     string!
+    companyGid  string!
+  }
+  filter    storeId==args.storeId && companyGid==args.companyGid && actor.isClusterOwner==true
+  sort      "companyLocationGid", "asc"
+  paginate  100
+  shape     creditLimitFull
+}
+
+/// One quote.
+@actor
+query quote quoteById {
+  args {
+    quoteId  string!
+  }
+  filter  row.id==args.quoteId && actor.isClusterOwner==true
+  shape     quoteFull
+}
+
+/// A company's quotes, newest first. `status` narrows to a stage.
+@actor
+query quote quotesForCompany {
+  args {
+    storeId     string!
+    companyGid  string!
+    status      string
+  }
+  filter    storeId==args.storeId && companyGid==args.companyGid && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     quoteFull
+}
+
+/// A rep's quotes.
+@actor
+query quote quotesForRep {
+  args {
+    storeId     string!
+    salesRepId  string!
+    status      string
+  }
+  filter    storeId==args.storeId && salesRepId==args.salesRepId && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     quoteFull
+}
+
+/// Quotes that have passed their validity date and are still open. The read
+/// the expiry sweep makes.
+@actor
+query quote quotesPastValidity {
+  args {
+    storeId  string!
+    asOf     datetime!
+  }
+  filter    storeId==args.storeId && status=="sent" && validUntil<=args.asOf && actor.isClusterOwner==true
+  sort      "validUntil", "asc"
+  paginate  100
+  shape     quoteFull
+}
+
+/// One approval chain.
+@actor
+query approvalChain approvalChainById {
+  args {
+    chainId  string!
+  }
+  filter  row.id==args.chainId && actor.isClusterOwner==true
+  shape     approvalChainFull
+}
+
+/// The chains that could apply to a company: its own, plus the store-wide
+/// ones. Which of them ENGAGES is a threshold comparison the caller makes.
+@actor
+query approvalChain approvalChainsForCompany {
+  args {
+    storeId     string!
+    companyGid  string
+  }
+  filter    storeId==args.storeId && actor.isClusterOwner==true && when(args.companyGid) { companyGid==args.companyGid }
+  sort      "thresholdAmount", "asc"
+  paginate  100
+  shape     approvalChainFull
+}
+
+/// Sales reps for a store.
+@actor
+query salesRep salesRepsForStore {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && isActiveRecord && actor.isClusterOwner==true
+  sort      "displayName", "asc"
+  paginate  100
+  shape     salesRepFull
+}
+
+/// Territories for a store.
+@actor
+query territory territoriesForStore {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && isActiveRecord && actor.isClusterOwner==true
+  sort      "name", "asc"
+  paginate  100
+  shape     territoryFull
+}
+
+/// A company's saved reorder lists.
+@actor
+query reorderList reorderListsForCompany {
+  args {
+    storeId     string!
+    companyGid  string!
+  }
+  filter    storeId==args.storeId && companyGid==args.companyGid && isActiveRecord && actor.isClusterOwner==true
+  sort      "name", "asc"
+  paginate  100
+  shape     reorderListFull
+}

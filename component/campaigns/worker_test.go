@@ -71,8 +71,12 @@ type fakeEngine struct {
 	// which is the pre-paging shape most tests still want.
 	pageSize int
 
-	// shopifyProducts backs shopifyProducts for #4140. Nil is an empty catalog.
+	// shopifyProducts backs purchasableVariants for #4140. Nil is an empty
+	// catalog. Rows are mirrored VARIANTS since memql#4389.
 	shopifyProducts []map[string]any
+	// shopifyStores backs the `stores` read that decides whether a Shopify
+	// catalog is in play at all.
+	shopifyStores []map[string]any
 
 	calls []recordedCall
 }
@@ -119,8 +123,10 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
-	case strings.HasPrefix(q, "query shopifyProducts"):
+	case strings.HasPrefix(q, "query purchasableVariants"):
 		return rowsEnvelope(e.shopifyProducts), nil
+	case strings.HasPrefix(q, "query stores"):
+		return rowsEnvelope(e.shopifyStores), nil
 	default:
 		return nil, nil
 	}

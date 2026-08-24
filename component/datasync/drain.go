@@ -301,6 +301,26 @@ func (w *Worker) deliver(ctx context.Context, opCtx context.Context, connector m
 		w.logger.Info("datasync drain: connector does not implement outbound delivery; entries are parked, not dead-lettered",
 			"connector", connector.Name(), "entry", entry.ID)
 
+	case memqlsync.IsPermanent(err):
+		// A failure no retry can fix -- a receiver's validation refusal,
+		// which arrives identically every time. Dead-lettered NOW rather
+		// than at the attempt ceiling.
+		//
+		// Spending the budget on it is not merely wasteful: the entries
+		// behind it wait through every backoff, so one malformed payload
+		// slows the whole queue for a connector, and the dead-letter that
+		// eventually lands says "exhausted attempts" rather than what the
+		// receiver actually objected to. The connector knows which it is
+		// and says so; the drain honours it.
+		if markErr := w.store.MarkDead(opCtx, entry.ID, err.Error()); markErr != nil {
+			w.logger.Warn("datasync drain: dead-lettering failed", "entry", entry.ID, "error", markErr)
+			return
+		}
+		w.deadTotal.Add(1)
+		w.logger.Warn("datasync drain: DEAD-LETTERED on a permanent failure -- an operator has to decide",
+			"connector", connector.Name(), "concept", entry.ConceptID, "row", entry.RowRef,
+			"attempts", attempts, "error", err)
+
 	case attempts >= w.cfg.MaxAttempts:
 		if markErr := w.store.MarkDead(opCtx, entry.ID, err.Error()); markErr != nil {
 			w.logger.Warn("datasync drain: dead-lettering failed", "entry", entry.ID, "error", markErr)

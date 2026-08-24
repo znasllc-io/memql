@@ -10,7 +10,7 @@ package memql
 // THE RULE, stated once: a connector actor is admitted to a concept
 // whose @origin or @mirroredTo names it, regardless of that concept's
 // declared tier; and to no other concept, whatever its tier. The Shopify
-// connector reads and writes shopifyProduct because shopifyProduct says
+// connector reads and writes v1:shopify:product because that concept says
 // @origin("shopify"); it cannot read a campaign, an identity, or another
 // origin's mirror, and no tier anywhere grants it anything.
 //
@@ -36,8 +36,8 @@ package memql
 //     predicate into the plan. That function takes no context -- ruled
 //     deliberately in memql#3976 -- so it cannot know who is asking, and
 //     it injects `actor.isClusterOwner==true` for a clusterOwner-tier
-//     mirror like shopifyProduct. A connector is not a cluster owner, so
-//     the predicate matches nothing and the connector's own reconcile
+//     mirror like v1:shopify:product. A connector is not a cluster owner,
+//     so the predicate matches nothing and the connector's own reconcile
 //     read returns zero rows: not an error, an EMPTY RESULT, which reads
 //     exactly like "the mirror is empty" and would have the reconciler
 //     conclude there is nothing to reconcile.
