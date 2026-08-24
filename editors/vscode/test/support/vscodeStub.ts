@@ -157,6 +157,13 @@ export function resetRecorded(): void {
   // about the whole file while reading like a fact about one case.
   recorded.inputBoxes.length = 0;
   recorded.outputChannels.length = 0;
+  // Appearance listeners and the editor's theme kind (memql#4419). Same
+  // reasoning as the input boxes above, one step worse: a listener left
+  // registered by a previous case belongs to a DISPOSED panel, so the next
+  // fireConfigurationChange() renders into a closed tab and the render counts
+  // this lane asserts on come out one high, blamed on the wrong panel.
+  resetAppearanceListeners();
+  window.activeColorTheme = { kind: ColorThemeKind.Dark };
   nextOpenDialogResult = undefined;
   // Back to DISMISSED, the documented default. An armed answer surviving into the
   // next case would hand a password to a run that never asked for one.
@@ -230,6 +237,66 @@ export const ViewColumn = {
   One: 1,
   Two: 2,
 } as const;
+
+// -----------------------------------------------------------------------------
+// The appearance surface (memql#4419)
+// -----------------------------------------------------------------------------
+//
+// Three members and two drivers, added because the panels now RE-RENDER on
+// them. What `memql.appearance` resolves to is unit-tested away from `vscode`
+// in src/webview/appearance.ts; what is only observable here is the half that
+// makes the setting worth having -- that flipping it repaints an OPEN panel,
+// rather than taking effect the next time one is opened.
+
+export const ColorThemeKind = {
+  Light: 1,
+  Dark: 2,
+  HighContrast: 3,
+  HighContrastLight: 4,
+} as const;
+
+/** Listeners registered through `window.onDidChangeActiveColorTheme`. */
+const colorThemeListeners: ((theme: { kind: number }) => void)[] = [];
+/** Listeners registered through `workspace.onDidChangeConfiguration`. */
+const configurationListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[] = [];
+
+/**
+ * Switch the editor's theme kind and fire the listeners, as the editor does.
+ *
+ * DEFAULTS TO DARK at module load, because that is the case where forcing
+ * `light` is visible: under a light editor a forced-light panel is
+ * indistinguishable from an unstamped one, so a test that started light could
+ * pass against a panel that stamps nothing at all.
+ */
+export function setActiveColorTheme(kind: number): void {
+  window.activeColorTheme = { kind };
+  for (const listener of [...colorThemeListeners]) listener(window.activeColorTheme);
+}
+
+/**
+ * Fire a configuration-change event naming the sections that changed.
+ *
+ * `affectsConfiguration` answers by PREFIX, the way the real one does, so a
+ * listener asking about `memql.appearance` is woken by a change reported as
+ * `memql` -- and, importantly, is NOT woken by `memql.lsp.serverPath`. A stub
+ * that answered true for everything would let a listener with a missing or
+ * wrong guard pass this lane and repaint every panel on every keystroke in
+ * settings.json.
+ */
+export function fireConfigurationChange(...changed: string[]): void {
+  const event = {
+    affectsConfiguration(section: string): boolean {
+      return changed.some((c) => section === c || section.startsWith(`${c}.`) || c.startsWith(`${section}.`));
+    },
+  };
+  for (const listener of [...configurationListeners]) listener(event);
+}
+
+/** Drop every registered appearance listener. Called by resetRecorded(). */
+function resetAppearanceListeners(): void {
+  colorThemeListeners.length = 0;
+  configurationListeners.length = 0;
+}
 
 /**
  * A webview panel, as a test drives it.
@@ -619,9 +686,44 @@ export const workspace = {
       },
     };
   },
+
+  // What every panel host subscribes to for `memql.appearance` (memql#4419).
+  // Driven by fireConfigurationChange().
+  onDidChangeConfiguration(
+    listener: (event: { affectsConfiguration(section: string): boolean }) => void
+  ): StubDisposable {
+    configurationListeners.push(listener);
+    return {
+      dispose: () => {
+        const at = configurationListeners.indexOf(listener);
+        if (at >= 0) configurationListeners.splice(at, 1);
+      },
+    };
+  },
 };
 
 export const window = {
+  /**
+   * The editor's current theme, as `vscode.window.activeColorTheme`.
+   *
+   * MUTABLE and replaced wholesale by setActiveColorTheme(), rather than
+   * having its `kind` poked, because the real one is a fresh object per change
+   * -- a panel that cached the object rather than reading it per render would
+   * pass against an in-place mutation and fail in the editor.
+   */
+  activeColorTheme: { kind: ColorThemeKind.Dark as number },
+
+  /** Panel hosts subscribe here to repaint when the editor's theme changes. */
+  onDidChangeActiveColorTheme(listener: (theme: { kind: number }) => void): StubDisposable {
+    colorThemeListeners.push(listener);
+    return {
+      dispose: () => {
+        const at = colorThemeListeners.indexOf(listener);
+        if (at >= 0) colorThemeListeners.splice(at, 1);
+      },
+    };
+  },
+
   showErrorMessage(message: string): Promise<undefined> {
     recorded.errors.push(message);
     return Promise.resolve(undefined);

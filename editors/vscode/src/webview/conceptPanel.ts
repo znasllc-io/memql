@@ -39,6 +39,7 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { ConnectionManager } from "../connection/manager.js";
 import { ConceptPanelState } from "../state/conceptPanelState.js";
@@ -199,6 +200,9 @@ export class ConceptPanel {
     });
 
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => this.dispose(true)),
       this.panel.webview.onDidReceiveMessage(
         // The webview posts plain JSON; treat it as untrusted input rather
@@ -452,7 +456,7 @@ ${viewKitStyles}
   button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 <div class="toolbar">
   ${brandMarkSvg(16)}
   <strong class="data">${escapeHtml(this.concept.id)}</strong>

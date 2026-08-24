@@ -40,6 +40,7 @@ import * as vscode from "vscode";
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import {
   DEPLOY_ACTIONS,
@@ -387,6 +388,9 @@ export class DeploymentPanel {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => {
         this.disposed = true;
         // Abort FIRST. A run whose panel has gone has nowhere to report, and
@@ -1404,7 +1408,7 @@ ${viewKitStyles}
   button[disabled] { opacity: 0.5; cursor: default; }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 ${brandStrip("MemQL")}
 ${this.bodyHtml()}
 <script nonce="${nonce}">

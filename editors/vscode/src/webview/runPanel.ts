@@ -35,6 +35,7 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { RunTarget } from "../constructs/runnable.js";
 import type { RunOutcome } from "../run/orchestrator.js";
@@ -113,6 +114,9 @@ export class RunPanel {
       { enableScripts: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
     );
@@ -237,7 +241,7 @@ ${panelChrome()}
   .actions input { width: auto; flex: 1 1 12em; }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 <div class="toolbar">
   ${brandMarkSvg(16)}
   <strong class="data">${escapeHtml(this.target.kind)} ${escapeHtml(this.target.name)}</strong>
@@ -322,8 +326,18 @@ function noticeFor(target: RunTarget, values: Record<string, unknown>): string {
   return `This run configuration sets ${orphans.join(", ")}, which ${target.name} no longer declares. Those values are not shown and will not be sent.`;
 }
 
+// The separator is NUL because no component of a RunTarget can contain one, so
+// the joined key is unambiguous. It is written as an ESCAPE rather than as the
+// raw byte it used to be (memql#4422): a raw NUL makes the whole file "binary"
+// to the standard toolchain -- `file` reports "data", and `grep` skips it in
+// silence, with no message and a zero exit. That is not hypothetical here.
+// This file was invisible to the survey that produced this epic's design
+// record, which is why that record says "all six webview panels" when there
+// are seven, and it is why the brand-coverage gate reads panels with a decoder
+// that cannot fail rather than shelling out to grep. Same value, same key,
+// greppable.
 function panelKey(target: RunTarget): string {
-  return `${target.uri} ${target.kind} ${target.name}`;
+  return `${target.uri}\u0000${target.kind}\u0000${target.name}`;
 }
 
 function isStringMap(v: unknown): v is Record<string, string> {
@@ -375,6 +389,9 @@ export class ResultPanel {
       { enableScripts: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
     );
@@ -473,7 +490,7 @@ ${viewKitStyles}
   .group-title { font-weight: 600; margin: 12px 0 4px; }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 <div class="toolbar">
   ${brandMarkSvg(16)}
   <strong>${escapeHtml(resultTitle(this.outcome))}</strong>
