@@ -64,6 +64,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorProviderVerify: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateProviderVerifyExpression(ctx, args)
 		},
+		BuiltinExecutorProviderKeySet: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateProviderKeySetExpression(ctx, args)
+		},
+		BuiltinExecutorProviderFederationSet: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateProviderFederationSetExpression(ctx, args)
+		},
 	}
 
 	if e.functions != nil {

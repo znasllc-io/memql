@@ -752,6 +752,93 @@ func ProviderAuthStatusBuild(args ProviderAuthStatusArgs) string {
 	return "builtin providerAuthStatus()"
 }
 
+// ProviderFederationSet -- Write Anthropic workload identity federation ids as v1:platform:globalVariable rows -- the recommended path, because no key is at rest anywhere: each pod exchanges its own projected token for a short-lived bearer. Plaintext rows are correct here; none of these five is a credential. All-or-none is enforced BEFORE the write (the workspace id excepted, which Anthropic needs only for a multi-workspace rule): a partial set refuses BOOT, so accepting one here would take the fleet down at its next restart, hours from the save that caused it. Owner-only.
+type ProviderFederationSetArgs struct {
+	// The OIDC federation rule id (fdrl_...) the token exchange names.
+	RuleId string
+	// UUID of the Anthropic organization the rule belongs to.
+	OrganizationId string
+	// The service account the rule maps this cluster onto.
+	ServiceAccountId string
+	// Optional. Anthropic requires it only when a rule spans more than one workspace, so it is outside the all-or-none set.
+	WorkspaceId string
+	// Path to the pod's projected Kubernetes token, mounted for the Anthropic audience.
+	IdentityTokenFile string
+}
+
+// ProviderFederationSet calls the engine builtin providerFederationSet.
+func (qc *QueryClient) ProviderFederationSet(ctx context.Context, args ProviderFederationSetArgs) (*Result, error) {
+	call := ProviderFederationSetBuild(args)
+	return qc.executeNamed(ctx, "providerFederationSet", call)
+}
+
+func ProviderFederationSetBuild(args ProviderFederationSetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin providerFederationSet(")
+	if args.RuleId != "" {
+		b.WriteString("ruleId: ")
+		b.WriteString(quoteMemQL(args.RuleId))
+	}
+	if args.OrganizationId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("organizationId: ")
+		b.WriteString(quoteMemQL(args.OrganizationId))
+	}
+	if args.ServiceAccountId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("serviceAccountId: ")
+		b.WriteString(quoteMemQL(args.ServiceAccountId))
+	}
+	if args.WorkspaceId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("workspaceId: ")
+		b.WriteString(quoteMemQL(args.WorkspaceId))
+	}
+	if args.IdentityTokenFile != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("identityTokenFile: ")
+		b.WriteString(quoteMemQL(args.IdentityTokenFile))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ProviderKeySet -- Seal one vendor API key into a v1:platform:globalSecret row, under the exact name the auth resolver tries. WRITE-ONLY: the reply carries the row name and a fingerprint, never the value, and no read-back call exists. The VENDOR is the argument rather than the row name, so an operator cannot mistype a name the resolver never tries and watch a correctly-entered key do nothing. Does NOT reload -- seeding and applying are separate acts, so a mistyped key cannot take the fleet down as it is saved. Owner-only.
+type ProviderKeySetArgs struct {
+	// Which vendor the key belongs to: anthropic or openai.
+	Vendor string
+	// The key itself. Trimmed, refused when empty, sealed with the cluster master key before it touches a row, and never returned.
+	ApiKey string
+}
+
+// ProviderKeySet calls the engine builtin providerKeySet.
+func (qc *QueryClient) ProviderKeySet(ctx context.Context, args ProviderKeySetArgs) (*Result, error) {
+	call := ProviderKeySetBuild(args)
+	return qc.executeNamed(ctx, "providerKeySet", call)
+}
+
+func ProviderKeySetBuild(args ProviderKeySetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin providerKeySet(")
+	b.WriteString("vendor: ")
+	b.WriteString(quoteMemQL(args.Vendor))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("apiKey: ")
+	b.WriteString(quoteMemQL(args.ApiKey))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProviderVerify -- Make ONE authenticated, token-free call to a provider's vendor and report whether the credential THIS node resolved was accepted. Lists models -- the cheapest authenticated request either vendor serves -- so it can be pressed as often as an operator likes without spending inference. A rejected key is an ANSWER (verified=false with the vendor's reason), not an error. Owner-only.
 type ProviderVerifyArgs struct {
 	// The registered provider entry to verify, by name.

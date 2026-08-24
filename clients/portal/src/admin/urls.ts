@@ -21,6 +21,14 @@ export interface AdminSurface {
   readonly label: string;
   readonly title: string;
   readonly blurb: string;
+  // OWNER, not owner-or-admin (epic memql#4440). Every other surface here
+  // shares one floor, and `providers` is the first that does not: seeding a
+  // vendor credential and rotating it across the fleet is a cluster-owner act,
+  // and the engine's builtins refuse below owner regardless of what this
+  // console renders.
+  //
+  // Absent (the default) means the console's ordinary owner-or-admin floor.
+  readonly ownerOnly?: boolean;
 }
 
 // TWO SURFACES RETIRED HERE (memql#4264), and both for the same reason:
@@ -62,7 +70,32 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "The runtime-editable settings in force: who may register, how long a " +
       "token lives, and how the cluster brands itself.",
   },
+  {
+    id: "providers",
+    label: "AI providers",
+    title: "AI providers",
+    ownerOnly: true,
+    blurb:
+      "Which models this cluster can call, and how it authenticates to them. " +
+      "Nothing here is needed to install or run the cluster -- configure it " +
+      "when you want agents to think.",
+  },
 ];
+
+// The surfaces a given role may be OFFERED.
+//
+// ABSENT, NOT DISABLED, for a surface above the caller's floor (epic
+// memql#4440). A greyed-out tab is an advertisement for a capability, and the
+// operator's only way to learn what it does is to be told they may not. This
+// console already refuses below its floor with a page that names the role it
+// read; a second, weaker refusal in the tab strip adds nothing.
+//
+// An empty role has not resolved yet -- see AdminAccess.resolved. It is
+// treated as below the owner floor here, which is the safe direction: the
+// strip gains the tab when the role arrives.
+export function adminSurfacesFor(role: string): readonly AdminSurface[] {
+  return ADMIN_SURFACES.filter((surface) => surface.ownerOnly !== true || role === "owner");
+}
 
 export function adminPath(surfaceId = ""): string {
   return surfaceId === "" ? ADMIN_ROOT : `${ADMIN_ROOT}/${surfaceId}`;

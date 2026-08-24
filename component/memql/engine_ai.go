@@ -308,11 +308,18 @@ func (e *MemQLEngine) promptDefaultProvider(templateId string) string {
 // `MemQLEngine.Logger` is PROMOTED from the embedded *component.Component, so
 // on an engine built without one -- every hand-constructed test engine, and
 // any embedding that skips the component wiring -- reading the field
-// dereferences a nil pointer instead of yielding a nil logger. That is why the
-// guards around this file read `e.Component != nil && e.Logger != nil` rather
-// than the obvious `e.Logger != nil`, and it is a trap worth having one name
-// for: every slog call in the package takes a *slog.Logger that is allowed to
-// be nil, so the only unsafe step is READING the field.
+// dereferences a nil pointer instead of yielding a nil logger. That is the
+// memql#2674 class, and it is why every guard in this package tests the
+// Component before the promoted field;
+// TestNoUnguardedPromotedLoggerChecks fails the build on one that does not.
+//
+// This is the same rule with one name instead of a repeated conjunction, for
+// a path that needs the logger three times. It is not an exemption from that
+// gate: the gate looks for a comparison against the promoted field, and this
+// function does not make one -- it checks the EMBEDDED POINTER and then reads
+// the field, which is the only order that is safe. Every slog call in the
+// package accepts a nil *slog.Logger, so reading the field is the whole
+// hazard.
 func (e *MemQLEngine) safeLogger() *slog.Logger {
 	if e == nil || e.Component == nil {
 		return nil

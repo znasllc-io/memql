@@ -308,6 +308,24 @@ concept providerVerifyResult {
   modelsListed  int      @description("How many models the check listed. Present only on a pass; the call spends no tokens, which is what makes Verify pressable as often as an operator likes.")
 }
 
+/// Virtual single-row RESULT of seeding AI provider configuration from the portal (epic
+/// memql#4440) -- `providerKeySet` or `providerFederationSet`. Never persisted.
+///
+/// THERE IS NO VALUE FIELD, AND THERE IS NO READ-BACK CONSTRUCT ANYWHERE IN THIS EPIC. A key
+/// entered here is sealed with the cluster master key before it touches a row and is never
+/// returned; what comes back is the row NAME the resolver will try and a four-character
+/// fingerprint. "Is this key good" is answered by `providerVerify` making a live call, not by
+/// showing an operator what they typed.
+@displayCard(primary="name", secondary="vendor", tertiary="fingerprint")
+concept providerConfigResult {
+  name         string!  @description("The row name written, which is the exact name the auth resolver tries. Also the row id. The VENDOR is what the caller chooses; this name is derived, so a mistyped name the resolver never tries is not a state an operator can reach.")
+  vendor       string!  @description("Which vendor the configuration is for.")
+  fingerprint  string   @description("Four characters derived from the sealed value, enough to tell two keys apart and useless for reconstructing either. Empty for federation, which seals nothing.")
+  applied      bool!    @description("Always false: seeding does not reload. Present rather than implied, because \"saved\" and \"in force\" are the two states an operator most needs told apart -- a key that is saved and not applied is doing nothing, and the page says so.")
+  written      []string  @description("Which variable names a federation write actually created. Empty for a key write. An omitted optional (the workspace id) writes no row at all rather than an empty one -- the resolver reads \"\" as absent, so an empty row would mean nothing and shadow nothing.")
+  message      string   @description("What the operator should do next, in one sentence.")
+}
+
 /// One pending outbound delivery for an ORIGIN concept (epic memql#4378, D5). MemQL owns the data;
 /// an external system holds a mirror of it; this row is the durable record that a change has to
 /// reach that system. Appended by the engine in the SAME TRANSACTION as the row write, one entry

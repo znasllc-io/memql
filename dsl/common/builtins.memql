@@ -740,6 +740,32 @@ builtin providerVerify {
   provider  string!
 }
 
+@sdk
+@executor("providerKeySet")
+@description("Seal one vendor API key into a v1:platform:globalSecret row, under the exact name the auth resolver tries. WRITE-ONLY: the reply carries the row name and a fingerprint, never the value, and no read-back call exists. The VENDOR is the argument rather than the row name, so an operator cannot mistype a name the resolver never tries and watch a correctly-entered key do nothing. Does NOT reload -- seeding and applying are separate acts, so a mistyped key cannot take the fleet down as it is saved. Owner-only.")
+builtin providerKeySet {
+  /// Which vendor the key belongs to: anthropic or openai.
+  vendor  string!
+  /// The key itself. Trimmed, refused when empty, sealed with the cluster master key before it touches a row, and never returned.
+  apiKey  string!
+}
+
+@sdk
+@executor("providerFederationSet")
+@description("Write Anthropic workload identity federation ids as v1:platform:globalVariable rows -- the recommended path, because no key is at rest anywhere: each pod exchanges its own projected token for a short-lived bearer. Plaintext rows are correct here; none of these five is a credential. All-or-none is enforced BEFORE the write (the workspace id excepted, which Anthropic needs only for a multi-workspace rule): a partial set refuses BOOT, so accepting one here would take the fleet down at its next restart, hours from the save that caused it. Owner-only.")
+builtin providerFederationSet {
+  /// The OIDC federation rule id (fdrl_...) the token exchange names.
+  ruleId             string
+  /// UUID of the Anthropic organization the rule belongs to.
+  organizationId     string
+  /// The service account the rule maps this cluster onto.
+  serviceAccountId   string
+  /// Optional. Anthropic requires it only when a rule spans more than one workspace, so it is outside the all-or-none set.
+  workspaceId        string
+  /// Path to the pod's projected Kubernetes token, mounted for the Anthropic audience.
+  identityTokenFile  string
+}
+
 // ---- The sync runtime (epic memql#4378) ----
 //
 // Four builtins over component/datasync. The first two are driven by the

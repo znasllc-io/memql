@@ -567,6 +567,65 @@ QueryClient.prototype.providerAuthStatus = function (this: QueryClient, args: Pr
   return this.executeNamed("providerAuthStatus", buildProviderAuthStatus(args), opts);
 };
 
+/** Write Anthropic workload identity federation ids as v1:platform:globalVariable rows -- the recommended path, because no key is at rest anywhere: each pod exchanges its own projected token for a short-lived bearer. Plaintext rows are correct here; none of these five is a credential. All-or-none is enforced BEFORE the write (the workspace id excepted, which Anthropic needs only for a multi-workspace rule): a partial set refuses BOOT, so accepting one here would take the fleet down at its next restart, hours from the save that caused it. Owner-only. */
+export interface ProviderFederationSetArgs {
+  /** The OIDC federation rule id (fdrl_...) the token exchange names. */
+  ruleId?: string;
+  /** UUID of the Anthropic organization the rule belongs to. */
+  organizationId?: string;
+  /** The service account the rule maps this cluster onto. */
+  serviceAccountId?: string;
+  /** Optional. Anthropic requires it only when a rule spans more than one workspace, so it is outside the all-or-none set. */
+  workspaceId?: string;
+  /** Path to the pod's projected Kubernetes token, mounted for the Anthropic audience. */
+  identityTokenFile?: string;
+}
+
+export function buildProviderFederationSet(args: ProviderFederationSetArgs): string {
+  const parts: string[] = [];
+  if (args.ruleId !== undefined) parts.push("ruleId: " + renderMemQLValue(args.ruleId));
+  if (args.organizationId !== undefined) parts.push("organizationId: " + renderMemQLValue(args.organizationId));
+  if (args.serviceAccountId !== undefined) parts.push("serviceAccountId: " + renderMemQLValue(args.serviceAccountId));
+  if (args.workspaceId !== undefined) parts.push("workspaceId: " + renderMemQLValue(args.workspaceId));
+  if (args.identityTokenFile !== undefined) parts.push("identityTokenFile: " + renderMemQLValue(args.identityTokenFile));
+  return "builtin providerFederationSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerFederationSet(args: ProviderFederationSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerFederationSet = function (this: QueryClient, args: ProviderFederationSetArgs = {} as ProviderFederationSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerFederationSet", buildProviderFederationSet(args), opts);
+};
+
+/** Seal one vendor API key into a v1:platform:globalSecret row, under the exact name the auth resolver tries. WRITE-ONLY: the reply carries the row name and a fingerprint, never the value, and no read-back call exists. The VENDOR is the argument rather than the row name, so an operator cannot mistype a name the resolver never tries and watch a correctly-entered key do nothing. Does NOT reload -- seeding and applying are separate acts, so a mistyped key cannot take the fleet down as it is saved. Owner-only. */
+export interface ProviderKeySetArgs {
+  /** Which vendor the key belongs to: anthropic or openai. */
+  vendor: string;
+  /** The key itself. Trimmed, refused when empty, sealed with the cluster master key before it touches a row, and never returned. */
+  apiKey: string;
+}
+
+export function buildProviderKeySet(args: ProviderKeySetArgs): string {
+  const parts: string[] = [];
+  parts.push("vendor: " + renderMemQLValue(args.vendor));
+  parts.push("apiKey: " + renderMemQLValue(args.apiKey));
+  return "builtin providerKeySet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerKeySet(args: ProviderKeySetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerKeySet = function (this: QueryClient, args: ProviderKeySetArgs = {} as ProviderKeySetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerKeySet", buildProviderKeySet(args), opts);
+};
+
 /** Make ONE authenticated, token-free call to a provider's vendor and report whether the credential THIS node resolved was accepted. Lists models -- the cheapest authenticated request either vendor serves -- so it can be pressed as often as an operator likes without spending inference. A rejected key is an ANSWER (verified=false with the vendor's reason), not an error. Owner-only. */
 export interface ProviderVerifyArgs {
   /** The registered provider entry to verify, by name. */
