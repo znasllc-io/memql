@@ -1,12 +1,12 @@
 {
   "name": "uninstall",
   "kind": "uninstall",
-  "description": "Take back exactly what the install graph put on this machine, in the reverse of the order install built it: the cluster goes before the hosts entries it answered on and the checkout it was reconciled from, and each tool outlives the artifact it is needed to remove.",
+  "description": "Take back exactly what the install put on this machine, in the reverse of the order it was built: the cluster goes before the addresses it answered on and the files it ran from, and each tool is removed only after the thing it was needed to remove.",
   "steps": [
     {
       "id": "removeCluster",
       "script": "install.removeArtifact",
-      "description": "Delete the local k3d cluster.",
+      "description": "Removing the cluster and everything running inside it.",
       "params": {
         "kind": "stack"
       },
@@ -21,7 +21,7 @@
     {
       "id": "removeCheckout",
       "script": "install.removeArtifact",
-      "description": "Remove the pinned source checkout.",
+      "description": "Removing the MemQL files this install downloaded.",
       "params": {
         "kind": "checkout",
         "prune-empty-parents": "1"
@@ -40,7 +40,7 @@
     {
       "id": "removeHostsBlock",
       "script": "install.removeArtifact",
-      "description": "Delete the installer's marked block from the system hosts file, leaving every other line alone.",
+      "description": "Removing the cluster's web addresses from the system hosts file, leaving every other entry alone.",
       "params": {
         "kind": "hostsEntries",
         "marker": "memql"
@@ -59,7 +59,7 @@
     {
       "id": "removeLocalCA",
       "script": "install.removeArtifact",
-      "description": "Uninstall the local mkcert CA from the system trust stores, delete its key material, and remove the front-door certificate and private key it issued.",
+      "description": "Withdrawing this machine's local certificate authority from the system trust stores and deleting the certificate it issued.",
       "params": {
         "kind": "mkcertCA",
         "prune-empty-parents": "1"
@@ -80,7 +80,7 @@
     {
       "id": "removeToolK3d",
       "script": "install.removeArtifact",
-      "description": "Remove the installed k3d binary -- after the cluster it manages is gone.",
+      "description": "Removing k3d, now that the cluster it runs is gone.",
       "params": {
         "kind": "binary",
         "prune-empty-parents": "1"
@@ -101,7 +101,7 @@
     {
       "id": "removeToolKubectl",
       "script": "install.removeArtifact",
-      "description": "Remove the installed kubectl binary -- after the cluster it talks to is gone.",
+      "description": "Removing kubectl, now that the cluster it talks to is gone.",
       "params": {
         "kind": "binary",
         "prune-empty-parents": "1"
@@ -122,7 +122,7 @@
     {
       "id": "removeToolMkcert",
       "script": "install.removeArtifact",
-      "description": "Remove the installed mkcert binary -- after the CA it is needed to uninstall is gone.",
+      "description": "Removing mkcert, now that the certificate authority it manages is gone.",
       "params": {
         "kind": "binary",
         "prune-empty-parents": "1"

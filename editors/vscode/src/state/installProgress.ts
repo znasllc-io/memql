@@ -23,12 +23,7 @@
 //
 // Refs: #3474 #3470 #3469 #3463
 
-import * as os from "node:os";
-
 import type { InstallStepView } from "@znasllc-io/memql-view-kit";
-
-import { redactForDisplay } from "../install/secrets.js";
-import { briefMessage } from "./diagnostics.js";
 
 import type { StepProgress } from "./addCluster.js";
 
@@ -280,23 +275,20 @@ export function toStepViews(steps: readonly StepProgress[]): InstallStepView[] {
     const detail = detailFor(step);
     if (detail !== "") view.detail = detail;
 
-    // The exit code rides only on a failure. On any other state it is either
-    // absent or stale, and a step that succeeded showing "exit 5" would be
-    // alarming and wrong.
-    if (step.state === "failed" && step.exitCode !== null) view.exitCode = step.exitCode;
-
-    // A SHORT what-failed line, never the verbatim stderr (memql#4194, audit
-    // row 30). The full log -- paths, hostnames, kubectl output -- goes to the
-    // MemQL Install output channel as the run emits it; the panel keeps the
-    // last line, redacted and capped, which is where a capability script's
-    // actual error sentence lands. Only where something went wrong: attaching
-    // a log line to every successful step would bury the failure in twelve
-    // disclosures that all say "fine".
-    if (step.log !== "" && (step.state === "failed" || step.state === "preserved")) {
-      const inline = inlineStepError(step.log);
-      if (inline !== "") view.error = inline;
-    }
-
+    // NEITHER THE EXIT CODE NOR A LOG LINE RIDES ON A CHECKLIST ROW ANY MORE
+    // (memql#4456 over memql#4194).
+    //
+    // memql#4194 put a short redacted last-line here because the full log had
+    // nowhere on the page to be -- it went to the MemQL Install output channel,
+    // and the inline line ended by SAYING SO. That is no longer true: the run
+    // screens carry a log pane (memql#4455), so the sentence pointed somewhere
+    // else while the thing it described was one click below it, and the same
+    // stderr rendered in two places.
+    //
+    // D4's rule is that verbatim output, exit codes and envelope fields have
+    // exactly one home, and it is the pane. The checklist keeps what a
+    // checklist is for: which step, what state, and the reason sentence the
+    // capability wrote for a human (`detailFor`).
     return view;
   });
 }
@@ -333,25 +325,120 @@ export function runIsSettled(steps: readonly StepProgress[]): boolean {
   return !steps.some((s) => s.state === "pending" || s.state === "running");
 }
 
+// ---------------------------------------------------------------------------
+// the run's progress, as a number (memql#4454)
+// ---------------------------------------------------------------------------
+
 /**
- * The one line of a step's stderr the PANEL may show (memql#4194, audit 30).
+ * How far along a run is.
  *
- * The last non-empty line is where a capability script's own failure sentence
- * lands (cap_fail writes it last); it is redacted -- home masked, credentials
- * scrubbed -- and capped, and the panel line names where the rest went. The
- * full log's home is the MemQL Install output channel, fed line-by-line as
- * the run emits stderr.
- *
- * `home` is a parameter for the tests; callers take the default.
+ * PURE, AND HERE RATHER THAN IN THE RENDERER, for the reason the rest of this
+ * module exists: the panel that draws the bar imports `vscode`, so a
+ * percentage computed inside a template literal is one no test can reach. The
+ * bar is the most visible claim this wizard makes -- "you are two-thirds of the
+ * way through a ten-minute operation" -- and it is worth being able to assert.
  */
-export function inlineStepError(log: string, home: string = os.homedir()): string {
-  const lines = log
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  const last = lines[lines.length - 1];
-  if (last === undefined) return "";
-  const brief = briefMessage(redactForDisplay(last, home));
-  if (brief === "") return "";
-  return `${brief}\nFull log: the MemQL Install output channel.`;
+export interface RunProgress {
+  /** Steps that will not change state again. */
+  settled: number;
+  /** Every step the executor seeded, including the ones not started. */
+  total: number;
+  /** `settled / total` as a whole number; 0 when nothing has been seeded. */
+  percent: number;
+  /**
+   * The description of every step currently RUNNING, in graph order.
+   *
+   * A LIST BECAUSE A WAVE IS A LIST. The executor runs independent branches
+   * under `Promise.all`, so "the current step" is regularly three steps, and a
+   * narration that named one of them would be naming whichever the projection
+   * happened to reach first -- the same scheduling accident `failures` exists
+   * to avoid on the other side of the run.
+   *
+   * EMPTY IS ORDINARY: between waves, before the first step starts, and once
+   * the run is over. The caller decides what to say then; this reports.
+   */
+  currentDescriptions: readonly string[];
+}
+
+/**
+ * A step is SETTLED when it will not change state again.
+ *
+ * The same predicate `runIsSettled` applies to the whole list, deliberately:
+ * two meanings of "settled" on one run is how a bar comes to disagree with the
+ * Cancel button beside it. `skipped` and `preserved` count -- a step the run
+ * verified it did not need is a step that is done with -- and so does `failed`,
+ * which has finished in every sense except the one the operator cares about.
+ */
+function isSettled(state: StepProgress["state"]): boolean {
+  return state !== "pending" && state !== "running";
+}
+
+/**
+ * The run's progress, from the step list the executor seeded.
+ *
+ * THE BAR MAY MOVE BACKWARDS, and that is correct rather than a glitch to
+ * smooth over. `AddClusterState.retry()` puts failed steps back to `pending`,
+ * so a retry genuinely has more left to do than the moment before it -- and a
+ * bar that only ever advanced would have to either freeze or lie about which
+ * of the two it was.
+ *
+ * TOTAL IS THE SEEDED LIST, not a guess. `runStarted` upserts the steps ahead
+ * precisely so "how much is left" is knowable; before that event the list is
+ * empty, `total` is 0, and the caller renders an INDETERMINATE bar rather than
+ * a 0% one -- "we do not know yet" and "nothing has happened yet" are different
+ * claims and only one of them is true then.
+ */
+export function runProgress(steps: readonly StepProgress[]): RunProgress {
+  const total = steps.length;
+  const settled = steps.filter((step) => isSettled(step.state)).length;
+  return {
+    settled,
+    total,
+    percent: total === 0 ? 0 : Math.round((settled / total) * 100),
+    currentDescriptions: steps
+      .filter((step) => step.state === "running")
+      .map((step) => (step.description === "" ? step.id : step.description)),
+  };
+}
+
+/** The one line under the bar: what is happening, and where in the run it is. */
+export interface RunNarration {
+  /** The human sentence, or "" when there is nothing running to narrate. */
+  message: string;
+  /** "step 4 of 14", or "" while the total is still unknown. */
+  position: string;
+}
+
+/**
+ * What to say beneath the progress bar.
+ *
+ * THE STEP'S OWN DESCRIPTION, NEVER ITS OUTPUT AND NEVER ITS SCRIPT. The graph
+ * carries a written sentence per step for exactly this, and it is the single
+ * source the CLI narrates from too -- which is what stops the wizard and the
+ * terminal describing the same install differently. Raw output has one home on
+ * this surface and it is behind the disclosure (memql#4455).
+ *
+ * A WAVE NAMES ITS FIRST STEP AND COUNTS THE REST. Listing three sentences on
+ * one line is unreadable at the width a panel has, and picking one silently
+ * would hide that anything else was in flight.
+ *
+ * POSITION IS `settled + 1`, CLAMPED. It is the step the operator is waiting
+ * on, which is the one after everything that has finished; clamping stops the
+ * last wave reporting "step 15 of 14" as it settles.
+ */
+export function runNarration(progress: RunProgress): RunNarration {
+  const { currentDescriptions: current, settled, total } = progress;
+  const first = current[0];
+  const message =
+    first === undefined
+      ? ""
+      : current.length === 1
+        ? first
+        : // The stop is taken off the embedded sentence: "...over https. -- and 1
+          // more in progress" is what the naive join produces.
+          `${first.replace(/\.$/, "")} -- and ${current.length - 1} more in progress`;
+  return {
+    message,
+    position: total === 0 ? "" : `step ${Math.min(settled + 1, total)} of ${total}`,
+  };
 }

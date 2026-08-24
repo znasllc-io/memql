@@ -1,12 +1,12 @@
 {
   "name": "install-main",
   "kind": "install",
-  "description": "Install a local MemQL cluster from a main checkout, building its node images from that checkout instead of pulling a published release.",
+  "description": "Set up a local MemQL cluster built from the latest source on this machine, instead of from a published release.",
   "steps": [
     {
       "id": "detect",
       "script": "install.detect",
-      "description": "Inventory the machine: OS/arch support, docker daemon, port availability, free disk.",
+      "description": "Checking this machine can run a cluster: a supported system, Docker running, the ports free, and enough disk space.",
       "readOnly": true,
       "elevation": "none",
       "verify": {
@@ -17,7 +17,7 @@
     {
       "id": "dockerAccess",
       "script": "install.dockerAccess",
-      "description": "Confirm this user can reach the Docker daemon before anything is installed.",
+      "description": "Checking that Docker can run containers for you, before anything is installed.",
       "readOnly": true,
       "dependsOn": [
         "detect"
@@ -31,7 +31,7 @@
     {
       "id": "toolK3d",
       "script": "install.binary",
-      "description": "Install the pinned k3d binary, verified against its committed sha256.",
+      "description": "Installing k3d, which runs the cluster, and checking the download is the expected one.",
       "params": {
         "tool": "k3d"
       },
@@ -51,7 +51,7 @@
     {
       "id": "toolKubectl",
       "script": "install.binary",
-      "description": "Install the pinned kubectl binary, verified against its committed sha256.",
+      "description": "Installing kubectl, which talks to the cluster, and checking the download is the expected one.",
       "params": {
         "tool": "kubectl"
       },
@@ -71,7 +71,7 @@
     {
       "id": "toolMkcert",
       "script": "install.binary",
-      "description": "Install the pinned mkcert binary, verified against its committed sha256.",
+      "description": "Installing mkcert, which issues this machine's local certificates, and checking the download is the expected one.",
       "params": {
         "tool": "mkcert"
       },
@@ -91,7 +91,7 @@
     {
       "id": "hostsBlock",
       "script": "install.hostsEntries",
-      "description": "Point the front-door hostnames at 127.0.0.1 inside a marked block in the system hosts file.",
+      "description": "Pointing the cluster's web addresses at this machine, inside a marked section of the system hosts file.",
       "params": {
         "action": "add",
         "confirm": "add-memql-hosts"
@@ -112,7 +112,7 @@
     {
       "id": "browserTrust",
       "script": "install.nssTools",
-      "description": "Install the NSS tools, so browsers can trust the local certificate authority.",
+      "description": "Setting up the tools your browsers need to trust this machine's local certificates.",
       "params": {
         "confirm": "install-nss-tools"
       },
@@ -132,7 +132,7 @@
     {
       "id": "localCA",
       "script": "install.mkcert",
-      "description": "Ensure a trusted local CA and issue the front-door wildcard certificate.",
+      "description": "Issuing the certificate that lets this cluster answer over https.",
       "params": {
         "confirm": "install-memql-ca"
       },
@@ -151,7 +151,7 @@
     {
       "id": "stackCheckout",
       "script": "install.cloneStack",
-      "description": "Check the MemQL stack out at a release tag into the pinned local source directory.",
+      "description": "Downloading the MemQL release you chose.",
       "dependsOn": [
         "detect",
         "providerKey",
@@ -168,7 +168,7 @@
     {
       "id": "providerKey",
       "script": "install.verifyProviderKey",
-      "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it. Skipped, satisfied, when no key was supplied: installing spends no inference, so providers are configured in the portal afterwards.",
+      "description": "Checking that your AI provider key is accepted, before the cluster is built around it. Skipped when you supplied none: installing spends no AI credit, and providers are set up afterwards in the portal.",
       "dependsOn": [
         "detect"
       ],
@@ -183,7 +183,7 @@
       "id": "clusterUp",
       "script": "k3d.up",
       "timeoutSeconds": 1800,
-      "description": "Create the k3d cluster, install ArgoCD, seed secrets and reconcile the local overlay against the checkout's own :local image names.",
+      "description": "Creating the cluster and preparing it for the MemQL images that are about to be built here.",
       "dependsOn": [
         "toolK3d",
         "toolKubectl",
@@ -205,7 +205,7 @@
       "id": "buildImages",
       "script": "k3d.dev",
       "timeoutSeconds": 2700,
-      "description": "Build the node images from the checkout, import them into k3d, and roll the cluster onto them.",
+      "description": "Building MemQL from the source just downloaded and starting the cluster on it.",
       "params": {
         "image-source": "checkout"
       },
@@ -223,7 +223,7 @@
     {
       "id": "seedBootstrap",
       "script": "install.seedBootstrap",
-      "description": "Write the identity bootstrap values -- and the AI provider key if one was supplied -- into the cluster and restart the nodes that read them, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "description": "Creating your owner account and applying the settings you gave, then restarting the services that read them.",
       "dependsOn": [
         "clusterUp",
         "buildImages"
@@ -238,7 +238,7 @@
     {
       "id": "frontDoor",
       "script": "install.verifyFrontDoor",
-      "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname, plus exact-versus-wildcard host precedence.",
+      "description": "Checking the cluster answers over https at every one of its addresses.",
       "dependsOn": [
         "seedBootstrap"
       ],
@@ -252,7 +252,7 @@
     {
       "id": "magicLink",
       "script": "install.magicLink",
-      "description": "Recover the cluster owner's magic link from the identity pod, as a fallback sign-in route. Identity logs a link only when one is REQUESTED, so a restarted pod carries none -- an empty window is reported as linkState=none rather than failing the install.",
+      "description": "Looking for a sign-in link for the owner account, as a second way in. A cluster that has not been asked for one carries none, which is reported rather than treated as a failure.",
       "params": {
         "local": "1"
       },
@@ -269,7 +269,7 @@
     {
       "id": "enrolmentLink",
       "script": "install.enrolmentLink",
-      "description": "Mint a single-use passkey-enrolment link for the cluster owner when there is an account to enrol, so the install ends with a credential the operator holds. A cluster nobody has signed into yet has no account: the first sign-in creates it, so this reports that instead.",
+      "description": "Creating a single-use link for setting up a passkey on the owner account. A cluster nobody has signed into yet has no account -- the first sign-in creates it -- and that is reported instead.",
       "params": {
         "local": "1"
       },
@@ -286,7 +286,7 @@
     {
       "id": "recoveryKey",
       "script": "install.recoveryKey",
-      "description": "Claim the cluster's owner recovery key and show it once -- on the terminal for a CLI run, on the install done screen in the editor (memql#4079) -- so the install ends with a break-glass credential the operator holds off-cluster. Every other credential this install produces assumes the owner can sign in; this one is the answer to all of them being gone. A cluster nobody has signed into yet has no owner and therefore no key, which is reported rather than failed -- and so is a key an earlier run already claimed, which is what repair and upgrade find here. That one is never silently re-claimed: only its hash was stored, so re-revealing is impossible and rotating would strand the value the operator already put somewhere safe.",
+      "description": "Claiming this cluster's recovery key and showing it once, so you finish with a way back in if every other is ever lost. A cluster nobody has signed into yet has no owner and no key; a key an earlier run already claimed is left alone, because only its fingerprint was kept and re-showing it is impossible.",
       "params": {
         "local": "1"
       },

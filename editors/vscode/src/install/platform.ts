@@ -40,11 +40,22 @@ export const UNSUPPORTED_PLATFORM_EXIT = 3;
 
 const DETECT_MESSAGE_RE = /unsupported platform/i;
 
-/** The detect step, as the install graph names it -- used when we refuse outside that graph. */
+/**
+ * The detect step, as the install document names it -- used when we refuse
+ * outside a run.
+ *
+ * A SECOND COPY OF ONE SENTENCE, and the reason it is safe is that a test pins
+ * it: `screenOrdering.test.ts` reads `scripts/install/graph/install.json` and
+ * fails when this description and that one differ. Without that, the content
+ * sweep in memql#4456 would have rewritten the document and left this one
+ * reading in the old voice, on the one path an operator reaches when the
+ * install refuses before it starts.
+ */
 export const PLATFORM_DETECT_STEP: Step = {
   id: "detect",
   script: "install.detect",
-  description: "Inventory the machine: OS/arch support, docker daemon, port availability, free disk.",
+  description:
+    "Checking this machine can run a cluster: a supported system, Docker running, the ports free, and enough disk space.",
   readOnly: true,
   elevation: "none",
   retained: false,

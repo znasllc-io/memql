@@ -13,6 +13,8 @@
 
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
+import { renderDisclosure, renderScreen } from "./screenLayout.js";
+
 import type { InstanceAction } from "../deploy/instanceActions.js";
 import type { UpgradeVerdict } from "../deploy/upgrade.js";
 import { displayVersion, type Instance, type Run, type RunItem } from "../state/deployments.js";
@@ -64,6 +66,12 @@ function latestFact(releases: ReleaseListing | undefined): string {
  *
  * `data-act`, not `data-choose`: the instance actions validate their id against
  * instanceActions(), and this is not one of them.
+ *
+ * IT NO LONGER CARRIES ITS OWN ACTIONS ROW (memql#4453). It used to sit in a
+ * row of its own, between the facts and the instance's buttons -- which under
+ * the actions-first doctrine would put two action rows on one page, in
+ * different places, one of them below the fold. It is a button now, and the
+ * screen puts it in the single row at the top.
  */
 function upgradeButton(verdict: UpgradeVerdict): string {
   if (verdict.kind === "none") return "";
@@ -71,9 +79,74 @@ function upgradeButton(verdict: UpgradeVerdict): string {
     verdict.kind === "offer"
       ? verdict.confirmation
       : "This move is not a retag. Press to see what it changes and where the procedure is.";
-  return `<div class="actions"><button class="primary" type="button" data-act="upgrade" title="${escapeHtml(
+  return `<button class="primary" type="button" data-act="upgrade" title="${escapeHtml(
     detail,
-  )}">${escapeHtml(verdict.label)}</button></div>`;
+  )}">${escapeHtml(verdict.label)}</button>`;
+}
+
+/**
+ * The troubleshooting tier, demoted rather than deleted (memql#4456).
+ *
+ * WHAT THIS IS FOR. These pages had accreted a second audience: beside the
+ * facts an operator opened the page to read -- what is this cluster, what
+ * version, is there a newer one -- sat receipt-derived paths, image-lane
+ * bookkeeping, raw RFC3339 stamps and node-by-node digests. Each is genuinely
+ * useful about once a quarter, when something is wrong, and the cost of
+ * having them inline the rest of the time is that the page reads as a
+ * diagnostic dump rather than as a product.
+ *
+ * NOTHING IS DELETED. The support case still has every one of them; they are
+ * one click away instead of first. That distinction is the whole decision --
+ * removing them would trade one bad failure mode for a worse one, because the
+ * quarter they are wanted is the quarter nobody can get at them.
+ *
+ * THE SAME COMPONENT AS THE RUN LOG (memql#4455), on purpose. "Material worth
+ * keeping and not worth leading with" is one idea, and a second implementation
+ * of it would be a second answer to what collapsed looks like here.
+ */
+function renderDiagnostics(open: boolean, body: string): string {
+  if (body.trim() === "") return "";
+  return renderDisclosure({
+    act: "toggleDiagnostics",
+    summary: "Show diagnostics",
+    summaryOpen: "Hide diagnostics",
+    open,
+    body,
+  });
+}
+
+/** Fact rows for the Diagnostics pane, or "" when every one of them is empty. */
+function diagnosticFacts(rows: readonly string[]): string {
+  const present = rows.filter((row) => row !== "");
+  if (present.length === 0) return "";
+  return `<div class="facts">${present.join("\n  ")}</div>`;
+}
+
+/** One `fact` row, or "" when there is nothing to state. */
+function fact(key: string, value: string): string {
+  if (value === "") return "";
+  return `<div class="fact"><span class="fact-key">${escapeHtml(
+    key,
+  )}</span><span class="fact-value">${escapeHtml(value)}</span></div>`;
+}
+
+/**
+ * A LOCAL instance's receipt-derived facts.
+ *
+ * Every one of these comes off the same install receipt the product facts come
+ * off; what separates them is who is asking. "Which directory did the install
+ * clone into" is a question with exactly one audience, and it is not the
+ * audience opening a cluster page to see whether it is healthy.
+ */
+function localDiagnosticFacts(instance: Instance): string {
+  return diagnosticFacts([
+    fact("kind", instance.kind),
+    fact("checkout", instance.checkout ?? ""),
+    fact("image source", instance.imageSource ?? ""),
+    fact("rebuild commit", instance.rebuild?.commit ?? ""),
+    fact("rebuilt at", instance.rebuild?.recordedAt ?? ""),
+    fact("rebuilt nodes", instance.rebuild?.nodes ?? ""),
+  ]);
 }
 
 export interface OverviewInput {
@@ -87,6 +160,15 @@ export interface OverviewInput {
   releases: ReleaseListing | undefined;
   /** Whether this instance is offered a move to the newest release. */
   upgrade: UpgradeVerdict;
+  /**
+   * Whether the Diagnostics section is disclosed (memql#4456).
+   *
+   * REQUIRED rather than defaulted: the flag lives in the panel, and a default
+   * would let a caller forget to thread it and ship a section that can never
+   * open -- silently, because a closed disclosure looks exactly the same
+   * whether or not anything is listening to its toggle.
+   */
+  diagnosticsOpen: boolean;
 }
 
 export function renderInstanceOverview(input: OverviewInput): string {
@@ -121,13 +203,17 @@ export function renderInstanceOverview(input: OverviewInput): string {
   const error =
     input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
 
-  return `<h1>${escapeHtml(instance.name)}</h1>
-<p class="lede">${escapeHtml(status.tooltip)}</p>
-${error}
-<div class="facts">
-  <div class="fact"><span class="fact-key">kind</span><span class="fact-value">${escapeHtml(
-    instance.kind,
-  )}</span></div>
+  // ONE ACTIONS ROW, AT THE TOP (memql#4453). The move-to-newest button and the
+  // instance's own actions used to render in two separate rows in two separate
+  // places, both below the facts; they are one row now, and it is the first
+  // thing under the heading. WHICH buttons appear is still entirely
+  // `instanceActions`' and `upgradeButton`'s decision -- this only decides where.
+  return renderScreen({
+    title: instance.name,
+    actions: `${upgradeButton(input.upgrade)}${actions}`,
+    status: `<p class="lede">${escapeHtml(status.tooltip)}</p>
+${error}`,
+    details: `<div class="facts">
   <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
     displayVersion(instance.version),
   )}</span></div>
@@ -136,10 +222,10 @@ ${error}
     instance.domain ?? "not recorded",
   )}</span></div>
 </div>
-${upgradeButton(input.upgrade)}
-<div class="actions">${actions}</div>
 <h2>Deployments</h2>
-${runs}`;
+${runs}`,
+    logs: renderDiagnostics(input.diagnosticsOpen, localDiagnosticFacts(instance)),
+  });
 }
 
 export interface ChooseTagInput {
@@ -205,11 +291,11 @@ export function renderChooseTag(input: ChooseTagInput): string {
         : `<p class="notice">${escapeHtml(input.listing.error)} Type the tag below.</p>`;
 
   if (input.listing.refusedPlatform === true) {
-    return `<h1>Create deployment</h1>
-${listingNote}
-<div class="actions">
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+    return renderScreen({
+      title: "Create deployment",
+      actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
+      status: listingNote,
+    });
   }
 
   const typed = `<div class="field" data-invalid="${input.tagError !== ""}">
@@ -267,22 +353,32 @@ ${listingNote}
         ])
       : "";
 
-  return `<h1>Create deployment</h1>
-<p class="lede">This cluster is on ${escapeHtml(
-    current,
-  )}. Pick the release to move it to; nothing runs until you start it.</p>
+  // Start is DISABLED until a target is chosen rather than absent, which is the
+  // one thing actions-first changes about this screen: a button that appears
+  // only once the form is complete is a button an operator cannot plan around,
+  // and at the top of the page its absence would read as "this screen does
+  // nothing". Disabled says "choose below, then press this".
+  return renderScreen({
+    title: "Create deployment",
+    actions: `<button class="primary" type="button" data-act="beginDeploy"${
+      input.target === "" || input.tagError !== "" ? " disabled" : ""
+    }>Start</button>
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+    // THE LANE CROSSING RIDES WITH THE BUTTON (memql#4453 over memql#4246). It
+    // is the one thing on this screen that says a developer's own build is
+    // about to stop running, and this is the path that would otherwise make
+    // that change silently -- so it goes where Start is, not at the end of the
+    // form Start acts on. Above the fold now, where it was previously last.
+    status: `<p class="lede">This cluster is on ${escapeHtml(
+      current,
+    )}. Pick the release to move it to; nothing runs until you start it.</p>
 ${listingNote}
-${picker}
+${laneNote}`,
+    details: `${picker}
 ${typed}
 ${sameNote}
-${plan}
-${laneNote}
-<div class="actions">
-  <button class="primary" type="button" data-act="beginDeploy"${
-    input.target === "" || input.tagError !== "" ? " disabled" : ""
-  }>Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+${plan}`,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +428,8 @@ export interface RemoteOverviewInput {
   releases: ReleaseListing | undefined;
   /** Whether this instance is offered a move to the newest release. */
   upgrade: UpgradeVerdict;
+  /** Whether the Diagnostics section is disclosed. See `OverviewInput`. */
+  diagnosticsOpen: boolean;
 }
 
 /**
@@ -348,20 +446,23 @@ export function renderRemoteInstance(input: RemoteOverviewInput): string {
   const { instance, pipeline } = input;
   const status = instanceRowStatus(instance, input.releases);
 
-  const actions =
-    pipeline.actions.length === 0
-      ? ""
-      : `<div class="actions">${pipeline.actions
-          .map(
-            (action) =>
-              `<button class="${
-                action.typeToConfirm ? "secondary destructive" : "primary"
-              }" type="button" data-deploy="${escapeHtml(action.id)}" title="${escapeHtml(
-                action.description,
-              )}">${escapeHtml(action.label)}</button>`,
-          )
-          .join("")}</div>`;
+  const actions = pipeline.actions
+    .map(
+      (action) =>
+        `<button class="${
+          action.typeToConfirm ? "secondary destructive" : "primary"
+        }" type="button" data-deploy="${escapeHtml(action.id)}" title="${escapeHtml(
+          action.description,
+        )}">${escapeHtml(action.label)}</button>`,
+    )
+    .join("");
 
+  // THE RUN ROWS KEEP THEIR HEADLINE; THE PER-TIER BREAKDOWN DOES NOT
+  // (memql#4456). What a deployment DID -- kind, when, how it ended -- is what
+  // this list is for. Which node types it declared, at how many replicas, at
+  // which digest, is a different question with a different audience, and
+  // rendering it inline for every historical run turned a five-row history into
+  // fifty rows of digests.
   const runs =
     input.runs.length === 0
       ? `<p class="lede">No deployments have been recorded for this cluster${
@@ -370,27 +471,39 @@ export function renderRemoteInstance(input: RemoteOverviewInput): string {
       : input.runs
           .map((run) => {
             const row = runRowStatus(run, input.nowMs);
-            const items =
-              run.items.length === 0
-                ? ""
-                : `<div class="items-label">Node types</div>
-<ul class="runs">${run.items
-                    .map(
-                      (item) => `<li class="run">
-  <span class="run-kind">${escapeHtml(item.label)}</span>
-  <span class="run-detail">${escapeHtml(item.detail ?? "")}</span>
-</li>`,
-                    )
-                    .join("")}</ul>`;
             return `<div class="run-block" data-status="${escapeHtml(run.status)}">
   <div class="run">
     <span class="run-kind">${escapeHtml(row.label)}</span>
     <span class="run-detail">${escapeHtml(row.description)}</span>
   </div>
-  ${items}
 </div>`;
           })
           .join("");
+
+  // THE ITEMS ARE LABELLED "NODE TYPES", NEVER "STEPS", wherever they render.
+  // A local run's items are capability-script executions and a remote run's are
+  // per-tier `deploymentNodeSpec` rows -- a declaration of version, replicas and
+  // digest, not an account of something that ran. The label is what stops one
+  // being read as the other, and demoting them into Diagnostics does not make
+  // that distinction less load-bearing; it makes it easier to miss, so the
+  // label travels with them.
+  const nodeTypes = input.runs
+    .filter((run) => run.items.length > 0)
+    .map((run) => {
+      const row = runRowStatus(run, input.nowMs);
+      return `<div class="run-block">
+  <div class="items-label">Node types -- ${escapeHtml(row.label)}</div>
+  <ul class="runs">${run.items
+    .map(
+      (item) => `<li class="run">
+  <span class="run-kind">${escapeHtml(item.label)}</span>
+  <span class="run-detail">${escapeHtml(item.detail ?? "")}</span>
+</li>`,
+    )
+    .join("")}</ul>
+</div>`;
+    })
+    .join("");
 
   const outcome =
     input.outcome === ""
@@ -400,12 +513,16 @@ export function renderRemoteInstance(input: RemoteOverviewInput): string {
         }">${escapeHtml(input.outcome)}</p>`;
   const error = input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
 
-  return `<h1>${escapeHtml(instance.name)}</h1>
-<p class="lede">${escapeHtml(status.tooltip)}</p>
+  return renderScreen({
+    title: instance.name,
+    actions: `${upgradeButton(input.upgrade)}${actions}`,
+    status: `<p class="lede">${escapeHtml(status.tooltip)}</p>
 ${error}
 ${outcome}
-<div class="facts">
-  <div class="fact"><span class="fact-key">kind</span><span class="fact-value">remote</span></div>
+<h2>${escapeHtml(pipeline.title)}</h2>
+<p class="lede">${escapeHtml(pipeline.detail)}</p>
+${shipTargetLine(input)}`,
+    details: `<div class="facts">
   <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
     displayVersion(instance.version),
   )}</span></div>
@@ -414,13 +531,14 @@ ${outcome}
     instance.domain ?? "not recorded",
   )}</span></div>
 </div>
-${upgradeButton(input.upgrade)}
-<h2>${escapeHtml(pipeline.title)}</h2>
-<p class="lede">${escapeHtml(pipeline.detail)}</p>
-${shipTargetLine(input)}
-${actions}
 <h2>Deployments</h2>
-${runs}`;
+${runs}`,
+    logs: renderDiagnostics(
+      input.diagnosticsOpen,
+      `${diagnosticFacts([fact("kind", "remote")])}
+${nodeTypes}`,
+    ),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +579,8 @@ export interface RunDetailInput {
   outcome: string;
   /** A failure this page produced, as opposed to one a step reported. */
   error: string;
+  /** Whether the Diagnostics section is disclosed. See `OverviewInput`. */
+  diagnosticsOpen: boolean;
 }
 
 /**
@@ -485,14 +605,6 @@ function runVersionFact(instance: Instance, run: Run): string {
   if (transition !== "") return transition;
   if (run.kind === "rebuild") return "built from the checkout";
   return "";
-}
-
-/** One `fact` row, or "" when there is nothing to state. */
-function fact(key: string, value: string): string {
-  if (value === "") return "";
-  return `<div class="fact"><span class="fact-key">${escapeHtml(
-    key,
-  )}</span><span class="fact-value">${escapeHtml(value)}</span></div>`;
 }
 
 /**
@@ -584,7 +696,9 @@ export function renderRunDetail(input: RunDetailInput): string {
 
   // The lane fact, for a cluster running a developer's own build. Named from
   // the INSTANCE and labelled as the instance's, never folded into the run's
-  // sentence -- see runVersionFact.
+  // sentence -- see runVersionFact. It stays in the PRODUCT tier: which images
+  // a cluster is running is the difference between a developer's build and a
+  // release, which is a fact about what the cluster IS.
   const lane =
     instance.imageSource === "checkout"
       ? fact("image source", checkoutVersionText(instance))
@@ -602,23 +716,35 @@ export function renderRunDetail(input: RunDetailInput): string {
           input.outcome.startsWith("ERROR") ? "error" : "notice"
         }">${escapeHtml(input.outcome)}</p>`;
 
-  return `<h1>${escapeHtml(row.label)}</h1>
-<p class="lede">${escapeHtml(row.tooltip)}</p>
+  // WHAT MOVES INTO DIAGNOSTICS HERE IS THE RAW STAMPS, AND ONLY THOSE
+  // (memql#4456). `duration` stays -- "4m 12s" is a fact an operator reads --
+  // while `2026-08-14T10:00:00Z` twice over is a machine-readable rendering of
+  // the same thing, and the run's own id is a support-case handle. The ITEMS
+  // stay too: this is the run detail page, and what the run did is the reason
+  // it exists (#4427 owns that content; this epic owns the layout around it).
+  const diagnostics = diagnosticFacts([
+    fact("run id", run.id),
+    fact("started", run.startedAt),
+    fact("finished", run.finishedAt ?? ""),
+  ]);
+
+  return renderScreen({
+    title: row.label,
+    actions: `${actions}
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+    status: `<p class="lede">${escapeHtml(row.tooltip)}</p>
 ${input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`}
-${outcome}
-<div class="facts">
+${outcome}`,
+    details: `<div class="facts">
   ${fact("cluster", instance.name)}
   ${fact("kind", run.kind)}
   ${fact("versions", runVersionFact(instance, run))}
   ${lane}
   ${fact("status", run.status)}
   ${fact("reason", failureReason(run))}
-  ${fact("started", run.startedAt)}
-  ${fact("finished", run.finishedAt ?? "")}
   ${fact("duration", runDuration(run.startedAt, run.finishedAt))}
 </div>
-${runItems(instance, run)}
-<div class="actions">${actions}
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+${runItems(instance, run)}`,
+    logs: renderDiagnostics(input.diagnosticsOpen, diagnostics),
+  });
 }

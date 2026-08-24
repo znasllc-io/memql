@@ -25,8 +25,8 @@ func applyMainDeltas(t *testing.T, g *Graph) *Graph {
 	t.Helper()
 	out := *g
 	out.Name = "install-main"
-	out.Description = "Install a local MemQL cluster from a main checkout, building its node images " +
-		"from that checkout instead of pulling a published release."
+	out.Description = "Set up a local MemQL cluster built from the latest source on this machine, " +
+		"instead of from a published release."
 
 	steps := make([]Step, 0, len(g.Steps)+1)
 	for _, s := range g.Steps {
@@ -34,16 +34,16 @@ func applyMainDeltas(t *testing.T, g *Graph) *Graph {
 		case "clusterUp":
 			// Delta 1: it proves what it can prove when no image exists yet.
 			s.Verify = Verify{Kind: VerifyResultTrue, Field: "result.argocdReady"}
-			s.Description = "Create the k3d cluster, install ArgoCD, seed secrets and reconcile the local " +
-				"overlay against the checkout's own :local image names."
+			s.Description = "Creating the cluster and preparing it for the MemQL images that are " +
+				"about to be built here."
 			steps = append(steps, s)
 			// Delta 2: the build, immediately after it.
 			steps = append(steps, Step{
 				ID:             "buildImages",
 				Script:         "k3d.dev",
 				TimeoutSeconds: 2700,
-				Description: "Build the node images from the checkout, import them into k3d, " +
-					"and roll the cluster onto them.",
+				Description: "Building MemQL from the source just downloaded and starting the " +
+					"cluster on it.",
 				Params:      map[string]string{"image-source": "checkout"},
 				DependsOn:   []string{"clusterUp"},
 				Elevation:   ElevationNone,

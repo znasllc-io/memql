@@ -138,7 +138,7 @@ test("a run over a checkout-mode cluster says it returns to released images", ()
   );
 });
 
-test("the collect screen renders the checklist above Start", () => {
+test("the collect screen renders the checklist above the form it warns about", () => {
   const html = renderCollectScreen({
     action: "install",
     values: EMPTY_INPUTS,
@@ -152,9 +152,27 @@ test("the collect screen renders the checklist above Start", () => {
   });
   assert.match(html, /Before it runs/);
   assert.match(html, /preflight-item attention/);
+  // RE-EXPRESSED BY memql#4453, and the intent it protects is unchanged.
+  //
+  // This used to assert `checklist < Start`, because the checklist was placed
+  // directly above a Start button that sat at the BOTTOM of the form -- so
+  // "above Start" and "above the fields" were the same position. Actions-first
+  // separated them: Start is now the first thing on the page, and the choice
+  // was whether the checklist follows it up or stays behind among the fields.
+  //
+  // It follows it up. The thing #4195 wanted was that an operator has read what
+  // the run will need BEFORE they commit to it, and the checklist is now in the
+  // first screenful instead of at the end of a seven-field form -- which is a
+  // better guarantee of that than the old ordering gave, on a form long enough
+  // to scroll. What is asserted is therefore that it precedes the fields.
   assert.ok(
-    html.indexOf("Before it runs") < html.indexOf('data-act="begin"'),
-    "the checklist renders before the Start button",
+    html.indexOf("Before it runs") < html.indexOf('data-field="domain"'),
+    "the checklist must render above the form whose answers it qualifies",
+  );
+  // And it is in the STATUS area, not stranded below the details.
+  assert.ok(
+    html.indexOf('data-act="begin"') < html.indexOf("Before it runs"),
+    "the actions row comes first on every screen (memql#4453)",
   );
 });
 
