@@ -102,6 +102,7 @@ function fakeConnection(
   role: string,
   calls: Array<{ name: string; args: unknown }>,
   concepts: unknown[],
+  inventory: unknown[],
 ): Connection {
   const query = asQueryClient({
     listConcepts: vi.fn(async () => concepts),
@@ -112,7 +113,7 @@ function fakeConnection(
     })),
     dataOrigins: vi.fn(async (args: unknown) => {
       calls.push({ name: "dataOrigins", args });
-      return rowsResult(INVENTORY_ROWS);
+      return rowsResult(inventory);
     }),
     syncStatesAll: vi.fn(async (args: unknown) => {
       calls.push({ name: "syncStatesAll", args });
@@ -159,9 +160,10 @@ function renderAt(
   path: string,
   calls: Array<{ name: string; args: unknown }> = [],
   concepts: unknown[] = [MIRROR_CONCEPT, NATIVE_CONCEPT],
+  inventory: unknown[] = INVENTORY_ROWS,
 ) {
   const dial = vi.fn(async () =>
-    fakeConnection(role, calls, concepts),
+    fakeConnection(role, calls, concepts, inventory),
   ) as unknown as typeof Connection.dial;
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -267,7 +269,11 @@ describe("the data origins page", () => {
 
   it("puts both dead-letter verbs behind a confirmation", async () => {
     const calls = renderAt("owner", "/data-origins");
-    await waitFor(() => expect(screen.getByText("Load")).toBeTruthy());
+    // Wait for the INVENTORY, not merely for the button. The queue is read
+    // per connector and the connector list comes from the inventory, so
+    // clicking Load before it lands asks nobody and reports a clean queue --
+    // which is why the button is disabled until then.
+    await waitFor(() => expect(screen.getByText("v1:shopify:shopifyProduct")).toBeTruthy());
 
     fireEvent.click(screen.getByText("Load"));
     await waitFor(() => expect(screen.getByText("v1:wholesale:priceList")).toBeTruthy());
@@ -289,6 +295,32 @@ describe("the data origins page", () => {
     expect(calls.find((c) => c.name === "datasyncDiscardOutboxEntry")?.args).toMatchObject({
       entryId: "v1:platform:outboxEntry:abc",
     });
+  });
+
+  it("will not read the queue when there is no connector to ask", async () => {
+    // An inventory whose concepts name no connector. The queue is read PER
+    // CONNECTOR, so there is nobody to ask -- and a Load that resolved
+    // instantly against an empty list would render "Nothing is
+    // dead-lettered", which is a silent wrong answer: the operator would see
+    // a clean queue because the page asked nobody, not because nothing is
+    // stuck. The button says so instead.
+    const calls = renderAt("owner", "/data-origins", [], [NATIVE_CONCEPT], [
+      {
+        conceptId: "v1:planner:plan",
+        dataState: "native",
+        origin: "memql",
+        mirroredTo: [],
+        connectors: [],
+      },
+    ]);
+    await waitFor(() => expect(screen.getByText("Load")).toBeTruthy());
+
+    const load = screen.getByText("Load").closest("button");
+    expect(load?.disabled).toBe(true);
+
+    fireEvent.click(screen.getByText("Load"));
+    expect(calls.some((c) => c.name === "outboxDeadLetters")).toBe(false);
+    expect(screen.queryByText(/Nothing is dead-lettered/)).toBeNull();
   });
 });
 

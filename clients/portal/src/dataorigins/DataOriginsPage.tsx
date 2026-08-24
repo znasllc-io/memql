@@ -274,6 +274,14 @@ function DeadLetterBand({ connectors }: { connectors: readonly string[] }): Reac
   );
 
   const load = useCallback(async () => {
+    // Nothing to ask, so DO NOT report an answer. The queue is read per
+    // connector, and the connector list comes from the inventory above --
+    // which arrives asynchronously. Loading with an empty list would resolve
+    // instantly and render "Nothing is dead-lettered", which is a SILENT
+    // WRONG ANSWER: the operator sees a clean queue because the page had
+    // nobody to ask, not because nothing is stuck. The button is disabled
+    // until the inventory lands, and says why.
+    if (connectors.length === 0) return;
     if (!query || status !== "connected") return;
     setError("");
     try {
@@ -291,6 +299,7 @@ function DeadLetterBand({ connectors }: { connectors: readonly string[] }): Reac
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [query, status, connectors]);
+
 
   const confirm = useCallback(async () => {
     if (!pending || !query) return;
@@ -326,7 +335,16 @@ function DeadLetterBand({ connectors }: { connectors: readonly string[] }): Reac
             deliveries that exhausted their attempts; nothing retries these automatically, which is
             what makes them dead rather than failed
           </span>
-          <Button size="xs" onClick={() => void load()}>
+          <Button
+            size="xs"
+            disabled={connectors.length === 0}
+            title={
+              connectors.length === 0
+                ? "No connector to ask yet — the inventory is still loading"
+                : undefined
+            }
+            onClick={() => void load()}
+          >
             {loaded ? "Refresh" : "Load"}
           </Button>
         </span>
