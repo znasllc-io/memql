@@ -3854,6 +3854,72 @@ func OutboundRequestsByStatusBuild(args OutboundRequestsByStatusArgs) string {
 	return b.String()
 }
 
+// OutboxDeadLetters -- The operator's dead-letter queue for one connector: entries that exhausted their attempts and are waiting for a person. Never retried automatically -- that is what makes them dead rather than failed.
+//
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxDeadLetters"] in generated_concepts.go).
+type OutboxDeadLettersArgs struct {
+	Target string
+}
+
+// OutboxDeadLetters calls the engine query outboxDeadLetters.
+func (qc *QueryClient) OutboxDeadLetters(ctx context.Context, args OutboxDeadLettersArgs) (*Result, error) {
+	call := OutboxDeadLettersBuild(args)
+	return qc.executeNamed(ctx, "outboxDeadLetters", call)
+}
+
+func OutboxDeadLettersBuild(args OutboxDeadLettersArgs) string {
+	var b strings.Builder
+	b.WriteString("query outboxDeadLetters(")
+	b.WriteString("target: ")
+	b.WriteString(quoteMemQL(args.Target))
+	b.WriteString(")")
+	return b.String()
+}
+
+// OutboxEntryById -- One entry by its own row id -- the seam the retry and discard mutations resolve through.
+//
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxEntryById"] in generated_concepts.go).
+type OutboxEntryByIdArgs struct {
+	EntryId string
+}
+
+// OutboxEntryById calls the engine query outboxEntryById.
+func (qc *QueryClient) OutboxEntryById(ctx context.Context, args OutboxEntryByIdArgs) (*Result, error) {
+	call := OutboxEntryByIdBuild(args)
+	return qc.executeNamed(ctx, "outboxEntryById", call)
+}
+
+func OutboxEntryByIdBuild(args OutboxEntryByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query outboxEntryById(")
+	b.WriteString("entryId: ")
+	b.WriteString(quoteMemQL(args.EntryId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// OutboxPending -- Entries one connector still owes delivery on, oldest first so a row's changes leave in the order they were made. `failed` is included: a failed entry is a retry that is due, not a terminal state -- the worker skips the ones whose nextAttemptAt has not come.
+//
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxPending"] in generated_concepts.go).
+type OutboxPendingArgs struct {
+	Target string
+}
+
+// OutboxPending calls the engine query outboxPending.
+func (qc *QueryClient) OutboxPending(ctx context.Context, args OutboxPendingArgs) (*Result, error) {
+	call := OutboxPendingBuild(args)
+	return qc.executeNamed(ctx, "outboxPending", call)
+}
+
+func OutboxPendingBuild(args OutboxPendingArgs) string {
+	var b strings.Builder
+	b.WriteString("query outboxPending(")
+	b.WriteString("target: ")
+	b.WriteString(quoteMemQL(args.Target))
+	b.WriteString(")")
+	return b.String()
+}
+
 // OverrideById -- Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.
 //
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overrideById"] in generated_concepts.go).
@@ -5183,6 +5249,64 @@ func (qc *QueryClient) SurfacesForOwner(ctx context.Context, args SurfacesForOwn
 func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 	_ = args
 	return "query surfacesForOwner()"
+}
+
+// SyncStateFor -- Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip.
+//
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.go).
+type SyncStateForArgs struct {
+	ConceptId string
+	Connector string
+	Direction string
+}
+
+// SyncStateFor calls the engine query syncStateFor.
+func (qc *QueryClient) SyncStateFor(ctx context.Context, args SyncStateForArgs) (*Result, error) {
+	call := SyncStateForBuild(args)
+	return qc.executeNamed(ctx, "syncStateFor", call)
+}
+
+func SyncStateForBuild(args SyncStateForArgs) string {
+	var b strings.Builder
+	b.WriteString("query syncStateFor(")
+	b.WriteString("conceptId: ")
+	b.WriteString(quoteMemQL(args.ConceptId))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("connector: ")
+	b.WriteString(quoteMemQL(args.Connector))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("direction: ")
+	b.WriteString(quoteMemQL(args.Direction))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SyncStatesAll -- Every domain's health -- the Data origins page's health half.
+//
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.go).
+type SyncStatesAllArgs struct {
+	Connector string
+}
+
+// SyncStatesAll calls the engine query syncStatesAll.
+func (qc *QueryClient) SyncStatesAll(ctx context.Context, args SyncStatesAllArgs) (*Result, error) {
+	call := SyncStatesAllBuild(args)
+	return qc.executeNamed(ctx, "syncStatesAll", call)
+}
+
+func SyncStatesAllBuild(args SyncStatesAllArgs) string {
+	var b strings.Builder
+	b.WriteString("query syncStatesAll(")
+	if args.Connector != "" {
+		b.WriteString("connector: ")
+		b.WriteString(quoteMemQL(args.Connector))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // SystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.

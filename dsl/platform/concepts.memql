@@ -257,3 +257,58 @@ concept dataOrigin {
   mirroredTo  []string  @description("External systems MemQL pushes this concept's changes out to. Empty unless dataState is \"origin\".")
   connectors  []string  @description("Every connector name this concept depends on -- its external origin plus every mirror target, sorted. Never contains \"memql\": MemQL is not a connector. This is the set the engine resolves at boot, and an unresolvable name refuses it.")
 }
+
+/// One pending outbound delivery for an ORIGIN concept (epic memql#4378, D5). MemQL owns the data;
+/// an external system holds a mirror of it; this row is the durable record that a change has to
+/// reach that system. Appended by the engine in the SAME TRANSACTION as the row write, one entry
+/// per @mirroredTo target, and drained by that connector's worker.
+///
+/// The append is transactional because the alternative is a change that MemQL believes it
+/// propagated and the mirror never heard of. A write that fails writes no entry; an entry that
+/// exists names a row write that committed.
+///
+/// clusterOwner: the queue is one deployment's operational state, not any user's rows, and "how
+/// deep is the outbox" has to be answerable. The drain worker reads it under the engine's own
+/// operator identity -- the campaigns precedent.
+@rowAuthz(clusterOwner)
+@displayCard(primary="conceptId", secondary="target", tertiary="rowRef", status="status")
+concept outboxEntry {
+  conceptId       string!  @description("Canonical id of the concept whose row changed. Named conceptId because `concept` is a reserved row intrinsic.")
+  rowRef          string!  @description("Id of the row that changed. Not named rowId to keep it clearly a reference rather than this entry's own id.")
+  action          enum("upsert", "retire")!  @description("What happened to the row. MemQL has no hard delete -- a retirement is an append that marks the row gone -- so `retire` is a flag on a change rather than a separate verb.")
+  version         string!  @description("The row's version AFTER the change. Half of the idempotency key, and what lets a receiver discard a replay.")
+  target          string!  @description("Connector name this entry is destined for -- one of the concept's @mirroredTo targets. Present even though the worker is per-connector, because an entry that cannot say where it is going is unauditable.")
+  status          enum("pending", "delivering", "delivered", "failed", "dead")!  @description("pending: waiting for a worker. delivering: claimed by one. delivered: the receiver has it. failed: a delivery attempt failed and nextAttemptAt says when to retry. dead: attempts exhausted -- the operator queue, never retried automatically.")
+  attempts        int      @description("How many delivery attempts have been made. Compared against MEMQL_SYNC_OUTBOX_MAX_ATTEMPTS to decide dead.")
+  nextAttemptAt   datetime @description("Earliest time a worker may try again. Set on every failure from the backoff schedule; a worker skips entries whose time has not come.")
+  lastError       string   @description("Truncated error from the last failed attempt. Never a payload body -- the runtime does not log those.")
+  idempotencyKey  string!  @description("(conceptId, rowRef, version, target), rendered once by the engine so every attempt at this entry presents the same key to the receiver. This is what makes a redelivery arrive once.")
+  deliveredAt     datetime @description("When the receiver accepted it. Set once; a redelivery that the receiver recognises does not move it.")
+}
+
+/// Per-(concept, connector) SYNC HEALTH (epic memql#4378, D7). Health is a ROW, not a log line: an
+/// operator asking "is the Shopify mirror current" needs an answer that survives a restart and can
+/// be read from a page, not a grep over one replica's stdout.
+///
+/// Written ONLY by the sync runtime -- the inbound dispatcher, the backfill and reconciliation
+/// runners, and the outbox drain worker. Deterministic id per (concept, connector, direction), so
+/// the append-only version history IS the health timeline.
+///
+/// clusterOwner for the same reason outboxEntry is: this is the deployment's operational state.
+@rowAuthz(clusterOwner)
+@displayCard(primary="conceptId", secondary="connector", tertiary="direction", status="backfillStatus")
+concept syncState {
+  conceptId        string!  @description("Canonical id of the concept this row reports on.")
+  connector        string!  @description("Connector name on the other side.")
+  direction        enum("inbound", "outbound")!  @description("inbound: MemQL mirrors this concept and the connector fills it. outbound: MemQL originates it and the connector drains the outbox. A concept can have a row in each direction.")
+  backfillCursor   string   @description("Opaque connector cursor for a resumable backfill. Persisted after EVERY page, so a restart resumes rather than restarts.")
+  backfillStatus   enum("none", "running", "complete", "failed")  @description("Where the backfill stands. `none` is the default -- never run -- and is distinct from `complete`.")
+  lastInboundAt    datetime @description("When the last inbound delivery for this domain was applied.")
+  lagSeconds       int      @description("Seconds between the origin's version of the last applied write and when MemQL applied it. A mirror's staleness, in the only unit an operator can act on.")
+  lastReconcileAt  datetime @description("When the last reconciliation sweep finished.")
+  driftCount       int      @description("Rows the last sweep found disagreeing with the origin. Zero after a clean sweep; non-zero is the number worth investigating even after healing, because repeated drift is a webhook that is not arriving.")
+  outboxDepth      int      @description("Pending + failed entries for this (concept, connector). The number that says whether the drain is keeping up.")
+  deadLetterCount  int      @description("Entries that exhausted their attempts and are waiting for an operator. Never decreases on its own.")
+  paused           bool     @description("Operator pause switch. Stops the backfill and reconciliation runners and the drain for this domain, without unregistering the connector or changing any declaration.")
+  lastError        string   @description("Truncated error from the last failure on this domain, whichever runner produced it.")
+}

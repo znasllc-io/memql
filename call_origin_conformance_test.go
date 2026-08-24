@@ -171,6 +171,31 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// -- carrying no PII and no credential. The stamp is applied inline
 		// on a context this package constructs and dies at the one Execute
 		// it is passed to.
+		// The DATA-ORIGINS RUNTIME (epic memql#4378). Server-initiated on
+		// every path, with no request in scope on any of them:
+		//
+		//   - the outbox drain worker is a poll loop on a timer;
+		//   - the backfill and reconciliation runners are operator- or
+		//     schedule-driven;
+		//   - the inbound dispatcher works a v1:platform:inboundRequest ROW
+		//     that the HTTP edge staged and an automation handed over. It
+		//     never sees the request -- by the time it runs, the signature
+		//     has been checked, the body has been persisted, and the socket
+		//     is long closed.
+		//
+		// What it stamps for: its own bookkeeping. The outbox queue and the
+		// health timeline are clusterOwner-tier concepts whose mutations are
+		// @serverOnly precisely because they belong to the deployment rather
+		// than to any user, so the runtime has to present internal origin to
+		// write the rows it exists to write. The stamp is applied in ONE
+		// place -- OperatorContext, alongside the operator AccessContext --
+		// on a context this package constructs per call.
+		//
+		// Mirror writes do NOT go through it. Those run under the CONNECTOR
+		// actor, a narrower credential admitted only to the concepts naming
+		// that connector; the two are stamped separately and the call sites
+		// say which is in scope.
+		"component/datasync":             "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows; mirror writes use the narrower connector actor instead (epic memql#4378)",
 		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes; its @serverOnly mutations exist because the concept is a mirror, and the connector actor stamped beside internal origin bounds the reach to that mirror alone (epic memql#4378)",
 		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft

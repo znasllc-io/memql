@@ -116,6 +116,28 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 		// a test fixture -- the same category as the two entries above, and
 		// not a write path.
 		"component/database/memory-nodes/concept_secret_redaction_test.go": "Concept.Create unit test against a fake store",
+
+		// THE OUTBOX APPEND (epic memql#4378, D5), and the only entry here
+		// that is a real write on a real store. It earns the exemption on
+		// an argument, not on convenience:
+		//
+		//   - It CANNOT go through executeWrite, because it runs INSIDE
+		//     executeWrite's own transaction. The whole point of the append
+		//     is that the row and its delivery record commit together or
+		//     not at all; re-entering the executor would open a second
+		//     connection outside that transaction and lose exactly the
+		//     property the code exists to provide.
+		//   - It writes ONE engine-owned concept, v1:platform:outboxEntry,
+		//     with a payload the engine composes field by field from the
+		//     row write it is recording. No caller-supplied value reaches
+		//     it, so there is no forged owner, no unexpected field and
+		//     nothing for the per-concept guards this gate protects --
+		//     agentRole, rbac, healing, agent kind, identity credential --
+		//     to have an opinion about. None of them names this concept.
+		//   - The concept's own tier is clusterOwner and its mutations are
+		//     @serverOnly, so the guarded path is still the only way anyone
+		//     ELSE touches these rows.
+		"component/memql/outbox_append.go": "the outbox append -- runs inside executeWrite's own transaction, writing one engine-owned concept from an engine-composed payload (epic memql#4378)",
 	}
 
 	root, err := os.Getwd()

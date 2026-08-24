@@ -95,3 +95,43 @@ shape site siteFull {
   binding
   row.createdAt
 }
+
+/// Full projection of v1:platform:outboxEntry -- what the drain worker needs to deliver an entry
+/// and what the operator's dead-letter queue renders.
+@row
+shape outboxEntry outboxEntryFull {
+  row.id
+  conceptId
+  rowRef
+  action
+  version
+  target
+  status
+  attempts
+  nextAttemptAt
+  lastError
+  idempotencyKey
+  deliveredAt
+  row.createdAt
+}
+
+/// Full projection of v1:platform:syncState -- one domain's health, as the Data origins page reads
+/// it and as the runners write it.
+@row
+shape syncState syncStateFull {
+  row.id
+  conceptId
+  connector
+  direction
+  backfillCursor
+  backfillStatus
+  lastInboundAt
+  lagSeconds
+  lastReconcileAt
+  driftCount
+  outboxDepth
+  deadLetterCount
+  paused
+  lastError
+  row.createdAt
+}

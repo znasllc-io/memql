@@ -218,7 +218,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 // it. TestStagedWrite_PartialUpdatePreservesOmittedFields (staged_write_test.go)
 // fails loudly if this ever grows a gate.
 func (e *MemQLEngine) loadPriorPayload(ctx context.Context, conceptMeta *memorynodes.Concept, id string) (payload map[string]any, exists bool, err error) {
-	store := &bunStore{db: e.database()}
+	store := newBunStore(e.database())
 	priorNodes, err := conceptMeta.Query(ctx, store, memorynodes.QueryParams{
 		IDs:   []string{id},
 		Limit: 1,
@@ -1052,10 +1052,38 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		createParams.Clock = func() time.Time { return ts }
 	}
 
-	store := &bunStore{db: e.database()}
-	result, err := conceptMeta.Create(ctx, store, createParams)
-	if err != nil {
-		return nil, meta, err
+	// THE OUTBOX APPEND (epic memql#4378, D5). A concept whose dataState
+	// is `origin` is one MemQL owns and external systems mirror, so every
+	// write to it has to reach those systems -- and the record of that
+	// obligation is written in the SAME TRANSACTION as the row, or a
+	// process dying between the two statements leaves a committed change
+	// nothing will ever propagate. See outbox_append.go for both failure
+	// directions and why only a transaction closes them.
+	//
+	// The transaction is opened ONLY for such a concept. Every other
+	// write -- which is every concept in the tree an author has not
+	// declared -- takes the single-statement path below unchanged.
+	var result memorynodes.Node
+	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 {
+		retire := outboxPayloadRetires(payload)
+		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
+			created, createErr := conceptMeta.Create(ctx, txStore, createParams)
+			if createErr != nil {
+				return createErr
+			}
+			result = created
+			return e.appendOutboxEntries(ctx, txStore, conceptMeta.Name, created.ID, created.CreatedAt, targets, retire)
+		})
+		if txErr != nil {
+			return nil, meta, txErr
+		}
+	} else {
+		store := newBunStore(e.database())
+		created, createErr := conceptMeta.Create(ctx, store, createParams)
+		if createErr != nil {
+			return nil, meta, createErr
+		}
+		result = created
 	}
 
 	created := memorynodes.MemoryNode{

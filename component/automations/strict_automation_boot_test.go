@@ -70,8 +70,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // campaigns gained ingestCampaignFeedback (memql#3461); 32 -> 31 when
 // purgeExpiredPolicyTraces went with the rest of the dead policyTrace
 // subsystem (memql#4114); 31 -> 33 when shopify gained applyShopifyInboundProduct + reconcileShopifyIndex (memql#4137);
-// 33 -> 35 when library gained indexFileOnCreate + archiveFileOnArtifactArchive (memql#4340).
-const shippedAutomationCount = 35
+// 33 -> 35 when library gained indexFileOnCreate + archiveFileOnArtifactArchive (memql#4340);
+// 35 -> 37 when platform gained dispatchInboundToConnector + reconcileMirroredDomains, the
+// data-origins sync runtime's two drivers (epic memql#4378).
+const shippedAutomationCount = 37
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

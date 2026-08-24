@@ -52,6 +52,12 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/openairealtime"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	_ "github.com/znasllc-io/memql/integrations/router"
+	// The sync runtime (epic memql#4378): the inbound dispatcher and the
+	// backfill / reconciliation runners. The outbox DRAIN worker is not
+	// here -- it needs the cluster execution guard, which is not on
+	// PluginContext, so it is wired explicitly in app/engine.go beside
+	// the campaigns worker for the same reason.
+	_ "github.com/znasllc-io/memql/component/datasync"
 	_ "github.com/znasllc-io/memql/integrations/shopify"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/telephony"

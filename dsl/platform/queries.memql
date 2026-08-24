@@ -258,3 +258,78 @@ query site siteById {
   filter  row.id==args.siteId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
 }
+
+// ---- The sync runtime's reads (epic memql#4378) ----
+//
+// Every one of these is cluster-owner gated by its concept's declared
+// tier AND states that tier as a top-level conjunct, which is what
+// TestRowAuthzEnforcementLandGate requires of an authored query over a
+// tier-declaring concept. The drain worker reads them under the engine's
+// own operator identity -- the campaigns precedent -- so the conjunct is
+// satisfied rather than worked around.
+
+/// Entries one connector still owes delivery on, oldest first so a row's changes leave in the order
+/// they were made. `failed` is included: a failed entry is a retry that is due, not a terminal
+/// state -- the worker skips the ones whose nextAttemptAt has not come.
+@actor
+query outboxEntry outboxPending {
+  args {
+    target  string!
+  }
+  filter    target==args.target && status in ["pending", "failed"] && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  100
+  shape     outboxEntryFull
+}
+
+/// The operator's dead-letter queue for one connector: entries that exhausted their attempts and
+/// are waiting for a person. Never retried automatically -- that is what makes them dead rather
+/// than failed.
+@actor
+query outboxEntry outboxDeadLetters {
+  args {
+    target  string!
+  }
+  filter    target==args.target && status=="dead" && actor.isClusterOwner==true
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     outboxEntryFull
+}
+
+/// One entry by its own row id -- the seam the retry and discard mutations resolve through.
+@unbounded("outbox entry by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query outboxEntry outboxEntryById {
+  args {
+    entryId  string!
+  }
+  filter  row.id==args.entryId && actor.isClusterOwner==true
+  shape   outboxEntryFull
+}
+
+/// Health for one (concept, connector, direction). Sorted newest-first because the row id is
+/// deterministic per domain, so the append-only history IS the health timeline and the caller wants
+/// its tip.
+@actor
+query syncState syncStateFor {
+  args {
+    conceptId  string!
+    connector  string!
+    direction  string!
+  }
+  filter  conceptId==args.conceptId && connector==args.connector && direction==args.direction && actor.isClusterOwner==true
+  sort    "row.createdAt", "desc"
+  shape   syncStateFull
+}
+
+/// Every domain's health -- the Data origins page's health half.
+@actor
+query syncState syncStatesAll {
+  args {
+    connector  string
+  }
+  filter    actor.isClusterOwner==true && when(args.connector) { connector==args.connector }
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     syncStateFull
+}

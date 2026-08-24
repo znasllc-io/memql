@@ -9,6 +9,7 @@ import (
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/campaigns"
+	"github.com/znasllc-io/memql/component/datasync"
 	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -219,6 +220,29 @@ func (a *App) engineAndBus() {
 	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {
 		a.fatal("failed to register campaigns integration", "error", err)
 	}
+
+	// epic memql#4378: the outbox drain worker. Delivers every change to
+	// an ORIGIN concept out to the systems that mirror it, with an
+	// idempotency key, backoff, dead-lettering and audit.
+	//
+	// Wired HERE rather than as a self-registering plug-in for exactly
+	// the reason the campaigns worker above is: the cluster execution
+	// guard is not on PluginContext, and without it two replicas drain
+	// the same connector concurrently -- at which point the only thing
+	// between MemQL and a double delivery is the receiver honouring the
+	// idempotency key, which is a promise about somebody else's system.
+	//
+	// The rest of the runtime -- the inbound dispatcher and the two
+	// runners -- IS a self-registering plug-in (component/datasync/
+	// plugin.go), because none of it needs the guard: the inbound
+	// automation is already claimed by the scheduler, and a backfill is
+	// operator-driven.
+	drainWorker := datasync.NewWorker(
+		&CampaignsEngineAdapter{Engine: a.engine},
+		clusterGuard,
+		a.Logger,
+	)
+	a.Dependencies = append(a.Dependencies, drainWorker)
 
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:       nil,

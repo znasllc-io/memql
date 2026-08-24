@@ -53,8 +53,41 @@ func mutationActor(ctx context.Context) (string, error) {
 	return actor, nil
 }
 
+// bunStore adapts the engine's database handle to the memory-nodes Store
+// interface.
+//
+// The field is bun.IDB rather than *bun.DB so the SAME store can be
+// bound to a TRANSACTION (epic memql#4378). A write to an ORIGIN concept
+// has to append its outbox entries atomically with the row itself --
+// otherwise a process that dies between the two statements leaves either
+// a committed change nothing will ever propagate, or a queued delivery of
+// something that rolled back. bun.Tx and *bun.DB both satisfy bun.IDB and
+// the two methods below use only that surface, so the transactional path
+// reuses this adapter instead of growing a second one that could drift
+// from it. See component/memql/outbox_append.go.
 type bunStore struct {
-	db *bun.DB
+	db bun.IDB
+}
+
+// newBunStore wraps the engine's database handle.
+//
+// It exists because of a TYPED NIL. The field above is an interface, and
+// assigning a nil *bun.DB to an interface produces a value that is NOT
+// nil -- so `s.db == nil` stops catching an unconfigured engine the
+// moment the field stops being a concrete pointer, and the guards below
+// fall through into a nil-pointer panic inside bun instead of returning
+// "database not configured".
+//
+// That is not hypothetical: it is what happened when the field widened
+// to bun.IDB for the transactional outbox append, and
+// TestRePromoteConcept_UnRetiresAndWritesResume caught it. Storing
+// nothing rather than a typed nil restores the guard, and every
+// construction goes through here so no call site can reintroduce it.
+func newBunStore(db *bun.DB) *bunStore {
+	if db == nil {
+		return &bunStore{}
+	}
+	return &bunStore{db: db}
 }
 
 func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.MemoryNode) error {

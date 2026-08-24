@@ -3,3 +3,41 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+
+use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
+
+// ---- The sync runtime's automations (epic memql#4378) ----
+//
+// Both load on every node type, because every binary loads every concept.
+// Both no-op on a node with no connector bound, which is the common case
+// -- the builtin answers "skipped" rather than being absent, for the
+// reason integrations/shopify's own inbound automation records: an
+// executor that is missing fails every inbound row from every source.
+
+/// Offer every staged inbound delivery to the connector its source names. The connector decides
+/// whether the delivery is its own; a source nothing serves is skipped, not failed.
+@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+automation dispatchInboundToConnector {
+  args {
+    id     any
+    source any
+    body   any
+  }
+  step dispatch {
+    builtin datasyncDispatchInbound (
+      inboundRequestId: id,
+      source: source,
+      body: body
+    )
+  }
+}
+
+/// Sweep mirrored domains whose interval says they are due. Every 10 minutes, because the interval
+/// that matters is the DOMAIN's -- this only decides how often the runtime asks the question, and a
+/// domain reconciling every 6 hours is not swept 36 times in between.
+@trigger(schedule="0 */10 * * * *")
+automation reconcileMirroredDomains {
+  step sweep {
+    builtin datasyncReconcileDomains ()
+  }
+}
