@@ -236,12 +236,22 @@ export interface LocalInstanceInput {
 }
 
 /**
- * The local instance -- shown whether or not anything is installed.
+ * The local instance -- derived whether or not anything is installed.
  *
- * A machine with NO local cluster still gets a row, carrying `absent`. That row
- * is the entry point the Clusters "+" menu used to hide, and it is the reason
- * the view is useful on a machine where nothing has been installed yet: the
- * alternative is an empty view that gives an operator nowhere to start.
+ * A machine with NO local cluster still yields one, carrying `absent`. It is
+ * the local machine's entry in the catalog, and `absent` is a real verdict
+ * about it rather than a missing one: the instance page opens on it, the
+ * upgrade machinery reads it, and `instanceActions` uses exactly that verdict
+ * to decide that the only thing on offer is an install.
+ *
+ * IT IS NO LONGER A ROW, and the argument that used to be written here went
+ * with it (memql#4426). The Deployments view rendered a `local` row on every
+ * machine, installed or not, so an operator with nothing had somewhere to
+ * start; that row is what suppressed the view's welcome, and the welcome now
+ * carries the install offer itself, alongside the Clusters welcome and the view
+ * title menu. So this function no longer exists to guarantee a row -- it exists
+ * because the local machine is an instance, and "nothing is installed" is
+ * something to say about it.
  *
  * Domain and version are read back from what a previous run recorded rather
  * than defaulted. A default here would claim the machine is at a version it may
@@ -342,11 +352,18 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
 }
 
 /**
- * Instances in the order the tree renders them: local first, then remote by name.
+ * Instances in catalog order: local first, then remote by name.
  *
  * Local is pinned to the top rather than sorted with the rest because it is the
- * one instance that is always present -- including as `absent`, where it is the
- * only row on the view and the only thing an operator can act on.
+ * one instance that is always present -- including as `absent`, which is a
+ * verdict about this machine and not an absence from the list.
+ *
+ * "The order the TREE renders them" until memql#4426, and it is worth saying
+ * what changed: the Deployments view now renders one cluster's runs rather than
+ * every instance, so nothing reads this order to lay out rows any more. It is
+ * still the order the catalog hands instances back in, which is what a lookup
+ * by name and the instance page both walk, so a stable, stated order is still
+ * worth having -- it just no longer decides what an operator sees first.
  */
 export function sortInstances(instances: readonly Instance[]): Instance[] {
   return [...instances].sort((a, b) => {

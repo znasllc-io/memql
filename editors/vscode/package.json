@@ -152,6 +152,21 @@
       {
         "view": "memqlClusters",
         "contents": "No clusters yet. MemQL runs as a cluster this editor installs, repairs and connects to; managing what runs inside one is its portal's job.\n[Install a local cluster](command:memql.deployments.createDeployment)\n[Add an existing cluster](command:memql.clusters.add)"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Not connected. Select a cluster to see its deployments.\n[Select Cluster](command:memql.clusters.select)\n[Install a local cluster](command:memql.deployments.createDeployment)",
+        "when": "!memql.clusterSelected"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "Not connected. Select a cluster to browse its constructs.\n[Select Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected"
+      },
+      {
+        "view": "memqlData",
+        "contents": "Not connected. Select a cluster to browse its data.\n[Select Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected"
       }
     ],
     "commands": [
@@ -210,6 +225,10 @@
         "command": "memql.deployments.open",
         "title": "MemQL: Open Local Deployment",
         "icon": "$(server)"
+      },
+      {
+        "command": "memql.deployments.openRun",
+        "title": "MemQL: Open Deployment"
       },
       {
         "command": "memql.deployments.openCheckout",
@@ -366,6 +385,10 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "command": "memql.deployments.openRun",
+          "when": "false"
+        },
+        {
           "command": "memql.deployments.openCheckout",
           "when": "isWorkspaceTrusted"
         },
@@ -484,6 +507,36 @@
       ],
       "view/title": [
         {
+          "command": "memql.deployments.open",
+          "when": "view == memqlDeployments && memql.clusterSelected",
+          "group": "navigation@0"
+        },
+        {
+          "command": "memql.deployments.openCheckout",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memql.deployments.createDeployment",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent",
+          "group": "1_instance@1"
+        },
+        {
+          "command": "memql.deployments.rebuildFromCheckout",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "2_lifecycle@0"
+        },
+        {
+          "command": "memql.clusters.repair",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "2_lifecycle@1"
+        },
+        {
+          "command": "memql.clusters.uninstall",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "2_lifecycle@2"
+        },
+        {
           "command": "memql.deployments.refresh",
           "when": "view == memqlDeployments",
           "group": "navigation@1"
@@ -564,31 +617,6 @@
           "command": "memql.clusters.signOut",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@3"
-        },
-        {
-          "command": "memql.deployments.createDeployment",
-          "when": "view == memqlDeployments && viewItem == memqlLocalInstanceAbsent",
-          "group": "inline@1"
-        },
-        {
-          "command": "memql.deployments.openCheckout",
-          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
-          "group": "inline@1"
-        },
-        {
-          "command": "memql.deployments.rebuildFromCheckout",
-          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
-          "group": "lifecycle@0"
-        },
-        {
-          "command": "memql.clusters.repair",
-          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
-          "group": "lifecycle@1"
-        },
-        {
-          "command": "memql.clusters.uninstall",
-          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
-          "group": "lifecycle@2"
         },
         {
           "command": "memql.runs.execute",

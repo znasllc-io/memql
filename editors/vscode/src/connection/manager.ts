@@ -23,6 +23,10 @@ import type { ConnectOptions, Dispatcher, QueryClient, SubscriptionManager } fro
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { Latest, type LatestToken } from "../async/latest.js";
+import {
+  connectionContextKeys,
+  type ConnectionContextKeys,
+} from "../state/connectionContext.js";
 import { runAuthenticated, type AuthenticatedRunResult, type CredentialStoreDeps } from "../auth/store.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import {
@@ -56,6 +60,23 @@ export type ConnectionState =
   | { status: "error"; clusterName: string; message: string; reason: ConnectionErrorReason };
 
 export type StateListener = (state: ConnectionState) => void;
+
+/**
+ * Where the two context keys are written (memql#4424).
+ *
+ * A SINK RATHER THAN A DIRECT `setContext` CALL, because publishing them is
+ * this class's job and importing `vscode` here is not allowed --
+ * cmd/memql-lsp/vscodeimportrule_test.go enforces that mechanically, and it is
+ * what keeps this file's own tests running under bare `node --test`. So the
+ * decision lives here and the API call lives in src/extension.ts, the same
+ * split `dial`, `credentials` and `credentialStore` already use.
+ *
+ * It must be THIS class that decides. A view that called `setContext` itself
+ * would be publishing an answer derived from a state it observed rather than
+ * one the manager holds, and two publishers of one key race: the last write
+ * wins, and which one that is depends on listener registration order.
+ */
+export type ContextKeySink = (keys: ConnectionContextKeys) => void;
 
 // The shape of `Connection.dial`. Constructor-injectable (defaults to
 // `defaultDial` below) purely for test determinism: ConnectionManager's own
@@ -103,7 +124,21 @@ export class ConnectionManager {
     // `reauthenticationRequired`, it just cannot blank the dead token on the
     // way out. src/extension.ts injects the real one.
     private readonly credentialStore: CredentialStoreDeps | undefined = undefined,
-  ) {}
+    // Where `memql.clusterSelected` and `memql.connected` go (memql#4424).
+    // Defaulted to a no-op so a manager built bare -- every unit test, and the
+    // stripped construction in this file's own suite -- still connects and
+    // still publishes state; it simply has no editor to tell.
+    private readonly contextKeys: ContextKeySink = () => {},
+  ) {
+    // ON ACTIVATION, and this is the call that makes it so. A key VS Code has
+    // never been told about is UNSET, and an unset key is falsy in a `when`
+    // clause -- so the welcomes would render correctly on a fresh window by
+    // accident, and the first thing to depend on `memql.connected` being
+    // explicitly false would find nothing there. Stating both up front means
+    // the keys describe the extension from its first frame rather than from
+    // its first connection attempt.
+    this.contextKeys(connectionContextKeys(this.current));
+  }
 
   get state(): ConnectionState {
     return this.current;
@@ -165,6 +200,19 @@ export class ConnectionManager {
 
   private publish(state: ConnectionState): void {
     this.current = state;
+    // THE KEYS GO FIRST, before the listeners run. Every view repaints off
+    // `onDidChangeState`, and a provider that returned `[]` while
+    // `memql.clusterSelected` still said `true` would leave the workbench with
+    // an empty tree and no welcome to put in it -- a blank panel, which is the
+    // exact failure the welcomes exist to end.
+    //
+    // AND THIS IS THE ONLY CALL SITE. `publish` is the single funnel every
+    // state change goes through -- select, a refused credential, disconnect,
+    // sign-out (which disconnects), and a socket dying under
+    // `watchForTermination` -- so putting it here is what makes "the manager is
+    // the only publisher" a property of the code rather than a rule to
+    // remember.
+    this.contextKeys(connectionContextKeys(state));
     for (const l of this.listeners) l(state);
   }
 

@@ -28,7 +28,7 @@ a trusted workspace, since it reads credentials and opens a network connection.
 | View | Answers |
 |---|---|
 | **Clusters** | Which clusters can I reach, as whom, in what state -- the home view |
-| **Deployments** | What do I operate, at what version, and what changed it |
+| **Deployments** | What changed the SELECTED cluster, when, and how it ended |
 | **Constructs** | What is DEFINED on this cluster |
 | **Data** | What rows EXIST |
 | **Runs** | What have I run against a cluster |
@@ -91,24 +91,46 @@ Full rationale: [the Deployments surface design](https://github.com/znasllc-io/m
 
 ## Deployments
 
-Instances at the top, runs beneath, newest first.
+The **selected** cluster's deployment runs, newest first. One cluster, flat.
 
 ```
-DEPLOYMENTS
-|- local     healthy - v0.17.0
-|  |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
-|  \- install                        succeeded   9d ago
-\- staging   healthy - v0.9.2
-   |- rollout v0.9.2   succeeded     1d ago
-   \- rollout v0.9.1   rolled_back   3d ago
+DEPLOYMENTS   local · healthy · v0.19.1
+|- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
+\- install                        succeeded   9d ago
 ```
+
+**Which cluster** is the one this editor has in hand, and it is named in the
+view's description -- the line beside the view's own name, carrying its health
+and its version, plus `· update vX.Y.Z available` when there is one. Switching
+the selection in **Clusters** switches this view with it. With nothing selected
+the view is empty and says so, with the two ways out of that state:
+
+```
+Not connected. Select a cluster to see its deployments.
+Select Cluster
+Install a local cluster
+```
+
+There is no `local` wrapper row (memql#4426). It used to be there so that a
+machine with nothing installed had somewhere to start; that entry point now
+lives in three places instead -- the welcome above, the Clusters welcome, and
+**Create Deployment** in this view's title menu -- and the instance's own
+actions (Repair, Rebuild From Checkout, Uninstall, Open Local Checkout) moved to
+the title menu with it. Nothing lost a route.
 
 **An instance** is a MemQL you operate. It is derived rather than declared:
 `local` is whatever is on this machine (an install receipt, a `local: true`
 registry row, and whether the front door answers), and every other
-`clusters.yaml` entry is a remote one. A machine with no local cluster still
-shows the `local` row, as `not installed`, carrying **Create deployment** as its
-only action -- that row is where an operator with nothing installed starts.
+`clusters.yaml` entry is a remote one.
+
+**Selecting a run opens it.** The detail page states what the run was, what it
+moved the cluster between, how it ended and why, when it started and finished
+and how long it took, and its steps (or, for a remote deployment, its node
+types). Its buttons are the instance's own role-gated actions, ordered for what
+you are looking at: a failed run leads with **Repair**, a cluster running
+checkout images leads with **Rebuild From Checkout**, and a remote deployment
+offers the deploy-control actions your role admits. No verb appears there that
+the instance page would not also offer.
 
 **A run** is something that changed an instance's deployed state. Local runs are
 recorded in `~/.memql/runs/`, one file per run, rewritten after every step, so a
@@ -674,6 +696,51 @@ fails.
 Press `F5` to launch an Extension Development Host, set `memql.lsp.serverPath`
 to your built binary, and open a folder of `.memql` files.
 
+### The context keys (contributor notes)
+
+Three context keys drive every `when` clause in `package.json` that is not
+simply `view == ...`. Each has exactly ONE writer, and adding a second writer
+to any of them is a race whose winner depends on listener registration order.
+
+| Key | Means | Written by |
+|---|---|---|
+| `memql.clusterSelected` | This editor has a cluster in hand: dialling one, holding one, or tried and refused | `ConnectionManager` |
+| `memql.connected` | That cluster's transport is up right now | `ConnectionManager` |
+| `memql.deploymentsInstance` | What the selected cluster IS: `memqlLocalInstance`, `memqlLocalInstanceAbsent`, `memqlRemoteInstance`, or unset | `DeploymentsTreeProvider` |
+
+**The first two are the connection, and only the manager publishes them**
+(memql#4424). It is the one object that knows when either changes, so it maps
+its own state through `src/state/connectionContext.ts` -- a pure, table-tested
+module -- and writes the pair through an injected sink. `ConnectionManager`
+itself must stay free of `vscode` imports, so the `setContext` call lives in
+`src/extension.ts`; the DECISION does not. Every provider is injected with a
+reader of the same mapping rather than asking the manager itself, so a view
+cannot disagree with the workbench about whether a welcome should be showing.
+
+`clusterSelected` is **not** "clusters.yaml names a `selectedCluster`". A
+registry entry with no dial behind it is a name in a file, and the views keyed
+on this render cluster data: a fresh window with a remembered selection and no
+connection has nothing to draw. A cluster that was chosen and did NOT answer is
+`clusterSelected: true` and `connected: false` -- selected-but-unreachable is a
+fact about something, and it belongs in a view's rows and description, not in an
+empty state.
+
+**The third describes the selection, not the connection** (memql#4426), and the
+Deployments view is its one writer for the same reason the manager owns the
+others: it is the only thing that computes the catalog. It exists because the
+instance actions moved to the view TITLE menu when the instance row went, and
+`view/title` clauses are evaluated with no `viewItem` in scope -- so the row's
+contextValue vocabulary had to become a key to survive. It is written on every
+pass, including as `""`, so a stale value cannot offer Uninstall over a remote
+cluster.
+
+**Welcomes only render over an EMPTY tree.** That is the whole mechanism behind
+"Not connected": the Deployments, Constructs and Data providers return `[]` when
+`!memql.clusterSelected`, and any row at all -- including a well-meant
+"Not connected" placeholder -- silently deletes the welcome. Runs is the stated
+exception: it lists the workspace's own `runs.json`, so it keeps listing and
+`memql.runs.execute` refuses instead.
+
 ### Testing
 
 ```bash
@@ -683,10 +750,13 @@ make vscode-test-host   # host smoke lane -- downloads and drives a real VS Code
 
 The two lanes answer different questions. `vscode-test` covers the modules that
 do not import `vscode`; it is fast and dependency-light and must stay that way.
-It also covers `package.json` itself, because the tree's context menus are
-decided by `when` clauses the workbench evaluates and no host API can read back
-the entries it drew -- a clause edited to match no row would otherwise remove an
-action from the product with nothing noticing (`test/clusterMenus.test.ts`).
+It also covers `package.json` itself, because the tree's context menus and view
+welcomes are decided by `when` clauses the workbench evaluates and no host API
+can read back the entries it drew -- a clause edited to match no row would
+otherwise remove an action from the product with nothing noticing
+(`test/clusterMenus.test.ts`), and a welcome keyed on a misspelt context key
+renders permanently, because VS Code treats an unknown key as unset and
+`!unset` is true (`test/viewsWelcome.test.ts`).
 `vscode-test-host` (`editors/vscode/test-host/`) launches a real Extension
 Development Host to assert what a unit test structurally cannot reach -- that
 activation survives the host's runtime, that every command the manifest

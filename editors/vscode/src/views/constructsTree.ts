@@ -19,9 +19,15 @@
 //     absence is the statement. A greyed-out Run beside `concept` invites the
 //     question "why not", which is a question about the kind rather than about
 //     this construct, and the tree is the wrong place to answer it.
-//  2. NOT CONNECTED IS NOT AN EMPTY CATALOG. An empty list reads as "this
-//     cluster has no constructs", which is the one wrong answer available. So
-//     does a version mismatch, which gets its own row naming the message.
+//  2. AN UNREACHABLE CLUSTER IS NOT AN EMPTY CATALOG. An empty list reads as
+//     "this cluster has no constructs", which is the one wrong answer
+//     available. So does a version mismatch, which gets its own row naming the
+//     message. WITH NO CLUSTER SELECTED, though, the view IS empty -- returning
+//     `[]` is what lets the manifest's `viewsWelcome` render, and VS Code draws
+//     welcome content only over a genuinely empty tree. The synthetic
+//     "Not connected" row this file used to return is gone for exactly that
+//     reason: it duplicated the welcome's sentence and suppressed the welcome
+//     while doing it (memql#4425).
 //  3. NOTHING HERE MUTATES. Editing happens in a `.memql` file; this view
 //     reads.
 //
@@ -29,12 +35,13 @@
 // and the wire-to-run-path narrowing are all state/constructCatalog.ts, under
 // bare `node --test`.
 //
-// Refs: #3752 #3747
+// Refs: #4425 #4423 #3752 #3747
 
 import * as vscode from "vscode";
 import { briefMessage } from "../state/diagnostics.js";
 
 import type { ConnectionManager } from "../connection/manager.js";
+import type { ConnectionContextSource } from "../state/connectionContext.js";
 import {
   type CatalogConstruct,
   type CatalogState,
@@ -46,11 +53,22 @@ export type ConstructNode =
   | { kind: "group"; group: KindGroup }
   | { kind: "namespace"; group: KindGroup; namespace: NamespaceGroup }
   | { kind: "construct"; construct: CatalogConstruct }
-  /** Not connected, a version mismatch, or a failed read -- never a blank view. */
+  /** Unreachable, a version mismatch, or a failed read -- never a blank view. */
   | { kind: "state"; state: CatalogState };
 
 export interface ConstructsTreeDeps {
   connections: ConnectionManager;
+  /**
+   * The two context keys, read rather than re-derived (design D1).
+   *
+   * This view held the ConnectionManager already and could ask it directly.
+   * It does not, because "is a cluster selected" now has ONE answer that the
+   * manifest's `when` clauses are also keyed on, and a provider that computed
+   * its own would be able to disagree with the workbench about whether the
+   * welcome should be showing -- which presents as a blank panel, not as an
+   * error.
+   */
+  connectionContext: ConnectionContextSource;
   /** Reads the catalog over the live connection. */
   load: () => Promise<CatalogState>;
 }
@@ -75,6 +93,9 @@ export class ConstructsTreeProvider implements vscode.TreeDataProvider<Construct
 
   async getChildren(element?: ConstructNode): Promise<ConstructNode[]> {
     if (element === undefined) {
+      // EMPTY, so the welcome can render. Before the load, so a view nobody has
+      // selected a cluster for issues no ListConstructs call.
+      if (!this.deps.connectionContext().clusterSelected) return [];
       await this.ensureLoaded();
       if (this.state.kind !== "loaded") return [{ kind: "state", state: this.state }];
       // A connected cluster with genuinely no constructs is not a state to
@@ -218,11 +239,18 @@ function stateItem(state: CatalogState): vscode.TreeItem {
       item.iconPath = new vscode.ThemeIcon("loading~spin");
       return item;
     }
-    case "notConnected": {
-      const item = new vscode.TreeItem("Not connected", vscode.TreeItemCollapsibleState.None);
-      item.description = "connect to a cluster to see what it has loaded";
-      item.contextValue = "memqlConstructsNotConnected";
-      item.iconPath = new vscode.ThemeIcon("debug-disconnect");
+    case "unreachable": {
+      // REACHED ONLY WITH A CLUSTER SELECTED -- getChildren returns `[]` before
+      // the load otherwise -- so this row describes a cluster that was chosen
+      // and has not answered, never "you have chosen nothing". The wording says
+      // which of the two it is; the welcome says the other.
+      const item = new vscode.TreeItem("Cluster not answering", vscode.TreeItemCollapsibleState.None);
+      item.description = "no live session, so its constructs could not be listed";
+      item.tooltip =
+        "A cluster is selected but this editor holds no session to it. " +
+        "Open the Clusters view to reconnect or sign in.";
+      item.contextValue = "memqlConstructsUnreachable";
+      item.iconPath = new vscode.ThemeIcon("debug-disconnect", new vscode.ThemeColor("charts.yellow"));
       item.command = { command: "memql.clusters.select", title: "Select Cluster" };
       return item;
     }

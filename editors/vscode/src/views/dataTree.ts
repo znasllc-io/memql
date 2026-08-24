@@ -4,12 +4,22 @@
 // The list comes from ConceptsListMsg via the SDK's listConcepts, which the
 // engine answers from its own registry -- so a concept added to the DSL shows
 // up here with no client change. That is the whole point of a generic browser.
+//
+// WITH NO CLUSTER SELECTED THE VIEW IS EMPTY, and that is load-bearing rather
+// than incidental (memql#4425). This view used to render whatever `load()`
+// returned with nothing connected, which is an empty list -- indistinguishable
+// on screen from a cluster that genuinely has no concepts, and it left no room
+// for the manifest's `viewsWelcome` entry, which VS Code renders only over an
+// empty tree. Returning `[]` from the gate is what puts the welcome there
+// instead, and the gate reads the ONE connection answer (design D1) rather than
+// asking whether the query client happens to exist.
 
 import * as vscode from "vscode";
 import { briefMessage } from "../state/diagnostics.js";
 
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionManager } from "../connection/manager.js";
+import type { ConnectionContextSource } from "../state/connectionContext.js";
 import { ConceptsCache } from "../state/conceptsCache.js";
 
 export type ConceptTreeNode =
@@ -32,7 +42,15 @@ export class DataTreeProvider implements vscode.TreeDataProvider<ConceptTreeNode
   // state/conceptsCache.ts.
   private readonly cache = new ConceptsCache<Concept>();
 
-  constructor(private readonly connections: ConnectionManager) {
+  constructor(
+    private readonly connections: ConnectionManager,
+    /**
+     * The two context keys, read rather than re-derived (design D1). Injected
+     * so the empty case -- the one that makes the welcome appear -- can be
+     * driven without a live manager.
+     */
+    private readonly connectionContext: ConnectionContextSource,
+  ) {
     this.connections.onDidChangeState(() => {
       this.cache.invalidate();
       this.changed.fire(undefined);
@@ -51,6 +69,9 @@ export class DataTreeProvider implements vscode.TreeDataProvider<ConceptTreeNode
   }
 
   async getChildren(element?: ConceptTreeNode): Promise<ConceptTreeNode[]> {
+    // BEFORE the load, so an unselected view issues no listConcepts and holds
+    // no cached error from one.
+    if (!this.connectionContext().clusterSelected) return [];
     const concepts = await this.load();
 
     if (element === undefined) {
