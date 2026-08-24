@@ -243,12 +243,24 @@ func (s *Store) WriteAudit(ctx context.Context, rec Record, actorRole string) er
 // Argument order carries no meaning to the engine, and an unordered map would
 // make every assertion here flaky in a way that reads as a real failure.
 //
-// A BLANK-STRING ARGUMENT IS OMITTED rather than sent. The mutations spell
-// their optional fields `args.X ?? ""`, and `??` is blank-coalescing, so
-// sending "" reaches the same value -- but omitting it keeps the call short
-// and, more importantly, keeps an OPTIONAL argument optional in the one place
-// it matters: `update{}` is a read-merge, and a blank sent for a field the
-// caller did not mean to change would overwrite it.
+// A BLANK-STRING ARGUMENT IS OMITTED rather than sent, and omitting it is
+// EQUIVALENT to sending it -- which is worth stating precisely, because the
+// plausible-sounding reason is wrong.
+//
+// The tempting story is "update{} is a read-merge, so omitting a field leaves
+// it alone". That is not what happens here. Both mutations spell their
+// optional fields `args.X ?? ""`, and `??` is blank-coalescing over an ABSENT
+// argument as well as an empty one, so the field is written as "" either way.
+// Measured against a real engine, not inferred: a row created carrying
+// `error: "...boom"` and then updated with no `error` argument comes back with
+// `error: ""`.
+//
+// That is the behaviour we want -- a version that has reached
+// images_available must not still carry the failure message from before -- so
+// the omission is a shortening of the call string and nothing more. The
+// read-merge protection is real but comes from somewhere else: the mutation
+// BODY lists only the fields it means to write, and a field absent from the
+// body is what survives a merge untouched.
 func renderCall(name string, args map[string]any) string {
 	keys := make([]string, 0, len(args))
 	for k, v := range args {

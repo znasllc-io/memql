@@ -319,3 +319,77 @@ func TestReleaseCutByVersionFindsAVersionPastTheListsPageBoundary(t *testing.T) 
 			"'cut by hand, or on another installation' -- for a release this cluster made.", buried)
 	}
 }
+
+// TestUpdateReleaseCutStatusClearsAStaleError pins the behaviour
+// integrations/release's renderCall depends on, and which its comment used to
+// describe backwards.
+//
+// renderCall omits a blank string rather than sending it, and the plausible
+// story for why -- "update{} is a read-merge, so an omitted field is left
+// alone" -- is FALSE for these mutations. The body spells `error: args.error ??
+// ""`, and `??` is blank-coalescing over an ABSENT argument too, so the field
+// is written as "" either way.
+//
+// That is the behaviour the feature wants: a version that reached
+// images_available must not still carry the failure message from when it was
+// half-done. It is pinned here rather than left as a comment because the two
+// readings differ only in an outcome nothing else asserts -- a stale error
+// beside a green status is exactly the kind of wrong-but-plausible row an
+// operator would act on.
+func TestUpdateReleaseCutStatusClearsAStaleError(t *testing.T) {
+	eng, _, ctx := sharedReadMergeEngine(t)
+	own := auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: "v1:identity:user:releasecut-probe",
+		Role:   auth.RoleOwner,
+	})
+	internal := auth.ContextWithInternalOrigin(own)
+	q := langparser.QuoteString
+	const version = "v0.0.0-releasecut-staleerror"
+
+	// A half-done cut, carrying the failure that state exists to record.
+	create := fmt.Sprintf(`mutation createReleaseCut(version:%s,bump:"patch",baseSha:%s,`+
+		`requestedBy:%s,status:"tag_created_release_failed",tagName:%s,error:%s)`,
+		q(version), q("0000000000000000000000000000000000000000"),
+		q("v1:identity:user:releasecut-probe"), q(version),
+		q("tag_created_release_failed: GitHub refused the Release"))
+	if _, err := eng.Execute(internal, create); err != nil {
+		t.Fatalf("seeding the half-done row: %v", err)
+	}
+
+	// Somebody publishes the Release by hand, the images build, and a check
+	// finds them. Store.UpdateStatus sends no `error` argument, because
+	// renderCall drops the blank.
+	update := fmt.Sprintf(`mutation updateReleaseCutStatus(version:%s,status:"images_available",`+
+		`checkedAt:"2026-08-24T00:05:00Z")`, q(version))
+	if _, err := eng.Execute(internal, update); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	res, err := eng.Execute(internal, fmt.Sprintf("query releaseCutByVersion(version:%s)", q(version)))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	checked := false
+	for _, n := range res.Bundle.GetNodes() {
+		if n == nil || n.GetPayload() == nil {
+			continue
+		}
+		m := n.GetPayload().AsMap()
+		if v, _ := m["version"].(string); v != version {
+			continue
+		}
+		checked = true
+		if status, _ := m["status"].(string); status != "images_available" {
+			t.Errorf("status = %q, want images_available", status)
+		}
+		if errText, _ := m["error"].(string); errText != "" {
+			t.Errorf("error = %q, want it cleared. A stale failure message beside a green "+
+				"status is a row an operator would act on -- and if this is preserved rather "+
+				"than cleared, renderCall dropping the blank is a real behaviour change and "+
+				"not the shortening its comment says it is.", errText)
+		}
+	}
+	if !checked {
+		t.Fatal("the row was not read back at all, so this asserts nothing")
+	}
+}
