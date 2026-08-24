@@ -179,6 +179,8 @@ The check is on demand. There is no poller and no schedule.
 | `tag_created_release_failed` | **half done** -- see below | act; nothing is building |
 | `version_not_cut` | Check images was asked about a version with no row here | it was cut by hand or on another installation. There is no row to move |
 | `registry_check_failed` | the image check itself errored | the status is unchanged. Retry later |
+| `not_owner` | the caller does not hold the owner role | you will not meet this from the portal -- the card is absent for a non-owner rather than refusing. It is what a direct SDK or MCP caller gets |
+| `invalid_bump` | the bump was not major/minor/patch | same: the portal only offers the three, so this is a direct caller's typo |
 
 ### The half-done state
 
