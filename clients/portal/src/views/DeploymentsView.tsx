@@ -17,6 +17,8 @@ import {
   rolloutRows,
 } from "../deploy/rows";
 import { DeploymentOps } from "../deploy/DeploymentOps";
+import { ReleasesCard } from "../deploy/releases/ReleasesCard";
+import { useReleases } from "../deploy/releases/useReleases";
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
@@ -58,6 +60,12 @@ export function DeploymentsView({
   onSelect,
 }: ViewProps): ReactNode {
   const console_ = useDeployConsole();
+  // Cutting a version of MemQL ITSELF (epic memql#4434), which is a different
+  // axis from everything else on this page: the bands below move THIS cluster
+  // onto a version that exists, and this one brings a version into existence
+  // for every installation. Same page because an operator asks both questions
+  // in one sitting -- "what is running" and "is there something newer to run".
+  const releases = useReleases();
 
   const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId } =
     console_;
@@ -168,6 +176,23 @@ export function DeploymentsView({
           and roll back on a single click, while that page confirmed every one
           of them. An operator's protection depended on which door they had
           walked through. The careful set won; DeploymentOps carries it. */}
+      {/* ABSENT for a non-owner, never disabled -- instanceActions' doctrine.
+          The engine enforces the same rule independently (the Go owner wall in
+          integrations/release, before any network call), so this decides only
+          what is OFFERED.
+
+          Gated on accessResolved as well as on the role: rendering it while
+          the connection's identity is still unknown would flash a
+          release-cutting form at everyone for one paint. */}
+      {releases.accessResolved && releases.isOwner ? (
+        <Band
+          title="Releases"
+          meta="Cut a version of MemQL itself"
+        >
+          <ReleasesCard state={releases} />
+        </Band>
+      ) : null}
+
       {overlayAbsence === "" && (permissions.canShip || permissions.canRollBack || permissions.canRepair) ? (
         <Band
           title="Ship"

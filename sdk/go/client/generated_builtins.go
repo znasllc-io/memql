@@ -927,6 +927,78 @@ func RecallBuild(args RecallArgs) string {
 	return b.String()
 }
 
+// ReleaseCut -- Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential.
+type ReleaseCutArgs struct {
+	// Which part of the newest existing version to increment. major and minor zero the parts below them.
+	// Enum: major | minor | patch
+	Bump string
+	// Optional prose prepended to the Release body. GitHub's generated release notes are appended either way, so leaving this empty still produces a populated Release.
+	Notes string
+	// Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then.
+	BumpExtensionPin    bool
+	BumpExtensionPinSet bool // set true to send bumpExtensionPin; required because zero-value bool is ambiguous
+	// Compute the plan -- next version and base sha -- and write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this.
+	DryRun    bool
+	DryRunSet bool // set true to send dryRun; required because zero-value bool is ambiguous
+}
+
+// ReleaseCut calls the engine builtin releaseCut.
+func (qc *QueryClient) ReleaseCut(ctx context.Context, args ReleaseCutArgs) (*Result, error) {
+	call := ReleaseCutBuild(args)
+	return qc.executeNamed(ctx, "releaseCut", call)
+}
+
+func ReleaseCutBuild(args ReleaseCutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCut(")
+	b.WriteString("bump: ")
+	b.WriteString(quoteMemQL(args.Bump))
+	if args.Notes != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(quoteMemQL(args.Notes))
+	}
+	if args.BumpExtensionPinSet {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bumpExtensionPin: ")
+		b.WriteString(fmt.Sprintf("%v", args.BumpExtensionPin))
+	}
+	if args.DryRunSet {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dryRun: ")
+		b.WriteString(fmt.Sprintf("%v", args.DryRun))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCutStatus -- Check whether the container images for a cut version actually exist yet, by asking GHCR for their manifests. Answers about the ARTIFACT rather than the workflow run: a build can fail after the Release publishes, and only the registry knows. All present moves the row to images_available; any absent leaves it dispatched; a check that errored reports the error and changes nothing. On demand only -- there is no poller.
+type ReleaseCutStatusArgs struct {
+	// The version to check, in either tag form (v1.2.3) or bare form (1.2.3).
+	Version string
+}
+
+// ReleaseCutStatus calls the engine builtin releaseCutStatus.
+func (qc *QueryClient) ReleaseCutStatus(ctx context.Context, args ReleaseCutStatusArgs) (*Result, error) {
+	call := ReleaseCutStatusBuild(args)
+	return qc.executeNamed(ctx, "releaseCutStatus", call)
+}
+
+func ReleaseCutStatusBuild(args ReleaseCutStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCutStatus(")
+	b.WriteString("version: ")
+	b.WriteString(quoteMemQL(args.Version))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RestoreDocumentVersion -- Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row.
 type RestoreDocumentVersionArgs struct {
 	DocumentId string

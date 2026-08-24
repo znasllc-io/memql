@@ -5074,6 +5074,28 @@ QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRate
   return this.executeNamed("refundRate", buildRefundRate(args), opts);
 };
 
+/** Every release this cluster cut, newest first. Backs the Releases card on the portal's Deployments page.
+GATED requiresOwner, matching the builtin's Go owner wall rather than the concept's clusterOwner tier -- and the two are not the same question. The tier decides which ROWS a caller may see; this gate decides whether cutting a release is a thing this caller does at all, and the answer the owner ask gives is "only owners". Being the weaker of the two would be the bug: an admin passing the tier while the cut button refuses them would render a history for an action they cannot take.
+This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A release cut by hand appears here not at all. */
+// Bound concept: v1:cluster:releaseCut (machine-readable: BoundConcepts["releaseCuts"] in generated_concepts.ts).
+export interface ReleaseCutsArgs {
+}
+
+export function buildReleaseCuts(args: ReleaseCutsArgs): string {
+  void args;
+  return "query releaseCuts()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCuts(args?: ReleaseCutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCuts = function (this: QueryClient, args: ReleaseCutsArgs = {} as ReleaseCutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCuts", buildReleaseCuts(args), opts);
+};
+
 /** A company's saved reorder lists. */
 // Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["reorderListsForCompany"] in generated_concepts.ts).
 export interface ReorderListsForCompanyArgs {
