@@ -209,6 +209,18 @@ describe("who sees the Releases card", () => {
 });
 
 describe("cutting a release", () => {
+  it("offers all three bumps as radios, defaulting to patch", async () => {
+    // The DEFAULT is the assertion that matters: a form that opened on `major`
+    // would ship a breaking version to anyone who confirmed without reading.
+    // And all three are on screen rather than behind a dropdown click, so the
+    // operator sees the range before choosing.
+    renderDeployments("owner", { cuts: CUT_ROWS });
+    await waitFor(() => expect(screen.getByText("Releases")).toBeTruthy());
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.value)).toEqual(["patch", "minor", "major"]);
+    expect(radios.filter((r) => r.checked).map((r) => r.value)).toEqual(["patch"]);
+  });
+
   it("requires the typed confirm phrase before the button arms", async () => {
     const calls = renderDeployments("owner", { cuts: CUT_ROWS });
     await waitFor(() => expect(screen.getByText("Releases")).toBeTruthy());
@@ -234,7 +246,10 @@ describe("cutting a release", () => {
     const calls = renderDeployments("owner", { cuts: CUT_ROWS });
     await waitFor(() => expect(screen.getByText("Releases")).toBeTruthy());
 
-    fireEvent.change(screen.getByLabelText("Bump"), { target: { value: "minor" } });
+    // A RADIO group, not a dropdown: all three are on screen, which is the
+    // point (`major` must never be reached by accident). Selected by its
+    // accessible name.
+    fireEvent.click(screen.getByRole("radio", { name: /minor/ }));
     fireEvent.change(screen.getByPlaceholderText(/Prepended to GitHub/), {
       target: { value: "The workbench epic." },
     });

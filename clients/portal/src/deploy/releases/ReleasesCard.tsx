@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { Button, ConfirmDialog, DataText, Field, Select, Textarea, TextInput } from "../../ui";
+import { Button, ConfirmDialog, DataText, Field, Textarea, TextInput } from "../../ui";
 import { ErrorMessage } from "../../components/StatusMessage";
 import type { CheckResult, ReleaseRow, ReleasesState } from "./useReleases";
 
@@ -86,13 +86,7 @@ export function ReleasesCard({ state }: { state: ReleasesState }): ReactNode {
       <Headline state={state} />
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <Field label="Bump">
-          <Select value={bump} onChange={(next) => setBump(next as typeof bump)} ariaLabel="Bump">
-            <option value="patch">patch</option>
-            <option value="minor">minor</option>
-            <option value="major">major</option>
-          </Select>
-        </Field>
+        <BumpChoice value={bump} onChange={setBump} />
         <Field label="Notes (optional)" grow>
           <Textarea
             value={notes}
@@ -150,6 +144,54 @@ export function ReleasesCard({ state }: { state: ReleasesState }): ReactNode {
 
       <History state={state} />
     </>
+  );
+}
+
+// BumpChoice is a RADIO GROUP and not a dropdown, which is a deliberate choice
+// rather than an arbitrary one.
+//
+// All three options are on screen at once. A dropdown hides `major` behind a
+// click, and the whole point of this control is that the operator sees the
+// range of what they are choosing between before choosing -- these three are
+// not equivalent, and `major` is the one somebody should never reach by
+// accident. The same reasoning makes the consequence text sit beside each
+// option rather than in a hint below the field.
+//
+// Hand-rolled inputs rather than a ui-kit control because the kit has no radio
+// group; this is the portal's first. The markup is a <fieldset> with a
+// <legend>, which is what makes it announce as one group with three choices to
+// a screen reader -- a set of loose labelled inputs does not.
+function BumpChoice({
+  value,
+  onChange,
+}: {
+  value: "major" | "minor" | "patch";
+  onChange: (next: "major" | "minor" | "patch") => void;
+}): ReactNode {
+  const options: { key: "patch" | "minor" | "major"; says: string }[] = [
+    { key: "patch", says: "a fix" },
+    { key: "minor", says: "new behaviour" },
+    { key: "major", says: "a break" },
+  ];
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="text-xs font-medium text-muted">Bump</legend>
+      <div className="flex flex-wrap gap-3">
+        {options.map((option) => (
+          <label key={option.key} className="flex items-center gap-1.5 text-sm">
+            <input
+              type="radio"
+              name="release-bump"
+              value={option.key}
+              checked={value === option.key}
+              onChange={() => onChange(option.key)}
+            />
+            <span>{option.key}</span>
+            <span className="text-xs text-subtle">{option.says}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
