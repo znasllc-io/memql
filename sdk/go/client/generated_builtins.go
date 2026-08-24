@@ -737,6 +737,65 @@ func LibraryTrainFileBuild(args LibraryTrainFileArgs) string {
 	return b.String()
 }
 
+// ProviderAuthStatus -- List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.
+type ProviderAuthStatusArgs struct {
+}
+
+// ProviderAuthStatus calls the engine builtin providerAuthStatus.
+func (qc *QueryClient) ProviderAuthStatus(ctx context.Context, args ProviderAuthStatusArgs) (*Result, error) {
+	call := ProviderAuthStatusBuild(args)
+	return qc.executeNamed(ctx, "providerAuthStatus", call)
+}
+
+func ProviderAuthStatusBuild(args ProviderAuthStatusArgs) string {
+	_ = args
+	return "builtin providerAuthStatus()"
+}
+
+// ProviderVerify -- Make ONE authenticated, token-free call to a provider's vendor and report whether the credential THIS node resolved was accepted. Lists models -- the cheapest authenticated request either vendor serves -- so it can be pressed as often as an operator likes without spending inference. A rejected key is an ANSWER (verified=false with the vendor's reason), not an error. Owner-only.
+type ProviderVerifyArgs struct {
+	// The registered provider entry to verify, by name.
+	Provider string
+}
+
+// ProviderVerify calls the engine builtin providerVerify.
+func (qc *QueryClient) ProviderVerify(ctx context.Context, args ProviderVerifyArgs) (*Result, error) {
+	call := ProviderVerifyBuild(args)
+	return qc.executeNamed(ctx, "providerVerify", call)
+}
+
+func ProviderVerifyBuild(args ProviderVerifyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin providerVerify(")
+	b.WriteString("provider: ")
+	b.WriteString(quoteMemQL(args.Provider))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ProvidersReload -- Re-resolve AI provider credentials from the graph on EVERY node, so a key seeded through the portal takes effect fleet-wide with no restart. Reloads this node synchronously and broadcasts the same request over the mesh; each node builds a replacement registry fully and swaps it in atomically, so in-flight calls are unaffected and a node that cannot build one keeps what it had. Writes a providers_reloaded audit line naming who asked. Owner-only.
+type ProvidersReloadArgs struct {
+	// Ties every node's log line back to one Apply. Generated when omitted.
+	RequestId string
+}
+
+// ProvidersReload calls the engine builtin providersReload.
+func (qc *QueryClient) ProvidersReload(ctx context.Context, args ProvidersReloadArgs) (*Result, error) {
+	call := ProvidersReloadBuild(args)
+	return qc.executeNamed(ctx, "providersReload", call)
+}
+
+func ProvidersReloadBuild(args ProvidersReloadArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin providersReload(")
+	if args.RequestId != "" {
+		b.WriteString("requestId: ")
+		b.WriteString(quoteMemQL(args.RequestId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // Recall -- Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
 type RecallArgs struct {
 	Text     string

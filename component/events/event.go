@@ -119,6 +119,18 @@ const (
 	// single broadcast routing rule forwards it everywhere with zero side effects
 	// (no automations).
 	KindAuthoringDemote
+
+	// KindProvidersReload is emitted on the dedicated providers-reload
+	// broadcast channel (epic memql#4440) when an operator applies a provider
+	// configuration change. Provider auth resolves once per process at boot,
+	// so a key seeded into the graph is invisible to every running node until
+	// something tells them to look again -- and the portal's Apply reaches
+	// exactly one replica. It carries only a request id; each node re-reads
+	// the shared graph itself. Like cache.invalidate.* / authoring.promote.*,
+	// ONLY the providers-reload subscriber consumes it, so a single broadcast
+	// routing rule forwards it everywhere with zero side effects (no
+	// automations).
+	KindProvidersReload
 )
 
 // String returns a human-readable name for the event kind.
@@ -184,6 +196,8 @@ func (k Kind) String() string {
 		return "cache_invalidate"
 	case KindPreconditionMissed:
 		return "precondition_missed"
+	case KindProvidersReload:
+		return "providers_reload"
 	case KindAuthoringPromote:
 		return "authoring_promote"
 	case KindAuthoringDemote:
@@ -264,6 +278,16 @@ const (
 	// node's shared registry within seconds (no restart). Single-consumer
 	// broadcast topic with zero automation side effects, like authoring.promote.
 	TopicAuthoringDemote = "authoring.demote"
+
+	// Providers-reload broadcast (epic memql#4440). A dedicated channel: the
+	// owner-gated `providersReload` builtin emits
+	// providers.reload.<requestId> here, ONLY the providers-reload subscriber
+	// consumes it, and a single broadcast routing rule (providers.reload.*)
+	// forwards it to every node so a credential seeded through the portal
+	// takes effect fleet-wide within seconds, with no restart. Same
+	// single-consumer broadcast shape as cache.invalidate.* /
+	// authoring.promote.*, and the same zero automation side effects.
+	TopicProvidersReload = "providers.reload"
 
 	// MCP Tool events
 	TopicToolCalled    = "tool.called"

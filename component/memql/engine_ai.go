@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -301,23 +303,85 @@ func (e *MemQLEngine) promptDefaultProvider(templateId string) string {
 //
 // Used by functions and automations to resolve var("NAME") expressions.
 
+// safeLogger returns this engine's logger, or nil when it has none.
+//
+// `MemQLEngine.Logger` is PROMOTED from the embedded *component.Component, so
+// on an engine built without one -- every hand-constructed test engine, and
+// any embedding that skips the component wiring -- reading the field
+// dereferences a nil pointer instead of yielding a nil logger. That is why the
+// guards around this file read `e.Component != nil && e.Logger != nil` rather
+// than the obvious `e.Logger != nil`, and it is a trap worth having one name
+// for: every slog call in the package takes a *slog.Logger that is allowed to
+// be nil, so the only unsafe step is READING the field.
+func (e *MemQLEngine) safeLogger() *slog.Logger {
+	if e == nil || e.Component == nil {
+		return nil
+	}
+	return e.Logger
+}
+
 func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
-	registry, err := loadAIProviders(e.Logger)
-	if err != nil {
+	if e.providers == nil {
+		return 0, fmt.Errorf("reload AI providers: no provider registry on this engine")
+	}
+
+	// BUILD FULLY, THEN SWAP (epic memql#4440, design D5).
+	//
+	// Everything expensive and everything fallible happens out here on a
+	// throwaway registry: the tree is walked, every auth placeholder is
+	// re-resolved through globalSecret -> globalVariable -> env, and every SDK
+	// client is constructed. Only when that has completed does anything the
+	// running engine can see change.
+	//
+	// TWO BUGS ARE BEING FIXED HERE, not one, and the second is why this could
+	// be promoted to a production seam at all:
+	//
+	//  1. IT LOADED NOTHING. `loadAIProviders` returns an EMPTY registry -- it
+	//     says so in its own doc comment; the legacy walk it used to do was
+	//     retired when providers moved to LoadUnifiedProviders, and this call
+	//     site was never updated. So every "reload" replaced the live registry
+	//     with an empty one and reported a count of zero. It had no callers in
+	//     the tree, which is exactly why that went unnoticed.
+	//  2. IT WAS NOT ATOMIC. Reassigning `e.providers` races ~57 unsynchronized
+	//     reads of that field, and rebuilding `e.aiRuntime` to match discards
+	//     the semantic cache SetSemanticCache attached to the old one.
+	//     `adoptContents` swaps the registry's CONTENTS under its own write
+	//     lock instead, so every reader keeps the same pointer, every accessor
+	//     already holds RLock, and an in-flight call sees the whole old set or
+	//     the whole new one -- never a mixture. aiRuntime is left alone: it
+	//     holds the same registry, so it sees the new contents without being
+	//     rebuilt.
+	// safeLogger, not e.Logger: `Logger` is promoted from the embedded
+	// *component.Component, which is nil on a hand-built engine, so reading
+	// the field directly panics rather than yielding nil. Every other call
+	// site in this file guards with `e.Component != nil && e.Logger != nil`
+	// for that reason; this reload has three uses of it, so it resolves once.
+	logger := e.safeLogger()
+
+	next := newProviderRegistry(strings.TrimSpace(os.Getenv(envDefaultProvider)))
+	if _, err := LoadUnifiedProviders(logger, next); err != nil {
+		// The LIVE registry is untouched. A reload that cannot build a
+		// replacement leaves the node serving what it was already serving,
+		// which is strictly better than the empty set it used to install.
 		return 0, fmt.Errorf("reload AI providers: %w", err)
 	}
-	e.providers = registry
-	if e.aiRuntime != nil {
-		e.aiRuntime = newAIRuntime(e.Logger, e.prompts, registry, e.aiCacheConfig)
+	next.finalizeDefault(logger)
+
+	e.providers.adoptContents(next)
+
+	available := e.providers.AvailableCount()
+	if logger != nil {
+		logger.Info("AI providers reloaded",
+			"component", ComponentName,
+			"registered", e.providers.Count(),
+			// AVAILABLE, not registered, is the number an operator is asking
+			// for: a keyless node registers every provider and can call none.
+			"available", available)
 	}
-	if e.Component != nil && e.Logger != nil {
-		e.Logger.Info("AI providers reloaded after seed",
-			"providerCount", registry.Count())
-	}
-	return registry.Count(), nil
+	return available, nil
 }
 
 // TTSProvider returns the default TTS provider from the registry.

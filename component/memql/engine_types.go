@@ -405,6 +405,20 @@ const (
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
 	BuiltinExecutorDataOrigins = "dataOrigins"
+	// BuiltinExecutorProviderAuthStatus projects every registered AI
+	// provider's availability and credential SOURCE from the live registry
+	// (epic memql#4440). Virtual: no row is persisted, and no credential is
+	// ever in the payload. Owner-gated in Go. See
+	// provider_auth_status_read.go.
+	BuiltinExecutorProviderAuthStatus = "providerAuthStatus"
+	// BuiltinExecutorProvidersReload re-resolves provider auth on EVERY node
+	// (epic memql#4440). Owner-gated in Go; writes an audit line; broadcasts
+	// over the mesh. See provider_reload_propagate.go.
+	BuiltinExecutorProvidersReload = "providersReload"
+	// BuiltinExecutorProviderVerify makes ONE authenticated, token-free call
+	// to a provider's vendor and reports whether the credential was accepted
+	// (epic memql#4440). Owner-gated in Go. See provider_verify.go.
+	BuiltinExecutorProviderVerify = "providerVerify"
 )
 
 // FilterNode aliases ComparisonExpression for backwards compatibility with earlier plan designs.

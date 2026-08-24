@@ -107,6 +107,21 @@ func defaultRoutingRules() []RoutingRule {
 		// the demoted bundle's constructs on the broadcast. Same single-broadcast
 		// pattern as cache.invalidate.* / authoring.promote.*.
 		{Pattern: "authoring.demote.*", TargetType: ""},
+		// Providers-reload forwarding (epic memql#4440). Same shape and same
+		// reasoning as the three rules above: the owner-gated
+		// `providersReload` builtin emits providers.reload.<requestId>, ONLY
+		// the providers-reload subscriber consumes it (no automations, no
+		// other consumers), so forwarding it everywhere has ZERO side
+		// effects.
+		//
+		// WITHOUT THIS RULE THE FEATURE IS WORSE THAN ABSENT. Provider auth
+		// resolves per process at boot, and the portal's Apply lands on
+		// whichever replica the front door picked -- so default-deny would
+		// leave a fleet where one replica can call the vendor and the others
+		// cannot, presenting to a user as an assistant that works on every
+		// other message. That is strictly harder to diagnose than "the key
+		// did not take anywhere".
+		{Pattern: "providers.reload.*", TargetType: ""},
 		// Planner graph events: BFF owns the writes (createPlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its

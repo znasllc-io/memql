@@ -649,22 +649,19 @@ func deriveConceptRegistryState(all []*concept.Concept) (map[string][]Relationsh
 }
 
 // ReloadAIProviders re-loads the AI provider registry from .memql
-// files and re-resolves auth placeholders. Intended for the dev-
-// refresh workflow: after wiping the database and re-seeding
-// secrets, providers that eager-loaded against an empty concept
-// storage need to reload so their auth picks up the freshly seeded
-// values from v1:platform:globalSecret instead of falling back to OS env.
+// files and re-resolves auth placeholders. Its implementation, and the
+// reasoning for it, live in engine_ai.go.
 //
-// Concurrency: assumes the engine is in a quiescent state (no
-// in-flight AI calls). The repave workflow runs this after
-// `go run ./scripts/secrets seed` completes and before any user traffic
-// arrives.
-// Production callers (post-rotation) should similarly drain in-flight
-// calls before invoking; the swap is non-atomic across providers.
+// Concurrency: SAFE UNDER TRAFFIC since epic memql#4440. It builds the
+// replacement registry fully and then swaps its contents under the
+// registry's own write lock, so an in-flight call sees the whole old
+// set or the whole new one. The "drain first; the swap is non-atomic
+// across providers" caveat this comment used to carry was retired WITH
+// that change rather than inherited by it.
 //
-// Returns the count of providers loaded + any non-fatal load errors
-// (provider files that failed auth resolution are skipped, not
-// fatal). nil error means nothing failed.
+// Returns the count of AVAILABLE providers after the reload -- the
+// number an operator is actually asking for, since a keyless node
+// registers every provider and can call none.
 
 // suggestRelationshipTarget returns a trailing hint naming likely intended
 // targets for an unresolvable one, or "" when nothing is close enough.

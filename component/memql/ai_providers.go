@@ -385,6 +385,73 @@ func (r *ProviderRegistry) setEntry(entry *ProviderConfigEntry) {
 	}
 }
 
+// adoptContents replaces everything this registry holds with the contents of
+// `next`, under this registry's own write lock (epic memql#4440, design D5).
+//
+// THE SWAP IS THE POINT, and swapping CONTENTS rather than the pointer is what
+// makes it safe. `MemQLEngine.providers` is read from ~57 places with no lock
+// -- correctly, because the field is written once at boot and never again --
+// so a reload that reassigned the field would be a data race against every one
+// of them, and rebuilding aiRuntime to match would silently drop the semantic
+// cache that SetSemanticCache attached to the old one.
+//
+// Swapping the map under `mu` instead means every reader keeps the same
+// *ProviderRegistry and every accessor already takes RLock, so an in-flight
+// call sees either the whole old set or the whole new one and never a mixture.
+// That retires the "the swap is non-atomic across providers" caveat that
+// ReloadAIProviders carried, rather than inheriting it.
+//
+// `next` MUST be fully built before this is called -- auth resolved, clients
+// constructed. Building inside the lock would hold it across network-capable
+// constructors and stall every reader for the duration.
+func (r *ProviderRegistry) adoptContents(next *ProviderRegistry) {
+	if r == nil || next == nil {
+		return
+	}
+	// Read the incoming side under ITS lock: it is a local value here, but
+	// taking the lock keeps this correct if a caller ever shares one.
+	next.mu.RLock()
+	byName := make(map[string]*ProviderConfigEntry, len(next.byName))
+	for k, v := range next.byName {
+		byName[k] = v
+	}
+	declared := make(map[string]bool, len(next.declared))
+	for k, v := range next.declared {
+		declared[k] = v
+	}
+	defaultProvider, defaultPinned := next.defaultProvider, next.defaultPinned
+	next.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName = byName
+	r.declared = declared
+	r.defaultProvider = defaultProvider
+	r.defaultPinned = defaultPinned
+}
+
+// AvailableCount returns how many REGISTERED entries are callable.
+//
+// Distinct from Count(), which counts everything registered including the
+// @base entries that are Available=false on purpose and the unavailable ones a
+// keyless cluster is full of. A reload reporting Count() would say "12
+// providers" on a node where none of them work, which is the number an
+// operator would read as success.
+func (r *ProviderRegistry) AvailableCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := 0
+	for _, entry := range r.byName {
+		if entry != nil && entry.Available {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *ProviderRegistry) finalizeDefault(logger *slog.Logger) {
 	if r == nil {
 		return
@@ -919,14 +986,69 @@ func authConceptLookupNames(envKey string) []string {
 // secrets, baseURL is a variable. Returns ("", false) if neither
 // concept resolves the name (under any of the candidate names from
 // authConceptLookupNames).
+// CONCEPT STORAGE ONLY, still. It answers a narrower question than
+// resolveAuthValueSourced -- "is this in the graph" rather than "can this be
+// resolved at all" -- and it stays that way: widening it to include the env
+// tier would silently change what its callers are asking, and the seal-floor
+// naming test drives it precisely because it wants the concept path.
+//
+// Implemented over the shared chain rather than beside it (memql#4440) so
+// there is exactly one walk of the candidate names, and the narrowing is a
+// visible filter on the tier that answered.
 func authConceptResolver(envKey string) (string, bool) {
+	v, source, ok := resolveAuthValueSourced(envKey)
+	if !ok || source == AuthSourceEnv {
+		return "", false
+	}
+	return v, true
+}
+
+// ProviderAuthSource names WHICH tier of the resolution chain supplied a
+// provider's credential (epic memql#4440, design D4).
+//
+// It exists so the portal's AI-providers page can tell an operator apart
+// "the key is in the graph where I put it" from "the key is in this pod's
+// environment and will vanish on the next image" -- two states that look
+// identical in every previous surface, and which have completely different
+// answers to "why did it stop working".
+type ProviderAuthSource string
+
+const (
+	// AuthSourceFederation is Anthropic workload identity federation: no key
+	// at rest anywhere, the pod's own projected token exchanged for a bearer.
+	AuthSourceFederation ProviderAuthSource = "federation"
+	// AuthSourceGlobalSecret is an encrypted v1:platform:globalSecret row --
+	// what the portal page writes.
+	AuthSourceGlobalSecret ProviderAuthSource = "globalSecret"
+	// AuthSourceGlobalVariable is a plaintext v1:platform:globalVariable row.
+	// Correct for a baseURL or a federation id, wrong for an API key.
+	AuthSourceGlobalVariable ProviderAuthSource = "globalVariable"
+	// AuthSourceEnv is the process environment -- the bootstrap-window
+	// fallback. Legitimate, and worth showing as distinct: it is the one
+	// source a portal write cannot change.
+	AuthSourceEnv ProviderAuthSource = "env"
+	// AuthSourceUnresolved is the keyless state, which after epic memql#4440
+	// is the state a freshly installed cluster is in by design.
+	AuthSourceUnresolved ProviderAuthSource = "unresolved"
+)
+
+// resolveAuthValueSourced is the ONE implementation of the resolution chain,
+// reporting which tier answered.
+//
+// Extracted from resolveAuthPlaceholders rather than written beside it
+// (memql#4440). The portal's status projection has to report the source, and
+// a second walk of "globalSecret, then globalVariable, then env, with the
+// prefix-elision candidate names" would be a second answer to the question
+// this function exists to answer -- one that would drift the first time the
+// chain changed and would then describe a resolution the engine did not make.
+func resolveAuthValueSourced(envKey string) (string, ProviderAuthSource, bool) {
 	ctx := context.Background()
 	candidates := authConceptLookupNames(envKey)
 	if systemSecretResolver != nil {
 		for _, name := range candidates {
 			if v, err := systemSecretResolver(ctx, name); err == nil {
 				if trimmed := strings.TrimSpace(v); trimmed != "" {
-					return trimmed, true
+					return trimmed, AuthSourceGlobalSecret, true
 				}
 			}
 		}
@@ -935,12 +1057,17 @@ func authConceptResolver(envKey string) (string, bool) {
 		for _, name := range candidates {
 			if v, err := systemVariableResolver(ctx, name); err == nil {
 				if trimmed := strings.TrimSpace(v); trimmed != "" {
-					return trimmed, true
+					return trimmed, AuthSourceGlobalVariable, true
 				}
 			}
 		}
 	}
-	return "", false
+	for _, name := range candidates {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v, AuthSourceEnv, true
+		}
+	}
+	return "", AuthSourceUnresolved, false
 }
 
 // resolveAuthPlaceholders walks a provider's auth map and substitutes
@@ -978,24 +1105,16 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 			if envKey == "" {
 				return nil, fmt.Errorf("empty environment variable placeholder for auth %q", key)
 			}
-			// 1+2: concept storage (preferred).
+			// All three tiers, in one place: globalSecret, then
+			// globalVariable, then OS env -- the last with the same
+			// prefix-elision as concept storage, so `MEMQL_OPENAI_API_KEY` in
+			// env wins for a `MEMQL_AI_OPENAI_API_KEY`-referencing provider,
+			// matching the dev-manifest naming. The tier that answered is
+			// discarded here and kept by the status projection
+			// (providerAuthStatus), which is the only caller that needs it.
 			candidates := authConceptLookupNames(envKey)
-			if v, ok := authConceptResolver(envKey); ok {
+			if v, _, ok := resolveAuthValueSourced(envKey); ok {
 				resolved[key] = v
-				continue
-			}
-			// 3: OS env fallback. Same prefix-elision as concept storage so
-			// `MEMQL_OPENAI_API_KEY` in env wins for `MEMQL_AI_OPENAI_API_KEY`-
-			// referencing providers, matching the dev-manifest naming.
-			envHit := ""
-			for _, name := range candidates {
-				if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-					envHit = v
-					break
-				}
-			}
-			if envHit != "" {
-				resolved[key] = envHit
 				continue
 			}
 			// An OPTIONAL placeholder resolves to absent rather than to an

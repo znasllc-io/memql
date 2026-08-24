@@ -548,6 +548,69 @@ QueryClient.prototype.libraryTrainFile = function (this: QueryClient, args: Libr
   return this.executeNamed("libraryTrainFile", buildLibraryTrainFile(args), opts);
 };
 
+/** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
+export interface ProviderAuthStatusArgs {
+}
+
+export function buildProviderAuthStatus(args: ProviderAuthStatusArgs): string {
+  void args;
+  return "builtin providerAuthStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerAuthStatus(args?: ProviderAuthStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerAuthStatus = function (this: QueryClient, args: ProviderAuthStatusArgs = {} as ProviderAuthStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerAuthStatus", buildProviderAuthStatus(args), opts);
+};
+
+/** Make ONE authenticated, token-free call to a provider's vendor and report whether the credential THIS node resolved was accepted. Lists models -- the cheapest authenticated request either vendor serves -- so it can be pressed as often as an operator likes without spending inference. A rejected key is an ANSWER (verified=false with the vendor's reason), not an error. Owner-only. */
+export interface ProviderVerifyArgs {
+  /** The registered provider entry to verify, by name. */
+  provider: string;
+}
+
+export function buildProviderVerify(args: ProviderVerifyArgs): string {
+  const parts: string[] = [];
+  parts.push("provider: " + renderMemQLValue(args.provider));
+  return "builtin providerVerify(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerVerify(args: ProviderVerifyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerVerify = function (this: QueryClient, args: ProviderVerifyArgs = {} as ProviderVerifyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerVerify", buildProviderVerify(args), opts);
+};
+
+/** Re-resolve AI provider credentials from the graph on EVERY node, so a key seeded through the portal takes effect fleet-wide with no restart. Reloads this node synchronously and broadcasts the same request over the mesh; each node builds a replacement registry fully and swaps it in atomically, so in-flight calls are unaffected and a node that cannot build one keeps what it had. Writes a providers_reloaded audit line naming who asked. Owner-only. */
+export interface ProvidersReloadArgs {
+  /** Ties every node's log line back to one Apply. Generated when omitted. */
+  requestId?: string;
+}
+
+export function buildProvidersReload(args: ProvidersReloadArgs): string {
+  const parts: string[] = [];
+  if (args.requestId !== undefined) parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin providersReload(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providersReload(args: ProvidersReloadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providersReload = function (this: QueryClient, args: ProvidersReloadArgs = {} as ProvidersReloadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providersReload", buildProvidersReload(args), opts);
+};
+
 /** Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
 export interface RecallArgs {
   text: string;
