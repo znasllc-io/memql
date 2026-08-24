@@ -49,6 +49,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -71,6 +72,21 @@ const resultConcept = "integration:library:result"
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
 	engine memql.IntegrationEngineAccess
+
+	// --- the analysis / search / train half (memql#4342) ---
+	//
+	// All of these are OPTIONAL, and each has a documented behaviour when
+	// unset, because the edit capabilities above must keep working on a
+	// node that wires none of them: no extractor treats every upload as an
+	// opaque type (stored bytes, no chunks); no logger falls back to
+	// slog.Default; no authorizer refuses every non-operator train
+	// (train.go states why deny is the right default there); zero poll
+	// settings take the defaults in analysis.go.
+	extractor            TextExtractor
+	logger               *slog.Logger
+	domainAuthorizer     DomainWriteAuthorizer
+	artifactPollAttempts int
+	artifactPollInterval time.Duration
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -142,6 +158,30 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"artifactId": "string (required) -- the v1:library:artifact row id",
 				"label":      "string (required) -- the label to remove; blank is refused",
+			},
+		},
+		{
+			Name:        "similarArtifacts",
+			Description: "Search the caller's Library by meaning (memql#4342). Runs similarTo over the v1:library:fileChunk rows the analysis pass embedded, keeps only chunks owned by the acting user, folds them up to artifacts by best score, and re-reads each surviving artifact through the owner-gated libraryArtifactById before returning it. Pass 'text' to search by a phrase, or 'artifactId' to find artifacts like an existing one (the seed artifact is excluded from its own results).",
+			Handler:     i.handleSimilarArtifacts,
+			ArgsSchema: map[string]string{
+				"text":       "string -- the phrase to search by. Set this OR artifactId.",
+				"artifactId": "string -- find artifacts similar to this one; its summary (else its first chunk) becomes the query. Set this OR text.",
+				"limit":      "number -- max artifacts to return (default 5, capped at 50)",
+			},
+			// The handler already ranks by score and the ranking IS the
+			// answer -- without this the engine's default sort-by-createdAt
+			// would reshuffle the results into the order they were built.
+			// Same reason integrations/similarity sets it on similarTo.
+			PreserveOrder: true,
+		},
+		{
+			Name:        "trainFile",
+			Description: "Train a Library file into a knowledge domain (memql#4342, design D7 -- upload and train are two acts). Reconstructs the file's extracted text from its chunks, runs integration.knowledge.ingest over it with sourceRef 'artifact:<artifactId>', appends the domain to the file's trainedIntoDomainIds and writes an audit event. The file is resolved under the caller's own actor, so another user's file cannot be trained; the domain must be one the caller may write to, decided by the wired DomainWriteAuthorizer (a cluster owner always may; with no authorizer wired everyone else is refused).",
+			Handler:     i.handleTrainFile,
+			ArgsSchema: map[string]string{
+				"fileId":   "string (required) -- the v1:library:file row id, which must belong to the acting user",
+				"domainId": "string (required) -- the knowledge domain to train into",
 			},
 		},
 	}
@@ -563,8 +603,54 @@ func (i *Integration) writeArtifactLabels(ctx context.Context, row map[string]an
 		}
 	}
 	q := fmt.Sprintf("mutation createArtifact(%s)", strings.Join(parts, ", "))
+	return i.writeArtifactIndex(ctx, q)
+}
+
+// writeArtifactIndex is the one seam every Go writer of the artifact index goes
+// through. It stamps nothing: createArtifact is deliberately NOT @serverOnly.
+//
+// That was tried and reverted (memql#4340). Marking it @serverOnly would close
+// a real hole -- it takes ownerUserId as an argument, so a client can name an
+// arbitrary owner and plant a row in someone else's Library -- but every Go
+// writer below runs on a REQUEST-DERIVED context (the label capabilities and
+// the document edit path are reached from the portal and from agent tools), so
+// satisfying the annotation would mean stamping internal origin on exactly the
+// contexts component/auth/call_origin.go warns about, in a package that also
+// hosts agent-callable builtins. TestOnlyAllowlistedPackagesStampInternalOrigin
+// refuses that shape by default, and rightly.
+//
+// What makes the current arrangement safe in practice is that no caller here
+// supplies ownerUserId: each reads it off a row it already loaded under the
+// caller's own actor. The real fix -- promotion running AS the owner, so the
+// argument disappears -- is memql#2803.
+func (i *Integration) writeArtifactIndex(ctx context.Context, q string) error {
 	_, err := i.engine.Execute(ctx, q)
 	return err
+}
+
+// writeFileArtifact re-versions the index row for a v1:library:file, carrying
+// the file's own facts plus the two INDEX-ONLY fields (labels, archived) that
+// have no counterpart on the file row and that createArtifact's bare insert{}
+// would otherwise erase.
+//
+// It lives HERE, next to the other two artifact-index writers, rather than in
+// analysis.go where its only caller is. Every createArtifact statement in this
+// package is in this file, which is what makes "how does this package write the
+// index, and where does ownerUserId come from?" answerable by reading one file.
+func (i *Integration) writeFileArtifact(ctx context.Context, sourceRef string, file map[string]any, carry artifactCarryForward) error {
+	q := fmt.Sprintf(
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "file", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, live: false, labels: %s, archived: %t)`,
+		langparser.QuoteString(sourceRef),
+		langparser.QuoteString(stringField(file, "ownerUserId")),
+		langparser.QuoteString(fileArtifactSource(stringField(file, "source"))),
+		langparser.QuoteString(fileArtifactTitle(stringField(file, "name"))),
+		langparser.QuoteString(stringField(file, "summary")),
+		langparser.QuoteString(fileArtifactFormat(stringField(file, "format"))),
+		langparser.QuoteString(stringField(file, "mimeType")),
+		quoteStringArray(carry.labels),
+		carry.archived,
+	)
+	return i.writeArtifactIndex(ctx, q)
 }
 
 // mergeLabelAdd returns labels with label appended if absent. Idempotent:
@@ -696,20 +782,30 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 //
 // createArtifact's insert body is a bare `insert{}` block, so MemQL's
 // insert-versioning means the re-versioned row carries only the fields
-// THIS call names (D3 / memql artifacts-labels spec). labels is not
-// derived from doc (the generatedOutput row has no labels field) -- it
-// lives on the artifact row itself, so it has to be read back from the
-// CURRENT artifact row before re-versioning, or every document edit
-// silently drops whatever labels the artifact carried.
+// THIS call names (D3 / memql artifacts-labels spec). That makes every
+// INDEX-ONLY field -- one that lives on the artifact row and has no
+// counterpart on the backing generatedOutput -- a field this call has to
+// read back and re-send, or a document edit silently erases it.
+//
+// There are two such fields now, and the second one is the point of this
+// comment. `labels` was the first (memql#4288). `archived` is the second
+// (memql#4340): it is the soft delete, and re-versioning without it would
+// UN-ARCHIVE an artifact the owner had thrown away, as a side effect of
+// editing the document behind it. That is the #4288 hazard arriving with
+// a new field, which is exactly what it was predicted to do -- so the
+// carry-forward is read as a SET (currentArtifactCarryForward) rather
+// than as one named field, and adding a third index-only field means
+// adding it there rather than discovering this comment later.
 //
 // The lookup is best-effort like the rest of this function -- EXCEPT for
-// the specific failure mode of losing labels. currentArtifactLabels
-// distinguishes "read failed" from "no row yet" / "row has no labels":
-// only the latter two legitimately carry forward as no labels. On a
-// genuine read failure this function skips the re-stamp ENTIRELY rather
-// than risk writing `labels: []` over whatever the row actually holds --
-// a stale updatedAt watermark is the documented best-effort price of a
-// failed re-stamp; destroying real labels is not.
+// the specific failure mode of losing that set. currentArtifactCarryForward
+// distinguishes "read failed" from "no row yet" / "row carries nothing":
+// only the latter two legitimately carry forward as empty. On a genuine
+// read failure this function skips the re-stamp ENTIRELY rather than risk
+// writing `labels: []` and `archived: false` over whatever the row
+// actually holds -- a stale updatedAt watermark is the documented
+// best-effort price of a failed re-stamp; destroying real labels, or
+// resurrecting an archived row, is not.
 func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	docId := stringField(doc, "id")
 	if docId == "" {
@@ -720,12 +816,12 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 	if source == "" {
 		source = "agent_generated"
 	}
-	labels, ok := i.currentArtifactLabels(ctx, sourceRef)
+	carry, ok := i.currentArtifactCarryForward(ctx, sourceRef)
 	if !ok {
 		return
 	}
 	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s)`,
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s, archived: %t)`,
 		langparser.QuoteString(sourceRef),
 		langparser.QuoteString(stringField(doc, "ownerUserId")),
 		langparser.QuoteString(source),
@@ -735,33 +831,52 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		langparser.QuoteString(stringField(doc, "mimeType")),
 		langparser.QuoteString(stringField(doc, "partitionId")),
 		langparser.QuoteString(stringField(doc, "producedByPlanId")),
-		quoteStringArray(labels),
+		quoteStringArray(carry.labels),
+		carry.archived,
 	)
-	_, _ = i.engine.Execute(ctx, q)
+	_ = i.writeArtifactIndex(ctx, q)
 }
 
-// currentArtifactLabels reads the CURRENT artifact index row's labels for
-// a source ref, so touchArtifact can carry them forward into its
-// re-version call. Resolves the row via libraryArtifactBySourceConceptRef
-// -- a declared-payload-field filter, not a Go-side re-derivation of
-// createArtifact's hash-based id, so a future change to that DSL
-// expression cannot silently reopen this exact lookup.
+// artifactCarryForward is the set of INDEX-ONLY artifact fields a
+// re-version has to re-send: fields that live on the artifact row and have
+// no counterpart on the backing document, so createArtifact's bare
+// `insert{}` would drop them.
+//
+// A struct rather than a widening return list because the set grows -- it
+// went from one member to two between memql#4288 and memql#4340 -- and a
+// third member must land here, in one place, rather than as a fourth
+// return value some caller forgets to thread.
+type artifactCarryForward struct {
+	labels   []string
+	archived bool
+}
+
+// currentArtifactCarryForward reads the CURRENT artifact index row's
+// index-only fields for a source ref, so touchArtifact can carry them
+// forward into its re-version call. Resolves the row via
+// libraryArtifactBySourceConceptRef -- a declared-payload-field filter,
+// not a Go-side re-derivation of createArtifact's hash-based id, so a
+// future change to that DSL expression cannot silently reopen this exact
+// lookup.
 //
 // ok=false is a GENUINE read failure -- the caller must not treat that as
-// "no labels" (see touchArtifact). ok=true with a nil/empty result covers
-// both legitimate no-labels cases: no row promoted yet, and a row that
-// has never been labelled.
-func (i *Integration) currentArtifactLabels(ctx context.Context, sourceRef string) (labels []string, ok bool) {
+// "carries nothing" (see touchArtifact). ok=true with a zero-valued result
+// covers both legitimate cases: no row promoted yet, and a row that has
+// never been labelled or archived.
+func (i *Integration) currentArtifactCarryForward(ctx context.Context, sourceRef string) (artifactCarryForward, bool) {
 	q := fmt.Sprintf(`query libraryArtifactBySourceConceptRef(sourceConceptRef: %s)`, langparser.QuoteString(sourceRef))
 	raw, err := i.engine.Execute(ctx, q)
 	if err != nil {
-		return nil, false
+		return artifactCarryForward{}, false
 	}
 	rows := extractRows(raw)
 	if len(rows) == 0 {
-		return nil, true
+		return artifactCarryForward{}, true
 	}
-	return stringSliceField(rows[0], "labels"), true
+	return artifactCarryForward{
+		labels:   stringSliceField(rows[0], "labels"),
+		archived: boolField(rows[0], "archived"),
+	}, true
 }
 
 // loadGeneratedOutput reads the backing document row. Runs under a

@@ -72,6 +72,16 @@ type writeMeta struct {
 	// systemOwned-delete guard cannot be bypassed by a write that flips
 	// systemOwned to false in the same delta as deleted:true (memql#3717).
 	priorSystemOwned bool
+	// priorHostname is the prior row's v1:platform:site `hostname` (empty
+	// when absent), captured so the site hostname POLICY only judges a
+	// hostname this write is actually choosing (memql#4344).
+	//
+	// Without it the rule fires on the merged payload of every write, so an
+	// ordinary user who owns a site at a cluster-owner-created custom
+	// hostname could never publish to it, disable it or delete it -- each of
+	// those inherits the stored hostname through the read-merge, and the
+	// user policy would refuse a value the user never supplied.
+	priorHostname string
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -626,6 +636,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// delta tries to flip it to false in the same write that sets
 			// deleted:true.
 			meta.priorSystemOwned = boolFromAny(priorPayload["systemOwned"])
+			// Capture the PRIOR hostname (memql#4344) so the site hostname
+			// policy can tell "this write is choosing a hostname" from "this
+			// write inherited one through the read-merge".
+			meta.priorHostname = stringFromAny(priorPayload["hostname"])
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -677,6 +691,34 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// declares a tier. See rowauthz_insert_stamp.go.
 	if err := stampRowAuthzOwner(ctx, conceptMeta.Name, payload, mutation.FromTemplate); err != nil {
 		return nil, meta, err
+	}
+
+	// Site OWNER STAMP (memql#4344). The same stamp one layer up, for the
+	// TEMPLATE path the call above deliberately skips: createSite states no
+	// `ownerUserId:` answer in its stamp{} block because it cannot -- the
+	// portal seed must land cluster-owned (EMPTY owner) and "a cluster owner
+	// may hand a site to somebody else" is conditional on the actor's role.
+	// So the answer is supplied here, and a privileged caller's value (absent
+	// included) passes through untouched.
+	//
+	// Placed BESIDE stampRowAuthzOwner rather than in the per-concept guard
+	// table below, and that is load-bearing: ownerUserId is an outgoing
+	// @relationship, so canonicalizeRelationshipFields (immediately after this)
+	// rewrites it to `v1:identity:user:<id>`. A stamp applied after that lands
+	// a BARE owner in a column every other row spells canonically, and the SQL
+	// read path canonicalises the right-hand side -- so the owner's own site
+	// would match nothing. See platform_site_hostname_policy.go.
+	if conceptMeta.Name == conceptPlatformSite {
+		// The actor string is resolved again further down (mutationActor, for
+		// the createdBy stamp). Resolved here too, best-effort: a context with
+		// no actor at all is refused by that later call, and until then an
+		// empty actor simply fails the `system:` prefix test -- which is the
+		// fail-closed reading, since it means the stamp RUNS rather than being
+		// skipped.
+		siteActor, _ := mutationActor(ctx)
+		if err := applySiteOwnerStamp(ctx, payload, meta.priorExisted, siteActor); err != nil {
+			return nil, meta, err
+		}
 	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
@@ -962,8 +1004,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// (captured in the read-merge above) gates the write even if the delta
 	// tries to flip systemOwned to false in the same write. See
 	// platform_site_delete_guard.go.
+	// Site HOSTNAME POLICY guard (memql#4344), beside the systemOwned refusal
+	// because it is the same kind of rule: a user's site is <slug>.<domain>
+	// under the domain this cluster serves, with a bounded slug, a reserved
+	// list and cluster-wide uniqueness -- none of which a mutation body can
+	// express (the domain comes from the environment, uniqueness needs a read,
+	// and the shape rule is waived for a cluster owner). See
+	// platform_site_hostname_policy.go.
 	if conceptMeta.Name == conceptPlatformSite {
 		if err := e.validateSiteSystemOwnedDelete(ctx, payload, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
+		if err := e.validateSiteHostnamePolicy(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorHostname); err != nil {
 			return nil, meta, err
 		}
 	}

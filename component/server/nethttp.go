@@ -1024,6 +1024,46 @@ func SitesBundlePaths() []string {
 	return pathsWithBase("/sites/")
 }
 
+// ArtifactPaths returns the paths the Library's two byte-bearing routes mount
+// under (memql#4341): POST /artifacts and GET /artifacts/{id}/content, served
+// by ArtifactHandler on the bff.
+//
+// HTTP rather than gRPC for the reasoning CLAUDE.md's endpoint-protocol
+// exception table now records for this pair, and the owner approved them
+// explicitly in the epic's design record (D1): the upload is multipart, which
+// is the same "an arbitrary file, not a fixed protobuf schema" argument
+// already recorded for SpaceAttachmentPaths and SitesBundlePaths, and the
+// download is the export side of the same bytes.
+//
+// AUTHENTICATED, so it appears in NONE of PublicPaths(),
+// HandlerAuthorizedPaths() or SelfAuthenticatedPaths(). That is not an
+// omission: both routes require a bearer that resolves to a user, and per-row
+// authorization decides every read. It is also exactly the class
+// cmd/frontdoorpaths exists to catch -- an authenticated route is in no
+// aggregate, which is how /spaces/ came to be served by the bff and routed by
+// nothing -- so the classification lives there, in includedPathFuncs.
+//
+// TWO SPELLINGS, and the bare one is load-bearing. The upload's own path has
+// NO trailing slash, and a Prefix rule of "/artifacts/" is not guaranteed to
+// match a request for "/artifacts": the k8s Ingress spec says a trailing slash
+// is ignored, but traefik -- which fronts the LOCAL overlay -- compiles
+// pathType: Prefix into PathPrefix(`/artifacts/`), which does not. A path the
+// front door does not route is not a 404; it falls through to the "/" h2c
+// catch-all and fails with a protocol error naming nothing. Emitting both
+// costs one redundant Ingress rule on nginx and buys the upload route on
+// traefik.
+//
+// The bare form is also why the mux registration cannot rely on ServeMux's
+// subtree redirect: "/artifacts/" alone would answer POST /artifacts with a
+// 301, and a 301 on a POST loses the body.
+//
+// No collision with the portal's own /artifacts page: that is a client-side
+// route on portal.<domain>, served by the edge, and this block is on the
+// api.<domain> Ingress.
+func ArtifactPaths() []string {
+	return append(pathsWithBase("/artifacts"), pathsWithBase("/artifacts/")...)
+}
+
 func normalizeOrigins(origins []string) []string {
 	if len(origins) == 0 {
 		return []string{"*"}

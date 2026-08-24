@@ -373,6 +373,34 @@ func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 	return b.String()
 }
 
+// AppendLibraryFileTrainedDomain -- Record that a Library file has been trained into a knowledge domain (design D7 -- upload and train are two acts, and this is where the second one is written down). Takes the FULL merged list rather than a single id: MemQL has no array append, and a caller sending only the new member would clobber whatever another agent added concurrently -- the same reason the artifact label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the domain if it is not already there, and calls this; adding a domain twice writes nothing new.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["appendLibraryFileTrainedDomain"] in generated_concepts.go).
+type AppendLibraryFileTrainedDomainArgs struct {
+	FileId               string
+	TrainedIntoDomainIds []string
+}
+
+// AppendLibraryFileTrainedDomain calls the engine mutation appendLibraryFileTrainedDomain.
+func (qc *QueryClient) AppendLibraryFileTrainedDomain(ctx context.Context, args AppendLibraryFileTrainedDomainArgs) (*Result, error) {
+	call := AppendLibraryFileTrainedDomainBuild(args)
+	return qc.executeNamed(ctx, "appendLibraryFileTrainedDomain", call)
+}
+
+func AppendLibraryFileTrainedDomainBuild(args AppendLibraryFileTrainedDomainArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation appendLibraryFileTrainedDomain(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("trainedIntoDomainIds: ")
+	b.WriteString(renderMemQLValue(args.TrainedIntoDomainIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["applyResponsibilityIntake"] in generated_concepts.go).
@@ -587,6 +615,28 @@ func ArchiveAccountBuild(args ArchiveAccountArgs) string {
 	return b.String()
 }
 
+// ArchiveArtifact -- Archive a Library artifact index row -- the first write that takes something OUT of the Library, and a soft one. Sets archived so the row drops out of libraryArtifacts (the default list) while keeping its labels, its provenance and its sourceConceptRef intact; nothing is destroyed and the backing row is untouched by this write. When the artifact is a file (kind=file), the backing v1:library:file is archived alongside it by archiveFileOnArtifactArchive rather than here -- a mutation body writes one row, and which second row to touch is a decision that depends on the kind.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["archiveArtifact"] in generated_concepts.go).
+type ArchiveArtifactArgs struct {
+	ArtifactId string
+}
+
+// ArchiveArtifact calls the engine mutation archiveArtifact.
+func (qc *QueryClient) ArchiveArtifact(ctx context.Context, args ArchiveArtifactArgs) (*Result, error) {
+	call := ArchiveArtifactBuild(args)
+	return qc.executeNamed(ctx, "archiveArtifact", call)
+}
+
+func ArchiveArtifactBuild(args ArchiveArtifactArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveArtifact(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ArchiveAudience -- Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the engine's row-authz write guard refuses the update outright when the target row's owner is somebody else.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["archiveAudience"] in generated_concepts.go).
@@ -627,6 +677,28 @@ func ArchiveComposedViewBuild(args ArchiveComposedViewArgs) string {
 	b.WriteString("mutation archiveComposedView(")
 	b.WriteString("viewId: ")
 	b.WriteString(quoteMemQL(args.ViewId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ArchiveLibraryFile -- Archive a Library file -- the soft delete. Sets archived so the file drops out of the owner's default list; the row, its provenance and its bytes all survive, and the append-only history keeps every earlier version. Called directly by the owner, and by archiveFileOnArtifactArchive when the owner archives the artifact the file backs, so the two rows never disagree.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["archiveLibraryFile"] in generated_concepts.go).
+type ArchiveLibraryFileArgs struct {
+	FileId string
+}
+
+// ArchiveLibraryFile calls the engine mutation archiveLibraryFile.
+func (qc *QueryClient) ArchiveLibraryFile(ctx context.Context, args ArchiveLibraryFileArgs) (*Result, error) {
+	call := ArchiveLibraryFileBuild(args)
+	return qc.executeNamed(ctx, "archiveLibraryFile", call)
+}
+
+func ArchiveLibraryFileBuild(args ArchiveLibraryFileArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveLibraryFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2059,9 +2131,9 @@ type CreateArtifactArgs struct {
 	OwnerUserId      string
 	// Enum: artifact | record
 	Lens string
-	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source
+	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
 	Kind string
-	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
+	// Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live
 	Source  string
 	Title   string
 	Summary string
@@ -2073,6 +2145,8 @@ type CreateArtifactArgs struct {
 	// Enum: workspace | private
 	Scope                string
 	Labels               []string
+	Archived             bool
+	ArchivedSet          bool // set true to send archived; required because zero-value bool is ambiguous
 	PartitionId          string
 	AgentId              string
 	ProducedByPlanId     string
@@ -2159,6 +2233,13 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
+	}
+	if args.ArchivedSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 24 {
@@ -4313,6 +4394,136 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	return b.String()
 }
 
+// CreateLibraryFile -- Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on status=="stored" so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.go).
+type CreateLibraryFileArgs struct {
+	FileId   string
+	Name     string
+	MimeType string
+	Size     int
+	Sha256   string
+	BlobUrl  string
+	// Enum: uploaded | exported | agent_generated | derived
+	Source string
+	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
+	Format  string
+	Summary string
+}
+
+// CreateLibraryFile calls the engine mutation createLibraryFile.
+func (qc *QueryClient) CreateLibraryFile(ctx context.Context, args CreateLibraryFileArgs) (*Result, error) {
+	call := CreateLibraryFileBuild(args)
+	return qc.executeNamed(ctx, "createLibraryFile", call)
+}
+
+func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createLibraryFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mimeType: ")
+	b.WriteString(quoteMemQL(args.MimeType))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("size: ")
+	b.WriteString(fmt.Sprintf("%v", args.Size))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("blobUrl: ")
+	b.WriteString(quoteMemQL(args.BlobUrl))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if args.Format != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	if args.Summary != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(quoteMemQL(args.Summary))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateLibraryFileChunk -- Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always lands owned by the same person as its file. artifactId is resolved by the pass through libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second read.
+//
+// Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["createLibraryFileChunk"] in generated_concepts.go).
+type CreateLibraryFileChunkArgs struct {
+	ChunkId    string
+	FileId     string
+	ArtifactId string
+	Seq        int
+	Text       string
+	TokenCount int
+}
+
+// CreateLibraryFileChunk calls the engine mutation createLibraryFileChunk.
+func (qc *QueryClient) CreateLibraryFileChunk(ctx context.Context, args CreateLibraryFileChunkArgs) (*Result, error) {
+	call := CreateLibraryFileChunkBuild(args)
+	return qc.executeNamed(ctx, "createLibraryFileChunk", call)
+}
+
+func CreateLibraryFileChunkBuild(args CreateLibraryFileChunkArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createLibraryFileChunk(")
+	b.WriteString("chunkId: ")
+	b.WriteString(quoteMemQL(args.ChunkId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("seq: ")
+	b.WriteString(fmt.Sprintf("%v", args.Seq))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("text: ")
+	b.WriteString(quoteMemQL(args.Text))
+	if args.TokenCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["createMagicLinkRequest"] in generated_concepts.go).
@@ -5772,12 +5983,16 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 // CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
 // status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 // `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
+// OWNERSHIP (memql#4344). `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an arg. A concept declaring an owner tier over a caller-supplied field records a guarantee nothing provides -- and reads as safe, so an auditor seeing the tier stops looking; that is what TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because the field genuinely is not forgeable.
+// The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the deployment's row rather than a person's -- the seeded portal is site #1 and must land CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See component/memql/platform_site_hostname_policy.go.
+// That is a NARROWING and never a widening, which is why it does not reopen what the gate above protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the read-merge makes that an update and the cluster-owner write escape admits it.
+// HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS cluster serves, the [a-z0-9-]{3,40} slug, the reserved labels, cluster-wide uniqueness, and the cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
 	SiteId   string
 	Hostname string
-	// Enum: spa | static
+	// Enum: spa | static | shopify_storefront
 	Kind      string
 	BundleRef string
 	// Enum: draft | live | disabled
@@ -5787,6 +6002,8 @@ type CreateSiteArgs struct {
 	SystemOwned    bool
 	SystemOwnedSet bool // set true to send systemOwned; required because zero-value bool is ambiguous
 	Title          string
+	ArtifactId     string
+	Binding        map[string]any
 }
 
 // CreateSite calls the engine mutation createSite.
@@ -5844,6 +6061,20 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 		}
 		b.WriteString("title: ")
 		b.WriteString(quoteMemQL(args.Title))
+	}
+	if args.ArtifactId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.Binding != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("binding: ")
+		b.WriteString(renderMemQLValue(args.Binding))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7160,7 +7391,7 @@ func DeleteRecordBuild(args DeleteRecordArgs) string {
 	return b.String()
 }
 
-// DeleteSite -- Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+// DeleteSite -- Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce. Beyond that, deletion is owner-or-cluster-owner: guardRowAuthzWrite admits the row's OWNER, and the cluster-owner path is rowAuthzWriteEscape's explicit escape -- so one user cannot delete another's deployable, and an operator can delete any non-systemOwned one.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["deleteSite"] in generated_concepts.go).
 type DeleteSiteArgs struct {
@@ -12421,6 +12652,60 @@ func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 	return b.String()
 }
 
+// SetLibraryFileStatus -- Advance a Library file through the analysis lifecycle: the new status, and whatever the pass learned along with it (a summary, how much of the file is embedded, or why it failed). Every field but the status is optional and an absent one is NOT written, so a later transition cannot blank a summary an earlier one recorded. Handler-invoked by the analysis pass, which runs under the file owner's actor; the read-merge preserves ownerUserId and every byte fact.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["setLibraryFileStatus"] in generated_concepts.go).
+type SetLibraryFileStatusArgs struct {
+	FileId string
+	// Enum: stored | analyzing | ready | failed
+	Status  string
+	Summary string
+	// Enum: none | partial | complete
+	EmbeddingStatus string
+	FailureReason   string
+}
+
+// SetLibraryFileStatus calls the engine mutation setLibraryFileStatus.
+func (qc *QueryClient) SetLibraryFileStatus(ctx context.Context, args SetLibraryFileStatusArgs) (*Result, error) {
+	call := SetLibraryFileStatusBuild(args)
+	return qc.executeNamed(ctx, "setLibraryFileStatus", call)
+}
+
+func SetLibraryFileStatusBuild(args SetLibraryFileStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setLibraryFileStatus(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	if args.Summary != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(quoteMemQL(args.Summary))
+	}
+	if args.EmbeddingStatus != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("embeddingStatus: ")
+		b.WriteString(quoteMemQL(args.EmbeddingStatus))
+	}
+	if args.FailureReason != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failureReason: ")
+		b.WriteString(quoteMemQL(args.FailureReason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
 //
 // Bound concept: v1:telephony:number (machine-readable: BoundConcepts["setNumberE911"] in generated_concepts.go).
@@ -15119,11 +15404,14 @@ func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 }
 
 // UpdateSiteBundle -- Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
+// `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body: the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an operator publishes to any, and a cross-user write is refused before the merge -- which is why the guard reads the PRIOR row rather than the merged payload.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.go).
 type UpdateSiteBundleArgs struct {
-	SiteId    string
-	BundleRef string
+	SiteId     string
+	BundleRef  string
+	ArtifactId string
 }
 
 // UpdateSiteBundle calls the engine mutation updateSiteBundle.
@@ -15142,11 +15430,19 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 	}
 	b.WriteString("bundleRef: ")
 	b.WriteString(quoteMemQL(args.BundleRef))
+	if args.ArtifactId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
 
 // UpdateSiteStatus -- Move a site between draft / live / disabled.
+// Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStatus"] in generated_concepts.go).
 type UpdateSiteStatusArgs struct {

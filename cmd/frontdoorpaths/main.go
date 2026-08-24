@@ -127,7 +127,7 @@ var grpcSurface = map[string]bool{"/": true}
 // bff-http, keyed by function name so the exhaustiveness gate can compare
 // against a scan of package server.
 //
-// The three aggregates carry the unauthenticated surface. The four that follow
+// The three aggregates carry the unauthenticated surface. The five that follow
 // are the per-route declarations no aggregate picks up, each mounted by a
 // bff-tagged build:
 //
@@ -136,6 +136,14 @@ var grpcSurface = map[string]bool{"/": true}
 //	                        here because the mount is what makes it required.
 //	SpaceAttachmentPaths    POST /spaces/{id}/attachments, app/transport_attachments.go
 //	                        under `bff || agent`. Multipart, authenticated.
+//	ArtifactPaths           POST /artifacts + GET /artifacts/{id}/content,
+//	                        app/transport_artifacts.go under `bff` (memql#4341).
+//	                        Multipart in, bytes out; authenticated, so it is in
+//	                        no aggregate -- the same class as SpaceAttachmentPaths,
+//	                        which is what item 2 above is about. It emits TWO
+//	                        entries, /artifacts and /artifacts/, because the
+//	                        upload's own path has no trailing slash and traefik's
+//	                        PathPrefix(`/artifacts/`) would not match it.
 //	PolyphonRoomTokenPaths  app/transport_voice.go under `!agent && !planner`,
 //	PolyphonStatusPaths     which a bff build satisfies. Authenticated.
 var includedPathFuncs = map[string]func() []string{
@@ -144,6 +152,7 @@ var includedPathFuncs = map[string]func() []string{
 	"SelfAuthenticatedPaths": server.SelfAuthenticatedPaths,
 	"MemqlWebsocketPaths":    server.MemqlWebsocketPaths,
 	"SpaceAttachmentPaths":   server.SpaceAttachmentPaths,
+	"ArtifactPaths":          server.ArtifactPaths,
 	"PolyphonRoomTokenPaths": server.PolyphonRoomTokenPaths,
 	"PolyphonStatusPaths":    server.PolyphonStatusPaths,
 }

@@ -82,6 +82,7 @@ shape inboundRequest inboundRequestFull {
 @row
 shape site siteFull {
   row.id
+  ownerUserId
   hostname
   kind
   bundleRef
@@ -90,5 +91,7 @@ shape site siteFull {
   systemOwned
   title
   notes
+  artifactId
+  binding
   row.createdAt
 }

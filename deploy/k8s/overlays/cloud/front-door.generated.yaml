@@ -22,11 +22,15 @@
 # is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly
 # its own exact rule hosts under tls; and the union of those tls lists is the dnsNames
 # set -- deploy/k8s/overlays/frontdoor_hosts_test.go fails the build when they differ.
-# The *.<domain> RULE stays, because it is how every site reaches the edge, but it has no
-# certificate behind it: a customer site hostname needs its own Certificate and its own
-# exact-host Ingress until the issuer gains a DNS-01 solver
-# (docs/public/operate/site-hosting.md). The portal is the one site the generator can
-# name in advance, so it is the one site with an exact rule and a SAN.
+# The *.<domain> RULE stays, because it is how every site reaches the edge, and THIS
+# certificate is not what covers it. Where the overlay declares a DNS-01 ClusterIssuer it
+# also declares a SECOND, wildcard Certificate, and the wildcard rule carries that one
+# under tls (memql#4347). Where it does not -- the default -- the wildcard rule still has
+# no certificate behind it and a customer site hostname needs its own Certificate and
+# exact-host Ingress (docs/public/operate/site-hosting.md). Either way this generated
+# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The portal
+# is the one site the generator can name in advance, so it is the one site with an exact
+# rule and a SAN here.
 #
 # THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/
 # names a real domain: the domain is a value on the memql-domain ConfigMap, which every
@@ -54,8 +58,9 @@
 # not the one name -- the Certificate would sit Pending and every host here would serve
 # the controller's default certificate. The apex is a dnsName like any other now; it
 # used to be the one exception to a wildcard that matched exactly one label. One order,
-# one renewal, and a new customer site does NOT join this list: it needs a Certificate
-# of its own until a DNS-01 solver exists (docs/public/operate/site-hosting.md).
+# one renewal, and a new customer site does NOT join this list: it is covered by the
+# overlay's wildcard Certificate where a DNS-01 issuer is declared, and otherwise needs a
+# Certificate of its own (docs/public/operate/site-hosting.md).
 #
 # This list and the tls.hosts of the Ingresses below are the SAME set, derived from
 # component/frontdoor.CertificateSANs; the overlay render gate asserts the equality.
@@ -204,7 +209,21 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /artifacts/
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /auth/login
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /artifacts
             pathType: Prefix
             backend:
               service:
@@ -404,12 +423,13 @@ spec:
 # data, not infrastructure": the host count is fixed by the closed ROLE set plus the
 # platform's own portal, and never grows with sites.
 #
-# TLS NAMES THE APEX ONLY (memql#4224). The wildcard rule has no certificate behind it:
-# the issuer is HTTP-01, which cannot issue *.<domain>, and listing the wildcard under
-# tls anyway is what made ingress-nginx fall back to its self-signed default for every
-# name this rule answers. A site routed by the wildcard terminates TLS with that default
-# until it has a Certificate and an exact-host Ingress of its own
-# (docs/public/operate/site-hosting.md).
+# TLS NAMES THE APEX ONLY, IN THIS GENERATED BLOCK (memql#4224). The issuer here is
+# HTTP-01, which cannot issue *.<domain>, and listing the wildcard under tls against an
+# HTTP-01 certificate is what made ingress-nginx fall back to its self-signed default for
+# every name this rule answers. An overlay that declares a DNS-01 ClusterIssuer adds the
+# wildcard tls entry by patch, against its own wildcard Certificate (memql#4347); without
+# one, a site routed by the wildcard terminates TLS with that default until it has a
+# Certificate and an exact-host Ingress of its own (docs/public/operate/site-hosting.md).
 #
 # The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here
 # -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https

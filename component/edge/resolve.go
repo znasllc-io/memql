@@ -15,12 +15,24 @@ import (
 type Site struct {
 	ID          string
 	Hostname    string
-	Kind        string // "spa" | "static"
+	Kind        string // "spa" | "static" | "shopify_storefront"
 	BundleRef   string
 	Status      string // "draft" | "live" | "disabled"
 	Title       string
 	APIProxy    bool
 	SystemOwned bool
+
+	// Binding is the site row's typed per-kind configuration, carried through
+	// as the untyped object the row stores (memql#4345). Empty for every kind
+	// that has none (spa, static).
+	//
+	// For kind="shopify_storefront" it holds {storeDomain,
+	// storefrontTokenRef}. NOTE WHAT IS NOT IN IT: the token itself. The ref
+	// NAMES a v1:platform:globalSecret row and runtimeconfig.go resolves it at
+	// SERVE time -- so the credential lives in the secret store, and anyone
+	// reading the site row (or this cached copy of it) sees only the name of
+	// the thing they would have to be allowed to read.
+	Binding map[string]any
 }
 
 // QueryExecutor is the narrow read the resolver needs. Narrow deliberately:

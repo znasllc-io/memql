@@ -15,7 +15,8 @@ import { payloadOf, useConceptTile, type HomeTileState } from "./useHomeTiles";
 // already render.
 //
 // The tiles are one per POPULATION the rail offers -- people, agents,
-// customers, sites -- plus the two that TICK: deployments and the audit trail.
+// customers, deployables -- plus the two that TICK: deployments and the audit
+// trail.
 // Customers was missing while being one of the five predefined views, which is
 // exactly the kind of gap a console exists to close.
 //
@@ -32,7 +33,7 @@ export function HomePage(): ReactNode {
   const people = useConceptTile("v1:identity:user", false, 0);
   const agents = useConceptTile("v1:agents:agent", false, 0);
   const customers = useConceptTile("v1:identity:account", false, 0);
-  const sites = useConceptTile("v1:platform:site", false, 0);
+  const deployables = useConceptTile("v1:platform:site", false, 0);
   const deployments = useConceptTile("v1:cluster:deployment", true, 3);
   // The audit trail is the tile that TICKS: security-relevant events land
   // here live, which is the reason an operator glances at a console at all.
@@ -63,7 +64,7 @@ export function HomePage(): ReactNode {
           <NumberTile label="people" to="/views/people" tile={people} />
           <NumberTile label="agents" to="/views/agents" tile={agents} />
           <NumberTile label="customers" to="/views/customers" tile={customers} />
-          <NumberTile label="sites" to="/sites" tile={sites} />
+          <NumberTile label="deployables" to="/deployables" tile={deployables} />
           <NumberTile label="deployments" to="/views/deployments" tile={deployments} />
           <NumberTile label="audit events" to="/views/audit" tile={audit} live />
         </div>

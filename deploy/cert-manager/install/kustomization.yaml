@@ -35,3 +35,53 @@ resources:
   # rewrite the cluster-scoped and cross-namespace references the manifest
   # makes to itself.
   - https://github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.yaml
+
+# ---- Azure workload identity for the DNS-01 solver (epic memql#4339, task memql#4347) ----
+#
+# The cloud overlays declare a `letsencrypt-dns01` ClusterIssuer whose azureDNS
+# solver authenticates as a managed identity -- no client secret exists in the
+# cluster to leak. That only works if the CONTROLLER POD is admitted by the
+# Azure workload-identity webhook, and the webhook keys off two things the
+# upstream static manifest does not carry: the label on the pod template and
+# the client-id annotation on the ServiceAccount.
+#
+# WHY HERE AND NOT IN A CLOUD OVERLAY. Both cloud overlays set
+# `namespace: memql`, and kustomize's namespace transformer rewrites the
+# namespace of every resource it renders -- including one that names
+# `cert-manager` explicitly. A ServiceAccount patch for the cert-manager
+# namespace cannot live there. It also cannot live in a runbook: this path is
+# an ArgoCD Application, so an operator's hand-patch is reverted on the next
+# sync, and the DNS-01 issuer then fails to authenticate with nothing in the
+# manifests to explain why.
+#
+# INERT WITHOUT AZURE, WHICH IS WHY ONE SHAPE SERVES EVERY TARGET. Both values
+# are read ONLY by the azure-workload-identity mutating webhook. On a cluster
+# where that webhook is not installed -- every local k3d cluster, which reaches
+# this same path through scripts/k3d/up.sh -- the label matches no admission
+# rule and the annotation is a string nothing dereferences. Neither changes
+# what cert-manager does, so this stays a VALUE that varies (the client id) over
+# a shape that does not, per the environment-parity rule.
+#
+# The client id is the same `REPLACE-WITH-` install-time placeholder idiom the
+# cloud overlays already use for the database identity. Replace it with the
+# identity that holds `DNS Zone Contributor` on the domain's Azure DNS zone and
+# carries a federated credential for
+# `system:serviceaccount:cert-manager:cert-manager`; the steps are in
+# docs/public/operate/azure-entry-install.md.
+patches:
+  - target:
+      kind: ServiceAccount
+      name: cert-manager
+      namespace: cert-manager
+    patch: |
+      - op: add
+        path: /metadata/annotations/azure.workload.identity~1client-id
+        value: "REPLACE-WITH-CERT-MANAGER-IDENTITY-CLIENT-ID"
+  - target:
+      kind: Deployment
+      name: cert-manager
+      namespace: cert-manager
+    patch: |
+      - op: add
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+        value: "true"

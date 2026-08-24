@@ -18,6 +18,7 @@ shape artifact artifactFull {
   live
   scope
   labels
+  archived
   partitionId
   agentId
   producedByPlanId
@@ -102,3 +103,41 @@ shape documentVersion documentVersionFull {
   row.createdAt
 }
 
+
+/// Full projection of a Library file row: every payload field plus the row id and creation stamp.
+/// Backs libraryFileById and libraryFilesForOwner, and the download / export route which needs
+/// name, mimeType, size and blobUrl together to stream the bytes with correct headers.
+@row
+shape file libraryFileFull {
+  row.id
+  ownerUserId
+  name
+  mimeType
+  size
+  sha256
+  blobUrl
+  source
+  format
+  status
+  summary
+  failureReason
+  embeddingStatus
+  trainedIntoDomainIds
+  archived
+  row.createdAt
+}
+
+/// Full projection of one file chunk, including the body text the embedding was computed from.
+/// Backs libraryFileChunksForFile -- the read the analysis pass uses to confirm what it wrote and
+/// the similarity fold uses to resolve a hit back to its file and artifact.
+@row
+shape fileChunk libraryFileChunkFull {
+  row.id
+  ownerUserId
+  fileId
+  artifactId
+  seq
+  text
+  tokenCount
+  row.createdAt
+}

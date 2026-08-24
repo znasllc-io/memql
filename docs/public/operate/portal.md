@@ -401,8 +401,15 @@ summary, and an optional markdown body, and mints a
 deliverables land in. The existing `indexGeneratedOutputOnCreate`
 automation promotes that row into a `v1:library:artifact` index row on the
 same path any other generated output takes; the portal never writes the
-index row directly. Uploading bytes from the portal is out of scope --
-that remains the existing attachment path.
+index row directly.
+
+**Uploading a file IS in scope, and is a different act.** The page's upload
+drop zone posts the bytes to `POST /artifacts` (memql#4341/#4343), which
+stores them as a `v1:library:file` and promotes that into a `kind: file`
+index row; the same page exports any artifact through
+`GET /artifacts/{id}/content`. See [The Library](library.md). Chat
+attachments still travel their own path
+(`POST /spaces/{id}/attachments`) and are not promoted into the Library.
 
 **A namesake to not confuse:** `v1:library:artifact.labels` is a
 `[]string` of free-text display labels -- what this page renders as
@@ -524,6 +531,71 @@ needs to carry, and the page reads a machine's recent calls on demand.
 
 When a subscription cannot be established the page says so in a banner rather
 than silently going static.
+
+## Deployables
+
+`/deployables` is what this cluster hosts for you: every `v1:platform:site`
+row you own, and -- for a cluster owner -- every row in the cluster, with an
+owner column that says whose each one is. It replaced the Sites screen in
+memql#4346, and `/sites` redirects to it, tail and all, so a bookmarked site
+detail page still lands on that deployable.
+
+**It is not an operator surface any more, and that is the change.**
+`v1:platform:site` used to be `@rowAuthz(clusterOwner)`, so the Sites screen
+rendered an explanation instead of a table for anybody else. The concept
+declares the composite tier now -- `@rowAuthz(owner="ownerUserId",
+clusterOwner)` -- so an ordinary person has deployables of their own and there
+is nothing to refuse. The screen moved out of the rail's **Cluster** group into
+**Library** for the same reason: a bundle you published is your own material,
+not a fact about the machine.
+
+**Creating one takes a NAME, not a hostname.** A user's deployable is
+`<slug>.<domain>` for the domain this cluster serves, so the domain is never
+typed -- the form composes it and shows the result as you type. The slug rules
+(3-40 characters of lowercase letters, digits and hyphens; one label; not
+reserved) are checked in the browser so a bad name never reaches the wire, and
+checked again in Go on the write, which is the check that counts. Two rules the
+browser deliberately does not mirror: **uniqueness**, which needs a read the
+caller may not be allowed to make, and the **cluster-owner exemption** for a
+custom hostname, which the form does not offer at all because an apex or a
+second domain needs its own DNS record and its own certificate. Both are
+refused server-side, and the form shows those refusals verbatim.
+
+**The kind picker lists three live kinds and three that are not.** SPA, Website
+(`static`) and Shopify storefront are the enum. Android, iOS and macOS render
+as disabled "coming soon" entries **from a list the portal owns**, because
+there is nothing in the schema to read: those are artifact distribution, not
+hostname-resolved surfaces, and `TestSiteKindEnumIsExactlyThreeValues` pins the
+concept to exactly three values. A storefront additionally asks for its binding
+-- the store's `myshopify.com` domain, and the NAME of a global secret holding
+the Storefront API token. The name, never the token: the edge resolves it at
+serve time.
+
+**A new deployable is a DRAFT with nothing published.** `createSite` requires a
+`bundleRef` and the schema has no empty state, so the form writes the
+documented placeholder prefix and leaves the status at `draft` -- which the
+edge answers 404 for before it ever opens a bundle. The detail page says so
+plainly rather than leaving it to be discovered by opening the link.
+
+**Deploying is `sitePublishFromArtifact`, over a zip you already uploaded.**
+The detail page's picker lists your Library narrowed to file artifacts with a
+zip MIME type; the cluster reads those bytes from its own object storage,
+validates the bundle and hands it to the same publisher a CI publish goes
+through, so nothing is uploaded from the browser and a portal deploy and a CI
+deploy produce interchangeable versions. The reply names the version, the file
+count and the size. A refusal arrives as a stable machine-readable reason
+(`bundle_missing_index`, `artifact_not_a_zip`, ...) and the page renders the
+sentence, never the token.
+
+The rest of the detail page is the Sites screen unchanged: point at a bundle
+reference by hand (still the only way to name a `file:///app/*` bundle baked
+into the edge image, which is how the portal's own row works), the version
+history walked back through `asOf` with a rollback on each entry, the
+draft/live/disabled control, and delete -- refused server-side for the
+system-owned portal row regardless of what the page renders.
+
+Full behaviour, including the hostname policy's derived reserved set and every
+refusal reason: [Deployables](deployables.md).
 
 ---
 

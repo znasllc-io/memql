@@ -27,8 +27,9 @@ import (
 // the rule stated in its own header comment; the retrofit pass that followed
 // converted exactly one page. Six months of pages later, six roots carried their
 // own width -- Concepts and Integrations at max-w-5xl, campaign editing at 3xl,
-// Sites full width but its own detail page at 3xl -- and the column jumped as an
-// operator moved between sections.
+// the Sites list full width but its own detail page at 3xl -- and the column
+// jumped as an operator moved between sections. (Sites is Deployables since
+// memql#4346; the history is kept because it is the evidence for the rule.)
 //
 // Every one of those was a reasonable local choice, which is the whole problem.
 // "This page reads better narrower" is true, reviews fine, and is invisible in a
@@ -85,8 +86,8 @@ var mustUseContainer = []string{
 	"clients/portal/src/integrations/IntegrationsPage.tsx",
 	"clients/portal/src/integrations/CampaignsPage.tsx",
 	"clients/portal/src/integrations/CampaignEditorPage.tsx",
-	"clients/portal/src/sites/SitesPage.tsx",
-	"clients/portal/src/sites/SiteDetailPage.tsx",
+	"clients/portal/src/deployables/DeployablesPage.tsx",
+	"clients/portal/src/deployables/DeployableDetailPage.tsx",
 	"clients/portal/src/modules/ModulesPage.tsx",
 	"clients/portal/src/modules/ModuleDetailPage.tsx",
 	"clients/portal/src/artifacts/ArtifactsPage.tsx",

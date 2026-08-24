@@ -2,9 +2,12 @@
 package edge
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -76,7 +79,7 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 	})
 	site := &Site{ID: "s1", Hostname: "shop.example.com"}
 
-	got := runtimeConfigForSite(site, env, true)
+	got := runtimeConfigForSite(context.Background(), site, env, true, nil)
 
 	want := RuntimeConfig{
 		IdentityURL:        "https://identity.example.com",
@@ -97,7 +100,7 @@ func TestRuntimeConfigForSite_FallsBackToBaseURL(t *testing.T) {
 	env := fakeEnv(map[string]string{
 		"MEMQL_IDENTITY_BASE_URL": "https://identity-fallback.example.com",
 	})
-	got := runtimeConfigForSite(&Site{Hostname: "shop.example.com"}, env, true)
+	got := runtimeConfigForSite(context.Background(), &Site{Hostname: "shop.example.com"}, env, true, nil)
 	if got.IdentityURL != "https://identity-fallback.example.com" {
 		t.Errorf("IdentityURL = %q, want the MEMQL_IDENTITY_BASE_URL fallback", got.IdentityURL)
 	}
@@ -106,7 +109,7 @@ func TestRuntimeConfigForSite_FallsBackToBaseURL(t *testing.T) {
 // A nil site (an unresolved host, defensively) must not panic -- the
 // document just carries no matched client id.
 func TestRuntimeConfigForSite_NilSiteDoesNotPanic(t *testing.T) {
-	got := runtimeConfigForSite(nil, fakeEnv(nil), false)
+	got := runtimeConfigForSite(context.Background(), nil, fakeEnv(nil), false, nil)
 	if got.OAuthClientID != "" {
 		t.Errorf("OAuthClientID = %q, want empty for a nil site", got.OAuthClientID)
 	}
@@ -207,7 +210,7 @@ func TestRuntimeConfigForSite_CarriesTheDomain(t *testing.T) {
 		"MEMQL_DOMAIN":            "  acme.example.com ",
 		"MEMQL_IDENTITY_BASE_URL": "https://identity.acme.example.com",
 	})
-	got := runtimeConfigForSite(&Site{ID: "s1", Hostname: "shop.acme.example.com"}, env, true)
+	got := runtimeConfigForSite(context.Background(), &Site{ID: "s1", Hostname: "shop.acme.example.com"}, env, true, nil)
 	if got.Domain != "acme.example.com" {
 		t.Errorf("Domain = %q, want the trimmed MEMQL_DOMAIN", got.Domain)
 	}
@@ -217,7 +220,7 @@ func TestRuntimeConfigForSite_CarriesTheDomain(t *testing.T) {
 // can then tell "this node predates the field" (key absent) from "this node
 // has no domain" (key present, empty).
 func TestServeRuntimeConfig_DomainKeyIsAlwaysPresent(t *testing.T) {
-	doc := runtimeConfigForSite(&Site{ID: "s1", Hostname: "x"}, fakeEnv(map[string]string{}), false)
+	doc := runtimeConfigForSite(context.Background(), &Site{ID: "s1", Hostname: "x"}, fakeEnv(map[string]string{}), false, nil)
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -232,5 +235,183 @@ func TestServeRuntimeConfig_DomainKeyIsAlwaysPresent(t *testing.T) {
 	}
 	if v != "" {
 		t.Errorf("domain = %v, want empty string", v)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// shopify_storefront binding (memql#4345, design D4)
+// ---------------------------------------------------------------------------
+
+// storefrontSecrets is a fake SecretResolver over a fixed map. It holds BOTH
+// tokens a real cluster would hold for a store -- the public Storefront one
+// and the Admin one -- because the interesting assertion is not that the
+// resolver can find a token, it is that only ONE of them ever reaches the
+// served document even though both are one lookup away.
+func storefrontSecrets(t *testing.T) (SecretResolver, map[string]string) {
+	t.Helper()
+	secrets := map[string]string{
+		"acme_storefront_token": "shpat_PUBLIC_STOREFRONT_TOKEN",
+		"acme_admin_token":      "shpat_ADMIN_TOKEN_MUST_NEVER_BE_SERVED",
+	}
+	return func(_ context.Context, name string) (string, error) {
+		v, ok := secrets[name]
+		if !ok {
+			return "", fmt.Errorf("no secret named %q", name)
+		}
+		return v, nil
+	}, secrets
+}
+
+func storefrontSite() *Site {
+	return &Site{
+		ID:       "s-store",
+		Hostname: "shop.acme.example.com",
+		Kind:     "shopify_storefront",
+		Status:   "live",
+		Binding: map[string]any{
+			"storeDomain":        "acme-demo.myshopify.com",
+			"storefrontTokenRef": "acme_storefront_token",
+		},
+	}
+}
+
+// The whole point of D4's runtime half: a storefront site's document carries
+// {kind, storeDomain, storefrontToken}, with the token RESOLVED from the
+// globalSecret the row only NAMES.
+func TestRuntimeConfigForSite_StorefrontCarriesTheResolvedBinding(t *testing.T) {
+	resolve, _ := storefrontSecrets(t)
+
+	got := runtimeConfigForSite(context.Background(), storefrontSite(), fakeEnv(nil), true, resolve)
+
+	if got.Storefront == nil {
+		t.Fatal("a shopify_storefront site got no storefront block")
+	}
+	if got.Storefront.Kind != "shopify_storefront" {
+		t.Errorf("storefront.kind = %q, want shopify_storefront", got.Storefront.Kind)
+	}
+	if got.Storefront.StoreDomain != "acme-demo.myshopify.com" {
+		t.Errorf("storefront.storeDomain = %q, want the binding's value", got.Storefront.StoreDomain)
+	}
+	if got.Storefront.StorefrontToken != "shpat_PUBLIC_STOREFRONT_TOKEN" {
+		t.Errorf("storefront.storefrontToken = %q, want the resolved secret", got.Storefront.StorefrontToken)
+	}
+}
+
+// A spa / static site's document is unchanged -- the key is absent, not
+// present-and-empty, so an older cached bundle sees exactly what it saw
+// before this field existed.
+func TestRuntimeConfigForSite_NonStorefrontKindsCarryNothingNew(t *testing.T) {
+	resolve, _ := storefrontSecrets(t)
+	for _, kind := range []string{"spa", "static", ""} {
+		site := &Site{ID: "s1", Hostname: "app.example.com", Kind: kind}
+		doc := runtimeConfigForSite(context.Background(), site, fakeEnv(nil), true, resolve)
+		if doc.Storefront != nil {
+			t.Errorf("kind %q got a storefront block: %+v", kind, doc.Storefront)
+		}
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "storefront") {
+			t.Errorf("kind %q document mentions storefront: %s", kind, raw)
+		}
+	}
+}
+
+// KIND IS THE GATE. A binding written onto a row of some other kind -- by
+// accident, or by someone probing -- resolves nothing and publishes nothing:
+// the token is only ever fetched for a site DECLARED to be a storefront.
+func TestRuntimeConfigForSite_BindingOnANonStorefrontKindResolvesNoSecret(t *testing.T) {
+	var lookups []string
+	resolve := func(_ context.Context, name string) (string, error) {
+		lookups = append(lookups, name)
+		return "shpat_LEAKED", nil
+	}
+	site := storefrontSite()
+	site.Kind = "spa" // same binding, wrong kind
+
+	doc := runtimeConfigForSite(context.Background(), site, fakeEnv(nil), true, resolve)
+
+	if doc.Storefront != nil {
+		t.Errorf("a spa row carrying a storefront binding got a storefront block: %+v", doc.Storefront)
+	}
+	if len(lookups) != 0 {
+		t.Errorf("the secret store was consulted for a non-storefront site: %v", lookups)
+	}
+}
+
+// THE GREP. The Admin API token is the credential that must never reach a
+// browser -- it can read orders and customers and mutate the store, unlike
+// the Storefront token, which Shopify designs to be published. The resolver
+// here holds BOTH, so the assertion is not "the admin token was unavailable",
+// it is "the admin token was available one lookup away and still did not
+// appear in the bytes we served".
+func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
+	resolve, secrets := storefrontSecrets(t)
+	admin := secrets["acme_admin_token"]
+
+	h := NewHandler(Options{
+		Resolver:       staticResolver{site: storefrontSite()},
+		SecretResolver: resolve,
+	})
+	req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+	req.Host = "shop.acme.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", runtimeConfigPath, rec.Code)
+	}
+	body := rec.Body.String()
+
+	// The instrument can move: the PUBLIC token IS in this same document, so
+	// a document that failed to carry any secret at all would fail here
+	// first and this test could not pass vacuously.
+	if !strings.Contains(body, secrets["acme_storefront_token"]) {
+		t.Fatalf("the served document does not carry the public Storefront token, so the "+
+			"admin-token check below would prove nothing: %s", body)
+	}
+	if strings.Contains(body, admin) {
+		t.Errorf("the served runtime-config document carries the Shopify ADMIN token: %s", body)
+	}
+	if strings.Contains(strings.ToLower(body), "admin") {
+		t.Errorf("the served runtime-config document mentions an admin credential: %s", body)
+	}
+}
+
+// An unresolvable ref is an empty token, never an error string in the
+// document -- an error would tell every visitor the name of a secret and
+// whether it exists.
+func TestRuntimeConfigForSite_UnresolvableTokenRefIsAnEmptyToken(t *testing.T) {
+	resolve := func(_ context.Context, name string) (string, error) {
+		return "", fmt.Errorf("secret %q not found in the vault", name)
+	}
+	site := storefrontSite()
+
+	doc := runtimeConfigForSite(context.Background(), site, fakeEnv(nil), true, resolve)
+
+	if doc.Storefront == nil {
+		t.Fatal("want a storefront block even when the token cannot be resolved")
+	}
+	if doc.Storefront.StorefrontToken != "" {
+		t.Errorf("storefrontToken = %q, want empty", doc.Storefront.StorefrontToken)
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "not found in the vault") {
+		t.Errorf("the resolver's error leaked into the document: %s", raw)
+	}
+}
+
+// A node with no secret resolver wired still serves the rest of the block.
+func TestRuntimeConfigForSite_NoResolverStillCarriesTheStoreDomain(t *testing.T) {
+	doc := runtimeConfigForSite(context.Background(), storefrontSite(), fakeEnv(nil), true, nil)
+	if doc.Storefront == nil || doc.Storefront.StoreDomain != "acme-demo.myshopify.com" {
+		t.Fatalf("storefront = %+v, want the store domain with no token", doc.Storefront)
+	}
+	if doc.Storefront.StorefrontToken != "" {
+		t.Errorf("storefrontToken = %q, want empty with no resolver", doc.Storefront.StorefrontToken)
 	}
 }

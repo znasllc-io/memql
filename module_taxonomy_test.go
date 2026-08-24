@@ -73,6 +73,7 @@ var pluginKinds = map[string]moduleKind{
 	"timeutil":      kindComponent,
 	"embedding":     kindComponent, // see the note below
 	"deployversion": kindComponent,
+	"sitePublish":   kindComponent, // see the note below
 
 	// --- PACKS: product features with a coherent "off". ---
 	"chat":          kindPack,
@@ -107,6 +108,20 @@ var pluginKinds = map[string]moduleKind{
 //     time; the system on the other end is not integrated with, it is browsed.
 //     A connector knows whose API it is speaking. This one does not, which is
 //     precisely why it is a sandboxed capability slug and not a vendor lane.
+//
+//   - sitePublish -> COMPONENT (memql#4345). It makes no outbound call to
+//     anybody's system: it reads the cluster's OWN object storage and writes
+//     the cluster's own v1:platform:site row through component/edge's
+//     Publisher -- the same Publisher POST /sites/{id}/bundles uses. Site
+//     hosting is engine machinery rather than a switchable product feature:
+//     the platform's own console is site #1, so there is no MemQL with this
+//     spine switched off. It registers separately from `library` -- and no
+//     longer shares its package: it lives in component/sitepublish, in the ROOT
+//     module, because component/edge is in the root module too and integrations
+//     is a separate module the root already requires, so importing edge from
+//     integrations/library made the module graph a cycle. CI's
+//     module-boundaries lane is what says so; the go.work workspace resolves
+//     the import and hides it.
 //
 //   - knowledge -> PACK, with a real integration inside it. This is the one
 //     genuinely mixed case: integrations/knowledge/seed_wikipedia.go DOES call

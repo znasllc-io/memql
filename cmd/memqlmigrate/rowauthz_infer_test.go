@@ -223,9 +223,11 @@ query note allNotes {
 }
 
 // The composite case that shipped wrong: owned queries PLUS a @public
-// query. library.artifact's `libraryWorkspaceLiveSources` documents its
+// query. library.artifact's `libraryWorkspaceLiveSources` documented its
 // rows as having no owner at all, so declaring the concept owned
-// asserts something that query disproves.
+// asserted something that query disproved. The fixture below is
+// synthetic and stays the live test; the real read was rescoped when
+// memql#4340 declared that concept's tier by hand.
 func TestAPublicQueryBlocksAnOwnedTier(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n}\n",

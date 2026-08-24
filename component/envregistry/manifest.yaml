@@ -2403,6 +2403,15 @@ variables:
     optional: true
     description: "Name of the Azure blob container the uploader writes objects into."
 
+  # --- library ---
+
+  - name: MEMQL_LIBRARY_MAX_UPLOAD_BYTES
+    component: library
+    scope: node
+    default: "268435456"
+    optional: true
+    description: "Cap on a single POST /artifacts upload, in bytes (memql#4341). Default 268435456 (256 MB), sized so a site bundle fits -- ten times the attachment handler's fixed 25 MB, because a Library file is not a chat attachment and the deployables path publishes from one. Enforced in two layers, both answering 413: http.MaxBytesReader bounds the whole request body (this value plus a 1 MB multipart-framing allowance, so a file of exactly this many bytes still fits once boundaries and part headers are added) before the parser reads a byte, and the part header plus a LimitReader bound the FILE at exactly this value -- so the client's Content-Length is a claim rather than the limit. A value that is set and unparseable, or non-positive, falls back to the default rather than to 'no limit' -- an unbounded upload route is the one outcome a misconfigured cap must never produce. The in-memory multipart threshold is a separate fixed 32 MB and deliberately does NOT scale with this, or a 256 MB upload would be a 256 MB resident buffer."
+
   # --- planner ---
 
   - name: MEMQL_PLANNER_APPROVAL_TOKEN_THRESHOLD

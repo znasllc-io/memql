@@ -280,6 +280,59 @@ QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, 
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
 };
 
+/** Search the caller's Library by meaning and get whole artifacts back, best match first. */
+export interface LibrarySimilarArtifactsArgs {
+  /** The phrase to search by. Set this OR artifactId. */
+  text?: string;
+  /** Find artifacts similar to this one. Set this OR text. */
+  artifactId?: string;
+  /** Maximum artifacts to return. Defaults to 5; capped at 50, because each returned artifact costs one further owner-gated read. */
+  limit?: number;
+}
+
+export function buildLibrarySimilarArtifacts(args: LibrarySimilarArtifactsArgs): string {
+  const parts: string[] = [];
+  if (args.text !== undefined) parts.push("text: " + renderMemQLValue(args.text));
+  if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin librarySimilarArtifacts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySimilarArtifacts(args: LibrarySimilarArtifactsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySimilarArtifacts = function (this: QueryClient, args: LibrarySimilarArtifactsArgs = {} as LibrarySimilarArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySimilarArtifacts", buildLibrarySimilarArtifacts(args), opts);
+};
+
+/** Train a Library file into a knowledge domain -- the deliberate second act after upload. */
+export interface LibraryTrainFileArgs {
+  /** The v1:library:file row id to train. Must belong to the acting user. */
+  fileId: string;
+  /** Id of the knowledge domain to train the file into. */
+  domainId: string;
+}
+
+export function buildLibraryTrainFile(args: LibraryTrainFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "builtin libraryTrainFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryTrainFile(args: LibraryTrainFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryTrainFile = function (this: QueryClient, args: LibraryTrainFileArgs = {} as LibraryTrainFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryTrainFile", buildLibraryTrainFile(args), opts);
+};
+
 /** Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
 export interface RecallArgs {
   text: string;
@@ -355,5 +408,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.searchActions = function (this: QueryClient, args: SearchActionsArgs = {} as SearchActionsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("searchActions", buildSearchActions(args), opts);
+};
+
+/** Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef. */
+export interface SitePublishFromArtifactArgs {
+  /** The v1:platform:site row to publish to. */
+  siteId: string;
+  /** The v1:library:artifact index row of the zip to deploy. */
+  artifactId: string;
+}
+
+export function buildSitePublishFromArtifact(args: SitePublishFromArtifactArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin sitePublishFromArtifact(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePublishFromArtifact(args: SitePublishFromArtifactArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePublishFromArtifact = function (this: QueryClient, args: SitePublishFromArtifactArgs = {} as SitePublishFromArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePublishFromArtifact", buildSitePublishFromArtifact(args), opts);
 };
 

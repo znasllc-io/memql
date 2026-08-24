@@ -398,7 +398,7 @@ const undeclared3591ClaimedOwnerReason = "memql#3591 -- pre-actor owner-claim ch
 // the quiet scope change this gate exists to surface.
 const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric read for clients, the same gate as the generic browse it replaces; a tier on v1:observability:codeMetric is the observability domain's decision"
 
-// The three reads memql#4369 (Nexus) added, each listed rather than
+// The reads memql#4369 (Nexus) added, each listed rather than
 // declared and each carrying its own blocking issue rather than the
 // grandfather marker.
 //
@@ -429,11 +429,11 @@ const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric r
 //	          reason, narrowed by lineage.originatingPlanId, and every one
 //	          of its eight already-listed siblings is here too.
 //
-//	artifact  the memql#2803 decision the concept is already waiting on, and
-//	          artifactsForPlan carries no new risk over the six listed
-//	          v1:library:artifact reads above it: the identical
-//	          `ownerUserId==actor.userId` top-level conjunct, narrowed by a
-//	          producedByPlanId equality instead of a lens or kind one.
+// (memql#4369 listed a THIRD, `artifact`, on the same footing. memql#4340
+// declared v1:library:artifact's tier -- the composite
+// `@rowAuthz(owner="ownerUserId", clusterOwner)` -- so every read over it,
+// artifactsForPlan included, is measured now and none belongs on this list.
+// That is why only two of the three reasons below survive.)
 //
 // What Nexus does about the residual is recorded where the long tail is
 // tracked rather than only here: docs/public/operate/auth/per-row-authz-audit.md
@@ -442,8 +442,6 @@ const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric r
 const undeclared4369NexusPlanReason = "memql#4366 -- the caller's own goals, newest first; v1:planner:plan cannot take an owned floor until the engine's internal actor is characterised (measured on that issue), and plansForSpace reads collaborators' rows by design"
 
 const undeclared4369NexusAgentReason = "memql#4369 -- the agents one goal raised, narrowed by lineage.originatingPlanId; v1:agents:agent declares no tier and an owner conjunct here would return an empty set rather than a narrowed one (createAgent takes ownerUserId as a caller arg; the planner agent is owned by no user), so the declaration is #4366's successor work"
-
-const undeclared4369NexusArtifactReason = "memql#2803 -- the artifacts one goal produced; identical ownerUserId==actor.userId conjunct to its six listed v1:library:artifact siblings, narrowed by producedByPlanId, and blocked on the same createArtifact ownership-threading decision"
 
 // undeclared2803ArtifactLabelReason covers libraryArtifactsByLabel, the
 // label-facet read the artifacts-labels feature added over
@@ -751,16 +749,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	// v1:knowledge:documentChunk
 	"allDocumentChunkDomains": {"v1:knowledge:documentChunk", undeclaredGrandfatherReason},
 	"documentChunksForDomain": {"v1:knowledge:documentChunk", undeclaredGrandfatherReason},
-
-	// v1:library:artifact
-	"artifactsForPlan":                  {"v1:library:artifact", undeclared4369NexusArtifactReason},
-	"libraryArtifactById":               {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifactBySourceConceptRef": {"v1:library:artifact", undeclared2803ArtifactLabelReason},
-	"libraryArtifacts":                  {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifactsByKind":            {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryArtifactsByLabel":           {"v1:library:artifact", undeclared2803ArtifactLabelReason},
-	"libraryArtifactsByLens":            {"v1:library:artifact", undeclaredGrandfatherReason},
-	"libraryWorkspaceLiveSources":       {"v1:library:artifact", undeclaredGrandfatherReason},
 
 	// v1:observability:codeMetric
 	"codeMetricsInWindow": {"v1:observability:codeMetric", undeclared4208CodeMetricReason},

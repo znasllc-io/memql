@@ -79,3 +79,53 @@ builtin libraryRemoveArtifactLabel {
   artifactId  string!
   label       string!
 }
+
+// ---- the analysis / search / train half (memql#4342) ----
+//
+// Three builtins, and the first one is the odd one out: it is a second
+// DSL NAME for a capability that already exists
+// (integration.embedding.store), declared here so the Library's analysis
+// pass can reach the ONE embedding write-path from Go through Execute.
+// The alternative -- giving this integration its own pgvector INSERT --
+// would be a second write-path to keep in step with the first, which is
+// exactly what the engine's own harness/action embed hooks avoid by
+// dispatching the same capability. An executor is a target, not a
+// possession; nothing about naming it twice changes what it does.
+//
+// The other two are the Library's own Go capabilities, both @sdk because
+// the portal calls them directly through the generated client and both
+// wrapped by an agent tool in dsl/library/tools.memql. One
+// implementation, two callers -- the artifact-label pair's shape.
+
+/// Embed one Library file chunk into node_vectors so librarySimilarArtifacts can find it.
+@executor("integration.embedding.store")
+@args(profile="object")
+@description("Store an embedding vector for one v1:library:fileChunk row. A second DSL name for integration.embedding.store, declared in the library namespace so the analysis pass reaches the shared embedding write-path rather than opening a second one. vectorField must stay 'content': similarTo's join filters on that exact value, so a vector written under any other field name is stored, kept and never matched.")
+builtin libraryEmbedChunk {
+  nodeId       string!  @description("Canonical node id of the chunk row the vector attaches to -- v1:library:fileChunk:<shortId>. Canonical, not bare: this is the key node_vectors joins to MemoryNodes on.")
+  text         string!  @description("The chunk text to embed. The same text stored on the row, so a match can quote what it matched.")
+  concept      string   @description("Concept of the node, stored alongside the vector for filtered queries. v1:library:fileChunk.")
+  vectorField  string   @description("Which embedding field this is. 'content' -- see the description above before changing it.")
+  provider     string   @description("Embedding provider name. Defaults to embedding3Small, which is what the rest of the tree embeds with; a Library chunk embedded by a different provider is not comparable to the query vector.")
+}
+
+/// Search the caller's Library by meaning and get whole artifacts back, best match first.
+@sdk
+@executor("integration.library.similarArtifacts")
+@args(profile="object")
+@description("Semantic search over the caller's own Library (design 3.2). Runs similarTo across the v1:library:fileChunk rows the analysis pass embedded, keeps only chunks the acting user owns, folds them up to artifacts by best score, and re-reads each surviving artifact through the owner-gated libraryArtifactById before returning it -- so a hit on somebody else's file cannot be returned even though the underlying vector operator is concept-scoped rather than row-scoped. Pass text to search by a phrase, or artifactId to find artifacts like an existing one (its summary, else its first chunk, becomes the query, and the seed artifact is excluded from its own results). Each result carries artifactId, fileId, score, the matched chunk's seq and snippet, and the artifact's title / kind / summary / labels.")
+builtin librarySimilarArtifacts {
+  text        string   @description("The phrase to search by. Set this OR artifactId.")
+  artifactId  string   @description("Find artifacts similar to this one. Set this OR text.")
+  limit       int      @description("Maximum artifacts to return. Defaults to 5; capped at 50, because each returned artifact costs one further owner-gated read.")
+}
+
+/// Train a Library file into a knowledge domain -- the deliberate second act after upload.
+@sdk
+@executor("integration.library.trainFile")
+@args(profile="object")
+@description("Train a Library file into a knowledge domain (design D7 -- upload and train are two acts, and nothing is trained by default). Reconstructs the file's extracted text from the chunks the analysis pass wrote, runs integration.knowledge.ingest over it with sourceRef 'artifact:<artifactId>' so every knowledge chunk points back at the Library row it came from, appends the domain to the file's trainedIntoDomainIds and writes an audit event. Two refusals: the file is resolved under the caller's own actor, so another user's file is simply not found; and the domain must be one the caller may write to, which a cluster owner always is and which everyone else needs the cluster's wired knowledge-domain authorizer to confirm -- with none wired the call is refused rather than writing into a domain nobody vouched for. Idempotent: training the same file into the same domain again re-ingests the same content and records no second domain.")
+builtin libraryTrainFile {
+  fileId    string!  @description("The v1:library:file row id to train. Must belong to the acting user.")
+  domainId  string!  @description("Id of the knowledge domain to train the file into.")
+}

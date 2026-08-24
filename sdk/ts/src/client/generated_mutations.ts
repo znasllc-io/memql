@@ -216,6 +216,30 @@ QueryClient.prototype.appendDocumentVersion = function (this: QueryClient, args:
   return this.executeNamed("appendDocumentVersion", buildAppendDocumentVersion(args), opts);
 };
 
+/** Record that a Library file has been trained into a knowledge domain (design D7 -- upload and train are two acts, and this is where the second one is written down). Takes the FULL merged list rather than a single id: MemQL has no array append, and a caller sending only the new member would clobber whatever another agent added concurrently -- the same reason the artifact label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the domain if it is not already there, and calls this; adding a domain twice writes nothing new. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["appendLibraryFileTrainedDomain"] in generated_concepts.ts).
+export interface AppendLibraryFileTrainedDomainArgs {
+  fileId: string;
+  trainedIntoDomainIds: string[];
+}
+
+export function buildAppendLibraryFileTrainedDomain(args: AppendLibraryFileTrainedDomainArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("trainedIntoDomainIds: " + renderMemQLValue(args.trainedIntoDomainIds));
+  return "mutation appendLibraryFileTrainedDomain(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appendLibraryFileTrainedDomain(args: AppendLibraryFileTrainedDomainArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appendLibraryFileTrainedDomain = function (this: QueryClient, args: AppendLibraryFileTrainedDomainArgs = {} as AppendLibraryFileTrainedDomainArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appendLibraryFileTrainedDomain", buildAppendLibraryFileTrainedDomain(args), opts);
+};
+
 /** Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["applyResponsibilityIntake"] in generated_concepts.ts).
 export interface ApplyResponsibilityIntakeArgs {
@@ -356,6 +380,28 @@ QueryClient.prototype.archiveAccount = function (this: QueryClient, args: Archiv
   return this.executeNamed("archiveAccount", buildArchiveAccount(args), opts);
 };
 
+/** Archive a Library artifact index row -- the first write that takes something OUT of the Library, and a soft one. Sets archived so the row drops out of libraryArtifacts (the default list) while keeping its labels, its provenance and its sourceConceptRef intact; nothing is destroyed and the backing row is untouched by this write. When the artifact is a file (kind=file), the backing v1:library:file is archived alongside it by archiveFileOnArtifactArchive rather than here -- a mutation body writes one row, and which second row to touch is a decision that depends on the kind. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["archiveArtifact"] in generated_concepts.ts).
+export interface ArchiveArtifactArgs {
+  artifactId: string;
+}
+
+export function buildArchiveArtifact(args: ArchiveArtifactArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "mutation archiveArtifact(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveArtifact(args: ArchiveArtifactArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveArtifact = function (this: QueryClient, args: ArchiveArtifactArgs = {} as ArchiveArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveArtifact", buildArchiveArtifact(args), opts);
+};
+
 /** Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the engine's row-authz write guard refuses the update outright when the target row's owner is somebody else. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["archiveAudience"] in generated_concepts.ts).
 export interface ArchiveAudienceArgs {
@@ -398,6 +444,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.archiveComposedView = function (this: QueryClient, args: ArchiveComposedViewArgs = {} as ArchiveComposedViewArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("archiveComposedView", buildArchiveComposedView(args), opts);
+};
+
+/** Archive a Library file -- the soft delete. Sets archived so the file drops out of the owner's default list; the row, its provenance and its bytes all survive, and the append-only history keeps every earlier version. Called directly by the owner, and by archiveFileOnArtifactArchive when the owner archives the artifact the file backs, so the two rows never disagree. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["archiveLibraryFile"] in generated_concepts.ts).
+export interface ArchiveLibraryFileArgs {
+  fileId: string;
+}
+
+export function buildArchiveLibraryFile(args: ArchiveLibraryFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "mutation archiveLibraryFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveLibraryFile(args: ArchiveLibraryFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveLibraryFile = function (this: QueryClient, args: ArchiveLibraryFileArgs = {} as ArchiveLibraryFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveLibraryFile", buildArchiveLibraryFile(args), opts);
 };
 
 /** Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write. */
@@ -1293,9 +1361,9 @@ export interface CreateArtifactArgs {
   ownerUserId: string;
   // Enum: artifact | record
   lens: string;
-  // Enum: document | generated_output | note | todo | calendar_event | memory | live_source
+  // Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
   kind: string;
-  // Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | user_created | live
+  // Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live
   source: string;
   title: string;
   summary?: string;
@@ -1306,6 +1374,7 @@ export interface CreateArtifactArgs {
   // Enum: workspace | private
   scope?: string;
   labels?: string[];
+  archived?: boolean;
   partitionId?: string;
   agentId?: string;
   producedByPlanId?: string;
@@ -1329,6 +1398,7 @@ export function buildCreateArtifact(args: CreateArtifactArgs): string {
   if (args.live !== undefined) parts.push("live: " + renderMemQLValue(args.live));
   if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
   if (args.labels !== undefined) parts.push("labels: " + renderMemQLValue(args.labels));
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));
@@ -2388,6 +2458,78 @@ QueryClient.prototype.createIdentityProvider = function (this: QueryClient, args
   return this.executeNamed("createIdentityProvider", buildCreateIdentityProvider(args), opts);
 };
 
+/** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on status=="stored" so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.ts).
+export interface CreateLibraryFileArgs {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  blobUrl: string;
+  // Enum: uploaded | exported | agent_generated | derived
+  source: string;
+  // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
+  format?: string;
+  summary?: string;
+}
+
+export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("mimeType: " + renderMemQLValue(args.mimeType));
+  parts.push("size: " + renderMemQLValue(args.size));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  parts.push("blobUrl: " + renderMemQLValue(args.blobUrl));
+  parts.push("source: " + renderMemQLValue(args.source));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
+  return "mutation createLibraryFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createLibraryFile(args: CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createLibraryFile = function (this: QueryClient, args: CreateLibraryFileArgs = {} as CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createLibraryFile", buildCreateLibraryFile(args), opts);
+};
+
+/** Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always lands owned by the same person as its file. artifactId is resolved by the pass through libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second read. */
+// Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["createLibraryFileChunk"] in generated_concepts.ts).
+export interface CreateLibraryFileChunkArgs {
+  chunkId: string;
+  fileId: string;
+  artifactId: string;
+  seq: number;
+  text: string;
+  tokenCount?: number;
+}
+
+export function buildCreateLibraryFileChunk(args: CreateLibraryFileChunkArgs): string {
+  const parts: string[] = [];
+  parts.push("chunkId: " + renderMemQLValue(args.chunkId));
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("seq: " + renderMemQLValue(args.seq));
+  parts.push("text: " + renderMemQLValue(args.text));
+  if (args.tokenCount !== undefined) parts.push("tokenCount: " + renderMemQLValue(args.tokenCount));
+  return "mutation createLibraryFileChunk(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createLibraryFileChunk(args: CreateLibraryFileChunkArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createLibraryFileChunk = function (this: QueryClient, args: CreateLibraryFileChunkArgs = {} as CreateLibraryFileChunkArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createLibraryFileChunk", buildCreateLibraryFileChunk(args), opts);
+};
+
 /** Create a magic-link request row at issuance time. */
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["createMagicLinkRequest"] in generated_concepts.ts).
 export interface CreateMagicLinkRequestArgs {
@@ -3103,12 +3245,16 @@ QueryClient.prototype.createSessionForParticipant = function (this: QueryClient,
 
 /** Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
 status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
-`createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b). */
+`createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
+OWNERSHIP (memql#4344). `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an arg. A concept declaring an owner tier over a caller-supplied field records a guarantee nothing provides -- and reads as safe, so an auditor seeing the tier stops looking; that is what TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because the field genuinely is not forgeable.
+The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the deployment's row rather than a person's -- the seeded portal is site #1 and must land CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See component/memql/platform_site_hostname_policy.go.
+That is a NARROWING and never a widening, which is why it does not reopen what the gate above protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the read-merge makes that an update and the cluster-owner write escape admits it.
+HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS cluster serves, the [a-z0-9-]{3,40} slug, the reserved labels, cluster-wide uniqueness, and the cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.ts).
 export interface CreateSiteArgs {
   siteId: string;
   hostname: string;
-  // Enum: spa | static
+  // Enum: spa | static | shopify_storefront
   kind?: string;
   bundleRef: string;
   // Enum: draft | live | disabled
@@ -3116,6 +3262,8 @@ export interface CreateSiteArgs {
   apiProxy?: boolean;
   systemOwned?: boolean;
   title?: string;
+  artifactId?: string;
+  binding?: Record<string, unknown>;
 }
 
 export function buildCreateSite(args: CreateSiteArgs): string {
@@ -3128,6 +3276,8 @@ export function buildCreateSite(args: CreateSiteArgs): string {
   if (args.apiProxy !== undefined) parts.push("apiProxy: " + renderMemQLValue(args.apiProxy));
   if (args.systemOwned !== undefined) parts.push("systemOwned: " + renderMemQLValue(args.systemOwned));
   if (args.title !== undefined) parts.push("title: " + renderMemQLValue(args.title));
+  if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.binding !== undefined) parts.push("binding: " + renderMemQLValue(args.binding));
   return "mutation createSite(" + parts.join(", ") + ")";
 }
 
@@ -3827,7 +3977,7 @@ QueryClient.prototype.deleteRecord = function (this: QueryClient, args: DeleteRe
   return this.executeNamed("deleteRecord", buildDeleteRecord(args), opts);
 };
 
-/** Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce. */
+/** Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce. Beyond that, deletion is owner-or-cluster-owner: guardRowAuthzWrite admits the row's OWNER, and the cluster-owner path is rowAuthzWriteEscape's explicit escape -- so one user cannot delete another's deployable, and an operator can delete any non-systemOwned one. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["deleteSite"] in generated_concepts.ts).
 export interface DeleteSiteArgs {
   siteId: string;
@@ -6959,6 +7109,38 @@ QueryClient.prototype.setGlobalVariable = function (this: QueryClient, args: Set
   return this.executeNamed("setGlobalVariable", buildSetGlobalVariable(args), opts);
 };
 
+/** Advance a Library file through the analysis lifecycle: the new status, and whatever the pass learned along with it (a summary, how much of the file is embedded, or why it failed). Every field but the status is optional and an absent one is NOT written, so a later transition cannot blank a summary an earlier one recorded. Handler-invoked by the analysis pass, which runs under the file owner's actor; the read-merge preserves ownerUserId and every byte fact. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["setLibraryFileStatus"] in generated_concepts.ts).
+export interface SetLibraryFileStatusArgs {
+  fileId: string;
+  // Enum: stored | analyzing | ready | failed
+  status: string;
+  summary?: string;
+  // Enum: none | partial | complete
+  embeddingStatus?: string;
+  failureReason?: string;
+}
+
+export function buildSetLibraryFileStatus(args: SetLibraryFileStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
+  if (args.embeddingStatus !== undefined) parts.push("embeddingStatus: " + renderMemQLValue(args.embeddingStatus));
+  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
+  return "mutation setLibraryFileStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setLibraryFileStatus(args: SetLibraryFileStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setLibraryFileStatus = function (this: QueryClient, args: SetLibraryFileStatusArgs = {} as SetLibraryFileStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setLibraryFileStatus", buildSetLibraryFileStatus(args), opts);
+};
+
 /** Set E911 / caller-ID verification state on an owned DID (by row id). */
 // Bound concept: v1:telephony:number (machine-readable: BoundConcepts["setNumberE911"] in generated_concepts.ts).
 export interface SetNumberE911Args {
@@ -8566,17 +8748,21 @@ QueryClient.prototype.updateSessionStreams = function (this: QueryClient, args: 
   return this.executeNamed("updateSessionStreams", buildUpdateSessionStreams(args), opts);
 };
 
-/** Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten. */
+/** Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
+`artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body: the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an operator publishes to any, and a cross-user write is refused before the merge -- which is why the guard reads the PRIOR row rather than the merged payload. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.ts).
 export interface UpdateSiteBundleArgs {
   siteId: string;
   bundleRef: string;
+  artifactId?: string;
 }
 
 export function buildUpdateSiteBundle(args: UpdateSiteBundleArgs): string {
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("bundleRef: " + renderMemQLValue(args.bundleRef));
+  if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
   return "mutation updateSiteBundle(" + parts.join(", ") + ")";
 }
 
@@ -8590,7 +8776,8 @@ QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
 };
 
-/** Move a site between draft / live / disabled. */
+/** Move a site between draft / live / disabled.
+Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier rather than by anything here -- see updateSiteBundle's note for why the split is where it is. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStatus"] in generated_concepts.ts).
 export interface UpdateSiteStatusArgs {
   siteId: string;

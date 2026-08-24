@@ -258,9 +258,12 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 	// something that query disproves. Counting only the positive votes
 	// -- "one caller-scoped query, therefore the concept is owned" --
 	// declares `planner.plan` owned off 2 of 10 queries while the
-	// primary user-facing read is space-scoped, and declares
-	// `library.artifact` owned when `libraryWorkspaceLiveSources`
-	// documents its rows as having no owner at all.
+	// primary user-facing read is space-scoped, and declared
+	// `library.artifact` owned while `libraryWorkspaceLiveSources`
+	// documented its rows as having no owner at all. (That read was
+	// rescoped when memql#4340 declared the concept's tier by hand --
+	// the rule the example illustrates is unchanged, and the synthetic
+	// fixture in TestAPublicQueryBlocksAnOwnedTier still exercises it.)
 	//
 	// Only @serverOnly is exempt: it is not a client-callable read, and
 	// #2803's design decision 4 reserves an explicit system actor for

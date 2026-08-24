@@ -73,11 +73,7 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			// /_memql/ws -> /memql/ws. The prefix is the edge's marker, not
-			// part of the API's path space -- swap the marker for the bff's
-			// real "/memql" route root rather than deleting it outright, or
-			// every proxied path loses its leading segment along with it.
-			pr.Out.URL.Path = "/memql" + strings.TrimPrefix(pr.In.URL.Path, "/_memql")
+			pr.Out.URL.Path = upstreamPath(pr.In.URL.Path)
 			pr.Out.URL.RawPath = ""
 			// SetXForwarded, plus the site's own Host, so the bff sees which
 			// origin the request actually arrived on rather than the edge's
@@ -99,6 +95,43 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// trusting it, because a plain GET test would pass while every WebSocket
 	// silently died.
 	proxy.ServeHTTP(w, r)
+}
+
+// libraryBytePrefix is the bff route root the Library's two byte-bearing
+// endpoints mount at (server.ArtifactPaths(): POST /artifacts and
+// GET /artifacts/{id}/content, memql#4341). Named, not spelled inline, so the
+// one place that has to agree with component/server says which.
+const libraryBytePrefix = "/artifacts"
+
+// upstreamPath maps the edge's same-origin marker onto the bff's real path
+// space.
+//
+// TWO ROOTS, because the bff has two. The multiplexed API lives under
+// "/memql" ("/_memql/ws" -> "/memql/ws"), and the marker is SWAPPED for it
+// rather than deleted -- deleting it outright would make every proxied path
+// lose its leading segment along with the marker. The Library's byte routes
+// live at the bff's own root instead ("/artifacts", "/artifacts/{id}/content"),
+// so for those the marker is stripped and nothing put back.
+//
+// WHY THE PORTAL CANNOT JUST CALL "/artifacts" DIRECTLY, which is the obvious
+// question. It is served BY this handler, and a path that resolves to no file
+// in the bundle takes the SPA fallback -- so a bare same-origin POST
+// /artifacts would be answered with index.html and a 200, which is a silent
+// success for an upload that stored nothing. Routing it through the marker is
+// also what keeps a hosted site that has its own /artifacts page from having
+// it swallowed by this proxy: the marker is the one prefix a bundle may not
+// claim.
+//
+// Nothing new is EXPOSED by this. serveAPI already requires site.APIProxy,
+// and both routes are authenticated with per-row authorization deciding every
+// read (component/server/artifact_handler.go) -- a strictly narrower surface
+// than the "/memql/ws" bridge this proxy has always carried.
+func upstreamPath(in string) string {
+	rest := strings.TrimPrefix(in, "/_memql")
+	if rest == libraryBytePrefix || strings.HasPrefix(rest, libraryBytePrefix+"/") {
+		return rest
+	}
+	return "/memql" + rest
 }
 
 // cleanPathLikeMux reproduces net/http's own unexported cleanPath

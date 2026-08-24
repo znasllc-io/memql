@@ -3346,7 +3346,68 @@ func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	return b.String()
 }
 
-// LibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
+// LibraryFileById -- Fetch one Library file by id, gated to the caller: ownerUserId==actor.userId, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileById"] in generated_concepts.go).
+type LibraryFileByIdArgs struct {
+	FileId string
+}
+
+// LibraryFileById calls the engine query libraryFileById.
+func (qc *QueryClient) LibraryFileById(ctx context.Context, args LibraryFileByIdArgs) (*Result, error) {
+	call := LibraryFileByIdBuild(args)
+	return qc.executeNamed(ctx, "libraryFileById", call)
+}
+
+func LibraryFileByIdBuild(args LibraryFileByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileById(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryFileChunksForFile -- List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId narrows to the one file. The frontend orders by seq, which is monotonic in file order.
+//
+// Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["libraryFileChunksForFile"] in generated_concepts.go).
+type LibraryFileChunksForFileArgs struct {
+	FileId string
+}
+
+// LibraryFileChunksForFile calls the engine query libraryFileChunksForFile.
+func (qc *QueryClient) LibraryFileChunksForFile(ctx context.Context, args LibraryFileChunksForFileArgs) (*Result, error) {
+	call := LibraryFileChunksForFileBuild(args)
+	return qc.executeNamed(ctx, "libraryFileChunksForFile", call)
+}
+
+func LibraryFileChunksForFileBuild(args LibraryFileChunksForFileArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileChunksForFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryFilesForOwner -- List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into).
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.go).
+type LibraryFilesForOwnerArgs struct {
+}
+
+// LibraryFilesForOwner calls the engine query libraryFilesForOwner.
+func (qc *QueryClient) LibraryFilesForOwner(ctx context.Context, args LibraryFilesForOwnerArgs) (*Result, error) {
+	call := LibraryFilesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "libraryFilesForOwner", call)
+}
+
+func LibraryFilesForOwnerBuild(args LibraryFilesForOwnerArgs) string {
+	_ = args
+	return "query libraryFilesForOwner()"
+}
+
+// LibraryWorkspaceLiveSources -- List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.go).
 type LibraryWorkspaceLiveSourcesArgs struct {
@@ -4770,7 +4831,8 @@ func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
 	return "query signInIdentitiesForSelf()"
 }
 
-// SiteByHostname -- Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request. Cluster-owner gated per v1:platform:site's declared tier; the edge integration calls this under a cluster-owner-equivalent credential, not a per-request user.
+// SiteByHostname -- Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request.
+// The caller term is the COMPOSITE tier's own predicate, written out (memql#4344). It used to be a bare `actor.isClusterOwner==true`, which under the composite tier would narrow the query to cluster owners ALONE and leave a user unable to resolve their own deployable -- the admin gate is one BRANCH of the tier now, not the whole of it. The engine ANDs this same term in from the concept's declaration; restating it is what the land gate asks for, so that a reader of the query can see the scope without resolving the concept (TestRowAuthzEnforcementLandGate). It is an OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's own rows. The edge still reads every site because it calls this under a synthetic cluster-owner actor (component/edge's systemEdgeActor), which the second branch admits.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteByHostname"] in generated_concepts.go).
 type SiteByHostnameArgs struct {
@@ -4792,7 +4854,7 @@ func SiteByHostnameBuild(args SiteByHostnameArgs) string {
 	return b.String()
 }
 
-// SiteById -- Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per v1:platform:site's declared tier.
+// SiteById -- Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Owner-or-cluster-owner per v1:platform:site's composite tier -- see siteByHostname for why the bare admin gate this replaced would now collapse the read to cluster owners alone.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteById"] in generated_concepts.go).
 type SiteByIdArgs struct {
@@ -4814,7 +4876,8 @@ func SiteByIdBuild(args SiteByIdArgs) string {
 	return b.String()
 }
 
-// SitesAll -- Every site in the cluster. The portal's primary screen, and the read that would silently return a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
+// SitesAll -- The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+// The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.go).
 type SitesAllArgs struct {

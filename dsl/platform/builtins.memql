@@ -1,0 +1,28 @@
+// platform domain -- Go-backed capabilities over the platform's own rows.
+
+// ---- deploy from the Library (memql#4345) ----
+//
+// Deploying a hosted site is a read-then-validate-then-write dance MemQL
+// cannot express on its own: it resolves a Library artifact to its backing
+// file row, fetches that file's bytes from object storage, expands a zip,
+// enforces size / count limits over the expanded tree, uploads every file
+// under a fresh content-addressed version prefix, and only then flips the
+// site row's bundleRef. The Go side is component/sitepublish/site_publish.go;
+// the atomic upload-then-flip half is component/edge's Publisher, the same
+// one POST /sites/{id}/bundles uses, so a portal deploy and a CI deploy
+// produce the same versioned prefixes and can roll back across each other.
+//
+// AUTHORIZATION IS NOT IN THIS DECLARATION and is not meant to be. The
+// capability runs under the CALLER's actor and issues owner-scoped named
+// queries (siteById, libraryArtifactById, libraryFileById) plus one guarded
+// write (updateSiteBundle against v1:platform:site's composite tier), so the
+// caller must own BOTH the site -- or be a cluster owner -- and the artifact.
+// A cross-user call resolves zero rows and is refused by name.
+@sdk
+@executor("integration.sitePublish.fromArtifact")
+@args(profile="object")
+@description("Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef.")
+builtin sitePublishFromArtifact {
+  siteId      string!  @description("The v1:platform:site row to publish to.")
+  artifactId  string!  @description("The v1:library:artifact index row of the zip to deploy.")
+}

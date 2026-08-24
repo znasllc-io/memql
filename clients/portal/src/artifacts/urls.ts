@@ -13,6 +13,20 @@ export const ARTIFACTS_ROOT = "/artifacts";
 // the spelling.
 export const LABEL_PARAM = "label";
 
+// The meaning-search query, in the URL for the same reason the label filter
+// is: a search someone ran is a link they can send, it survives a refresh,
+// and the back button leaves the search rather than un-typing it one
+// character at a time. The two COMPOSE -- ?q=budget&label=finance is
+// "artifacts about budgets, among the ones labelled finance" -- which is why
+// each is its own key rather than one packed mode parameter.
+export const SEARCH_PARAM = "q";
+
+// Whether archived rows are shown. In the URL rather than in a useState
+// because it changes WHICH ROWS the page is about, and every other such
+// choice on this page is addressable.
+export const ARCHIVED_PARAM = "archived";
+export const ARCHIVED_VALUE = "1";
+
 export function artifactsPath(): string {
   return ARTIFACTS_ROOT;
 }

@@ -17,12 +17,17 @@ import (
 // MEMQL_IDENTITY_VERIFIER_BASE_URL, e.g. "https://identity:8085") that
 // serveIdentityXHR reverse-proxies the four same-origin JSON paths to;
 // empty refuses those paths with 502 rather than SPA-fallback HTML.
+// SecretResolver, when supplied, is how a shopify_storefront site's
+// runtime-config document resolves the v1:platform:globalSecret its binding
+// names (memql#4345); a Handler built without one serves every other field of
+// that document and an empty storefrontToken.
 type Options struct {
 	Resolver       Resolver
 	Opener         BundleOpener
 	Logger         *slog.Logger
 	APITarget      string
 	IdentityTarget string
+	SecretResolver SecretResolver
 }
 
 // Handler serves whichever site the request's Host names.
@@ -32,6 +37,7 @@ type Handler struct {
 	logger         *slog.Logger
 	apiTarget      string
 	identityTarget string
+	secretResolver SecretResolver
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -47,6 +53,7 @@ func NewHandler(opts Options) *Handler {
 		logger:         logger,
 		apiTarget:      opts.APITarget,
 		identityTarget: opts.IdentityTarget,
+		secretResolver: opts.SecretResolver,
 	}
 }
 
@@ -115,8 +122,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The last rung of D11's order, and the only place kind is consulted. A
 	// static site 404s so a mistyped path in a multi-page site is visible;
-	// an spa falls back so client-side routing works.
-	if site.Kind == "spa" {
+	// an spa falls back so client-side routing works. A shopify_storefront
+	// IS a spa bundle -- design D4 says so in as many words -- so it takes
+	// the same fallback; without it every client-side storefront route
+	// (/products/x, /cart) 404s on a hard reload.
+	if site.Kind == "spa" || site.Kind == storefrontKind {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			h.serveFile(w, r, fsys, "index.html")
 			return

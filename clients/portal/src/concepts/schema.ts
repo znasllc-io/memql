@@ -259,16 +259,3 @@ export function describeConceptSchema(rows: readonly Row[]): ConceptSchemaView {
   return { source: "observed", fields, document: null, sampleSize: rows.length };
 }
 
-// enumValuesForField is the convenience path for a caller that wants one
-// field's allowed values -- a selector control -- rather than the whole
-// schema table (memql#3717). Concept-agnostic like the rest of this module:
-// it takes the rows already on screen and a field name, never a concept id,
-// so a selector built on it works for any concept's enum field without a
-// renderer change. Empty when the schema has not loaded yet (findSchemaDocument
-// scans loaded rows, not a registry -- see its own header) or the field is
-// not a declared enum; the caller decides how to render that emptiness
-// rather than this module guessing at a fallback list.
-export function enumValuesForField(rows: readonly Row[], fieldName: string): string[] {
-  const view = describeConceptSchema(rows);
-  return view.fields.find((field) => field.name === fieldName)?.enumValues ?? [];
-}

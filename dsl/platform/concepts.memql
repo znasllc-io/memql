@@ -5,6 +5,7 @@
 
 use agents.concepts.{ agent }
 use identity.concepts.{ user }
+use library.concepts.{ artifact }
 use planner.concepts.{ plan }
 
 /// Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope("global")).
@@ -182,25 +183,41 @@ concept inboundRequest {
 /// write and rolling one back is a row write, so the number of Kubernetes objects does not grow with
 /// the number of sites. The graph's own row history IS the version list.
 ///
-/// clusterOwner tier, deliberately, and NOT owner="ownerUserId". enforceRowAuthzOnPlan ANDs the
-/// owned predicate unconditionally with no cluster-owner escape on the read path, so on an
-/// owner-tier concept "list every site in this cluster" is not merely unimplemented -- it is not
-/// EXPRESSIBLE, and the caller silently gets a subset. That query is the portal's primary screen,
-/// and cluster-wide hostname uniqueness would be uncheckable for the same reason. The tier matches
-/// v1:campaigns:sendJob and :suppression for the same reason those carry it: one deployment, one
-/// front door, not any individual operator's rows.
-@rowAuthz(clusterOwner)
+/// The COMPOSITE tier -- the owner, OR a cluster owner (memql#4312). It replaced a plain
+/// clusterOwner tier when deployables became self-serve (memql#4344), and the reason the old tier
+/// gave is the reason the composite is the only form that could replace it. That reason was: a
+/// plain owner="ownerUserId" tier has NO cluster-owner escape on the read path -- enforceRowAuthzOnPlan
+/// ANDs the owned predicate unconditionally -- so on an owner-tier concept "list every site in this
+/// cluster" is not merely unimplemented, it is not EXPRESSIBLE, and the caller silently gets a
+/// subset. That query is the portal's primary screen, and cluster-wide hostname uniqueness would be
+/// uncheckable for the same reason. The composite keeps BOTH statements true at once: it injects
+/// (ownerUserId==actor.userId)||(actor.isClusterOwner==true), so a user reads exactly their own
+/// deployables and an operator reads every row in the cluster -- which is what makes "list every
+/// site" expressible, and what lets the Go hostname-uniqueness probe see rows it does not own.
+/// Going the other way (staying clusterOwner and adding an owner field) would have made every
+/// self-serve read return nothing to the user who created the row.
+///
+/// ownerUserId EMPTY means cluster-owned, and the seeded portal row is the case: sameRowAuthzOwner
+/// refuses an empty owner outright, so a cluster-owned row is reachable through the admin branch
+/// alone -- never by a caller who happens to have no identity resolved.
+@rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="hostname", secondary="kind", tertiary="title", status="status")
 concept site {
-  hostname     string!  @description("Fully qualified host this site answers on, e.g. shop.example.com. Cluster-unique -- the uniqueness check is possible only because this concept is not owner-scoped.")
-  kind         enum("spa", "static")!  @description("Tail of the request-resolution order. 'spa' falls back to index.html so client-side routing works; 'static' answers 404 so a mistyped path in a multi-page site is visible rather than silently rendering the home page. Authored as an open enum rather than a closed one, and the reason is worth keeping even though the case that motivated it did not ship: a third value, 'server', was designed in epic memql#3718 -- bundleRef naming a container image instead of a bundle prefix, reconciled by a narrow controller into a Deployment + Service with the edge proxying to it rather than serving bytes -- and that epic was CLOSED UNBUILT, because its motivation is migrating a customer's existing Rails/Laravel/Django/Express app and no such migration exists. Do not read 'server' as queued work; read it as the demonstration that a new kind is additive here, touching neither the five front-door host rules, the TLS model, the portal, the publish path, nor this concept. Whatever the next kind turns out to be, it costs a value and its resolution tail.")
+  ownerUserId  string   @description("v1:identity:user.id that owns this deployable, or EMPTY for a cluster-owned site. Stamped from the actor on create by createSite, which is what makes the tier below true rather than aspirational. A write made as the DEPLOYMENT -- a cluster owner, a system actor, or trusted server-side Go -- has that stamp undone and produces a cluster-owned row instead; the seeded portal is the one the platform ships that way, and re-running createSite on an existing id is how an operator hands a site over or takes it back. It is the row-authz key: the composite tier compares it against actor.userId and ORs in the cluster-owner branch, so a user reads and writes exactly their own sites while an operator reads every one. NOT `string!` -- an empty value is the meaningful cluster-owned state, and `string!` would refuse the portal seed.")
+  hostname     string!  @description("Fully qualified host this site answers on, e.g. shop.example.com. Cluster-unique. A USER-owned site must be <slug>.<domain> -- slug [a-z0-9-]{3,40}, not one of the reserved labels (api / identity / mcp / portal / www / admin / mail), and the domain is the one the cluster serves, derived through component/frontdoor rather than supplied. Any other hostname -- a custom apex, a second domain -- is cluster-owner-only and hand-certified, because the cloud front-door certificate names exact hosts (memql#4224) and only the *.<domain> Ingress rule routes without an operator step. Enforced in Go beside the systemOwned-delete refusal (component/memql/platform_site_hostname_policy.go), because neither the slug rule, the reserved list, cluster-wide uniqueness nor an actor-conditional exemption is expressible in a mutation body; the mutation carries the shape half (@pattern / @maxLength).")
+  kind         enum("spa", "static", "shopify_storefront")!  @description("Tail of the request-resolution order. 'spa' falls back to index.html so client-side routing works; 'static' answers 404 so a mistyped path in a multi-page site is visible rather than silently rendering the home page. Authored as an open enum rather than a closed one, and the reason is worth keeping even though the case that motivated it did not ship: a third value, 'server', was designed in epic memql#3718 -- bundleRef naming a container image instead of a bundle prefix, reconciled by a narrow controller into a Deployment + Service with the edge proxying to it rather than serving bytes -- and that epic was CLOSED UNBUILT, because its motivation is migrating a customer's existing Rails/Laravel/Django/Express app and no such migration exists. Do not read 'server' as queued work; read it as the demonstration that a new kind is additive here, touching neither the five front-door host rules, the TLS model, the portal, the publish path, nor this concept. Whatever the next kind turns out to be, it costs a value and its resolution tail. 'shopify_storefront' (memql#4344) is the demonstration and the first addition: it is a SPA the edge serves at <slug>.<domain>, so its resolution tail is 'spa' exactly, and everything that makes it a storefront rides `binding` and the runtime-config document. Checkout is Shopify's hosted checkout; orders and inventory arrive by webhook, never through the storefront. Android, iOS and macOS deliberately have NO value here (design D5). They are artifact DISTRIBUTION -- stores, TestFlight, notarisation -- not hostname-resolved web surfaces, so there is nothing for the edge to resolve and a value that never resolves would be the wrong kind of additive. The portal shows them as disabled 'coming soon' kinds with no schema behind them. TestSiteKindEnumIsExactlyThreeValues pins this list so the next addition is a decision rather than a drift.")
   bundleRef    string!  @description("URI of the bundle to serve, one of three usages. 'file:///app/portal' -- the platform's own portal, baked into the image; deploy and rollback are an image rollout and an image rollback. 'file:///app/sites/<name>' -- a site a monorepo cluster bakes into the edge image at build time (or a working-tree path for the dev inner loop); deploy and rollback are the same image rollout/rollback. 'blob://sites/<id>/<version>/' -- an uploaded bundle in object storage; deploy is an upload plus a row flip in seconds, rollback is one row write. Bake what ships with the cluster; upload what changes on its own clock -- a typo fix on a landing page must not roll the node serving every other site, and marketing copy diverges from engine cadence immediately.")
   status       enum("draft", "live", "disabled")!  @description("'draft' resolves for nobody (404); 'live' serves; 'disabled' answers 503 rather than 404 so a deliberately paused site is distinguishable from a typo'd hostname. NOTE: @default is never applied on insert (memql#2960) -- createSite fills this with ??.")
   apiProxy     bool     @description("Mount /_memql/* on this origin, forwarded to the bff, so the site is same-origin with its own API. Removes CORS and the SameSite=Lax cookie problem entirely.")
   systemOwned  bool     @description("Blocks deletion. The portal only: its row is re-seeded at boot, so an operator cannot brick cluster management by deleting it. Does NOT branch the serving path -- see TestPortalHasNoSpecialCase.")
   title        string   @description("Operator-facing label shown in the portal's site list.")
   notes        string   @description("Operator-facing notes.")
+  artifactId   string   @description("The v1:library:artifact row this site's current bundle was published from, when it was published from the Library rather than uploaded by CI or baked into the image. Provenance, not a serving input -- the edge reads bundleRef and never this. Empty for a site whose bundle arrived through POST /sites/{id}/bundles or file:///app/*.")
+  binding      object   @description("Per-kind connection to the system this site fronts. Shape is decided by `kind`, and only one kind declares one today: shopify_storefront => {storeDomain, storefrontTokenRef}, where storeDomain is the myshopify.com host and storefrontTokenRef NAMES a v1:platform:globalSecret row holding the Storefront API token -- the token itself is never stored here, and the Admin API token never appears in either field. Empty for spa and static. A Storefront token is a client-side credential by Shopify's design, so the edge resolves the named secret at serve time into the site's runtime-config document; that is the only place it is dereferenced.")
   deleted      bool     @default("false") @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="publishedFrom", field="artifactId", target=artifact, direction="outgoing")
 }
 
 /// Per-instance pack enablement state (module-registry design,

@@ -241,6 +241,23 @@ func AnalyzeShadow(expr ExpressionNode, decl *langparser.RowAuthzDecl) (ShadowVe
 				// analyzer that credited one would report no narrowing where
 				// the engine performs one.
 				return ShadowAlreadyImplied, ""
+			// THE COMPOSITE TIER'S OWN PREDICATE (memql#4312, first
+			// declared by v1:platform:site in memql#4344). The injected
+			// term is a DISJUNCTION, so the arm above -- which matches a
+			// single comparison leaf -- cannot see a filter that spells it
+			// out, and the author who wrote exactly what InjectedPredicate
+			// renders is told their read would change.
+			//
+			// That is the memql#3029 defect one tier over, and the note on
+			// isOwnerScopeLeaf's self-owned arm names it: a renderer and a
+			// matcher disagreeing about the very predicate they both exist
+			// to describe. Recognising the term is not widening the gate --
+			// `A && (owner || admin)` implies `(owner || admin)` outright,
+			// and the arm is gated on ClusterOwnerBypass so a PLAIN owned
+			// tier still refuses the same shape, which for it really would
+			// be fail-open.
+			case decl.Tier == langparser.RowAuthzOwned && decl.ClusterOwnerBypass && isCompositeScopeConjunct(c, decl.Owner):
+				return ShadowAlreadyImplied, ""
 			case decl.Tier == langparser.RowAuthzClusterOwner && isClusterOwnerLeaf(c):
 				return ShadowAlreadyImplied, ""
 			}
@@ -389,6 +406,31 @@ func isOwnerScopeLeaf(node ExpressionNode, ownerField string) bool {
 		return false
 	}
 	return strings.EqualFold(field, strings.TrimSpace(ownerField))
+}
+
+// isCompositeScopeConjunct reports whether a conjunct IS the composite tier's
+// injected predicate: `<ownerField> == actor.userId || actor.isClusterOwner`.
+//
+// Order-independent, matching the declaration itself, which takes its two
+// arguments in either order. Nothing else counts: an admin gate ORed with any
+// term that is not the owner comparison is the fail-open shape memql#2839
+// refuses (`fromE164==args.e164 || actor.isClusterOwner==true` -- a false gate
+// zeroes nothing there), and dslgate's CallerScopeLeaf draws the same line for
+// the same reason.
+//
+// Only ever consulted for a declaration carrying ClusterOwnerBypass. For a
+// PLAIN owned tier this shape does not imply the tier at all -- the admin arm
+// returns rows the owner term excludes -- so admitting it there would be
+// exactly the widening this file's gate exists to prevent.
+func isCompositeScopeConjunct(node ExpressionNode, ownerField string) bool {
+	logical, ok := node.(*LogicalExpression)
+	if !ok || logical.Op != LogicalOr {
+		return false
+	}
+	if isOwnerScopeLeaf(logical.Left, ownerField) && isClusterOwnerLeaf(logical.Right) {
+		return true
+	}
+	return isClusterOwnerLeaf(logical.Left) && isOwnerScopeLeaf(logical.Right, ownerField)
 }
 
 // isRowIdName reports whether a field reference names the row id intrinsic --

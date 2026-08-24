@@ -91,7 +91,7 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
 // THE RAIL (memql#4264)
 // ============================================================================
 //
-// Three groups, and the names are the decision:
+// Four groups, and the names are the decision:
 //
 //   VIEWS    the DATA in this cluster, as screens. The five that ship with the
 //            product, then the ones this operator composed.
@@ -100,6 +100,8 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
 //   FLEET    WHERE WORK RUNS -- this person's machines, and the cluster's own
 //            sandboxed workbenches (epic memql#4349). See the FLEET constant
 //            below for why it is neither a view nor cluster administration.
+//   LIBRARY  the operator's own MATERIAL -- what they put in and what the
+//            cluster made for them (memql#4343).
 //   CLUSTER  the cluster ITSELF rather than the data in it.
 //
 // What this replaced was Operate / Explore / Administer, and it was wrong in a
@@ -153,21 +155,39 @@ const FLEET: readonly NavItem[] = [
 ];
 
 // Cluster is the machine, not the operator's OWN data -- that split is what
+// Library is the person's OWN MATERIAL: the things they put into this cluster
+// and the things it made for them. Artifacts is the Library index -- files,
+// generated outputs, notes, to-dos, calendar events, memories -- and
+// Deployables (memql#4346) is what they published out of it.
+//
+// It is a FOURTH group rather than a sub-heading under Cluster, and the split
+// is the decision (design 3.7). Artifacts sat in Cluster on the reasoning
+// that it was "a FIXED, cluster-native surface rather than a composed view" --
+// true, and the wrong axis. What Cluster means is the machine, not the data in
+// it; a person's uploaded files are as much theirs as a view they composed.
+// The moment the page grew upload, export, search and archive, keeping it
+// beside Signing keys stopped describing anything.
+//
+// DEPLOYABLES MOVED HERE OUT OF CLUSTER, and it is the same axis argument one
+// surface over. As Sites it was cluster-owner-only, so it genuinely was a fact
+// about the machine. v1:platform:site declares the composite tier now
+// (memql#4344): an ordinary person owns deployables, and a bundle they deployed
+// is an artifact they published rather than infrastructure. It is listed ONCE,
+// here -- the duplicate-door failure memql#4264 exists to prevent.
+const LIBRARY: readonly NavItem[] = [
+  { to: "/artifacts", label: "Artifacts", icon: Archive },
+  { to: "/deployables", label: "Deployables", icon: Globe },
+];
+
+// Cluster is the machine, not the operator's own data -- that split is what
 // keeps this group distinct from Views (designed dashboards over whatever
-// concept an operator points one at). Artifacts sits here rather than there
-// for the same reason Sites does: both are a FIXED, cluster-native surface
-// (the Library that indexes what this cluster produces; the hosted web
-// surfaces it serves) rather than a composed view over arbitrary rows.
+// concept an operator points one at) and, since memql#4343, from Library.
 //
 // The admin surfaces are listed individually rather than behind an
 // "Administration" entry with its own tab strip: one level of nesting for
 // five destinations bought nothing except a landing page that duplicated the
 // console.
-const CLUSTER: readonly NavItem[] = [
-  { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/sites", label: "Sites", icon: Globe },
-  { to: "/artifacts", label: "Artifacts", icon: Archive },
-];
+const CLUSTER: readonly NavItem[] = [{ to: "/integrations", label: "Integrations", icon: Plug }];
 // People is NOT here. It is one of the views, and the verbs an admin needs
 // live on the row detail there (memql#4264) -- which is what removed the
 // second door.
@@ -343,6 +363,7 @@ export function AppShell(): ReactNode {
             <NavGroup label="Custom" items={custom} collapsed={collapsed} />
             <NavGroup label="Build" items={build} collapsed={collapsed} />
             <NavGroup label="Fleet" items={FLEET} collapsed={collapsed} />
+            <NavGroup label="Library" items={LIBRARY} collapsed={collapsed} />
             <NavGroup label="Cluster" items={cluster} collapsed={collapsed} />
           </div>
 

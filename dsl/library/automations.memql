@@ -164,3 +164,87 @@ automation indexMemoryOnCreate {
     )
   }
 }
+
+// THE @filter IS NOT A REFINEMENT, IT IS WHAT KEEPS THIS AUTOMATION FROM
+// DESTROYING DATA.
+//
+// `graph.node.created` fires on EVERY successful write, not only the first:
+// executeWrite publishes it unconditionally because MemQL is append-only and
+// an update materialises a new row (component/memql/executor_mutation.go --
+// the update() path additionally publishes .updated, which is why that event
+// exists at all). So without a filter this automation would re-fire on
+// setLibraryFileStatus, appendLibraryFileTrainedDomain and archiveLibraryFile.
+//
+// Re-firing is not harmless. createArtifact's body is a bare `insert{}`, so a
+// re-version carries ONLY the fields named here -- and `labels` is not one of
+// them, because labels live on the ARTIFACT and the file row has none to
+// forward. Every status transition would therefore silently wipe whatever the
+// owner had labelled the artifact: the memql#4288 hazard, reached from the
+// promotion path instead of the edit path.
+//
+// `status == "stored"` is the creation state and only the creation state --
+// createLibraryFile STAMPS it (it is not a caller argument), and every later
+// write moves it on. Keeping the index in step with what analysis learns is
+// therefore the analysis pass's job, which is Go and can carry the labels
+// forward the way integrations/library's touchArtifact does.
+/// On file creation, promote the new v1:library:file into the Library as an artifact index row
+/// (lens=artifact, kind=file). The sixth promotion, and the shape of the five above: sourceConceptRef
+/// binds event.payload.id directly, the optional fields coalesce so no nil reaches a string field,
+/// and the derived id makes a re-run version the same row rather than add a second one. format is
+/// carried from the file row, where the writer that knew the MIME wrote it -- an automation step
+/// argument has no conditional form, so the mapping lives in Go and its answer lives on the row.
+/// memql#4340.
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+@filter(payload.status == "stored")
+automation indexFileOnCreate {
+  args {
+    archived any
+    format any
+    id any
+    mimeType any
+    name any
+    ownerUserId any
+    source any
+    summary any
+  }
+
+  step persist {
+    mutation createArtifact (
+      sourceConceptRef: id,
+      ownerUserId:      ownerUserId,
+      lens:             "artifact",
+      kind:             "file",
+      source,
+      title:            name ?? "Untitled file",
+      summary:          summary ?? "",
+      format:           format ?? "other",
+      mimeType:         mimeType ?? "",
+      live:             false,
+      archived:         archived ?? false
+    )
+  }
+}
+
+/// When an artifact backed by a file is archived, archive the backing v1:library:file too, so the
+/// two rows never disagree about whether the owner threw the thing away. Triggered on the artifact
+/// UPDATE rather than written into archiveArtifact's body because a mutation body writes one row
+/// and which second row to touch depends on the kind -- the @filter is where that condition
+/// belongs. sourceConceptRef is the canonical 'v1:library:file:<id>' the promotion wrote, which is
+/// the id archiveLibraryFile targets. ONE DIRECTION ONLY, deliberately: artifact -> file. The
+/// mirror automation (file -> artifact) would close a cycle, since each write publishes an event
+/// the other subscribes to, and both writes being idempotent does not stop the events. Archiving
+/// through the artifact is the portal's path; archiveLibraryFile is the file-level operation.
+/// Idempotent: archiving an already-archived file writes the same value. memql#4340.
+@trigger(event="node.updated", concept="v1:library:artifact", partition="*")
+@filter(payload.kind == "file" && payload.archived == true)
+automation archiveFileOnArtifactArchive {
+  args {
+    sourceConceptRef any
+  }
+
+  step archiveBackingFile {
+    mutation archiveLibraryFile (
+      fileId: sourceConceptRef
+    )
+  }
+}

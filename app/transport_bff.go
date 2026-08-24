@@ -33,6 +33,11 @@ func (a *App) transportBFF() {
 	// library here, not a node-mounted endpoint, and the edge node itself
 	// has no coherent address for a site-agnostic publish route.
 	a.mountSiteBundleEndpoints(uploader, container)
+	// Library artifact upload + export (POST /artifacts, GET
+	// /artifacts/{id}/content, memql#4341). Bff-only: the Library is a
+	// user-facing surface the portal dials, and it reuses the same blob client
+	// for the same reason the bundle endpoint above does.
+	a.mountLibraryArtifactEndpoints(uploader, container)
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP
 	// on the frontend-facing node. Deny-by-default -- with no

@@ -3348,7 +3348,71 @@ QueryClient.prototype.libraryArtifactsByLens = function (this: QueryClient, args
   return this.executeNamed("libraryArtifactsByLens", buildLibraryArtifactsByLens(args), opts);
 };
 
-/** List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723). */
+/** Fetch one Library file by id, gated to the caller: ownerUserId==actor.userId, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileById"] in generated_concepts.ts).
+export interface LibraryFileByIdArgs {
+  fileId: string;
+}
+
+export function buildLibraryFileById(args: LibraryFileByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "query libraryFileById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileById(args: LibraryFileByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileById = function (this: QueryClient, args: LibraryFileByIdArgs = {} as LibraryFileByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileById", buildLibraryFileById(args), opts);
+};
+
+/** List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId narrows to the one file. The frontend orders by seq, which is monotonic in file order. */
+// Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["libraryFileChunksForFile"] in generated_concepts.ts).
+export interface LibraryFileChunksForFileArgs {
+  fileId: string;
+}
+
+export function buildLibraryFileChunksForFile(args: LibraryFileChunksForFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "query libraryFileChunksForFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileChunksForFile(args: LibraryFileChunksForFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileChunksForFile = function (this: QueryClient, args: LibraryFileChunksForFileArgs = {} as LibraryFileChunksForFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileChunksForFile", buildLibraryFileChunksForFile(args), opts);
+};
+
+/** List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into). */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.ts).
+export interface LibraryFilesForOwnerArgs {
+}
+
+export function buildLibraryFilesForOwner(args: LibraryFilesForOwnerArgs): string {
+  void args;
+  return "query libraryFilesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFilesForOwner(args?: LibraryFilesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFilesForOwner = function (this: QueryClient, args: LibraryFilesForOwnerArgs = {} as LibraryFilesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFilesForOwner", buildLibraryFilesForOwner(args), opts);
+};
+
+/** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.ts).
 export interface LibraryWorkspaceLiveSourcesArgs {
 }
@@ -4766,7 +4830,8 @@ QueryClient.prototype.signInIdentitiesForSelf = function (this: QueryClient, arg
   return this.executeNamed("signInIdentitiesForSelf", buildSignInIdentitiesForSelf(args), opts);
 };
 
-/** Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request. Cluster-owner gated per v1:platform:site's declared tier; the edge integration calls this under a cluster-owner-equivalent credential, not a per-request user. */
+/** Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request.
+The caller term is the COMPOSITE tier's own predicate, written out (memql#4344). It used to be a bare `actor.isClusterOwner==true`, which under the composite tier would narrow the query to cluster owners ALONE and leave a user unable to resolve their own deployable -- the admin gate is one BRANCH of the tier now, not the whole of it. The engine ANDs this same term in from the concept's declaration; restating it is what the land gate asks for, so that a reader of the query can see the scope without resolving the concept (TestRowAuthzEnforcementLandGate). It is an OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's own rows. The edge still reads every site because it calls this under a synthetic cluster-owner actor (component/edge's systemEdgeActor), which the second branch admits. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteByHostname"] in generated_concepts.ts).
 export interface SiteByHostnameArgs {
   hostname: string;
@@ -4788,7 +4853,7 @@ QueryClient.prototype.siteByHostname = function (this: QueryClient, args: SiteBy
   return this.executeNamed("siteByHostname", buildSiteByHostname(args), opts);
 };
 
-/** Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per v1:platform:site's declared tier. */
+/** Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Owner-or-cluster-owner per v1:platform:site's composite tier -- see siteByHostname for why the bare admin gate this replaced would now collapse the read to cluster owners alone. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteById"] in generated_concepts.ts).
 export interface SiteByIdArgs {
   siteId: string;
@@ -4810,7 +4875,8 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
   return this.executeNamed("siteById", buildSiteById(args), opts);
 };
 
-/** Every site in the cluster. The portal's primary screen, and the read that would silently return a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier. */
+/** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.ts).
 export interface SitesAllArgs {
 }

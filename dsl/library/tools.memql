@@ -43,3 +43,54 @@ tool artifactRemoveLabel {
   artifactId  string!  @description("Id of the artifact to remove the label from -- the v1:library:artifact row id.")
   label       string!  @description("The label to remove. Must match an existing label exactly.")
 }
+
+// ---- the search + train tools (memql#4342) ----
+//
+// artifactSearch lets an agent look through the person's own Library by
+// meaning; artifactTrain lets it put a file into a knowledge domain when
+// the person asks. Both ride the SAME builtins the portal calls through
+// the generated SDK (dsl/library/builtins.memql:
+// librarySimilarArtifacts / libraryTrainFile), for the label pair's
+// reason: there is no attribution difference between an agent searching
+// and a person searching.
+//
+// Reached through the `function` handler type -- there is no "builtin"
+// handler type -- and resolved at load, so a name typo here refuses boot
+// rather than failing the first time an agent calls the tool.
+//
+// AUTHORIZATION NEEDS NO NEW MECHANISM, AND THE TWO TOOLS GET IT FROM
+// DIFFERENT PLACES. artifactSearch reads under the AGENT'S SESSION USER:
+// the capability filters chunks on the acting user's id and re-reads each
+// artifact through an owner-gated query, so an agent can only ever surface
+// files the person it is acting for can already open. artifactTrain adds
+// the domain half on top: writing is refused unless the cluster's
+// knowledge-domain authorizer confirms the user may write there (a
+// cluster owner always may). An agent therefore cannot train a user's
+// file into a domain that user could not train it into themselves.
+
+/// Search the person's Library by meaning and get back whole artifacts, best match first. Use this
+/// when they refer to something they have -- "the pricing deck", "that PDF about onboarding", "what
+/// did my notes say about X" -- instead of asking them to find it. Returns each artifact's id,
+/// title, kind, summary, labels and the matching snippet, so you can cite what you found. Search by
+/// a phrase with `text`, or pass `artifactId` to find things like one you already have.
+@handler(type="function", name="librarySimilarArtifacts")
+@allowedRoles("assistant", "specialist")
+@executionTime("fast")
+tool artifactSearch {
+  text        string  @description("What to look for, in the person's own words. A phrase or a sentence works better than a keyword. Set this OR artifactId.")
+  artifactId  string  @description("Find artifacts similar to this one -- the v1:library:artifact row id. Set this OR text.")
+  limit       int     @description("How many artifacts to return. Defaults to 5; ask for more only when the person wants a survey rather than an answer.")
+}
+
+/// Train one of the person's Library files into a knowledge domain, so agents can draw on it later.
+/// Use this ONLY when they ask for it -- uploading a file does not train it, and training is a
+/// decision they make about their own material. Say which file and which domain you are about to
+/// use before you call it. Refused when the file is not theirs, when the file has no readable text,
+/// or when they may not write to that domain.
+@handler(type="function", name="libraryTrainFile")
+@allowedRoles("assistant", "specialist")
+@executionTime("slow")
+tool artifactTrain {
+  fileId    string!  @description("The v1:library:file id of the file to train -- the fileId on the artifact, not the artifact id.")
+  domainId  string!  @description("Id of the knowledge domain to train it into. Use one the person named or picked; do not guess a domain.")
+}

@@ -316,7 +316,13 @@ describe("hovering and clicking", () => {
     // rendered link the dialog offers back to the concept browser.
     renderNexus(nexusHarness(), "/nexus/plan-spring/node/artifact~artifact-catalog");
     await waitFor(() => expect(screen.getByRole("heading", { name: /row detail/i })).toBeTruthy());
-    const library = screen.getByRole("link", { name: /open in the library/i });
+    // findByRole, not getByRole: the panel renders its heading as soon as the
+    // dialog opens, but this link is gated on `node.kind === "artifact"` and so
+    // waits for the node itself to resolve. Two render passes, and the bare
+    // getByRole asserted against the first one -- which is why this passed
+    // locally and in isolation and lost the race once under CI's parallel load
+    // (memql#4411). findByRole retries until the second pass lands.
+    const library = await screen.findByRole("link", { name: /open in the library/i });
     expect(library.getAttribute("href")).toBe("/artifacts/artifact-catalog");
     fireEvent.click(library);
   });

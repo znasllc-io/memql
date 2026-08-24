@@ -83,6 +83,12 @@ func (a *App) mountEdgeEndpoints() {
 		Logger:         a.Logger,
 		APITarget:      edgeAPITargetFromEnv(a.Logger),
 		IdentityTarget: edgeIdentityTargetFromEnv(a.Logger),
+		// The engine's own global-secret read, handed over as a one-method
+		// function rather than as the engine itself: a shopify_storefront
+		// site's runtime-config document resolves the v1:platform:globalSecret
+		// its binding NAMES, at serve time (memql#4345), and that one field is
+		// the only reason the serving path may touch the secret store at all.
+		SecretResolver: a.engine.ResolveSystemSecret,
 	})
 
 	a.handleRoute("/", handler)

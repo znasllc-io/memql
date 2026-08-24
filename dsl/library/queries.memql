@@ -21,7 +21,23 @@
 /// single facet dominates.
 @actor
 query artifact libraryArtifacts {
-  filter  ownerUserId==actor.userId
+  // archived!=true is what makes archiveArtifact a soft DELETE rather than a
+  // flag nobody reads.
+  //
+  // THE SPELLING IS LOAD-BEARING and `archived == false` is not the same
+  // predicate. Every artifact row promoted before memql#4340 has no `archived`
+  // member at all, and the two forms disagree about those rows: `!= true`
+  // returns them (measured against Postgres --
+  // TestArchivedFilterKeepsRowsWrittenBeforeTheFieldExisted), `== false` would
+  // not, so the equality form would empty every existing Library on the deploy
+  // that introduced the field. createArtifact writes the member on every new
+  // row anyway, but the filter must not DEPEND on that.
+  //
+  // The narrower facet reads below deliberately do NOT carry it -- a caller
+  // who asked for one lens, kind or label asked a question about that facet,
+  // and the archive filter belongs to the DEFAULT list, which is the one a
+  // person lands on.
+  filter  ownerUserId==actor.userId && archived!=true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -165,25 +181,33 @@ query memory memoryById {
   shape   memoryFull
 }
 
-// `@public` marks this query as intentionally NOT caller-scoped. Workspace
-// liveSources (liveSource.scope=="workspace") are partition-shared and carry
-// no ownerId, so their promoted index rows have an empty ownerUserId that the
-// owned reads above can never match -- they'd be invisible to everyone. This
-// path surfaces exactly those rows (kind=live_source AND scope=workspace, NO
-// owner gate) so every partition member sees the shared sources, mirroring the
-// canvasState public/private split. The audit stays honest: the widening is
-// bounded to workspace-scoped live sources (private sources keep ownerUserId
-// and only ever surface through the owned queries), and partition isolation is
-// enforced upstream of the read. The frontend merges this into the Records lens
-// alongside the owned libraryArtifactsByLens("record") results (#723).
-/// List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by
-/// design: workspace liveSources have no single owner (empty ownerUserId), so this reads
-/// kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the
-/// owned Records results. Private live sources are excluded here -- they surface through the
-/// owner-gated queries. See the @public justification above (#723).
-@public
+// THIS READ WAS `@public`, AND memql#4340 TOOK THAT AWAY -- not by choice
+// here, but because an owner tier and an OWNERLESS row cannot both be true of
+// one concept.
+//
+// #723 gave workspace liveSources (liveSource.scope=="workspace") an empty
+// ownerUserId on purpose: partition-shared rows with no single owner, surfaced
+// through this one un-gated path while every sibling read stayed owner-scoped.
+// Declaring v1:library:artifact's tier (design D8) ends that shape. The tier's
+// predicate is ANDed into EVERY read of the concept before it runs and every
+// row is separately admitted on its way out -- neither mechanism consults the
+// filter, and `@public` on a QUERY is a conformance classification, not an
+// enforcement switch. So a row with an empty ownerUserId is now invisible on
+// every path, and writing no conjunct here would not have preserved the shared
+// read; it would only have hidden the change from the land gate.
+//
+// What the conjunct records is therefore the truth: this read now returns the
+// caller's OWN workspace-scoped live sources. A genuinely partition-shared
+// Library row needs a concept that can express "no owner", which the index no
+// longer is; that is a design question for whoever brings liveSource promotion
+// into the engine tree, and it is deliberately not answered by a filter.
+/// List workspace-scoped live sources for the Library Records lens. Gated by
+/// ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was
+/// before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row
+/// is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
+@actor
 query artifact libraryWorkspaceLiveSources {
-  filter  kind=="live_source" && scope=="workspace"
+  filter  ownerUserId==actor.userId && kind=="live_source" && scope=="workspace"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -293,4 +317,75 @@ query artifact artifactsForPlan {
   }
   filter  ownerUserId==actor.userId && producedByPlanId==args.planId
   shape   artifactFull
+}
+
+// ---- file + fileChunk: the byte-bearing reads (memql#4340) ----
+//
+// Both concepts declare the composite tier, so the ownerUserId conjunct
+// written here is no longer the only thing standing between one person's
+// files and another's -- the declaration ANDs the same predicate in from
+// the concept and admits every row on its way out, which is what covers
+// the paths a filter cannot reach. It is written anyway, for the reason
+// every sibling read above writes it: a reader auditing this file should
+// be able to see the scope of a read without resolving its concept's
+// annotation.
+//
+// WHAT THE COMPOSITE HALF DOES NOT DO, because the obvious reading is
+// wrong: it does NOT make these reads return every user's rows to a
+// cluster owner. The tier's injected term is `(owner==actor ||
+// isClusterOwner)`, but it is ANDed with the filter written here -- and
+// `ownerUserId==actor.userId` narrows the result right back to the
+// caller's own rows. A cluster owner calling libraryFilesForOwner() sees
+// their own files, which is what the name says.
+//
+// The bypass is real and is measured (TestClusterOwnerSeesEveryLibraryRow),
+// but it lives on the paths with no authored filter to AND against: a raw
+// query string, graph expansion, a subscription. That is the operator
+// reach the composite tier buys, and an operator surface that wants the
+// cross-user LIST still needs a read that does not scope itself.
+
+/// Fetch one Library file by id, gated to the caller: ownerUserId==actor.userId, over a concept
+/// declaring the composite tier. Backs the artifact detail view and the download / export route, which needs
+/// name, mimeType, size and blobUrl together to stream the bytes with correct headers.
+@unbounded("library file by id (guarded), gated to the owner -- bounded to a single row")
+@actor
+query file libraryFileById {
+  args {
+    fileId  string!
+  }
+  filter  when(args.fileId) { row.id==args.fileId } && ownerUserId==actor.userId
+  shape   libraryFileFull
+}
+
+/// List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The
+/// file-level read behind the Artifacts page's upload and training surfaces --
+/// the artifact index is what the list renders, and this is what answers questions the index does
+/// not carry (analysis status, embedding coverage, which domains a file was trained into).
+@actor
+query file libraryFilesForOwner {
+  filter  ownerUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   libraryFileFull
+}
+
+/// List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a
+/// similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId
+/// narrows to the one file. The frontend orders by seq, which is
+/// monotonic in file order.
+@actor
+query fileChunk libraryFileChunksForFile {
+  args {
+    fileId  string!
+  }
+  filter  ownerUserId==actor.userId && fileId==args.fileId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   libraryFileChunkFull
 }

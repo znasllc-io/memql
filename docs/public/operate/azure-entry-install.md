@@ -107,7 +107,7 @@ company apex at AKS.** The cluster domain is the install's
 | identity | `identity.$MEMQL_DOMAIN` | sign-in; first-run wizard at `/setup` |
 | api | `api.$MEMQL_DOMAIN` | gRPC + HTTP edge |
 | sites (portal) | `portal.$MEMQL_DOMAIN` | site #1; its own exact rule and SAN (memql#4224) |
-| sites (wildcard) | `*.$MEMQL_DOMAIN` | every other site; routing only, **no certificate behind it** |
+| sites (wildcard) | `*.$MEMQL_DOMAIN` | every other site; certified by `memql-wildcard-tls` over DNS-01 (memql#4347) |
 | sites (apex) | `$MEMQL_DOMAIN` | same edge Service |
 | mcp | `mcp.$MEMQL_DOMAIN` | exists in the generator; **leave it dark** |
 
@@ -124,40 +124,131 @@ Point DNS at the cluster ingress, then wait for the certificate:
 | `*.$MEMQL_DOMAIN` | A | same cluster ingress IP |
 
 The wildcard DNS record is for ROUTING: it is what lets `*.$MEMQL_DOMAIN`
-reach the edge for every site. It is not a wildcard certificate.
+reach the edge for every site. It is a separate thing from the wildcard
+CERTIFICATE below -- both are needed, and the certificate additionally needs
+the zone to be an **Azure DNS** zone this cluster's identity may write to,
+because that is how the DNS-01 challenge is answered.
 
-**The front-door certificate (`memql-front-door-tls`) names exact hosts
-only** (memql#4224): `api.`, `identity.`, `mcp.`, `portal.` and the apex.
-The issuer is `letsencrypt-prod`, which solves **HTTP-01 only** -- there is
-no DNS-01 solver on this cluster. That matters in two ways:
+**TWO certificates, split by which ACME challenge can issue each half**
+(memql#4224, memql#4347):
 
-- **Do not add a `*.$MEMQL_DOMAIN` dnsName.** ACME cannot serve an HTTP-01
-  challenge for a wildcard, and one wildcard name fails the WHOLE order:
-  the Certificate sits Pending, the Secret is never written, and every
-  host serves ingress-nginx's self-signed default ("Kubernetes Ingress
-  Controller Fake Certificate"; Safari: "This Connection Is Not Private").
-  That is how the first entry-shape bring-up went, and the hand-edit to
-  exact names that followed is now the generated shape.
-- **`tls.hosts` must say the same names.** ingress-nginx verifies the
-  certificate against each host an Ingress lists under `tls` and falls
-  back to the default for a host the certificate does not name -- and it
-  builds a certificate-bearing server block per RULE host, never per
-  `tls` host. An edge Ingress that still lists `*.$MEMQL_DOMAIN` under
-  `tls`, or a portal with no exact rule of its own, reproduces the
-  fake-certificate failure for `portal.$MEMQL_DOMAIN` with a Ready
-  certificate in hand. The generator emits `portal-front-door` (an exact
-  rule to the same edge Service) for exactly this reason; the
-  cluster-side `portal-front-door` Ingress that was hand-made as the ops
-  workaround has the same name, so Argo adopts and overwrites it on the
-  next sync.
+| Certificate | Issuer | Names |
+|---|---|---|
+| `memql-front-door-tls` | `letsencrypt-prod` (HTTP-01) | `api.`, `identity.`, `mcp.`, `portal.`, the apex |
+| `memql-wildcard-tls` | `letsencrypt-dns01` (DNS-01, Azure DNS) | `*.$MEMQL_DOMAIN`, the apex |
 
-A customer site hostname routed by the wildcard has **no certificate**
-until it has a `Certificate` and an exact-host Ingress of its own
-([site-hosting.md](site-hosting.md#2-add-the-hostname)). An engine-only
-entry install hosts no such site, so nothing is missing; a client install
-that hosts a site on the
-cloud front door must plan for that object pair per site until a DNS-01
-solver exists.
+- **Do not add a `*.$MEMQL_DOMAIN` dnsName to `memql-front-door-tls`.** ACME
+  cannot serve an HTTP-01 challenge for a wildcard, and one wildcard name
+  fails the WHOLE order: the Certificate sits Pending, the Secret is never
+  written, and every host serves ingress-nginx's self-signed default
+  ("Kubernetes Ingress Controller Fake Certificate"; Safari: "This
+  Connection Is Not Private"). That is how the first entry-shape bring-up
+  went, and the hand-edit to exact names that followed is now the generated
+  shape. The wildcard belongs on `memql-wildcard-tls` and nowhere else.
+- **`tls.hosts` must name hosts the certificate that entry points at can
+  cover.** ingress-nginx verifies the certificate against each host an
+  Ingress lists under `tls` and falls back to the default for a host that
+  certificate does not name -- and it builds a certificate-bearing server
+  block per RULE host, never per `tls` host. So `edge-front-door` carries
+  TWO `tls` entries: the apex against `memql-front-door-tls`, and
+  `*.$MEMQL_DOMAIN` against `memql-wildcard-tls`. A portal with no exact
+  rule of its own still reproduces the fake-certificate failure for
+  `portal.$MEMQL_DOMAIN` with both certificates Ready; the generator emits
+  `portal-front-door` (an exact rule to the same edge Service) for exactly
+  that reason. The cluster-side `portal-front-door` Ingress that was
+  hand-made as the ops workaround has the same name, so Argo adopts and
+  overwrites it on the next sync.
+
+**The wildcard certificate is what makes a hosted site live over TLS with
+no operator step.** Before it, a customer site hostname routed by the
+wildcard had no certificate until somebody added a `Certificate` and an
+exact-host Ingress for it -- one object pair per site. Now `*.$MEMQL_DOMAIN`
+already names it. A hostname OUTSIDE `$MEMQL_DOMAIN` -- a customer's own
+apex, a second domain -- is still that object pair
+([site-hosting.md](site-hosting.md#2-add-the-hostname)), and so is anything
+more than one label deep (`shop.eu.$MEMQL_DOMAIN`).
+
+### DNS-01 prerequisites, in order
+
+Do these BEFORE the first sync. Skipping them is not fatal -- the wildcard
+Certificate simply never becomes Ready and hosted sites fall back to the
+controller's default, which is where they were before memql#4347 -- but the
+role hosts and sign-in are unaffected either way, which is the whole reason
+the two certificates are separate.
+
+```bash
+export ZONE_GROUP="<dns-zone-rg>"        # the resource group holding the DNS zone
+export IDENTITY_GROUP="<cluster-rg>"     # where the managed identity is created
+export CLUSTER_RG="<cluster-rg>"
+export CLUSTER="<aks-name>"
+export SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+# 1. The DNS zone for the domain, delegated at the registrar. `az network dns
+#    zone show` must succeed before anything below is worth running.
+az network dns zone create -g "$ZONE_GROUP" -n "$MEMQL_DOMAIN"
+az network dns zone show  -g "$ZONE_GROUP" -n "$MEMQL_DOMAIN" --query nameServers -o tsv
+#    ...point the registrar at those name servers, then wait for the delegation
+#    to resolve. `dig NS $MEMQL_DOMAIN` must answer with them.
+
+# 2. A user-assigned managed identity, and DNS Zone Contributor ON THE ZONE.
+#    Scope it to the zone, never to the subscription: this identity's only job
+#    is writing _acme-challenge TXT records under one name.
+az identity create -g "$IDENTITY_GROUP" -n id-certmanager-memql
+DNS_CLIENT_ID="$(az identity show -g "$IDENTITY_GROUP" -n id-certmanager-memql --query clientId -o tsv)"
+DNS_PRINCIPAL_ID="$(az identity show -g "$IDENTITY_GROUP" -n id-certmanager-memql --query principalId -o tsv)"
+ZONE_ID="$(az network dns zone show -g "$ZONE_GROUP" -n "$MEMQL_DOMAIN" --query id -o tsv)"
+az role assignment create --assignee "$DNS_PRINCIPAL_ID" \
+  --role "DNS Zone Contributor" --scope "$ZONE_ID"
+
+# 3. A federated credential for cert-manager's ServiceAccount -- the same
+#    secret-less pattern ESO uses for Key Vault (deploy/external-secrets/README.md).
+#    The subject is cert-manager's default SA in its own namespace.
+OIDC="$(az aks show -g "$CLUSTER_RG" -n "$CLUSTER" --query oidcIssuerProfile.issuerUrl -o tsv)"
+az identity federated-credential create -g "$IDENTITY_GROUP" \
+  --identity-name id-certmanager-memql --name cert-manager \
+  --issuer "$OIDC" --subject system:serviceaccount:cert-manager:cert-manager \
+  --audiences api://AzureADTokenExchange
+
+# 4. The four values the ClusterIssuer needs, for the Argo patch list below.
+#    The webhook wiring itself (the SA client-id annotation and the pod label)
+#    is already in git -- see the note under this block -- so there is nothing
+#    to patch by hand here; $DNS_CLIENT_ID is the value you substitute into
+#    deploy/cert-manager/install/kustomization.yaml.
+echo "hostedZoneName    = $MEMQL_DOMAIN"
+echo "resourceGroupName = $ZONE_GROUP"
+echo "subscriptionID    = $SUBSCRIPTION_ID"
+echo "clientID          = $DNS_CLIENT_ID"
+```
+
+> **INFO: the webhook wiring is committed, not hand-patched.** The
+> workload-identity webhook keys off two things the upstream cert-manager
+> manifest does not carry: `azure.workload.identity/client-id` on the
+> `cert-manager` ServiceAccount and `azure.workload.identity/use: "true"` on the
+> controller's pod template. Both are `patches:` entries in
+> `deploy/cert-manager/install/kustomization.yaml`, so ArgoCD owns them and a
+> cert-manager bump cannot silently drop them. The annotation ships as the
+> placeholder `REPLACE-WITH-CERT-MANAGER-IDENTITY-CLIENT-ID`; substitute
+> `$DNS_CLIENT_ID` from step 2 and commit it, the same way the cloud overlays
+> carry the database identity's client id.
+>
+> Both values are read ONLY by that webhook, so this one shape serves every
+> deploy target: on a cluster without the webhook -- every local k3d cluster,
+> which reaches the same path through `scripts/k3d/up.sh` -- the label matches
+> no admission rule and the annotation is a string nothing dereferences.
+>
+> Verify after a sync: `kubectl -n cert-manager get deploy cert-manager -o
+> jsonpath='{.spec.template.metadata.labels}'` shows
+> `azure.workload.identity/use`, and `kubectl -n cert-manager get sa
+> cert-manager -o jsonpath='{.metadata.annotations}'` shows a real client id
+> rather than the placeholder.
+
+Then, after the first sync:
+
+```bash
+kubectl -n memql get certificate memql-front-door-tls memql-wildcard-tls
+# both must reach READY True. A wildcard stuck at False is almost always the
+# zone: `kubectl -n memql describe certificaterequest` names the Azure error.
+```
 
 ## Argo host-patch
 
@@ -177,18 +268,30 @@ the generator emitted, plus the `memql-domain` ConfigMap:
 - Ingress `portal-front-door` → `portal.$MEMQL_DOMAIN` (same two pointers)
 - Ingress `edge-front-door` → `/spec/rules/0/host` = `*.$MEMQL_DOMAIN`,
   `/spec/rules/1/host` = `$MEMQL_DOMAIN`, `/spec/tls/0/hosts/0` =
-  `$MEMQL_DOMAIN` -- the apex is its ONLY tls host; there is no
-  `/spec/tls/0/hosts/1` any more
+  `$MEMQL_DOMAIN` (the apex, on `memql-front-door-tls`) and
+  `/spec/tls/1/hosts/0` = `*.$MEMQL_DOMAIN` (the wildcard, on
+  `memql-wildcard-tls`) -- TWO tls entries, one per certificate
+- Certificate `memql-wildcard-tls` `spec.dnsNames` → `*.$MEMQL_DOMAIN`,
+  `$MEMQL_DOMAIN` -- two entries in that order (`/spec/dnsNames/0`,
+  `/spec/dnsNames/1`); the apex is on it as well as the wildcard because
+  `*.<domain>` matches exactly one label and the apex has none
+- ClusterIssuer `letsencrypt-dns01` → the four values step 4 above printed:
+  `/spec/acme/solvers/0/dns01/azureDNS/hostedZoneName` = `$MEMQL_DOMAIN`,
+  `.../resourceGroupName`, `.../subscriptionID`,
+  `.../managedIdentity/clientID`, plus `/spec/acme/email`
 - ConfigMap `memql-domain` key `MEMQL_DOMAIN` → the install domain
 
-> **WARNING: the pointer set changed in memql#4224.** A patch written
-> against the previous shape -- two dnsNames, a wildcard under the edge
-> Ingress's `tls.hosts` -- does not fail loudly everywhere: the two
-> dnsNames replaces still succeed and put the wildcard back into the
-> order, which is the Pending Certificate again. (`/spec/tls/0/hosts/1` on
-> `edge-front-door` does fail the render now, which is the one place a
-> stale patch announces itself.) Rewrite the Application patch to the list
-> above before syncing.
+> **WARNING: the pointer set changed twice -- memql#4224, then memql#4347.**
+> A patch written against the ORIGINAL shape (two dnsNames on
+> `memql-front-door-tls`, a wildcard under the edge Ingress's
+> `/spec/tls/0/hosts`) does not fail loudly everywhere: the two dnsNames
+> replaces still succeed and put the wildcard back into the HTTP-01 order,
+> which is the Pending Certificate again. A patch written against the
+> memql#4224 shape fails differently and more quietly: it simply has no
+> `/spec/tls/1/hosts/0` entry, so `edge-front-door` keeps the committed
+> `*.memql.localhost` under tls -- a tls host the real wildcard certificate
+> does not name, which is the memql#4224 symptom at the one host that change
+> was about. Rewrite the Application patch to the list above before syncing.
 
 The same derivation feeds every side: `cmd/frontdoorhosts` composes
 the Ingress hosts and SANs, `component/envregistry/domain.go` composes
@@ -211,10 +314,12 @@ kustomize refuses a sibling path (load restrictor).
    Do not retarget `deploy/argocd/apps/memql.yaml`.
 3. Seed secrets the way a cloud install already does (External Secrets
    + Key Vault). Seed `memql-domain` with the install's `MEMQL_DOMAIN`.
-4. Wait for DNS, then wait for the certificate to become Ready:
-   `kubectl -n memql get certificate memql-front-door-tls` must show
-   `READY True` with the five exact dnsNames and no wildcard. Then prove
-   the SNI match memql#4224 was about, on every exact host:
+4. Wait for DNS, then wait for BOTH certificates to become Ready:
+   `kubectl -n memql get certificate memql-front-door-tls memql-wildcard-tls`.
+   `memql-front-door-tls` must show `READY True` with the five exact
+   dnsNames and no wildcard; `memql-wildcard-tls` must show `READY True`
+   with `*.$MEMQL_DOMAIN` and the apex. Then prove the SNI match memql#4224
+   was about, on every exact host:
 
 ```bash
 for h in identity api portal mcp; do
@@ -225,7 +330,17 @@ done
 
    Every line must name Let's Encrypt as the issuer. `Kubernetes Ingress
    Controller Fake Certificate` on any host means that host has no exact
-   rule or is not in the certificate -- re-check the patch list above.
+   rule or is not in the certificate -- re-check the patch list above. Run
+   the same probe against an arbitrary site name to prove the wildcard:
+
+```bash
+openssl s_client -servername "anything.$MEMQL_DOMAIN" -connect "anything.$MEMQL_DOMAIN:443" </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer -subject
+```
+
+   Let's Encrypt with subject `*.$MEMQL_DOMAIN` means the DNS-01 half is
+   live; the fake certificate there means the wildcard Certificate is not
+   Ready or `/spec/tls/1/hosts/0` was never patched.
 5. Open `https://identity.$MEMQL_DOMAIN/setup`. The domain field
    prefills from `MEMQL_DOMAIN` (memql#4216).
 6. Verify:
@@ -374,7 +489,9 @@ repo-credential writes, and the Argo source switch are owner-gated.
   backup `ObjectStore` `destinationPath` (the storage account is an install
   value -- capture it, do not reconstruct it).
 - **Out of band -- no engine manifest defines them:** the cluster-scoped
-  `ClusterIssuer letsencrypt-prod` (HTTP-01), and the hand-seeded
+  `ClusterIssuer letsencrypt-prod` (HTTP-01) plus `letsencrypt-dns01`
+  (DNS-01, which unlike the first one IS in git -- overlays/cloud-entry
+  ships it), and the hand-seeded
   `memql-secrets` (the Graph mail credentials included). Until memql#4224
   and memql#4225 are deployed, two cluster-only workarounds sit beside
   them -- the `portal-front-door` Ingress and the LiveKit Services forced

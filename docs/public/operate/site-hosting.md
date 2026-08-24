@@ -216,23 +216,27 @@ the opposite case -- it will change far more often than the engine does, so
 
 ## Deploying a site, end to end
 
-**The portal's Sites screen is where an operator does most of this.**
-`/sites` (`clients/portal/src/sites/`, memql#3717) lists every site in the
-cluster, live -- updating through the same `subscribeGraph` mechanism
-[Live data](#live-data-in-a-hosted-site) describes below -- with a form to
-create one, and a detail screen per site (`/sites/:siteId`) to publish,
-roll back, change status and delete. What follows is the underlying graph
-writes those controls perform; reach for the portal first, and use the raw
-mutation calls below when scripting a step (CI, an install wizard, a
-one-off fix) instead of clicking through it. Two things the portal does
-NOT do, which is why steps 2 and 3 below still exist as CLI/ops tasks:
-register the hostname, and get bundle bytes into storage in the first
-place.
+**The portal's Deployables screen is where most of this happens.**
+`/deployables` (`clients/portal/src/deployables/`, memql#4346 -- the Sites
+screen from memql#3717, renamed and widened; `/sites` redirects there) lists
+the caller's own sites, or every site in the cluster for a cluster owner, with
+a form to create one and a detail screen per site (`/deployables/:siteId`) to
+deploy, roll back, change status and delete. What follows is the underlying
+graph writes those controls perform; reach for the portal first, and use the
+raw mutation calls below when scripting a step (CI, an install wizard, a
+one-off fix) instead of clicking through it.
+
+**One thing the portal does NOT do, which is why step 2 below still exists as
+an ops task: register the hostname.** Getting bundle bytes into storage used
+to be the second one; it is not any more. A person uploads a zip to their
+Library and the portal deploys it with `sitePublishFromArtifact`, which reads
+the bytes from object storage server-side -- see
+[Deployables](deployables.md#deploying-from-the-library).
 
 ### 1. Create the site row
 
 `createSite` (`dsl/platform/mutations.memql`) is the write behind the
-portal's "New site" form -- it is the only way a site starts existing. It
+portal's "New deployable" form -- it is the only way a site starts existing. It
 requires a `bundleRef` up front -- there is no "empty" state in the
 schema -- so for a brand-new uploaded site, pass a placeholder prefix and
 leave `status` at its default:
@@ -253,46 +257,78 @@ Three things worth knowing before you run it:
   (see [Status](#status-draft-live-disabled) below) -- so a placeholder
   `bundleRef` pointing at nothing yet is harmless. Nobody can request the
   site until you flip it live.
-- **`site` is `@rowAuthz(clusterOwner)`** (`dsl/platform/concepts.memql`),
-  the same tier `v1:campaigns:sendJob` and `:suppression` carry, and it
-  admits *only* the cluster owner role, not admin -- `AccessContext.
+- **`site` is `@rowAuthz(owner="ownerUserId", clusterOwner)`**
+  (`dsl/platform/concepts.memql`) -- the COMPOSITE tier: the row's owner,
+  or a cluster owner. **This supersedes decision D6**, which recorded a
+  plain `clusterOwner` tier and the reason for it: an owner-tier
+  alternative makes "list every site" and cluster-wide hostname uniqueness
+  unenforceable, because `enforceRowAuthzOnPlan` ANDs the owned predicate
+  with no cluster-owner escape. That reason still holds, and the composite
+  is what satisfies it while also making deployables self-serve
+  (memql#4344, design D3): it injects
+  `(ownerUserId==actor.userId)||(actor.isClusterOwner==true)`, so a user
+  reads and writes exactly their own sites and an operator reads every row
+  in the cluster. `admin` is still not among them -- `AccessContext.
   IsClusterOwner()` checks `Role == RoleOwner` exactly
-  (`component/auth/access_context.go`). This is a deliberate, accepted
-  trade recorded as decision D6: an owner-tier or `via=<spec>` alternative
-  either makes "list every site" and cluster-wide hostname uniqueness
-  unenforceable, or would make site management the first-ever use of an
-  authorization shape with zero prior instances in the tree. Widening to
-  admins is later work with a named mechanism, not the default today.
-- **A non-owner is refused, not shown an empty list.** `sitesAll` and
-  `siteById` (`dsl/platform/queries.memql`) both carry
-  `actor.isClusterOwner==true` as an explicit filter conjunct, so an
-  `admin` role's read comes back with zero rows at the engine -- not an
-  error, just nothing, which reads exactly like "there are no sites" if
-  nothing else says otherwise. The portal's own `/sites` screen renders
-  `SitesRefused` (`clients/portal/src/sites/SitesRefused.tsx`) in place of
-  the whole screen for a non-owner instead, stating the gate plainly. If
-  you are scripting against the raw queries, do the same: "zero rows" and
-  "you are not the owner" are different facts, and only one of them is a
+  (`component/auth/access_context.go`).
+- **A user creating a site owns it; a cluster owner creating one creates
+  the deployment's.** `createSite` stamps `ownerUserId` from the actor, and
+  a write made as the deployment (a cluster owner, a system actor, or
+  trusted server-side Go) has that stamp UNDONE, leaving the row
+  cluster-owned -- an empty `ownerUserId`, which is what the seeded portal
+  carries. See `component/memql/platform_site_hostname_policy.go`.
+- **A user's hostname must be `<slug>.<domain>`** -- slug `[a-z0-9-]{3,40}`,
+  cluster-unique, and not one of `api`, `identity`, `mcp`, `portal`, `www`,
+  `admin`, `mail` or the apex, under the domain the cluster serves (derived
+  through `component/frontdoor`, so it cannot disagree with the front door's
+  own hosts). Any other hostname stays cluster-owner-only and hand-certified,
+  for the reason [Limits](#limits) gives. Hostname UNIQUENESS binds every
+  caller including a cluster owner: the edge resolves a request Host to one
+  row, so a second live row on the same hostname makes which site answers
+  depend on row order.
+- **A caller who owns no sites is shown an empty list, not an error.**
+  `sitesAll` and `siteById` (`dsl/platform/queries.memql`) carry the
+  composite predicate as an explicit filter conjunct, so a read comes back
+  with the caller's own rows and nothing else -- not an error, just fewer
+  rows, which reads exactly like "there are no sites" if nothing else says
+  otherwise. If you are scripting against the raw queries, keep that in
+  mind: "zero rows" and "you cannot see the others" are different facts,
+  and only one of them is a
   bug.
 
 ### 2. Add the hostname
 
-**In the cloud, routing needs nothing; TLS needs an object per site.** The
-wildcard DNS record and the `*.<domain>` Ingress rule (committed once at
-install -- decision D2) route any `<label>.<domain>` hostname to the edge the
-moment a live site row names it, so the bytes are served end to end. **The
-certificate is not covered by that claim** (memql#4224): the cloud front-door
-certificate names exact hosts only -- `api.`, `identity.`, `mcp.`, `portal.`
-and the apex -- because the issuer is HTTP-01 and a single wildcard SAN fails
-the whole ACME order. A site routed by the wildcard terminates TLS with the
-ingress controller's self-signed default until it has a cert-manager
-`Certificate` for its hostname and an exact-host Ingress pointing at
-`svc/edge:8085` -- the same shape as the generated `portal-front-door`,
-which exists for exactly this reason. That is one Kubernetes object pair per
-site, an explicit exception to "a site is data" forced by HTTP-01, and it
-stands until the issuer gains a DNS-01 solver. Locally the mkcert pair IS a
-wildcard, so a site that works over https on the local cluster is no
-evidence that it has a certificate in the cloud.
+**In the cloud, routing needs nothing; TLS depends on which issuer the overlay
+declares.** The wildcard DNS record and the `*.<domain>` Ingress rule
+(committed once at install -- decision D2) route any `<label>.<domain>`
+hostname to the edge the moment a live site row names it, so the bytes are
+served end to end.
+
+**With a DNS-01 issuer, the certificate follows for free** (memql#4347). Both
+cloud overlays ship a `letsencrypt-dns01` ClusterIssuer whose Azure DNS solver
+authenticates as a managed identity, and one wildcard `Certificate`
+(`memql-wildcard-tls`) for `*.<domain>` plus the apex; the edge Ingress's
+wildcard rule carries it under `tls`. A freshly deployed site is live over TLS
+with no operator step -- which is what makes self-serve deployables real.
+Install-time prerequisites (an Azure DNS zone for the domain, the identity's
+`DNS Zone Contributor` role on that zone, the federated credential) are in
+[azure-entry-install.md](azure-entry-install.md).
+
+**Without one, the pre-#4347 rule still stands** (memql#4224). The generated
+front-door certificate names exact hosts only -- `api.`, `identity.`, `mcp.`,
+`portal.` and the apex -- because HTTP-01 cannot issue a wildcard and a single
+wildcard SAN fails the whole ACME order. A site routed by the wildcard then
+terminates TLS with the ingress controller's self-signed default until it has
+a cert-manager `Certificate` for its hostname and an exact-host Ingress
+pointing at `svc/edge:8085` -- the same shape as the generated
+`portal-front-door`. That is one Kubernetes object pair per site, an explicit
+exception to "a site is data" forced by HTTP-01.
+
+The render gate decides which regime applies by reading the issuer's SOLVER,
+not its name, so an issuer created out of band counts as HTTP-01 and #4224's
+exact-host assertion holds by default rather than needing to be re-chosen.
+Locally the mkcert pair IS a wildcard, so a site that works over https on the
+local cluster is still no evidence that it has a certificate in the cloud.
 
 **Locally, there is no wildcard hosts entry**, so the new hostname has to
 be added to the managed block `scripts/install/hosts-entries.sh` owns
@@ -337,11 +373,12 @@ pins `MemqlService.Stream` traffic to reads plus one agent-turn message
 type; this is a plain HTTP handler on the bff checking the same `class`
 claim on its own, independently.
 
-**What a signed-in operator CAN do in the portal is the other half of
-this.** `/sites/:siteId`'s "Publish" control (`SiteDetailPage.tsx`,
-`useSiteDetail.ts`) calls `updateSiteBundle` directly with a `bundleRef`
-VALUE and flips the row -- exactly the same write [Rollback](#rollback)
-below uses, in the other direction. It does not touch bytes and cannot:
+**What a signed-in person CAN do in the portal is the other half of
+this.** `/deployables/:siteId`'s "Point at a bundle reference" control
+(`DeployableDetailPage.tsx`) calls `updateSiteBundle` directly with a
+`bundleRef` VALUE and flips the row -- exactly the same write
+[Rollback](#rollback) below uses, in the other direction. It does not touch
+bytes and cannot:
 `updateSiteBundle` has no way to know whether the prefix it is pointing at
 has anything in it. The two halves are complementary, not redundant -- CI
 puts bytes at a `blob://` prefix (this section) and gets back the
@@ -448,7 +485,7 @@ runs on every write that would set `deleted: true`, reads the PRIOR row's
 the caller is a system actor. That is what actually protects the portal's
 own row -- `systemOwned`'s doc comment has said "blocks deletion" since
 before this guard existed, and nothing enforced it until this landed. The
-portal's own detail screen (`SiteDetailPage.tsx`) disables the delete
+portal's own detail screen (`DeployableDetailPage.tsx`) disables the delete
 control for a `systemOwned` row as a courtesy; the real gate is this
 write-path check, reachable and effective against a raw mutation call
 too.
@@ -605,9 +642,9 @@ ordinary query surface -- proven against a live engine in
 whoever is asking: finding a prior version this way is a walk, not a
 lookup.
 
-**The portal does exactly this walk for you.** `/sites/:siteId`'s "Version
-history" band (`clients/portal/src/sites/history.ts`,
-`useSiteHistory.ts`) re-issues `siteById` under successive `asOf`
+**The portal does exactly this walk for you.** `/deployables/:siteId`'s
+"Version history" band (`clients/portal/src/deployables/calls.ts`,
+`useDeployables.ts`) re-issues `siteById` under successive `asOf`
 timestamps, each one set just before the previous result's `createdAt`,
 bounded to the last `MAX_HISTORY_VERSIONS` (5) versions -- the mechanism
 above, already built, with a "Roll back to this" button on each entry that
@@ -730,8 +767,12 @@ rather than trusting this paragraph's age.
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.
 - Node wiring: `app/transport_edge.go`, `app/build_edge.go`.
 - Soft-delete guard: `component/memql/platform_site_delete_guard.go`.
-- Portal Sites screen (memql#3717): `clients/portal/src/sites/` --
-  `SitesPage.tsx` / `useSites.ts` (list + create), `SiteDetailPage.tsx` /
-  `useSiteDetail.ts` (publish, roll back, status, delete),
-  `history.ts` / `useSiteHistory.ts` (the `asOf` version walk),
-  `SitesRefused.tsx` (the non-owner explanation).
+- Portal Deployables screen (memql#4346, replacing the Sites screen of
+  memql#3717): `clients/portal/src/deployables/` --
+  `DeployablesPage.tsx` (list + create), `DeployableDetailPage.tsx` (deploy
+  from the Library, point at a bundle ref, roll back, status, delete),
+  `useDeployables.ts` (all four hooks), `calls.ts` (the `asOf` version walk),
+  `hostname.ts` (the client-side mirror of the hostname policy),
+  `publishRefusal.ts` (the refusal-reason table). There is no non-owner
+  refusal screen: the composite tier gives an ordinary caller sites of their
+  own, so there is nothing to refuse.

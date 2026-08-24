@@ -83,8 +83,11 @@ const seedMaterializerActor = "system:seedMaterializer"
 // only; see rowauthz_enforce.go). Every seed target concept until now was
 // UNDECLARED tier, so guardRowAuthzWrite's `decl == nil` branch let every
 // seed write through regardless of actor and the gap was invisible.
-// v1:platform:site is @rowAuthz(clusterOwner) (the portal seed,
-// dsl/platform/seeds.memql), and RE-materializing it -- every boot after
+// v1:platform:site declares a row-authz tier (the portal seed,
+// dsl/platform/seeds.memql) -- @rowAuthz(clusterOwner) when this was
+// written, the composite @rowAuthz(owner="ownerUserId", clusterOwner)
+// since memql#4344, and the escape below is what admits the seed under
+// either. RE-materializing it -- every boot after
 // the first, since the id already has a row -- walks the SAME
 // read-merge-then-guard path update/delete take (executor_mutation.go's
 // comment: "regardless of whether the mutation was authored as update{}

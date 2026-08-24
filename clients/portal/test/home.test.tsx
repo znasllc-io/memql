@@ -107,7 +107,7 @@ describe("the console home", () => {
     // The console renders in place of the old redirect, with a tile per
     // population the rail offers -- customers included, which was missing.
     await waitFor(() => expect(screen.getByText("audit events")).toBeTruthy());
-    for (const label of ["people", "agents", "customers", "sites", "deployments"]) {
+    for (const label of ["people", "agents", "customers", "deployables", "deployments"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     await waitFor(() => expect(screen.getByText("audit_action_0")).toBeTruthy());
