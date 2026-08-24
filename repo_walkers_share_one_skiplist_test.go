@@ -35,6 +35,7 @@ var walkerExemptions = map[string]string{
 	"docs_construct_names_test.go":                   "walks dsl/, and skips every dot-prefixed directory",
 	"portal_render_path_test.go":                     "walks the portal source directory",
 	"portal_view_composition_test.go":                "walks the portal view directory",
+	"scripts/ci/portal_image_wiring_test.go":         "walks clients/portal/src, the portal stylesheet tree -- a narrow subtree that is not an ancestor of .claude",
 	"scripts/cidb/dbgate_test.go":                    "skips every dot-prefixed directory",
 	"scripts/cidb/dsnliteral_test.go":                "skips every dot-prefixed directory",
 	"scripts/citags/tags_test.go":                    "skips every dot-prefixed directory",
