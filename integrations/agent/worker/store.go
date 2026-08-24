@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/znasllc-io/memql/component/auth"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -164,13 +164,44 @@ func (s *EngineStore) PlanScope(ctx context.Context, planId string) (string, err
 
 // WriteInvocation persists the invocation row by routing through
 // the same component/worker store the WorkerService uses.
+//
+// ownerUserId is NOT an argument: v1:worker:invocation declares the composite
+// owner tier and marks the field @serverSet (memql#4406), so the owner is
+// stamped from actor.userId. A blank owner is refused rather than passed
+// through -- auth.ContextWithUserActor returns ctx UNCHANGED for a blank id,
+// and the write would then land on a row nobody can read, which surfaces much
+// later as "the fleet page shows no activity".
 func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.InvocationRow) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
+	writeCtx, query, err := invocationWriteCall(ctx, row)
+	if err != nil {
+		return err
+	}
+	_, err = s.Engine.Execute(writeCtx, query)
+	return err
+}
+
+// invocationWriteCall builds the borrowed-authority context and the mutation
+// text for one invocation write.
+//
+// Split out of WriteInvocation so the two properties memql#4406 depends on are
+// checkable without an engine: that the call runs as the OWNER, and that
+// ownerUserId does not also travel as an argument. EngineStore holds a concrete
+// *MemQLEngine rather than an interface, so there is no fake to record a
+// context off -- and both properties fail SILENTLY. An unstamped write lands a
+// row with an empty owner that nobody can read, and an undeclared argument is
+// discarded without an error (memql#3626), so a reviewer sees a plausible
+// ownerUserId in the map and concludes the owner reached the row.
+func invocationWriteCall(ctx context.Context, row workerservice.InvocationRow) (context.Context, string, error) {
+	owner := strings.TrimSpace(row.OwnerUserId)
+	if owner == "" {
+		return nil, "", fmt.Errorf("agent.worker store: ownerUserId required -- v1:worker:invocation is owner-tiered and an unstamped write is refused")
+	}
+	writeCtx := auth.ContextWithUserActor(ctx, owner)
 	args := map[string]any{
 		"invocationId":  row.ID,
-		"ownerUserId":   row.OwnerUserId,
 		"workerId":      row.WorkerId,
 		"agentId":       row.AgentId,
 		"planId":        row.PlanId,
@@ -194,11 +225,9 @@ func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.Inv
 	}
 	body, err := json.Marshal(args)
 	if err != nil {
-		return fmt.Errorf("agent.worker store: marshal invocation: %w", err)
+		return nil, "", fmt.Errorf("agent.worker store: marshal invocation: %w", err)
 	}
-	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
-	_, err = s.Engine.Execute(ctx, query)
-	return err
+	return writeCtx, fmt.Sprintf("createWorkerInvocation(%s)", string(body)), nil
 }
 
 // -- the fleet reads (memql#4351) --------------------------------------------

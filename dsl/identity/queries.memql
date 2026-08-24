@@ -372,8 +372,9 @@ query user searchUsers {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-// AUDIT 2026-08-04 (memql#2987): was @public, now admin-gated. This does what
-// the comment that used to sit here said should be done.
+// AUDIT 2026-08-04 (memql#2987): was @public, then admin-gated, and cluster-
+// owner-only since memql#4366. This does what the comment that used to sit here
+// said should be done, and then some.
 //
 // The debt was real and worse than "not caller-scoped": auditEventFull
 // projects actorEmail, targetEmail, sourceIP and userAgent, and the filter was
@@ -382,21 +383,33 @@ query user searchUsers {
 // by passing their id. @public enforced nothing -- it only suppressed the
 // classifier.
 //
-// requiresOwnerOrAdmin as a top-level conjunct is the searchUsers precedent
-// (memql#2883 / #2860), and it is the right shape here rather than
-// @serverOnly: the admin UI consumes this over the wire, and admins hold the
-// role, so the surface keeps working while everyone else is refused. It is a
-// live actorEnvelope context-spec, evaluated in-process against the auth
-// envelope -- not the `requiresClusterOwner` placeholder the old comment
-// warned about, which is declared nowhere (memql#2983).
-/// Audit events where actorUserId equals the supplied userId, restricted to the owner or an admin.
+// The gate was requiresOwnerOrAdmin, following the searchUsers precedent
+// (memql#2883 / #2860): a live actorEnvelope context-spec over the wire, so the
+// admin UI kept working while everyone else was refused. memql#4366 narrowed it
+// to actor.isClusterOwner==true, and NOT as a preference -- the concept now
+// declares @rowAuthz(clusterOwner), whose escape is the `owner` ROLE alone, so
+// the old spelling would pass an admin at the query gate and hand them zero
+// rows from the tier. See the concept's TIER note for why an owner tier and the
+// composite were both unavailable here.
+//
+// (The `requiresClusterOwner` placeholder an older comment warned about is
+// still declared nowhere -- memql#2983. actor.isClusterOwner is the real
+// envelope field.)
+/// Audit events where actorUserId equals the supplied userId. CLUSTER OWNER ONLY.
 /// Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar
 /// yet).
+///
+/// It was `requiresOwnerOrAdmin`, and the change is forced by the concept's tier rather than
+/// chosen (memql#4366). `clusterOwner` is the `owner` ROLE alone, so an admin passed by that spec
+/// would then be narrowed by the tier to zero rows -- a query gate that says yes over a tier that
+/// says no, reported to the reader as "the audit log is empty". Stating the real scope is what
+/// makes the narrowing honest; it does not take anything from an admin that the tier had left.
+@actor
 query auditEvent auditEventsByActor {
   args {
     userId  string!
   }
-  filter  actorUserId==args.userId && requiresOwnerOrAdmin
+  filter  actorUserId==args.userId && actor.isClusterOwner==true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -428,19 +441,21 @@ query auditEvent auditEventsByActor {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-// AUDIT 2026-08-04 (memql#2987): was @public, now admin-gated. Companion of
-// auditEventsByActor and identical in every way that matters -- same
-// auditEventFull shape (actorEmail / targetEmail / sourceIP / userAgent), same
-// caller-supplied id with no check, same fix. See that query for the full
-// rationale.
-/// Audit events where targetId equals the supplied targetId, restricted to the owner or an admin.
+// AUDIT 2026-08-04 (memql#2987): was @public, then admin-gated, and cluster-
+// owner-only since memql#4366. Companion of auditEventsByActor and identical in
+// every way that matters -- same auditEventFull shape (actorEmail / targetEmail
+// / sourceIP / userAgent), same caller-supplied id with no check, same fixes.
+// See that query for the full rationale.
+/// Audit events where targetId equals the supplied targetId. CLUSTER OWNER ONLY -- same forced
+/// change as auditEventsByActor above, same reason (memql#4366).
 /// Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar
 /// yet).
+@actor
 query auditEvent auditEventsByTarget {
   args {
     targetId  string!
   }
-  filter  targetId==args.targetId && requiresOwnerOrAdmin
+  filter  targetId==args.targetId && actor.isClusterOwner==true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -915,9 +930,18 @@ query delegation expiredActiveDelegations {
 
 /// All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days <
 /// now.
+///
+/// It reads under `actor.isClusterOwner==true` because its only caller is the
+/// auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL
+/// (component/auth/maintenance_actor.go, memql#4366). Stating the conjunct rather than leaning on
+/// the tier's injection makes the arrangement legible here, at the read -- and makes the failure
+/// mode loud rather than silent. This sweep is OBSERVATION-ONLY today: it publishes a candidate
+/// COUNT, so an unauthorized read does not fail, it reports zero, and a retention window nobody is
+/// enforcing looks exactly like a retention window with nothing to do.
+@actor
 @unbounded("expired audit-event retention purge sweep -- an internal sweep that must see all")
 query auditEvent expiredAuditEvents {
-  filter  action!=""
+  filter  actor.isClusterOwner==true && action!=""
   shape   auditEventFull
 }
 
@@ -1498,11 +1522,17 @@ query authActivity authActivityByRetiredHash {
   shape   authActivityFull
 }
 
+/// THE OPERATOR ROLL-UP for the portal's Audit Trail: cluster owner only, which is the one role
+/// the concept's `clusterOwner` tier lets past (memql#4366). It was `requiresOwnerOrAdmin`; see
+/// auditEventsByActor for why that spelling could only have produced an empty page for an admin.
+/// This mirrors recentAuthActivity exactly, and the pair of them is the split memql#4328 made:
+/// routine mechanics are self-readable, cluster-wide security decisions are the operator's.
+@actor
 query auditEvent recentAuditEvents {
   args {
     category  string
   }
-  filter  requiresOwnerOrAdmin && when(args.category) { category==args.category }
+  filter  actor.isClusterOwner==true && when(args.category) { category==args.category }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

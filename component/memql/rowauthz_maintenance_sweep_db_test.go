@@ -1,0 +1,285 @@
+package memql
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+)
+
+// THE PROOF memql#4406 asked for: the retention sweep still retires a row after
+// v1:worker:invocation's tier landed.
+//
+// "A green suite with a dead sweep is the failure mode here" -- the issue's own
+// words, and the reason this file exists rather than a note saying the sweep was
+// reviewed. Declaring an owned tier over a concept a system-actor sweep reads
+// makes the sweep read ZERO ROWS: not an error, not a log line, just a table
+// that quietly stops being pruned while WORKER_INVOCATION_RETENTION_DAYS goes on
+// looking like a setting. Every gate in this package stays green through that.
+//
+// So the test is built around a NEGATIVE CONTROL rather than a positive one. It
+// is easy to write a test where the sweep's read returns the row and learn
+// nothing -- an unenforced tier returns it too. What makes the pass meaningful
+// is that the SAME read, under the ordinary automation principal, returns
+// nothing: the tier is doing work, and the maintenance principal is what gets
+// past it.
+//
+// Postgres-gated like its neighbours; CI's db-tests lane runs this package with
+// MEMQL_REQUIRE_DB=1, so a skip there is a failure rather than a green.
+
+const invocationConcept = "v1:worker:invocation"
+
+// The RoleReader principal below is the one component/automations'
+// contextWithSystemActor builds for an automation that is NOT on the maintenance
+// list. It is rebuilt here rather than imported because component/automations
+// imports THIS package, so the dependency cannot run the other way.
+//
+// That is safe for what it is used for: it is the NEGATIVE control, and its only
+// claim is "a RoleReader actor is refused". The tie back to the real thing is
+// asserted separately, by requiring MaintenanceActor to answer nil for an
+// unlisted name -- i.e. that the LIST is what confers the elevation, not the
+// shape of the context.
+
+// ownerFieldString renders a stored owner field for an error message. The write
+// path canonicalises an @relationship owner to `v1:identity:user:<id>`, so the
+// assertion is on containment rather than equality -- sameRowAuthzOwner's own
+// reason for existing.
+func ownerFieldString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// queryRowCount runs a read and returns how many rows it produced.
+//
+// A COUNT rather than a membership test, deliberately. Both sweep queries are
+// `@unbounded` with NO sort and NO paginate, so they clamp at MaxResults (500)
+// in an unspecified order -- which makes "my row is in the result" a
+// non-deterministic assertion the moment the database holds more than 500 rows
+// of that concept. That is not hypothetical: it is exactly how
+// TestSeedSweepListUserIds fails against perfectly good code on a reused
+// database, and dsl/identity/queries.memql says so in as many words ("Past 500
+// active users this truncates, and silently").
+//
+// The pair of assertions this file makes is truncation-proof in both
+// directions: >=1 under the maintenance principal (a row was written first, and
+// a clamp cannot turn one row into none) and EXACTLY 0 under the ordinary one.
+// Whether a SPECIFIC row survived the write is checked where it can be checked
+// deterministically -- latestPayload, which reads by id straight off the table.
+func queryRowCount(t *testing.T, ctx context.Context, eng *MemQLEngine, q string) int {
+	t.Helper()
+	res, err := eng.Execute(ctx, q)
+	if err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	if res == nil || res.Bundle == nil {
+		return 0
+	}
+	return len(res.Bundle.Nodes)
+}
+
+func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+
+	// ---- POSITIVE CONTROL, first, because #4366 records exactly this trap:
+	// "a first probe reported 'survives' because the concept registry had not
+	// been loaded, so nothing was injected". A test that measures enforcement
+	// over an unloaded registry measures nothing and reports success.
+	concept, err := memoryNodes.Get(invocationConcept)
+	if err != nil || concept == nil {
+		t.Fatalf("%s did not resolve in the loaded registry (%v); nothing below would be enforced", invocationConcept, err)
+	}
+	decl := concept.RowAuthz
+	if decl == nil {
+		t.Fatalf("%s declares no row-authz tier, so this test would pass over an unenforced concept", invocationConcept)
+	}
+	if decl.Tier != langparser.RowAuthzOwned || strings.TrimSpace(decl.Owner) != "ownerUserId" || !decl.ClusterOwnerBypass {
+		t.Fatalf("%s declares tier=%q owner=%q clusterOwner=%v; this test is written against the composite owner tier",
+			invocationConcept, decl.Tier, decl.Owner, decl.ClusterOwnerBypass)
+	}
+
+	suffix := uniqueSuffix("sweep4406")
+	owner := "worker-owner-" + suffix
+	invocationId := "inv-" + suffix
+
+	ownerCtx := rowAuthzCallerCtx(owner)
+
+	// ---- The write. ownerUserId is NOT an argument: the concept marks it
+	// @serverSet and the mutation stamps actor.userId, which is the half of
+	// memql#4406 that TestDeclaredOwnerFieldsAreServerStamped enforces.
+	storedId := runMutation(t, ownerCtx, eng, "createWorkerInvocation", map[string]any{
+		"invocationId": invocationId,
+		"workerId":     "wkr-" + suffix,
+		"agentId":      "agt-" + suffix,
+		"tool":         "workerHost",
+		"action":       "exec",
+		"startedAt":    "2026-01-01T00:00:00.000Z",
+		"outcome":      "success",
+	})
+	stamped := latestPayload(t, ownerCtx, db, invocationConcept, storedId)
+	if got := ownerFieldString(stamped["ownerUserId"]); !strings.Contains(got, owner) {
+		t.Fatalf("ownerUserId stamped as %q, want the actor %q -- the row is owned by nobody the sweep can be scoped against", got, owner)
+	}
+
+	// ---- The maintenance principal, taken from the REAL list rather than
+	// constructed here, so this test fails if the entry is ever dropped.
+	maint := auth.MaintenanceActor("workerInvocationRetentionSweep")
+	if maint == nil {
+		t.Fatal("workerInvocationRetentionSweep is not on the maintenance list, so the retention sweep " +
+			"runs as RoleReader over an owned-tier concept and retires nothing (component/auth/maintenance_actor.go)")
+	}
+	if !maint.IsClusterOwner() {
+		t.Fatalf("the maintenance principal is %s/%s and IsClusterOwner()=false; the composite tier's only escape is RoleOwner",
+			maint.UserId, maint.Role)
+	}
+	maintCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), maint),
+		&auth.TokenInfo{Subject: maint.UserId})
+
+	// ---- THE CLAIM: the sweep's read still returns work to do.
+	if n := queryRowCount(t, maintCtx, eng, `query expiredWorkerInvocations()`); n == 0 {
+		t.Fatal("expiredWorkerInvocations returned ZERO rows under the maintenance principal, with a row " +
+			"just written. The sweep cannot retire what it cannot read, and this is the silent failure " +
+			"memql#4406 refused to ship: no error, no log line, and WORKER_INVOCATION_RETENTION_DAYS " +
+			"quietly stops meaning anything.")
+	}
+
+	// ---- THE NEGATIVE CONTROL, without which the assertion above is also
+	// satisfied by a tier that is not enforced at all.
+	if auth.MaintenanceActor("someAutomationNobodyListed") != nil {
+		t.Fatal("MaintenanceActor answered for an unlisted automation; the elevation must come from the list")
+	}
+	readerCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), &auth.AccessContext{
+			UserId: "system:automation:workerInvocationRetentionSweep",
+			Role:   auth.RoleReader,
+		}),
+		&auth.TokenInfo{Subject: "system:automation:workerInvocationRetentionSweep"})
+	// EXACTLY zero, not "does not contain my row": absence of one row is also
+	// what a truncated result looks like, so emptiness is the assertion that
+	// cannot pass vacuously.
+	if n := queryRowCount(t, readerCtx, eng, `query expiredWorkerInvocations()`); n != 0 {
+		t.Fatalf("the ordinary automation principal (RoleReader) read %d row(s), so the tier is not being "+
+			"enforced and the pass above says nothing about the maintenance principal", n)
+	}
+
+	// ---- The sweep's WRITE, which the write guard resolves against the same
+	// admission function. A read the sweep can perform and a write it cannot is
+	// still a sweep that retires nothing.
+	if _, err := eng.Execute(maintCtx, `mutation softDeleteWorkerInvocation(invocationId: "`+invocationId+`")`); err != nil {
+		t.Fatalf("softDeleteWorkerInvocation refused the maintenance principal: %v", err)
+	}
+	after := latestPayload(t, ownerCtx, db, invocationConcept, storedId)
+	if after["deleted"] != true {
+		t.Fatalf("deleted=%v after the sweep's soft-delete, want true", after["deleted"])
+	}
+
+	// And the ordinary principal cannot perform that write, for the same reason
+	// it cannot perform the read.
+	if _, err := eng.Execute(readerCtx, `mutation softDeleteWorkerInvocation(invocationId: "`+invocationId+`")`); err == nil {
+		t.Fatal("the ordinary automation principal soft-deleted another owner's invocation row; the write " +
+			"guard is not consulting the tier")
+	}
+}
+
+// THE SAME PROOF for v1:identity:auditEvent (memql#4366), and here the silent
+// failure is worse than the worker one.
+//
+// auditEventRetentionSweep is OBSERVATION-ONLY: it publishes a candidate COUNT
+// rather than deleting rows. So an unauthorized read does not fail -- it reports
+// zero, and a retention window nobody is enforcing is indistinguishable from a
+// retention window with nothing to do. There is no second symptom to notice.
+//
+// The write half is the part that would be a severe regression if the ruling
+// were wrong, so it is asserted rather than argued: the concept declares
+// `clusterOwner`, and if that gated CREATES then every sign-in, every session
+// and every role change would stop being recorded. The write guard resolves a
+// TARGET ROW, so it covers updates and deletes and not creates
+// (rowauthz_write_guard.go says so); this is the test that makes that sentence
+// evidence.
+func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+
+	const auditConcept = "v1:identity:auditEvent"
+
+	// POSITIVE CONTROL first, for the reason #4366 records: a probe over an
+	// unloaded registry measures nothing and reports success.
+	c, err := memoryNodes.Get(auditConcept)
+	if err != nil || c == nil || c.RowAuthz == nil {
+		t.Fatalf("%s declares no row-authz tier in the loaded registry (%v); this test would pass over "+
+			"an unenforced concept", auditConcept, err)
+	}
+	if c.RowAuthz.Tier != langparser.RowAuthzClusterOwner {
+		t.Fatalf("%s declares tier=%q; this test is written against the clusterOwner ruling", auditConcept, c.RowAuthz.Tier)
+	}
+
+	suffix := uniqueSuffix("auditsweep4366")
+	eventId := "aud-" + suffix
+	actorUser := "audit-actor-" + suffix
+
+	// ---- THE WRITE, under an ORDINARY user. This is what the identity service
+	// does on every sign-in: it records an event about a user, from that user's
+	// request context, with actorUserId as DATA rather than as an owner stamp.
+	//
+	// runMutation fails the test on any error, which is the assertion: if the
+	// clusterOwner tier gated CREATES, every sign-in, session and role change
+	// would stop being recorded. The audit trail's own doc says the write guard
+	// covers updates and deletes only, and this is what keeps that sentence
+	// evidence rather than a claim.
+	storedId := runMutation(t, rowAuthzCallerCtx(actorUser), eng, "createAuditEvent", map[string]any{
+		"eventId":     eventId,
+		"occurredAt":  "2026-01-01T00:00:00.000Z",
+		"category":    "auth",
+		"action":      "signin_succeeded",
+		"actorUserId": actorUser,
+		"outcome":     "success",
+	})
+
+	// actorUserId stays CALLER-SUPPLIED, which is the load-bearing half of why
+	// this concept cannot take an owner tier: re-stamping it from the actor
+	// would be wrong, not merely awkward, and it is deliberately EMPTY for an
+	// anonymous event. Read by id straight off the table, so this assertion is
+	// unaffected by any clamp.
+	stored := latestPayload(t, rowAuthzCallerCtx(actorUser), db, auditConcept, storedId)
+	if got := ownerFieldString(stored["actorUserId"]); !strings.Contains(got, actorUser) {
+		t.Fatalf("actorUserId stored as %q, want the value the caller passed (%q). If a stamp has "+
+			"started overwriting it, the concept's TIER note is no longer true and an anonymous event "+
+			"would carry a principal it never had.", got, actorUser)
+	}
+
+	// ---- The sweep's read, under the REAL maintenance principal.
+	maint := auth.MaintenanceActor("auditEventRetentionSweep")
+	if maint == nil {
+		t.Fatal("auditEventRetentionSweep is not on the maintenance list, so the audit retention sweep " +
+			"counts ZERO candidates for ever, and reports that as a healthy tick")
+	}
+	maintCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), maint), &auth.TokenInfo{Subject: maint.UserId})
+	if n := queryRowCount(t, maintCtx, eng, `query expiredAuditEvents()`); n == 0 {
+		t.Fatal("expiredAuditEvents returned ZERO rows under the maintenance principal, with a row just " +
+			"written. The sweep's candidate count is its whole output, so this failure has no second symptom.")
+	}
+
+	// ---- NEGATIVE CONTROL: the ordinary automation principal sees nothing, so
+	// the assertion above is about the principal rather than about an
+	// unenforced tier.
+	readerCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), &auth.AccessContext{
+			UserId: "system:automation:auditEventRetentionSweep",
+			Role:   auth.RoleReader,
+		}),
+		&auth.TokenInfo{Subject: "system:automation:auditEventRetentionSweep"})
+	if n := queryRowCount(t, readerCtx, eng, `query expiredAuditEvents()`); n != 0 {
+		t.Fatalf("the ordinary automation principal read %d audit row(s), so the tier is not being "+
+			"enforced and the pass above says nothing", n)
+	}
+
+	// ---- And the ordinary caller who WROTE the row cannot read the roll-up.
+	// That is the ruling: the cluster-wide security log is the operator's.
+	if n := queryRowCount(t, rowAuthzCallerCtx(actorUser), eng, `query recentAuditEvents()`); n != 0 {
+		t.Fatalf("a non-owner caller read %d row(s) from the cluster-wide audit roll-up; the clusterOwner "+
+			"ruling is not enforced", n)
+	}
+}

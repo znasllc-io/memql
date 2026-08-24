@@ -10,12 +10,25 @@ use planner.shapes.{ planFull }
 /// List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to
 /// rows created strictly before it -- the retention sweep's logic computes the cutoff (now -
 /// WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
+///
+/// It reads under `actor.isClusterOwner==true` because its only caller is the
+/// workerInvocationRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL
+/// (component/automations/maintenance_actor.go, memql#4406) -- a named synthetic cluster owner. The
+/// alternative would be a read-path escape hatch in the enforcement layer, which is strictly worse:
+/// a bypass is available to every caller that can reach it, whereas an identity is only as powerful
+/// as the queries it is used for. That is the reasoning component/campaigns/worker.go and
+/// authActivityByRetiredHash both record for the same choice.
+///
+/// Writing the conjunct rather than relying on the tier's injection is what makes the arrangement
+/// legible HERE, at the read, instead of only in the Go that stamps the principal. It is also the
+/// failure mode made loud: strip the principal and this returns zero rows, and the filter says why.
+@actor
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 query invocation expiredWorkerInvocations {
   args {
     createdBefore  string
   }
-  filter  action!="" && isNotDeleted && when(args.createdBefore) { row.createdAt<args.createdBefore }
+  filter  actor.isClusterOwner==true && action!="" && isNotDeleted && when(args.createdBefore) { row.createdAt<args.createdBefore }
   shape   workerInvocationFull
 }
 
@@ -31,12 +44,20 @@ query invocation expiredWorkerInvocations {
 // Arguments:
 //   planId (string, required) - v1:planner:plan.id
 
-/// List all worker invocations belonging to a Plan.
+/// List the CALLER'S worker invocations belonging to a Plan.
+///
+/// The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite
+/// tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable
+/// (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator
+/// counterpart: the pair shape exists where an operator surface needs it
+/// (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an
+/// unused second variant here would be surface nothing reads.
+@actor
 query invocation invocationsForPlan {
   args {
     planId  string!
   }
-  filter  planId==args.planId && isNotDeleted
+  filter  planId==args.planId && ownerUserId==actor.userId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -57,17 +78,19 @@ query invocation invocationsForPlan {
 // Arguments:
 //   ownerUserId (string, required) - v1:identity:user.id
 
-// `@public` marks this query as intentionally not caller-scoped.
-// The only known callsite is the worker invocation retention sweep
-// (system actor). Splitting into self + system variants tracked
-// under #54.
-/// List worker invocations belonging to a user.
-@public
+// NO LONGER @public (memql#4406). It carried that annotation with the note "the only known
+// callsite is the worker invocation retention sweep (system actor)" -- which was not true: the
+// sweep reads expiredWorkerInvocations, and this query had no caller at all. What @public bought
+// was a caller-supplied ownerUserId reachable over the wire against rows carrying argsRedacted
+// and an unscrubbed outputPreview.
+//
+// The argument went with it. `ownerUserId` as an ARG is dead once the scope is the actor: the two
+// could only ever agree, and a caller passing somebody else's id now gets nothing rather than
+// their fleet's call history.
+/// List the caller's worker invocations, across every machine they own.
+@actor
 query invocation invocationsForUser {
-  args {
-    ownerUserId  string!
-  }
-  filter  ownerUserId==args.ownerUserId && isNotDeleted
+  filter  ownerUserId==actor.userId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

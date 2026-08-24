@@ -335,7 +335,7 @@ func DefaultGraphEnvKeys() GraphEnvKeys {
 
 // LegacyGraphEnvKeys returns the pre-rename names. Kept so installs
 // that still have the old `AZURE_*` / `MAIL_*` values seeded keep
-// working until everyone has re-run `make secrets-seed`. Once the
+// working until everyone has re-run `go run ./scripts/secrets seed`. Once the
 // last install is migrated this can come out.
 func LegacyGraphEnvKeys() GraphEnvKeys {
 	return GraphEnvKeys{

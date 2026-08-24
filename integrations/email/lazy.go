@@ -22,8 +22,8 @@ type SecretResolver func(ctx context.Context, name string) (string, error)
 // lifetime of the process.
 //
 // Why this exists: the env-driven NewSenderFromEnv path runs at
-// plug-in registration time, BEFORE `make secrets-seed` populates
-// v1:platform:globalVariable + globalSecret rows on a freshly
+// plug-in registration time, BEFORE `go run ./scripts/secrets seed`
+// populates v1:platform:globalVariable + globalSecret rows on a freshly
 // rebuilt cluster. Without lazy resolution, the identity binary
 // would lock in LogSender on cold-boot and require a manual restart
 // after seeding to pick up Graph / SMTP credentials.

@@ -985,7 +985,7 @@ func TestDBTestsLaneMakesAnUnreachableDatabaseFail(t *testing.T) {
 				"line, so this gate cannot read which packages it runs:\n\n  %s\n\n"+
 				"Put the invocation on its own line (`set -o pipefail` or an env assignment on "+
 				"a preceding line is fine). The gate deliberately does not parse around `;` or "+
-				"`&&`, because accepting `make deps && go test` would also accept "+
+				"`&&`, because accepting `make install-deps && go test` would also accept "+
 				"`false && go test` (memql#2886).", dbTestsJob, ciWorkflow, lane.unparsedRun[0])
 		default:
 			t.Fatalf("the %q job in %s has no `go test` step, so the env key it sets guards "+

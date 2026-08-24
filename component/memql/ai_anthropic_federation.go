@@ -246,7 +246,7 @@ func anthropicCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.
 		// told at two moments -- the resolver's error for an ordinary
 		// provider, and this one for the Anthropic path where the resolver
 		// deliberately stays silent. Fixing one and leaving the other
-		// saying `make secret-set` would leave a pair that
+		// pointing at a `secret-set` make target would leave a pair that
 		// docs/public/operate/env-vars.md describes together disagreeing.
 		return nil, "", fmt.Errorf(
 			"provider %q has no Anthropic credential: neither %s nor workload identity federation is configured. "+

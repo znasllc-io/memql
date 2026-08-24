@@ -7,10 +7,15 @@ use agents.concepts.{ agentAuthorization }
 use identity.concepts.{ user }
 
 /// Insert a worker tool-invocation telemetry row.
+///
+/// ownerUserId is NOT an argument: v1:worker:invocation declares the composite owner tier
+/// (memql#4406) and marks the field @serverSet, so the owner reaches the row from actor.userId and
+/// through nothing else. Both Go writers already resolve the owner before calling -- they need it
+/// to route the dispatch at all -- and now stamp it as the actor rather than passing it as data.
+@actor
 mutate invocation createWorkerInvocation {
   args {
     invocationId   string!
-    ownerUserId    string!
     workerId       string!
     agentId        string!
     planId         string
@@ -34,7 +39,7 @@ mutate invocation createWorkerInvocation {
   }
   insert {
     id: args.invocationId
-    args.ownerUserId
+    ownerUserId: actor.userId
     args.workerId
     args.agentId
     planId: args.planId ?? ""

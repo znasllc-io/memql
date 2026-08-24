@@ -110,8 +110,10 @@ memql-cockpit --cluster acme       # https://api.acme.example
 Locally this needs the two config knobs the cloud gets from its provider: the
 `*.memql.localhost` wildcard in `/etc/hosts` (→ 127.0.0.1) and a trusted mkcert
 cert (`mkcert -install`) — both already required to reach `identity.memql.localhost`.
-A raw `kubectl port-forward svc/bff 50051` (`make forward`) remains available for
-low-level debugging, but it is **not** part of the connection path.
+A raw `kubectl port-forward svc/bff 50051` remains available for low-level
+debugging, but it is **not** part of the connection path. There is deliberately
+no make target wrapping it: a wrapper is what turns a debugging escape hatch
+into a documented way to connect.
 
 ## Anti-patterns (reject these in review)
 
@@ -119,7 +121,7 @@ low-level debugging, but it is **not** part of the connection path.
   connection model. If "how a client connects" differs between local and cloud,
   that is a deviation. (This is why `run-local` was removed — one `run` connects
   everywhere via the cluster registry.)
-- **Target-specific commands or code branches.** No `make run-local`, no
+- **Target-specific commands or code branches.** No `run-local` make target, no
   `if env == "local"` in application logic. Configuration is *data* (the
   overlay + the registry), read the same way everywhere.
 

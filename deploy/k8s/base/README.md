@@ -133,8 +133,8 @@ every other node has it `false`.
 
 ### Gated pre-deploy migration ([#553](https://github.com/znasllc-io/memql/issues/553))
 
-So a schema change never races the worker rollout, `make deploy` /
-`make deploy-aks` apply `migrate-job.yaml` (a one-shot `memql migrate` Job)
+So a schema change never races the worker rollout, `make deploy` applies
+`migrate-job.yaml` (a one-shot `memql migrate` Job)
 and **wait for it to complete before any Deployment rolls** — a failed
 migration aborts the deploy. The Job is idempotent (bun advisory lock +
 mark-applied), and identity's boot migration is retained as a no-op
@@ -244,7 +244,7 @@ kubectl apply -k deploy/k8s/overlays/cloud
 > authority); the base `:tags` are placeholders. Rollback = `git revert` of the
 > overlay (see `scripts/deploy/aks-rollback.sh`), never `kubectl rollout undo`.
 
-Or, from the repo root: `make deploy-aks` (runs the namespace +
+Or, from the repo root: `make deploy` (runs the namespace +
 kustomize apply; the Secret step is a one-time prerequisite). `identity`
 comes up first to run the one-time migration and serve JWKS; the other
 nodes' verifiers retry JWKS non-fatally until it is ready.

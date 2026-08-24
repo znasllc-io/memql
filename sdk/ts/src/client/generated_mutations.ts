@@ -3744,11 +3744,11 @@ QueryClient.prototype.createVoiceAgentTokenIdentity = function (this: QueryClien
   return this.executeNamed("createVoiceAgentTokenIdentity", buildCreateVoiceAgentTokenIdentity(args), opts);
 };
 
-/** Insert a worker tool-invocation telemetry row. */
+/** Insert a worker tool-invocation telemetry row.
+ownerUserId is NOT an argument: v1:worker:invocation declares the composite owner tier (memql#4406) and marks the field @serverSet, so the owner reaches the row from actor.userId and through nothing else. Both Go writers already resolve the owner before calling -- they need it to route the dispatch at all -- and now stamp it as the actor rather than passing it as data. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["createWorkerInvocation"] in generated_concepts.ts).
 export interface CreateWorkerInvocationArgs {
   invocationId: string;
-  ownerUserId: string;
   workerId: string;
   agentId: string;
   planId?: string;
@@ -3774,7 +3774,6 @@ export interface CreateWorkerInvocationArgs {
 export function buildCreateWorkerInvocation(args: CreateWorkerInvocationArgs): string {
   const parts: string[] = [];
   parts.push("invocationId: " + renderMemQLValue(args.invocationId));
-  parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
   parts.push("workerId: " + renderMemQLValue(args.workerId));
   parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.planId !== undefined) parts.push("planId: " + renderMemQLValue(args.planId));

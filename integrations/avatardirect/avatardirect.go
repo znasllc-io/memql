@@ -284,10 +284,13 @@ func (i *Integration) handleEngageVendor(ctx context.Context, args map[string]an
 	// engineURL is where the vendor's CLOUD engine dials in from the public
 	// internet. A browser-local URL (livekit.local / 192.168.x /
 	// ws://livekit:7880) is unreachable from the cloud, so this MUST be an
-	// externally-reachable tunnel -- LIVEKIT_PUBLIC_URL (the same env the
-	// voice-agent avatar uses; set by `make dev-refresh`'s ngrok step). Without
-	// it the engine can't join the room and never publishes video, so fall back
-	// to the browser URL but log a warning.
+	// externally-reachable tunnel -- MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL (the same
+	// env the voice-agent avatar uses; seeded onto the memql-secrets Secret by
+	// scripts/k3d/seed-secrets.sh, i.e. `make secrets`). Without it the engine
+	// can't join the room and never publishes video, so fall back to the browser
+	// URL but log a warning. (memql#4405: this used to name the env var by a
+	// stale short name and credit a `dev-refresh` make target's "ngrok step"
+	// -- neither the target nor the step exists.)
 	browserURL := i.lk.LiveKitPublicURL
 	if browserURL == "" {
 		browserURL = i.lk.LiveKitURL
@@ -614,7 +617,19 @@ func (i *Integration) vendorAPIKey(ctx context.Context, secretName string) (stri
 	if v := strings.TrimSpace(os.Getenv(secretName)); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("avatardirect: %s not found in v1:platform:globalSecret or env -- run `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration`", secretName, secretName)
+	// NAMES REAL THINGS ONLY (memql#4405). This used to direct the operator
+	// at a `secret-set` make target (with NAME= / VALUE= / SCOPE= / KIND=
+	// arguments), which the Makefile has never had -- and there is no
+	// `scripts/secrets` subcommand behind it either, so it was not a
+	// missing wrapper but a whole workflow that does not exist. The
+	// phrasing matches component/memql/ai_providers.go's resolver
+	// error, which memql#4338 fixed first: name the destination, not
+	// an imaginary command.
+	return "", fmt.Errorf(
+		"avatardirect: %s not found in v1:platform:globalSecret or the process env. "+
+			"Seed it under that name: put it in the node's environment (locally `make secrets`; "+
+			"in a cluster, whichever secret store the deployment reads), or store a "+
+			"v1:platform:globalSecret row under it", secretName)
 }
 
 // -----------------------------------------------------------------

@@ -1068,6 +1068,8 @@ Row admission has one actor that is neither a user nor a role: a
 **connector** (epic memql#4378, decision D4). It is the characterised
 internal actor memql#4366 asks for, **for this class of writer only** —
 the planner's system actor is a separate decision and is not this one.
+The engine's housekeeping READS are answered by the [maintenance
+principal](#the-maintenance-principal-a-named-internal-sweep) below.
 
 **The rule, in one sentence.** A connector actor is admitted to the rows
 of a concept whose `@origin` or `@mirroredTo` names it, regardless of
@@ -1119,6 +1121,125 @@ Implementation: `component/auth/connector_actor.go`,
 `component/memql/mirror_write_guard.go`. Measured by
 `TestConnectorRowAdmissionIsScopedToTheConceptsThatNameIt` and
 `TestMirrorWritesAreRefusedForEveryActorButItsConnector`.
+
+## The maintenance principal: a named internal sweep
+
+The connector actor above characterises one class of internal caller. The
+engine has a second, and it is the one that blocks declarations rather
+than enabling them: **housekeeping reads that span every owner by
+definition** — a retention sweep.
+
+**The failure it exists to prevent.** `contextWithSystemActor`
+(`component/automations/executor.go`) stamps `RoleReader`, deliberately:
+`"system"` is not in `auth.AllRoles`, and Reader keeps
+`actor.isClusterOwner` FALSE for a caller with no identity of its own
+(memql#2801). Right for an automation acting on one user's data — and
+fatal for a sweep. The moment a swept concept declares an owned tier, the
+injected predicate compares each row's owner against
+`system:automation:<name>`, matches nothing, and the sweep retires
+nothing:
+
+> no error, no log line, and a retention window that goes on looking like
+> a setting while the table is never pruned.
+
+Every gate in this document stays green through that. memql#4406 measured
+it for `v1:worker:invocation` and refused to declare the tier until the
+principal existed, because the alternative was discovering it in
+production as *"why is this table growing"*.
+
+**The decision: an identity, not an escape hatch.** The argument is
+`component/campaigns/worker.go`'s, and it is the one that settles it —
+
+> The alternative would be an escape hatch in the enforcement layer,
+> which is strictly worse: a bypass is available to every caller that can
+> reach it, whereas an identity is only as powerful as the queries it is
+> used for.
+
+So a listed automation runs as a **named synthetic cluster owner**,
+`system:maintenance:<automation>` at `RoleOwner`, which is the composite
+tier's only escape. Two consequences worth stating:
+
+- **The queries say so themselves.** `expiredWorkerInvocations` carries
+  `actor.isClusterOwner==true` as a top-level conjunct rather than
+  relying on the tier's injection. That makes the arrangement legible at
+  the read instead of only in the Go that stamps the principal — and it
+  makes the failure loud: remove the principal and the read returns
+  nothing, with the filter explaining why.
+- **The prefix is distinct from `system:automation:`.** The two
+  principals differ in exactly the way that matters, so a `createdBy`
+  stamp, an audit line and a log field all record which one ran.
+
+**Why the list is compiled in and not a DSL annotation.** An
+`@maintenance` automation annotation was the obvious shape and is the
+wrong one: `MEMQL_DSL_PATH` mounts product DSL from disk at boot, so a
+DSL annotation conferring cluster-owner authority would let a product
+bundle grant *itself* the cluster's maintenance principal — privilege
+escalation by dropping a file into a volume. The list is in Go, so a
+mounted bundle cannot reach it. It is also why `auth.MaintenanceActor`
+being exported confers nothing: the authority comes from the list, so a
+name that is not on it gets `nil` however loudly it asks.
+
+**When NOT to reach for it.** Only for reads that span owners *by
+nature*. A server-side path that merely finds an owner-scoped read
+inconvenient should borrow exactly ONE owner's authority with
+`auth.ContextWithUserActor` — the shape `component/worker`'s store, the
+campaigns drain worker and the workbench integration all use.
+
+Implementation: `component/auth/maintenance_actor.go`, consumed by
+`component/automations/executor.go`. Two entries today, both retention
+sweeps: `workerInvocationRetentionSweep` and
+`auditEventRetentionSweep`. Measured by
+`TestMaintenanceAutomationsAreArgued` (the list is pinned, every entry
+argued, every name resolves to an automation that loads, and the wire
+from list to executor is asserted in both directions), and end to end by
+`TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier` and
+`TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork`
+— both Postgres-gated and both built around a NEGATIVE control, because a
+test where the sweep's read returns the row is equally satisfied by a
+tier that is not enforced at all.
+
+The audit one carries a second assertion worth naming: that
+`createAuditEvent` still succeeds for an **ordinary** caller. The
+`clusterOwner` tier would be a severe regression if it gated creates —
+every sign-in, session and role change would stop being recorded — and
+the reason it does not is that the write guard resolves a TARGET ROW, so
+it covers updates and deletes only. That sentence is load-bearing, so it
+is evidence rather than a claim.
+
+### What is still undeclared, and what it is waiting for
+
+memql#4366 named five concepts. Three are now settled:
+`v1:worker:registration` (memql#4349), `v1:worker:invocation`
+(memql#4406) and `v1:identity:auditEvent` (above). The **planner
+trio — `v1:planner:plan`, `v1:planner:task`, `v1:planner:taskState` —
+is not**, and the reason is specific enough to write down so the next
+attempt starts from it:
+
+- **Every internal reader is chicken-and-egg.** `planById` has seven Go
+  call sites (`integrations/workbench`, `integrations/agent/worker`,
+  four in `integrations/planner`, plus `integrations/cognition`), and
+  every one of them is a `loadPlan(ctx, planId)` helper that takes a
+  plan id and *no owner*. `integrations/workbench`'s `resolvePlanOwner`
+  is the clearest case: it reads the plan **in order to discover the
+  owner**, which an owner-gated read cannot answer. So the fix is not a
+  stamp at each call site — the value to stamp is not in hand.
+- **The maintenance principal is the wrong tool here.** It would work
+  mechanically and make the tier decorative for exactly the code that
+  touches plans most: declared, and unenforced where it matters. The
+  right shape is threading the owner down from wherever the plan id
+  came from, which is a refactor of the planner's dispatch plumbing.
+- **`plansForSpace` is no longer the blocker it was recorded as.** It
+  has no live consumer at all — only the generated SDK and the gate
+  fixtures — so the "reads collaborators' rows BY DESIGN" ruling
+  (`cmd/memqlmigrate/rowauthz_infer.go`) is now a statement about dead
+  surface. Deleting it, or scoping it, is a decision available for free.
+- `task` and `taskState` additionally need a new `ownerUserId` field
+  with server stamping at four mutations.
+
+And it touches the planner agent loop, which
+[llm-cost-control.md](../../ai/llm-cost-control.md) asks to be read
+first. Nexus's client-side filters (memql#4369, above) stand in
+meanwhile and need no change when the tier lands.
 
 ## Related issues
 

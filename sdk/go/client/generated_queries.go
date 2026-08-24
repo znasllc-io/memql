@@ -1264,7 +1264,8 @@ func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 	return b.String()
 }
 
-// AuditEventsByActor -- Audit events where actorUserId equals the supplied userId, restricted to the owner or an admin. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByActor -- Audit events where actorUserId equals the supplied userId. CLUSTER OWNER ONLY. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
+// It was `requiresOwnerOrAdmin`, and the change is forced by the concept's tier rather than chosen (memql#4366). `clusterOwner` is the `owner` ROLE alone, so an admin passed by that spec would then be narrowed by the tier to zero rows -- a query gate that says yes over a tier that says no, reported to the reader as "the audit log is empty". Stating the real scope is what makes the narrowing honest; it does not take anything from an admin that the tier had left.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByActor"] in generated_concepts.go).
 type AuditEventsByActorArgs struct {
@@ -1286,7 +1287,7 @@ func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 	return b.String()
 }
 
-// AuditEventsByTarget -- Audit events where targetId equals the supplied targetId, restricted to the owner or an admin. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByTarget -- Audit events where targetId equals the supplied targetId. CLUSTER OWNER ONLY -- same forced change as auditEventsByActor above, same reason (memql#4366). Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByTarget"] in generated_concepts.go).
 type AuditEventsByTargetArgs struct {
@@ -2864,6 +2865,7 @@ func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 }
 
 // ExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
+// It reads under `actor.isClusterOwner==true` because its only caller is the auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go, memql#4366). Stating the conjunct rather than leaning on the tier's injection makes the arrangement legible here, at the read -- and makes the failure mode loud rather than silent. This sweep is OBSERVATION-ONLY today: it publishes a candidate COUNT, so an unauthorized read does not fail, it reports zero, and a retention window nobody is enforcing looks exactly like a retention window with nothing to do.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["expiredAuditEvents"] in generated_concepts.go).
 type ExpiredAuditEventsArgs struct {
@@ -2949,6 +2951,8 @@ func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) st
 }
 
 // ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
+// It reads under `actor.isClusterOwner==true` because its only caller is the workerInvocationRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/automations/maintenance_actor.go, memql#4406) -- a named synthetic cluster owner. The alternative would be a read-path escape hatch in the enforcement layer, which is strictly worse: a bypass is available to every caller that can reach it, whereas an identity is only as powerful as the queries it is used for. That is the reasoning component/campaigns/worker.go and authActivityByRetiredHash both record for the same choice.
+// Writing the conjunct rather than relying on the tier's injection is what makes the arrangement legible HERE, at the read, instead of only in the Go that stamps the principal. It is also the failure mode made loud: strip the principal and this returns zero rows, and the filter says why.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["expiredWorkerInvocations"] in generated_concepts.go).
 type ExpiredWorkerInvocationsArgs struct {
@@ -3367,7 +3371,8 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	return b.String()
 }
 
-// InvocationsForPlan -- List all worker invocations belonging to a Plan.
+// InvocationsForPlan -- List the CALLER'S worker invocations belonging to a Plan.
+// The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForPlan"] in generated_concepts.go).
 type InvocationsForPlanArgs struct {
@@ -3389,11 +3394,10 @@ func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 	return b.String()
 }
 
-// InvocationsForUser -- List worker invocations belonging to a user.
+// InvocationsForUser -- List the caller's worker invocations, across every machine they own.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForUser"] in generated_concepts.go).
 type InvocationsForUserArgs struct {
-	OwnerUserId string
 }
 
 // InvocationsForUser calls the engine query invocationsForUser.
@@ -3403,12 +3407,8 @@ func (qc *QueryClient) InvocationsForUser(ctx context.Context, args InvocationsF
 }
 
 func InvocationsForUserBuild(args InvocationsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query invocationsForUser(")
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
-	b.WriteString(")")
-	return b.String()
+	_ = args
+	return "query invocationsForUser()"
 }
 
 // InvocationsForWorker -- Recent calls dispatched to one of the caller's machines, newest first. Backs the per-machine activity list on /fleet/machines, which renders the routing record: the strategy that chose it, the candidates considered, and what it was rerouted from.
@@ -4982,7 +4982,7 @@ func QuotesPastValidityBuild(args QuotesPastValidityArgs) string {
 	return b.String()
 }
 
-// RecentAuditEvents wraps the query named "recentAuditEvents".
+// RecentAuditEvents -- THE OPERATOR ROLL-UP for the portal's Audit Trail: cluster owner only, which is the one role the concept's `clusterOwner` tier lets past (memql#4366). It was `requiresOwnerOrAdmin`; see auditEventsByActor for why that spelling could only have produced an empty page for an admin. This mirrors recentAuthActivity exactly, and the pair of them is the split memql#4328 made: routine mechanics are self-readable, cluster-wide security decisions are the operator's.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.go).
 type RecentAuditEventsArgs struct {
