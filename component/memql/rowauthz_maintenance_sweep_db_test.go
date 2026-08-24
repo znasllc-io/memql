@@ -52,24 +52,32 @@ func ownerFieldString(v any) string {
 	return s
 }
 
-// queryInvocationIds runs a read and returns the set of row ids it produced.
-func queryInvocationIds(t *testing.T, ctx context.Context, eng *MemQLEngine, q string) map[string]bool {
+// queryRowCount runs a read and returns how many rows it produced.
+//
+// A COUNT rather than a membership test, deliberately. Both sweep queries are
+// `@unbounded` with NO sort and NO paginate, so they clamp at MaxResults (500)
+// in an unspecified order -- which makes "my row is in the result" a
+// non-deterministic assertion the moment the database holds more than 500 rows
+// of that concept. That is not hypothetical: it is exactly how
+// TestSeedSweepListUserIds fails against perfectly good code on a reused
+// database, and dsl/identity/queries.memql says so in as many words ("Past 500
+// active users this truncates, and silently").
+//
+// The pair of assertions this file makes is truncation-proof in both
+// directions: >=1 under the maintenance principal (a row was written first, and
+// a clamp cannot turn one row into none) and EXACTLY 0 under the ordinary one.
+// Whether a SPECIFIC row survived the write is checked where it can be checked
+// deterministically -- latestPayload, which reads by id straight off the table.
+func queryRowCount(t *testing.T, ctx context.Context, eng *MemQLEngine, q string) int {
 	t.Helper()
 	res, err := eng.Execute(ctx, q)
 	if err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
-	out := map[string]bool{}
 	if res == nil || res.Bundle == nil {
-		return out
+		return 0
 	}
-	for _, n := range res.Bundle.Nodes {
-		if n == nil {
-			continue
-		}
-		out[n.Id] = true
-	}
-	return out
+	return len(res.Bundle.Nodes)
 }
 
 func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T) {
@@ -130,12 +138,12 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 		auth.ContextWithAccess(t.Context(), maint),
 		&auth.TokenInfo{Subject: maint.UserId})
 
-	// ---- THE CLAIM: the sweep's read still sees the row.
-	rows := queryInvocationIds(t, maintCtx, eng, `query expiredWorkerInvocations()`)
-	if !rows[storedId] {
-		t.Fatalf("expiredWorkerInvocations returned %d row(s) and none was %s. The sweep cannot retire what "+
-			"it cannot read, and this is the silent failure memql#4406 refused to ship: no error, no log line, "+
-			"and WORKER_INVOCATION_RETENTION_DAYS quietly stops meaning anything.", len(rows), storedId)
+	// ---- THE CLAIM: the sweep's read still returns work to do.
+	if n := queryRowCount(t, maintCtx, eng, `query expiredWorkerInvocations()`); n == 0 {
+		t.Fatal("expiredWorkerInvocations returned ZERO rows under the maintenance principal, with a row " +
+			"just written. The sweep cannot retire what it cannot read, and this is the silent failure " +
+			"memql#4406 refused to ship: no error, no log line, and WORKER_INVOCATION_RETENTION_DAYS " +
+			"quietly stops meaning anything.")
 	}
 
 	// ---- THE NEGATIVE CONTROL, without which the assertion above is also
@@ -149,9 +157,12 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 			Role:   auth.RoleReader,
 		}),
 		&auth.TokenInfo{Subject: "system:automation:workerInvocationRetentionSweep"})
-	if got := queryInvocationIds(t, readerCtx, eng, `query expiredWorkerInvocations()`); got[storedId] {
-		t.Fatal("the ordinary automation principal (RoleReader) read the row too, so the tier is not being " +
-			"enforced and the pass above says nothing about the maintenance principal")
+	// EXACTLY zero, not "does not contain my row": absence of one row is also
+	// what a truncated result looks like, so emptiness is the assertion that
+	// cannot pass vacuously.
+	if n := queryRowCount(t, readerCtx, eng, `query expiredWorkerInvocations()`); n != 0 {
+		t.Fatalf("the ordinary automation principal (RoleReader) read %d row(s), so the tier is not being "+
+			"enforced and the pass above says nothing about the maintenance principal", n)
 	}
 
 	// ---- The sweep's WRITE, which the write guard resolves against the same
@@ -189,7 +200,7 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 // (rowauthz_write_guard.go says so); this is the test that makes that sentence
 // evidence.
 func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *testing.T) {
-	eng, _, _ := sharedReadMergeEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	const auditConcept = "v1:identity:auditEvent"
 
@@ -226,6 +237,18 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 		"outcome":     "success",
 	})
 
+	// actorUserId stays CALLER-SUPPLIED, which is the load-bearing half of why
+	// this concept cannot take an owner tier: re-stamping it from the actor
+	// would be wrong, not merely awkward, and it is deliberately EMPTY for an
+	// anonymous event. Read by id straight off the table, so this assertion is
+	// unaffected by any clamp.
+	stored := latestPayload(t, rowAuthzCallerCtx(actorUser), db, auditConcept, storedId)
+	if got := ownerFieldString(stored["actorUserId"]); !strings.Contains(got, actorUser) {
+		t.Fatalf("actorUserId stored as %q, want the value the caller passed (%q). If a stamp has "+
+			"started overwriting it, the concept's TIER note is no longer true and an anonymous event "+
+			"would carry a principal it never had.", got, actorUser)
+	}
+
 	// ---- The sweep's read, under the REAL maintenance principal.
 	maint := auth.MaintenanceActor("auditEventRetentionSweep")
 	if maint == nil {
@@ -234,9 +257,9 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 	}
 	maintCtx := auth.ContextWithToken(
 		auth.ContextWithAccess(t.Context(), maint), &auth.TokenInfo{Subject: maint.UserId})
-	if got := queryInvocationIds(t, maintCtx, eng, `query expiredAuditEvents()`); !got[storedId] {
-		t.Fatalf("expiredAuditEvents returned %d row(s) and none was %s. The sweep's candidate count is "+
-			"its whole output, so this failure has no second symptom.", len(got), storedId)
+	if n := queryRowCount(t, maintCtx, eng, `query expiredAuditEvents()`); n == 0 {
+		t.Fatal("expiredAuditEvents returned ZERO rows under the maintenance principal, with a row just " +
+			"written. The sweep's candidate count is its whole output, so this failure has no second symptom.")
 	}
 
 	// ---- NEGATIVE CONTROL: the ordinary automation principal sees nothing, so
@@ -248,14 +271,15 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 			Role:   auth.RoleReader,
 		}),
 		&auth.TokenInfo{Subject: "system:automation:auditEventRetentionSweep"})
-	if got := queryInvocationIds(t, readerCtx, eng, `query expiredAuditEvents()`); got[storedId] {
-		t.Fatal("the ordinary automation principal read the audit row too, so the tier is not being " +
-			"enforced and the pass above says nothing")
+	if n := queryRowCount(t, readerCtx, eng, `query expiredAuditEvents()`); n != 0 {
+		t.Fatalf("the ordinary automation principal read %d audit row(s), so the tier is not being "+
+			"enforced and the pass above says nothing", n)
 	}
 
 	// ---- And the ordinary caller who WROTE the row cannot read the roll-up.
 	// That is the ruling: the cluster-wide security log is the operator's.
-	if got := queryInvocationIds(t, rowAuthzCallerCtx(actorUser), eng, `query recentAuditEvents()`); got[storedId] {
-		t.Fatal("a non-owner caller read the cluster-wide audit roll-up; the clusterOwner ruling is not enforced")
+	if n := queryRowCount(t, rowAuthzCallerCtx(actorUser), eng, `query recentAuditEvents()`); n != 0 {
+		t.Fatalf("a non-owner caller read %d row(s) from the cluster-wide audit roll-up; the clusterOwner "+
+			"ruling is not enforced", n)
 	}
 }
