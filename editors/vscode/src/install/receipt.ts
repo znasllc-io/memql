@@ -652,6 +652,25 @@ export function recordedImageTag(receipt: Receipt | null): string {
 }
 
 /**
+ * Whether the install this receipt describes BUILT its node images (memql#4430).
+ *
+ * READ OFF THE `buildImages` ENTRY, which is the only honest evidence: the
+ * from-source lane is the lane that ran that step, and a receipt that has an
+ * entry for it ran it. Deriving it from the recorded ref kind instead would be
+ * wrong for every branch install cut BEFORE this lane existed -- those pulled
+ * release images and recorded an image tag, and a repair must keep replaying
+ * that tag rather than start looking for `:local` images nothing built.
+ *
+ * That is the same shape as `recordedImageTag`: the answer is what the run
+ * actually did, read back, rather than the same derivation performed twice
+ * against inputs that have since changed.
+ */
+export function recordedImagesFromSource(receipt: Receipt | null): boolean {
+  if (!receipt) return false;
+  return entryFor(receipt, "buildImages") !== undefined;
+}
+
+/**
  * What a repair must replay to reproduce the install a receipt describes: which
  * CODE, and which IMAGES.
  *
@@ -673,6 +692,15 @@ export interface RecordedCheckout {
    * about `stackCheckout`, for the reason the interface comment gives.
    */
   imageTag: string;
+  /**
+   * Whether that install BUILT its images from the checkout (memql#4430).
+   *
+   * The third thing a repair replays, and it rides here for exactly the reason
+   * `imageTag` does: a caller that remembers the ref and forgets the lane hands
+   * a cluster running `memql-<node>:local` a GHCR registry and the pin's tag,
+   * which is memql#4068's failure with a new cause.
+   */
+  fromSource: boolean;
   /** Short human label for the run record: the tag, or an abbreviated commit. */
   label: string;
 }
@@ -716,15 +744,28 @@ export function recordedCheckout(receipt: Receipt | null): RecordedCheckout {
   const commit = recordedStackCommit(receipt);
   const kind = recordedStackRefKind(receipt);
   const imageTag = recordedImageTag(receipt);
+  const fromSource = recordedImagesFromSource(receipt);
 
   if (kind === "branch" || kind === "commit") {
-    return { tag: "", commit, imageTag, label: commit === "" ? "" : commit.slice(0, 7) };
+    return {
+      tag: "",
+      commit,
+      imageTag,
+      fromSource,
+      label: commit === "" ? "" : commit.slice(0, 7),
+    };
   }
   // A tag install, or a receipt written before refKind existed. Prefer the tag;
   // fall back to the commit so a receipt that somehow recorded only the latter
   // still reproduces something rather than silently reinstalling the pin.
-  if (tag !== "") return { tag, commit: "", imageTag, label: tag };
-  return { tag: "", commit, imageTag, label: commit === "" ? "" : commit.slice(0, 7) };
+  if (tag !== "") return { tag, commit: "", imageTag, fromSource, label: tag };
+  return {
+    tag: "",
+    commit,
+    imageTag,
+    fromSource,
+    label: commit === "" ? "" : commit.slice(0, 7),
+  };
 }
 
 /**

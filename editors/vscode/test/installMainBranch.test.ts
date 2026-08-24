@@ -35,6 +35,7 @@ import { parseCliArgs, repairOptions, type CliOptions } from "../src/install/cli
 import { installPlan, type SessionOptions } from "../src/install/session.js";
 import { REDACTED } from "../src/install/secrets.js";
 import {
+  DEFAULT_IMAGE_REGISTRY,
   DEFAULT_STACK_TAG,
   MAIN_BRANCH_CHOICE,
   imageTagFor,
@@ -125,38 +126,44 @@ test("a recorded commit outranks whatever version the session carries", () => {
 // the images a main install runs
 // ---------------------------------------------------------------------------
 
-test("a main install never asks for a main image tag", () => {
-  // THE FAILURE THIS FEATURE INVITES. There is no memql-<node>:main in GHCR --
-  // build-engine-images.yml publishes on an explicit release dispatch only --
-  // so passing the version straight through is ImagePullBackOff on every pod.
-  const params = paramsFor(
-    options({ tag: MAIN_BRANCH_CHOICE, latestRelease: "v0.19.0" }),
-    "clusterUp",
-    "k3d.up",
-  );
-  assert.equal(params["image-tag"], "0.19.0");
-  assert.notEqual(params["image-tag"], "main");
-});
-
-test("a main install with no listing falls back to the pin, which is a real release", () => {
+test("a main install asks NO registry for an engine image at all", () => {
+  // THE LANE CHANGED (memql#4430). `main` used to mean main's checkout with the
+  // newest RELEASE's node images -- a deliberate skew, because no memql-<node>:main
+  // is published. It now BUILDS those images from the checkout, so there is no
+  // registry in the plan: k3d.up documents --image-registry as "default: the
+  // overlay's own, i.e. locally built", and omitting it is what selects them.
+  //
+  // BOTH FLAGS OR NEITHER: k3d.up requires the tag with the registry, so half a
+  // pair is a refusal rather than a default.
   const params = paramsFor(options({ tag: MAIN_BRANCH_CHOICE }), "clusterUp", "k3d.up");
-  assert.equal(params["image-tag"], imageTagFor(DEFAULT_STACK_TAG));
-  assert.ok(isReleaseTag(DEFAULT_STACK_TAG), "the fallback must be a published release");
+  assert.equal(params["image-tag"], undefined);
+  assert.equal(params["image-registry"], undefined);
 });
 
-test("a tag install ignores latestRelease entirely", () => {
-  const params = paramsFor(
-    options({ tag: "v9.9.9", latestRelease: "v0.19.0" }),
-    "clusterUp",
-    "k3d.up",
-  );
+test("a main install's plan carries the build step, with the lane pinned by the graph", () => {
+  // `--image-source=checkout` is deliberately ABSENT here: the document pins it,
+  // and the executor merges graph params last. A plan that passed it would make
+  // "build, but keep running released images" reachable.
+  const params = paramsFor(options({ tag: MAIN_BRANCH_CHOICE }), "buildImages", "k3d.dev");
+  assert.equal(params["image-source"], undefined);
+  assert.ok(params["repo-root"], "the build must be told WHICH checkout to build");
+});
+
+test("a tag install still passes the registry pair", () => {
+  const params = paramsFor(options({ tag: "v9.9.9" }), "clusterUp", "k3d.up");
   assert.equal(params["image-tag"], "9.9.9");
+  assert.equal(params["image-registry"], DEFAULT_IMAGE_REGISTRY);
 });
 
-test("imageTagForVersion never returns a branch name", () => {
-  assert.equal(imageTagForVersion("main", "v0.19.0"), "0.19.0");
-  assert.equal(imageTagForVersion("v1.2.3", "v0.19.0"), "1.2.3");
-  assert.equal(imageTagForVersion("", "v0.19.0"), imageTagFor(DEFAULT_STACK_TAG));
+test("imageTagForVersion REFUSES main rather than substituting a release", () => {
+  // It used to map main -> the newest release, which is the skew this epic
+  // removed. The refusal is what stops that mapping being quietly reintroduced
+  // as a fallback: a caller that forgets isMainBranchChoice now fails at the
+  // call, not forty pods later as an ImagePullBackOff naming one word.
+  assert.throws(() => imageTagForVersion("main"), /main/);
+  assert.equal(imageTagForVersion("v1.2.3"), "1.2.3");
+  assert.equal(imageTagForVersion(""), imageTagFor(DEFAULT_STACK_TAG));
+  assert.ok(isReleaseTag(DEFAULT_STACK_TAG), "the offline fallback must be a published release");
 });
 
 test("main is not mistaken for a release tag anywhere", () => {
@@ -410,7 +417,7 @@ test("a repair of a BRANCH install replays the recorded IMAGE tag, not this buil
   // defect, and this is the assertion that catches its return.
   assert.notEqual(
     params["image-tag"],
-    imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+    imageTagForVersion(opts.tag ?? ""),
     "the image tag was derived a second time rather than replayed from the receipt",
   );
 });
@@ -447,7 +454,7 @@ test("a receipt that never recorded an image tag falls back to deriving one", ()
   assert.equal(params["image-tag"], "0.17.1");
   assert.equal(
     params["image-tag"],
-    imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+    imageTagForVersion(opts.tag ?? ""),
     "with nothing recorded the plan must derive, not pass an empty --image-tag",
   );
 });
@@ -553,27 +560,35 @@ test("a repair refuses rather than guesses, and every refusal names the remedy",
 // how the picker presents it
 // ---------------------------------------------------------------------------
 
-test("main is offered last, apart from the release tags, and labelled", () => {
-  const list = versionChoiceList(["v0.19.0", "v0.18.0"], "v0.18.0", "v0.19.0");
-  const values = list.map((c) => c.value);
-  assert.deepEqual(values, ["v0.18.0", "v0.19.0", "main"]);
+test("main is offered last, apart from the release tags, and labelled as a LANE", () => {
+  const list = versionChoiceList(["v0.19.0", "v0.18.0"], "v0.18.0");
+  assert.deepEqual(list.map((c) => c.value), ["v0.19.0", "v0.18.0", "main"]);
 
   const main = list[list.length - 1]!;
   assert.equal(main.value, "main");
   assert.notEqual(main.label, "main", "a bare 'main' reads as just another tag in a list of tags");
-  assert.match(main.label, /development/);
-  // The label must name the images, because that skew is the one thing an
-  // operator cannot discover from anywhere else.
-  assert.match(main.label, /v0\.19\.0/);
+  assert.match(main.label, /build from source/);
+  assert.match(main.label, /developers/);
 });
 
-test("the selected version stays first, and main is not duplicated", () => {
-  const list = versionChoiceList(["v0.19.0", "main", "v0.18.0"], "v0.19.0", "v0.19.0");
+test("the main label no longer states a skew, because there is no longer a skew", () => {
+  // THE PROSE IS SWEPT WITH THE DECISION (memql#4430). The label used to name
+  // the release whose images a main install would run. It builds them now, so a
+  // label still naming a release would be describing a behaviour that is gone --
+  // and would send an operator looking for a version skew that is not there.
+  const main = versionChoiceList(["v0.19.0", "v0.18.0"], "v0.18.0").at(-1)!;
+  assert.doesNotMatch(main.label, /v0\.\d+\.\d+/, "the label must not name a release tag");
+  assert.doesNotMatch(main.label, /node images from/);
+  assert.doesNotMatch(main.label, /development \(/);
+});
+
+test("main is not duplicated when the listing itself carries it", () => {
+  const list = versionChoiceList(["v0.19.0", "main", "v0.18.0"], "v0.19.0");
   assert.deepEqual(list.map((c) => c.value), ["v0.19.0", "v0.18.0", "main"]);
   assert.equal(list.filter((c) => c.value === "main").length, 1);
 });
 
-test("choosing main does not pin it to the top as a selected release", () => {
-  const list = versionChoiceList(["v0.19.0", "v0.18.0"], "main", "v0.19.0");
+test("choosing main does not insert it among the releases", () => {
+  const list = versionChoiceList(["v0.19.0", "v0.18.0"], "main");
   assert.deepEqual(list.map((c) => c.value), ["v0.19.0", "v0.18.0", "main"]);
 });

@@ -45,7 +45,8 @@ import type {
   Inputs,
   StepProgress,
 } from "../state/addCluster.js";
-import { MAIN_BRANCH_CHOICE } from "../install/stackPin.js";
+import { MAIN_BRANCH_CHOICE, isMainBranchChoice } from "../install/stackPin.js";
+import { compareSemverDesc } from "../install/tags.js";
 import { SUPPORTED_PROVIDERS, requiredFields } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 
@@ -95,7 +96,7 @@ export const FIELD_HINTS: Record<InputField, string> = {
   providerKeyFile:
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
   version:
-    "Which MemQL release to install. The default is the version this extension was built and tested against; pick another only if you need a specific one.",
+    "Which MemQL release to install. Latest is preselected and is what a fresh install wants -- a release's manifests and its node images ship together at that tag. Choosing `main` instead clones the repository and BUILDS the node images from that checkout: it needs Docker and takes several minutes.",
 };
 
 export const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
@@ -125,12 +126,6 @@ export interface CollectScreenInput {
    * `install/tags.ts` documents for the deployment picker, for the same reason.
    */
   versionChoices?: readonly string[];
-  /**
-   * The newest published release, named in the `main` choice's label so an
-   * operator can see WHICH engine images a development install would run
-   * (memql#3901). Empty renders as "the newest release".
-   */
-  latestRelease?: string;
   /**
    * The "Before it runs" checklist (memql#4195): what the run will need,
    * stated before the Start button rather than at the moment each fact bites.
@@ -195,18 +190,16 @@ export function renderCollectScreen(input: CollectScreenInput): string {
       // able to name a version.
       //
       // `main` is appended to that listing as a labelled choice rather than a
-      // tag (memql#3901). It is NOT offered when the listing is empty: with no
-      // network the field is a free-text box, and a text box that accepts "main"
-      // would be an unlabelled branch, which clone-stack.sh refuses on purpose.
+      // tag (memql#3901, relabelled by memql#4430). It is NOT offered when the
+      // listing is empty: with no network the field is a free-text box, and a
+      // text box that accepts "main" would be an unlabelled branch, which
+      // clone-stack.sh refuses on purpose -- and a from-source lane with no
+      // network could not clone the repository it would build from anyway.
       const fieldChoices: readonly VersionChoice[] | undefined =
         field === "version"
           ? (input.versionChoices ?? []).length === 0
             ? undefined
-            : versionChoiceList(
-                input.versionChoices ?? [],
-                values.version,
-                input.latestRelease ?? "",
-              )
+            : versionChoiceList(input.versionChoices ?? [], values.version)
           : choices?.map((choice) => ({ value: choice, label: choice }));
       const control =
         fieldChoices === undefined
@@ -490,23 +483,30 @@ export function renderRemedy(failure: { id: string; remedy: string }): string {
 }
 
 /**
- * The version options, with the current value guaranteed present and first.
+ * The version options, with the current value guaranteed present and IN ORDER.
  *
  * A `<select>` silently drops a value that is not one of its options, so a
- * pinned default the remote listing does not carry -- a tag cut after this
+ * current value the remote listing does not carry -- a tag cut after this
  * extension was built, or a listing that came back partial -- would leave the
  * field showing the newest release while `values.version` still said something
  * else. The operator would then install a version the page never offered them.
+ * So the value is GUARANTEED PRESENT, and that property is what this keeps.
  *
- * Putting the current value first also keeps the pin at the top of the list,
- * which is where an operator scanning for "the one I was given" looks.
+ * WHAT IT NO LONGER DOES IS HOIST IT (memql#4429). This used to return
+ * `[current, ...rest]`, which put the current value at the TOP of a list whose
+ * whole meaning is its order: `compareSemverDesc` sorts newest-first, and the
+ * hoist then read `v0.19.1, v0.20.3, v0.19.2, ...` -- a picker that looks
+ * mis-sorted because it is. Guarantee-present and queue-jumping are two
+ * properties that arrived in one line; only the first was ever wanted, and the
+ * sorted insert below is the first without the second.
  */
-export function dedupeKeepingDefault(
+export function withCurrentInSortedPosition(
   choices: readonly string[],
   current: string,
 ): readonly string[] {
-  const rest = choices.filter((c) => c !== current);
-  return current === "" ? rest : [current, ...rest];
+  const trimmed = current.trim();
+  if (trimmed === "" || choices.includes(trimmed)) return choices;
+  return [...choices, trimmed].sort(compareSemverDesc);
 }
 
 /** One entry in the version picker: what gets submitted, and what is read. */
@@ -516,37 +516,66 @@ export interface VersionChoice {
 }
 
 /**
- * The version picker's entries (memql#3901).
+ * The label the newest listed release carries (memql#4429).
+ *
+ * THE VALUE IS THE REAL TAG, never a sentinel. What the operator submits when
+ * they take the recommendation is an ordinary version string, so `installPlan`,
+ * `imageTagFor` and the receipt all see exactly what they would have seen had
+ * the tag been picked by name -- and the receipt that install writes NAMES the
+ * version rather than the word "latest", which is the difference between a
+ * cluster whose version can be read back and one whose version depends on when
+ * it was installed.
+ */
+export function latestLabel(tag: string): string {
+  return `Latest -- ${tag} (recommended)`;
+}
+
+/**
+ * What the `main` entry says it is (memql#4430).
+ *
+ * IT IS A LANE, NOT A VERSION, and the label says which lane. `main` builds the
+ * node images FROM THE CHECKOUT it just cloned -- there is no release image
+ * behind it and none is fetched -- so the operator taking it needs Docker, a
+ * repository they can clone, and several minutes. The field hint states the
+ * cost; this states the audience.
+ *
+ * IT USED TO STATE A SKEW INSTEAD (memql#3901): main's manifests and scripts
+ * with the newest RELEASE's node images, because no `main` image is published.
+ * That skew is gone -- the images are built here now -- so the sentence
+ * describing it is gone with it rather than left standing over a decision that
+ * reversed.
+ */
+export const MAIN_CHOICE_LABEL = "main -- build from source (for MemQL developers)";
+
+/**
+ * The version picker's entries: newest first, Latest labelled, `main` last.
  *
  * `main` IS OFFERED, AND IT IS NOT MIXED IN WITH THE RELEASE TAGS. It goes last,
- * after a separator, and its label says what it is -- because it is a different
+ * after the releases, and its label says what it is -- because it is a different
  * KIND of answer, and an operator scanning a list of `v0.18.0`-shaped strings
  * would reasonably read a bare "main" as just another one.
  *
- * The label states the skew rather than hiding it. A `main` install gets main's
- * CHECKOUT -- the deploy manifests ArgoCD reconciles and the install scripts the
- * run executes -- and the newest RELEASE's node images, because
- * build-engine-images.yml publishes on a release dispatch only and there is no
- * `main` image in GHCR. So an unreleased manifest or script fix arrives and an
- * unreleased engine fix does not. Saying so here is the difference between an
- * operator who knows why their engine bug is still present and one who files
- * an issue about it (see imageTagForVersion).
+ * THE LATEST LABEL ATTACHES TO THE LISTING'S OWN NEWEST, not to whatever sorts
+ * first. Those differ in exactly the case the sorted insert above exists for: a
+ * current value the listing does not carry can sort ABOVE everything listed, and
+ * calling that "Latest (recommended)" would be a recommendation the listing does
+ * not support. It stays present, in order, unlabelled.
  */
 export function versionChoiceList(
   choices: readonly string[],
   current: string,
-  latestRelease: string,
 ): readonly VersionChoice[] {
-  const releases = dedupeKeepingDefault(
-    choices.filter((c) => c !== MAIN_BRANCH_CHOICE),
-    current === MAIN_BRANCH_CHOICE ? "" : current,
+  const listed = choices.filter((c) => c !== MAIN_BRANCH_CHOICE);
+  const newest = listed[0] ?? "";
+  const releases = withCurrentInSortedPosition(
+    listed,
+    isMainBranchChoice(current) ? "" : current,
   );
-  const images = latestRelease.trim() === "" ? "the newest release" : latestRelease.trim();
   return [
-    ...releases.map((value) => ({ value, label: value })),
-    {
-      value: MAIN_BRANCH_CHOICE,
-      label: `main -- development (manifests and scripts from main, node images from ${images})`,
-    },
+    ...releases.map((value) => ({
+      value,
+      label: value === newest && newest !== "" ? latestLabel(value) : value,
+    })),
+    { value: MAIN_BRANCH_CHOICE, label: MAIN_CHOICE_LABEL },
   ];
 }

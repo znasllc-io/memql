@@ -212,10 +212,20 @@ ships it — not from a plan.
    operator performs them in order.
 
 `editors/vscode/test/barriers.test.ts` holds the newest entry at or below
-`DEFAULT_STACK_TAG` (`editors/vscode/src/install/stackPin.ts`). An entry newer
-than the installer's reviewed pin describes a crossing nobody can make yet,
-which means the refusal never fires and the entry looks correct for exactly as
-long as it is wrong.
+`DEFAULT_STACK_TAG` (`editors/vscode/src/install/stackPin.ts`): the pin is
+bumped by the release that cuts a tag, so an entry ahead of it was written from
+a **plan** rather than from a release. Add the barrier in the release that ships
+it.
+
+> **This rule's original reason expired in memql#4429.** It used to be that
+> `DEFAULT_STACK_TAG` was the release the installer actually put on a machine,
+> so an entry newer than the pin described a crossing nobody could make -- an
+> unfireable refusal. That is no longer so: the install form is seeded with the
+> **newest** release the repository lists, and the pin has narrowed to the
+> offline fallback. The practical consequence runs the other way now, and it is
+> worth knowing: a **missing** barrier entry is reachable BY DEFAULT, not only
+> by an operator who typed a tag by hand. Nothing can test for a barrier nobody
+> wrote, which is why it belongs in the release that ships the change.
 
 ## Related
 

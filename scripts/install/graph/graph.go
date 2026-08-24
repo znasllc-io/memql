@@ -269,6 +269,9 @@ var uninstallJSON []byte
 //go:embed rebuild.json
 var rebuildJSON []byte
 
+//go:embed install-main.json
+var installMainJSON []byte
+
 var (
 	installOnce sync.Once
 	installG    *Graph
@@ -281,6 +284,10 @@ var (
 	rebuildOnce sync.Once
 	rebuildG    *Graph
 	rebuildErr  error
+
+	installMainOnce sync.Once
+	installMainG    *Graph
+	installMainErr  error
 )
 
 // Install returns the shipped install graph.
@@ -293,6 +300,37 @@ func Install() (*Graph, error) {
 func Uninstall() (*Graph, error) {
 	uninstallOnce.Do(func() { uninstallG, uninstallErr = Load(uninstallJSON, "uninstall.json") })
 	return uninstallG, uninstallErr
+}
+
+// InstallFromMain is the install graph for the FROM-SOURCE lane (memql#4430):
+// a `main` checkout whose node images are BUILT from that checkout rather than
+// pulled from a registry, because no `main` image is published and the lane
+// exists so a developer can run main's engine.
+//
+// IT IS A VARIANT, NOT A SECOND GRAPH. install_main_variant_test.go derives it
+// from install.json and fails if the two differ by anything other than the three
+// deltas below, so the sixteen shared steps cannot drift apart:
+//
+//  1. `clusterUp` proves `argocdReady` rather than `workloadsReady`. On this lane
+//     the workloads CANNOT be Available when clusterUp returns -- the overlay
+//     names `memql-<node>:local` and nothing has built them yet -- so requiring
+//     it would burn the 900s budget and fail every from-source install. What
+//     clusterUp genuinely does here is create the cluster and register ArgoCD,
+//     and that is what it is asked to prove. The workloads are proven one step
+//     later, by the step that actually makes them possible. This is the same
+//     order `scripts/k3d/bringup.sh` has always used for `make up`: up, then
+//     build + import, then healthy.
+//  2. `buildImages` is inserted after it -- the k3d.dev capability rebuild.json
+//     drives, with `--image-source=checkout` pinned by the document so no caller
+//     can turn it into "build, but keep running released images".
+//  3. `seedBootstrap` waits for BOTH. TopoOrder returns WAVES, so a seedBootstrap
+//     that still depended only on clusterUp would run CONCURRENTLY with the image
+//     build -- writing bootstrap values into the cluster and restarting nodes
+//     that are still in ImagePullBackOff. Everything after seedBootstrap is
+//     already serial, so this one edge gates the whole tail.
+func InstallFromMain() (*Graph, error) {
+	installMainOnce.Do(func() { installMainG, installMainErr = Load(installMainJSON, "install-main.json") })
+	return installMainG, installMainErr
 }
 
 // Rebuild is the one-step graph the extension's "Rebuild from checkout" runs:

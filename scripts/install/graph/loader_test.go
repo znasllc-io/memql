@@ -368,7 +368,7 @@ func TestTopoOrderReturnsWaves(t *testing.T) {
 }
 
 func TestTopoOrderCoversEveryStepExactlyOnce(t *testing.T) {
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		waves, err := g.TopoOrder()
 		if err != nil {
 			t.Fatalf("%s: TopoOrder: %v", g.Name, err)
@@ -467,7 +467,7 @@ func TestShippedGraphParamsAreDeclaredFlags(t *testing.T) {
 		return set
 	}
 
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			flags := declared(s.Script)

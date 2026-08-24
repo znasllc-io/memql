@@ -197,6 +197,92 @@ None of the three is an error. A row of buttons that turned out to be refused
 would be the error; naming the state is not. What the extension hides is hidden
 as a **courtesy** -- the engine decides, and a refusal names the role required.
 
+## Onboarding: getting a cluster into this editor
+
+Two routes, and they are for opposite situations. The **+** on the Clusters view
+offers both.
+
+### Install a local cluster
+
+Builds one on this machine: a k3d cluster, an ArgoCD that reconciles it, the
+hosts entries and the mkcert certificate that make `memql.localhost` resolve and
+serve TLS, and an owner account bootstrapped from the answers on the form.
+
+**The version field recommends Latest, and Latest is preselected.** The list is
+read from the repository at page-open time, newest first, and its first entry
+reads `Latest -- vX.Y.Z (recommended)`. Take it unless you have a reason not to:
+a release's deploy manifests and its node images are cut together at one tag, so
+the newest release is the one whose halves are known to match. The extension
+also carries a pinned release constant, but its only job now is to be the answer
+when the repository cannot be reached -- on a plane, behind a proxy, with no
+`git` -- and the field degrades to a text box prefilled with it.
+
+Choosing a specific older tag is supported and unremarkable; the field is a
+picker precisely so that "the release with the fix I am waiting on" is an answer
+you can give.
+
+**`main` is not a version. It is a lane, and it costs minutes.** The entry reads
+`main -- build from source (for MemQL developers)` and it is for one situation:
+you have repository access and you want to run the engine as it is on `main`
+right now, before any release carries it. Choosing it:
+
+- checks out `main` instead of a tag;
+- **builds the node images from that checkout** with Docker and imports them
+  into k3d as `memql-<node>:local`. No image is pulled from a registry for the
+  engine nodes, because none is published for `main`;
+- takes several minutes and needs Docker running.
+
+The cluster then genuinely runs main's engine -- not just main's manifests. That
+distinction used to matter a great deal: `main` previously meant main's checkout
+paired with the newest *release's* node images, a deliberate skew that delivered
+manifest and script fixes but not engine ones. It no longer does, and any prose
+you find describing that skew is stale.
+
+A `main` install shows as **checkout mode** on its Deployments row, with the
+commit it was built at and how many files were dirty. `Rebuild from checkout`
+on that row rebuilds and rolls it forward without reinstalling.
+
+### Add an existing cluster
+
+Registers a cluster that already exists somewhere else. **Nothing is installed
+and nothing on the cluster is touched** -- this writes an entry in
+`~/.memql/clusters.yaml` saying how to reach it.
+
+**It asks two things: a name and a domain.** Everything else is derived from the
+domain, and the hint under it shows the derivation as you type:
+
+| From `example.com` | derives |
+|---|---|
+| gRPC front door | `api.example.com:443` |
+| sign-in / JWKS | `https://identity.example.com` |
+| portal | `https://portal.example.com` |
+
+**Advanced** holds two fields you will usually not open. **Endpoint** is
+prefilled with the derivation and only needs changing for a front door that is
+not at `api.<domain>:443`; an edit there wins. **Token** is for pasting an
+identity-issued access token, and the ordinary answer is to leave it empty and
+run **MemQL: Sign In**, which mints one through your browser. A personal access
+token (`mql_pat_...`) is refused with an explanation: the mesh verifies bearers
+against the identity service's JWKS feed, so a PAT fails before any lookup.
+
+**`localhost` and its family are refused here, on purpose.** `localhost`,
+anything under `.localhost` (including `memql.localhost`), `127.0.0.0/8` and
+`::1` all name this machine, and this form only records an address -- it cannot
+create the hosts entries, the certificate or the cluster that would make one
+answer. Registering one produces an entry pointing at a front door that does not
+exist, and the failure arrives much later as a connection error naming a
+hostname you typed yourself. Use **Install a local cluster** instead; that flow
+takes `memql.localhost` as its own default, because it is about to make it
+resolve.
+
+**Saving probes first, and a failed probe does not stop you.** On a valid form
+the extension fetches `https://identity.<domain>/.well-known/jwks.json` and
+checks the endpoint is reachable. If it answers, the cluster is registered
+silently. If it does not, you get the endpoint and the reason, nothing is
+written, and the button becomes **Save anyway** -- because a cluster that is
+stopped, behind a VPN you have not connected, or still deploying is one you may
+perfectly well want registered now.
+
 ## Clusters
 
 Connections, and nothing else: which clusters this editor can reach, and as

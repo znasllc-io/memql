@@ -181,6 +181,29 @@ export function rebuildGraphPath(repoRoot: string): string {
   return path.join(repoRoot, "scripts", "install", "graph", "rebuild.json");
 }
 
+/**
+ * The install document for a lane (memql#4430).
+ *
+ * TWO DOCUMENTS, ONE KIND. `install-main.json` is install.json with three
+ * deltas -- clusterUp proves `argocdReady` instead of `workloadsReady`, a
+ * `buildImages` step follows it, and seedBootstrap waits for both -- because a
+ * from-source install has no published image to pull and therefore cannot have
+ * Available workloads at the moment the cluster comes up. The deltas and the
+ * argument for each live at `graph.InstallFromMain` in
+ * scripts/install/graph/graph.go, and a Go test derives one document from the
+ * other so they cannot drift.
+ *
+ * IT IS A PATH FUNCTION rather than a `GraphKind`, for the reason
+ * `rebuildGraphPath` gives: the kinds are the two DIRECTIONS a graph runs, this
+ * is a variant of one of them, and a third kind would buy a parallel validation
+ * path for a document that validates identically.
+ */
+export function installGraphPath(repoRoot: string, fromSource: boolean): string {
+  return fromSource
+    ? path.join(repoRoot, "scripts", "install", "graph", "install-main.json")
+    : graphDocumentPath("install", repoRoot);
+}
+
 export async function loadGraphFile(file: string): Promise<Graph> {
   let text: string;
   try {

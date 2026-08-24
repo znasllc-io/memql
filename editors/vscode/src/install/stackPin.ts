@@ -14,21 +14,42 @@
 // correctly reads "a fault in MemQL rather than in your machine", and it was
 // (memql#3560).
 //
-// WHY A PINNED CONSTANT RATHER THAN "THE NEWEST TAG". Resolving the latest
-// release at run time would need no maintenance, and it is the wrong trade for
-// this repository. `scripts/install/tool-pins.env` already states the house
-// position for k3d, kubectl and mkcert: "Changing a pin is a reviewed diff,
-// never a silent auto-update." The same reasoning applies with more force here,
-// because a packaged extension carries a STAGED COPY of `scripts/` from its own
-// build commit and runs those scripts against whatever the checkout contains. A
-// pin makes that pairing a fact somebody chose and can read off a diff; "newest
-// tag" makes it whatever was pushed this morning.
+// WHAT THIS PIN IS FOR NOW: THE OFFLINE FALLBACK (memql#4429). It is the
+// release the extension was built against, and it is what an install uses when
+// it cannot ask the repository what releases exist -- no network, no git, a
+// listing that timed out. It is no longer what a connected install gets: the
+// version field is seeded from the listing and the picker labels that entry
+// `Latest -- vX.Y.Z (recommended)`.
 //
-// KEEPING IT CURRENT is therefore a release step, exactly like bumping a tool
-// pin: cut the tag, then bump this. `installSession.test.ts` checks the SHAPE,
-// not the recency -- no test can tell a deliberate pin from a stale one, and
-// one that reached the network to try would fail offline for a reason that has
-// nothing to do with the change under test.
+// THE ARGUMENT THAT USED TO STAND HERE, AND WHY IT NO LONGER DOES. This section
+// argued for a pinned constant OVER "the newest tag", by analogy with
+// `scripts/install/tool-pins.env` ("Changing a pin is a reviewed diff, never a
+// silent auto-update"), on the grounds that a packaged extension carries a
+// STAGED COPY of `scripts/` from its own build commit and runs those scripts
+// against whatever the checkout contains -- so the pairing should be something
+// somebody chose.
+//
+// The analogy is the part that failed. A tool pin names a THIRD-PARTY tool
+// whose new releases nobody here reviewed; this names OUR OWN release, cut from
+// this repository, and every postmortem recorded below is a failure of
+// installing an OLDER one. Read them in order: v0.16.1 issued magic links at a
+// host nobody could reach; v0.17.1 routed nothing at api.<domain>; v0.18.0
+// severed sessions on an unknown field; v0.19.0 shipped an inert recovery key.
+// Not one of them is a failure of having installed something too new. A pin
+// that must be bumped by hand is a pin that is stale by default, and "the
+// reviewed pairing" was in practice "whatever the last person to touch this file
+// happened to have".
+//
+// WHAT SURVIVES OF IT is the offline case, where there is no listing to prefer
+// and the reviewed pairing is genuinely the best available answer, and the
+// release-step discipline below -- the pin is still bumped at a release, because
+// it is still what an offline machine installs.
+//
+// KEEPING IT CURRENT is therefore still a release step, exactly like bumping a
+// tool pin: cut the tag, then bump this. `installSession.test.ts` checks the
+// SHAPE, not the recency -- no test can tell a deliberate pin from a stale one,
+// and one that reached the network to try would fail offline for a reason that
+// has nothing to do with the change under test.
 //
 // BUMPED TO v0.17.0 (memql#3600, memql#3602). Two bugs made a v0.16.1 install
 // produce a cluster nobody could sign into, and only one of them was in the
@@ -134,7 +155,12 @@
 // Refs: #4066 #4063 #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
- * The release tag an install checks out unless told otherwise.
+ * The release tag an install checks out when nothing else names one.
+ *
+ * THE OFFLINE FALLBACK the extension was built against (memql#4429), not the
+ * house recommendation: a connected install is seeded with the newest release
+ * the repository lists and the picker labels it `Latest ... (recommended)`.
+ * This is what remains when that listing cannot be had.
  *
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
@@ -164,28 +190,30 @@ export function isMainBranchChoice(version: string): boolean {
 }
 
 /**
- * The node images a `main` install runs, and WHY THEY ARE NOT main's.
+ * The registry image tag for a chosen RELEASE, and it refuses `main`.
  *
- * `build-engine-images.yml` publishes `memql-<node>:<version>` only on an
- * explicit release dispatch. There is no `main` tag and no nightly in GHCR, so
- * `imageTagFor("main")` would ask for `memql-bff:main` and put every pod into
- * ImagePullBackOff. A `main` install therefore runs the newest images that
- * exist, which is the newest published release.
+ * THE MAIN LANE HAS NO REGISTRY IMAGE, BY CONSTRUCTION (memql#4430). `main`
+ * BUILDS its node images from the checkout it just cloned -- the `buildImages`
+ * step, the same `k3d.dev` capability "Rebuild from checkout" drives -- and
+ * imports them into k3d as `memql-<node>:local`. There is nothing for this
+ * function to answer on that lane, so `installPlan` omits `--image-registry`
+ * and `--image-tag` entirely and the overlay's own `:local` images stand.
  *
- * SO A `main` INSTALL IS A SKEW, DELIBERATELY, AND THE PICKER SAYS SO. What it
- * gets from main is the CHECKOUT -- the deploy manifests ArgoCD reconciles and
- * the install scripts the run itself executes. What it does not get is a newer
- * engine BINARY. Measured against the three fixes that motivated memql#3882:
- * the missing `api-front-door.yaml` (a manifest) and the seedBootstrap roll
- * budget (a script) both arrive; the migration-retry fix (engine code) does not.
- * Two out of three, which is the honest description and the one the label uses.
- *
- * The alternative -- teaching CI to publish a moving `main` image tag -- is a
- * bigger change than this issue, and a mutable image tag is its own decision.
+ * IT THROWS RATHER THAN GUESSING, and the throw is the point. This used to map
+ * `main` to the newest RELEASE's images, which made a `main` install a
+ * deliberate skew: main's manifests and scripts, an older release's engine
+ * binary. That skew is gone. What must not replace it is a silent fallback --
+ * an `imageTagFor("main")` asking a registry for `memql-bff:main`, a tag
+ * nothing publishes, is an ImagePullBackOff on every pod whose cause is one
+ * word. `isMainBranchChoice` stays the ONE discriminator; every caller asks it
+ * first, and this refusal is what makes a caller that forgot fail at the call
+ * rather than forty pods later.
  */
-export function imageTagForVersion(version: string, latestRelease: string): string {
+export function imageTagForVersion(version: string): string {
   if (isMainBranchChoice(version)) {
-    return imageTagFor(latestRelease.trim() || DEFAULT_STACK_TAG);
+    throw new Error(
+      "imageTagForVersion was handed `main`, which names no published image: a main install BUILDS its node images from the checkout (see the buildImages step). Ask isMainBranchChoice first and omit the registry flags on that lane.",
+    );
   }
   return imageTagFor(version.trim() || DEFAULT_STACK_TAG);
 }

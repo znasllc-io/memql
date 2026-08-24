@@ -1,0 +1,304 @@
+{
+  "name": "install-main",
+  "kind": "install",
+  "description": "Install a local MemQL cluster from a main checkout, building its node images from that checkout instead of pulling a published release.",
+  "steps": [
+    {
+      "id": "detect",
+      "script": "install.detect",
+      "description": "Inventory the machine: OS/arch support, docker daemon, port availability, free disk.",
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.supported"
+      }
+    },
+    {
+      "id": "dockerAccess",
+      "script": "install.dockerAccess",
+      "description": "Confirm this user can reach the Docker daemon before anything is installed.",
+      "readOnly": true,
+      "dependsOn": [
+        "detect"
+      ],
+      "elevation": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.ready"
+      }
+    },
+    {
+      "id": "toolK3d",
+      "script": "install.binary",
+      "description": "Install the pinned k3d binary, verified against its committed sha256.",
+      "params": {
+        "tool": "k3d"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.installed"
+      }
+    },
+    {
+      "id": "toolKubectl",
+      "script": "install.binary",
+      "description": "Install the pinned kubectl binary, verified against its committed sha256.",
+      "params": {
+        "tool": "kubectl"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.installed"
+      }
+    },
+    {
+      "id": "toolMkcert",
+      "script": "install.binary",
+      "description": "Install the pinned mkcert binary, verified against its committed sha256.",
+      "params": {
+        "tool": "mkcert"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.installed"
+      }
+    },
+    {
+      "id": "hostsBlock",
+      "script": "install.hostsEntries",
+      "description": "Point the front-door hostnames at 127.0.0.1 inside a marked block in the system hosts file.",
+      "params": {
+        "action": "add",
+        "confirm": "add-memql-hosts"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "sudo",
+      "receipt": "hostsEntries",
+      "preExistingPath": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.blockPresent"
+      }
+    },
+    {
+      "id": "browserTrust",
+      "script": "install.nssTools",
+      "description": "Install the NSS tools, so browsers can trust the local certificate authority.",
+      "params": {
+        "confirm": "install-nss-tools"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "sudo",
+      "retained": true,
+      "retainedReason": "certutil is a general system tool other software uses. MemQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.installed"
+      }
+    },
+    {
+      "id": "localCA",
+      "script": "install.mkcert",
+      "description": "Ensure a trusted local CA and issue the front-door wildcard certificate.",
+      "params": {
+        "confirm": "install-memql-ca"
+      },
+      "dependsOn": [
+        "toolMkcert",
+        "browserTrust"
+      ],
+      "elevation": "user-trust",
+      "receipt": "mkcertCA",
+      "preExistingPath": "result.caPreExisting",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.caTrusted"
+      }
+    },
+    {
+      "id": "stackCheckout",
+      "script": "install.cloneStack",
+      "description": "Check the MemQL stack out at a release tag into the pinned local source directory.",
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "none",
+      "receipt": "checkout",
+      "preExistingPath": "!result.cloned",
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.commit"
+      }
+    },
+    {
+      "id": "providerKey",
+      "script": "install.verifyProviderKey",
+      "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it.",
+      "dependsOn": [
+        "detect"
+      ],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.valid"
+      }
+    },
+    {
+      "id": "clusterUp",
+      "script": "k3d.up",
+      "timeoutSeconds": 1800,
+      "description": "Create the k3d cluster, install ArgoCD, seed secrets and reconcile the local overlay against the checkout's own :local image names.",
+      "dependsOn": [
+        "toolK3d",
+        "toolKubectl",
+        "hostsBlock",
+        "localCA",
+        "stackCheckout",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "none",
+      "receipt": "stack",
+      "preExistingPath": "!result.clusterCreated",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.argocdReady"
+      }
+    },
+    {
+      "id": "buildImages",
+      "script": "k3d.dev",
+      "timeoutSeconds": 2700,
+      "description": "Build the node images from the checkout, import them into k3d, and roll the cluster onto them.",
+      "params": {
+        "image-source": "checkout"
+      },
+      "dependsOn": [
+        "clusterUp"
+      ],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.imageSource",
+        "value": "checkout"
+      }
+    },
+    {
+      "id": "seedBootstrap",
+      "script": "install.seedBootstrap",
+      "description": "Write the identity bootstrap values and the AI provider key into the cluster and restart the nodes that read them, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "dependsOn": [
+        "clusterUp",
+        "buildImages"
+      ],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.bootstrapComplete"
+      }
+    },
+    {
+      "id": "frontDoor",
+      "script": "install.verifyFrontDoor",
+      "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname, plus exact-versus-wildcard host precedence.",
+      "dependsOn": [
+        "seedBootstrap"
+      ],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.allPassed"
+      }
+    },
+    {
+      "id": "magicLink",
+      "script": "install.magicLink",
+      "description": "Recover the cluster owner's magic link from the identity pod, as a fallback sign-in route. Identity logs a link only when one is REQUESTED, so a restarted pod carries none -- an empty window is reported as linkState=none rather than failing the install.",
+      "params": {
+        "local": "1"
+      },
+      "dependsOn": [
+        "frontDoor"
+      ],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.linkState"
+      }
+    },
+    {
+      "id": "enrolmentLink",
+      "script": "install.enrolmentLink",
+      "description": "Mint a single-use passkey-enrolment link for the cluster owner when there is an account to enrol, so the install ends with a credential the operator holds. A cluster nobody has signed into yet has no account: the first sign-in creates it, so this reports that instead.",
+      "params": {
+        "local": "1"
+      },
+      "dependsOn": [
+        "frontDoor"
+      ],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.enrolmentState"
+      }
+    },
+    {
+      "id": "recoveryKey",
+      "script": "install.recoveryKey",
+      "description": "Claim the cluster's owner recovery key and show it once -- on the terminal for a CLI run, on the install done screen in the editor (memql#4079) -- so the install ends with a break-glass credential the operator holds off-cluster. Every other credential this install produces assumes the owner can sign in; this one is the answer to all of them being gone. A cluster nobody has signed into yet has no owner and therefore no key, which is reported rather than failed -- and so is a key an earlier run already claimed, which is what repair and upgrade find here. That one is never silently re-claimed: only its hash was stored, so re-revealing is impossible and rotating would strand the value the operator already put somewhere safe.",
+      "params": {
+        "local": "1"
+      },
+      "dependsOn": [
+        "enrolmentLink"
+      ],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.recoveryKeyState"
+      }
+    }
+  ]
+}

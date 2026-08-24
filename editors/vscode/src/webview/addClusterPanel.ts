@@ -77,7 +77,13 @@ import {
   sudoRunsWithoutAsking,
   type SudoAgent,
 } from "../install/sudoAgent.js";
-import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind } from "../install/graph.js";
+import {
+  graphDocumentPath,
+  installGraphPath,
+  loadGraphFile,
+  type Graph,
+  type GraphKind,
+} from "../install/graph.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import { platformRefuseEvents, refuseUnsupportedPlatform } from "../install/platform.js";
@@ -92,10 +98,15 @@ import {
 } from "../install/session.js";
 import {
   AddClusterState,
+  DERIVATION_PLACEHOLDER,
   SUPPORTED_PROVIDERS,
+  derivationLine,
   type ConnectField,
+  type ConnectProbeTargets,
+  type ConnectProbeVerdict,
   type InputField,
 } from "../state/addCluster.js";
+import { composeEndpointFromDomain } from "../connection/endpoint.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 // EVERY LOCAL RUN WRITES A RECORD (memql#3739). The Deployments tree reads the
 // run log as one history, so the wizard's install, repair and uninstall have to
@@ -116,7 +127,7 @@ import {
 } from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { listReleaseTags } from "../install/tags.js";
-import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../install/stackPin.js";
+import { DEFAULT_STACK_REPO, isMainBranchChoice } from "../install/stackPin.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -170,12 +181,33 @@ const CONNECT_LABELS: Record<ConnectField, string> = {
 const CONNECT_HINTS: Record<ConnectField, string> = {
   name: "How this cluster is stored in clusters.yaml, and what every other MemQL command calls it.",
   domain:
-    "Optional, e.g. example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
+    "The cluster's apex, e.g. example.com. Everything else is derived from it: the endpoint below, the identity service sign-in talks to, and the portal URL.",
   endpoint:
-    "The gRPC front door as host:port -- api.<domain>:443 for a cluster behind the usual ingress.",
+    "Derived from the domain. Change it only for a front door that is not at api.<domain>:443 -- an edit here wins.",
   token:
-    'Optional. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "MemQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
+    'Optional, and rarely needed. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "MemQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
 };
+
+/**
+ * The two questions the form actually asks (memql#4431).
+ *
+ * NAME AND DOMAIN, and everything else is derived from the second. The screen
+ * used to ask four things, of which the endpoint was the DERIVED value -- so it
+ * asked the operator for the answer and left the question beside it as optional.
+ */
+const CONNECT_PRIMARY_FIELDS: readonly ConnectField[] = ["name", "domain"];
+
+/**
+ * What Advanced holds: the derivation's override, and the credential nobody
+ * ordinarily pastes.
+ *
+ * A DISCLOSURE, NOT A SECOND SCREEN. Both fields have correct answers already --
+ * the endpoint is composed from the domain, and the token's ordinary value is
+ * empty because "MemQL: Sign In" mints one. What they need is to be REACHABLE,
+ * for the non-standard front door and the operator who genuinely has a token,
+ * not to be asked.
+ */
+const CONNECT_ADVANCED_FIELDS: readonly ConnectField[] = ["endpoint", "token"];
 
 /** The token is the one field on this page that should not render as plain text. */
 const CONNECT_SECRET_FIELDS: readonly ConnectField[] = ["token"];
@@ -211,6 +243,65 @@ const STEP_TIMEOUT_MS = 600_000;
  * are both owned by activation, and a panel that resolved them itself would be
  * a second opinion about where clusters.yaml lives.
  */
+/**
+ * The real reachability probe: does this cluster answer, and does its identity
+ * service publish a keyset (memql#4432).
+ *
+ * WHAT IT PROVES AND WHAT IT DOES NOT. A 200 with a JSON body carrying `keys`
+ * means the identity service is up AND its TLS chain verified AND the front door
+ * routed it -- which is most of what "is this cluster reachable" means. It does
+ * NOT prove the operator can sign in, and the form does not claim it does.
+ *
+ * TLS IS VERIFIED, NOT BYPASSED. Turning verification off would make the probe
+ * pass for a cluster whose certificate nobody can trust, which is the one answer
+ * worse than no probe at all. The mkcert false negative that would otherwise
+ * force that choice is out of scope by construction: `validateConnect` refuses
+ * the localhost family (memql#4431), so every domain reaching here is a public
+ * one carrying a public chain.
+ *
+ * THE TIMEOUT IS THE POINT, not a detail. An unroutable host does not refuse a
+ * connection, it hangs -- the operator would sit on a spinner with no verdict,
+ * which is worse than the failure it is trying to report. Ten seconds matches
+ * `TAG_LIST_TIMEOUT_MS`, the other network call this wizard makes.
+ */
+const CONNECT_PROBE_TIMEOUT_MS = 10_000;
+
+export async function probeClusterOverHttps(
+  targets: ConnectProbeTargets,
+): Promise<ConnectProbeVerdict> {
+  if (targets.jwksUrl === "") {
+    return { ok: false, reason: "no identity host could be derived from that domain" };
+  }
+  const timer = new AbortController();
+  const bell = setTimeout(() => timer.abort(), CONNECT_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(targets.jwksUrl, { signal: timer.signal, redirect: "follow" });
+    if (!res.ok) {
+      return { ok: false, reason: `${targets.jwksUrl} answered HTTP ${String(res.status)}` };
+    }
+    const body = (await res.json()) as { keys?: unknown };
+    if (!Array.isArray(body.keys)) {
+      return {
+        ok: false,
+        reason: `${targets.jwksUrl} answered, but not with a JWKS -- something else is serving that host`,
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    // AbortError is the timeout, and it deserves its own sentence: "aborted"
+    // tells an operator nothing about their cluster.
+    if (err instanceof Error && err.name === "AbortError") {
+      return {
+        ok: false,
+        reason: `no answer within ${String(CONNECT_PROBE_TIMEOUT_MS / 1000)}s (the host may not resolve, or a firewall may be dropping it)`,
+      };
+    }
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(bell);
+  }
+}
+
 export interface AddClusterDeps {
   /** ~/.memql/clusters.yaml, resolved once at activation. */
   clustersPath: string;
@@ -223,6 +314,14 @@ export interface AddClusterDeps {
   diagnostics: DiagnosticSink;
   /** Repaints the Clusters view once an entry lands. */
   refreshTree: () => void;
+  /**
+   * Injected by tests; the real Node https probe when absent (memql#4432).
+   *
+   * The seam exists so the registration form's pass / fail / timeout behaviour
+   * is testable without a network -- the same reason `sudoIsFree` and the graph
+   * are injectable here.
+   */
+  probeCluster?: (targets: ConnectProbeTargets) => Promise<ConnectProbeVerdict>;
   /**
    * Where the graph documents and capability scripts are, from
    * `installRootFor` (memql#3487).
@@ -979,9 +1078,12 @@ export class AddClusterPanel {
           // `installPlan`'s own derivation from the chosen version is the right
           // answer.
           imageTag: recordedCheckout(priorReceipt).imageTag,
-          // Only ever consulted for a `main` install, to pick node images that
-          // exist. See imageTagForVersion.
-          latestRelease: this.latestRelease(),
+          // AND THE LANE (memql#4430), for the reason the line above exists. A
+          // from-source install records no image tag, so replaying only the tag
+          // would leave this run deriving the pin for a cluster whose images were
+          // built from its own checkout. False on a fresh install, where
+          // `installPlan` reads the lane off the chosen version instead.
+          imagesFromSource: recordedCheckout(priorReceipt).fromSource,
           timeoutMs: STEP_TIMEOUT_MS,
           env: this.sudoEnv(),
         }),
@@ -1251,6 +1353,23 @@ export class AddClusterPanel {
     // A second Save while the first is still in the filesystem would be two
     // read-modify-write passes over the same file racing each other.
     if (this.saving) return;
+
+    // VALIDATE, THEN PROBE, THEN WRITE (memql#4432). The state machine owns all
+    // three decisions -- which is what lets the pass / fail / timeout table run
+    // under bare `node --test` -- and this supplies only the socket.
+    //
+    // A "warned" outcome has written nothing and has recorded WHY on the form;
+    // rendering is the whole response, and the button it renders now says "Save
+    // anyway". The second press comes back through here and returns "write".
+    this.render(); // paint the "Checking..." line before the probe blocks on it
+    const outcome = await this.state.prepareConnectSave(
+      this.deps.probeCluster ?? probeClusterOverHttps,
+    );
+    if (outcome !== "write") {
+      this.render();
+      return;
+    }
+
     const draft = this.state.connectDraft();
     if (draft === undefined) {
       this.render();
@@ -1581,6 +1700,13 @@ ${viewKitStyles}
      the uninstall screen's h2 keeps its own look. */
   .recovery-heading { font-size: 1.05em; margin: 16px 0 4px; }
   .recovery-key-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+  details.advanced { margin: 12px 0; }
+  details.advanced > summary { cursor: pointer; user-select: none;
+                               color: var(--memql-accent); padding: 4px 0; }
+  details.advanced[open] > summary { margin-bottom: 4px; }
+  .warning { border-left: 3px solid var(--memql-accent);
+             background: var(--memql-raised); padding: 8px 10px; border-radius: 4px; }
+  .probe-ok { color: var(--memql-data-number); }
   .recovery-key { font-family: var(--vscode-editor-font-family, monospace);
                   background: var(--memql-raised);
                   border: 1px solid var(--memql-accent);
@@ -1646,6 +1772,33 @@ ${this.bodyHtml()}
   }
   document.addEventListener('input', sendField);
   document.addEventListener('change', sendField);
+  // THE DERIVATION, LIVE, WITH NO SECOND COPY OF THE CONVENTION (memql#4431).
+  // The host renders the composition ALREADY PERFORMED over a placeholder --
+  // api.%DOMAIN%:443, produced by composeEndpointFromDomain itself -- so all
+  // this does is substitute. It does not know the convention and cannot drift
+  // from it. Nothing is posted: a repaint here replaces the whole document, so
+  // updating one node's text is precisely what a keystroke may do and a render
+  // is what it must not.
+  //
+  // No regex: this source is itself inside a template literal, where a
+  // backslash escape is consumed before the browser ever sees it, so a
+  // character class here is one silent mangling away from matching everything.
+  const derivedHint = document.querySelector('[data-derived-endpoint]');
+  if (derivedHint) {
+    const template = derivedHint.dataset.endpointTemplate || '';
+    document.addEventListener('input', (e) => {
+      const el = e.target.closest('[data-connect-field="domain"]');
+      if (!el) return;
+      // The same normalization normalizeDomain applies: trim, then drop leading
+      // and trailing dots.
+      let typed = el.value.trim();
+      while (typed.startsWith('.')) typed = typed.slice(1);
+      while (typed.endsWith('.')) typed = typed.slice(0, -1);
+      derivedHint.textContent = typed === ''
+        ? 'MemQL will connect to api.<domain>:443.'
+        : 'Will connect to ' + template.replace('%DOMAIN%', typed) + '.';
+    });
+  }
   // Escape acts only where a screen has ASKED for it. A page-wide handler
   // would also cancel a screen that never opted in, and "the keystroke did
   // something the screen never offered" is the failure this attribute avoids.
@@ -1753,28 +1906,8 @@ ${cards}`;
       values: this.state.inputs,
       errors: this.state.errors,
       versionChoices: this.versionChoices,
-      latestRelease: this.latestRelease(),
       ...(this.preflight === undefined ? {} : { preflight: this.preflight }),
     });
-  }
-
-  /**
-   * The newest published release, or the compiled-in pin when nothing was
-   * listed (memql#3901).
-   *
-   * `listReleaseTags` already returns newest-first and drops anything that is
-   * not a `vX.Y.Z` release, so the head of the list IS the newest release.
-   * Falling back to the pin rather than to "" matters: the pin is a real
-   * published release, so a `main` install with no network still asks for node
-   * images that exist instead of for none.
-   *
-   * NOTE THIS IS NOT "auto-select the newest", which stackPin.ts argues against
-   * at length and which still holds -- nothing here changes what the version
-   * field is SET to. It answers a different question: given that the operator
-   * chose `main`, which images should it run.
-   */
-  private latestRelease(): string {
-    return this.versionChoices[0] ?? DEFAULT_STACK_TAG;
   }
 
   /**
@@ -1836,6 +1969,14 @@ ${cards}`;
     const listing = await listReleaseTags({ cwd: process.cwd(), repo: DEFAULT_STACK_REPO });
     if (listing.tags.length === 0) return;
     this.versionChoices = listing.tags;
+    // THE LISTING IS WHAT MAKES "Latest" A VALUE (memql#4429). The picker labels
+    // the newest entry `Latest ... (recommended)`; this is what makes that entry
+    // the one that is SELECTED. Both read the same head of the same list, so the
+    // recommendation and the selection cannot disagree.
+    //
+    // The state machine drops this on the floor if the operator has already
+    // chosen -- deciding that here would need form state the DOM no longer has.
+    this.state.seedVersionFromListing(listing.tags[0] ?? "");
     this.render();
   }
 
@@ -1856,22 +1997,93 @@ ${cards}`;
    * does, and for the better reason -- all the problems arrive together
    * instead of one per attempt.
    */
+  /**
+   * The probe's verdict, on the form (memql#4432).
+   *
+   * A WARNING, NOT AN ERROR, and the markup says so: it is not attached to a
+   * field, because no field is wrong. The cluster is unreachable from here right
+   * now, which may be a typo and may equally be a VPN the operator has not
+   * connected, a cluster that is scaled to zero, or a deploy in progress.
+   *
+   * The endpoint is NAMED in the message. "Could not reach the cluster" sends
+   * somebody to check their cluster; "could not reach api.example.com:443" lets
+   * them notice they typed exmaple.com.
+   */
+  private probeHtml(): string {
+    const probe = this.state.connectProbe;
+    switch (probe.state) {
+      case "none":
+        return "";
+      case "running":
+        return `<p class="hint probe-running">Checking that ${escapeHtml(
+          this.state.connectProbeTargets().endpoint,
+        )} answers...</p>`;
+      case "passed":
+        return `<p class="hint probe-ok">Reached ${escapeHtml(probe.endpoint)} and its sign-in service.</p>`;
+      case "failed":
+        return `<p class="warning probe-failed">Could not reach ${escapeHtml(
+          probe.endpoint,
+        )}: ${escapeHtml(probe.reason)}<br>
+Nothing has been written. If the cluster is stopped, behind a VPN, or still deploying, this is expected -- press Save anyway to register it regardless.</p>`;
+    }
+  }
+
   private connectHtml(): string {
     const values = this.state.connectInputs;
     const errors = this.state.connectErrors;
     const failure = this.state.connectFailure;
 
-    const fields = CONNECT_FIELDS.map((field) => {
+    const renderField = (field: ConnectField): string => {
       const error = errors.find((e) => e.field === field);
       const secret = CONNECT_SECRET_FIELDS.includes(field);
+      // The endpoint box shows the DERIVATION as its starting value, so opening
+      // Advanced answers "what will this connect to" without anyone typing. An
+      // edit replaces it and wins -- `validateConnect` and `connectDraft` both
+      // prefer a non-empty box over the composition.
+      const shown =
+        field === "endpoint" && values.endpoint.trim() === ""
+          ? composeEndpointFromDomain(values.domain)
+          : values[field];
+      // THE LIVE DERIVATION, WITHOUT A SECOND COPY OF THE CONVENTION
+      // (memql#4431). `endpoint.ts` records that this composition was once
+      // inlined in three places and that the drift is invisible -- each copy
+      // produces a plausible hostname and the failure surfaces as a cluster that
+      // will not dial. So the webview is handed a TEMPLATE produced by the real
+      // function rather than a rule it re-implements: the script substitutes the
+      // typed domain into it as the operator types, and the only thing on that
+      // side is a string replace.
+      const derived =
+        field === "domain"
+          ? `<div class="hint" data-derived-endpoint
+       data-endpoint-template="${escapeHtml(composeEndpointFromDomain(DERIVATION_PLACEHOLDER))}">${escapeHtml(
+              derivationLine(values.domain),
+            )}</div>`
+          : "";
       return `<div class="field" data-invalid="${error !== undefined}">
   <label for="c-${field}">${escapeHtml(CONNECT_LABELS[field])}</label>
   <input id="c-${field}" type="${secret ? "password" : "text"}"
-         data-connect-field="${field}" value="${escapeHtml(values[field])}">
+         data-connect-field="${field}" value="${escapeHtml(shown)}">
   <div class="hint">${escapeHtml(CONNECT_HINTS[field])}</div>
+  ${derived}
   ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
 </div>`;
-    }).join("");
+    };
+
+    const primary = CONNECT_PRIMARY_FIELDS.map(renderField).join("");
+    // ADVANCED OPENS ITSELF WHEN IT HAS SOMETHING TO SAY. A validation error
+    // inside a collapsed <details> is an error nobody can see, and a form that
+    // refuses to save while showing no problem is the worst of both. It also
+    // stays open when either field already carries an operator's answer, so a
+    // repaint never hides what they typed.
+    const advancedHasContent =
+      CONNECT_ADVANCED_FIELDS.some((f) => errors.some((e) => e.field === f)) ||
+      values.endpoint.trim() !== "" ||
+      values.token.trim() !== "";
+    const advanced = `<details class="advanced"${advancedHasContent ? " open" : ""}>
+  <summary>Advanced</summary>
+  <p class="hint">Both of these have correct answers already. Change the endpoint only for a front door that is not at api.&lt;domain&gt;:443.</p>
+  ${CONNECT_ADVANCED_FIELDS.map(renderField).join("")}
+</details>`;
 
     // data-escape-act is what makes Escape mean "discard" HERE and nowhere
     // else on this page: the key listener looks for the attribute rather than
@@ -1880,10 +2092,14 @@ ${cards}`;
     return `<h1>Connect to an existing cluster</h1>
 <p class="lede">Registering a cluster records how to reach it. Nothing is installed and nothing on the cluster is touched.</p>
 <div data-escape-act="discard">
-${fields}
+${primary}
+${advanced}
+${this.probeHtml()}
 ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`}
 <div class="actions">
-  <button class="primary" type="button" data-connect-act="save">Save cluster</button>
+  <button class="primary" type="button" data-connect-act="save">${
+    this.state.connectProbe.state === "failed" ? "Save anyway" : "Save cluster"
+  }</button>
   <button class="secondary" type="button" data-connect-act="discard">Cancel</button>
 </div>
 </div>`;
@@ -2053,7 +2269,13 @@ ${this.sharedToolsHtml()}
     let graph: PreflightInputs["graph"];
     let needsElevation = false;
     try {
-      const loaded = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
+      // THE LANE'S OWN DOCUMENT (memql#4430). "Before it runs" states how many
+      // steps a run has, and a from-source install has one more -- the build.
+      // Counting install.json's steps for a `main` install would understate the
+      // run on the one screen whose whole job is saying what it will cost.
+      const loaded = await loadGraphFile(
+        installGraphPath(this.deps.installRoot, isMainBranchChoice(this.state.inputs.version)),
+      );
       needsElevation = loaded.steps.some((step) => step.elevation !== "none");
       graph = { ok: true, steps: loaded.steps.length, needsElevation };
     } catch (err) {

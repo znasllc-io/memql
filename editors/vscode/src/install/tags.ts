@@ -5,12 +5,25 @@
 // VERSION, and moving it to another tag is a coherent deployment. This lists
 // the tags to move to.
 //
-// IT NEVER AUTO-SELECTS THE NEWEST, and neither does anything downstream.
-// `stackPin.ts` argues at length why the pinned tag is a reviewed diff rather
-// than whatever was pushed this morning; the same reasoning holds when the
-// operator is choosing rather than defaulting. A version somebody picked off a
-// list is a fact they can be held to, and one the extension picked silently is
-// not. This module therefore returns an ORDER, never a selection.
+// THIS MODULE RETURNS AN ORDER, NEVER A SELECTION. What the two callers DO with
+// that order deliberately differs, and the boundary is stated here because here
+// is where both of them can read it (memql#4429):
+//
+//   - THE INSTALL FORM PRESELECTS THE NEWEST, labelled `Latest -- vX.Y.Z
+//     (recommended)`. A fresh install has no cluster to disturb and every reason
+//     to want the newest release: a release's manifests and its node images ship
+//     together at that tag, and the four postmortems `stackPin.ts` records are
+//     all failures of having installed something older.
+//   - THE DEPLOYMENT PAGE'S MOVE PICKER PRESELECTS NOTHING, and that is not an
+//     oversight to be tidied up. Moving an EXISTING cluster is the surface where
+//     a silent choice is dangerous: any version is as plausible as another, the
+//     operator is changing something that already works, and a version somebody
+//     picked off a list is a fact they can be held to while one the extension
+//     picked silently is not.
+//
+// The distinction is "is there a cluster to lose", not "is a default nice to
+// have" -- so a change to either preselection is a decision about that, and not
+// a consistency fix.
 //
 // AND IT DEGRADES TO TYPING. `git ls-remote` needs a network and a git; an
 // operator on a plane has neither and still has a cluster to move. A failure
