@@ -9,6 +9,27 @@
   the portal: light, dark and system; there are different views following
   different colors and I don't want that."
 
+> **Correction (2026-08-24, during implementation).** The panel count below is
+> wrong, and how it got wrong is worth more than the number. There are **seven**
+> `*Panel.ts` files and **nine** panel classes -- `automationPanel.ts` hosts
+> `AutomationRunPanel` + `StepTracePanel`, and `runPanel.ts` hosts `RunPanel` +
+> `ResultPanel`. `runPanel.ts` is the file this record omits entirely, and it
+> was already inlining `brandStyleBlock()`, so the conclusions below are
+> unaffected -- only the census is.
+>
+> **The cause was two raw NUL bytes** in `runPanel.ts`'s `panelKey()` template
+> literal. A NUL makes a file binary to the toolchain: `grep` skips it in
+> SILENCE (no match, no "binary file matches" line, exit 1), `file` reports
+> "data", and `git diff` prints "Binary files differ". The survey that produced
+> this record used grep, so the seventh panel was invisible to it. The wrong
+> count then travelled into all four task issues before anyone re-derived it.
+>
+> Fixed in memql#4422: the bytes are escapes now, two more offenders elsewhere
+> in the package were found by a byte-level sweep, and
+> `editors/vscode/test/sourceBytes.test.ts` fails the build on any raw NUL. The
+> original text is left below rather than edited, because a design record that
+> silently self-corrects is one nobody can audit.
+
 ## Current state (verified 2026-08-23)
 
 - `editors/vscode/src/webview/brandTokens.ts` (memql#4196) already carries the
@@ -123,6 +144,15 @@ New `node --test` test asserting every `src/webview/*Panel.ts` html builder
 inlines `brandStyleBlock()` (import-graph or output-string check). Today all
 six do; the gate is what keeps the seventh honest. The three `*Screens.ts`
 fragment modules are exempt by construction (they render inside a panel).
+
+> **Correction (2026-08-24):** "all six ... the seventh" carries the miscount
+> the box at the top of this record explains; it is seven files and nine panel
+> classes, and all nine were already compliant. The decision is unaffected --
+> if anything the real numbers strengthen it, because the two files hosting TWO
+> panels each are exactly where a per-file check passes while one document
+> ships bare. That is why the implemented gate's unit is the DOCUMENT rather
+> than the file, and why the `*Screens.ts` exemption is asserted structurally
+> (those modules build no document) rather than granted by filename.
 
 ## What this does NOT change
 
