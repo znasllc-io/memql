@@ -11,9 +11,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // github_test.go -- the cut, end to end, against a fake GitHub.
@@ -622,4 +624,78 @@ type failingEngine struct{ memql.IntegrationEngineAccess }
 
 func (e *failingEngine) Execute(context.Context, string) (*memql.ExecuteResult, error) {
 	return nil, fmt.Errorf("the database is down")
+}
+
+// TestRemoteMessagesAreBoundedAndEncodable covers the two defects on the
+// failure path -- the one place nobody is watching, because the operator is
+// already dealing with the failure that got them there.
+//
+// GitHub's error message is REMOTE text: this package does not author it and
+// can promise nothing about its length or its encoding. It lands on a
+// v1:cluster:releaseCut row via describeRefusal and then on an operator's
+// screen, so both properties have to hold at the boundary rather than
+// downstream.
+func TestRemoteMessagesAreBoundedAndEncodable(t *testing.T) {
+	t.Run("a huge JSON message is capped", func(t *testing.T) {
+		// This path had NO cap: 5000 characters in, 5000 straight onto a
+		// graph row. Only the raw-body fallback was bounded, and that is
+		// the path GitHub almost never takes.
+		body := []byte(`{"message":"` + strings.Repeat("z", 5000) + `"}`)
+		got := firstLine(body)
+		if utf8.RuneCountInString(got) > maxRemoteMessage+3 {
+			t.Fatalf("firstLine returned %d runes; the cap is %d (+3 for the ellipsis)",
+				utf8.RuneCountInString(got), maxRemoteMessage)
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Error("a truncated message must say it was truncated")
+		}
+	})
+
+	t.Run("truncation lands on a rune boundary", func(t *testing.T) {
+		// THROUGH THE RAW-BODY PATH ON PURPOSE. An earlier version of
+		// this case used a JSON body, and it passed against the OLD code
+		// too -- because the old code did not truncate that path at all,
+		// so nothing was ever cut and the string stayed valid by
+		// accident. A case that cannot fail against the defect is not a
+		// case; it is the third costume of the same silence.
+		//
+		// The raw-body path is the one that byte-sliced. 199 ASCII bytes
+		// then a two-byte rune puts the 200th byte mid-rune, which
+		// yields invalid UTF-8 -- and structpb REFUSES it, so the
+		// capability's own result would fail to encode and the caller
+		// would get an encoding error in place of the GitHub failure
+		// that caused it.
+		body := []byte(strings.Repeat("a", 199) + "é" + strings.Repeat("ü", 50))
+		got := firstLine(body)
+		if !utf8.ValidString(got) {
+			t.Fatalf("firstLine produced invalid UTF-8 (a byte slice through a rune): %q", got)
+		}
+		if _, err := structpb.NewStruct(map[string]any{"error": got}); err != nil {
+			t.Fatalf("the message cannot be encoded onto a row: %v", err)
+		}
+		if utf8.RuneCountInString(got) > maxRemoteMessage+3 {
+			t.Fatalf("the raw-body path returned %d runes; the cap is %d",
+				utf8.RuneCountInString(got), maxRemoteMessage)
+		}
+	})
+
+	t.Run("invalid bytes in the body are replaced, not propagated", func(t *testing.T) {
+		// No truncation involved: a remote body can simply carry invalid
+		// bytes, and nothing downstream would fix them.
+		got := firstLine([]byte("plain body with \xff\xfe bad bytes"))
+		if !utf8.ValidString(got) {
+			t.Fatalf("invalid bytes survived: %q", got)
+		}
+		if _, err := structpb.NewStruct(map[string]any{"error": got}); err != nil {
+			t.Fatalf("the message cannot be encoded onto a row: %v", err)
+		}
+	})
+
+	t.Run("a short message is passed through untouched", func(t *testing.T) {
+		// The control. Without it every case above is satisfied by a
+		// function that returns "" for everything.
+		if got := firstLine([]byte(`{"message":"Reference already exists"}`)); got != "Reference already exists" {
+			t.Fatalf("firstLine mangled a normal message: %q", got)
+		}
+	})
 }

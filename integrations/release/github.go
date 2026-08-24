@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // github.go -- the GitHub REST client, shaped like integrations/shopify/admin.go:
@@ -129,18 +130,57 @@ func classify(status int, body []byte, what string) error {
 	}
 }
 
+// maxRemoteMessage bounds how much of GitHub's reply is carried forward.
+//
+// This text ends up on a v1:cluster:releaseCut row and on an operator's
+// screen, and it is REMOTE: this package does not author it and cannot
+// promise anything about its length or its encoding.
+const maxRemoteMessage = 200
+
 // firstLine renders a GitHub error body compactly. GitHub replies
 // {"message": "...", "errors": [...]}; the message is the actionable half.
+//
+// BOUNDED AND UTF-8 SANITISED, and both halves were defects rather than
+// hypotheticals -- measured, not reasoned:
+//
+//	The decoded `message` path had NO cap at all: a 5000-character message
+//	came back at 5000 characters and went straight onto a graph row. Only the
+//	raw-body fallback was capped, which is the path GitHub almost never takes.
+//
+//	The cap it did have sliced BYTES. `s[:200]` on text whose 200th byte sits
+//	mid-rune produces invalid UTF-8, and structpb.NewStruct REFUSES it
+//	("proto: invalid UTF-8 in string") -- so the capability's own result would
+//	fail to encode and the caller would get an encoding error instead of the
+//	GitHub failure that caused it. On the failure path, where the operator is
+//	already dealing with something going wrong and would read the second error
+//	as part of the first.
+//
+// So: truncate on a RUNE boundary, and pass whatever survives through
+// ToValidUTF8, because a remote body can carry invalid bytes without any
+// truncation on our part.
 func firstLine(body []byte) string {
 	var decoded struct {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &decoded); err == nil && decoded.Message != "" {
-		return decoded.Message
+		return clampMessage(decoded.Message)
 	}
-	s := strings.TrimSpace(string(body))
-	if len(s) > 200 {
-		return s[:200] + "..."
+	return clampMessage(strings.TrimSpace(string(body)))
+}
+
+// clampMessage bounds a remote string to maxRemoteMessage RUNES and guarantees
+// the result is valid UTF-8.
+func clampMessage(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if utf8.RuneCountInString(s) <= maxRemoteMessage {
+		return s
+	}
+	runes := 0
+	for idx := range s {
+		if runes == maxRemoteMessage {
+			return s[:idx] + "..."
+		}
+		runes++
 	}
 	return s
 }
