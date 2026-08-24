@@ -115,7 +115,39 @@ spelled out per source -- an unset scheme is an error, never a silent downgrade
 -- it logs a warning at boot, and every row it stages carries
 `signatureVerified=false` so an audit query finds them.
 
-## What a product writes
+## What a connector's `Apply` returns
+
+A staged row is worked by whatever serves its `source`. Since epic
+memql#4378 the engine ships a **dispatcher** that does the routing, so the
+usual answer is *implement a connector*, not *write an automation*:
+
+```
+dispatchInboundToConnector      an engine automation on inboundRequest.created
+  -> the connector whose Name() matches the row's `source`
+  -> Connector.Apply(ctx, InboundRequest) -> []MirrorWrite
+  -> the runtime writes each one behind the VERSION GUARD
+  -> the request row is stamped `processed` or `failed`
+```
+
+`Apply` receives the row's fields as an `InboundRequest` — `Source`,
+`Topic`, `Body`, `Headers`, `ReceivedAt` and the staged row's id — and
+returns the rows it wants written. It does **not** write them itself: the
+runtime does, under the connector's own actor, and refuses any write whose
+version is older than what MemQL already holds (recording it as `stale`).
+That is what stops an out-of-order webhook regressing a mirror.
+
+Returning **no** writes is normal, not a failure. `/inbound/{source}` is a
+shared door and most of what comes through it belongs to something else;
+an unrecognised delivery is stamped `processed` and forgotten.
+
+See [data origins](../concepts/data-origins.md) for the contract and
+`integrations/CLAUDE.md` for the recipe.
+
+### Writing an automation instead
+
+Still supported, and still the right answer when the delivery is not
+mirrored data — a notification to act on, a job to enqueue, something with
+no system of record on the other side:
 
 ```memql fragment
 @trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
@@ -125,6 +157,10 @@ automation handleShopifyOrder { ... }
 Filter on `source`, read `body`, and stamp `updateInboundRequestStatus` with
 `processing` / `processed` / `failed` as you work it. The engine only ever
 writes the initial `received`; everything after that is yours.
+
+Both can coexist: the dispatcher only ever offers a row to the connector
+its `source` names, so an automation on a different source never sees a
+connector and vice versa.
 
 The row also carries `contentType`, `dedupeKey`, `signatureVerified` and
 `receivedAt`. Query staged rows with `inboundRequestsByStatus(status:

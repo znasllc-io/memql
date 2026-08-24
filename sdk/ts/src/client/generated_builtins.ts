@@ -96,6 +96,117 @@ QueryClient.prototype.campaignStartSend = function (this: QueryClient, args: Cam
   return this.executeNamed("campaignStartSend", buildCampaignStartSend(args), opts);
 };
 
+/** List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page. */
+export interface DataOriginsArgs {
+}
+
+export function buildDataOrigins(args: DataOriginsArgs): string {
+  void args;
+  return "builtin dataOrigins()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    dataOrigins(args?: DataOriginsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.dataOrigins = function (this: QueryClient, args: DataOriginsArgs = {} as DataOriginsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("dataOrigins", buildDataOrigins(args), opts);
+};
+
+/** Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. */
+export interface DatasyncDiscardOutboxEntryArgs {
+  entryId: string;
+  reason?: string;
+}
+
+export function buildDatasyncDiscardOutboxEntry(args: DatasyncDiscardOutboxEntryArgs): string {
+  const parts: string[] = [];
+  parts.push("entryId: " + renderMemQLValue(args.entryId));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin datasyncDiscardOutboxEntry(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncDiscardOutboxEntry(args: DatasyncDiscardOutboxEntryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncDiscardOutboxEntry = function (this: QueryClient, args: DatasyncDiscardOutboxEntryArgs = {} as DatasyncDiscardOutboxEntryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncDiscardOutboxEntry", buildDatasyncDiscardOutboxEntry(args), opts);
+};
+
+/** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. */
+export interface DatasyncRetryOutboxEntryArgs {
+  entryId: string;
+}
+
+export function buildDatasyncRetryOutboxEntry(args: DatasyncRetryOutboxEntryArgs): string {
+  const parts: string[] = [];
+  parts.push("entryId: " + renderMemQLValue(args.entryId));
+  return "builtin datasyncRetryOutboxEntry(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncRetryOutboxEntry(args: DatasyncRetryOutboxEntryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncRetryOutboxEntry = function (this: QueryClient, args: DatasyncRetryOutboxEntryArgs = {} as DatasyncRetryOutboxEntryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncRetryOutboxEntry", buildDatasyncRetryOutboxEntry(args), opts);
+};
+
+/** Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. */
+export interface DatasyncSetSyncPausedArgs {
+  connector: string;
+  conceptId: string;
+  paused: boolean;
+}
+
+export function buildDatasyncSetSyncPaused(args: DatasyncSetSyncPausedArgs): string {
+  const parts: string[] = [];
+  parts.push("connector: " + renderMemQLValue(args.connector));
+  parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  parts.push("paused: " + renderMemQLValue(args.paused));
+  return "builtin datasyncSetSyncPaused(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncSetSyncPaused(args: DatasyncSetSyncPausedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncSetSyncPaused = function (this: QueryClient, args: DatasyncSetSyncPausedArgs = {} as DatasyncSetSyncPausedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncSetSyncPaused", buildDatasyncSetSyncPaused(args), opts);
+};
+
+/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it. */
+export interface DatasyncStartBackfillArgs {
+  connector: string;
+  conceptId: string;
+}
+
+export function buildDatasyncStartBackfill(args: DatasyncStartBackfillArgs): string {
+  const parts: string[] = [];
+  parts.push("connector: " + renderMemQLValue(args.connector));
+  parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  return "builtin datasyncStartBackfill(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncStartBackfill(args: DatasyncStartBackfillArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncStartBackfill = function (this: QueryClient, args: DatasyncStartBackfillArgs = {} as DatasyncStartBackfillArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncStartBackfill", buildDatasyncStartBackfill(args), opts);
+};
+
 /** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
