@@ -197,7 +197,7 @@ func dependsOnTransitively(g *Graph, from, to string) bool {
 // --------------------------------------------------------------------------
 
 func TestNeitherGraphHasACycle(t *testing.T) {
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		if _, err := g.TopoOrder(); err != nil {
 			t.Errorf("%s: %v", g.Name, err)
 		}
@@ -212,7 +212,7 @@ func TestEveryGraphScriptIsAllowlisted(t *testing.T) {
 	root := repoRoot(t)
 	allow := allowlistPath(t, root)
 
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			rel, ok := allow[s.Script]
@@ -234,7 +234,7 @@ func TestEveryGraphScriptIsAllowlisted(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestEveryStepDeclaresAKnownElevation(t *testing.T) {
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			switch s.Elevation {
@@ -342,7 +342,7 @@ func TestGraphsOnlyReadFieldsTheScriptsEmit(t *testing.T) {
 		return f
 	}
 
-	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild)} {
+	for _, g := range []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall), mustLoadEmbedded(t, Rebuild), mustLoadEmbedded(t, InstallFromMain)} {
 		for i := range g.Steps {
 			s := &g.Steps[i]
 			emitted := fields(s.Script)

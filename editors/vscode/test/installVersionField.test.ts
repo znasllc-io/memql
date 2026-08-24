@@ -5,7 +5,7 @@ import { DEFAULT_INPUTS, requiredFields } from "../src/state/addCluster.js";
 import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import { listReleaseTags } from "../src/install/tags.js";
 import { refusedPlatformGuidance } from "../src/state/installProgress.js";
-import { dedupeKeepingDefault } from "../src/webview/installScreens.js";
+import { withCurrentInSortedPosition } from "../src/webview/installScreens.js";
 
 // installVersionField.test.ts -- znasllc-io/memql#3882.
 //
@@ -83,23 +83,47 @@ test("a failed listing is an empty list with a reason, never a rejection", async
   assert.match(listing.error, /could not run git/);
 });
 
-test("the current value is always an option, and is first", () => {
-  // A <select> silently DROPS a value that is not one of its options. A pinned
-  // default the remote listing does not carry -- a tag cut after this extension
-  // was built, or a partial listing -- would leave the field showing the newest
-  // release while the value still said something else, and the operator would
-  // install a version the page never offered them.
-  const got = dedupeKeepingDefault(["v0.19.0", "v0.17.1"], "v0.18.0");
-  assert.deepEqual(got, ["v0.18.0", "v0.19.0", "v0.17.1"]);
+test("the current value is always an option -- IN ITS SORTED POSITION, not first", () => {
+  // TWO PROPERTIES ARRIVED IN ONE LINE AND ONLY ONE WAS WANTED (memql#4429).
+  //
+  // Guarantee-present is real: a <select> silently DROPS a value that is not one
+  // of its options, so a current value the listing does not carry -- a tag cut
+  // after this extension was built, or a partial listing -- would leave the
+  // field showing the newest release while the value still said something else,
+  // and the operator would install a version the page never offered them.
+  //
+  // Queue-jumping was the accident. The old `dedupeKeepingDefault` returned
+  // [current, ...rest], which put the pin at the top of a list whose entire
+  // meaning is its order. That is the mis-sort the owner reported.
+  const got = withCurrentInSortedPosition(["v0.19.0", "v0.17.1"], "v0.18.0");
+  assert.deepEqual(got, ["v0.19.0", "v0.18.0", "v0.17.1"]);
+});
+
+test("a current value NEWER than anything listed sorts to the top on merit", () => {
+  // Same insert, and here it does land first -- because it belongs there, not
+  // because it is the current value.
+  assert.deepEqual(withCurrentInSortedPosition(["v0.19.0", "v0.17.1"], "v0.20.3"), [
+    "v0.20.3",
+    "v0.19.0",
+    "v0.17.1",
+  ]);
 });
 
 test("the current value is not duplicated when the listing already has it", () => {
-  const got = dedupeKeepingDefault(["v0.19.0", "v0.18.0", "v0.17.1"], "v0.18.0");
-  assert.deepEqual(got, ["v0.18.0", "v0.19.0", "v0.17.1"]);
+  const got = withCurrentInSortedPosition(["v0.19.0", "v0.18.0", "v0.17.1"], "v0.18.0");
+  assert.deepEqual(got, ["v0.19.0", "v0.18.0", "v0.17.1"]);
 });
 
 test("an empty current value adds no blank option", () => {
-  assert.deepEqual(dedupeKeepingDefault(["v0.19.0"], ""), ["v0.19.0"]);
+  assert.deepEqual(withCurrentInSortedPosition(["v0.19.0"], ""), ["v0.19.0"]);
+});
+
+test("the listing's own order is never re-sorted when nothing is inserted", () => {
+  // The listing arrives from compareSemverDesc already. Returning it untouched
+  // -- the same array -- is what makes "the picker renders the listing's order"
+  // a property of this function rather than a coincidence of re-sorting.
+  const listing = ["v0.19.0", "v0.18.0"];
+  assert.equal(withCurrentInSortedPosition(listing, "v0.18.0"), listing);
 });
 
 test("Create deployment on an unsupported platform refuses instead of listing tags", async () => {

@@ -68,7 +68,14 @@
 
 import * as path from "node:path";
 
-import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind, type Step } from "./graph.js";
+import {
+  graphDocumentPath,
+  installGraphPath,
+  loadGraphFile,
+  type Graph,
+  type GraphKind,
+  type Step,
+} from "./graph.js";
 import {
   defaultReceiptPath,
   readReceipt,
@@ -82,6 +89,7 @@ import {
 import { looksLikeProviderKey, REDACTED } from "./secrets.js";
 import { type ExecEvent, type ExecutionReport, type StepPlan } from "./executor.js";
 import {
+  imagesFromSource,
   installPlan,
   previewUninstall,
   runInstall,
@@ -297,6 +305,12 @@ export function repairOptions(opts: CliOptions, receipt: Receipt | null): CliOpt
     // `clusterUp` -- and `installPlan` then derives, which is the only answer
     // available and the correct one for the tag installs those receipts are.
     imageTag: checkout.imageTag || undefined,
+    // AND THE LANE THOSE IMAGES CAME FROM (memql#4430). A from-source install
+    // records NO image tag -- there is no registry in its plan at all -- so the
+    // line above is empty for it and `installPlan` would derive the pin and hand
+    // a cluster running `memql-<node>:local` a GHCR registry. That is memql#4068
+    // exactly, by a route that opened when the main lane stopped pulling images.
+    imagesFromSource: checkout.fromSource || undefined,
     provider: recordedProvider(receipt) || opts.provider,
     providerKeyFile: keyFile,
     domain: recordedDomain(receipt) || opts.domain,
@@ -359,7 +373,15 @@ export async function run(
       }
       return 0;
     }
-    const graph = await loadGraphFile(graphDocumentPath(kind, opts.root));
+    // THE LANE'S OWN DOCUMENT (memql#4430). A dry run that printed install.json
+    // for a `--tag=main` run would show sixteen steps and no build, which is not
+    // the plan the same command would execute -- and a dry run is read precisely
+    // because somebody wants to know that before committing to it.
+    const graph = await loadGraphFile(
+      kind === "install"
+        ? installGraphPath(opts.root, imagesFromSource(opts))
+        : graphDocumentPath(kind, opts.root),
+    );
     printPlan(graph, installPlan(opts), log);
     return 0;
   }

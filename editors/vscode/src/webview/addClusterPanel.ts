@@ -76,7 +76,13 @@ import {
   sudoRunsWithoutAsking,
   type SudoAgent,
 } from "../install/sudoAgent.js";
-import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind } from "../install/graph.js";
+import {
+  graphDocumentPath,
+  installGraphPath,
+  loadGraphFile,
+  type Graph,
+  type GraphKind,
+} from "../install/graph.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import { platformRefuseEvents, refuseUnsupportedPlatform } from "../install/platform.js";
@@ -115,7 +121,7 @@ import {
 } from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { listReleaseTags } from "../install/tags.js";
-import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../install/stackPin.js";
+import { DEFAULT_STACK_REPO, isMainBranchChoice } from "../install/stackPin.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -975,9 +981,12 @@ export class AddClusterPanel {
           // `installPlan`'s own derivation from the chosen version is the right
           // answer.
           imageTag: recordedCheckout(priorReceipt).imageTag,
-          // Only ever consulted for a `main` install, to pick node images that
-          // exist. See imageTagForVersion.
-          latestRelease: this.latestRelease(),
+          // AND THE LANE (memql#4430), for the reason the line above exists. A
+          // from-source install records no image tag, so replaying only the tag
+          // would leave this run deriving the pin for a cluster whose images were
+          // built from its own checkout. False on a fresh install, where
+          // `installPlan` reads the lane off the chosen version instead.
+          imagesFromSource: recordedCheckout(priorReceipt).fromSource,
           timeoutMs: STEP_TIMEOUT_MS,
           env: this.sudoEnv(),
         }),
@@ -1749,28 +1758,8 @@ ${cards}`;
       values: this.state.inputs,
       errors: this.state.errors,
       versionChoices: this.versionChoices,
-      latestRelease: this.latestRelease(),
       ...(this.preflight === undefined ? {} : { preflight: this.preflight }),
     });
-  }
-
-  /**
-   * The newest published release, or the compiled-in pin when nothing was
-   * listed (memql#3901).
-   *
-   * `listReleaseTags` already returns newest-first and drops anything that is
-   * not a `vX.Y.Z` release, so the head of the list IS the newest release.
-   * Falling back to the pin rather than to "" matters: the pin is a real
-   * published release, so a `main` install with no network still asks for node
-   * images that exist instead of for none.
-   *
-   * NOTE THIS IS NOT "auto-select the newest", which stackPin.ts argues against
-   * at length and which still holds -- nothing here changes what the version
-   * field is SET to. It answers a different question: given that the operator
-   * chose `main`, which images should it run.
-   */
-  private latestRelease(): string {
-    return this.versionChoices[0] ?? DEFAULT_STACK_TAG;
   }
 
   /**
@@ -1832,6 +1821,14 @@ ${cards}`;
     const listing = await listReleaseTags({ cwd: process.cwd(), repo: DEFAULT_STACK_REPO });
     if (listing.tags.length === 0) return;
     this.versionChoices = listing.tags;
+    // THE LISTING IS WHAT MAKES "Latest" A VALUE (memql#4429). The picker labels
+    // the newest entry `Latest ... (recommended)`; this is what makes that entry
+    // the one that is SELECTED. Both read the same head of the same list, so the
+    // recommendation and the selection cannot disagree.
+    //
+    // The state machine drops this on the floor if the operator has already
+    // chosen -- deciding that here would need form state the DOM no longer has.
+    this.state.seedVersionFromListing(listing.tags[0] ?? "");
     this.render();
   }
 
@@ -2049,7 +2046,13 @@ ${this.sharedToolsHtml()}
     let graph: PreflightInputs["graph"];
     let needsElevation = false;
     try {
-      const loaded = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
+      // THE LANE'S OWN DOCUMENT (memql#4430). "Before it runs" states how many
+      // steps a run has, and a from-source install has one more -- the build.
+      // Counting install.json's steps for a `main` install would understate the
+      // run on the one screen whose whole job is saying what it will cost.
+      const loaded = await loadGraphFile(
+        installGraphPath(this.deps.installRoot, isMainBranchChoice(this.state.inputs.version)),
+      );
       needsElevation = loaded.steps.some((step) => step.elevation !== "none");
       graph = { ok: true, steps: loaded.steps.length, needsElevation };
     } catch (err) {

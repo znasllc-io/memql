@@ -36,6 +36,7 @@ import {
 } from "./executor.js";
 import {
   graphDocumentPath,
+  installGraphPath,
   loadGraphFile,
   rebuildGraphPath,
   type Elevation,
@@ -101,12 +102,17 @@ export interface SessionOptions {
   commit?: string;
   repo?: string;
   /**
-   * The newest published release, used ONLY to pick node images for a `main`
-   * install. See imageTagForVersion: there is no `main` image in GHCR, so a
-   * branch install runs the newest images that exist. Empty falls back to
-   * DEFAULT_STACK_TAG.
+   * This cluster runs node images BUILT FROM ITS OWN CHECKOUT (memql#4430).
+   *
+   * True for a `main` install, where `buildImages` builds and imports
+   * `memql-<node>:local` and no registry is asked for anything. It is a
+   * SEPARATE option from the version rather than derived from it because a
+   * REPAIR has no version: a from-source install records a commit and no tag,
+   * so `isMainBranchChoice("")` is false and the repair would otherwise derive
+   * the pin and hand a `:local` cluster a GHCR registry. `recordedCheckout()`
+   * reads it back off the receipt, exactly as it reads `commit` and `imageTag`.
    */
-  latestRelease?: string;
+  imagesFromSource?: boolean;
   /** Registry the node images come from; see DEFAULT_IMAGE_REGISTRY. */
   imageRegistry?: string;
   /**
@@ -227,8 +233,8 @@ export interface WizardAnswers {
    * carefully it is written.
    */
   imageTag?: string;
-  /** See SessionOptions.latestRelease -- images for a `main` install. */
-  latestRelease?: string;
+  /** See SessionOptions.imagesFromSource -- the `main` / from-source lane. */
+  imagesFromSource?: boolean;
   timeoutMs?: number;
   /** See SessionOptions.env -- in practice, the sudo agent's SUDO_ASKPASS. */
   env?: Record<string, string>;
@@ -263,7 +269,7 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     tag: answers.tag,
     commit: answers.commit,
     imageTag: answers.imageTag,
-    latestRelease: answers.latestRelease,
+    imagesFromSource: answers.imagesFromSource,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
     env: answers.env,
@@ -396,6 +402,18 @@ function pinnedCaroot(): string {
  * seed-bootstrap.sh is the one place that decides what a complete bootstrap set
  * is -- and it exits 2 with the missing names when it is not.
  */
+/**
+ * Whether this run's node images come from the checkout rather than a registry.
+ *
+ * TWO ANSWERS, ONE QUESTION (memql#4430). A fresh `main` install knows it from
+ * the version the operator chose; a repair knows it only from the receipt,
+ * because a from-source install records a commit and no tag. Asking both here
+ * is what keeps the two front ends from each having to remember one of them.
+ */
+export function imagesFromSource(opts: SessionOptions): boolean {
+  return opts.imagesFromSource === true || isMainBranchChoice(opts.tag ?? "");
+}
+
 export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
   return (step: Step): StepPlan => {
     if (opts.skip.has(step.id)) {
@@ -444,7 +462,6 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // overlay, same sync path.
         params = present({
           "repo-root": stackDir,
-          "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
           // A FRESH-PULL BUDGET, not the dev default (memql#4073). k3d.up's
           // workload wait defaults to 300s, which is the `make dev` number --
           // images already imported into the cluster. An install NEVER has
@@ -459,17 +476,31 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // ceiling, not a sleep: a fast machine still finishes the moment
           // the workloads are Available.
           "workload-timeout": "900",
+          // THE REGISTRY FLAGS, AND THE LANE THAT HAS NONE (memql#4430).
+          //
+          // A from-source install passes NEITHER, and omitting them is what
+          // selects its images. k3d.up documents `--image-registry` as
+          // "default: the overlay's own, i.e. locally built", so with no
+          // override the local overlay's own `memql-<node>:local` names stand
+          // -- which is exactly what the `buildImages` step then builds from the
+          // checkout and imports. Passing a registry here would point ArgoCD at
+          // GHCR release images that the build would immediately have to take
+          // back, and would pull forty images to do it.
+          //
+          // THEY MOVE AS A PAIR because k3d.up requires the tag WITH the
+          // registry, so half of this pair is a refusal, not a default.
+          //
           // REPLAYED WHEN THE RECEIPT HAS ONE, DERIVED OTHERWISE (memql#4068).
           //
-          // The derivation below is right for an INSTALL, where the operator has
-          // just chosen a version and there is nothing recorded to replay. It is
+          // The derivation is right for an INSTALL, where the operator has just
+          // chosen a version and there is nothing recorded to replay. It is
           // wrong for a REPAIR, and wrong in a way that reads as success: a
           // branch install's recorded checkout is a commit and an EMPTY tag, so
           // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the
           // repaired cluster reconciled the recorded commit's manifests against
-          // whatever release THIS extension build pins. An upgrade nobody asked for
-          // -- exactly what memql#3605 defines a repair as never being -- plus a
-          // manifest/image skew nobody chose.
+          // whatever release THIS extension build pins. An upgrade nobody asked
+          // for -- exactly what memql#3605 defines a repair as never being --
+          // plus a manifest/image skew nobody chose.
           //
           // ONE DERIVATION, and it stays here. `opts.imageTag` is not a second
           // derivation, it is the FIRST one's recorded output being replayed:
@@ -478,18 +509,23 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // second set of inputs is the defect; reading the answer back is the
           // fix, and it is the same shape as memql#3901's `commit`.
           //
+          // `imagesFromSource` is that same replay for the LANE rather than for
+          // the tag, and it is why a repair of a from-source install cannot fall
+          // back here: such an install records no image tag at all, so an empty
+          // `opts.imageTag` would otherwise derive the pin and hand a cluster
+          // running `:local` images a GHCR registry -- memql#4068's exact shape
+          // by a new route. `recordedCheckout().fromSource` reads the lane back
+          // off the receipt's own `buildImages` entry.
+          //
           // CONVERTED, not passed through: git tags carry the `v` and image
           // tags do not. See imageTagFor.
-          //
-          // AND NEVER "main" (memql#3901). build-engine-images.yml publishes
-          // memql-<node>:<version> on a release dispatch only -- there is no
-          // main tag and no nightly in GHCR -- so a `main` install runs the
-          // newest images that exist, which is the newest published release.
-          // The version picker states that skew rather than hiding it. See
-          // imageTagForVersion.
-          "image-tag":
-            (opts.imageTag ?? "").trim() ||
-            imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+          ...(imagesFromSource(opts)
+            ? {}
+            : {
+                "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
+                "image-tag":
+                  (opts.imageTag ?? "").trim() || imageTagForVersion(opts.tag ?? ""),
+              }),
           // The FOURTH consumer of the typed domain (memql#3593). The other
           // three place it on the MACHINE -- the hosts block, the certificate,
           // the front-door probe. This one places it in the CLUSTER: k3d.up
@@ -548,6 +584,25 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         break;
       case "providerKey":
         params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });
+        break;
+      case "buildImages":
+        // THE FROM-SOURCE LANE'S ONE EXTRA STEP (memql#4430), and it is the same
+        // `k3d.dev` invocation "Rebuild from checkout" runs -- deliberately, so
+        // there is one way to build node images from a checkout and not two.
+        //
+        // `--image-source=checkout` is PINNED BY THE GRAPH rather than passed
+        // here, exactly as `rebuild.json` pins it: the executor merges graph
+        // params last, so the lane is policy the document states and no caller
+        // can rewrite it into "build, but keep running released images".
+        //
+        // `--repo-root` is `resolveStackDir`, the same derivation `stackCheckout`
+        // and `clusterUp` share, so the images are built from the directory this
+        // very run cloned into rather than from wherever the packaged script sits.
+        //
+        // NO `--node` FILTER. A partial rebuild leaves the nodes it did not build
+        // pulling an image nobody published (dev.sh says so at length); a fresh
+        // install has no such thing as a node it can leave behind.
+        params = present({ "repo-root": stackDir });
         break;
       case "seedBootstrap":
         params = present({
@@ -816,7 +871,18 @@ function resolveStackDir(opts: SessionOptions): string {
   return path.join(process.env.HOME ?? "", ".memql", "src");
 }
 
+/**
+ * The document a run reads, which for an install depends on its LANE.
+ *
+ * The one place the from-source variant is chosen (memql#4430). Both front ends
+ * reach their install through here, so neither has to know that the lane has a
+ * document of its own -- the same reason `installPlan` is where the tag default
+ * is applied rather than in each caller.
+ */
 async function loadGraphFor(kind: GraphKind, opts: SessionOptions): Promise<Graph> {
+  if (kind === "install") {
+    return loadGraphFile(installGraphPath(opts.root, imagesFromSource(opts)));
+  }
   return loadGraphFile(graphDocumentPath(kind, opts.root));
 }
 

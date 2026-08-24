@@ -111,26 +111,34 @@ export interface Inputs {
   /** A PATH. The key itself never enters this module -- see SessionOptions. */
   providerKeyFile: string;
   /**
-   * The release tag to install (memql#3882).
+   * The release tag to install (memql#3882, re-defaulted by memql#4429).
    *
-   * COLLECTED WITH A DEFAULT, which is the shape the whole field turns on.
-   * `stackPin.ts` argues at length that the pinned tag should be a reviewed
-   * diff rather than "whatever was pushed this morning", and that argument is
-   * sound -- a packaged extension carries a STAGED COPY of `scripts/` and runs
-   * it against whatever the checkout contains, so the pairing should be
-   * something somebody chose. None of that argues for the pin being the ONLY
-   * thing the wizard can express.
+   * THE INSTALL FORM RECOMMENDS LATEST, and that is the opposite of what this
+   * field used to do. It started on `DEFAULT_STACK_TAG` and stayed there: the
+   * pin was a reviewed diff, which is a good property, and it was ALSO the
+   * answer an operator got when they did not choose -- so a fresh install
+   * installed whatever release the extension was built against, which is
+   * exactly the stale-pin failure `stackPin.ts` records four separate
+   * postmortems of. A FRESH install wants the NEWEST release: its manifests
+   * and its node images ship together at that tag, and every one of those
+   * postmortems is a failure of not having installed it.
    *
-   * So DEFAULT_STACK_TAG stays pre-selected and the dropdown is an OVERRIDE.
-   * The reviewed-pin property survives, and an operator who needs the release
-   * carrying a fix they are waiting on stops having to edit TypeScript and
-   * rebuild the extension to get it.
+   * So the listing seeds this field (`seedVersionFromListing`) and the picker
+   * labels that entry `Latest -- vX.Y.Z (recommended)`. The pin's role NARROWS
+   * to the offline fallback: it is what the field starts on, and what a machine
+   * that cannot reach `git ls-remote` still installs.
+   *
+   * IT STARTS ON THE PIN RATHER THAN EMPTY, which the design record sketched as
+   * "empty-meaning-latest". Empty is a value `validate()` refuses -- every
+   * required field must be non-blank -- and the listing is ASYNC, so an operator
+   * who pressed Start before it landed would be told the version is required.
+   * Starting on the pin is the same observable behaviour with no race: the
+   * listing overwrites it the moment it arrives, and if it never arrives the pin
+   * is the answer anyway.
    *
    * Note this is the opposite pre-selection from the deployment page's tag
-   * picker, which deliberately never pre-selects: there the operator is MOVING
-   * a cluster and any version is as plausible as another, so a silent choice
-   * would be one they could not be held to. Here there is a house answer, and
-   * offering it is what makes the field optional in practice.
+   * picker, which deliberately never pre-selects -- see `install/tags.ts`, which
+   * states that boundary where both pickers can read it.
    */
   version: string;
 }
@@ -179,8 +187,9 @@ export const DEFAULT_INPUTS: Inputs = {
   // pre-selection is an answer they can accept rather than a guess about them.
   provider: "anthropic",
   providerKeyFile: "",
-  // The constant, not a copy of it -- the same reasoning as `domain` above.
-  // The wizard's offer and the installer's own default are one fact.
+  // The OFFLINE FALLBACK, and only that (memql#4429). The listing overwrites it
+  // with the newest release as soon as it lands; this is what the field holds
+  // until then, and what it keeps on a machine that cannot list at all.
   version: DEFAULT_STACK_TAG,
 };
 
@@ -412,6 +421,8 @@ export class AddClusterState {
   private chosen: AddClusterAction | undefined;
   private guidedRun = false;
   private values: Inputs = { ...DEFAULT_INPUTS };
+  /** Whether `version` carries an operator's answer rather than a default. */
+  private versionTouched = false;
   private fieldErrors: FieldError[] = [];
   private progress: StepProgress[] = [];
   private failedId: string | undefined;
@@ -611,6 +622,7 @@ export class AddClusterState {
     return handoff.canSignIn ? "signIn" : "none";
   }
 
+
   // ---------------------------------------------------------------------------
   // routing
   // ---------------------------------------------------------------------------
@@ -655,10 +667,47 @@ export class AddClusterState {
    * forgetting what it had already told them.
    */
   setInput(field: InputField, value: string): void {
+    // TOUCHING THE VERSION FIELD IS RECORDED, and it is recorded HERE because
+    // this is the one place an operator's own answer reaches the field
+    // (memql#4429). The tag listing arrives asynchronously and seeds this field
+    // when it does; an operator who has already chosen must not have that choice
+    // replaced by a network call landing a second later.
+    if (field === "version") this.versionTouched = true;
     this.values[field] = value;
     this.fieldErrors = this.fieldErrors.filter((e) => e.field !== field);
     const problem = this.problemWith(field, value);
     if (problem !== undefined) this.fieldErrors.push({ field, message: problem });
+  }
+
+  /**
+   * Offers the newest listed release as the version, unless the operator chose.
+   *
+   * WHY A SEED RATHER THAN A DEFAULT (memql#4429). "Latest" cannot be a
+   * constant: it is whatever `git ls-remote` answers at page-open time, which is
+   * later than the moment `DEFAULT_INPUTS` is read. So the field starts on the
+   * offline fallback and this raises it to the newest release when the listing
+   * lands -- the picker labels that same entry `Latest ... (recommended)`, so
+   * the label and the selection are one fact rather than two that can disagree.
+   *
+   * IT IS A NO-OP ONCE THE OPERATOR HAS TOUCHED THE FIELD. That is the whole
+   * reason it is a method on this state machine rather than a line in the panel:
+   * "has anyone chosen yet" is form state, and the panel discards its DOM on
+   * every repaint.
+   *
+   * An empty argument is ignored rather than written: an empty listing is not a
+   * version, and blanking the field would turn a failed network call into
+   * "A version is required."
+   */
+  seedVersionFromListing(newest: string): void {
+    const tag = newest.trim();
+    if (tag === "" || this.versionTouched) return;
+    this.values.version = tag;
+    this.fieldErrors = this.fieldErrors.filter((e) => e.field !== "version");
+  }
+
+  /** Whether the operator has answered the version field themselves. */
+  get versionWasChosen(): boolean {
+    return this.versionTouched;
   }
 
   /** Every problem with what has been entered so far, for the action chosen. */
