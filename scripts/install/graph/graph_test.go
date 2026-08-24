@@ -46,6 +46,27 @@ func bothGraphs(t *testing.T) (install, uninstall *Graph) {
 	return mustLoadEmbedded(t, Install), mustLoadEmbedded(t, Uninstall)
 }
 
+// installDirectionGraphs is every document that RUNS FORWARD over the machine:
+// install.json and its from-source variant (memql#4430).
+//
+// SEPARATE FROM bothGraphs BECAUSE THE TWO ANSWER DIFFERENT QUESTIONS. Most
+// gates here are about the install/uninstall PAIR -- does uninstall reverse
+// install, in the reverse order, with covering elevation -- and the variant has
+// nothing to add to any of them: it carries the same receipts as install.json.
+// Feeding it to the ordering gate would actively mislead, because its extra step
+// is deliberately not reversed (it is CONTAINED by the cluster).
+//
+// What the variant genuinely must satisfy is the per-STEP accountability rules,
+// which are about one document at a time: every mutating step says where its
+// change is taken back, and a containedBy names something real and reversible
+// that ran first. Those are the gates that would otherwise let a new step into
+// a second document without ever asking it the question install.json's steps
+// all had to answer.
+func installDirectionGraphs(t *testing.T) []*Graph {
+	t.Helper()
+	return []*Graph{mustLoadEmbedded(t, Install), mustLoadEmbedded(t, InstallFromMain)}
+}
+
 // --------------------------------------------------------------------------
 // the headline: uninstall covers install
 // --------------------------------------------------------------------------
@@ -90,47 +111,51 @@ func TestEveryReceiptHasAReversal(t *testing.T) {
 // A step that changes the machine and records nothing is drift by omission: it
 // passes every other check in this file precisely because it declared nothing.
 func TestEveryMutatingInstallStepIsAccountedFor(t *testing.T) {
-	in, _ := bothGraphs(t)
-	for i := range in.Steps {
-		s := &in.Steps[i]
-		if s.ReadOnly || s.Receipt != "" || s.ContainedBy != "" || s.Retained {
-			continue
+	for _, in := range installDirectionGraphs(t) {
+		for i := range in.Steps {
+			s := &in.Steps[i]
+			if s.ReadOnly || s.Receipt != "" || s.ContainedBy != "" || s.Retained {
+				continue
+			}
+			t.Errorf("%s step %q changes the machine but declares none of receipt, containedBy or "+
+				"retained -- say where this change gets taken back, or say that it is deliberately kept",
+				in.Name, s.ID)
 		}
-		t.Errorf("install step %q changes the machine but declares none of receipt, containedBy or "+
-			"retained -- say where this change gets taken back, or say that it is deliberately kept", s.ID)
 	}
 }
 
 // containedBy is the honest alternative to a receipt, not a way around one: the
 // step it names must itself be reversible, or the containment is a fiction.
 func TestContainedByNamesAReversibleStep(t *testing.T) {
-	in, un := bothGraphs(t)
+	_, un := bothGraphs(t)
 	reversed := map[string]bool{}
 	for i := range un.Steps {
 		reversed[un.Steps[i].Reverses] = true
 	}
-	for i := range in.Steps {
-		s := &in.Steps[i]
-		if s.ContainedBy == "" {
-			continue
-		}
-		host := in.Step(s.ContainedBy)
-		if host == nil {
-			t.Errorf("install step %q is containedBy %q, which is not a step in this graph", s.ID, s.ContainedBy)
-			continue
-		}
-		if host.Receipt == "" {
-			t.Errorf("install step %q is containedBy %q, which writes no receipt", s.ID, s.ContainedBy)
-			continue
-		}
-		if !reversed[host.ID] {
-			t.Errorf("install step %q is containedBy %q, which nothing reverses", s.ID, s.ContainedBy)
-		}
-		// Containment is only true if the container was already there when the
-		// contained step ran.
-		if !dependsOnTransitively(in, s.ID, host.ID) {
-			t.Errorf("install step %q claims to be containedBy %q but does not depend on it -- "+
-				"it could run before the thing that supposedly contains it exists", s.ID, s.ContainedBy)
+	for _, in := range installDirectionGraphs(t) {
+		for i := range in.Steps {
+			s := &in.Steps[i]
+			if s.ContainedBy == "" {
+				continue
+			}
+			host := in.Step(s.ContainedBy)
+			if host == nil {
+				t.Errorf("%s step %q is containedBy %q, which is not a step in this graph", in.Name, s.ID, s.ContainedBy)
+				continue
+			}
+			if host.Receipt == "" {
+				t.Errorf("%s step %q is containedBy %q, which writes no receipt", in.Name, s.ID, s.ContainedBy)
+				continue
+			}
+			if !reversed[host.ID] {
+				t.Errorf("%s step %q is containedBy %q, which nothing reverses", in.Name, s.ID, s.ContainedBy)
+			}
+			// Containment is only true if the container was already there when the
+			// contained step ran.
+			if !dependsOnTransitively(in, s.ID, host.ID) {
+				t.Errorf("%s step %q claims to be containedBy %q but does not depend on it -- "+
+					"it could run before the thing that supposedly contains it exists", in.Name, s.ID, s.ContainedBy)
+			}
 		}
 	}
 }
