@@ -375,8 +375,21 @@ func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 		// which is strictly better than the empty set it used to install.
 		return 0, fmt.Errorf("reload AI providers: %w", err)
 	}
-	next.finalizeDefault(logger)
-
+	// NO finalizeDefault HERE, deliberately, and the omission is the careful
+	// part rather than a gap.
+	//
+	// Boot does not call it after LoadUnifiedProviders either -- `setEntry`
+	// maintains the default incrementally as each provider registers
+	// (@default wins, else first-available-wins, in file order), so the
+	// registry leaves the load with the right answer already.
+	//
+	// Calling it would ALSO be actively wrong here: `finalizeDefault` does not
+	// honour `defaultPinned`. An operator who set MEMQL_DEFAULT_CHAT_PROVIDER
+	// to a provider that cannot currently resolve would have their pin
+	// silently cleared and replaced by whatever the map's iteration order
+	// happened to surface first -- non-deterministic, so two replicas
+	// reloading the same configuration could end up with different defaults.
+	// A reload must leave the registry in the state a fresh boot would.
 	e.providers.adoptContents(next)
 
 	available := e.providers.AvailableCount()
