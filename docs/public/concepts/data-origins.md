@@ -182,13 +182,76 @@ is a judgement about when the other system stops being authoritative.
 Reversing the move is the same list with the systems exchanged. Tooling
 for it follows the first real move; the runbook is what exists now.
 
-## What is not covered here
+## The runtime
 
-The outbox that carries an origin concept's changes outward
-(`v1:platform:outboxEntry`), the per-connector drain worker, the inbound
-dispatcher, the backfill and reconciliation runners, and the per-domain
-health row (`v1:platform:syncState`) are the *runtime* half of this
-feature. They are described where they land.
+The declarations above say what is true; the runtime is what makes it
+happen. It lives in `component/datasync` (the *contract* is in
+`component/memql/sync`; the split is an import-cycle fact and the package
+doc explains it).
+
+**The outbox.** A write to an `origin` concept appends one
+`v1:platform:outboxEntry` per `@mirroredTo` target **in the write's own
+transaction**. That is not belt-and-braces: append-first-write-second
+leaves an entry describing a change that never happened, and
+write-first-append-second leaves a committed change nothing will ever
+propagate. Only a transaction closes both, and a process dying between
+two statements dies there more often than anywhere else. The transaction
+is opened *only* for an origin concept — every other write keeps its
+single-statement path.
+
+Each entry carries an idempotency key of `(concept, row, version,
+target)`, rendered once at append time and stored, so every attempt
+presents the receiver the same key. The entry's own row id is derived
+from the same tuple, so a replayed write appends the same entry rather
+than a second delivery of one change.
+
+**The drain worker** delivers entries oldest-first per connector, under a
+cluster claim so exactly one replica drains a given connector at a time.
+Every outcome is terminal or scheduled, never silent: `delivered`,
+`failed` with a doubling backoff, or `dead` after
+`MEMQL_SYNC_OUTBOX_MAX_ATTEMPTS` attempts. The attempt is counted at
+*claim* time, so a worker that dies mid-delivery still spends one — a
+crash-looping delivery must reach the ceiling rather than spin forever. A
+connector that does not implement `Propagate` yet has its entries
+**parked, not dead-lettered**: an unconfigured capability is not a
+delivery failure.
+
+A dead letter is an operator's decision, and there are exactly two:
+retry it (attempts reset — the operator presumably fixed the cause) or
+discard it (the row survives as audit history carrying the reason).
+
+**Inbound** is an automation on `v1:platform:inboundRequest.created`: it
+routes the staged delivery to the connector its `source` names, calls
+`Apply` under that connector's actor, and writes what comes back behind
+the **version guard** — a write older than what MemQL holds is recorded
+`stale` and skipped, so an out-of-order webhook cannot regress a mirror.
+The request row is stamped `processed` or `failed` either way.
+
+What "older" means depends on what the origin gives, and
+`DomainSpec.VersionField` is how a connector says which: a field on the
+mirror row holding the origin's own version (exact), or — when the origin
+publishes none — the delivery time compared against the row's `createdAt`
+(coarser, and honest about it).
+
+**Backfill and reconciliation** fill the same gap from different ends. A
+webhook stream tells you what changed *after* you started listening;
+backfill reads what was already there, and reconciliation compares the
+two systems forever. Both write through the *same* version-guarded path
+inbound uses — a sweep with its own write path would apply an old
+snapshot over a new webhook and heal the mirror backwards. Backfill
+persists its cursor after **every page**, so a restart resumes rather
+than restarts.
+
+**Health is a row.** `v1:platform:syncState`, one per (concept,
+connector, direction), carries the backfill cursor and status, last
+inbound time, lag, last reconciliation, drift count, outbox depth, dead
+letters, and the operator pause switch. Its id is deterministic, so the
+append-only history of that row *is* the domain's health timeline.
+
+`MEMQL_SYNC_ENABLED=false` stops **delivery** and nothing else: a mirror
+stays read-only, the outbox is still appended, every declaration is still
+enforced. Turning off the worker must not turn off the invariants, so a
+paused cluster accumulates work rather than losing it.
 
 ## See also
 

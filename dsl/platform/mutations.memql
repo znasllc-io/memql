@@ -518,3 +518,176 @@ mutate packState setPackEnabled {
     args.reason
   }
 }
+
+// ---- The sync runtime's writes (epic memql#4378) ----
+//
+// Every one is @serverOnly, and for the same reason the shopify mirror's
+// mutations are: actor.userId scoping has nobody to scope to. These rows
+// are the deployment's own operational state -- an outbox queue and a
+// health timeline -- written by the engine's drain worker and runners
+// under the operator identity, never by a user acting on their own rows.
+// A client-reachable mutation over them would be an SDK method whose only
+// legitimate caller is the server.
+//
+// The outbox APPEND is not here. It happens inside the engine, in the
+// same transaction as the row write it records (component/memql/
+// outbox_append.go), because an entry that is not written atomically with
+// the change it describes is either a change nothing propagates or a
+// delivery of something that was rolled back.
+
+/// Claim a pending entry for delivery. attempts is incremented by the caller so a claim that
+/// crashes still counts against the ceiling -- a worker that dies mid-delivery must not give the
+/// entry infinite lives. actor.userId scoping does not apply: the caller is the drain worker.
+@serverOnly
+mutate outboxEntry markOutboxDelivering {
+  args {
+    entryId   string!
+    attempts  int!
+  }
+  update {
+    id:        args.entryId
+    status:    "delivering"
+    attempts:  args.attempts
+  }
+}
+
+/// Record a successful delivery. Terminal: nothing retries a delivered entry, and the receiver
+/// recognising the idempotency key on a redelivery counts as success. actor.userId scoping does
+/// not apply: the caller is the drain worker.
+@serverOnly
+mutate outboxEntry markOutboxDelivered {
+  args {
+    entryId      string!
+    deliveredAt  datetime!
+  }
+  update {
+    id:           args.entryId
+    status:       "delivered"
+    deliveredAt:  args.deliveredAt
+    lastError:    ""
+  }
+}
+
+/// Record a failed attempt and when to try again. Not terminal -- the entry returns to the drain
+/// set and the worker skips it until nextAttemptAt. actor.userId scoping does not apply: the caller
+/// is the drain worker.
+@serverOnly
+mutate outboxEntry markOutboxFailed {
+  args {
+    entryId        string!
+    nextAttemptAt  datetime!
+    lastError      string
+  }
+  update {
+    id:             args.entryId
+    status:         "failed"
+    nextAttemptAt:  args.nextAttemptAt
+    lastError:      args.lastError ?? ""
+  }
+}
+
+/// Dead-letter an entry whose attempts are exhausted. Terminal until an operator retries it: the
+/// worker never picks a dead entry up again, which is the whole difference between dead and failed.
+/// actor.userId scoping does not apply: the caller is the drain worker.
+@serverOnly
+mutate outboxEntry markOutboxDead {
+  args {
+    entryId    string!
+    lastError  string
+  }
+  update {
+    id:         args.entryId
+    status:     "dead"
+    lastError:  args.lastError ?? ""
+  }
+}
+
+/// Return a dead entry to the queue at the operator's request. Attempts reset to zero: the operator
+/// has presumably fixed whatever was wrong, and carrying the old count forward would dead-letter it
+/// again on the first hiccup. actor.userId scoping does not apply -- the row is the deployment's,
+/// and the operator gate is the concept's clusterOwner tier plus the adminops caller.
+@serverOnly
+mutate outboxEntry retryOutboxEntry {
+  args {
+    entryId  string!
+  }
+  update {
+    id:         args.entryId
+    status:     "pending"
+    attempts:   0
+    lastError:  ""
+  }
+}
+
+/// Discard a dead entry: the operator has decided this change will never be delivered. Recorded as
+/// `delivered` would be a lie, so it stays `dead` and is marked discarded through lastError -- the
+/// row is audit history and the queue read filters on status. actor.userId scoping does not apply
+/// for the same reason retryOutboxEntry's does not.
+@serverOnly
+mutate outboxEntry discardOutboxEntry {
+  args {
+    entryId  string!
+    reason   string
+  }
+  update {
+    id:         args.entryId
+    status:     "delivered"
+    lastError:  args.reason ?? "discarded by an operator"
+  }
+}
+
+/// Write one domain's health. Deterministic id per (concept, connector, direction), so this is an
+/// append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
+/// sync runtime, acting for no user.
+@serverOnly
+mutate syncState upsertSyncState {
+  args {
+    stateId          string!
+    conceptId        string!
+    connector        string!
+    direction        string!
+    backfillCursor   string
+    backfillStatus   string
+    lastInboundAt    datetime
+    lagSeconds       int
+    lastReconcileAt  datetime
+    driftCount       int
+    outboxDepth      int
+    deadLetterCount  int
+    paused           bool
+    lastError        string
+  }
+  insert {
+    accept { conceptId, connector, direction, lastInboundAt, lastReconcileAt }
+    stamp {
+      id:               args.stateId
+      backfillCursor:   args.backfillCursor ?? ""
+      backfillStatus:   args.backfillStatus ?? "none"
+      lagSeconds:       args.lagSeconds ?? 0
+      driftCount:       args.driftCount ?? 0
+      outboxDepth:      args.outboxDepth ?? 0
+      deadLetterCount:  args.deadLetterCount ?? 0
+      paused:           args.paused ?? false
+      lastError:        args.lastError ?? ""
+    }
+  }
+}
+
+/// Pause or resume one domain. Separate from upsertSyncState so an operator's pause cannot be
+/// clobbered by a runner's next health write -- read-merge preserves every field this one omits.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: a sync-health row belongs to the
+/// DEPLOYMENT, not to a user, so there is no owner field to compare an actor against. The gate that
+/// matters is the concept's clusterOwner tier plus the owner/admin check at the operator surface
+/// that calls this; the annotation keeps the write off the wire entirely.
+@serverOnly
+mutate syncState setSyncPaused {
+  args {
+    stateId  string!
+    paused   bool!
+  }
+  update {
+    id:      args.stateId
+    paused:  args.paused
+  }
+}

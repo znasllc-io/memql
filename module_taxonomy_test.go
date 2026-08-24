@@ -74,6 +74,26 @@ var pluginKinds = map[string]moduleKind{
 	"embedding":     kindComponent, // see the note below
 	"deployversion": kindComponent,
 	"sitePublish":   kindComponent, // see the note below
+	// The data-origins runtime (epic memql#4378): the inbound dispatcher
+	// and the backfill / reconciliation runners.
+	//
+	// A COMPONENT rather than a pack, and the test is the one this table
+	// states -- does turning it off remove a feature, or break the engine?
+	// It breaks it. The dispatcher automation loads on every binary, so a
+	// node without the executor fails every inbound row from EVERY source,
+	// not just the connectors'. And the invariants the runtime serves are
+	// engine invariants: a mirror is read-only whether or not anything is
+	// filling it, and the outbox is appended in the write's transaction
+	// whether or not anything drains it.
+	//
+	// It is also not an integration: it calls nobody. It drives whichever
+	// connectors are bound, and THOSE are the integrations (shopify is
+	// classified as one above).
+	//
+	// The operator switch that does exist, MEMQL_SYNC_ENABLED, stops
+	// DELIVERY and nothing else -- which is the shape of a component's
+	// tunable, not of a pack's on/off.
+	"datasync": kindComponent,
 
 	// --- PACKS: product features with a coherent "off". ---
 	"chat":          kindPack,

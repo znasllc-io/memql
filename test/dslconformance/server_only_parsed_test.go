@@ -231,6 +231,32 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// reach of that stamp to this one three-field product index.
 		{Path: "shopify/mutations.memql", Name: "upsertShopifyProduct"}: true,
 		{Path: "shopify/mutations.memql", Name: "retireShopifyProduct"}: true,
+		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
+		// writers over two engine-owned concepts -- an outbox queue and a
+		// health timeline -- and the argument is one argument, not eight.
+		//
+		// Caller scoping has nobody to scope to. These rows belong to the
+		// DEPLOYMENT: an outbox entry records that a change has to reach
+		// an external system, and a syncState row records how far behind
+		// a mirror is. Neither has an owner field, neither is any user's,
+		// and the only writer is the runtime itself, acting for no user
+		// under the engine's operator identity. actor.userId is empty for
+		// every legitimate caller and a self-scoped filter would match
+		// nothing.
+		//
+		// What @serverOnly adds over the concepts' clusterOwner tier is
+		// the WIRE: without it, eight typed methods for driving the
+		// engine's internal delivery queue are generated into both SDKs.
+		// The operator surface reaches them through the Data origins
+		// page's own capabilities, which carry the owner/admin gate.
+		{Path: "platform/mutations.memql", Name: "markOutboxDelivering"}: true,
+		{Path: "platform/mutations.memql", Name: "markOutboxDelivered"}:  true,
+		{Path: "platform/mutations.memql", Name: "markOutboxFailed"}:     true,
+		{Path: "platform/mutations.memql", Name: "markOutboxDead"}:       true,
+		{Path: "platform/mutations.memql", Name: "retryOutboxEntry"}:     true,
+		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
+		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
+		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
 		// memql#4270. The two halves of user invitations, and neither is
 		// caller-scopable for the same underlying reason: the row is not the
 		// caller's.

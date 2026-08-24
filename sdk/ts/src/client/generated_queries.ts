@@ -3882,6 +3882,72 @@ QueryClient.prototype.outboundRequestsByStatus = function (this: QueryClient, ar
   return this.executeNamed("outboundRequestsByStatus", buildOutboundRequestsByStatus(args), opts);
 };
 
+/** The operator's dead-letter queue for one connector: entries that exhausted their attempts and are waiting for a person. Never retried automatically -- that is what makes them dead rather than failed. */
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxDeadLetters"] in generated_concepts.ts).
+export interface OutboxDeadLettersArgs {
+  target: string;
+}
+
+export function buildOutboxDeadLetters(args: OutboxDeadLettersArgs): string {
+  const parts: string[] = [];
+  parts.push("target: " + renderMemQLValue(args.target));
+  return "query outboxDeadLetters(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    outboxDeadLetters(args: OutboxDeadLettersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.outboxDeadLetters = function (this: QueryClient, args: OutboxDeadLettersArgs = {} as OutboxDeadLettersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("outboxDeadLetters", buildOutboxDeadLetters(args), opts);
+};
+
+/** One entry by its own row id -- the seam the retry and discard mutations resolve through. */
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxEntryById"] in generated_concepts.ts).
+export interface OutboxEntryByIdArgs {
+  entryId: string;
+}
+
+export function buildOutboxEntryById(args: OutboxEntryByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("entryId: " + renderMemQLValue(args.entryId));
+  return "query outboxEntryById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    outboxEntryById(args: OutboxEntryByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.outboxEntryById = function (this: QueryClient, args: OutboxEntryByIdArgs = {} as OutboxEntryByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("outboxEntryById", buildOutboxEntryById(args), opts);
+};
+
+/** Entries one connector still owes delivery on, oldest first so a row's changes leave in the order they were made. `failed` is included: a failed entry is a retry that is due, not a terminal state -- the worker skips the ones whose nextAttemptAt has not come. */
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxPending"] in generated_concepts.ts).
+export interface OutboxPendingArgs {
+  target: string;
+}
+
+export function buildOutboxPending(args: OutboxPendingArgs): string {
+  const parts: string[] = [];
+  parts.push("target: " + renderMemQLValue(args.target));
+  return "query outboxPending(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    outboxPending(args: OutboxPendingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.outboxPending = function (this: QueryClient, args: OutboxPendingArgs = {} as OutboxPendingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("outboxPending", buildOutboxPending(args), opts);
+};
+
 /** Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overrideById"] in generated_concepts.ts).
 export interface OverrideByIdArgs {
@@ -5162,6 +5228,54 @@ declare module "./query.js" {
 
 QueryClient.prototype.surfacesForOwner = function (this: QueryClient, args: SurfacesForOwnerArgs = {} as SurfacesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("surfacesForOwner", buildSurfacesForOwner(args), opts);
+};
+
+/** Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip. */
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.ts).
+export interface SyncStateForArgs {
+  conceptId: string;
+  connector: string;
+  direction: string;
+}
+
+export function buildSyncStateFor(args: SyncStateForArgs): string {
+  const parts: string[] = [];
+  parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  parts.push("connector: " + renderMemQLValue(args.connector));
+  parts.push("direction: " + renderMemQLValue(args.direction));
+  return "query syncStateFor(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    syncStateFor(args: SyncStateForArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.syncStateFor = function (this: QueryClient, args: SyncStateForArgs = {} as SyncStateForArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("syncStateFor", buildSyncStateFor(args), opts);
+};
+
+/** Every domain's health -- the Data origins page's health half. */
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.ts).
+export interface SyncStatesAllArgs {
+  connector?: string;
+}
+
+export function buildSyncStatesAll(args: SyncStatesAllArgs): string {
+  const parts: string[] = [];
+  if (args.connector !== undefined) parts.push("connector: " + renderMemQLValue(args.connector));
+  return "query syncStatesAll(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    syncStatesAll(args: SyncStatesAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.syncStatesAll = function (this: QueryClient, args: SyncStatesAllArgs = {} as SyncStatesAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("syncStatesAll", buildSyncStatesAll(args), opts);
 };
 
 /** ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart. */

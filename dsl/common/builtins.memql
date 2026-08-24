@@ -698,3 +698,50 @@ builtin dateKeyInTimezone {
 @executor("dataOrigins")
 @description("List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.")
 builtin dataOrigins { }
+
+// ---- The sync runtime (epic memql#4378) ----
+//
+// Four builtins over component/datasync. The first two are driven by the
+// automations in dsl/platform/automations.memql; the last two are what an
+// operator's Data origins page calls.
+
+@executor("integration.datasync.dispatchInbound")
+@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. A no-op for a source no connector serves, which is most of them.")
+builtin datasyncDispatchInbound {
+  inboundRequestId  string
+  source            string
+  topic             string
+  body              string
+}
+
+@executor("integration.datasync.reconcileDomains")
+@description("Sweep every mirrored domain whose own DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.")
+builtin datasyncReconcileDomains { }
+
+@executor("integration.datasync.startBackfill")
+@description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.")
+builtin datasyncStartBackfill {
+  connector  string!
+  conceptId  string!
+}
+
+@executor("integration.datasync.setSyncPaused")
+@description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.")
+builtin datasyncSetSyncPaused {
+  connector  string!
+  conceptId  string!
+  paused     boolean!
+}
+
+@executor("integration.datasync.retryOutboxEntry")
+@description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.")
+builtin datasyncRetryOutboxEntry {
+  entryId  string!
+}
+
+@executor("integration.datasync.discardOutboxEntry")
+@description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.")
+builtin datasyncDiscardOutboxEntry {
+  entryId  string!
+  reason   string
+}
