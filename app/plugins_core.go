@@ -51,6 +51,12 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	_ "github.com/znasllc-io/memql/integrations/openairealtime"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
+	// Cutting a release of MemQL itself (epic memql#4434). Registered on
+	// every node type rather than gated to one: the builtins are declared in
+	// dsl/cluster/builtins.memql, which every node loads, and a capability
+	// present in the DSL and absent from the registry is a boot-time
+	// resolution failure. It refuses harmlessly wherever nothing is seeded.
+	_ "github.com/znasllc-io/memql/integrations/release"
 	_ "github.com/znasllc-io/memql/integrations/router"
 	// The sync runtime (epic memql#4378): the inbound dispatcher and the
 	// backfill / reconciliation runners. The outbox DRAIN worker is not

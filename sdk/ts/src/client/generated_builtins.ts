@@ -697,6 +697,60 @@ QueryClient.prototype.recall = function (this: QueryClient, args: RecallArgs = {
   return this.executeNamed("recall", buildRecall(args), opts);
 };
 
+/** Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential. */
+export interface ReleaseCutArgs {
+  /** Which part of the newest existing version to increment. major and minor zero the parts below them. */
+  // Enum: major | minor | patch
+  bump: string;
+  /** Optional prose prepended to the Release body. GitHub's generated release notes are appended either way, so leaving this empty still produces a populated Release. */
+  notes?: string;
+  /** Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then. */
+  bumpExtensionPin?: boolean;
+  /** Compute the plan -- next version and base sha -- and write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this. */
+  dryRun?: boolean;
+}
+
+export function buildReleaseCut(args: ReleaseCutArgs): string {
+  const parts: string[] = [];
+  parts.push("bump: " + renderMemQLValue(args.bump));
+  if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
+  if (args.bumpExtensionPin !== undefined) parts.push("bumpExtensionPin: " + renderMemQLValue(args.bumpExtensionPin));
+  if (args.dryRun !== undefined) parts.push("dryRun: " + renderMemQLValue(args.dryRun));
+  return "builtin releaseCut(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCut(args: ReleaseCutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCut = function (this: QueryClient, args: ReleaseCutArgs = {} as ReleaseCutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCut", buildReleaseCut(args), opts);
+};
+
+/** Check whether the container images for a cut version actually exist yet, by asking GHCR for their manifests. Answers about the ARTIFACT rather than the workflow run: a build can fail after the Release publishes, and only the registry knows. All present moves the row to images_available; any absent leaves it dispatched; a check that errored reports the error and changes nothing. On demand only -- there is no poller. */
+export interface ReleaseCutStatusArgs {
+  /** The version to check, in either tag form (v1.2.3) or bare form (1.2.3). */
+  version: string;
+}
+
+export function buildReleaseCutStatus(args: ReleaseCutStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("version: " + renderMemQLValue(args.version));
+  return "builtin releaseCutStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCutStatus(args: ReleaseCutStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCutStatus = function (this: QueryClient, args: ReleaseCutStatusArgs = {} as ReleaseCutStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCutStatus", buildReleaseCutStatus(args), opts);
+};
+
 /** Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row. */
 export interface RestoreDocumentVersionArgs {
   documentId: string;

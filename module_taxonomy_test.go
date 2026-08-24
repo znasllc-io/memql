@@ -57,6 +57,7 @@ var pluginKinds = map[string]moduleKind{
 	"avatardirect":   kindIntegration, // Simli / Anam + LiveKit
 	"email":          kindIntegration, // Microsoft Graph / SMTP
 	"openairealtime": kindIntegration, // api.openai.com
+	"release":        kindIntegration, // api.github.com + ghcr.io -- tags, Releases, manifests
 	"shopify":        kindIntegration, // Storefront + Admin APIs
 	"storage":        kindIntegration, // Azure Blob
 	"telephony":      kindIntegration, // Telnyx + LiveKit

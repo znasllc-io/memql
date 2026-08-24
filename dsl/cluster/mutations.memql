@@ -165,3 +165,75 @@ mutate node updateNodeHealth {
 // v1:cluster:deploymentNodeSpec, ids unchanged) are identical; only the
 // authoring location moved. Consumers reach them via
 // `use deployment.mutations.{ ... }` (DSL) or by name through the engine (Go).
+
+// ---- The release-cut pair (epic memql#4434) ----
+//
+// Both are written ONLY by integrations/release, which stamps internal origin
+// on a context local to the one Execute it passes it to. See
+// call_origin_conformance_test.go's allowlist entry for why that package may
+// stamp at all, and integrations/release/store.go for the seam.
+
+/// Record a release cut. @serverOnly because `requestedBy` is the AUTHORITY the row asserts, and
+/// caller-scoping cannot supply it: a mutation argument is whatever the caller typed, so a
+/// client-reachable create would let any owner write another owner's name into the release history
+/// -- and the row is append-only, so there is no correcting it afterwards. `actor.userId` scoping is
+/// not the fix either: it would say the row belongs to the caller, which is true and beside the
+/// point. What must be true is that the row's requestedBy IS the actor the Go owner wall admitted,
+/// and only the Go caller knows that. The owner gate itself lives in the builtin
+/// (integrations/release), because builtins are outside the query/mutation row-authz buckets.
+@serverOnly
+mutate releaseCut createReleaseCut {
+  args {
+    version           string!
+    bump              enum("major", "minor", "patch")!
+    baseSha           string!
+    requestedBy       string!
+    requestedByEmail  string
+    status            enum("dispatched", "tag_created_release_failed", "images_available", "failed")!
+    releaseUrl        string
+    tagName           string
+    error             string
+    pinBumpPrUrl      string
+    pinBumpNote       string
+    dispatchedAt      string
+  }
+  insert {
+    accept { version, bump, baseSha, requestedBy }
+    stamp {
+      id: args.version
+      requestedByEmail: args.requestedByEmail ?? ""
+      status: args.status
+      releaseUrl: args.releaseUrl ?? ""
+      tagName: args.tagName ?? ""
+      error: args.error ?? ""
+      pinBumpPrUrl: args.pinBumpPrUrl ?? ""
+      pinBumpNote: args.pinBumpNote ?? ""
+      dispatchedAt: args.dispatchedAt ?? now
+    }
+  }
+}
+
+/// Move a release cut to what a check actually VERIFIED. @serverOnly for its sibling's reason plus
+/// one of its own: the only legitimate writer is the GHCR checker, and `status` here is a claim
+/// about a registry rather than about the caller. A client-reachable version would let anyone mark
+/// a version `images_available` without an image existing, which is precisely the false green D5
+/// exists to prevent. `actor.userId` scoping cannot help -- the row belongs to the deployment
+/// (clusterOwner tier), so there is no owner field to match a caller against.
+///
+/// Minimal arguments on purpose: `update{}` is a read-merge (memql#1628), so re-supplying the
+/// unchanged fields would be dead weight that an undeclared-argument discard hides.
+@serverOnly
+mutate releaseCut updateReleaseCutStatus {
+  args {
+    version    string!
+    status     enum("dispatched", "tag_created_release_failed", "images_available", "failed")!
+    error      string
+    checkedAt  string
+  }
+  update {
+    id: args.version
+    args.status
+    error: args.error ?? ""
+    checkedAt: args.checkedAt ?? now
+  }
+}

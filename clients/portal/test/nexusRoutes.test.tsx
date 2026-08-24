@@ -69,8 +69,22 @@ describe("the Nexus section", () => {
     renderNexus(nexusHarness(), "/nexus/plan-spring/node/task~step-normalise");
     // The dialog performs a FRESH read of the row the node names -- the
     // latest attempt, not the first (world.ts's node-vs-row split).
+    // BOTH assertions WAIT, and the second one is the reason this comment
+    // exists. It used to be a synchronous getByRole, which reads as safe --
+    // surely the dialog is up by the time its content is -- and is not.
+    //
+    // NodeDetail returns null until the async scene contains the node, so the
+    // heading and the map's own label for the same row arrive in DIFFERENT
+    // commits. Waiting on the row text and then asserting the heading is
+    // waiting on one thing to assert another; whether it holds depends on
+    // which commit lands first, which depends on how fast the box is.
+    // Measured: queryAllByText for that row returns 1 or 3 depending on the
+    // run, so the text genuinely has more than one source.
+    //
+    // It passed locally and in PR CI and failed in the merge queue, whose
+    // runner is slower -- the shape that gets re-run rather than fixed.
     await waitFor(() => expect(screen.getByText("shape-normalise-a2")).toBeTruthy());
-    expect(screen.getByRole("heading", { name: /row detail/i })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /row detail/i })).toBeTruthy();
   });
 
   it("redirects /nexus to the caller's most recent goal, running first", async () => {

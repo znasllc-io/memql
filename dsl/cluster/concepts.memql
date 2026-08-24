@@ -121,3 +121,37 @@ concept spawnEvent {
 // command, the SDK) is unaffected. The cluster topology queries that read a
 // node's payload.deploymentId (nodesForDeployment / nodesNotInDeployment) stay
 // here with the v1:cluster:node concept they project.
+
+/// One release cut of MemQL itself: the tag and published GitHub Release that make the CI cascade
+/// (dispatch-engine-images-on-release.yml, #2519) build every node image at that version. Written
+/// only by integrations/release, and append-only -- the row id is the VERSION, so every status
+/// transition appends to that version's own timeline and a cut is never edited into a different one.
+///
+/// WHY THE ROW IS HISTORY AND NOT THE ANSWER TO "WHAT IS NEWEST". GitHub's tags are. A human who
+/// cuts a release by hand -- which release.sh's break-glass path still allows -- creates a tag this
+/// concept never hears about, so a reader that trusted the newest row would name a version that is
+/// no longer the latest and be confidently wrong. The portal card reads TAGS for "newest existing"
+/// and these rows only for "what did this cluster do", which is a division the card states in words.
+///
+/// STATUS IS WHAT WE VERIFIED, NOT WHAT WE EXPECT. `dispatched` means the Release published and the
+/// cascade was handed the version; it does NOT claim the images exist. Only an actual GHCR manifest
+/// check moves a row to `images_available` (releaseCutStatus, D5), and a check that ERRORED leaves
+/// the row where it was rather than guessing -- the workflow can fail after the Release publishes,
+/// and the registry is the only thing that knows.
+@displayCard(primary="version", secondary="bump", tertiary="requestedByEmail", status="status")
+@rowAuthz(clusterOwner)
+concept releaseCut {
+  version        string!  @description("The version cut, in git-tag form (vX.Y.Z). ALSO the row id: one timeline per cut, so the append-only status transitions of one version stay one row's history. The image tags carry the BARE form without the leading v (memql#4061's two-conventions rule) -- this field is the tag, never the image tag.")
+  bump           enum("major", "minor", "patch")!  @description("Which part of the previous version was incremented to reach this one. Recorded because it is the operator's INTENT, and intent is not recoverable from the two versions alone once a hand-cut tag lands between them.")
+  baseSha        string!  @description("The main-branch commit sha the tag was created at, read from GitHub at cut time. This is what makes a cut reproducible: the version alone does not say what shipped, and the tag can be deleted.")
+  requestedBy    string!  @description("v1:identity:user.id of the owner who cut this release. Server-derived from the authenticated actor -- never an argument, because a caller-supplied value here would let one owner write another's name into the release history.")
+  requestedByEmail  string  @description("Email of the requester at cut time, denormalized so the history stays readable after the user row changes or is deleted. The same reasoning as v1:identity:auditEvent.actorEmail.")
+  status         enum("dispatched", "tag_created_release_failed", "images_available", "failed")!  @description("dispatched = tag created and Release published, cascade handed the version, images NOT yet verified. tag_created_release_failed = the HALF-DONE state: the tag exists and the Release does not, so nothing fired and a human must finish or delete the tag. images_available = a GHCR manifest check found every image at this version. failed = nothing was created.")
+  releaseUrl     string  @description("html_url of the published GitHub Release. Empty when the cut did not get that far.")
+  tagName        string  @description("The git tag that exists even when the Release did not publish -- the one fact a human needs to finish or delete a half-done cut. Duplicates `version` on the happy path and is deliberately NOT derived from it: on tag_created_release_failed it is the only evidence that something was created.")
+  error          string  @description("The typed refusal code plus its message, when the cut failed or a status check errored. Never a credential: refusals name the VARIABLE to seed, never its value.")
+  pinBumpPrUrl   string  @description("html_url of the follow-on PR bumping the VS Code extension's DEFAULT_STACK_TAG, when bumpExtensionPin was asked for and the PR opened. Empty when it was not asked for.")
+  pinBumpNote    string  @description("Why the pin-bump PR did not open, when it was asked for and could not. A PR that cannot be opened degrades to this note and NEVER fails the cut -- the release is already published by then, and failing the call would report a cut that happened as a cut that did not.")
+  dispatchedAt   datetime  @description("When the Release published.")
+  checkedAt      datetime  @description("When a GHCR manifest check last ran for this version. Empty until someone asks -- the check is on demand, with no poller.")
+}

@@ -523,6 +523,35 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
 		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
 		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
+		// epic memql#4434, the release-cut pair. One argument covers both, and it
+		// is not "the caller is a machine" -- the caller here is a signed-in
+		// OWNER, which is the shape this map usually refuses.
+		//
+		// What earns it is that each row asserts something the caller is not
+		// entitled to SAY, and caller-scoping addresses a different question:
+		//
+		//   createReleaseCut's `requestedBy` is the authority the row carries.
+		//   A mutation argument is whatever the caller typed, so a
+		//   client-reachable create lets any owner write a colleague's name into
+		//   the release history -- append-only, so uncorrectable. Scoping to
+		//   actor.userId would assert the row belongs to the caller, which is
+		//   true and beside the point: what must hold is that requestedBy IS the
+		//   actor the Go owner wall admitted, and only that Go frame knows it.
+		//
+		//   updateReleaseCutStatus's `status` is a claim about a CONTAINER
+		//   REGISTRY. images_available means a GHCR manifest was fetched, and
+		//   the whole point of D5 is that the status is verified rather than
+		//   assumed -- a client-callable version restores exactly the false
+		//   green it exists to prevent. There is also nobody to scope to: the
+		//   concept is clusterOwner-tier, so the row has no owner field.
+		//
+		// The gate that makes this safe is IN GO and runs first
+		// (integrations/release: auth.IsOwner before any HTTP), pinned against a
+		// real engine actor by owner_wall_test.go. The DSL half of the double
+		// wall is `requiresOwner` on the releaseCuts query, which gates the READ
+		// and by construction cannot gate a builtin.
+		{Path: "cluster/mutations.memql", Name: "createReleaseCut"}:       true,
+		{Path: "cluster/mutations.memql", Name: "updateReleaseCutStatus"}: true,
 	}
 	for k := range want {
 		if !set[k] {
