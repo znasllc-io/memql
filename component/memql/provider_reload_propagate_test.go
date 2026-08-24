@@ -372,3 +372,72 @@ func TestReloadIsAtomicUnderConcurrentReads(t *testing.T) {
 		t.Error("the swapped-in contents are not visible through the ORIGINAL registry pointer")
 	}
 }
+
+// TestProviderBuiltinsAreNotAICallable pins the boundary that keeps an AGENT
+// away from these five (epic memql#4440).
+//
+// WHY IT IS WORTH A TEST OF ITS OWN. registerFunctionTools already skips every
+// builtin -- "the MCP connector surface is a curated @mcp opt-in on TOOLS", and
+// its comment says so. That exclusion is general and it is not new. What IS
+// new is the consequence of it lapsing: `providerKeySet` seals a vendor
+// credential into the graph and `providersReload` rotates what an entire fleet
+// authenticates with. Before this epic the worst an auto-registered builtin
+// could do was read something; these are the first that write a credential.
+//
+// The owner gate would still refuse an agent acting as an ordinary user, so
+// this is defence in depth rather than the only wall. It is here because the
+// two walls fail independently: the gate is a runtime check on one caller, and
+// this is a structural claim about what is reachable at all.
+func TestProviderBuiltinsAreNotAICallable(t *testing.T) {
+	functions := newFunctionRegistry()
+	tools := newToolRegistry()
+
+	names := []string{
+		"providerAuthStatus", "providersReload", "providerVerify",
+		"providerKeySet", "providerFederationSet",
+	}
+	for _, name := range names {
+		if err := functions.Upsert(&Function{
+			Name:    name,
+			Type:    FunctionTypeBuiltin,
+			Enabled: true,
+		}); err != nil {
+			t.Fatalf("register %s: %v", name, err)
+		}
+	}
+
+	registerFunctionTools(nil, functions, tools)
+
+	for _, name := range names {
+		if tools.Has(name) {
+			t.Errorf("%q was auto-registered as an AI-callable tool. These builtins seal and "+
+				"rotate vendor credentials; an agent must not be able to call them at all, "+
+				"quite apart from the owner gate that would refuse it.", name)
+		}
+	}
+
+	// THE REACHABLE POSITIVE. registerFunctionTools must still do its job for
+	// the constructs it is for -- otherwise this test passes against a
+	// function that generates nothing, and would keep passing if the builtin
+	// exclusion were removed and the whole generator broke instead.
+	if err := functions.Upsert(&Function{
+		Name: "someOrdinaryQuery",
+		// FunctionTypeUserDefined ("") is what a .memql query carries; the
+		// generator keys off NOT being a builtin, so this is the control.
+		Type: FunctionTypeUserDefined,
+		// A description is required: ValidateTool refuses a tool without one,
+		// and the generator skips a tool that fails validation. Without this
+		// the control would be skipped for its OWN reason and the positive
+		// would be unreachable in a second, quieter way.
+		Description:  "A control function, so this test cannot pass against a generator that does nothing.",
+		FunctionKind: "query",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatalf("register the control query: %v", err)
+	}
+	registerFunctionTools(nil, functions, tools)
+	if !tools.Has("someOrdinaryQuery") {
+		t.Fatal("registerFunctionTools generated nothing for an ordinary query; " +
+			"the assertions above would pass against a generator that does nothing at all")
+	}
+}
