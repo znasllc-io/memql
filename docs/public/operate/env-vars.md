@@ -322,6 +322,96 @@ For partition-scoped resolvers (DSL `resolveSecret(...)` /
 
 ---
 
+## The minimal install envelope
+
+**Installing, starting, repairing, upgrading and uninstalling a MemQL cluster
+require no AI provider credential, and make no call to any AI vendor.**
+
+That is the guarantee, stated plainly because it used to be false in one
+place: the install wizard listed an AI provider and a key file among its
+required fields, and the install graph ran an authenticated models-list probe
+against the vendor before it would touch the machine. Neither was ever an
+engine requirement -- a provider whose key does not resolve registers as
+*unavailable* and is skipped at selection, and nothing refuses boot over it.
+Epic memql#4440 removed the requirement; this section is the contract it left
+behind.
+
+### What the guarantee covers
+
+| Verb | Vendor calls with nothing configured | With a key supplied at install |
+|---|---|---|
+| install | none | ONE authenticated `GET /v1/models`, which spends no tokens |
+| start | none | none |
+| repair | none | the same one probe, only if a key is recorded or supplied |
+| upgrade | none | none |
+| uninstall | none | none |
+
+Supplying a key at install still works and behaves exactly as before: it is
+verified before anything on the machine changes, then seeded. Supplying
+nothing skips the `providerKey` step -- reported as `skipped` with the reason
+"no key supplied -- configure AI providers in the portal" -- and seeds
+nothing.
+
+### What is actually required
+
+**Read it from the registry, not from here.** The authoritative set is the
+`required:` axis in
+[`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml),
+consumed at boot by
+[`component/envregistry/bootvalidate.go`](../../../component/envregistry/bootvalidate.go)
+keyed on `MEMQL_NODE_TYPE`. To ask it directly:
+
+```bash
+go run ./cmd/envscan -check          # every read, against the registry
+```
+
+As a shape rather than a list to keep in step: **every node type needs the row
+store and the address it serves on**, `identity` adds its own public origin
+(which becomes the JWT issuer, and nothing can derive it), and `voice` adds
+LiveKit's three. Nothing else in the registry is required by any node type,
+and **no AI variable is required by any of them**.
+
+`MEMQL_MASTER_KEY` is not on the `required:` axis and is still effectively
+needed by every real deployment: it decrypts sealed values at rest, so a node
+that never reads an encrypted secret can boot without it and no realistic one
+does. It is separate from `MEMQL_OPERATOR_KEY`, which authenticates
+(memql#3519) -- see
+[operator-credential.md](auth/operator-credential.md).
+
+Everything AI-related is **portal-configured**: the models this cluster can
+call, and how it authenticates to them, live at **Settings -> AI providers**
+(owner-only). Workload identity federation is the recommended path for
+Anthropic, and needs no key at rest at all --
+[anthropic-federation.md](auth/anthropic-federation.md).
+
+### How this stays true
+
+Four gates, because a guarantee in prose is a guarantee until the first
+plausible local reason to break it:
+
+- `TestNoAIVariableIsRequiredByAnyNodeType` (`component/envregistry`) sweeps
+  every `MEMQL_AI_*` / Anthropic / OpenAI entry against all nine node types.
+- `TestNoAIVariableIsInTheSealFloor` keeps them out of the *other*
+  requiredness axis. This is the one the audit found broken:
+  `MEMQL_OPENAI_API_KEY` and `MEMQL_ANTHROPIC_API_KEY` carried no
+  `optional: true` while every sibling did, so a developer could not seal a
+  `.env` without a vendor key -- the same requirement, in the one place nobody
+  looked.
+- `TestMinimalEnvelopeIsWhatTheDocSays` pins the per-node-type set, so a node
+  type gaining a required variable fails a test and has to be justified rather
+  than discovered by an operator.
+- The **install-e2e lane runs keyless by default**
+  (`.github/workflows/install-e2e.yml`), with the keyed round trip kept beside
+  it for the verify path. A future step that quietly demands a key breaks CI
+  rather than an operator.
+
+The two requiredness axes are easy to conflate and the manifest's own comment
+spells them out: `required:` drives BOOT VALIDATION (which node types refuse
+to start), `optional:` drives the SEAL FLOOR (what a developer's `.env` must
+cover). An AI variable must be outside both.
+
+---
+
 ## Bootstrap envelope (set in env, not in concepts)
 
 These are read at process startup. Putting any of them in a concept

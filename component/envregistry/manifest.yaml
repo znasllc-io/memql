@@ -57,12 +57,14 @@ secrets:
     component: ai
     scope: global
     kind: vendor_api_key
+    optional: true
     description: "Instance-wide OpenAI API key. Used for chat, TTS, STT, and Realtime providers unless a tenant has their own partition-scoped key."
 
   - name: MEMQL_ANTHROPIC_API_KEY
     component: ai
     scope: global
     kind: vendor_api_key
+    optional: true
     description: "Instance-wide Anthropic API key. Used for Claude chat / vision providers unless overridden per tenant."
 
   - name: MEMQL_IDENTITY_KEY_ENCRYPTION_KEY
@@ -200,7 +202,14 @@ secrets:
     scope: global
     kind: vendor_api_key
     optional: true
-    description: "Shopify Admin API token. Server-side only; never exposed on a browser-reachable surface. Optional when a Storefront token is set."
+    description: "Shopify Admin API token, for the SEED store only (memql#4389). Read once, at first boot on a cluster with no v1:shopify:store row: the value is sealed into a globalSecret row and the store row references it, after which this variable is never read again. Editing it later changes nothing -- the row is the configuration."
+
+  - name: MEMQL_SHOPIFY_WEBHOOK_SECRET
+    component: shopify
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "Shopify webhook signing secret, for the SEED store only. Sealed into a globalSecret row the store references; the inbound receiver resolves it per store, which is what lets two stores verify independently."
 
   # --- identity ---
 
@@ -381,6 +390,62 @@ variables:
     scope: global
     optional: true
     description: "Public origin the unsubscribe link points at, e.g. https://api.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail. VALIDATED, not just checked for presence (memql#3481): must be an absolute https origin (http is accepted only for a loopback host, so the local cluster still runs), with no query string or fragment -- RFC 8058 section 3.1 requires an HTTPS URI and providers silently ignore one-click on anything else. A trailing path is allowed and preserved, for deployments served under SERVER_PUBLIC_PATH. A value that is set and invalid refuses the send at campaignStartSend and warns once at worker boot; it is not fatal to the node, because a node that never sends campaigns does not need this set at all."
+
+  - name: MEMQL_SYNC_ENABLED
+    component: datasync
+    scope: node
+    optional: true
+    default: "true"
+    description: "Master switch for the data-origins sync RUNTIME (epic memql#4378): the outbox drain worker, the inbound dispatcher and the backfill/reconciliation runners. False stops DELIVERY and nothing else -- a mirror stays read-only, the outbox is still appended in the write's transaction, and every declaration is still enforced. That asymmetry is the point: turning off the worker must not turn off the invariants, so a paused cluster accumulates work rather than losing it."
+
+  - name: MEMQL_SYNC_POLL_SECONDS
+    component: datasync
+    scope: node
+    optional: true
+    default: "15"
+    description: "How often the outbox drain worker looks for entries to deliver."
+
+  - name: MEMQL_SYNC_STARTUP_DELAY_SECONDS
+    component: datasync
+    scope: node
+    optional: true
+    default: "10"
+    description: "Delay before the drain worker's first pass, so a rolling restart does not have every replica contend for the same connector claim at once."
+
+  - name: MEMQL_SYNC_BATCH_SIZE
+    component: datasync
+    scope: node
+    optional: true
+    default: "50"
+    description: "Maximum outbox entries one drain pass attempts per connector. Bounds how long a single pass holds its cluster claim."
+
+  - name: MEMQL_SYNC_OUTBOX_MAX_ATTEMPTS
+    component: datasync
+    scope: node
+    optional: true
+    default: "8"
+    description: "Delivery attempts an outbox entry gets before it is DEAD-LETTERED (epic memql#4378, D5). Reached, the entry stops costing the worker time and starts costing an operator attention, which is the correct trade in that order -- a permanently-failing delivery retried forever hides every other entry behind it. Attempts are counted at CLAIM time, so a worker that dies mid-delivery still spends one: otherwise a crash-looping delivery never reaches this ceiling."
+
+  - name: MEMQL_SYNC_BACKOFF_BASE_SECONDS
+    component: datasync
+    scope: node
+    optional: true
+    default: "30"
+    description: "First retry delay after a failed outbox delivery. Each further attempt doubles it, capped at MEMQL_SYNC_BACKOFF_MAX_SECONDS."
+
+  - name: MEMQL_SYNC_BACKOFF_MAX_SECONDS
+    component: datasync
+    scope: node
+    optional: true
+    default: "900"
+    description: "Cap on the doubling retry delay. Without a cap the eighth attempt on a 30s base is over an hour away, which for a mirror that is merely being rate-limited is a long time to be wrong."
+
+  - name: MEMQL_SYNC_CLAIM_TTL_SECONDS
+    component: datasync
+    scope: node
+    optional: true
+    default: "120"
+    description: "How long a drain worker holds its per-connector cluster claim. Longer than one pass by enough that a slow pass does not lose the claim mid-delivery; short enough that a dead replica's claim frees up promptly."
 
   - name: MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE
     component: campaigns
@@ -1850,9 +1915,22 @@ variables:
   - name: MEMQL_SHOPIFY_API_VERSION
     component: shopify
     scope: node
-    default: "2025-01"
+    default: "2026-07"
     optional: true
-    description: "Shopify Admin/Storefront GraphQL API version. Defaults to 2025-01."
+    description: "Shopify Admin GraphQL API version for the SEED store. Defaults to the version the mirror was generated from; a store pinned to a different one is refused rather than attempted, because it returns fields the concepts do not declare and omits fields they require. Bumping it is a reviewed regeneration -- see docs/public/operate/shopify-connector.md."
+
+  - name: MEMQL_SHOPIFY_APP_CLIENT_ID
+    component: shopify
+    scope: node
+    optional: true
+    description: "The custom-distribution app's client id, recorded on the seeded store row for the audit trail. Not a credential."
+
+  - name: MEMQL_SHOPIFY_PROTECTED_DATA_LEVEL
+    component: shopify
+    scope: node
+    default: "none"
+    optional: true
+    description: "Shopify's protected-customer-data approval level for the seeded store: none | level1 | level2. Recorded rather than enforced -- below the level a field needs, Shopify returns null and the mirror stores null, so this is what distinguishes 'the customer has no phone number' from 'we are not approved to see it'."
 
   # --- identity ---
 
