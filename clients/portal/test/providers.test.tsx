@@ -280,10 +280,26 @@ describe("apply", () => {
     await waitFor(() => {
       expect(screen.getByText(/every other node was told to re-resolve/i)).toBeTruthy();
     });
+    // Safe to assert synchronously: the message cannot render unless this call
+    // resolved, so its having happened is a PRECONDITION of the line above.
     expect(calls.some((c) => c.name === "providersReload")).toBe(true);
-    // The status is re-read after an apply, so the page is not left showing
-    // the state that prompted it.
-    expect(calls.filter((c) => c.name === "providerAuthStatus").length).toBeGreaterThan(1);
+
+    // THIS ONE MUST BE AWAITED, and asserting it synchronously was a race that
+    // passed locally and on the PR and failed in the merge queue.
+    //
+    // The re-read is a CONSEQUENCE, not a precondition. `useProviderActions.run`
+    // sets the success message and only then calls `onChanged()`, which bumps
+    // the status hook's epoch; the effect that issues providerAuthStatus runs
+    // on the NEXT commit. So `waitFor` on the message can resolve a full render
+    // before the second read is issued -- and on a loaded CI runner it does.
+    //
+    // The fix is to wait for the thing being asserted rather than to sequence
+    // around it: "the page re-reads its status after an apply" is genuinely
+    // eventual, so an eventual assertion is the honest one. It still fails if
+    // the re-read never happens, which is the property worth having.
+    await waitFor(() => {
+      expect(calls.filter((c) => c.name === "providerAuthStatus").length).toBeGreaterThan(1);
+    });
   });
 
   it("verifies a configured provider against the vendor", async () => {
