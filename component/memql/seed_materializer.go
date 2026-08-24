@@ -41,8 +41,10 @@ const (
 // renders its avatar with no manual stamping. Unset (production default) -> no
 // behavior change. Deployment-agnostic: the persona id is resolved from the
 // catalog at materialization time, never hardcoded (the minted ids vary per
-// vendor account). `make dev-refresh` exports this so the avatar "just works"
-// after login. See frontend#237.
+// vendor account). It is a manifest-listed variable (scripts/secrets/manifest.yaml),
+// so seeding the manifest is what makes the avatar "just work" after login
+// (memql#4405: this used to name a `dev-refresh` make target, which has never
+// existed). See frontend#237.
 const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
 
 // memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The portal

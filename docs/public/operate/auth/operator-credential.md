@@ -106,8 +106,8 @@ given `MEMQL_OPERATOR_KEY` refuses every operator stream.** The failure mode is:
 operator auth: rejected -- MEMQL_OPERATOR_KEY not configured on this node
 ```
 
-and the client sees `Unauthenticated`. That is `scripts/secrets health`,
-`make secrets-seed` and `scripts/cluster/rolling-drain` failing to
+and the client sees `Unauthenticated`. That is `go run ./scripts/secrets health`,
+`go run ./scripts/secrets seed` and `scripts/cluster/rolling-drain` failing to
 authenticate -- **not** a data-path outage and not an open door. The
 interceptor fails closed; ordinary user and service-account traffic is
 untouched because it never used this scheme.

@@ -76,13 +76,21 @@ MemQL splits configuration into two tiers:
 2. **Concept storage** -- everything else. API keys, OAuth client
    secrets, model defaults, feature flags, mail-sender addresses, and
    any tunable a tenant might want to override. These live in four
-   MemQL concepts and are seeded via the `make secrets-*` /
-   `make variable-*` workflow rather than env files.
+   MemQL concepts and are seeded with `go run ./scripts/secrets seed`
+   rather than from env files.
 
 The bootstrap envelope is intentionally tiny so that rotating an API
 key, changing a default model, or adding a new tenant's BYOK
-credential never requires a redeploy -- only a `make variable-set`
-or a re-seed of the operator's local yaml.
+credential never requires a redeploy -- only a re-seed, or a direct
+write of the `v1:platform:globalVariable` row.
+
+> **There is no `secrets-*` / `variable-*` family of make targets, and
+> there never has been.** This document described one for its whole life
+> -- init, seed, list, export, one-off set -- and every citation of it sent
+> an operator to a command that does not exist (memql#4405). The tool
+> underneath is real and takes exactly two subcommands, `seed` and
+> `health`; the sections below describe those. A new bad citation now fails
+> the build (`TestMakeTargetCitationsNameRealTargets`).
 
 ---
 
@@ -520,8 +528,10 @@ key" or "where do I change the default model".
 
 The authoritative manifest is
 [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml).
-Every entry in the manifest is what `make secrets-init` will prompt
-for and what `make secrets-seed` will push into the running MemQL.
+Every entry in the manifest is a name `go run ./scripts/secrets seed`
+will look for in the `--env-file` you point it at, and push into the
+running MemQL when it finds a value. Names absent from the env file are
+skipped; the manifest is the allow-list, not the source of values.
 
 ### Default global secrets (manifest)
 
@@ -551,10 +561,11 @@ Stored in `v1:platform:globalVariable`.
 
 ### Variables consumed by the product frontend
 
-These aren't in the manifest yet -- operators add them via
-`make variable-set` -- but they're documented here because they live
-in `v1:platform:globalVariable` and are read by the product
-frontend's runtime config layer (its publicConfig whitelist):
+These aren't in the manifest yet -- operators add them by writing the
+`v1:platform:globalVariable` row directly (the `setGlobalVariable`
+mutation) -- but they're documented here because they live in that
+concept and are read by the product frontend's runtime config layer
+(its publicConfig whitelist):
 
 | Name                            | Typical value          | Consumer                                                                       |
 |---------------------------------|------------------------|--------------------------------------------------------------------------------|
@@ -572,9 +583,9 @@ frontend's runtime config layer (its publicConfig whitelist):
 | `MEMQL_DEFAULT_USER_LANGUAGE`   | `en-US`                | Same.                                                                          |
 
 The exact name on the MemQL side has to match the entry in the
-frontend's publicConfig whitelist exactly. To add a new one: add it
-to the whitelist, then
-`make variable-set NAME=... VALUE=... SCOPE=global`.
+frontend's publicConfig whitelist exactly. To add a new one: add it to
+the whitelist, then either append it to the manifest and re-seed, or
+call `setGlobalVariable(name: "...", value: "...")` directly.
 
 ### Per-tenant overrides
 
@@ -594,73 +605,59 @@ This is the BYOK ("bring your own key") path. The DSL surface is
 
 ---
 
-## The yaml file (`~/.memql/dev-secrets.yaml`)
+## The env file the seeder reads
 
-This is **operator-local, gitignored, and dev-only**. It is the
-plaintext stash of values that get encrypted-and-pushed to MemQL on
-`make secrets-seed`.
+`go run ./scripts/secrets seed --env-file <path>` is the whole
+concept-seeding surface. It reads a plain `KEY=value` env file, keeps
+only the names the manifest lists, encrypts each secret under
+`MEMQL_MASTER_KEY`, and upserts the row into
+`v1:platform:globalSecret` / `v1:platform:globalVariable` over gRPC
+against the running MemQL.
 
-Schema:
-
-```yaml
-masterKey: <64-hex-character master key>     # 32 bytes hex-encoded
-secrets:
-  - name: MEMQL_OPENAI_API_KEY
-    scope: global
-    kind: vendor_api_key
-    value: sk-proj-...
-  - name: MEMQL_ANTHROPIC_API_KEY
-    scope: global
-    kind: vendor_api_key
-    value: sk-ant-...
-  ...
-variables:
-  - name: MEMQL_IDENTITY_BASE_URL
-    scope: global
-    value: https://auth.example.com
-  - name: VITE_OPENAI_MODEL
-    scope: global
-    value: gpt-5
-  ...
+```bash
+# Requires MEMQL_MASTER_KEY in the environment. Default endpoint is
+# https://bff.memql.localhost:443; override with MEMQL_GRPC_ENDPOINT.
+go run ./scripts/secrets seed --env-file .env
+go run ./scripts/secrets health     # gRPC handshake check: prints "ok"
 ```
 
-The yaml only matters for the **operator concept-seeding workflow**
-(`make secrets-seed`). In production:
+The env file is **operator-local and gitignored**. It is a stash of
+values, not a schema: the manifest decides which names mean anything,
+and the row ids are derived (`secret-global-<slug>` /
+`var-global-<slug>`) so a re-seed overwrites in place rather than
+producing a second row.
 
-- The `MEMQL_MASTER_KEY` env var is set explicitly on the deploy
-  target.
-- Secrets and variables are seeded once via Make targets pointing at
-  the prod gRPC endpoint, after which they live in the database.
+> **This section used to describe a `~/.memql/dev-secrets.yaml` stash**
+> with its own `masterKey:` / `secrets:` / `variables:` schema, plus
+> init / list / export / one-off-set commands to manage it. The seeder
+> reads a `.env` file and has never had those subcommands; nothing in
+> the tree reads that yaml path (memql#4405).
 
-### Where the yaml lives in the bootstrap chain
+In a cloud install:
+
+- `MEMQL_MASTER_KEY` is set explicitly on the deploy target.
+- Secrets and variables are seeded once against the cluster's gRPC
+  endpoint, after which they live in the database.
+
+### Where the env file sits in the bootstrap chain
 
 The bootstrap values (including `MEMQL_MASTER_KEY`) are seeded onto the
 `memql-secrets` Secret by `make up` (`scripts/k3d/seed-secrets.sh`) and
 reach the pods via `envFrom`, so every pod has the key in env from first
-boot. The yaml is only used by
-the concept-seeding step:
+boot. The env file is only used by the concept-seeding step:
 
-1. `make secrets-seed` runs `go run ./scripts/secrets seed`, which
-   reads `~/.memql/dev-secrets.yaml`.
-2. It encrypts each yaml entry under the master key (resolved from the
-   seeded `MEMQL_MASTER_KEY` env) and upserts the row into the right
-   concept over gRPC against the running MemQL.
+1. `go run ./scripts/secrets seed --env-file <path>` reads it.
+2. It encrypts each manifest-listed entry under the master key
+   (resolved from the seeded `MEMQL_MASTER_KEY` env) and upserts the row
+   into the right concept over gRPC against the running MemQL.
 
-### Make targets
+### Backing concept state up before a repave
 
-All driven by `scripts/secrets/main.go`:
-
-| Target                                                          | Purpose                                                                          |
-|-----------------------------------------------------------------|----------------------------------------------------------------------------------|
-| `make secrets-init`                                             | Interactive walk through the manifest. Generates a master key on first run, prompts only for empty entries on subsequent runs. |
-| `make secrets-seed`                                             | Encrypt + push every entry from the yaml into the running MemQL.                 |
-| `make secrets-list`                                             | Print the manifest, scope, and whether each entry has a value locally.           |
-| `make secret-set NAME=X VALUE=Y SCOPE=global`                   | One-off; doesn't touch the yaml.                                                 |
-| `make variable-set NAME=X VALUE=Y SCOPE=global`                 | Same for plaintext variables.                                                    |
-| `make secrets-export`                                           | Pull every active secret + variable from the running MemQL, decrypt locally, merge into the yaml (MemQL wins on conflict). Used to back state up before a `make down && make up` recreates the database. |
-
-`make secrets-export` then `make secrets-seed` round-trips concept state
-through the yaml, so it stays in sync across a cluster recreate.
+There is no export command. `make down && make up` recreates the
+database, so anything written directly with `setGlobalSecret` /
+`setGlobalVariable` and never added to your env file is gone. Keep the
+env file as the record: seed from it, and add to it anything you want to
+survive a repave.
 
 ### Master-key resolution order (in process)
 
@@ -739,25 +736,27 @@ deploy-config change every time it rotates.
 ### Adding a global secret
 
 1. Append a row to `scripts/secrets/manifest.yaml` under `secrets:`.
-2. `make secrets-init` (re-walks; only prompts for the new entry).
-3. `make secrets-seed`.
+2. Put `YOUR_NAME=<value>` in the env file you seed from.
+3. `go run ./scripts/secrets seed --env-file <path>`.
 4. Reference it from a provider/integration via `env("YOUR_NAME")` in
    `.memql` or `os.Getenv("YOUR_NAME")` in Go (the resolver chain
    works for both).
 
 ### Adding a global variable
 
-1. Append a row to `scripts/secrets/manifest.yaml` under
-   `variables:`, *or* set it ad-hoc with
-   `make variable-set NAME=YOUR_NAME VALUE=... SCOPE=global`.
+1. Append a row to `scripts/secrets/manifest.yaml` under `variables:`
+   and seed it the same way, *or* write the row directly with the
+   `setGlobalVariable(name: "YOUR_NAME", value: "...")` mutation.
 2. The DSL resolver returns it from `resolveVariable("YOUR_NAME")` or
    the same `env()` chain in provider auth.
 
 ### Adding a per-tenant (partition-scoped) entry
 
-`make secret-set NAME=... VALUE=... SCOPE=partition PARTITION=acme`
-or the variable equivalent. The same resolver chain finds it
-automatically.
+Call `setPartitionSecret` / `setPartitionVariable` directly. The
+seeder writes global rows only -- the manifest carries no
+partition-scoped entries -- and the partition dimension itself is
+being retired (#56), so treat these two concepts as legacy surface
+rather than the place to put new config.
 
 ---
 
@@ -766,7 +765,7 @@ automatically.
 | File                                                                          | What it tells you                                                              |
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml)        | Authoritative list of dev-bootstrap secrets + variables.                       |
-| [`scripts/secrets/main.go`](../../../scripts/secrets/main.go)                    | The CLI that powers every `make secret-*` / `make variable-*` target.          |
+| [`scripts/secrets/main.go`](../../../scripts/secrets/main.go)                    | The concept-seeding CLI: `seed --env-file <path>` and `health`. Nothing wraps it in a make target. |
 | [`scripts/k3d/seed-secrets.sh`](../../../scripts/k3d/seed-secrets.sh)            | Seeds the bootstrap envelope into k8s Secrets (run by `make up` / `make secrets`). |
 | `dsl/platform/concepts.memql`                                                 | Schemas for global + partition-scoped secrets and variables.                   |
 | `component/secret/encryption.go`                                              | NaCl secretbox + `MEMQL_MASTER_KEY` resolution.                                |
@@ -786,13 +785,16 @@ automatically.
 
 ### Rotating a secret
 
-```bash
-# In the operator's local copy (dev):
-make secret-set NAME=MEMQL_OPENAI_API_KEY VALUE='sk-proj-newvalue' SCOPE=global
+Put the new value in your env file under the same name and re-seed:
 
-# Or for prod, point the same target at the prod gRPC endpoint by
-# setting MEMQL_GRPC_ENDPOINT in the calling shell.
+```bash
+# Requires MEMQL_MASTER_KEY. For a cloud install, point the same command
+# at that cluster by setting MEMQL_GRPC_ENDPOINT in the calling shell.
+go run ./scripts/secrets seed --env-file .env
 ```
+
+A single row can also be written directly with the `setGlobalSecret`
+mutation, which is what the seeder itself calls.
 
 The old row is soft-deleted (`active=false`); `lastUsedAt` /
 `rotatedAt` get stamped on the new row. The next decrypt picks the
@@ -819,38 +821,37 @@ Full procedure and reasoning:
 
 ### Backing up state before a wipe
 
-```bash
-make secrets-export
-```
+There is no export command, so the env file has to BE the backup. Before
+any `make down && make up` (or `make up-refresh`), make sure every value
+you care about is in the file you seed from -- a row written directly with
+`setGlobalSecret` / `setGlobalVariable` and never added there does not
+survive the repave.
 
-Pulls every active row from the running MemQL, decrypts secrets
-locally with the master key, and merges the result into the yaml.
-Conflict resolution: MemQL wins. Run this before any
-`make down && make up` that resets the database.
+> This section used to document an export subcommand that pulled every
+> active row back out and merged it into a local yaml. It has never
+> existed (memql#4405).
 
 ### "Why is my provider giving 'no value' errors?"
 
 Check the resolver chain in order:
 
 1. Is the row in `v1:platform:globalSecret` /
-   `v1:platform:globalVariable`?
-   ```bash
-   make secrets-list
-   ```
-   or in DSL:
-   `getQuery("queryConfigSecret", { name: "MEMQL_OPENAI_API_KEY" })`.
+   `v1:platform:globalVariable`? Read it back through the
+   `globalSecret` / `globalVariable` query, e.g. in DSL
+   `globalVariable({name: "MEMQL_OPENAI_API_KEY"})`.
 2. Does the running MemQL have `MEMQL_MASTER_KEY` set in env?
 3. Is the master key the **same one** that encrypted the row? If
-   you regenerated it, the existing rows are unreadable -- run
-   `make secrets-seed` again to overwrite with the new key.
+   you regenerated it, the existing rows are unreadable -- re-seed with
+   `go run ./scripts/secrets seed --env-file <path>` to overwrite under
+   the new key.
 
-### Local override without polluting the yaml
+### Local override without touching the env file
 
-`make secret-set` / `make variable-set` write directly to the
-running MemQL without modifying the yaml. Useful for one-off
-experiments. Note that the next `make down && make up` recreates the
-database, so re-running `make secrets-seed` replaces the value with
-whatever's in the yaml -- export first if you want to keep it.
+`setGlobalSecret` / `setGlobalVariable` write directly to the running
+MemQL without modifying the env file. Useful for one-off experiments.
+Note that the next `make down && make up` recreates the database, and a
+re-seed replaces the value with whatever is in the env file -- so put it
+there too if you want it to last.
 
 ---
 

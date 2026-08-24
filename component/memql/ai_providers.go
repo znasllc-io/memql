@@ -954,7 +954,7 @@ func authConceptResolver(envKey string) (string, bool) {
 //     like baseURL.
 //  3. OS env                -- bootstrap-window fallback. Providers
 //     load eagerly during engine init, but
-//     `make dev-refresh` wipes the database
+//     `make up-refresh` wipes the database
 //     before re-seeding -- so on first boot
 //     concept storage is empty when
 //     providers load, and only the env keeps
@@ -1008,11 +1008,11 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 				continue
 			}
 			return nil, fmt.Errorf(
-				// NAMES REAL THINGS ONLY (memql#4338). This used to say
-				// `make secret-set` / `variable-set`; the Makefile has
-				// neither, and never has -- so the one line an operator
-				// reads at the moment of failure sent them to a command
-				// that does not exist.
+				// NAMES REAL THINGS ONLY (memql#4338). This used to direct
+				// the operator at `secret-set` / `variable-set` make
+				// targets; the Makefile has neither, and never has -- so
+				// the one line an operator reads at the moment of failure
+				// sent them to a command that does not exist.
 				"auth %q references %s but no value is in concept storage or OS env. "+
 					"Tried name(s) %s under v1:platform:globalSecret, v1:platform:globalVariable, "+
 					"and the process env. Seed ANY of those names: put it in the node's "+

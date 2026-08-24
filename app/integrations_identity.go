@@ -828,8 +828,11 @@ func (a *App) attemptAutoBootstrap(
 	a.provisionBootstrapOwner(ctx, cfg, store)
 
 	// MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP suppresses the owner magic-link email
-	// (memql#374). Set by `make dev-refresh` so iterative DB wipes don't
-	// produce an inbox storm; the operator is the same person across
+	// (memql#374). It is a manifest-listed variable (scripts/secrets/manifest.yaml),
+	// so an operator repeatedly repaving with `make up-refresh` seeds it once and
+	// iterative DB wipes stop producing an inbox storm (memql#4405: this used to
+	// name a `dev-refresh` make target -- one the Makefile has never had -- and
+	// attributed the setting to it rather than to the seed path that carries it); the operator is the same person across
 	// refreshes + the clusterSettings row is already persisted above, so
 	// the cluster is functionally bootstrapped without the email.
 	// Unset in staging / production deploys; behaviour there is unchanged.

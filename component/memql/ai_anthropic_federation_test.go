@@ -7,7 +7,37 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/maketargets"
 )
+
+// citesNoDeadMakeTarget asserts that text directs the reader at no `make`
+// target the Makefile lacks.
+//
+// This is the assertion memql#4405 exists to generalise. Two tests in this
+// file asserted strings.Contains(err.Error(), "make secret-set") as a proxy
+// for "the seeding hint survived" -- so the assertion passed BECAUSE the
+// falsehood was there, and the only automated opinion on the subject was
+// voting for the bug. memql#4338 flipped them to assert the absence of that
+// one literal, which is better but still names a single historical mistake.
+// Reading the real target set covers every future dead name instead.
+func citesNoDeadMakeTarget(t *testing.T, what, text string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	real := maketargets.Targets(string(raw))
+	// REACHABLE POSITIVE. Without this, a Makefile this test failed to parse
+	// yields an empty target set, every citation resolves against nothing --
+	// and the assertion below would pass over a text full of dead targets.
+	if len(real) == 0 {
+		t.Fatal("parsed no targets from the Makefile, so the citation check below would pass over anything")
+	}
+	if dead := maketargets.UnknownTargets(text, real); len(dead) > 0 {
+		t.Fatalf("%s cites make target(s) the Makefile does not have %v:\n%s", what, dead, text)
+	}
+}
 
 // Tests for the Anthropic credential decision (memql#4334).
 //
@@ -190,19 +220,18 @@ func TestAnthropicCredentialRefusesWithNoCredentialAtAll(t *testing.T) {
 	// The seeding hint the auth resolver used to print has to survive here,
 	// because the resolver no longer errors on this name.
 	//
-	// Asserted as a PROPERTY -- names the variable, names a real destination --
-	// rather than as a literal `make secret-set`, which is what let this
-	// assertion keep passing while pointing operators at a target the Makefile
-	// has never had (memql#4338).
+	// Asserted as a PROPERTY -- names the variable, names a real destination,
+	// and directs the operator at no make target that does not exist -- rather
+	// than as a literal, which is what let this assertion keep passing while
+	// pointing operators at a target the Makefile has never had (memql#4338,
+	// generalised in memql#4405).
 	if !strings.Contains(err.Error(), envAnthropicAPIKey) {
 		t.Fatalf("no-credential error does not name the variable to seed: %v", err)
 	}
 	if !strings.Contains(err.Error(), "globalSecret") {
 		t.Fatalf("no-credential error lost the seeding hint: %v", err)
 	}
-	if strings.Contains(err.Error(), "make secret-set") {
-		t.Fatalf("no-credential error cites `make secret-set`, which is not a Makefile target: %v", err)
-	}
+	citesNoDeadMakeTarget(t, "the no-credential error", err.Error())
 }
 
 // TestAnthropicConstructorsAttachTheGuardedClient covers spec 6.1's last
@@ -391,14 +420,12 @@ func TestNonOptionalPlaceholdersStillFail(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unset non-optional placeholder resolved silently")
 	}
-	// Same property, same reason as above (memql#4338): a real destination,
-	// and never a make target that does not exist.
+	// Same property, same reason as above (memql#4338 / memql#4405): a real
+	// destination, and never a make target that does not exist.
 	if !strings.Contains(err.Error(), "globalSecret") {
 		t.Fatalf("the resolver's seeding hint was lost: %v", err)
 	}
-	if strings.Contains(err.Error(), "make secret-set") {
-		t.Fatalf("the resolver cites `make secret-set`, which is not a Makefile target: %v", err)
-	}
+	citesNoDeadMakeTarget(t, "the resolver's seeding hint", err.Error())
 }
 
 // TestOptionalAuthNamesAreAnthropicCredentialOnly pins the allow-list. Adding

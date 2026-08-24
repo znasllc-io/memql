@@ -21,7 +21,7 @@ import (
 // BASE_URL is required. Every gRPC call carries an identity-issued
 // JWT that the per-node verifier validates against the identity
 // service's JWKS feed. Out-of-band operator tooling
-// (`make secrets-seed` etc.) authenticates via the operator
+// (`go run ./scripts/secrets seed` etc.) authenticates via the operator
 // credential -- see operator_stream_interceptor.go.
 //
 // On the identity binary (verifierRequired=false), configAndAuth

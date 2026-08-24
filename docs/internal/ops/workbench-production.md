@@ -279,7 +279,7 @@ pods by the one path every other config value does (epic memql#3958): as a
 KEY on the `memql-secrets` Secret. Not ad-hoc `kubectl set env`.
 
 > **This section used to describe re-sealing a genesis envelope** — edit a
-> plaintext `.env`, run `make genesis-seal`, re-store the sealed
+> plaintext `.env`, run a `genesis-seal` make target, re-store the sealed
 > `genesis-b64` blob in Key Vault and in a `genesis` k8s secret. That
 > mechanism no longer exists.
 

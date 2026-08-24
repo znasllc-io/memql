@@ -136,8 +136,9 @@ func (a *App) transportBase() {
 	//
 	//   operator-aware -- Authorization: Operator <master_key>
 	//                   admits out-of-band operator tooling
-	//                   (`make secrets-seed`, `scripts/secrets
-	//                   health`) as a synthetic cluster owner.
+	//                   (`go run ./scripts/secrets seed`, `go run
+	//                   ./scripts/secrets health`) as a synthetic
+	//                   cluster owner.
 	//                   Falls through on any other scheme.
 	//   pair-aware    -- Authorization: Pair <code> redeems a
 	//                   worker pairing code without an existing

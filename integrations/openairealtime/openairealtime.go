@@ -224,7 +224,7 @@ func (i *Integration) apiKey(ctx context.Context) (string, error) {
 	// rather than seeded into globalSecret. This mirrors the AI-provider /
 	// bridge-agent resolution chain (see component/memql/ai_providers.go
 	// authConceptLookupNames) so the builtin works wherever those do, without
-	// requiring a separate `make secret-set`.
+	// requiring a separate concept-seeding step.
 	for _, name := range names {
 		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			return v, nil
@@ -232,8 +232,14 @@ func (i *Integration) apiKey(ctx context.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf(
-		"openairealtime: OpenAI API key not found in v1:platform:globalSecret or env (looked for %s then %s) -- seed it with `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration` or set the env var on the node",
-		secretAPIKeyPrimary, secretAPIKeyFallback, secretAPIKeyPrimary)
+		// NAMES REAL THINGS ONLY (memql#4405) -- see the same fix in
+		// integrations/avatardirect and the resolver error memql#4338
+		// fixed in component/memql/ai_providers.go.
+		"openairealtime: OpenAI API key not found in v1:platform:globalSecret or the process env "+
+			"(looked for %s then %s). Seed ANY of those names: put it in the node's environment "+
+			"(locally `make secrets`; in a cluster, whichever secret store the deployment reads), "+
+			"or store a v1:platform:globalSecret row under it",
+		secretAPIKeyPrimary, secretAPIKeyFallback)
 }
 
 // -----------------------------------------------------------------

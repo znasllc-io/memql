@@ -21,7 +21,7 @@
 //
 // The split mirrors the deployed cluster topology: the
 // planner runs as a separate node-type binary
-// (`make build-planner`) and only loads what's relevant to plan
+// (`make planner`) and only loads what's relevant to plan
 // execution. Putting plan-execution code in cognition means the
 // planner binary doesn't have it -- which would be wrong.
 package planner

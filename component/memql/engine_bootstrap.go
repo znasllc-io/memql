@@ -255,7 +255,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// Wire concept-storage resolvers BEFORE loading providers so a
 	// provider's auth.apiKey="${MEMQL_AI_OPENAI_API_KEY}" picks up the
 	// value from v1:platform:globalSecret if a developer has run
-	// `make secrets-seed`. OS env stays as a legacy fallback per the
+	// `go run ./scripts/secrets seed`. OS env stays as a legacy fallback per the
 	// Phase 4b transition. Calling these is idempotent; they overwrite
 	// any prior installation, which is the desired behavior in tests.
 	SetSystemSecretResolver(func(ctx context.Context, name string) (string, error) {
@@ -656,8 +656,9 @@ func deriveConceptRegistryState(all []*concept.Concept) (map[string][]Relationsh
 // values from v1:platform:globalSecret instead of falling back to OS env.
 //
 // Concurrency: assumes the engine is in a quiescent state (no
-// in-flight AI calls). The dev-refresh workflow runs this after
-// `make secrets-seed` completes and before any user traffic arrives.
+// in-flight AI calls). The repave workflow runs this after
+// `go run ./scripts/secrets seed` completes and before any user traffic
+// arrives.
 // Production callers (post-rotation) should similarly drain in-flight
 // calls before invoking; the swap is non-atomic across providers.
 //

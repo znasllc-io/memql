@@ -187,7 +187,7 @@ func (di *DefaultInjector) injectOne(ctx context.Context, c envregistry.Injectab
 // MemQL engine: it queries the platform concepts for the only-if-absent
 // check and dispatches the canonical platform set* mutations for the
 // inserts, reusing the seed materializer's bare-key arg rendering +
-// DB-surge retry so the write path matches `make secrets-seed`.
+// DB-surge retry so the write path matches `go run ./scripts/secrets seed`.
 type engineInjectStore struct {
 	engine *MemQLEngine
 }
@@ -294,7 +294,8 @@ func injectConceptName(c envregistry.InjectableDefault) string {
 // upsert mutation and the deterministic row id. Keeping the id formula
 // identical means the operator seed path and this injector converge on
 // the SAME row rather than producing two -- so an operator who later
-// runs `make secrets-seed` overwrites the injected default in place.
+// runs `go run ./scripts/secrets seed` overwrites the injected default
+// in place.
 func variableMutationFor(c envregistry.InjectableDefault) (mutation string, id string) {
 	if c.Entry.Scope == "global" {
 		return "setGlobalVariable", "var-global-" + slugifyInjectName(c.Entry.Name)

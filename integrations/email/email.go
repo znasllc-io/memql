@@ -252,7 +252,7 @@ func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
 	// --- Graph path -----------------------------------------------------
 	// Try the new EMAIL_*-prefixed names first; fall back per-field to
 	// the pre-rename AZURE_* / MAIL_* names so installs that haven't
-	// run `make secrets-seed` since the rename keep working.
+	// re-seeded (`go run ./scripts/secrets seed`) since the rename keep working.
 	graphKeys := DefaultGraphEnvKeys()
 	legacyKeys := LegacyGraphEnvKeys()
 	readGraph := func(primary, legacy string) string {
