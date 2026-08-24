@@ -175,7 +175,14 @@ test("the derivation hint is composed by the real function, not re-implemented",
     "substituting into the template must equal composing directly, or the hint lies about what gets saved",
   );
 
-  assert.match(derivationLine("example.com"), /api\.example\.com:443/);
+  // EXACT, NOT A SUBSTRING MATCH. An unanchored /api\.example\.com:443/ passes
+  // for "Will connect to evil.example.net/api.example.com:443." -- it asserts
+  // that the endpoint appears SOMEWHERE in the sentence, which is not what the
+  // hint promises. The hint's whole job is to be the thing the operator reads
+  // instead of the endpoint box, so the whole sentence is the contract.
+  // (CodeQL js/regex/missing-regexp-anchor flagged the loose form, and it was
+  // right about the assertion even though this is a test.)
+  assert.equal(derivationLine("example.com"), `Will connect to ${composeEndpointFromDomain("example.com")}.`);
   assert.doesNotMatch(derivationLine(""), /api\.:443/, "an empty domain must not compose a hole");
 });
 
