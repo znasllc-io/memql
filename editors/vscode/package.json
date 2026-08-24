@@ -58,6 +58,18 @@
         "path": "./syntaxes/memql.tmLanguage.json"
       }
     ],
+    "themes": [
+      {
+        "label": "MemQL Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/memql-dark-color-theme.json"
+      },
+      {
+        "label": "MemQL Light",
+        "uiTheme": "vs",
+        "path": "./themes/memql-light-color-theme.json"
+      }
+    ],
     "configuration": {
       "title": "MemQL",
       "properties": {
