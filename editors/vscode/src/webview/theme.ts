@@ -62,6 +62,18 @@ function kindNumber(kind: vscode.ColorThemeKind): number {
 }
 
 /**
+ * The editor's current kind, in appearance.ts's vocabulary.
+ *
+ * EXPORTED so the one-time theme offer (memql#4421) can match its suggestion
+ * to the editor without a second copy of the enum mapping above. A second copy
+ * is precisely what this module's header exists to prevent -- and it would go
+ * wrong in the quietest possible way, offering a light user the dark theme.
+ */
+export function currentEditorKind(): number {
+  return kindNumber(vscode.window.activeColorTheme.kind);
+}
+
+/**
  * What the MemQL panels should render as right now.
  *
  * Read fresh on every call, never cached: `activeColorTheme` is replaced
@@ -70,7 +82,7 @@ function kindNumber(kind: vscode.ColorThemeKind): number {
  */
 export function currentTheme(): EffectiveTheme {
   const setting = vscode.workspace.getConfiguration(SECTION).get<string>(KEY);
-  return effectiveTheme(setting, kindNumber(vscode.window.activeColorTheme.kind));
+  return effectiveTheme(setting, currentEditorKind());
 }
 
 /**

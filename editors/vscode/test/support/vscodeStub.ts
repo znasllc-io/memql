@@ -64,6 +64,8 @@ export const recorded = {
   warnings: [] as string[],
   /** window.showInformationMessage bodies. */
   infos: [] as string[],
+  /** The action buttons offered alongside each of those bodies, same order. */
+  infoActions: [] as string[][],
   /**
    * View ids passed to window.registerTreeDataProvider OR window.createTreeView.
    *
@@ -133,11 +135,27 @@ export function setNextInputBoxResult(result: string | undefined): void {
   nextInputBoxResult = result;
 }
 
+/**
+ * What the next `window.showInformationMessage` answers with (memql#4421).
+ *
+ * SINGLE-SHOT: reading it clears it, so an armed answer cannot be collected
+ * twice by a second notification that happened to fire afterwards. Undefined
+ * means the operator dismissed the toast without pressing a button, which is
+ * the default and is a real case the theme offer has to decide about.
+ */
+export let nextInformationMessageChoice: string | undefined;
+
+export function setNextInformationMessageChoice(choice: string | undefined): void {
+  nextInformationMessageChoice = choice;
+}
+
 /** Drops everything `recorded` holds. Call between cases. */
 export function resetRecorded(): void {
   recorded.errors.length = 0;
   recorded.warnings.length = 0;
   recorded.infos.length = 0;
+  recorded.infoActions.length = 0;
+  nextInformationMessageChoice = undefined;
   recorded.treeViews.length = 0;
   for (const key of Object.keys(recorded.treeViewDescriptions)) {
     delete recorded.treeViewDescriptions[key];
@@ -751,9 +769,22 @@ export const window = {
     };
   },
 
-  showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
+  // Records the body AND the action buttons, and answers with whatever
+  // setNextInformationMessageChoice() armed (memql#4421).
+  //
+  // The buttons are recorded because "an offer was shown" and "an offer the
+  // operator could accept was shown" are different facts: a notification whose
+  // actions were dropped still lands in recorded.infos, still reads as working
+  // in a test, and is a dead end on screen.
+  //
+  // The default answer is `undefined` -- the operator dismissed it -- because
+  // that is what a case which says nothing about the prompt should get.
+  showInformationMessage(message: string, ...items: string[]): Promise<string | undefined> {
     recorded.infos.push(message);
-    return Promise.resolve(undefined);
+    recorded.infoActions.push([...items]);
+    const answer = nextInformationMessageChoice;
+    nextInformationMessageChoice = undefined;
+    return Promise.resolve(answer);
   },
 
   // The privileged-command handoff (memql#3551). The extension spawns every

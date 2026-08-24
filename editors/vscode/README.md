@@ -613,6 +613,72 @@ bash scripts/vscode/install.sh --help
 If the editor CLI is missing, run "Shell Command: Install 'code' command in
 PATH" from the VS Code command palette.
 
+## Appearance
+
+The MemQL panels wear the portal's palette -- the same hexes memql.io and the
+MemQL Portal render. Which of the two they wear is YOUR choice, not the
+editor's:
+
+`memql.appearance` -- `system` (default) | `light` | `dark`
+
+- **`system` means follow the EDITOR's colour theme.** Inside VS Code the
+  editor is the ambient theme, and it is what tracks your operating system if
+  you have asked it to. This matches what "system" means in the portal relative
+  to its own host, the browser.
+- **`light` / `dark` pin the MemQL palette** regardless of what the editor is
+  set to. A light editor with dark MemQL panels is a supported combination.
+- **A high-contrast editor theme always wins.** The panels then defer entirely
+  to VS Code's own colours and this setting is ignored. A themed green is not
+  worth an accessibility regression.
+
+Changing it repaints any panel you already have open -- no reload.
+
+### Why the sidebar does not follow it
+
+Tree rows, the activity bar, view titles, tabs and the status bar are drawn by
+the **workbench**, not by the extension. VS Code offers extensions `ThemeIcon`
+and `ThemeColor` for those surfaces and nothing else -- there is no API by
+which an extension can colour a tree row. This is a platform constraint, not a
+gap in this extension, and it is why the MemQL tree items speak VS Code's
+`charts.*` vocabulary (green = healthy, red = error, yellow = needs attention,
+purple = in progress) rather than a MemQL hex.
+
+So the only way the chrome AROUND the panels can wear the brand is for VS
+Code's own colour theme to be a MemQL theme. The extension ships two:
+
+- **MemQL Dark**
+- **MemQL Light**
+
+Pick one from `Preferences: Color Theme` (`Ctrl+K Ctrl+T` / `Cmd+K Cmd+T`).
+They are opt-in and the extension never changes your theme on its own; the
+first time it activates on a non-MemQL theme it offers once, records your
+answer either way, and does not ask again.
+
+The two themes brand the workbench -- editor, sidebar, activity bar, status
+bar, tabs, lists and selection, buttons, badges and inputs -- plus a minimal
+four-rule syntax split (comments, strings, numbers, keywords). They are
+deliberately **not** a full syntax theme, and they deliberately leave the
+sixteen `terminal.ansi*` colours at VS Code's defaults: those are a contract
+between your shell prompt, your `ls` colours and every TUI you run, and a brand
+green in that palette reads as "this file is executable".
+
+### If the palette changes
+
+The hexes live in exactly one place, `src/webview/palette.ts`, and both the
+panel CSS and the two theme files are derived from it. When the portal palette
+changes (upstream is `brand/` at the repository root -- see memql#4177):
+
+1. Edit `src/webview/palette.ts`.
+2. Run `node scripts/generate-themes.mjs`.
+3. Commit `palette.ts` **and** both files under `themes/`.
+
+`npm test` fails if the committed theme files disagree with the palette, so a
+step-1-without-step-2 cannot ship. `node scripts/generate-themes.mjs --check`
+is the same comparison from a shell. The test suite also holds every
+foreground/background text pair in both themes to WCAG AA (4.5:1), so a new
+palette that is unreadable in the workbench fails there rather than in
+somebody's editor.
+
 ## Requirements
 
 The `memql-lsp` binary, for the LANGUAGE FEATURES only. The extension resolves
@@ -772,6 +838,9 @@ checklist](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vs
 
 ## Settings
 
+- `memql.appearance` -- `system` (default) | `light` | `dark`. Which palette
+  the MemQL panels use; `system` follows the editor's colour theme. A
+  high-contrast editor theme overrides it. See [Appearance](#appearance).
 - `memql.lsp.serverPath` -- absolute path to the `memql-lsp` binary. **User
   settings only.** A value in workspace settings (`.vscode/settings.json`) is
   refused, and the extension shows a warning saying it was: an opened folder is
