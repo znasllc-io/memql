@@ -60,7 +60,27 @@ interface Call {
   args: unknown;
 }
 
-function fakeConnection(role: string, calls: Call[], statusRows: unknown[]): Connection {
+const VERIFY_PASSES = [{ provider: "chat54Mini", verified: true, reason: "", modelsListed: 12 }];
+
+// A REFUSAL, as the engine returns it: verified=false carrying the vendor's
+// own words, NOT a thrown error. The distinction is the page's whole contract
+// with this call -- a refusal is something to show in place, and an error is
+// an exception dialog about a question that could not be asked.
+const VERIFY_REFUSES = [
+  {
+    provider: "chat54Mini",
+    verified: false,
+    reason: "models.list failed on the api-key credential path: 401 invalid x-api-key",
+    modelsListed: 0,
+  },
+];
+
+function fakeConnection(
+  role: string,
+  calls: Call[],
+  statusRows: unknown[],
+  verifyRows: unknown[] = VERIFY_PASSES,
+): Connection {
   const record = (name: string, result: unknown) => async (args: unknown) => {
     calls.push({ name, args });
     return result;
@@ -93,12 +113,7 @@ function fakeConnection(role: string, calls: Call[], statusRows: unknown[]): Con
         rowsResult([{ name: "anthropic-federation", vendor: "anthropic", applied: false, message: "Saved." }]),
       ),
     ),
-    providerVerify: vi.fn(
-      record(
-        "providerVerify",
-        rowsResult([{ provider: "chat54Mini", verified: true, reason: "", modelsListed: 12 }]),
-      ),
-    ),
+    providerVerify: vi.fn(record("providerVerify", rowsResult(verifyRows))),
     providersReload: vi.fn(
       record(
         "providersReload",
@@ -121,9 +136,16 @@ function fakeConnection(role: string, calls: Call[], statusRows: unknown[]): Con
   } as unknown as Connection;
 }
 
-function renderAt(role: string, path = "/admin/providers", statusRows: unknown[] = KEYLESS_ROWS) {
+function renderAt(
+  role: string,
+  path = "/admin/providers",
+  statusRows: unknown[] = KEYLESS_ROWS,
+  verifyRows: unknown[] = VERIFY_PASSES,
+) {
   const calls: Call[] = [];
-  const dial = vi.fn(async () => fakeConnection(role, calls, statusRows)) as unknown as typeof Connection.dial;
+  const dial = vi.fn(async () =>
+    fakeConnection(role, calls, statusRows, verifyRows),
+  ) as unknown as typeof Connection.dial;
   render(
     <MemoryRouter initialEntries={[path]}>
       <AuthProvider
@@ -274,6 +296,25 @@ describe("apply", () => {
       expect(screen.getByText(/the vendor accepted this credential/i)).toBeTruthy();
     });
     expect(calls.some((c) => c.name === "providerVerify")).toBe(true);
+  });
+
+  it("shows a REFUSED credential in place, with the vendor's own words", async () => {
+    // The half a happy-path test cannot reach. `providerVerify` returns
+    // verified=false rather than erroring, so the page has to turn that into
+    // something the operator reads -- and it must carry the vendor's reason,
+    // because "verification failed" tells them nothing about which of the
+    // half-dozen causes they are looking at.
+    renderAt("owner", "/admin/providers", CONFIGURED_ROWS, VERIFY_REFUSES);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Verify" }).length).toBe(2);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Verify" })[0]!);
+    await waitFor(() => {
+      expect(screen.getByText(/401 invalid x-api-key/i)).toBeTruthy();
+    });
+    // NOT reported as a pass. The failure mode worth guarding is a page that
+    // renders the reason somewhere and the success message as well.
+    expect(screen.queryByText(/the vendor accepted this credential/i)).toBeNull();
   });
 
   it("names the credential's SOURCE, which is what a saved-but-not-used key looks like", async () => {
