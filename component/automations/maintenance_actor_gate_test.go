@@ -34,7 +34,7 @@ import (
 //     consumes them, so nothing else asserts that the wire is connected.
 func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// (1) The pinned set.
-	want := []string{"workerInvocationRetentionSweep"}
+	want := []string{"auditEventRetentionSweep", "workerInvocationRetentionSweep"}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the maintenance list is %v, pinned as %v.\n\n"+

@@ -89,6 +89,10 @@ var maintenanceAutomations = map[string]string{
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
 		"nothing looks exactly like a sweep with nothing to retire",
+	"auditEventRetentionSweep": "retention sweep over v1:identity:auditEvent, which declares the clusterOwner " +
+		"tier (memql#4366). Worse than the one above, because this sweep is OBSERVATION-ONLY: it publishes a " +
+		"candidate COUNT, so an unauthorized read does not fail, it reports zero -- and a retention window " +
+		"nobody enforces is indistinguishable from one with nothing to do",
 }
 
 // IsMaintenanceAutomation reports whether this automation runs under the

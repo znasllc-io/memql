@@ -36,6 +36,36 @@ concept accessRequest {
 /// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS via the daily auditEventRetentionSweep automation. The
 /// prevEventHash field is reserved for future hash-chain tamper-resistance; written but not
 /// validated in MVP.
+///
+/// TIER: `clusterOwner`, and that is a RULING rather than a default (memql#4366, which carved this
+/// decision out of memql#4313). Three things ruled out the alternatives:
+///
+///   - `owner="actorUserId"` cannot be declared. createAuditEvent writes actorUserId from CALLER
+///     ARGS, which TestDeclaredOwnerFieldsAreServerStamped refuses for a declared owner field --
+///     and re-stamping it from the actor would be WRONG rather than inconvenient: the identity
+///     service writes these on a user's behalf, and actorUserId is deliberately EMPTY for an
+///     anonymous event. A tier whose owner field is empty on the rows that matter most is a tier
+///     that admits nobody to them.
+///   - The composite `owner=..., clusterOwner` cannot deliver "an admin reads all" either.
+///     `clusterOwner` is `Role == owner` ALONE (AccessContext.IsClusterOwner), so an admin would
+///     be passed by a requiresOwnerOrAdmin query gate and then narrowed by the tier to nothing.
+///     memql#4313 assumed the two were the same; they are not.
+///   - `via="<spec>"` over a role predicate would parse, and is refused on meaning. The granted
+///     tier's whole design premise is "a row in isolation cannot answer this, the filter's join
+///     can" -- which is FALSE for a role check, needing no row at all. Every fail-closed edge it
+///     has (graph traversal, top-level builtin results, the write guard) would then fail for a
+///     reason that does not apply.
+///
+/// So the ruling is the one memql#4366 offers as the alternative: THE CLUSTER-WIDE SECURITY LOG IS
+/// OWNER-ONLY. It is the same split memql#4328 already made for its sibling -- recentAuthActivity
+/// is the operator roll-up, authActivityForSelf is where a person reads their own story. Routine
+/// MECHANICS are self-readable; security DECISIONS about the whole cluster are the operator's.
+/// A non-owner admin keeps authActivityForSelf and loses the cluster-wide trail.
+///
+/// createAuditEvent is unaffected: the write guard resolves a TARGET ROW and so covers updates and
+/// deletes, never creates (rowauthz_write_guard.go), and this concept is append-only with no
+/// update path at all.
+@rowAuthz(clusterOwner)
 @displayCard(primary="action", secondary="category", tertiary="actorEmail", status="outcome")
 concept auditEvent {
   occurredAt      datetime!  @description("When the event happened. May lag createdAt by milliseconds because the row is written after the event completes.")

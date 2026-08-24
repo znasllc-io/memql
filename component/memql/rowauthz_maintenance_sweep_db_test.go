@@ -172,3 +172,90 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 			"guard is not consulting the tier")
 	}
 }
+
+// THE SAME PROOF for v1:identity:auditEvent (memql#4366), and here the silent
+// failure is worse than the worker one.
+//
+// auditEventRetentionSweep is OBSERVATION-ONLY: it publishes a candidate COUNT
+// rather than deleting rows. So an unauthorized read does not fail -- it reports
+// zero, and a retention window nobody is enforcing is indistinguishable from a
+// retention window with nothing to do. There is no second symptom to notice.
+//
+// The write half is the part that would be a severe regression if the ruling
+// were wrong, so it is asserted rather than argued: the concept declares
+// `clusterOwner`, and if that gated CREATES then every sign-in, every session
+// and every role change would stop being recorded. The write guard resolves a
+// TARGET ROW, so it covers updates and deletes and not creates
+// (rowauthz_write_guard.go says so); this is the test that makes that sentence
+// evidence.
+func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+
+	const auditConcept = "v1:identity:auditEvent"
+
+	// POSITIVE CONTROL first, for the reason #4366 records: a probe over an
+	// unloaded registry measures nothing and reports success.
+	c, err := memoryNodes.Get(auditConcept)
+	if err != nil || c == nil || c.RowAuthz == nil {
+		t.Fatalf("%s declares no row-authz tier in the loaded registry (%v); this test would pass over "+
+			"an unenforced concept", auditConcept, err)
+	}
+	if c.RowAuthz.Tier != langparser.RowAuthzClusterOwner {
+		t.Fatalf("%s declares tier=%q; this test is written against the clusterOwner ruling", auditConcept, c.RowAuthz.Tier)
+	}
+
+	suffix := uniqueSuffix("auditsweep4366")
+	eventId := "aud-" + suffix
+	actorUser := "audit-actor-" + suffix
+
+	// ---- THE WRITE, under an ORDINARY user. This is what the identity service
+	// does on every sign-in: it records an event about a user, from that user's
+	// request context, with actorUserId as DATA rather than as an owner stamp.
+	//
+	// runMutation fails the test on any error, which is the assertion: if the
+	// clusterOwner tier gated CREATES, every sign-in, session and role change
+	// would stop being recorded. The audit trail's own doc says the write guard
+	// covers updates and deletes only, and this is what keeps that sentence
+	// evidence rather than a claim.
+	storedId := runMutation(t, rowAuthzCallerCtx(actorUser), eng, "createAuditEvent", map[string]any{
+		"eventId":     eventId,
+		"occurredAt":  "2026-01-01T00:00:00.000Z",
+		"category":    "auth",
+		"action":      "signin_succeeded",
+		"actorUserId": actorUser,
+		"outcome":     "success",
+	})
+
+	// ---- The sweep's read, under the REAL maintenance principal.
+	maint := auth.MaintenanceActor("auditEventRetentionSweep")
+	if maint == nil {
+		t.Fatal("auditEventRetentionSweep is not on the maintenance list, so the audit retention sweep " +
+			"counts ZERO candidates for ever, and reports that as a healthy tick")
+	}
+	maintCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), maint), &auth.TokenInfo{Subject: maint.UserId})
+	if got := queryInvocationIds(t, maintCtx, eng, `query expiredAuditEvents()`); !got[storedId] {
+		t.Fatalf("expiredAuditEvents returned %d row(s) and none was %s. The sweep's candidate count is "+
+			"its whole output, so this failure has no second symptom.", len(got), storedId)
+	}
+
+	// ---- NEGATIVE CONTROL: the ordinary automation principal sees nothing, so
+	// the assertion above is about the principal rather than about an
+	// unenforced tier.
+	readerCtx := auth.ContextWithToken(
+		auth.ContextWithAccess(t.Context(), &auth.AccessContext{
+			UserId: "system:automation:auditEventRetentionSweep",
+			Role:   auth.RoleReader,
+		}),
+		&auth.TokenInfo{Subject: "system:automation:auditEventRetentionSweep"})
+	if got := queryInvocationIds(t, readerCtx, eng, `query expiredAuditEvents()`); got[storedId] {
+		t.Fatal("the ordinary automation principal read the audit row too, so the tier is not being " +
+			"enforced and the pass above says nothing")
+	}
+
+	// ---- And the ordinary caller who WROTE the row cannot read the roll-up.
+	// That is the ruling: the cluster-wide security log is the operator's.
+	if got := queryInvocationIds(t, rowAuthzCallerCtx(actorUser), eng, `query recentAuditEvents()`); got[storedId] {
+		t.Fatal("a non-owner caller read the cluster-wide audit roll-up; the clusterOwner ruling is not enforced")
+	}
+}

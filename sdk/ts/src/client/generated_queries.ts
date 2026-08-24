@@ -1293,7 +1293,8 @@ QueryClient.prototype.audioOverridesForSpace = function (this: QueryClient, args
   return this.executeNamed("audioOverridesForSpace", buildAudioOverridesForSpace(args), opts);
 };
 
-/** Audit events where actorUserId equals the supplied userId, restricted to the owner or an admin. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet). */
+/** Audit events where actorUserId equals the supplied userId. CLUSTER OWNER ONLY. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
+It was `requiresOwnerOrAdmin`, and the change is forced by the concept's tier rather than chosen (memql#4366). `clusterOwner` is the `owner` ROLE alone, so an admin passed by that spec would then be narrowed by the tier to zero rows -- a query gate that says yes over a tier that says no, reported to the reader as "the audit log is empty". Stating the real scope is what makes the narrowing honest; it does not take anything from an admin that the tier had left. */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByActor"] in generated_concepts.ts).
 export interface AuditEventsByActorArgs {
   userId: string;
@@ -1315,7 +1316,7 @@ QueryClient.prototype.auditEventsByActor = function (this: QueryClient, args: Au
   return this.executeNamed("auditEventsByActor", buildAuditEventsByActor(args), opts);
 };
 
-/** Audit events where targetId equals the supplied targetId, restricted to the owner or an admin. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet). */
+/** Audit events where targetId equals the supplied targetId. CLUSTER OWNER ONLY -- same forced change as auditEventsByActor above, same reason (memql#4366). Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet). */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByTarget"] in generated_concepts.ts).
 export interface AuditEventsByTargetArgs {
   targetId: string;
@@ -2851,7 +2852,8 @@ QueryClient.prototype.expiredActiveDelegations = function (this: QueryClient, ar
   return this.executeNamed("expiredActiveDelegations", buildExpiredActiveDelegations(args), opts);
 };
 
-/** All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now. */
+/** All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
+It reads under `actor.isClusterOwner==true` because its only caller is the auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go, memql#4366). Stating the conjunct rather than leaning on the tier's injection makes the arrangement legible here, at the read -- and makes the failure mode loud rather than silent. This sweep is OBSERVATION-ONLY today: it publishes a candidate COUNT, so an unauthorized read does not fail, it reports zero, and a retention window nobody is enforcing looks exactly like a retention window with nothing to do. */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["expiredAuditEvents"] in generated_concepts.ts).
 export interface ExpiredAuditEventsArgs {
 }
@@ -4930,7 +4932,7 @@ QueryClient.prototype.quotesPastValidity = function (this: QueryClient, args: Qu
   return this.executeNamed("quotesPastValidity", buildQuotesPastValidity(args), opts);
 };
 
-/** recentAuditEvents wraps the query named "recentAuditEvents". */
+/** THE OPERATOR ROLL-UP for the portal's Audit Trail: cluster owner only, which is the one role the concept's `clusterOwner` tier lets past (memql#4366). It was `requiresOwnerOrAdmin`; see auditEventsByActor for why that spelling could only have produced an empty page for an admin. This mirrors recentAuthActivity exactly, and the pair of them is the split memql#4328 made: routine mechanics are self-readable, cluster-wide security decisions are the operator's. */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.ts).
 export interface RecentAuditEventsArgs {
   category?: string;

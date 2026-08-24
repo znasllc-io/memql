@@ -657,11 +657,13 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	// v1:identity:accountEntitlement
 	"accountEntitlement": {"v1:identity:accountEntitlement", undeclaredGrandfatherReason},
 
-	// v1:identity:auditEvent
-	"auditEventsByActor":  {"v1:identity:auditEvent", undeclaredGrandfatherReason},
-	"auditEventsByTarget": {"v1:identity:auditEvent", undeclaredGrandfatherReason},
-	"expiredAuditEvents":  {"v1:identity:auditEvent", undeclaredGrandfatherReason},
-	"recentAuditEvents":   {"v1:identity:auditEvent", undeclaredGrandfatherReason},
+	// v1:identity:auditEvent's four entries are gone: the concept declares
+	// @rowAuthz(clusterOwner) (memql#4366). The RULING is on the concept, and it
+	// is worth knowing before reading the four reads: the cluster-wide security
+	// log is OWNER-ONLY, because neither an owner tier nor the composite could
+	// express "an admin reads all" -- clusterOwner is Role==owner alone, and
+	// createAuditEvent writes actorUserId from caller args (correctly: it is
+	// empty for an anonymous event).
 
 	// v1:identity:authCode
 	"authCodeByCodeHash":       {"v1:identity:authCode", undeclaredGrandfatherReason},
