@@ -836,27 +836,24 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	// kept the enforcement gate green -- an entry can only leave this list by
 	// the concept declaring, never by the read moving.
 
-	// v1:worker:invocation
-	"expiredWorkerInvocations": {"v1:worker:invocation", undeclaredGrandfatherReason},
-	"invocationsForPlan":       {"v1:worker:invocation", undeclaredGrandfatherReason},
-	"invocationsForUser":       {"v1:worker:invocation", undeclaredGrandfatherReason},
-	// The two Fleet reads (epic memql#4349). NOT carrying the grandfather
-	// marker, deliberately: they were added long after the memql#3173 seed, and
-	// reading as part of that population would hide that this concept's debt
-	// GREW rather than merely persisted. memql#4406 is the declaration, and it
-	// is a separate change because the tier would silently stop the retention
-	// sweep -- contextWithSystemActor stamps RoleReader, not a cluster owner,
-	// so expiredWorkerInvocations would read zero rows with every gate green.
-	"invocationsForWorker":           {"v1:worker:invocation", undeclared4406Reason},
-	"invocationsForWorkerAsOperator": {"v1:worker:invocation", undeclared4406Reason},
+	// v1:worker:invocation had FIVE entries here -- three grandfathered and the
+	// two Fleet reads added by epic memql#4349 -- and they are gone because the
+	// concept now declares @rowAuthz(owner="ownerUserId", clusterOwner)
+	// (memql#4406).
+	//
+	// The blocker those entries recorded was real and is worth keeping written
+	// down, because it is the shape every remaining sweep-adjacent entry below
+	// has: `contextWithSystemActor` stamps RoleReader, so declaring the tier
+	// made the retention sweep read zero rows and retire nothing -- silently,
+	// with WORKER_INVOCATION_RETENTION_DAYS quietly ceasing to mean anything
+	// and every gate in this file green.
+	//
+	// It was resolved by DECIDING the sweep's principal rather than discovering
+	// it: workerInvocationRetentionSweep is on the engine-owned maintenance list
+	// (component/automations/maintenance_actor.go) and runs as a named synthetic
+	// cluster owner, which the composite tier admits. An identity, not an
+	// enforcement bypass -- component/campaigns/worker.go's argument.
 }
-
-// undeclared4406Reason covers the two per-machine activity reads epic
-// memql#4349's Fleet page needs. The concept's declaration is memql#4406, split
-// out because it narrows five readers at once and one of them is the retention
-// sweep.
-const undeclared4406Reason = "memql#4406 -- v1:worker:invocation's tier is a separate change; " +
-	"it narrows the retention sweep, which runs as RoleReader and would silently stop"
 
 // undeclaredWorld is the state the pinned list is judged against: what
 // the LOADED tree says today.

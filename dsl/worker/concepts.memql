@@ -12,9 +12,26 @@ use planner.concepts.{ plan, task }
 /// identity:auditEvent for the security timeline. Linkage between the two layers is via
 /// correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the
 /// workerInvocationRetentionSweep cron soft-deletes rows past their TTL.
+///
+/// TIER: the composite `owner, clusterOwner` (memql#4406). It carries `argsRedacted` and
+/// `outputPreview`, and outputPreview's own field doc says the quiet part out loud -- "Sensitive
+/// tokens are NOT scrubbed here -- preview is for owner eyes". That sentence described an intent
+/// the schema did not enforce: with no tier declared, every row was admitted to every caller on
+/// the read path. The composite rather than a plain owner tier for the same reason
+/// v1:worker:registration takes it -- a plain owner tier hides every other user's calls from the
+/// operator who has to support them.
+///
+/// What it cost, recorded because the issue was filed to STOP it being discovered: the retention
+/// sweep is a system-actor path, and `contextWithSystemActor` stamps RoleReader, so an owned tier
+/// makes it read zero rows and retire nothing -- silently, with WORKER_INVOCATION_RETENTION_DAYS
+/// quietly ceasing to mean anything. That is now decided rather than found:
+/// workerInvocationRetentionSweep runs under the cluster's maintenance principal
+/// (component/automations/maintenance_actor.go) and `expiredWorkerInvocations` carries
+/// `actor.isClusterOwner==true` so the arrangement is legible at the read.
+@rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="action", secondary="tool", tertiary="workerId", status="outcome")
 concept invocation {
-  ownerUserId    string!  @description("v1:identity:user.id of the worker's owner. Same as WorkerRegistration.ownerUserId; denormalized so the frontend's per-user invocations query doesn't need to join.")
+  ownerUserId    string!  @serverSet  @description("v1:identity:user.id of the worker's owner. Same as WorkerRegistration.ownerUserId; denormalized so the frontend's per-user invocations query doesn't need to join. THE ROW-AUTHZ OWNER FIELD (memql#4406), stamped from actor.userId by createWorkerInvocation and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention, and TestDeclaredOwnerFieldsAreServerStamped fails the build on a mutation that writes it from args. Both Go writers (component/worker/store.go, integrations/agent/worker/store.go) already know the owner and run the create under auth.ContextWithUserActor for it.")
   workerId       string!  @description("v1:worker:registration.id the call dispatched to.")
   agentId        string!  @description("v1:agents:agent.id the call originated from.")
   planId         string  @description("v1:planner:plan.id when the call was part of a plan-task. Empty for ad-hoc agent calls.")

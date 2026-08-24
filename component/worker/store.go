@@ -272,13 +272,22 @@ func (s *EngineStore) RevokeRegistration(ctx context.Context, registrationId, ow
 }
 
 // CreateInvocation persists a v1:worker:invocation row.
+//
+// ownerUserId is NOT an argument of the mutation: the concept marks it
+// @serverSet and createWorkerInvocation stamps it from actor.userId
+// (memql#4406), so the owner reaches the row through the context this method
+// builds and through nothing else -- the same shape CreateRegistration uses,
+// for the same reason.
 func (s *EngineStore) CreateInvocation(ctx context.Context, row InvocationRow) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
+	writeCtx, err := ownerActor(ctx, row.OwnerUserId)
+	if err != nil {
+		return err
+	}
 	args := map[string]any{
 		"invocationId":  row.ID,
-		"ownerUserId":   row.OwnerUserId,
 		"workerId":      row.WorkerId,
 		"agentId":       row.AgentId,
 		"planId":        row.PlanId,
@@ -310,7 +319,7 @@ func (s *EngineStore) CreateInvocation(ctx context.Context, row InvocationRow) e
 		return fmt.Errorf("worker.store: marshal invocation args: %w", err)
 	}
 	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
-	if _, err := s.Engine.Execute(ctx, query); err != nil {
+	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: create invocation: %w", err)
 	}
 	return nil

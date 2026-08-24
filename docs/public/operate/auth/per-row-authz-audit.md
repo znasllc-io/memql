@@ -1068,6 +1068,8 @@ Row admission has one actor that is neither a user nor a role: a
 **connector** (epic memql#4378, decision D4). It is the characterised
 internal actor memql#4366 asks for, **for this class of writer only** —
 the planner's system actor is a separate decision and is not this one.
+The engine's housekeeping READS are answered by the [maintenance
+principal](#the-maintenance-principal-a-named-internal-sweep) below.
 
 **The rule, in one sentence.** A connector actor is admitted to the rows
 of a concept whose `@origin` or `@mirroredTo` names it, regardless of
@@ -1119,6 +1121,79 @@ Implementation: `component/auth/connector_actor.go`,
 `component/memql/mirror_write_guard.go`. Measured by
 `TestConnectorRowAdmissionIsScopedToTheConceptsThatNameIt` and
 `TestMirrorWritesAreRefusedForEveryActorButItsConnector`.
+
+## The maintenance principal: a named internal sweep
+
+The connector actor above characterises one class of internal caller. The
+engine has a second, and it is the one that blocks declarations rather
+than enabling them: **housekeeping reads that span every owner by
+definition** — a retention sweep.
+
+**The failure it exists to prevent.** `contextWithSystemActor`
+(`component/automations/executor.go`) stamps `RoleReader`, deliberately:
+`"system"` is not in `auth.AllRoles`, and Reader keeps
+`actor.isClusterOwner` FALSE for a caller with no identity of its own
+(memql#2801). Right for an automation acting on one user's data — and
+fatal for a sweep. The moment a swept concept declares an owned tier, the
+injected predicate compares each row's owner against
+`system:automation:<name>`, matches nothing, and the sweep retires
+nothing:
+
+> no error, no log line, and a retention window that goes on looking like
+> a setting while the table is never pruned.
+
+Every gate in this document stays green through that. memql#4406 measured
+it for `v1:worker:invocation` and refused to declare the tier until the
+principal existed, because the alternative was discovering it in
+production as *"why is this table growing"*.
+
+**The decision: an identity, not an escape hatch.** The argument is
+`component/campaigns/worker.go`'s, and it is the one that settles it —
+
+> The alternative would be an escape hatch in the enforcement layer,
+> which is strictly worse: a bypass is available to every caller that can
+> reach it, whereas an identity is only as powerful as the queries it is
+> used for.
+
+So a listed automation runs as a **named synthetic cluster owner**,
+`system:maintenance:<automation>` at `RoleOwner`, which is the composite
+tier's only escape. Two consequences worth stating:
+
+- **The queries say so themselves.** `expiredWorkerInvocations` carries
+  `actor.isClusterOwner==true` as a top-level conjunct rather than
+  relying on the tier's injection. That makes the arrangement legible at
+  the read instead of only in the Go that stamps the principal — and it
+  makes the failure loud: remove the principal and the read returns
+  nothing, with the filter explaining why.
+- **The prefix is distinct from `system:automation:`.** The two
+  principals differ in exactly the way that matters, so a `createdBy`
+  stamp, an audit line and a log field all record which one ran.
+
+**Why the list is compiled in and not a DSL annotation.** An
+`@maintenance` automation annotation was the obvious shape and is the
+wrong one: `MEMQL_DSL_PATH` mounts product DSL from disk at boot, so a
+DSL annotation conferring cluster-owner authority would let a product
+bundle grant *itself* the cluster's maintenance principal — privilege
+escalation by dropping a file into a volume. The list is in Go, so a
+mounted bundle cannot reach it. It is also why `auth.MaintenanceActor`
+being exported confers nothing: the authority comes from the list, so a
+name that is not on it gets `nil` however loudly it asks.
+
+**When NOT to reach for it.** Only for reads that span owners *by
+nature*. A server-side path that merely finds an owner-scoped read
+inconvenient should borrow exactly ONE owner's authority with
+`auth.ContextWithUserActor` — the shape `component/worker`'s store, the
+campaigns drain worker and the workbench integration all use.
+
+Implementation: `component/auth/maintenance_actor.go`, consumed by
+`component/automations/executor.go`. Measured by
+`TestMaintenanceAutomationsAreArgued` (the list is pinned, every entry
+argued, every name resolves to an automation that loads, and the wire
+from list to executor is asserted in both directions) and by
+`TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier` — which
+is Postgres-gated and built around a NEGATIVE control, because a test
+where the sweep's read returns the row is also satisfied by a tier that
+is not enforced at all.
 
 ## Related issues
 

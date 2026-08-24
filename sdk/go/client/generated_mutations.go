@@ -7023,11 +7023,11 @@ func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) 
 }
 
 // CreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
+// ownerUserId is NOT an argument: v1:worker:invocation declares the composite owner tier (memql#4406) and marks the field @serverSet, so the owner reaches the row from actor.userId and through nothing else. Both Go writers already resolve the owner before calling -- they need it to route the dispatch at all -- and now stamp it as the actor rather than passing it as data.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["createWorkerInvocation"] in generated_concepts.go).
 type CreateWorkerInvocationArgs struct {
 	InvocationId  string
-	OwnerUserId   string
 	WorkerId      string
 	AgentId       string
 	PlanId        string
@@ -7061,11 +7061,6 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 	b.WriteString("mutation createWorkerInvocation(")
 	b.WriteString("invocationId: ")
 	b.WriteString(quoteMemQL(args.InvocationId))
-	if b.Len() > 32 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}

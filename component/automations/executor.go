@@ -49,20 +49,48 @@ const systemActorPrefix = "system:automation:"
 // keeps actor.isClusterOwner FALSE -- the property memql#2801 made the envelope
 // guarantee for an absent caller, and which must not weaken now that the caller
 // is present.
+//
+// THE ONE EXCEPTION is the cluster's MAINTENANCE PRINCIPAL
+// (component/auth/maintenance_actor.go, memql#4366 / memql#4406): a named,
+// engine-owned, compiled-in list of automations whose reads span every owner by
+// nature -- a retention sweep -- and which therefore run as a synthetic cluster
+// owner. Read that file before adding to the list; the short version is that
+// RoleReader makes a sweep over an owned-tier concept retire NOTHING, silently,
+// with every gate green.
+//
+// The elevation applies only in the branch below where NO AccessContext was
+// inherited, so the AuthoredScheduler invariant above is untouched: an authored
+// run keeps the author's envelope, and a maintenance name it happened to share
+// could not lift it.
 func contextWithSystemActor(ctx context.Context, automationName string) context.Context {
+	_, inherited := auth.AccessFromContext(ctx)
+
 	actorId := systemActorPrefix + automationName
+	role := "system"
+	accessRole := auth.RoleReader
+	// Gated on !inherited as well as on the list. Elevating the CLAIMS while
+	// leaving an inherited AccessContext alone would leave the two surfaces
+	// describing different principals -- and the surface that decides row
+	// authz is the one we would not have touched.
+	if !inherited {
+		if ma := auth.MaintenanceActor(automationName); ma != nil {
+			actorId = ma.UserId
+			role = string(ma.Role)
+			accessRole = ma.Role
+		}
+	}
 	claims := map[string]any{
 		"sub":   actorId,
 		"email": actorId,
-		"role":  "system",
+		"role":  role,
 	}
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)
 	ctx = auth.ContextWithToken(ctx, token)
-	if _, ok := auth.AccessFromContext(ctx); !ok {
+	if !inherited {
 		ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
 			UserId: actorId,
-			Role:   auth.RoleReader,
+			Role:   accessRole,
 		})
 	}
 	return ctx

@@ -53,8 +53,15 @@ func fleetCallSites() []struct {
 		{"myWorkersWithStatus", nil, "agent/worker/store.go WorkersForOwner"},
 		{"routingPolicyForOwner", nil, "agent/worker/store.go RoutingPolicyForOwner"},
 		{"touchWorkerSelected", []string{"registrationId"}, "agent/worker/store.go TouchWorkerSelected"},
+		// ownerUserId is ABSENT, and that absence is the memql#4406 change:
+		// v1:worker:invocation declares the composite owner tier and marks the
+		// field @serverSet, so the mutation stamps actor.userId and the writer
+		// borrows the owner's authority instead of passing their id as data.
+		// Re-adding it here would not restore anything -- the construct no
+		// longer declares it, so the value would be silently discarded, which
+		// is the failure this whole table exists to make visible.
 		{"createWorkerInvocation", []string{
-			"invocationId", "ownerUserId", "workerId", "agentId", "planId", "taskId",
+			"invocationId", "workerId", "agentId", "planId", "taskId",
 			"correlationId", "tool", "action", "argsRedacted", "startedAt", "completedAt",
 			"durationMs", "outcome", "exitCode", "signal", "errorCode", "errorMessage",
 			"bytesIn", "bytesOut", "outputPreview", "routing",

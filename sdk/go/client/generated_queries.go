@@ -2949,6 +2949,8 @@ func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) st
 }
 
 // ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
+// It reads under `actor.isClusterOwner==true` because its only caller is the workerInvocationRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/automations/maintenance_actor.go, memql#4406) -- a named synthetic cluster owner. The alternative would be a read-path escape hatch in the enforcement layer, which is strictly worse: a bypass is available to every caller that can reach it, whereas an identity is only as powerful as the queries it is used for. That is the reasoning component/campaigns/worker.go and authActivityByRetiredHash both record for the same choice.
+// Writing the conjunct rather than relying on the tier's injection is what makes the arrangement legible HERE, at the read, instead of only in the Go that stamps the principal. It is also the failure mode made loud: strip the principal and this returns zero rows, and the filter says why.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["expiredWorkerInvocations"] in generated_concepts.go).
 type ExpiredWorkerInvocationsArgs struct {
@@ -3367,7 +3369,8 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	return b.String()
 }
 
-// InvocationsForPlan -- List all worker invocations belonging to a Plan.
+// InvocationsForPlan -- List the CALLER'S worker invocations belonging to a Plan.
+// The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForPlan"] in generated_concepts.go).
 type InvocationsForPlanArgs struct {
@@ -3389,11 +3392,10 @@ func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 	return b.String()
 }
 
-// InvocationsForUser -- List worker invocations belonging to a user.
+// InvocationsForUser -- List the caller's worker invocations, across every machine they own.
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForUser"] in generated_concepts.go).
 type InvocationsForUserArgs struct {
-	OwnerUserId string
 }
 
 // InvocationsForUser calls the engine query invocationsForUser.
@@ -3403,12 +3405,8 @@ func (qc *QueryClient) InvocationsForUser(ctx context.Context, args InvocationsF
 }
 
 func InvocationsForUserBuild(args InvocationsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query invocationsForUser(")
-	b.WriteString("ownerUserId: ")
-	b.WriteString(quoteMemQL(args.OwnerUserId))
-	b.WriteString(")")
-	return b.String()
+	_ = args
+	return "query invocationsForUser()"
 }
 
 // InvocationsForWorker -- Recent calls dispatched to one of the caller's machines, newest first. Backs the per-machine activity list on /fleet/machines, which renders the routing record: the strategy that chose it, the candidates considered, and what it was rerouted from.

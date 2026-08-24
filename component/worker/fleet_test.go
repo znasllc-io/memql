@@ -436,3 +436,58 @@ func TestOnlineWindowIsTwoHeartbeatIntervals(t *testing.T) {
 		t.Fatalf("HeartbeatBatchInterval is the freshness budget of `online`; got %v", HeartbeatBatchInterval)
 	}
 }
+
+// TestEngineStoreCreateInvocation_BorrowsTheOwnersAuthority pins the half of
+// memql#4406 that is silent when it breaks.
+//
+// v1:worker:invocation declares @rowAuthz(owner="ownerUserId", clusterOwner)
+// and marks the field @serverSet, so createWorkerInvocation stamps
+// actor.userId. A worker authenticates as `worker:<id>`, never as its owner --
+// so if this store does not borrow the owner's authority, the row lands with an
+// EMPTY ownerUserId and is readable by nobody, including the operator later
+// asking why the machine shows no activity. There is no error on that path: the
+// mutation succeeds and writes a row nothing can see.
+//
+// Asserted on the CONTEXT rather than through an engine, because a fake
+// executor never reaches the row-authz gate -- the property to check is that
+// the store stamped, not what the gate then did with it.
+func TestEngineStoreCreateInvocation_BorrowsTheOwnersAuthority(t *testing.T) {
+	eng := &fakeEngineExecutor{}
+	store := &EngineStore{Engine: eng}
+
+	row := InvocationRow{
+		ID:          "inv-owner-1",
+		OwnerUserId: "user-42",
+		WorkerId:    "reg-1",
+		AgentId:     "agent-1",
+		Tool:        "workerHost",
+		Action:      "exec",
+		Outcome:     "success",
+		StartedAt:   time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
+	}
+	if err := store.CreateInvocation(context.Background(), row); err != nil {
+		t.Fatalf("create invocation: %v", err)
+	}
+	if got := actorUserId(eng.ctxs[0]); got != "user-42" {
+		t.Fatalf("the invocation write ran as actor %q, want %q. An unstamped write lands a row with "+
+			"an empty ownerUserId -- readable by nobody, and with no error to say so.", got, "user-42")
+	}
+	// ownerUserId must NOT also travel as data: the construct no longer
+	// declares it, and an undeclared argument is silently discarded
+	// (memql#3626), so passing it would look like belt-and-braces and be
+	// nothing at all.
+	if strings.Contains(eng.queries[0], "ownerUserId") {
+		t.Fatalf("the invocation write still passes ownerUserId as an argument:\n%s", eng.queries[0])
+	}
+
+	// A blank owner is REFUSED rather than passed through.
+	// auth.ContextWithUserActor returns ctx UNCHANGED for a blank id, so a
+	// fallthrough here would produce exactly the unreadable row above.
+	row.OwnerUserId = "  "
+	if err := store.CreateInvocation(context.Background(), row); err == nil {
+		t.Fatal("a blank ownerUserId was accepted; the write would land a row nobody can read")
+	}
+	if len(eng.queries) != 1 {
+		t.Fatalf("the refused call still reached the engine (%d queries)", len(eng.queries))
+	}
+}
