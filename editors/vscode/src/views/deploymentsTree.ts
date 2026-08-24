@@ -1,44 +1,58 @@
-// The Deployments tree: instances at the top, runs beneath, newest first.
+// The Deployments tree: the SELECTED cluster's deployment runs, newest first.
 //
-//   DEPLOYMENTS
-//   |- local     healthy - v0.17.0
-//   |  |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
-//   |  \- install                        succeeded   9d ago
-//   \- staging   healthy - v0.9.2
-//      |- rollout v0.9.2   succeeded     1d ago
-//      \- rollout v0.9.1   rolled_back   3d ago
+//   DEPLOYMENTS   local · healthy · v0.17.0
+//   |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
+//   \- install                        succeeded   9d ago
 //
 // This file renders state and owns none, the way views/clustersTree.ts does.
-// Which instances exist, which runs belong to which, what each row says and
-// which icon it carries are all decided in state/deploymentsCatalog.ts, where
-// they run under bare `node --test`. What is left here is the TreeDataProvider
-// lifecycle and the mapping onto VS Code's icon vocabulary.
+// Which runs belong to the selection, what each row says and which icon it
+// carries are all decided in state/deploymentsCatalog.ts, where they run under
+// bare `node --test`. What is left here is the TreeDataProvider lifecycle and
+// the mapping onto VS Code's icon vocabulary.
 //
-// TWO RULES THE SHAPE OF THIS TREE DEPENDS ON.
+// THREE RULES THE SHAPE OF THIS TREE DEPENDS ON.
 //
-//  1. AN INSTANCE WITH NO RUNS IS NOT AN EMPTY STATE. It renders with its
-//     actions and no children, because "installed, never upgraded" is the
-//     normal case and so is "a remote cluster this editor is not connected to".
-//     Neither deserves a placeholder telling the operator something is missing.
-//  2. A MACHINE WITH NO LOCAL CLUSTER STILL SHOWS THE `local` ROW, as
-//     "not installed", carrying Create deployment as its only action. That row
-//     is the entry point the Clusters "+" menu used to hide, and it is what
-//     makes this view useful on a machine where nothing has been installed --
-//     the operator who most needs somewhere to start.
+//  1. NO INSTANCE WRAPPER ROW, of any kind. The view is about one cluster --
+//     the one this editor has in hand -- so a row naming it would be a heading
+//     an operator has to expand before reaching the only list on the view. The
+//     instance's own facts move to `TreeView.description`, which is the API for
+//     a heading, and its ACTIONS move to the view title menu; the instance page
+//     keeps its buttons unchanged. Nothing lost a route (memql#4426).
+//  2. WITH NO CLUSTER SELECTED THIS VIEW IS EMPTY, deliberately and completely.
+//     `getChildren` returns `[]`, and the manifest's `viewsWelcome` entry --
+//     keyed on `!memql.clusterSelected` -- renders in the space. VS Code draws
+//     welcome content ONLY over a genuinely empty tree, so a single synthetic
+//     row here, however well meant, silently deletes the welcome (memql#4425).
+//  3. AN INSTANCE WITH NO RUNS IS NOT AN EMPTY STATE. A selected cluster with
+//     nothing recorded renders no rows and keeps its description: "installed,
+//     never upgraded" is the normal case, and so is a remote cluster whose
+//     history has not loaded. That is NOT the same nothing as rule 2, and the
+//     description is what tells them apart on screen -- present means a cluster
+//     is selected.
 //
-// Refs: #3737 #3733
+// WHERE THE INSTALL ENTRY POINT WENT (memql#4426, design D4). This file used to
+// carry a rule requiring the `local` row to render even on a machine with no
+// local cluster, as "not installed", so that an operator with nothing installed
+// had somewhere to start. That row is gone and the entry point is not: the
+// Clusters welcome offers it, this view's own disconnected welcome offers it,
+// and Create Deployment is in the view title menu. Refs #3737 and #3733 argued
+// for the row; this epic supersedes that argument rather than leaving it
+// standing beside the reversed decision.
+//
+// Refs: #4426 #4425 #4423 (supersedes #3737 #3733)
 
 import * as vscode from "vscode";
 
 import type { Instance, Run } from "../state/deployments.js";
+import type { ConnectionContextSource } from "../state/connectionContext.js";
 import {
   buildCatalog,
-  instanceContextValue,
-  instanceRowStatus,
+  runsForSelected,
+  selectedInstanceContext,
+  selectedViewDescription,
   runRowStatus,
   type Catalog,
   type CatalogInputs,
-  type InstanceRowIcon,
   type RunRowIcon,
 } from "../state/deploymentsCatalog.js";
 import type { ReleaseCache } from "../version/releaseCache.js";
@@ -46,17 +60,21 @@ import type { ReleaseCache } from "../version/releaseCache.js";
 /**
  * A row.
  *
- * A discriminated union rather than two providers: the instance and its runs
- * are one tree, and VS Code hands getTreeItem whichever it asked for.
+ * Still a union with one non-error member rather than a bare `Run`, because
+ * `getTreeItem` is handed whichever node it asked for and the error row has to
+ * be one of them. The instance member is gone with the wrapper row it drew.
  */
 export type DeploymentNode =
-  | { kind: "instance"; instance: Instance }
   | { kind: "run"; run: Run; instance: string }
   // The single synthetic row shown when clusters.yaml will not read. Mirrors
   // views/clustersTree.ts: readClustersFile deliberately throws on a malformed
   // or torn file (the Cockpit writes it too, without a lock), and an unhandled
   // rejection reaching VS Code's tree API has nowhere to be displayed -- the
   // panel just goes blank, which reads as "no clusters" rather than as a fault.
+  //
+  // IT IS DRAWN ONLY WHILE A CLUSTER IS SELECTED. With nothing selected the
+  // view is empty by rule 2 and the welcome is the correct thing in the space;
+  // an unreadable registry is not the operator's next problem there.
   | { kind: "error"; message: string };
 
 /** What the provider needs, minus the two values it resolves per refresh. */
@@ -64,10 +82,20 @@ export type DeploymentsTreeDeps = Omit<CatalogInputs, "connection" | "readDeploy
   /** Resolved per refresh, because both change without this view being told. */
   connection: () => CatalogInputs["connection"];
   readDeployments: () => CatalogInputs["readDeployments"];
+  /**
+   * The two context keys, read rather than re-derived (design D1).
+   *
+   * Distinct from `connection` above even though the manager backs both:
+   * `connection` says WHICH cluster and is the catalog's input, this says
+   * WHETHER there is one and decides whether any of it is drawn. Injected so a
+   * test can drive the empty case without a ConnectionManager -- which is the
+   * case worth driving, because it is the one that makes the welcome appear.
+   */
+  connectionContext: ConnectionContextSource;
   /** Injectable clock, so relative times are testable. */
   now?: () => number;
   /**
-   * The release listing, for the availability clause on each instance row
+   * The release listing, for the availability clause in the view description
    * (memql#3996).
    *
    * Optional so a caller that does not want it -- a test, a stripped build --
@@ -75,16 +103,38 @@ export type DeploymentsTreeDeps = Omit<CatalogInputs, "connection" | "readDeploy
    * cannot be constructed. Same call views/clustersTree.ts makes.
    */
   releases?: ReleaseCache;
+  /**
+   * Where the instance line is written (memql#4426).
+   *
+   * A callback rather than a `TreeView` handle, so this file stays a
+   * TreeDataProvider and the view object stays owned by activation -- the
+   * provider is constructed before `createTreeView` can exist, and holding the
+   * view would make the order load-bearing. Optional for the same reason
+   * `releases` is: a test drives `getChildren` without a workbench.
+   */
+  setDescription?: (description: string) => void;
+  /**
+   * Where `memql.deploymentsInstance` is written (memql#4426).
+   *
+   * The view title menu's instance actions are scoped by it, so it is written
+   * on EVERY pass -- including as "" -- for the reason the description is:
+   * a stale value left over from the last selection would offer Uninstall over
+   * a remote cluster, and the doctrine this extension holds to is that a button
+   * whose only outcome is a refusal must not be drawn.
+   *
+   * A callback for the same reason `setDescription` is one: `setContext` is a
+   * `vscode` API and this provider is constructed before activation has one to
+   * hand it.
+   */
+  setInstanceContext?: (value: string) => void;
 };
 
 export class DeploymentsTreeProvider implements vscode.TreeDataProvider<DeploymentNode> {
   private readonly changed = new vscode.EventEmitter<DeploymentNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
 
-  // The catalog is built once per expansion pass and read again when VS Code
-  // asks for an instance's children. Rebuilding per call would re-probe the
-  // front door and re-read the cluster once per visible instance, and the two
-  // passes could then disagree about the same cluster within one frame.
+  // The catalog is built once per expansion pass. Rebuilding per call would
+  // re-probe the front door and re-read the cluster once per visible row.
   private catalog: Catalog | undefined;
 
   constructor(private readonly deps: DeploymentsTreeDeps) {}
@@ -95,30 +145,63 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
   }
 
   async getChildren(element?: DeploymentNode): Promise<DeploymentNode[]> {
-    if (element === undefined) {
-      const catalog = await this.load();
-      if (catalog.error !== undefined) return [{ kind: "error", message: catalog.error }];
-      // Fire-and-forget, exactly as views/clustersTree.ts does it: THIS is what
-      // triggers the first release fetch, so activation stays offline and the
-      // work is caused by somebody actually looking at the tree. Not awaited,
-      // because the rows must render now from what is already known.
-      void this.learnReleases();
-      return catalog.instances.map((instance) => ({ kind: "instance", instance }));
+    // A FLAT LIST: nothing has children. Kept as an explicit early return
+    // rather than falling out of the code below, because a run row that
+    // accidentally reported children would render an expand arrow that opens
+    // onto nothing.
+    if (element !== undefined) return [];
+
+    // RULE 2, AND IT COMES BEFORE THE READ. Returning early also means a
+    // machine with no cluster selected does no presence probe, no receipt read
+    // and no `git ls-remote` on the strength of a view it is not going to draw.
+    if (!this.deps.connectionContext().clusterSelected) {
+      this.deps.setDescription?.("");
+      this.deps.setInstanceContext?.("");
+      return [];
     }
-    if (element.kind !== "instance") return [];
+
     const catalog = await this.load();
-    return (catalog.runs.get(element.instance.name) ?? []).map((run) => ({
-      kind: "run",
+    const selected = runsForSelected(catalog, this.deps.connection());
+    // Written on every pass, including when it is "": the selection changes
+    // without this view being told, and a description left over from the
+    // previous cluster is a heading that names the wrong machine.
+    this.deps.setDescription?.(selectedViewDescription(selected.instance, this.deps.releases?.peek()));
+    this.deps.setInstanceContext?.(selectedInstanceContext(selected.instance));
+    if (catalog.error !== undefined) return [{ kind: "error", message: catalog.error }];
+    // Fire-and-forget, exactly as views/clustersTree.ts does it: THIS is what
+    // triggers the first release fetch, so activation stays offline and the
+    // work is caused by somebody actually looking at the tree. Not awaited,
+    // because the rows must render now from what is already known.
+    void this.learnReleases();
+    return selected.runs.map((run) => ({
+      kind: "run" as const,
       run,
-      instance: element.instance.name,
+      instance: selected.instance?.name ?? run.instance,
     }));
   }
 
   getTreeItem(node: DeploymentNode): vscode.TreeItem {
-    if (node.kind === "error") return errorItem(node.message);
-    return node.kind === "instance"
-      ? this.instanceItem(node)
-      : runItem(node.run, (this.deps.now ?? Date.now)());
+    return node.kind === "error"
+      ? errorItem(node.message)
+      : runItem(node, (this.deps.now ?? Date.now)());
+  }
+
+  /**
+   * The instance the view is currently describing, for the commands in its
+   * title menu (memql#4426).
+   *
+   * The menu entries act on the SELECTION rather than on a row -- there is no
+   * instance row left to right-click -- so something has to answer "which
+   * instance". This does, from the catalog the view last built, so the action
+   * an operator takes is the one the description in front of them names.
+   *
+   * Undefined before the first read and whenever nothing is selected. Callers
+   * treat that as "no target", never as the local instance: silently defaulting
+   * is how an Uninstall aimed at nothing would find something.
+   */
+  selectedInstance(): Instance | undefined {
+    if (this.catalog === undefined) return undefined;
+    return runsForSelected(this.catalog, this.deps.connection()).instance;
   }
 
   /**
@@ -150,9 +233,19 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
     // The two thunks are RESOLVED here and dropped from what is passed on, so
     // the catalog receives values rather than the functions that produce them.
     // `now` goes with them: it is this view's clock for relative times, not a
-    // catalog input. So is `releases` -- it decides how a row READS, and the
-    // catalog is what a row reads ABOUT.
-    const { connection, readDeployments, now: _now, releases: _releases, ...rest } = this.deps;
+    // catalog input. So do `releases`, `connectionContext` and `setDescription`
+    // -- they decide how the view READS, and the catalog is what it reads
+    // ABOUT.
+    const {
+      connection,
+      readDeployments,
+      now: _now,
+      releases: _releases,
+      connectionContext: _connectionContext,
+      setDescription: _setDescription,
+      setInstanceContext: _setInstanceContext,
+      ...rest
+    } = this.deps;
     const resolvedConnection = connection();
     const resolvedReadDeployments = readDeployments();
     this.catalog = await buildCatalog({
@@ -164,48 +257,25 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
     });
     return this.catalog;
   }
-
-  private instanceItem(node: Extract<DeploymentNode, { kind: "instance" }>): vscode.TreeItem {
-    const { instance } = node;
-    const hasRuns = (this.catalog?.runs.get(instance.name) ?? []).length > 0;
-    const item = new vscode.TreeItem(
-      instance.name,
-      // Collapsed rather than Expanded: an instance with many runs would
-      // otherwise push every other instance off the view on first open.
-      hasRuns
-        ? vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.None,
-    );
-    // `peek()`, never `get()`: this is a synchronous render path, and fetching
-    // here would put a subprocess behind every repaint. The fetch is triggered
-    // by getChildren instead, which repaints when it learns something.
-    const status = instanceRowStatus(instance, this.deps.releases?.peek());
-    item.description = status.description;
-    item.tooltip = status.tooltip;
-    item.iconPath = instanceIcon(status.icon);
-    // Three values, because the three kinds of row offer different actions and
-    // a `when` clause is the only way to scope a menu entry to one of them: an
-    // absent local instance can only be created, an installed one can also be
-    // repaired and uninstalled, and a remote one does neither.
-    item.contextValue = instanceContextValue(instance);
-    // The row carries the instance it names, and the page renders the local or
-    // the remote half accordingly (#3739, #3740).
-    item.command = {
-      command: "memql.deployments.open",
-      title: "Open Instance",
-      arguments: [node],
-    };
-    return item;
-  }
 }
 
-function runItem(run: Run, nowMs: number): vscode.TreeItem {
-  const status = runRowStatus(run, nowMs);
+function runItem(node: Extract<DeploymentNode, { kind: "run" }>, nowMs: number): vscode.TreeItem {
+  const status = runRowStatus(node.run, nowMs);
   const item = new vscode.TreeItem(status.label, vscode.TreeItemCollapsibleState.None);
   item.description = status.description;
   item.tooltip = status.tooltip;
   item.iconPath = runIcon(status.icon);
   item.contextValue = "memqlDeploymentRun";
+  // SELECTING A DEPLOYMENT OPENS IT (memql#4427). These rows carried no command
+  // at all, so clicking one did nothing -- the single most direct way to teach
+  // an operator that a view is decorative. The run and the instance it belongs
+  // to both travel, because the detail page's action buttons are the
+  // INSTANCE's role-gated set, contextualised by what this run did.
+  item.command = {
+    command: "memql.deployments.openRun",
+    title: "Open Deployment",
+    arguments: [node],
+  };
   return item;
 }
 
@@ -219,19 +289,6 @@ function errorItem(message: string): vscode.TreeItem {
   item.tooltip = `ERROR: ${message}`;
   item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
   return item;
-}
-
-function instanceIcon(icon: InstanceRowIcon): vscode.ThemeIcon {
-  switch (icon) {
-    case "healthy":
-      return new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor("charts.green"));
-    case "unreachable":
-      // Yellow, not red: something IS installed and the next action is a
-      // repair, which is a different story from an outage with nothing to fix.
-      return new vscode.ThemeIcon("warning", new vscode.ThemeColor("charts.yellow"));
-    case "absent":
-      return new vscode.ThemeIcon("circle-outline");
-  }
 }
 
 function runIcon(icon: RunRowIcon): vscode.ThemeIcon {

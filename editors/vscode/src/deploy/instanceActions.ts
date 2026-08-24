@@ -46,7 +46,7 @@ import {
   type RoleTier,
   type RoleVisibility,
 } from "./actions.js";
-import type { Instance } from "../state/deployments.js";
+import type { Instance, Run } from "../state/deployments.js";
 
 export type InstanceActionId =
   | "createDeployment"
@@ -91,6 +91,15 @@ export interface InstanceAction {
   tier?: RoleTier;
   /** The deploy-control action driven, when `flow` is "deployControl". */
   deployAction?: DeployActionId;
+  /**
+   * Whether the action makes the operator type a phrase back.
+   *
+   * Read off `DEPLOY_ACTIONS` rather than decided here, so the run detail page
+   * can draw the destructive one destructively without a second list of which
+   * actions those are. Present only for deploy-control actions; a local action
+   * that needs a confirmation gets it from the flow it opens.
+   */
+  typeToConfirm?: boolean;
 }
 
 /** "Create deployment", as the local machine's three states reach it. */
@@ -169,6 +178,7 @@ function fromDeployAction(
     flow: "deployControl",
     tier: spec.tier,
     deployAction,
+    typeToConfirm: spec.typeToConfirm,
   };
 }
 
@@ -224,6 +234,94 @@ export function instanceActions(
   return REMOTE_ACTIONS.filter(
     (action) => action.tier === undefined || satisfiesTier(visibility.role, action.tier),
   );
+}
+
+/**
+ * The same actions, ORDERED FOR THE RUN AN OPERATOR IS LOOKING AT
+ * (memql#4427).
+ *
+ * THIS ADDS NO VERBS AND REMOVES NONE. It is `instanceActions` with one entry
+ * moved to the front, and that constraint is the whole design: a detail page
+ * that composed its own set would become a second authority on what an
+ * instance offers, and the first thing a second authority does is offer a
+ * button the first one withheld -- which is how the doctrine at the top of this
+ * file ("never offer a button whose only outcome is a refusal") gets broken
+ * without anybody editing the table it is written beside.
+ *
+ * THE TABLE, and it is read top to bottom:
+ *
+ *   remote instance          -- untouched. The deploy-control set arrives
+ *                               already filtered by the caller's role and
+ *                               already in the order deploy/actions.ts states;
+ *                               rollback stays owner-only there, not here.
+ *   local, run failed        -- Repair leads. Re-running the graph is what
+ *                               answers a failed local run, and the operator
+ *                               opened this page because of the failure.
+ *   local, checkout lane     -- Rebuild From Checkout leads. The cluster is
+ *                               running a developer's own build, so the verb
+ *                               that refreshes it is the one they came for.
+ *   otherwise                -- the instance's own order stands.
+ *
+ * FAILURE OUTRANKS THE LANE, deliberately. The lane is a standing fact about
+ * the cluster and will still be true tomorrow; the failure is a fact about THIS
+ * run, which is the thing the page is about. Leading with Rebuild over a failed
+ * run would answer a question the operator did not ask.
+ *
+ * A LEAD THE INSTANCE DOES NOT OFFER IS SIMPLY NOT APPLIED. An `absent` local
+ * instance offers only Create deployment, and a machine with no recorded
+ * checkout is offered no rebuild (see `instanceActions`) -- so the reordering
+ * finds nothing to move and the set is returned as it came. That is what makes
+ * "no button whose only outcome is a refusal" hold here for free: this function
+ * can only ever permute.
+ */
+export interface RunDetailActionsInput {
+  instance: Instance;
+  run: Run;
+  visibility?: RoleVisibility;
+  /**
+   * The deploy-control actions the CLUSTER can currently take -- the ids from
+   * `pipelineState().actions`. Remote instances only.
+   *
+   * WHY THE SET IS INTERSECTED AND NEVER UNIONED. `instanceActions` filters by
+   * the caller's ROLE; the pipeline state answers a different question that the
+   * role cannot -- whether this cluster has a deploy pipeline at all, and
+   * whether its status read was even visible. An engine-only cluster refuses
+   * every deploy-control action by design (pipelineState's header), so drawing
+   * the role-permitted set over one would be a row of buttons whose only
+   * outcome is a refusal -- the exact thing the doctrine at the top of this file
+   * forbids. Intersecting can only remove, so no verb appears here that the
+   * instance page would not also have offered.
+   *
+   * ABSENT MEANS "NOT ASKED", NOT "NOTHING OFFERED". The status read is
+   * asynchronous and the page paints before it lands; treating the gap as an
+   * empty pipeline would blank the actions for an instant on every open, which
+   * reads as a cluster that lost its deploy console. Undefined therefore leaves
+   * the role-gated set alone, which is the same call `roleVisibility`
+   * indeterminate makes one question earlier.
+   */
+  pipelineOffers?: readonly DeployActionId[];
+}
+
+export function runDetailActions(input: RunDetailActionsInput): InstanceAction[] {
+  const { instance, run } = input;
+  const actions = instanceActions(instance, input.visibility);
+  if (instance.kind === "remote") {
+    const offers = input.pipelineOffers;
+    if (offers === undefined) return actions;
+    return actions.filter(
+      (action) => action.deployAction !== undefined && offers.includes(action.deployAction),
+    );
+  }
+  const lead: InstanceActionId | undefined =
+    run.status === "failed"
+      ? "repair"
+      : instance.imageSource === "checkout"
+        ? "rebuildFromCheckout"
+        : undefined;
+  if (lead === undefined) return actions;
+  const at = actions.findIndex((action) => action.id === lead);
+  if (at <= 0) return actions;
+  return [actions[at], ...actions.slice(0, at), ...actions.slice(at + 1)];
 }
 
 /**

@@ -64,8 +64,23 @@ export const recorded = {
   warnings: [] as string[],
   /** window.showInformationMessage bodies. */
   infos: [] as string[],
-  /** View ids passed to window.registerTreeDataProvider. */
+  /**
+   * View ids passed to window.registerTreeDataProvider OR window.createTreeView.
+   *
+   * ONE LIST FOR BOTH, because the question every caller asks it is "did
+   * activation put this view up", and the two APIs are two ways of doing that.
+   * Deployments moved to `createTreeView` in memql#4426 only because it needs
+   * the TreeView object back -- `TreeView.description` is where the selected
+   * cluster's facts now live -- and splitting the list would have made that
+   * implementation detail into a change every activation assertion had to
+   * follow.
+   */
   treeViews: [] as string[],
+  /**
+   * Descriptions written to a TreeView handed back by createTreeView, by view
+   * id. The Deployments view's instance line (memql#4426) is the only writer.
+   */
+  treeViewDescriptions: {} as Record<string, string | undefined>,
   /** How many times window.registerFileDecorationProvider was called. */
   fileDecorationProviders: 0,
   /** How many times window.registerUriHandler was called (memql#4251). */
@@ -124,6 +139,9 @@ export function resetRecorded(): void {
   recorded.warnings.length = 0;
   recorded.infos.length = 0;
   recorded.treeViews.length = 0;
+  for (const key of Object.keys(recorded.treeViewDescriptions)) {
+    delete recorded.treeViewDescriptions[key];
+  }
   recorded.fileDecorationProviders = 0;
   recorded.commands.length = 0;
   recorded.watched.length = 0;
@@ -369,6 +387,67 @@ export class FileDecoration {
 
 export class ThemeColor {
   constructor(readonly id: string) {}
+}
+
+// ---------------------------------------------------------------------------
+// the tree-item surface (memql#4425, memql#4427)
+// ---------------------------------------------------------------------------
+//
+// A DELIBERATE WIDENING of what this stub claims to model, and the header's
+// rule -- "a member reached only from a tree item render is absent on purpose"
+// -- is what makes it worth writing down rather than just adding.
+//
+// Two acceptance items cannot be checked without it. The first is that the
+// three cluster-backed providers return `[]` when no cluster is selected:
+// VS Code renders `viewsWelcome` content ONLY over a genuinely empty tree, so a
+// single stray row silently deletes the welcome, and that failure is invisible
+// to every other lane -- the extension activates, the view has content, and the
+// content is wrong. The second is that a deployment row carries
+// `memql.deployments.openRun`: a row with no command is a click that does
+// nothing, which is the defect memql#4427 exists to fix, and it is a property
+// of the TreeItem this fake now has to be able to hold.
+//
+// It models the FIELDS a `getTreeItem` sets and no behaviour: no icon
+// resolution, no markdown rendering, no collapse state machine. A case that
+// starts depending on any of those should fail here rather than pass against a
+// fiction, exactly as the header argues.
+
+export const TreeItemCollapsibleState = {
+  None: 0,
+  Collapsed: 1,
+  Expanded: 2,
+} as const;
+
+export class ThemeIcon {
+  constructor(
+    readonly id: string,
+    readonly color?: ThemeColor
+  ) {}
+}
+
+export class MarkdownString {
+  supportHtml = false;
+
+  constructor(public value = "") {}
+}
+
+export interface StubCommand {
+  command: string;
+  title: string;
+  arguments?: unknown[];
+}
+
+export class TreeItem {
+  description?: string;
+  tooltip?: string | MarkdownString;
+  iconPath?: ThemeIcon;
+  contextValue?: string;
+  command?: StubCommand;
+
+  constructor(
+    public label: string,
+    public collapsibleState: number = TreeItemCollapsibleState.None
+  ) {}
 }
 
 export class RelativePattern {
@@ -635,6 +714,29 @@ export const window = {
   registerTreeDataProvider(viewId: string, _provider: unknown): StubDisposable {
     recorded.treeViews.push(viewId);
     return { dispose: () => undefined };
+  },
+
+  /**
+   * The TreeView object, modelled only as far as this extension uses it
+   * (memql#4426): a disposable that carries a settable `description`.
+   *
+   * Not a full TreeView -- there is no reveal, no selection, no visibility
+   * event -- and that is the stub's standing rule rather than an omission: it
+   * models what activation touches, so a test that starts depending on more
+   * fails loudly here instead of passing against a fiction.
+   */
+  createTreeView(viewId: string, _options: unknown): StubDisposable & { description?: string } {
+    recorded.treeViews.push(viewId);
+    const view = {
+      dispose: () => undefined,
+      get description(): string | undefined {
+        return recorded.treeViewDescriptions[viewId];
+      },
+      set description(value: string | undefined) {
+        recorded.treeViewDescriptions[viewId] = value;
+      },
+    };
+    return view;
   },
 
   // The read-only badge (memql#3762). Recorded rather than ignored, because

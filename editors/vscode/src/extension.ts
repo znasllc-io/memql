@@ -16,6 +16,7 @@ import {
   ProgressLocation,
   Range,
   RelativePattern,
+  TreeView,
   Uri,
   window,
   workspace,
@@ -175,6 +176,13 @@ import {
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
+import {
+  connectionContextKeys,
+  CLUSTER_SELECTED_KEY,
+  CONNECTED_KEY,
+  NOT_CONNECTED_REFUSAL,
+} from './state/connectionContext.js';
+import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, portalConceptUrl, portalTarget } from './clusters/portalUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
@@ -943,7 +951,22 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // believed was good, the manager refreshes once, retries once, and -- if
     // that is refused too -- clears the credential through this seam so the
     // next action starts a clean sign-in instead of replaying a dead one.
-    storeDeps
+    storeDeps,
+    // THE CONTEXT KEYS' ONE WRITER (memql#4424). The manager decides both
+    // values -- it is the only object that knows when either changes -- and
+    // this closure is the `vscode` half it is not allowed to import. Every
+    // `viewsWelcome` and every Deployments title-menu entry is keyed on what
+    // goes through here, so a second writer anywhere would be a race whose
+    // winner depends on listener registration order.
+    //
+    // NOT AWAITED, and there is nothing to await it for: `setContext` is
+    // fire-and-forget by design, and the manager publishes state to its
+    // listeners in the same tick, so the keys and the repaint reach the
+    // workbench together.
+    (keys) => {
+      void commands.executeCommand('setContext', CLUSTER_SELECTED_KEY, keys.clusterSelected);
+      void commands.executeCommand('setContext', CONNECTED_KEY, keys.connected);
+    }
   );
 
   // THE ONE PLACE a dial failure's raw text is recorded (memql#4194). Every
@@ -1065,10 +1088,32 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // and its query client both change without this view being told, and a
   // captured `undefined` from activation time would leave the connected
   // cluster's history permanently unreadable.
+  // Declared before the provider so the provider's `setDescription` callback
+  // can reach it, and assigned right after `createTreeView` below. A `let` and
+  // not a constructor argument, because the view cannot exist before the
+  // provider it renders -- and making the provider hold the view would put an
+  // ordering constraint into a class whose whole job is to be orderless.
+  let deploymentsView: TreeView<DeploymentNode> | undefined;
   const deploymentsTree = new DeploymentsTreeProvider({
     clustersPath,
     receiptPath: defaultReceiptPath(),
     presence: () => presence.get(),
+    // The ONE connection answer, read rather than re-derived (design D1). Note
+    // it is the manager's state through the shared mapping, NOT this file's own
+    // reading of it: the workbench evaluates the manifest's `when` clauses
+    // against the same booleans, and a view that disagreed with them would
+    // render an empty tree with no welcome in it.
+    connectionContext: () => connectionContextKeys(connections?.state ?? { status: 'disconnected' }),
+    // The instance line, promoted out of the wrapper row that used to carry it
+    // (memql#4426).
+    setDescription: (description) => {
+      if (deploymentsView !== undefined) deploymentsView.description = description;
+    },
+    // What the view title menu's instance actions are scoped by, now that
+    // there is no row to scope them with.
+    setInstanceContext: (value) => {
+      void commands.executeCommand('setContext', DEPLOYMENTS_INSTANCE_KEY, value);
+    },
     // The SHARED cache the Clusters tree uses (memql#3996). Single-flight, so
     // both trees open still cost one `git ls-remote`; constructing a second one
     // here would double the work and let the two surfaces disagree about what
@@ -1177,14 +1222,26 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     },
   });
 
+  // createTreeView, NOT registerTreeDataProvider (memql#4426). The two register
+  // the same provider; only the first hands back the TreeView object, and
+  // `TreeView.description` is where the selected cluster's facts now live --
+  // the subtitle beside the view's name, which is what let the wrapper row go.
+  // The view is disposable and goes into the same subscriptions list the
+  // registration used to.
+  deploymentsView = window.createTreeView('memqlDeployments', {
+    treeDataProvider: deploymentsTree,
+  });
   context.subscriptions.push(
-    window.registerTreeDataProvider('memqlDeployments', deploymentsTree),
+    deploymentsView,
     commands.registerCommand('memql.deployments.refresh', () => deploymentsTree.refresh()),
     // Create deployment on a machine with NO local cluster is the install
     // graph, which is the same run the "+" opened -- re-parented, not
-    // rewritten. Contributed on the absent row only; moving an INSTALLED
-    // instance to another tag is a different flow and lands with the instance
-    // page (#3739).
+    // rewritten. Scoped to the ABSENT selection only (memql#4426: the view
+    // title menu's `memql.deploymentsInstance == memqlLocalInstanceAbsent`,
+    // where it used to be the absent instance ROW), and offered a second time
+    // from the Deployments and Clusters welcomes, which is where an operator
+    // with nothing installed actually is. Moving an INSTALLED instance to
+    // another tag is a different flow and lands with the instance page (#3739).
     commands.registerCommand('memql.deployments.createDeployment', () => {
       AddClusterPanel.show(context, presence, addClusterDeps(), 'install');
     }),
@@ -1193,15 +1250,27 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // revealed -- a receipt written by a run the page itself started is the
     // ordinary case, and a page holding a snapshot from when it opened would
     // report the version it replaced.
-    commands.registerCommand('memql.deployments.open', (node?: DeploymentNode) => {
-      // From a tree row, the instance it names; from the palette, where no row
-      // exists, the local one -- which is the only instance a machine always
-      // has.
-      DeploymentPanel.show(
-        context,
-        deploymentPanelDeps(),
-        node?.kind === 'instance' ? node.instance.name : ''
-      );
+    commands.registerCommand('memql.deployments.open', () => {
+      // THE SELECTION, not the local instance (memql#4426). This used to be
+      // reached from an instance ROW, which named its own instance; the row is
+      // gone and the command is now in the view title menu, where there is
+      // nothing to name one. Falling back to the local instance the way the
+      // palette entry did would open the wrong page for every operator whose
+      // selected cluster is remote -- silently, since both pages look right.
+      //
+      // "" is passed through when nothing is selected, which the panel reads as
+      // the local instance. That is the palette's old behaviour preserved for
+      // the palette's old case: the command is not offered in the title menu
+      // without `memql.clusterSelected`, so this only happens from the palette.
+      DeploymentPanel.show(context, deploymentPanelDeps(), deploymentsTree.selectedInstance()?.name ?? '');
+    }),
+    // Selecting a deployment opens it (memql#4427). The row carries the run and
+    // the instance it belongs to, because the detail page's action buttons are
+    // the INSTANCE's role-gated set, contextualised by what this run did --
+    // there is no second catalog of run-scoped verbs.
+    commands.registerCommand('memql.deployments.openRun', (node?: DeploymentNode) => {
+      if (node === undefined || node.kind !== 'run') return;
+      DeploymentPanel.showRun(context, deploymentPanelDeps(), node.instance, node.run.id);
     }),
     // "Rebuild Local Cluster From Checkout" (memql#4246). Registered here, in
     // the Deployments surface, because that is where it BELONGS -- but the
@@ -1245,8 +1314,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       });
     }),
   );
-  // The connection decides a remote instance's version and its history, so a
-  // connect or a drop changes what this tree can say.
+  // The connection decides a remote instance's version and its history -- and,
+  // since memql#4426, WHICH cluster this view is about and whether it renders
+  // at all. A connect or a drop is therefore not merely new content: it is the
+  // difference between the timeline and the "Not connected" welcome, so the
+  // repaint here is what makes the welcome appear and disappear on time.
   connections.onDidChangeState(() => deploymentsTree.refresh());
   // The Deployments tree reads three files that change underneath it, all in
   // ~/.memql and all outside any workspace -- so each needs a RelativePattern
@@ -1307,6 +1379,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
   const constructsTree = new ConstructsTreeProvider({
     connections,
+    connectionContext: () => connectionContextKeys(connections?.state ?? { status: 'disconnected' }),
     load: async (): Promise<CatalogState> => {
       const dispatcher = connections?.dispatcher;
       if (dispatcher === undefined) {
@@ -1317,7 +1390,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // other way round: no cluster is not an answer, so nothing is marked
         // rather than everything.
         await readonlyMarker.update(undefined, undefined);
-        return { kind: 'notConnected' };
+        // REACHED ONLY WITH A CLUSTER SELECTED (memql#4425): the provider
+        // returns `[]` before it calls this when nothing is, so the manifest's
+        // welcome can render over the empty tree. What is left here is a
+        // cluster that WAS chosen and holds no live session -- which is a fact
+        // about something, and gets a row rather than a welcome.
+        return { kind: 'unreachable' };
       }
       try {
         const result = await new ConstructsClient(dispatcher).listConstructs();
@@ -1540,7 +1618,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
-  const conceptsTree = new DataTreeProvider(connections);
+  const conceptsTree = new DataTreeProvider(connections, () =>
+    connectionContextKeys(connections?.state ?? { status: 'disconnected' })
+  );
   context.subscriptions.push(
     window.registerTreeDataProvider('memqlData', conceptsTree),
     commands.registerCommand('memql.data.refresh', () => conceptsTree.refresh())
@@ -2733,6 +2813,21 @@ function registerRunSurface(
     }),
     commands.registerCommand('memql.runs.execute', async (node?: RunsTreeNode) => {
       if (node === undefined || node.kind !== 'run') return;
+      // THE RUNS EXCEPTION, enforced at the moment a cluster is actually needed
+      // (memql#4425, design D2). Every other cluster-backed view empties itself
+      // when nothing is selected so its welcome can render; this one keeps
+      // listing, because `runs.json` is the developer's OWN file and hiding it
+      // would present their saved work as lost. So the gate lives here instead,
+      // on `memql.connected` rather than `memql.clusterSelected`: a run needs a
+      // live session, not merely a chosen cluster, and a cluster that is
+      // selected but not answering fails the same way.
+      //
+      // The sentence is the shared one, so the refusal an operator meets here
+      // and the welcomes they read in the sidebar are recognisably one message.
+      if (!connectionContextKeys(connections?.state ?? { status: 'disconnected' }).connected) {
+        window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+        return;
+      }
       // An automation configuration OPENS THE FORM pre-filled rather than
       // running straight away. Every other kind's saved configuration is a
       // complete, replayable call; an automation's is a saved trigger event

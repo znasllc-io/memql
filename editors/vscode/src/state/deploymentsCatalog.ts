@@ -1,9 +1,17 @@
-// What the Deployments tree renders: every instance, and the runs beneath it.
+// Every instance on this machine and reachable from it, and the runs beneath
+// each -- from which the Deployments view takes ONE (memql#4426).
+//
+// The catalog is still whole-machine. What narrowed is the VIEW: it renders the
+// selected cluster's runs flat, through `runsForSelected` below, while the
+// Clusters view continues to show every registered cluster with its health. Two
+// surfaces, two questions, one read -- rather than a second catalog that could
+// disagree with this one about the same cluster in the same frame.
 //
 // The tree itself is a mapping onto VS Code's TreeItem vocabulary and nothing
 // else. Everything that is a DECISION -- which instances exist, which runs
-// belong to which, what a row says, which icon it carries -- is here, where it
-// runs under bare `node --test` with no workbench, no cluster and no network.
+// belong to which, which of them the view is about, what a row says, which icon
+// it carries -- is here, where it runs under bare `node --test` with no
+// workbench, no cluster and no network.
 // That division is enforced mechanically (cmd/memql-lsp/vscodeimportrule_test.go)
 // and it is the only reason the "renders on a fresh machine" acceptance is
 // checkable at all: the failure it guards against is a panel that goes blank,
@@ -27,7 +35,7 @@
 //   - the run log unreadable   -> no runs, which is what an instance with no
 //     runs renders as anyway, and that is not an empty state.
 //
-// Refs: #3737 #3733
+// Refs: #4426 #4423 #3737 #3733
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -52,7 +60,7 @@ import {
   projectDeployments,
   projectNodeSpecs,
 } from "./deploymentHistory.js";
-import { defaultRunsDir, listRuns } from "./runLog.js";
+import { defaultRunsDir, listRuns, sortRunsNewestFirst } from "./runLog.js";
 
 /** The live connection, as far as this view cares. */
 export interface ConnectionFacts {
@@ -243,6 +251,33 @@ async function resolveRemote(
  * here, and views/deploymentsTree.ts is left as a mapping onto VS Code's icon
  * names.
  */
+/**
+ * A checkout-mode instance's version text, or "" for every other instance.
+ *
+ * A CHECKOUT-MODE INSTANCE NAMES THE CHECKOUT, NOT THE RECORDED RELEASE
+ * (memql#4246). `instance.version` is still whichever tag the ORIGINAL install
+ * checked out -- a repair or upgrade would replay it -- but that is not what is
+ * running right now. Printing it would tell an operator their v0.17.0 cluster
+ * is healthy while it is actually serving whatever was in the checkout at the
+ * last rebuild, uncommitted edits included.
+ *
+ * Its own function since memql#4426, because two surfaces now say it: the tree
+ * row, and the Deployments view description above the timeline. A second copy
+ * of this rule is how one of them would go on printing a release tag for a
+ * cluster running a developer's own build.
+ *
+ * A count the envelope did not carry is LEFT OUT, never invented: printing
+ * "0 uncommitted files" from an unreported field is a claim that the tree was
+ * clean.
+ */
+export function checkoutVersionText(instance: Instance): string {
+  if (instance.imageSource !== "checkout" || instance.rebuild === undefined) return "";
+  const { rebuild } = instance;
+  const shortCommit = rebuild.commit.slice(0, 7);
+  const dirty = rebuild.dirtyCount;
+  return `checkout ${shortCommit}${dirty !== undefined && dirty > 0 ? ` (${dirty} uncommitted)` : ""}`;
+}
+
 export type InstanceRowIcon = "healthy" | "unreachable" | "absent";
 
 export interface InstanceRowStatus {
@@ -297,14 +332,12 @@ export function instanceRowStatus(
   // their v0.17.0 cluster is healthy while it is actually serving whatever
   // was in the checkout at the last rebuild, uncommitted edits included.
   let checkoutTooltip = "";
-  if (instance.imageSource === "checkout" && instance.rebuild !== undefined) {
+  const checkoutText = checkoutVersionText(instance);
+  if (checkoutText !== "" && instance.rebuild !== undefined) {
     const { rebuild } = instance;
     const shortCommit = rebuild.commit.slice(0, 7);
-    // A count the envelope did not carry is LEFT OUT, never invented: printing
-    // "0 uncommitted files" from an unreported field is a claim that the tree
-    // was clean.
     const dirty = rebuild.dirtyCount;
-    versionText = `checkout ${shortCommit}${dirty !== undefined && dirty > 0 ? ` (${dirty} uncommitted)` : ""}`;
+    versionText = checkoutText;
     checkoutTooltip =
       `\nRunning images built from the checkout at ${shortCommit}` +
       (dirty === undefined ? ". " : ` (${dirty} uncommitted files when it was built). `) +
@@ -434,10 +467,190 @@ export function relativeTime(iso: string | undefined, nowMs: number): string {
   return `${Math.floor(elapsed / DAY)}d ago`;
 }
 
-/** The context value a row carries, which is what scopes its menu entries. */
+/**
+ * How long a run TOOK, as the detail page prints it (memql#4427).
+ *
+ * A different question from `relativeTime`, which answers "how long ago", and
+ * kept beside it so the two read as one vocabulary rather than as two authors.
+ * Coarse in the same way and for the same reason -- `4m 12s` is read at a
+ * glance -- but it keeps seconds, because a run's duration is often under a
+ * minute and "0m" would be a worse answer than none.
+ *
+ * "" WHEN IT CANNOT BE COMPUTED, and the caller omits the fact rather than
+ * printing a placeholder. A run still in flight has no finish, an interrupted
+ * one never got a finish written, and an unparseable stamp is a fact about the
+ * record. None of the three is a duration of zero, and printing one would be
+ * the same class of lie `displayVersion` exists to prevent.
+ *
+ * A NEGATIVE ELAPSED READS AS `0s`, not as a negative duration: clock skew
+ * between a cluster and this machine is ordinary, and a run that finished a
+ * moment "before" it started did not run backwards.
+ */
+export function runDuration(
+  startedAt: string | undefined,
+  finishedAt: string | undefined,
+): string {
+  const from = Date.parse(startedAt ?? "");
+  const to = Date.parse(finishedAt ?? "");
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return "";
+  const elapsed = Math.max(0, to - from);
+  const seconds = Math.floor(elapsed / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${rest}s`;
+  return `${rest}s`;
+}
+
+/**
+ * The context key the Deployments view title menu is scoped by (memql#4426).
+ *
+ * A KEY RATHER THAN A ROW'S `contextValue`, because there is no longer a row.
+ * The instance actions moved to the view TITLE menu when the wrapper row went,
+ * and `view/title` clauses are evaluated with no `viewItem` in scope -- so the
+ * only way to keep "Uninstall is offered for an installed local cluster and for
+ * nothing else" is to publish the same vocabulary as a key.
+ *
+ * IT IS NOT A THIRD CONNECTION KEY. `memql.clusterSelected` and
+ * `memql.connected` describe the CONNECTION and only the ConnectionManager
+ * publishes them (design D1). This describes what the selected cluster IS --
+ * local or remote, installed or not -- which is a fact only the catalog
+ * computes, so the Deployments view is its one publisher for the same reason
+ * the manager is theirs.
+ */
+export const DEPLOYMENTS_INSTANCE_KEY = "memql.deploymentsInstance";
+
+/**
+ * The context value an instance carries, which is what scopes its menu entries.
+ *
+ * The vocabulary is unchanged from when it labelled a row: the three values
+ * exist because the three kinds of instance offer different actions, and an
+ * absent local cluster can only be created where an installed one can also be
+ * repaired, rebuilt and uninstalled.
+ */
 export function instanceContextValue(instance: Instance): string {
   if (instance.kind === "remote") return "memqlRemoteInstance";
   return instance.presence === "absent" ? "memqlLocalInstanceAbsent" : "memqlLocalInstance";
+}
+
+/**
+ * The same value for the SELECTION, including when there is not one.
+ *
+ * "" when nothing is selected, which is what every `==` clause in the manifest
+ * fails against -- so a title menu over an unselected view offers none of the
+ * instance actions, and the welcome is the only thing on screen. Distinguished
+ * from `instanceContextValue` so no caller has to invent a value for the
+ * absent case; inventing one is how "no cluster" would come to mean "local".
+ */
+export function selectedInstanceContext(instance: Instance | undefined): string {
+  return instance === undefined ? "" : instanceContextValue(instance);
+}
+
+// ---------------------------------------------------------------------------
+// the selected cluster's timeline (memql#4426)
+// ---------------------------------------------------------------------------
+
+/**
+ * The instance the Deployments view is about, and its runs.
+ *
+ * WHAT CHANGED, AND WHY THE SHAPING IS HERE. The view used to render every
+ * registered instance as a top-level row with its runs nested underneath, which
+ * put a wrapper row -- `local`, most often -- between an operator and the only
+ * list they came for. It now renders ONE cluster's runs, flat: the one this
+ * editor has in hand. The instance itself does not vanish; it moves to the view
+ * description, where it is a heading rather than a row to expand.
+ *
+ * Pure, and in this file rather than inline in the provider, for the reason the
+ * header states about every other decision here: the failure mode of the
+ * Deployments view is a BLANK PANEL, and no unit test of a TreeDataProvider
+ * would see one. Driven here, "a selection that names no instance yields no
+ * rows" is an assertion.
+ *
+ * NOTHING SELECTED IS NOT AN ERROR, and it is not an empty cluster either. It
+ * yields no instance and no runs, so the provider returns `[]` and the
+ * manifest's welcome renders over it -- which is the whole mechanism, since VS
+ * Code draws welcome content ONLY over a genuinely empty tree.
+ *
+ * A SELECTION THAT NAMES NO INSTANCE yields the same nothing rather than a
+ * complaint. It is an ordinary race: `clusters.yaml` is shared with the MemQL
+ * Cockpit, so a cluster can be removed there between this editor selecting it
+ * and this catalog being read, and a synthetic error row would suppress the
+ * welcome that correctly describes what is left.
+ */
+export interface SelectedRuns {
+  /** The selected cluster's instance, or undefined when there is no selection. */
+  instance: Instance | undefined;
+  /** Its runs, newest first. Empty when there is no selection. */
+  runs: Run[];
+}
+
+export function runsForSelected(
+  catalog: Catalog,
+  selection: ConnectionFacts | undefined,
+): SelectedRuns {
+  if (selection === undefined) return { instance: undefined, runs: [] };
+  const instance = catalog.instances.find((i) => i.name === selection.clusterName);
+  if (instance === undefined) return { instance: undefined, runs: [] };
+  // RE-DERIVED, not inherited. `listRuns` and `runsFromDeployments` each sort
+  // their own output already, so this is a second application of an order that
+  // is usually right -- and that is the point: a list filtered or re-ordered
+  // upstream cannot silently produce a history running backwards, and the
+  // comparator is the shared one rather than a third spelling of it.
+  return { instance, runs: sortRunsNewestFirst(catalog.runs.get(instance.name) ?? []) };
+}
+
+/**
+ * The line above the timeline: which cluster this is, how it is, what it runs.
+ *
+ *   local · healthy · v0.19.1
+ *   local · healthy · v0.19.1 · update v0.20.0 available
+ *   staging · not answering · v0.9.2
+ *   local · not installed
+ *
+ * THE INSTANCE FACTS, PROMOTED OUT OF A ROW. `TreeView.description` is the API
+ * made for exactly this -- a subtitle beside the view's own name -- and it is
+ * what lets the runs be the only rows. An operator reading it learns the three
+ * things the wrapper row told them, in the place a heading belongs.
+ *
+ * IT SAYS "update vX available", NOT the row's "vX available". The row appends
+ * the clause to a version and reads `v0.18.0 - v0.19.0 available`, which is one
+ * field. Here the version is its own segment, and a bare `v0.19.0 available`
+ * beside `v0.18.0` would read as two versions with no statement about either.
+ *
+ * A CHECKOUT-MODE CLUSTER GETS NO AVAILABILITY CLAUSE, which is the same call
+ * `instanceRowStatus` makes: the recorded release is not what the cluster is
+ * running, so "an update to it is available" is a claim about a version it is
+ * not on.
+ *
+ * "" FOR NO SELECTION, and the caller clears the description rather than
+ * printing something. The welcome is already saying what is going on.
+ */
+export function selectedViewDescription(
+  instance: Instance | undefined,
+  listing: ReleaseListing | undefined,
+): string {
+  if (instance === undefined) return "";
+  if (instance.presence === "absent") {
+    // No version segment, exactly as the row makes no version claim about a
+    // machine with nothing installed.
+    return `${instance.name} · not installed`;
+  }
+  const parts = [
+    instance.name,
+    instance.presence === "installed-unreachable" ? "not answering" : "healthy",
+  ];
+  const checkout = checkoutVersionText(instance);
+  if (checkout !== "") {
+    parts.push(checkout);
+    return parts.join(" · ");
+  }
+  parts.push(displayVersion(instance.version));
+  const described = describeVersion({ recorded: instance.version, listing });
+  if (described.upgradeAvailable && described.latest !== undefined) {
+    parts.push(`update ${described.latest} available`);
+  }
+  return parts.join(" · ");
 }
 
 export { LOCAL_INSTANCE_NAME };

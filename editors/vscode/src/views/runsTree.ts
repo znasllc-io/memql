@@ -7,6 +7,21 @@
 // nothing else; running is always an explicit click. That matters because the
 // file lives in the workspace so a repository can ship one -- opening a folder
 // must never be able to make the editor talk to a cluster.
+//
+// THE STATED EXCEPTION TO CONNECTION GATING (memql#4425, design D2). Every
+// other cluster-backed view in this extension returns `[]` when no cluster is
+// selected, so its `viewsWelcome` can say "Not connected". THIS ONE DOES NOT,
+// and the reason is what it lists: `runs.json` entries are the DEVELOPER'S OWN
+// FILE, authored by them and living in their workspace, not rows read from a
+// cluster. Emptying the view because no cluster happens to be selected would
+// present a developer's saved work as gone -- which reads as data loss, and is
+// the one impression an editor must never give about a file it did not write.
+//
+// So the gate moves from the LISTING to the RUN. `memql.runs.execute` refuses
+// with `NOT_CONNECTED_REFUSAL` -- the same sentence the welcomes open with --
+// when `!memql.connected`, which is the moment a cluster is actually required.
+// The list keeps its own welcome for the case it has always described: a file
+// with no entries in it.
 
 import * as vscode from "vscode";
 

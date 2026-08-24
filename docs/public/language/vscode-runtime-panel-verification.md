@@ -433,8 +433,11 @@ this surface is reading one as the other:
       credential, and disconnects if that cluster was the live connection
 - [ ] Removing the selected cluster clears `selected_cluster` rather than
       leaving it pointing at a name that no longer exists
-- [ ] **Uninstall** appears in a `local: true` row's context menu, is NOT an
-      inline icon, and does NOT appear on a remote cluster's row at all
+- [ ] **Uninstall** appears in the Deployments view's title menu with a
+      `local: true` cluster selected, is NOT an inline icon anywhere, and does
+      NOT appear with a remote cluster selected -- nor on any Clusters row
+      (memql#3742 moved it off Clusters; memql#4426 moved it off the Deployments
+      instance row, which is gone)
 - [ ] Uninstall opens an itemised dry run first: every artifact the receipt
       names, what happens to it, and which steps will ask for elevation
 - [ ] Anything the install FOUND rather than created -- an mkcert CA that was
@@ -558,24 +561,74 @@ on the Clusters row and on the connection page, is one click away. What
 replaced it is split in two: Deployments answers "what do I operate", and the
 connection page answers "what does this editor dial, and as whom".
 
-### 5a. The Deployments view
+### 5a. The Deployments view (rewritten by memql#4426)
 
-- [ ] On a machine with no local cluster: the `local` row still appears, reads
-      `not installed`, and offers **Create deployment** and nothing else
-- [ ] With a local cluster installed: the row reads `healthy - <version>`, and
-      the version is the tag the install recorded
-- [ ] A cluster that is installed and not answering reads `not answering`, keeps
-      its version, and leads with **Repair**
+The view is the SELECTED cluster's runs, flat. There is no `local` wrapper row
+and no instance row of any kind -- the instance's facts are the view's
+description and its actions are in the title menu.
+
+- [ ] With **no cluster selected**: the view is empty and shows the welcome
+      -- "Not connected. Select a cluster to see its deployments." -- carrying
+      **Select Cluster** and **Install a local cluster**, and the view has no
+      description
+- [ ] Selecting a cluster populates it; the description reads
+      `<name> · healthy · <version>`, and the version is the tag the install
+      recorded
+- [ ] With TWO clusters registered, switching the selection in Clusters switches
+      this view with it, and none of the other cluster's runs remain
+- [ ] A cluster that is installed and not answering keeps its rows and its
+      description reads `· not answering ·` -- selected-but-unreachable is NOT
+      the empty state and must not show the welcome
 - [ ] A version that cannot be worked out renders as the word `unknown`, never
       as a blank
-- [ ] An instance with no runs renders with its actions and no children -- not
-      as an empty state
+- [ ] A newer release available adds `· update <version> available` to the
+      description
+- [ ] A selected cluster with no runs shows its description and no rows -- not
+      the welcome, and not an empty-state placeholder
 - [ ] Run rows are newest first and carry the verb, the version transition, the
       status and a relative time
 - [ ] A run started from this editor appears in the tree BEFORE its first step
       reports, and its steps fill in live
 - [ ] Kill VS Code mid-run, reopen: the run is still listed, and names exactly
       the steps that had completed
+- [ ] Disconnect (or sign out): the rows go, the description clears, and the
+      welcome returns
+
+### 5a-i. Where the instance went (memql#4426)
+
+Every action the `local` row used to carry must still be reachable. All of them
+are now in the view's **title menu** (the `...` in the view's header).
+
+- [ ] With an INSTALLED local cluster selected, the title menu offers
+      **Open Local Checkout**, **Rebuild Local Cluster From Checkout**,
+      **Repair Local Cluster** and **Uninstall Local Cluster...**
+- [ ] With a machine that has NO local cluster selected, it offers
+      **Create Deployment...** and none of the four above
+- [ ] With a REMOTE cluster selected, it offers none of the five -- an action
+      whose only outcome is a refusal must not be drawn
+- [ ] With nothing selected, it offers none of them
+- [ ] **Open Local Deployment** in the title menu opens the instance page for
+      the SELECTED cluster -- check this with a remote cluster selected, since
+      opening the local one instead is the failure that looks right
+
+### 5a-ii. Opening one deployment (memql#4427)
+
+- [ ] Clicking a run row opens its detail page -- it is not inert
+- [ ] The page states the kind, the version transition, the status, the start,
+      the finish and the duration
+- [ ] A run still in flight shows NO duration and NO finish time, rather than
+      zeros
+- [ ] A failed run names the step that failed and what it said
+- [ ] A local run's items are headed **Steps**; a remote deployment's are headed
+      **Node types**
+- [ ] A run with no recorded items says which no-items case it is, rather than
+      showing an empty list
+- [ ] The buttons are the instance's own actions: a failed local run leads with
+      **Repair**, a checkout-mode cluster leads with **Rebuild from checkout**,
+      and no button appears that the instance page would not also offer
+- [ ] On a remote deployment, the deploy-control buttons match your role, and
+      pressing one reports the engine's own outcome line on this page
+- [ ] **Back** returns to the instance overview
 
 ### 5b. Deploying a local cluster to another tag
 
@@ -595,8 +648,9 @@ connection page answers "what does this editor dial, and as whom".
 
 ### 5c. Repair and uninstall, from Deployments
 
-- [ ] Repair and Uninstall appear on the Deployments local-instance row, and on
-      **no** Clusters row
+- [ ] Repair and Uninstall appear in the Deployments view TITLE menu with an
+      installed local cluster selected (memql#4426 moved them off the instance
+      row, which no longer exists), and on **no** Clusters row
 - [ ] Uninstall still confirms against the itemised dry run
 - [ ] An artifact the install FOUND rather than created is listed as
       **preserved**, is left on the machine, and appears as `preserved` in the
@@ -609,8 +663,9 @@ the cluster is running RELEASED images. A rebuild takes minutes and changes
 which images the cluster runs -- do not run it against a parity cluster
 somebody else is using.
 
-- [ ] **Rebuild from checkout** appears on the installed local instance and on
-      no other row; a machine with no recorded checkout does not offer it
+- [ ] **Rebuild Local Cluster From Checkout** appears in the Deployments title
+      menu with an installed local cluster selected, and with nothing else
+      selected; a machine with no recorded checkout does not offer it
 - [ ] The preflight shows all six lines -- Docker, Checkout, Git state, Nodes,
       Image source, Duration -- and each one names a fact you can check
 - [ ] **Image source** is a NOTE on a released-lane cluster and says it switches
@@ -622,9 +677,11 @@ somebody else is using.
       rebuilds those two, and the toast afterwards names what was actually built
 - [ ] The run reports through the same progress rows an install does, and the
       heading says *Rebuilding the local cluster from its checkout*
-- [ ] Afterwards the instance row reads `checkout <commit>` (with the
-      uncommitted count when there is one) instead of a version, and the
-      Connection page's **image source** says `checkout (built locally)`
+- [ ] Afterwards the Deployments view description reads
+      `<name> · healthy · checkout <commit>` (with the uncommitted count when
+      there is one) instead of a version and with no `update ... available`
+      clause, and the Connection page's **image source** says
+      `checkout (built locally)`
 - [ ] A construct you edited before the rebuild stops reading `edited` without
       touching the file -- the catalog refreshed
 - [ ] Now open **Repair**: its preflight carries an **Image source** note saying
@@ -643,7 +700,9 @@ somebody else is using.
 - [ ] Its runs read from the cluster, newest first, and their items are labelled
       **Node types** -- never "Steps" -- with version, replicas and digest
 - [ ] A remote this editor is not connected to still lists, with its version
-      `unknown` rather than hidden
+      `unknown` rather than hidden -- in the CLUSTERS view, which continues to
+      show every registered cluster; the Deployments view narrowed to the
+      selection in memql#4426 and shows only the one you are on
 - [ ] Exactly one of the three pipeline states renders: the actions, "no deploy
       pipeline is configured" in the engine's own words, or "status is not
       visible at your role"

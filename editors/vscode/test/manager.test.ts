@@ -619,3 +619,103 @@ test("a cluster whose credential never resolves still never reaches the dial", a
   );
   assert.equal((manager.state as { reason: string }).reason, "wrongTokenClass");
 });
+
+// ---------------------------------------------------------------------------
+// the context keys the manager publishes (memql#4424)
+// ---------------------------------------------------------------------------
+//
+// WHY THEY ARE ASSERTED HERE rather than beside the mapping table. The mapping
+// is pure and tested in test/connectionContext.test.ts; what cannot be checked
+// there is that it is actually PUBLISHED, and published from every path that
+// changes the answer. `publish` is the single funnel every state change goes
+// through -- a select, a refused credential, a disconnect, a sign-out (which
+// disconnects), a socket dying under `watchForTermination` -- and this is the
+// evidence that it is, driven through the real state machine rather than
+// asserted about it.
+//
+// The consequence of a missed path is not an error anywhere: the keys simply go
+// stale, and three views keep showing a welcome over a cluster the editor is
+// holding, or keep showing rows for one it lost.
+
+test("the keys are published on activation, before anything has connected", async () => {
+  // A key VS Code has never been told about is UNSET, and unset is falsy in a
+  // `when` clause -- so the welcomes would render on a fresh window by
+  // accident. Stating both up front means the keys describe the extension from
+  // its first frame.
+  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  new ConnectionManager(() => Promise.resolve(fakeConn("n1")), undefined, undefined, (k) =>
+    keys.push(k),
+  );
+  assert.deepEqual(keys, [{ clusterSelected: false, connected: false }]);
+});
+
+test("the keys follow a connect, a drop and a disconnect", async () => {
+  const conn = fakeConn("n1");
+  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  const manager = new ConnectionManager(
+    () => Promise.resolve(conn),
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+
+  await manager.connect(cluster("local"));
+  await flush();
+  assert.deepEqual(
+    keys.at(-1),
+    { clusterSelected: true, connected: true },
+    "a held connection did not publish connected",
+  );
+  // "connecting" passed through on the way, and it is selected-but-not-yet-up:
+  // the views render their normal shape rather than a welcome while a dial is
+  // in flight.
+  assert.ok(
+    keys.some((k) => k.clusterSelected && !k.connected),
+    "the dial-in-flight state never reached the keys",
+  );
+
+  // A SERVER-SIDE DROP. Nothing else notices a connection dying; without the
+  // publish inside watchForTermination the keys would still say `connected`
+  // while `query` hands out nothing.
+  conn.terminate();
+  await flush();
+  assert.deepEqual(
+    keys.at(-1),
+    { clusterSelected: true, connected: false },
+    "a lost connection left memql.connected true",
+  );
+
+  await manager.disconnect();
+  assert.deepEqual(
+    keys.at(-1),
+    { clusterSelected: false, connected: false },
+    "a disconnect did not empty the cluster-backed views",
+  );
+});
+
+test("a refused dial leaves the cluster SELECTED and not connected", async () => {
+  // Design D2's distinction, at its source. A cluster that was chosen and did
+  // not answer must not empty the views: it is a fact about something, carried
+  // by each view's own row and description affordances. Publishing
+  // `clusterSelected: false` here would replace a cluster that is down with a
+  // screen saying nothing is chosen.
+  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  const manager = new ConnectionManager(
+    () => Promise.reject(new Error("no route to host")),
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+  await manager.connect(cluster("staging"));
+  await flush();
+  assert.equal(manager.state.status, "error");
+  assert.deepEqual(keys.at(-1), { clusterSelected: true, connected: false });
+});
+
+test("a manager built with no sink still connects", async () => {
+  // The default is a no-op, so every other test in this file -- and any bare
+  // construction -- gets a manager that works and simply has no editor to tell.
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("n1")));
+  await manager.connect(cluster("local"));
+  assert.equal(manager.state.status, "connected");
+});

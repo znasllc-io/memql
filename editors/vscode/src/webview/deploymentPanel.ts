@@ -58,7 +58,7 @@ import {
   type DeployOutcome,
   type StatusRead,
 } from "../deploy/controller.js";
-import { instanceActions, type InstanceActionId } from "../deploy/instanceActions.js";
+import { instanceActions, runDetailActions, type InstanceActionId } from "../deploy/instanceActions.js";
 import { upgradeVerdict, type UpgradeTarget, type UpgradeVerdict } from "../deploy/upgrade.js";
 import { describeVersion } from "../version/describe.js";
 import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
@@ -90,11 +90,16 @@ import {
 import { rebuiltMessage } from "../state/imageLane.js";
 import { rebuildPreflightItems, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
 import { RunRecorder } from "../state/runRecorder.js";
-import { defaultRunsDir } from "../state/runLog.js";
+import { defaultRunsDir, RUN_LOG_KEEP } from "../state/runLog.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
 import { graphDocumentPath, loadGraphFile, type Graph } from "../install/graph.js";
 import { DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
-import { renderChooseTag, renderInstanceOverview, renderRemoteInstance } from "./deploymentScreens.js";
+import {
+  renderChooseTag,
+  renderInstanceOverview,
+  renderRemoteInstance,
+  renderRunDetail,
+} from "./deploymentScreens.js";
 import {
   renderFailedScreen,
   renderRebuildScreen,
@@ -128,7 +133,7 @@ const REBUILD_TIMEOUT_MS = 2_700_000;
  */
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
 
-type Screen = "overview" | "chooseTag" | "rebuildPreflight" | "running" | "failedStep";
+type Screen = "overview" | "runDetail" | "chooseTag" | "rebuildPreflight" | "running" | "failedStep";
 
 export interface DeploymentPanelDeps {
   /** Everything buildCatalog needs, minus what this panel resolves itself. */
@@ -215,6 +220,17 @@ export class DeploymentPanel {
   private readonly state = new AddClusterState();
 
   private screen: Screen = "overview";
+  /**
+   * Which run the detail screen is about (memql#4427). "" on every other
+   * screen.
+   *
+   * The ID rather than the Run, deliberately. This page re-reads the machine on
+   * every reveal -- that is the whole reason it takes catalog inputs instead of
+   * a resolved instance -- so a captured record would go on describing a run
+   * whose status has since settled. Looking it up by id per render means the
+   * detail page ages the same way the overview does.
+   */
+  private runId = "";
   /** Which instance this page is about. Empty means the local one. */
   private instanceName = "";
   private instance: Instance | undefined;
@@ -279,6 +295,40 @@ export class DeploymentPanel {
     DeploymentPanel.open_ = panel;
     panel.pointAt(instanceName);
     return panel;
+  }
+
+  /**
+   * Opens the page on ONE DEPLOYMENT (memql#4427).
+   *
+   * Through `show`, not beside it: this is the same panel on a different
+   * screen, and a second panel class for a detail view would be a second
+   * lifecycle to keep in step with a run that is still writing to disk.
+   *
+   * The screen is set AFTER `pointAt`, because `pointAt` resets to the overview
+   * whenever the instance changes -- which is exactly what an operator clicking
+   * a run on a newly selected cluster does. Setting it first would have the
+   * reset undo the navigation, and the click would appear to do nothing.
+   */
+  static showRun(
+    context: vscode.ExtensionContext,
+    deps: DeploymentPanelDeps,
+    instanceName: string,
+    runId: string,
+  ): DeploymentPanel {
+    const panel = DeploymentPanel.show(context, deps, instanceName);
+    panel.openRun(runId);
+    return panel;
+  }
+
+  private openRun(runId: string): void {
+    this.runId = runId;
+    this.screen = "runDetail";
+    this.error = "";
+    // Paints now from whatever the last read left behind, and again when the
+    // read `show` started lands. A detail page that waited for the catalog
+    // would leave the click with no visible effect for as long as a presence
+    // probe takes.
+    this.render();
   }
 
   /**
@@ -492,6 +542,9 @@ export class DeploymentPanel {
     }
     if (type === "back") {
       this.screen = "overview";
+      // Dropped with the screen, so a later reveal of this panel cannot land on
+      // a detail page for a run the operator has already navigated away from.
+      this.runId = "";
       await this.load();
       return;
     }
@@ -1174,6 +1227,43 @@ export class DeploymentPanel {
 <p class="lede">Reading this machine...</p>`;
     }
     switch (this.screen) {
+      case "runDetail": {
+        const run = this.runs.find((r) => r.id === this.runId);
+        if (run === undefined) {
+          // THE RECORD IS GONE, and this says so rather than falling back to
+          // the overview. The run log keeps the newest RUN_LOG_KEEP records and
+          // prunes the rest, and clusters.yaml is shared with the Cockpit, so a
+          // row can outlive its record for perfectly ordinary reasons. Bouncing
+          // silently to the overview would present that as a click that did
+          // nothing, which is the failure this whole screen exists to end.
+          return `<h1>Deployment</h1>
+<p class="lede">This deployment is no longer in the record. Local runs are pruned once there are more than ${RUN_LOG_KEEP} of them, and a remote deployment's rows come from the cluster.</p>
+<div class="actions">
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+        }
+        return renderRunDetail({
+          instance,
+          run,
+          actions: runDetailActions({
+            instance,
+            run,
+            // Undefined until the first role read lands, which
+            // `runDetailActions` reads as INDETERMINATE and therefore offers --
+            // the same call src/deploy/actions.ts makes, for the same reason.
+            ...(this.roleVisibility !== undefined ? { visibility: this.roleVisibility } : {}),
+            // Likewise absent until the status read returns: "not asked" is not
+            // "nothing offered", and blanking the actions for that instant
+            // would read as a cluster that lost its deploy console.
+            ...(this.pipeline === undefined
+              ? {}
+              : { pipelineOffers: this.pipeline.actions.map((action) => action.id) }),
+          }),
+          nowMs: Date.now(),
+          outcome: this.outcome,
+          error: this.error,
+        });
+      }
       case "chooseTag":
         return renderChooseTag({
           instance,

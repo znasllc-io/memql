@@ -27,8 +27,20 @@
 // negatively for the kind that must not, because "uninstall is restricted to
 // local rows" is only half-proved by showing it on a local row.
 //
+// AND THE ROW MOVED AGAIN (memql#4426). Uninstall, Repair, Rebuild From
+// Checkout, Open Local Checkout and Create Deployment were contributed to
+// `view/item/context` scoped by the Deployments instance ROW's contextValue.
+// That row no longer exists -- the view renders the selected cluster's runs
+// flat -- so those five clauses now match nothing and would have vanished from
+// the product with every test in this file still green, which is precisely the
+// failure its header describes one paragraph up. They are contributed to
+// `view/title` instead, scoped by `memql.deploymentsInstance`: a context key
+// carrying the SAME three values the row's contextValue carried, because
+// `view/title` clauses are evaluated with no `viewItem` in scope. The
+// assertions below follow them, and the negative ones stay where they were.
+//
 // THE GROUP IS PART OF THE CLAIM. Remove is the inline trash can; Uninstall is
-// a deliberate reach into the context menu and is contributed to `lifecycle`.
+// a deliberate reach into the menu and is contributed to `lifecycle`.
 // That separation is the whole of the design decision these two commands rest
 // on (memql#3476, D1): removing a cluster from the list is routine and
 // reversible, taking a k3d cluster, a hosts-file block and a CA off the machine
@@ -36,12 +48,20 @@
 // the second one. An `inline` group on Uninstall would put it back under that
 // cursor, so it is asserted against by name.
 //
-// Refs: #3479 #3476 #3466
+// Refs: #4426 #4423 #3479 #3476 #3466
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+// Imported rather than spelled, so this file tracks the CODE and fails only
+// when the manifest drifts from it. A hardcoded key would fail spuriously on a
+// rename that kept both sides in step, and -- worse -- would keep passing if
+// the code stopped publishing the key at all, which is the failure that makes
+// a menu entry silently unreachable.
+import { CLUSTER_SELECTED_KEY } from "../src/state/connectionContext.js";
+import { DEPLOYMENTS_INSTANCE_KEY } from "../src/state/deploymentsCatalog.js";
 
 // dist-test/test/<name>.js is where esbuild.test.js puts this file, so the
 // manifest is two levels up. Read at runtime rather than imported: it is the
@@ -70,6 +90,7 @@ interface Manifest {
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as Manifest;
 const itemMenu = manifest.contributes.menus["view/item/context"] ?? [];
+const titleMenu = manifest.contributes.menus["view/title"] ?? [];
 
 /**
  * A row as the workbench sees it when it evaluates a `when` clause: the view
@@ -79,9 +100,31 @@ type WhenContext = Record<string, string | boolean>;
 
 const REMOTE_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlCluster" };
 const LOCAL_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlLocalCluster" };
-// The row uninstall MOVED TO (memql#3742). Taking a cluster off the machine is
-// a Deployments action; the Clusters view is connections, and its rows now
-// offer nothing that changes the machine.
+// Where uninstall lives NOW (memql#3742, then memql#4426). Taking a cluster off
+// the machine is a Deployments action -- the Clusters view is connections, and
+// its rows offer nothing that changes the machine -- and within Deployments it
+// is a TITLE menu entry scoped by the selection, because the instance row it
+// used to hang off has been replaced by the run timeline.
+//
+// The three values are the ones `instanceContextValue` produces, unchanged from
+// when they labelled a row: the vocabulary moved key, it was not rewritten.
+const LOCAL_INSTANCE_SELECTED: WhenContext = {
+  view: "memqlDeployments",
+  [DEPLOYMENTS_INSTANCE_KEY]: "memqlLocalInstance",
+};
+const ABSENT_INSTANCE_SELECTED: WhenContext = {
+  view: "memqlDeployments",
+  [DEPLOYMENTS_INSTANCE_KEY]: "memqlLocalInstanceAbsent",
+};
+const REMOTE_INSTANCE_SELECTED: WhenContext = {
+  view: "memqlDeployments",
+  [DEPLOYMENTS_INSTANCE_KEY]: "memqlRemoteInstance",
+};
+// Nothing selected: the key is unset, which is what every `==` clause fails
+// against and what leaves the welcome as the only thing on the view.
+const NOTHING_SELECTED: WhenContext = { view: "memqlDeployments" };
+// The two Clusters-view instance rows this file used to name, kept so the
+// negative assertions still speak the language of the surface they left.
 const LOCAL_INSTANCE_ROW: WhenContext = {
   view: "memqlDeployments",
   viewItem: "memqlLocalInstance",
@@ -195,6 +238,10 @@ function entriesFor(command: string): MenuEntry[] {
   return itemMenu.filter((entry) => entry.command === command);
 }
 
+function titleEntriesFor(command: string): MenuEntry[] {
+  return titleMenu.filter((entry) => entry.command === command);
+}
+
 // The evaluator is the instrument, so it is calibrated before it is trusted. A
 // broken parser that answered false to everything would make every "does not
 // offer" assertion below pass for the wrong reason.
@@ -218,12 +265,101 @@ test("the when-clause evaluator answers the shapes this manifest uses", () => {
   );
 });
 
-test("uninstall is offered on the Deployments local-instance row", () => {
-  const entries = entriesFor("memql.clusters.uninstall");
-  assert.equal(entries.length, 1, "expected exactly one uninstall entry in view/item/context");
+test("uninstall is offered from the Deployments title menu when a local cluster is selected", () => {
+  const entries = titleEntriesFor("memql.clusters.uninstall");
+  assert.equal(entries.length, 1, "expected exactly one uninstall entry in view/title");
   assert.ok(
-    matches(entries[0], LOCAL_INSTANCE_ROW),
-    `uninstall does not reach a memqlLocalInstance row: when = ${String(entries[0].when)}`
+    matches(entries[0], LOCAL_INSTANCE_SELECTED),
+    `uninstall does not reach a selected local instance: when = ${String(entries[0].when)}`
+  );
+});
+
+test("uninstall reaches NOTHING but a selected, installed local cluster", () => {
+  // The three ways the key can be set, and the one way it can be unset. Each is
+  // a machine an uninstall would be wrong on: nothing is installed, the cluster
+  // is somebody else's, or no cluster is chosen at all.
+  const entries = titleEntriesFor("memql.clusters.uninstall");
+  for (const context of [ABSENT_INSTANCE_SELECTED, REMOTE_INSTANCE_SELECTED, NOTHING_SELECTED]) {
+    assert.deepEqual(
+      entries.filter((entry) => matches(entry, context)),
+      [],
+      `uninstall reached ${String(context[DEPLOYMENTS_INSTANCE_KEY] ?? "an unselected view")}`
+    );
+  }
+});
+
+test("the five instance actions LEFT view/item/context and none came back", () => {
+  // THE DELETION GUARD for memql#4426. The Deployments view renders runs, not
+  // instances, so no row in it carries a `memqlLocalInstance` contextValue any
+  // more. A clause still scoped to one matches nothing and is invisible in the
+  // product -- and, unlike a deleted entry, it LOOKS present in the manifest.
+  // That is the exact failure mode this file's header is about, so the move is
+  // asserted from the side it left as well as the side it arrived at.
+  const moved = [
+    "memql.clusters.uninstall",
+    "memql.clusters.repair",
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+    "memql.deployments.createDeployment",
+  ];
+  for (const command of moved) {
+    for (const row of [LOCAL_INSTANCE_ROW, ABSENT_INSTANCE_ROW]) {
+      assert.deepEqual(
+        entriesFor(command).filter((entry) => matches(entry, row)),
+        [],
+        `${command} is still scoped to a Deployments instance row, which no longer exists`
+      );
+    }
+  }
+});
+
+test("every action the instance row offered is reachable from the title menu", () => {
+  // "Every action reachable before is reachable after" is an acceptance item of
+  // memql#4426, and this is it as an assertion rather than as a claim in a PR
+  // body. The pairing is the one the old rows had: an ABSENT local cluster
+  // could only be created; an INSTALLED one could also be repaired, rebuilt,
+  // opened at its checkout and uninstalled.
+  const installed = [
+    "memql.clusters.uninstall",
+    "memql.clusters.repair",
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+  ];
+  for (const command of installed) {
+    assert.ok(
+      titleEntriesFor(command).some((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
+      `${command} is unreachable: it left the instance row and did not arrive in the title menu`
+    );
+  }
+  assert.ok(
+    titleEntriesFor("memql.deployments.createDeployment").some((entry) =>
+      matches(entry, ABSENT_INSTANCE_SELECTED)
+    ),
+    "create deployment is unreachable on a machine with nothing installed"
+  );
+});
+
+test("opening the instance page is offered whenever a cluster is selected", () => {
+  // The route the instance ROW used to be: its `command` opened the page. With
+  // the row gone the only way back to it is this entry, so it is gated on the
+  // connection key alone -- every selected cluster has an instance page, local
+  // or remote.
+  const entries = titleEntriesFor("memql.deployments.open");
+  assert.equal(entries.length, 1, "expected exactly one open-instance entry in view/title");
+  for (const context of [
+    LOCAL_INSTANCE_SELECTED,
+    ABSENT_INSTANCE_SELECTED,
+    REMOTE_INSTANCE_SELECTED,
+  ]) {
+    assert.ok(
+      matches(entries[0], { ...context, [CLUSTER_SELECTED_KEY]: true }),
+      `the instance page is unreachable for ${String(context[DEPLOYMENTS_INSTANCE_KEY])}`
+    );
+  }
+  assert.equal(
+    matches(entries[0], NOTHING_SELECTED),
+    false,
+    "the instance page is offered with no cluster selected"
   );
 });
 
@@ -249,12 +385,30 @@ test("uninstall is NOT offered on a machine with nothing installed", () => {
   );
 });
 
-test("repair moved with it, and to the same row", () => {
-  const entries = entriesFor("memql.clusters.repair");
-  assert.equal(entries.length, 1, "expected exactly one repair entry in view/item/context");
-  assert.ok(matches(entries[0], LOCAL_INSTANCE_ROW));
-  for (const row of [LOCAL_ROW, REMOTE_ROW, ABSENT_INSTANCE_ROW]) {
-    assert.equal(matches(entries[0], row), false, String(row["viewItem"]));
+test("repair moved with it, and to the same place", () => {
+  // Repair is in TWO title menus and that is deliberate rather than a
+  // duplicate: the Clusters view has carried it since memql#3742 (group
+  // 1_manage) because that is where an operator with a broken cluster looks
+  // first, and Deployments carries it beside the rest of the instance
+  // lifecycle. Both are asserted so neither can be dropped as "the other one
+  // has it".
+  const entries = titleEntriesFor("memql.clusters.repair");
+  assert.ok(
+    entries.some((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
+    "repair does not reach a selected local instance"
+  );
+  assert.ok(
+    entries.some((entry) => matches(entry, { view: "memqlClusters" })),
+    "repair left the Clusters title menu"
+  );
+  const deployments = entries.filter((entry) => (entry.when ?? "").includes("memqlDeployments"));
+  assert.equal(deployments.length, 1, "expected exactly one Deployments repair entry");
+  for (const context of [ABSENT_INSTANCE_SELECTED, REMOTE_INSTANCE_SELECTED, NOTHING_SELECTED]) {
+    assert.equal(
+      matches(deployments[0], context),
+      false,
+      String(context[DEPLOYMENTS_INSTANCE_KEY] ?? "nothing selected")
+    );
   }
 });
 

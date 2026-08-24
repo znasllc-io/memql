@@ -284,7 +284,18 @@ export const PROMOTED_NAMESPACE = "(no namespace)";
 
 export type CatalogState =
   | { kind: "loading" }
-  | { kind: "notConnected" }
+  /**
+   * A cluster IS selected and this editor holds no live session to it -- the
+   * dial is in flight, or it failed (memql#4425).
+   *
+   * It replaces `notConnected`, which drew a synthetic "Not connected" row.
+   * That row is now the view's `viewsWelcome` entry, and a row cannot do the
+   * welcome's job: VS Code renders welcome content ONLY over an empty tree, so
+   * the row silently suppressed the very message it duplicated. What is left is
+   * the case the welcome must NOT cover -- a cluster was chosen and is not
+   * answering, which is a fact about something and belongs in a row.
+   */
+  | { kind: "unreachable" }
   /** The cluster does not speak `ListConstructs`. Stated, never blank. */
   | { kind: "versionMismatch"; message: string }
   /** The read failed for some other reason; the engine's own words. */
