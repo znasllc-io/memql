@@ -207,7 +207,39 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// actor, a narrower credential admitted only to the concepts naming
 		// that connector; the two are stamped separately and the call sites
 		// say which is in scope.
-		"component/datasync":             "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows; mirror writes use the narrower connector actor instead (epic memql#4378)",
+		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows; mirror writes use the narrower connector actor instead (epic memql#4378)",
+		// The RELEASE CUTTER (epic memql#4434). REQUEST-DERIVED, and the
+		// fourth exception -- stated rather than borrowed, because the caller
+		// here is neither a connector nor a boot path: it is a signed-in human
+		// clicking a button in the portal, which is the shape call_origin.go
+		// warns about in as many words.
+		//
+		// WHAT EARNS IT is a precondition that is ASSERTED rather than merely
+		// stated here: every path that reaches the stamp is downstream of the
+		// Go owner wall, in the same function, before any network call. That
+		// is the adminops shape, and it gets the adminops treatment --
+		// integrations/release/owner_wall_test.go drives a non-owner actor
+		// through both capabilities and asserts the engine is never reached,
+		// against a REAL engine actor rather than a mock.
+		//
+		// WHAT IT REACHES is narrower than every entry above, and the
+		// narrowness is structural rather than incidental. Three constructs:
+		// createReleaseCut, updateReleaseCutStatus and createAuditEvent. None
+		// of them returns a row to a caller, so there is no directory-grade
+		// PII here and nothing to enumerate -- the widest thing a leaked
+		// context could do is append to an append-only release history that
+		// an owner may already append to. The one READ it stamps
+		// (Store.CutByVersion, over the owner-gated releaseCuts query) runs on
+		// behalf of a caller the wall has already admitted as an owner, so the
+		// stamp buys it nothing the caller did not already have.
+		//
+		// The stamp is applied INLINE in executeServerOnly, which returns a
+		// RESULT and never a context -- so no later frame can inherit the mark
+		// and open a different @serverOnly construct, which is the memql#2989
+		// escalation. One seam, for the identity store's reason: a stamp
+		// hand-rolled per call site is a stamp the next call site copies
+		// slightly wrong, and this gate polices packages rather than sites.
+		"integrations/release":           "cutting a release of MemQL itself -- REQUEST-DERIVED, earned by every stamped path sitting downstream of the Go owner wall in the same function (asserted by integrations/release/owner_wall_test.go), and bounded to two append-only bookkeeping writes plus an audit event (epic memql#4434)",
 		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes; its @serverOnly mutations exist because the concept is a mirror, and the connector actor stamped beside internal origin bounds the reach to that mirror alone (epic memql#4378)",
 		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
