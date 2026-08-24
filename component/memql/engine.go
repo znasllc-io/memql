@@ -1696,6 +1696,15 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// within seconds (no restart). Scoped to the engine lifecycle context.
 	e.StartAuthoringPromoteSubscriber(ctx)
 
+	// epic memql#4440: wire LIVE cross-node re-resolution of AI provider auth.
+	// Provider auth resolves once per process at boot, so a credential seeded
+	// through the portal is invisible to every running node until one of them
+	// is told to look again -- and the portal's Apply reaches exactly one
+	// replica. The owner-gated `providersReload` builtin broadcasts
+	// providers.reload.<requestId>; this subscriber re-resolves on receipt.
+	// Scoped to the engine lifecycle context, like its siblings above.
+	e.StartProvidersReloadSubscriber(ctx)
+
 	// memql#2163: wire LIVE cross-node propagation of durable DEMOTIONS, the
 	// inverse of the promote subscriber above. A durable demote on any node
 	// broadcasts authoring.demote.<bundleId>; this subscriber removes the

@@ -405,6 +405,28 @@ const (
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
 	BuiltinExecutorDataOrigins = "dataOrigins"
+	// BuiltinExecutorProviderAuthStatus projects every registered AI
+	// provider's availability and credential SOURCE from the live registry
+	// (epic memql#4440). Virtual: no row is persisted, and no credential is
+	// ever in the payload. Owner-gated in Go. See
+	// provider_auth_status_read.go.
+	BuiltinExecutorProviderAuthStatus = "providerAuthStatus"
+	// BuiltinExecutorProvidersReload re-resolves provider auth on EVERY node
+	// (epic memql#4440). Owner-gated in Go; writes an audit line; broadcasts
+	// over the mesh. See provider_reload_propagate.go.
+	BuiltinExecutorProvidersReload = "providersReload"
+	// BuiltinExecutorProviderVerify makes ONE authenticated, token-free call
+	// to a provider's vendor and reports whether the credential was accepted
+	// (epic memql#4440). Owner-gated in Go. See provider_verify.go.
+	BuiltinExecutorProviderVerify = "providerVerify"
+	// BuiltinExecutorProviderKeySet seals one vendor API key into a
+	// globalSecret row under the name the resolver tries (epic memql#4440).
+	// Owner-gated; write-only -- there is no read-back call anywhere.
+	BuiltinExecutorProviderKeySet = "providerKeySet"
+	// BuiltinExecutorProviderFederationSet writes Anthropic's workload
+	// identity federation ids as globalVariable rows, refusing a partial set
+	// (epic memql#4440). Owner-gated. None of the five is a credential.
+	BuiltinExecutorProviderFederationSet = "providerFederationSet"
 )
 
 // FilterNode aliases ComparisonExpression for backwards compatibility with earlier plan designs.

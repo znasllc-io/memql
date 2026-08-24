@@ -22,14 +22,33 @@ name: install-e2e
 #   * The receipt survives the round trip and is what the uninstall reads its
 #     --path and --pre-existing from. It is uploaded as an artifact so a
 #     failure can be read afterwards.
-#   * THE PROVIDER-KEY GATE HOLDS IN BOTH DIRECTIONS (memql#3473, #3507). The
-#     round-trip job proves a good key lets everything downstream proceed; the
-#     `refused-key` job proves a REFUSED one leaves all four surfaces
-#     untouched. The second is the half the gate exists for -- an operator is
-#     never asked for a sudo password and then told their key is wrong -- and
-#     it is the half a unit test structurally cannot reach: installGraph.test.ts
-#     asserts the graph DOCUMENT declares the edges, but only an execution
-#     shows the executor still honours them.
+#   * THE KEYLESS INSTALL IS THE DEFAULT PATH, AND IT IS EXERCISED FIRST
+#     (epic memql#4440). `keyless-round-trip` runs the whole graph with no
+#     `--provider-key-file` at all and asserts TWO things a unit test cannot:
+#     that the install still changes the machine and reverses cleanly, and
+#     that NO PROCESS ON THE RUNNER CONTACTED AN AI VENDOR -- proved by
+#     running no stub and pointing the vendor base URL at a closed port, so
+#     any call at all would fail loudly rather than silently succeed against
+#     something helpful.
+#
+#     It runs first and it is the ordinary case: after memql#4441 the wizard
+#     asks for no key, so this is what an operator's install actually does.
+#     A future step that quietly demands one breaks CI here rather than
+#     breaking an operator.
+#
+#   * THE PROVIDER-KEY GATE HOLDS IN BOTH DIRECTIONS (memql#3473, #3507), for
+#     the operator who DID supply a key. The round-trip job proves a good key
+#     lets everything downstream proceed; the `refused-key` job proves a
+#     REFUSED one leaves all four surfaces untouched. The second is the half
+#     the gate exists for -- an operator is never asked for a sudo password
+#     and then told their key is wrong -- and it is the half a unit test
+#     structurally cannot reach: installGraph.test.ts asserts the graph
+#     DOCUMENT declares the edges, but only an execution shows the executor
+#     still honours them.
+#
+#     NEITHER KEYED JOB IS REDUNDANT NOW. The keyless job cannot exercise the
+#     verify path (there is nothing to verify), and the keyed jobs cannot
+#     exercise the skip. Three jobs, three distinct claims.
 #
 # ========================== WHAT IT DOES NOT PROVE ========================
 #
@@ -120,8 +139,196 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ==========================================================================
+  # THE DEFAULT PATH: no key, no vendor (epic memql#4440)
+  # ==========================================================================
+  #
+  # Deliberately FIRST, because it is the ordinary install. The two keyed jobs
+  # below cover the operator who supplied a credential, which after this epic
+  # is the exception.
+  #
+  # WHAT MAKES THE VENDOR-SILENCE ASSERTION REAL. No stub is started, and
+  # `providerKey.base-url` points at a port nothing is listening on. So the
+  # claim is not "we saw no traffic" -- which a passive check could never
+  # establish from inside a job -- it is that the graph completed while any
+  # vendor call would have failed with a connection refusal. The install
+  # succeeding IS the evidence.
+  keyless-round-trip:
+    name: keyless install -> uninstall -> diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+
+      - name: Tag this checkout so the install has a real tag to pin
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG="e2e-${GITHUB_SHA::12}"
+          git -c user.email=ci@example.com -c user.name=ci tag -f "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Same reasoning as the keyed job: a preinstalled tool changes what the
+      # receipt records, so the baseline must describe the machine the install
+      # actually runs against.
+      - name: Take preinstalled pinned tools out of the way
+        run: |
+          set -euo pipefail
+          for tool in k3d kubectl mkcert; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              found="$(command -v "$tool")"
+              sudo mv "$found" "$RUNNER_TEMP/${tool}.preinstalled"
+              echo "moved preinstalled $tool aside (was $found)"
+            fi
+          done
+
+      - name: Build the install CLI
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run build:install-cli
+
+      - name: Nothing is listening where a vendor would be
+        run: |
+          set -euo pipefail
+          # Proves the negative is REACHABLE. If something were answering on
+          # 8099 -- a leftover stub, a runner-image service -- this job would
+          # pass while proving nothing about vendor silence.
+          if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:8099/v1/models; then
+            echo "ERROR: something is answering on 127.0.0.1:8099; the vendor-silence claim below would be vacuous" >&2
+            exit 1
+          fi
+          echo "127.0.0.1:8099 is closed, as it must be"
+
+      - name: Snapshot the machine BEFORE
+        run: ./scripts/install/e2e-baseline.sh --mode=snapshot --out="$RUNNER_TEMP/before.txt"
+
+      # NO --provider-key-file. That is the whole difference from the job
+      # below, and it is what makes the graph skip `providerKey`.
+      #
+      # The base-url param IS still passed, pointed at the closed port, and it
+      # is a safety net rather than setup: if a regression ever made the step
+      # RUN here, its default base URL is the real vendor, and this job would
+      # quietly make an unauthenticated call to Anthropic from CI. Pinned to
+      # 127.0.0.1 it fails instead, loudly, which is the outcome a test about
+      # vendor silence should have.
+      - name: Install, with no AI provider key
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js install \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --repo="$GITHUB_WORKSPACE" \
+              --tag="${{ steps.tag.outputs.tag }}" \
+              --skip=localCA \
+              --param=providerKey.base-url=http://127.0.0.1:8099 \
+              --timeout=600 \
+              --json > "$RUNNER_TEMP/report.json"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/install-receipt.json"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/report.json" 2>/dev/null || true
+
+      - name: Show what the run reported
+        if: always()
+        run: cat "$RUNNER_TEMP/report.json" || true
+
+      # THE SKIP, PINNED. `skipped` with the stated reason -- and crucially
+      # NOT `failed`, which is what an unreachable vendor would produce if the
+      # step had run.
+      - name: providerKey was SKIPPED, with a reason
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.outcomes[] | select(.id=="providerKey") | .status' "$RUNNER_TEMP/report.json")"
+          reason="$(jq -r '.outcomes[] | select(.id=="providerKey") | .reason // ""' "$RUNNER_TEMP/report.json")"
+          echo "providerKey: status=$status reason=$reason"
+          [ "$status" = "skipped" ] || {
+            echo "ERROR: providerKey status is '$status', expected 'skipped'. " \
+                 "'failed' means the step RAN and could not reach the vendor -- which is the " \
+                 "vendor call this job exists to prove does not happen." >&2
+            exit 1
+          }
+          case "$reason" in
+            *"configure AI providers in the portal"*) ;;
+            *) echo "ERROR: the skip does not state why: '$reason'" >&2; exit 1 ;;
+          esac
+          # SATISFIED, asserted directly as well as through its consequence
+          # below. The consequence check is the stronger test; this one names
+          # the field, so a failure points at the line to fix rather than at
+          # eight steps that did not run.
+          satisfied="$(jq -r '.outcomes[] | select(.id=="providerKey") | .satisfied' "$RUNNER_TEMP/report.json")"
+          [ "$satisfied" = "true" ] || {
+            echo "ERROR: the providerKey skip is not marked satisfied (got '$satisfied'). " \
+                 "Dependents block on an unsatisfied skip, so the whole install is about to be skipped." >&2
+            exit 1
+          }
+
+      # THE CASCADE THAT MUST NOT HAPPEN. Every mutating step declares
+      # dependsOn:[..., providerKey], so a skip that did not mark itself
+      # SATISFIED would skip the entire install -- and the round-trip diff
+      # below would pass, because a machine nothing touched reverses
+      # perfectly. This assertion is what stops that reading as success.
+      - name: Every other step actually RAN
+        run: |
+          set -euo pipefail
+          for id in detect dockerAccess toolK3d toolKubectl toolMkcert hostsBlock \
+                    browserTrust stackCheckout; do
+            status="$(jq -r --arg id "$id" '.outcomes[] | select(.id==$id) | .status' "$RUNNER_TEMP/report.json")"
+            [ "$status" = "ok" ] || {
+              echo "ERROR: $id is '$status' on a keyless install. The providerKey skip cascaded " \
+                   "through the dependency graph and the install did nothing." >&2
+              exit 1
+            }
+          done
+          echo "every mutating step ran"
+
+      - name: The install actually changed the machine
+        run: |
+          set -euo pipefail
+          if ./scripts/install/e2e-baseline.sh --mode=compare \
+              --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/during.txt"; then
+            echo "ERROR: the keyless install left the machine identical" >&2
+            exit 1
+          fi
+          echo "the keyless install changed the machine, as it must"
+
+      - name: Uninstall
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js uninstall \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --timeout=600
+
+      - name: Snapshot the machine AFTER, and diff
+        run: |
+          ./scripts/install/e2e-baseline.sh --mode=compare \
+            --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/after.txt"
+
+      - name: Upload the receipt and the snapshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-e2e-keyless-evidence
+          path: |
+            ${{ runner.temp }}/before.txt
+            ${{ runner.temp }}/during.txt
+            ${{ runner.temp }}/after.txt
+            ${{ runner.temp }}/report.json
+            ${{ runner.temp }}/install-receipt.json
+          if-no-files-found: warn
+
+  # ==========================================================================
+  # THE KEYED PATH: an operator who supplied a credential
+  # ==========================================================================
   round-trip:
-    name: install -> uninstall -> diff
+    name: keyed install -> uninstall -> diff
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

@@ -6,6 +6,7 @@ import { Navigate } from "react-router-dom";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { viewPath } from "../views/urls";
 import { KeysPage } from "./KeysPage";
+import { ProvidersPage } from "./ProvidersPage";
 import { SettingsPage } from "./SettingsPage";
 import { TokensPage } from "./TokensPage";
 
@@ -51,6 +52,12 @@ export function AdminRoutes(): ReactNode {
       <Route path="tokens" element={<TokensPage />} />
       <Route path="keys" element={<KeysPage />} />
       <Route path="settings" element={<SettingsPage />} />
+      {/* Owner-only, unlike its siblings (epic memql#4440): the engine refuses
+          every construct behind it below cluster owner, and the tab is absent
+          rather than disabled for anyone else. The ROUTE stays reachable --
+          a bookmark should land on the page saying why, not on a Not Found
+          that reads as "the capability is gone". */}
+      <Route path="providers" element={<ProvidersPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );

@@ -221,7 +221,14 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 	}
 
 	// Pass 2: resolve extends + instantiate client + register child.
+	//
+	// The availability tally is accumulated rather than logged as it goes
+	// (epic memql#4440): whether an unavailable provider deserves a WARN
+	// depends on whether ANY other provider resolved, which is not known
+	// until the walk finishes. See reportProviderAvailability.
 	total := 0
+	available := 0
+	var unavailable []unavailableProvider
 	for _, p := range all {
 		if p.cfg.Base {
 			if !p.cfg.Disabled {
@@ -252,10 +259,12 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 		resolvedAuth, authErr := resolveAuthPlaceholders(entry.Config.Auth)
 		if authErr != nil {
 			entry.err = authErr
-			if logger != nil {
-				logger.Warn("memql.unifiedProviderLoader: auth resolution failed; registered as unavailable",
-					"provider", entry.Config.Name, "error", authErr)
-			}
+			unavailable = append(unavailable, unavailableProvider{
+				name:   entry.Config.Name,
+				kind:   entry.Config.Type,
+				reason: "auth resolution failed",
+				err:    authErr,
+			})
 			registry.setEntry(entry)
 			total++
 			continue
@@ -264,19 +273,83 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 		client, clientErr := newAIProvider(entry.Config)
 		if clientErr != nil {
 			entry.err = clientErr
-			if logger != nil {
-				logger.Warn("memql.unifiedProviderLoader: provider client construction failed; registered as unavailable",
-					"provider", entry.Config.Name, "type", entry.Config.Type, "error", clientErr)
-			}
+			unavailable = append(unavailable, unavailableProvider{
+				name:   entry.Config.Name,
+				kind:   entry.Config.Type,
+				reason: "provider client construction failed",
+				err:    clientErr,
+			})
 		} else {
 			entry.Client = client
 			entry.Available = true
+			available++
 		}
 		registry.setEntry(entry)
 		total++
 	}
 
+	reportProviderAvailability(logger, available, unavailable)
 	return total
+}
+
+// unavailableProvider is one provider that registered but cannot be called,
+// held until the whole tree has been walked. Collected rather than logged in
+// place because the LEVEL these are reported at depends on the final tally --
+// see reportProviderAvailability.
+type unavailableProvider struct {
+	name   string
+	kind   string
+	reason string
+	err    error
+}
+
+// KeylessBootSummary is the one line a node with no AI provider configured
+// emits at boot (epic memql#4440, design D3).
+//
+// Exported so the boot test can assert on the exact sentence rather than on a
+// regexp that would still pass if the guidance half were dropped -- the
+// guidance is the point. An operator reading it must learn where to go, or
+// the quieting has traded a wall of warnings for silence.
+const KeylessBootSummary = "AI providers not configured; configure in the portal: Settings -> AI providers"
+
+// reportProviderAvailability says what happened to the providers that could
+// not be made callable, at the level the SHAPE of the outcome deserves.
+//
+// TWO STATES, AND THE DISTINCTION IS THE WHOLE FEATURE.
+//
+//   - NOTHING RESOLVED. Every provider is unavailable, which after epic
+//     memql#4440 is the state a freshly installed cluster is in by design:
+//     installing spends no inference and asks for no key. Emitting one warning
+//     per provider -- a dozen of them, every boot, on every node -- trains an
+//     operator to ignore this component's warnings, which is exactly when the
+//     one that matters arrives. So: ONE line, at INFO, naming the count and
+//     where to fix it. The per-provider detail moves to DEBUG and stays
+//     available in full through `memql provider-auth check`.
+//
+//   - SOME RESOLVED, SOME DID NOT. Half-configured is the state worth
+//     shouting about: somebody seeded a credential and it did not take, or a
+//     vendor lane was half-migrated. The per-provider WARNs stay exactly as
+//     they were.
+//
+// Silence therefore means ONE thing and one thing only -- "none configured" --
+// and that is the state the portal page now owns. If this ever starts
+// swallowing a partial failure, the risk D3 named has materialised.
+func reportProviderAvailability(logger *slog.Logger, available int, unavailable []unavailableProvider) {
+	if logger == nil || len(unavailable) == 0 {
+		return
+	}
+	if available == 0 {
+		logger.Info(KeylessBootSummary, "component", ComponentName, "unavailable", len(unavailable))
+		for _, u := range unavailable {
+			logger.Debug("memql.unifiedProviderLoader: "+u.reason+"; registered as unavailable",
+				"provider", u.name, "type", u.kind, "error", u.err)
+		}
+		return
+	}
+	for _, u := range unavailable {
+		logger.Warn("memql.unifiedProviderLoader: "+u.reason+"; registered as unavailable",
+			"provider", u.name, "type", u.kind, "error", u.err)
+	}
 }
 
 // LoadUnifiedTools walks the new tree, parses every `tool NAME

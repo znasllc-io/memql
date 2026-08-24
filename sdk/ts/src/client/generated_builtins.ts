@@ -548,6 +548,128 @@ QueryClient.prototype.libraryTrainFile = function (this: QueryClient, args: Libr
   return this.executeNamed("libraryTrainFile", buildLibraryTrainFile(args), opts);
 };
 
+/** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
+export interface ProviderAuthStatusArgs {
+}
+
+export function buildProviderAuthStatus(args: ProviderAuthStatusArgs): string {
+  void args;
+  return "builtin providerAuthStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerAuthStatus(args?: ProviderAuthStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerAuthStatus = function (this: QueryClient, args: ProviderAuthStatusArgs = {} as ProviderAuthStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerAuthStatus", buildProviderAuthStatus(args), opts);
+};
+
+/** Write Anthropic workload identity federation ids as v1:platform:globalVariable rows -- the recommended path, because no key is at rest anywhere: each pod exchanges its own projected token for a short-lived bearer. Plaintext rows are correct here; none of these five is a credential. All-or-none is enforced BEFORE the write (the workspace id excepted, which Anthropic needs only for a multi-workspace rule): a partial set refuses BOOT, so accepting one here would take the fleet down at its next restart, hours from the save that caused it. Owner-only. */
+export interface ProviderFederationSetArgs {
+  /** The OIDC federation rule id (fdrl_...) the token exchange names. */
+  ruleId?: string;
+  /** UUID of the Anthropic organization the rule belongs to. */
+  organizationId?: string;
+  /** The service account the rule maps this cluster onto. */
+  serviceAccountId?: string;
+  /** Optional. Anthropic requires it only when a rule spans more than one workspace, so it is outside the all-or-none set. */
+  workspaceId?: string;
+  /** Path to the pod's projected Kubernetes token, mounted for the Anthropic audience. */
+  identityTokenFile?: string;
+}
+
+export function buildProviderFederationSet(args: ProviderFederationSetArgs): string {
+  const parts: string[] = [];
+  if (args.ruleId !== undefined) parts.push("ruleId: " + renderMemQLValue(args.ruleId));
+  if (args.organizationId !== undefined) parts.push("organizationId: " + renderMemQLValue(args.organizationId));
+  if (args.serviceAccountId !== undefined) parts.push("serviceAccountId: " + renderMemQLValue(args.serviceAccountId));
+  if (args.workspaceId !== undefined) parts.push("workspaceId: " + renderMemQLValue(args.workspaceId));
+  if (args.identityTokenFile !== undefined) parts.push("identityTokenFile: " + renderMemQLValue(args.identityTokenFile));
+  return "builtin providerFederationSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerFederationSet(args: ProviderFederationSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerFederationSet = function (this: QueryClient, args: ProviderFederationSetArgs = {} as ProviderFederationSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerFederationSet", buildProviderFederationSet(args), opts);
+};
+
+/** Seal one vendor API key into a v1:platform:globalSecret row, under the exact name the auth resolver tries. WRITE-ONLY: the reply carries the row name and a fingerprint, never the value, and no read-back call exists. The VENDOR is the argument rather than the row name, so an operator cannot mistype a name the resolver never tries and watch a correctly-entered key do nothing. Does NOT reload -- seeding and applying are separate acts, so a mistyped key cannot take the fleet down as it is saved. Owner-only. */
+export interface ProviderKeySetArgs {
+  /** Which vendor the key belongs to: anthropic or openai. */
+  vendor: string;
+  /** The key itself. Trimmed, refused when empty, sealed with the cluster master key before it touches a row, and never returned. */
+  apiKey: string;
+}
+
+export function buildProviderKeySet(args: ProviderKeySetArgs): string {
+  const parts: string[] = [];
+  parts.push("vendor: " + renderMemQLValue(args.vendor));
+  parts.push("apiKey: " + renderMemQLValue(args.apiKey));
+  return "builtin providerKeySet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerKeySet(args: ProviderKeySetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerKeySet = function (this: QueryClient, args: ProviderKeySetArgs = {} as ProviderKeySetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerKeySet", buildProviderKeySet(args), opts);
+};
+
+/** Make ONE authenticated, token-free call to a provider's vendor and report whether the credential THIS node resolved was accepted. Lists models -- the cheapest authenticated request either vendor serves -- so it can be pressed as often as an operator likes without spending inference. A rejected key is an ANSWER (verified=false with the vendor's reason), not an error. Owner-only. */
+export interface ProviderVerifyArgs {
+  /** The registered provider entry to verify, by name. */
+  provider: string;
+}
+
+export function buildProviderVerify(args: ProviderVerifyArgs): string {
+  const parts: string[] = [];
+  parts.push("provider: " + renderMemQLValue(args.provider));
+  return "builtin providerVerify(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providerVerify(args: ProviderVerifyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providerVerify = function (this: QueryClient, args: ProviderVerifyArgs = {} as ProviderVerifyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providerVerify", buildProviderVerify(args), opts);
+};
+
+/** Re-resolve AI provider credentials from the graph on EVERY node, so a key seeded through the portal takes effect fleet-wide with no restart. Reloads this node synchronously and broadcasts the same request over the mesh; each node builds a replacement registry fully and swaps it in atomically, so in-flight calls are unaffected and a node that cannot build one keeps what it had. Writes a providers_reloaded audit line naming who asked. Owner-only. */
+export interface ProvidersReloadArgs {
+  /** Ties every node's log line back to one Apply. Generated when omitted. */
+  requestId?: string;
+}
+
+export function buildProvidersReload(args: ProvidersReloadArgs): string {
+  const parts: string[] = [];
+  if (args.requestId !== undefined) parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin providersReload(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    providersReload(args: ProvidersReloadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.providersReload = function (this: QueryClient, args: ProvidersReloadArgs = {} as ProvidersReloadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("providersReload", buildProvidersReload(args), opts);
+};
+
 /** Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
 export interface RecallArgs {
   text: string;

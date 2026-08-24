@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { PageHeader, Tabs } from "../ui";
-import { adminPath, ADMIN_SURFACES, type AdminSurface } from "./urls";
+import { adminPath, adminSurfacesFor, type AdminSurface } from "./urls";
 
 // The chrome the admin screens share.
 //
@@ -52,7 +52,11 @@ export function AdminFrame({
       <PageHeader
         eyebrow={
           <>
-            owner or admin
+            {/* THE SURFACE'S OWN FLOOR, not the console's. Most screens here
+                are owner-or-admin; AI providers is owner-only (epic
+                memql#4440), and an eyebrow that said otherwise would tell an
+                admin the empty page in front of them was a bug. */}
+            {surface.ownerOnly === true ? "owner" : "owner or admin"}
             <span aria-hidden="true"> · </span>
             {resolved
               ? role === ""
@@ -72,7 +76,7 @@ export function AdminFrame({
       <div className="-mt-2">
         <Tabs
           label="Administration"
-          items={ADMIN_SURFACES.map((s) => ({
+          items={adminSurfacesFor(role).map((s) => ({
             to: adminPath(s.id),
             label: s.label,
             end: true,
@@ -90,18 +94,31 @@ export function AdminFrame({
 // It says the role it read and where the decision was made, because the two
 // remedies are different: a wrong role is an owner's job, and a role that
 // never resolved is a connection problem.
-export function Refused({ role, resolved }: { role: string; resolved: boolean }): ReactNode {
+export function Refused({
+  role,
+  resolved,
+  ownerOnly = false,
+}: {
+  role: string;
+  resolved: boolean;
+  // The surface's floor, when it is higher than the console's (epic
+  // memql#4440). Defaults to the console's own owner-or-admin.
+  ownerOnly?: boolean;
+}): ReactNode {
+  const floor = ownerOnly ? "a cluster owner" : "owner or admin";
   return (
     <div className="rounded-lg border border-line bg-surface p-6">
-      <h2 className="text-sm font-semibold">This is an owner and admin surface</h2>
+      <h2 className="text-sm font-semibold">
+        {ownerOnly ? "This is a cluster-owner surface" : "This is an owner and admin surface"}
+      </h2>
       <p className="mt-2 max-w-2xl text-sm text-muted">
         {resolved
           ? `The cluster resolved your role on this connection as ${role === "" ? "unset" : role}.`
           : "Your role has not resolved on this connection yet."}{" "}
-        Every read behind these screens is refused server-side for anyone below
-        owner or admin, so the console offers nothing here rather than showing
-        you tables that would come back empty. Ask a cluster owner to change your
-        role.
+        Every read behind {ownerOnly ? "this screen" : "these screens"} is
+        refused server-side for anyone below {floor}, so the console offers
+        nothing here rather than showing you tables that would come back empty.
+        Ask a cluster owner to change your role.
       </p>
     </div>
   );

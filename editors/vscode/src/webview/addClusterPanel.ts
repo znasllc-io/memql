@@ -762,6 +762,9 @@ export class AddClusterPanel {
     if (type === "openCheckout") {
       void this.openCheckout();
     }
+    if (type === "openProviderSettings") {
+      void this.openProviderSettings();
+    }
     if (type === "copyRecoveryKey") {
       void this.copyRecoveryKey();
     }
@@ -939,15 +942,24 @@ export class AddClusterPanel {
     // to tell apart from a current one.
     this.runError = "";
 
-    // A REPAIR HAS NO KEY FIELD, SO IT READS ONE OFF THE RECEIPT (memql#3512).
+    // A REPAIR READS THE KEY OFF THE RECEIPT WHEN THE FIELD IS EMPTY
+    // (memql#3512), which after epic memql#4440 is a PREFILL rather than a
+    // rescue.
     //
-    // `requiredFields("repair")` is `["domain"]` on purpose -- a repair re-runs
-    // the graph over a machine that already recorded these answers. But
-    // memql#3473's gate put `providerKey` in front of every mutating step, and
-    // `session.ts` drops empty params, so a repair reached wave 2 with no
-    // `--key-file` and died there with exit 2 on every invocation. The receipt
-    // is the record of what the install did, and `providerKey` writes an entry
-    // even though it leaves no artifact, so the path is already on disk.
+    // The original reasoning: memql#3473's gate put `providerKey` in front of
+    // every mutating step, and `session.ts` drops empty params, so a repair
+    // reached wave 2 with no `--key-file` and died there with exit 2 on every
+    // invocation. The receipt is the record of what the install did, and
+    // `providerKey` writes an entry even though it leaves no artifact, so the
+    // path is already on disk.
+    //
+    // That failure mode is gone: `installPlan` now SKIPS `providerKey`,
+    // satisfied, when no key file is supplied, so a keyless repair passes
+    // wave 2 rather than dying in it. What the receipt read still buys is the
+    // thing it was always also doing -- a repair of a cluster that WAS
+    // installed with a key re-verifies that same key against that same
+    // vendor, instead of silently dropping provider seeding on the way
+    // through.
     let providerKeyFile = inputs.providerKeyFile;
     let provider = inputs.provider;
     // Read ONCE, up here: the recorded tag is needed at the run call below, and
@@ -969,18 +981,26 @@ export class AddClusterPanel {
       // fine.
       provider = recordedProvider(receipt) || provider;
     }
-    if (providerKeyFile === "") {
-      // REFUSE RATHER THAN START. Without a key path the run cannot pass wave
-      // 2, and the failure it would produce is exit 2 -- whose guidance
-      // correctly says "a fault in MemQL rather than in your machine", which
-      // would be a lie here. Say the true thing before anything runs.
-      this.runError =
-        "MemQL has no record of an AI provider key for this machine. " +
-        "Install rather than repair, so the key can be collected and verified.";
-      this.state.finish({ ok: false });
-      this.render();
-      return;
-    }
+    // NO REFUSAL HERE ANY MORE (epic memql#4440).
+    //
+    // This is where a repair used to stop dead: with no key path recorded and
+    // none typed, the run could not pass wave 2, so the panel refused up front
+    // with "Install rather than repair, so the key can be collected and
+    // verified." That was the honest sentence for a graph in which every
+    // mutating step waited on a vendor call.
+    //
+    // It is now the wrong sentence, and it would be the WORST one in the
+    // product: after this epic the ordinary install supplies no key at all, so
+    // "no record of an AI provider key" describes almost every cluster -- and
+    // the remedy it names, reinstalling, is destructive advice for a machine
+    // whose only problem was that a repair refused to run. A keyless repair is
+    // just a repair; `providerKey` skips, satisfied, and every step behind it
+    // proceeds.
+    //
+    // Nothing replaces it, deliberately. There is no degraded state to warn
+    // about: a cluster with no provider configured is a working cluster whose
+    // agents cannot think yet, and the place that says so is the portal page
+    // the done screen links to.
 
     // Repair does not go through gateCreateDeployment, so it must refuse
     // here -- before sudo -- on an unsupported platform (memql#4294).
@@ -2659,6 +2679,41 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
    * records no checkout: a cluster registered by hand, or one whose install
    * never reached the clone step, has nowhere for the button to open.
    */
+  /**
+   * Opens the portal's AI-providers page (epic memql#4440).
+   *
+   * `asExternalUri` is deliberately NOT used, unlike the claim link: this is a
+   * plain address an operator could type, carries no credential and no
+   * single-use token, and remote-tunnel port mapping would only rewrite a
+   * hostname the browser resolves perfectly well on its own.
+   */
+  private async openProviderSettings(): Promise<void> {
+    const url = this.state.providerSetupUrl;
+    if (url === "") return;
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+  }
+
+  /**
+   * The done screen's "Configure AI providers" line, offered only when the run
+   * seeded no key (epic memql#4440).
+   *
+   * The DECISION is `providerSetupUrl`'s, in state/addCluster.ts, where a test
+   * can reach it; this method only renders what that getter returned. An empty
+   * string renders nothing at all, which is the whole keyed path.
+   */
+  private providerSettingsBlock(): string {
+    const url = this.state.providerSetupUrl;
+    if (url === "") return "";
+    return `<p>${escapeHtml(
+      "No AI provider was configured, which is the ordinary way to install: nothing about running this cluster needs one. When you want agents to think, set a provider up in the portal -- workload identity federation is the recommended path for Anthropic, and needs no key at rest.",
+    )}</p>`;
+  }
+
+  private providerSettingsButton(): string {
+    if (this.state.providerSetupUrl === "") return "";
+    return `<button class="secondary" type="button" data-act="openProviderSettings">Configure AI providers</button>`;
+  }
+
   private openCheckoutButton(): string {
     if (recordedStackDir(this.doneReceipt) === "") return "";
     return `<button class="secondary" type="button" data-act="openCheckout">Open source checkout</button>`;
@@ -2754,6 +2809,10 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       // they ask the operator for different things, which is why the script
       // keeps them tellable apart.
       const recovery = this.recoveryKeyBlock();
+      // LAST of the notes and last but one of the buttons (epic memql#4440).
+      // It is the only line here that is not about getting INTO the cluster,
+      // and an operator who cannot sign in yet has no use for a provider page.
+      const providers = this.providerSettingsBlock();
       return `<h1>Your cluster is ready</h1>
 <p class="lede">${escapeHtml(
         `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
@@ -2761,10 +2820,12 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
 ${recovery}
 ${enrolNote}
 ${claimNote}
+${providers}
 <div class="actions">
   ${enrol}
   ${claim}
   ${signIn}
+  ${this.providerSettingsButton()}
   ${this.openCheckoutButton()}
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;

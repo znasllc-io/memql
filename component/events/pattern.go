@@ -293,3 +293,15 @@ func BundleFromAuthoringDemoteTopic(topic string) (string, bool) {
 	}
 	return bundleId, true
 }
+
+// TopicProvidersReloadFor returns the dedicated providers-reload topic for one
+// Apply (epic memql#4440). TopicProvidersReloadFor("r-7f3a") returns
+// "providers.reload.r-7f3a".
+//
+// The request id is a topic SEGMENT rather than payload-only so two Applies in
+// quick succession are two distinct topics -- which is what stops a bus from
+// treating them as one, and what lets each node's log line be tied back to the
+// click that caused it.
+func TopicProvidersReloadFor(requestId string) string {
+	return BuildTopicWithConcept(TopicProvidersReload, requestId)
+}

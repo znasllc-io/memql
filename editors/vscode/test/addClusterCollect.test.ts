@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   AddClusterState,
   DEFAULT_INPUTS,
+  optionalFields,
   requiredFields,
   type InputField,
 } from "../src/state/addCluster.js";
@@ -42,31 +43,32 @@ test("the form opens pre-filled with the installer's own domain default", () => 
 });
 
 test("a repair can be started without typing anything, once the receipt is in", () => {
-  // A repair asks for the domain (defaulted), the vendor (defaulted) and the
-  // key path -- and the panel pre-fills the last two from the receipt before
-  // the operator sees the form, so in practice nothing is typed (memql#3544).
+  // A repair asks for the domain (defaulted) and the owner -- and the panel
+  // pre-fills the owner from the receipt before the operator sees the form, so
+  // in practice nothing is typed (memql#3544).
   //
-  // The key path is the one that cannot be defaulted HERE: this module has no
-  // receipt and no filesystem. What it can pin is that the path is the only
-  // thing standing between a fresh state and a startable repair.
-  //
-  // The OWNER joins the key path in that category (znasllc-io#3888): three more
-  // values this module cannot default, which the panel pre-fills from the
-  // receipt before the operator sees the form. A repair that reached
+  // The OWNER is the category this module cannot default (znasllc-io#3888):
+  // three values the panel pre-fills from the receipt. A repair that reached
   // `seedBootstrap` without them died at `exit 2` naming values no box offered.
+  //
+  // THE KEY PATH IS NO LONGER IN THAT LIST (epic memql#4440). It used to be
+  // the one thing standing between a fresh state and a startable repair, on
+  // the reasoning that the run could not pass wave 2 without it. It can now:
+  // `providerKey` skips, satisfied, when no key was supplied. Keeping it
+  // required would have made repair unreachable for every cluster installed
+  // the way this product now recommends -- with no key at all.
   const state = new AddClusterState();
   state.chooseAction("repair");
   assert.deepEqual(
     state.validate().map((e) => e.field),
-    ["ownerFirstName", "ownerLastName", "ownerEmail", "providerKeyFile"],
-    "the domain and the vendor are defaulted; the owner and the path are not",
+    ["ownerFirstName", "ownerLastName", "ownerEmail"],
+    "the domain and the vendor are defaulted; the owner is not",
   );
 
   state.setInput("ownerFirstName", "Ada");
   state.setInput("ownerLastName", "Lovelace");
   state.setInput("ownerEmail", "owner@example.com");
-  state.setInput("providerKeyFile", "/home/someone/.memql/key");
-  assert.deepEqual(state.validate(), []);
+  assert.deepEqual(state.validate(), [], "a repair still wants a key path");
   assert.equal(state.beginRun(), true);
   assert.equal(state.screen, "running");
 });
@@ -80,9 +82,17 @@ test("an install still refuses to start on the fields only a person can supply",
   assert.equal(state.beginRun(), false);
   const missing = new Set(state.errors.map((e) => e.field));
   assert.ok(!missing.has("domain"), "the pre-filled domain should not be reported missing");
-  for (const field of ["ownerFirstName", "ownerLastName", "ownerEmail", "providerKeyFile"] as const) {
+  for (const field of ["ownerFirstName", "ownerLastName", "ownerEmail"] as const) {
     assert.ok(missing.has(field), `${field} was not required`);
   }
+  // AND THE KEY PATH IS NOT ONE OF THEM (epic memql#4440). The three above
+  // genuinely cannot be guessed and seed-bootstrap.sh genuinely refuses
+  // without them; a vendor key is neither -- nothing in install, start,
+  // repair, upgrade or uninstall reads it.
+  assert.ok(
+    !missing.has("providerKeyFile"),
+    "an install refused to start over an AI provider key it does not need",
+  );
 });
 
 test("the four personal fields are deliberately blank", () => {
@@ -170,7 +180,11 @@ test("the provider key field carries a PATH, and the schema says so", () => {
   // the receipt": nothing in this module ever holds the key. SessionOptions
   // documents the same constraint for the same reason -- argv is world-readable
   // in `ps`.
-  assert.ok(requiredFields("install").includes("providerKeyFile"));
+  // COLLECTED, not required (epic memql#4440) -- the structural claim is
+  // about what this module HOLDS, which is unchanged by the demotion. If
+  // anything the claim got stronger: the field is now one an operator can
+  // leave empty entirely.
+  assert.ok(optionalFields("install").includes("providerKeyFile"));
   assert.ok(!Object.keys(DEFAULT_INPUTS).some((k) => /secret|token|apiKey|password/i.test(k)));
 });
 
@@ -229,12 +243,22 @@ test("a repair collects the provider key again, so a bad one can be corrected", 
   // The receipt still supplies the DEFAULT (memql#3512's point stands -- nobody
   // should retype a good path), but it is now a starting value in a box rather
   // than a locked-in one.
+  // COLLECTED, NOT REQUIRED (epic memql#4440). memql#3544's dead end was
+  // "the box is not there to fix a bad value", and an OPTIONAL box fixes that
+  // just as completely as a required one -- the operator can still edit the
+  // pre-filled path. What a REQUIREMENT would additionally do is refuse a
+  // repair on every cluster that was installed with no key at all, which
+  // after this epic is most of them.
   assert.ok(
-    requiredFields("repair").includes("providerKeyFile"),
+    optionalFields("repair").includes("providerKeyFile"),
     "a repair must be able to correct the key path it is about to reuse",
   );
   assert.ok(
-    requiredFields("repair").includes("provider"),
+    optionalFields("repair").includes("provider"),
     "and the vendor that path is verified against",
+  );
+  assert.ok(
+    !requiredFields("repair").includes("providerKeyFile"),
+    "a repair must not demand a key the install was never asked for",
   );
 });
