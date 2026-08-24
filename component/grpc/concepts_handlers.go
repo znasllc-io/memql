@@ -38,6 +38,19 @@ func conceptInfoFromConcept(c *memoryNodes.Concept) *memqlv1.ConceptInfo {
 			Status:    c.DisplayCard.Status,
 		}
 	}
+	// The data-origins declaration (epic memql#4378). Sent on EVERY
+	// concept, including native ones, because "native" is an answer a
+	// client needs and its absence is not: a badge that renders only
+	// when a field is present cannot distinguish "MemQL owns this" from
+	// "this server is too old to say".
+	//
+	// Origin carries the EFFECTIVE value rather than the stored one --
+	// "memql" where the concept declared nothing -- so no client
+	// re-derives the default, and the three of them (portal, both SDKs)
+	// cannot drift about it.
+	info.DataState = string(c.DataState())
+	info.DataOrigin = c.EffectiveOrigin()
+	info.DataMirroredTo = append([]string(nil), c.MirroredTo...)
 	return info
 }
 

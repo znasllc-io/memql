@@ -378,3 +378,82 @@ query item queryItems {
 		t.Errorf("the report must name the file; output:\n%s", out)
 	}
 }
+
+// TestRun_UnregisteredConnectorRefusesTheMountedBundle is issue #4386's
+// negative witness for epic memql#4378, and the reason it lives HERE
+// rather than in test/dslconformance is the reason memqllint exists at
+// all: this is the engine-parity pass, so the bundle is mounted as an
+// overlay and MemQLEngine.Init runs over the merged tree -- the same
+// path a product bundle takes through MEMQL_DSL_PATH at boot.
+//
+// A conformance test over this repo's own dsl/ cannot cover it. The
+// declarations that matter to an operator are the ones in THEIR bundle,
+// and no Go test in this repository walks those (memql#4051). What makes
+// the check reach them is that it runs inside Init.
+//
+// The gate is sighted here because cmd/memqllint blank-imports the
+// connector packages: a build that declares no connectors cannot tell a
+// typo from a correct name and says so instead of refusing.
+func TestRun_UnregisteredConnectorRefusesTheMountedBundle(t *testing.T) {
+	t.Run("an origin naming a connector nobody serves", func(t *testing.T) {
+		root := writeTree(t, map[string]string{
+			"storefront/concepts.memql": `@version("1.0.0")
+@namespace("storefront")
+@description("A mirror of a system this build has never heard of.")
+@origin("nowhere")
+concept phantom {
+  label  string  @required  @description("Label.")
+}`,
+		})
+		code, out := captureRun(t, []string{root})
+		if code != 1 {
+			t.Fatalf("run() = %d, want 1 -- a mirror nobody fills reads as an empty catalog, which is why "+
+				"an unresolvable @origin refuses boot; output:\n%s", code, out)
+		}
+		for _, want := range []string{"nowhere", "does not serve"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("the report never says %q; an operator has to learn WHICH name failed and that this "+
+					"build does not serve it. Output:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("a mirror target nobody drains", func(t *testing.T) {
+		root := writeTree(t, map[string]string{
+			"storefront/concepts.memql": `@version("1.0.0")
+@namespace("storefront")
+@description("MemQL-origin data pushed to a system nothing drains.")
+@mirroredTo("nowhere")
+concept ledger {
+  label  string  @required  @description("Label.")
+}`,
+		})
+		code, out := captureRun(t, []string{root})
+		if code != 1 {
+			t.Fatalf("run() = %d, want 1 -- an undrained mirror target accumulates outbox entries forever; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "nowhere") {
+			t.Fatalf("the report never names the unresolvable target; output:\n%s", out)
+		}
+	})
+
+	// The positive control. Without it a refusal above could equally be
+	// caused by the fixture failing to load for some unrelated reason,
+	// and the test would pass while measuring nothing.
+	t.Run("a REGISTERED connector name loads", func(t *testing.T) {
+		root := writeTree(t, map[string]string{
+			"storefront/concepts.memql": `@version("1.0.0")
+@namespace("storefront")
+@description("A mirror of a system this build does serve.")
+@origin("shopify")
+concept mirrored {
+  label  string  @required  @description("Label.")
+}`,
+		})
+		code, out := captureRun(t, []string{root})
+		if code != 0 {
+			t.Fatalf("run() = %d, want 0 -- \"shopify\" is declared by this build, so the same fixture shape "+
+				"must load. If this fails the refusals above prove nothing about connector names; output:\n%s", code, out)
+		}
+	})
+}

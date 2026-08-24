@@ -882,3 +882,70 @@ concept globalInfraExample {
   nodeType  enum("bff", "voice", "cognition", "agent", "planner")!
   startedAt datetime!
 }
+
+// =============================================================================
+//   14. Data origins -- @origin and @mirroredTo (epic memql#4378)
+// =============================================================================
+//
+// MemQL is the origin of what it owns, a faithful mirror of what it does
+// not, and every concept says which. Two declarations produce three
+// states, and there is deliberately no fourth -- "shared", two systems
+// both authoring one domain with conflict rules, is the option the model
+// rejects and this vocabulary cannot express.
+//
+//   STATE    CHANGES MADE AT    COPIES ELSEWHERE   WRITABLE HERE
+//   mirror   an external origin MemQL              no -- by construction
+//   origin   MemQL              external mirrors   yes, and it propagates
+//   native   MemQL              nobody             yes
+//
+// @origin("<name>")     -- WHERE changes to this concept are made.
+//                          Absent means "memql". An external name makes
+//                          the concept a MIRROR.
+// @mirroredTo("a","b")  -- WHO ELSE holds a copy of this MemQL-origin
+//                          concept. Name every target in ONE annotation.
+//
+// A connector name is a lowerCamelCase identifier and must be one the
+// build serves, or the engine REFUSES BOOT naming the concept. That is
+// not strictness for its own sake: a mirror nobody fills reads as an
+// empty catalog, and a mirror target nobody drains accumulates outbox
+// entries forever. Both are silent data loss dressed as normal
+// operation.
+//
+// A MIRROR IS READ-ONLY BY CONSTRUCTION. The engine refuses every write
+// to it -- mutation, tool handler, raw insert, staged write -- that does
+// not come from the connector its @origin names, and neither the
+// cluster-owner nor the internal-origin escape applies. That is what
+// lets a reader trust the badge. It also means a mutation bound to a
+// mirror has to be @serverOnly: a client-reachable one is generated into
+// both SDKs as a method that can only fail.
+//
+// Refused at load: @mirroredTo beside an external @origin. A mirror that
+// also publishes is a second origin wearing the first one's badge --
+// re-mirroring is the ORIGIN's job.
+//
+// See docs/public/concepts/data-origins.md.
+
+@namespace("shopify")
+@description("A MIRROR: Shopify owns this data; MemQL holds a faithful read-only copy.")
+@origin("shopify")
+concept mirrorExample {
+  handle            string!
+  availableForSale  bool!
+}
+
+@namespace("wholesale")
+@description("An ORIGIN: MemQL owns this data and pushes every change out to Shopify.")
+@origin("memql")
+@mirroredTo("shopify")
+concept originExample {
+  sku    string!
+  price  float!
+}
+
+// A NATIVE concept needs no declaration at all -- native is the default,
+// and it is what all but a handful of concepts are.
+@namespace("planner")
+@description("NATIVE: MemQL owns this data and nobody else holds a copy.")
+concept nativeExample {
+  goal  string!
+}

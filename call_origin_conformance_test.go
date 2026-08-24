@@ -142,6 +142,36 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// drives all six operations with a client-origin context, and by
 		// component/memql's TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses,
 		// which asserts the engine refuses client origin and admits internal.
+		// A CONNECTOR, and the first of that class (epic memql#4378). The
+		// argument is different from every entry above and is worth stating
+		// rather than borrowing.
+		//
+		// v1:shopify:shopifyProduct declares @origin("shopify"), which makes
+		// it a MIRROR: the engine refuses every write to it that does not
+		// come from the shopify connector. That in turn makes its two
+		// mutations -- upsertShopifyProduct, retireShopifyProduct --
+		// @serverOnly by necessity rather than by choice: a client-reachable
+		// mutation over a concept the engine will always refuse for clients
+		// is an SDK method that can only fail, so it is removed from the
+		// generated SDK instead. The connector is then the only caller, and
+		// it has to present internal origin to reach them.
+		//
+		// SERVER-INITIATED, with no request in scope. A Shopify webhook is
+		// STAGED as a v1:platform:inboundRequest row by the HTTP edge and
+		// worked afterwards by an automation; the connector never sees the
+		// request, only the row. The scheduled reconcile has no request at
+		// all.
+		//
+		// WHAT THE STAMP CAN REACH IS BOUNDED BY THE MIRROR, NOT ONLY BY THE
+		// STAMP, which is what makes this narrower than the entries above:
+		// connectorContext stamps the CONNECTOR ACTOR alongside it, and that
+		// actor is admitted by row admission to the concepts naming
+		// "shopify" and to nothing else. So even a leaked context reaches
+		// one three-field product index -- handle, availableForSale, present
+		// -- carrying no PII and no credential. The stamp is applied inline
+		// on a context this package constructs and dies at the one Execute
+		// it is passed to.
+		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes; its @serverOnly mutations exist because the concept is a mirror, and the connector actor stamped beside internal origin bounds the reach to that mirror alone (epic memql#4378)",
 		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
 		// of this entry said, "a credential store whose reads are

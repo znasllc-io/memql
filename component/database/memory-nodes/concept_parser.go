@@ -134,6 +134,8 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,
 		RowAuthz:      parsed.rowAuthz,
+		Origin:        parsed.origin,
+		MirroredTo:    parsed.mirroredTo,
 	}, nil
 }
 
@@ -303,6 +305,20 @@ type parsedConcept struct {
 	// Nil means the concept declared no tier -- a warning in Phase 1
 	// and nothing more. See memql#2920.
 	rowAuthz *parser.RowAuthzDecl
+
+	// origin / mirroredTo are the data-origins declaration (epic
+	// memql#4378). Held as the raw declaration plus a "was it written"
+	// bit each, because the two annotations are only jointly valid --
+	// @mirroredTo beside an external @origin is refused -- and that
+	// check needs BOTH in hand, which is only true once the attribute
+	// loop has finished. The bits are what make a SECOND @origin a load
+	// error rather than a silent last-one-wins, the same rule @rowAuthz
+	// carries and for the same reason: a reader scanning top-down must
+	// not see a declaration the engine does not use.
+	origin             string
+	originDeclared     bool
+	mirroredTo         []string
+	mirroredToDeclared bool
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -396,6 +412,15 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 			return nil, err
 		}
 	}
+	// The data-origins pairing check (epic memql#4378). Deferred to
+	// here rather than done in applyConceptAttribute because it reads
+	// BOTH annotations and attributes are folded one at a time -- the
+	// same shape @displayCard's and @rowAuthz's late passes take, for
+	// the same reason.
+	if err := parser.ValidateOriginDecl(parser.OriginDecl{Origin: out.origin, MirroredTo: out.mirroredTo}); err != nil {
+		return nil, err
+	}
+
 	// Ruling-3 precedence resolved ONCE here (memql#2634) so the Concept
 	// literal and buildJSONSchema's concept-level description agree.
 	out.description = parser.EffectiveDescription(decl.DocComment, out.description)
@@ -1049,6 +1074,44 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 			return err
 		}
 		c.rowAuthz = decl
+	case parser.OriginAnnotation:
+		// @origin("memql" | "<connector>") -- WHERE changes to this
+		//   concept are made (epic memql#4378, D2). Absent means
+		//   "memql"; an external name makes the concept a MIRROR, which
+		//   component/memql's write guard enforces as read-only by
+		//   construction.
+		//
+		//   Declared at most once, for the reason @rowAuthz is: the
+		//   parser folds attributes in source order, so without this a
+		//   concept carrying two origins would load with the LAST one
+		//   winning, and "where is this data owned" would have a
+		//   different answer for a reader than for the engine.
+		if c.originDeclared {
+			return fmt.Errorf("@%s declared more than once -- a concept has exactly one origin",
+				parser.OriginAnnotation)
+		}
+		name, err := parser.ParseOrigin(attr)
+		if err != nil {
+			return err
+		}
+		c.origin = name
+		c.originDeclared = true
+	case parser.MirroredToAnnotation:
+		// @mirroredTo("<connector>", ...) -- WHO ELSE holds a copy of
+		//   this MemQL-origin concept (D2/D5). The pairing check --
+		//   refused beside an external @origin -- runs after the whole
+		//   attribute loop, in conceptDeclToParsed, because it needs
+		//   both annotations and attributes arrive one at a time.
+		if c.mirroredToDeclared {
+			return fmt.Errorf("@%s declared more than once -- name every mirror target in one annotation, e.g. @%s(\"a\", \"b\")",
+				parser.MirroredToAnnotation, parser.MirroredToAnnotation)
+		}
+		targets, err := parser.ParseMirroredTo(attr)
+		if err != nil {
+			return err
+		}
+		c.mirroredTo = targets
+		c.mirroredToDeclared = true
 	default:
 		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}

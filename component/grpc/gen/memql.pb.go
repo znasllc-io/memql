@@ -11184,9 +11184,36 @@ type ConceptInfo struct {
 	// per-concept rendering code. Absent when the concept didn't
 	// declare the annotation -- clients should fall back to a
 	// generic id+intrinsics rendering. See memql#160.
-	DisplayCard   *DisplayCard `protobuf:"bytes,7,opt,name=display_card,json=displayCard,proto3" json:"display_card,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DisplayCard *DisplayCard `protobuf:"bytes,7,opt,name=display_card,json=displayCard,proto3" json:"display_card,omitempty"`
+	// The data-origins declaration (epic memql#4378): what MemQL's
+	// relationship is to this concept's data. Three states, no fourth.
+	//
+	//	data_state = "mirror"  -- an external system owns it; MemQL holds
+	//	                          a faithful copy and REFUSES every write
+	//	                          that does not come from that system's
+	//	                          connector. A client rendering an editor
+	//	                          over such a concept is offering an
+	//	                          action the server will refuse.
+	//	data_state = "origin"  -- MemQL owns it and pushes changes out to
+	//	                          the connectors in mirrored_to.
+	//	data_state = "native"  -- MemQL owns it and nobody else has a copy.
+	//
+	// data_origin is never empty: a concept that declared nothing reports
+	// "memql", so a client renders a badge without re-deriving the
+	// default. data_mirrored_to is empty unless data_state is "origin".
+	//
+	// The `data_` prefix is deliberate and is not stylistic. ConstructInfo
+	// already carries a field called `origin`, and it means something
+	// else entirely -- WHERE THE SOURCE FILE LIVES ("core" | "bundle" |
+	// "promoted" | "staged"). A concept appears in both messages, so a
+	// client holding both descriptors would have two unrelated `origin`
+	// values for one construct. Naming them apart is what stops one being
+	// rendered for the other.
+	DataState      string   `protobuf:"bytes,8,opt,name=data_state,json=dataState,proto3" json:"data_state,omitempty"`
+	DataOrigin     string   `protobuf:"bytes,9,opt,name=data_origin,json=dataOrigin,proto3" json:"data_origin,omitempty"`
+	DataMirroredTo []string `protobuf:"bytes,10,rep,name=data_mirrored_to,json=dataMirroredTo,proto3" json:"data_mirrored_to,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ConceptInfo) Reset() {
@@ -11264,6 +11291,27 @@ func (x *ConceptInfo) GetType() string {
 func (x *ConceptInfo) GetDisplayCard() *DisplayCard {
 	if x != nil {
 		return x.DisplayCard
+	}
+	return nil
+}
+
+func (x *ConceptInfo) GetDataState() string {
+	if x != nil {
+		return x.DataState
+	}
+	return ""
+}
+
+func (x *ConceptInfo) GetDataOrigin() string {
+	if x != nil {
+		return x.DataOrigin
+	}
+	return ""
+}
+
+func (x *ConceptInfo) GetDataMirroredTo() []string {
+	if x != nil {
+		return x.DataMirroredTo
 	}
 	return nil
 }
@@ -21386,7 +21434,7 @@ const file_memql_proto_rawDesc = "" +
 	"\bconcepts\x18\x02 \x03(\v2\x1d.znasllc.memql.v1.ConceptInfoR\bconcepts\x12\x1f\n" +
 	"\vbase_topics\x18\x03 \x03(\tR\n" +
 	"baseTopics\x12#\n" +
-	"\rsystem_topics\x18\x04 \x03(\tR\fsystemTopics\"\xdf\x01\n" +
+	"\rsystem_topics\x18\x04 \x03(\tR\fsystemTopics\"\xc9\x02\n" +
 	"\vConceptInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
@@ -21394,7 +21442,13 @@ const file_memql_proto_rawDesc = "" +
 	"\x06entity\x18\x04 \x01(\tR\x06entity\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x12\n" +
 	"\x04type\x18\x06 \x01(\tR\x04type\x12@\n" +
-	"\fdisplay_card\x18\a \x01(\v2\x1d.znasllc.memql.v1.DisplayCardR\vdisplayCard\"y\n" +
+	"\fdisplay_card\x18\a \x01(\v2\x1d.znasllc.memql.v1.DisplayCardR\vdisplayCard\x12\x1d\n" +
+	"\n" +
+	"data_state\x18\b \x01(\tR\tdataState\x12\x1f\n" +
+	"\vdata_origin\x18\t \x01(\tR\n" +
+	"dataOrigin\x12(\n" +
+	"\x10data_mirrored_to\x18\n" +
+	" \x03(\tR\x0edataMirroredTo\"y\n" +
 	"\vDisplayCard\x12\x18\n" +
 	"\aprimary\x18\x01 \x01(\tR\aprimary\x12\x1c\n" +
 	"\tsecondary\x18\x02 \x01(\tR\tsecondary\x12\x1a\n" +

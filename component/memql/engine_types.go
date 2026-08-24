@@ -75,6 +75,21 @@ type QueryPlan struct {
 	// so the ctx-bearing side of the engine can re-read the tier instead
 	// of re-deriving it from the expression.
 	RowAuthzConcept string
+
+	// RowAuthzRelaxedForConnector records that the injected tier
+	// predicate was REMOVED again because the caller is the connector
+	// this concept's @origin or @mirroredTo names (epic memql#4378,
+	// rowauthz_connector.go).
+	//
+	// It exists for two reasons and neither is cosmetic. It is what a
+	// test can assert on -- "the connector's read was relaxed" is
+	// otherwise indistinguishable from "the tier never engaged". And it
+	// is folded into planCacheSignature, because a relaxed plan's
+	// canonical expression is byte-identical to an ordinary caller's
+	// over the same concept, so the caller identity has to stay in the
+	// key or the connector's tier-free result is served to whoever asks
+	// next.
+	RowAuthzRelaxedForConnector bool
 }
 
 // RelationshipNode identifies relationship traversals declared within a query.
@@ -386,6 +401,10 @@ const (
 	BuiltinExecutorPreviewInsert  = "previewInsert"
 	BuiltinExecutorServiceVersion = "serviceVersion"
 	BuiltinExecutorError          = "error"
+	// BuiltinExecutorDataOrigins projects every concept's data-origins
+	// declaration from the live registry (epic memql#4378). Virtual: no
+	// row is persisted. See data_origins_read.go.
+	BuiltinExecutorDataOrigins = "dataOrigins"
 )
 
 // FilterNode aliases ComparisonExpression for backwards compatibility with earlier plan designs.

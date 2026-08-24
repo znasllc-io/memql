@@ -6174,28 +6174,6 @@ QueryClient.prototype.retireConstructConcept = function (this: QueryClient, args
   return this.executeNamed("retireConstructConcept", buildRetireConstructConcept(args), opts);
 };
 
-/** Retire an index row we already had. Does not create a row -- the engine update of a missing id is a no-op / miss, never an invent. */
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["retireShopifyProduct"] in generated_concepts.ts).
-export interface RetireShopifyProductArgs {
-  productId: string;
-}
-
-export function buildRetireShopifyProduct(args: RetireShopifyProductArgs): string {
-  const parts: string[] = [];
-  parts.push("productId: " + renderMemQLValue(args.productId));
-  return "mutation retireShopifyProduct(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    retireShopifyProduct(args: RetireShopifyProductArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.retireShopifyProduct = function (this: QueryClient, args: RetireShopifyProductArgs = {} as RetireShopifyProductArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("retireShopifyProduct", buildRetireShopifyProduct(args), opts);
-};
-
 /** Revert a data record to a previous validation state with counter reset */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["revertRecord"] in generated_concepts.ts).
 export interface RevertRecordArgs {
@@ -8956,32 +8934,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateWorkerLastSeen = function (this: QueryClient, args: UpdateWorkerLastSeenArgs = {} as UpdateWorkerLastSeenArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateWorkerLastSeen", buildUpdateWorkerLastSeen(args), opts);
-};
-
-/** Upsert the thin index row after a successful Storefront/Admin fetch. Id is the Shopify GID. present is stamped true. */
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["upsertShopifyProduct"] in generated_concepts.ts).
-export interface UpsertShopifyProductArgs {
-  productId: string;
-  handle: string;
-  availableForSale: boolean;
-}
-
-export function buildUpsertShopifyProduct(args: UpsertShopifyProductArgs): string {
-  const parts: string[] = [];
-  parts.push("productId: " + renderMemQLValue(args.productId));
-  parts.push("handle: " + renderMemQLValue(args.handle));
-  parts.push("availableForSale: " + renderMemQLValue(args.availableForSale));
-  return "mutation upsertShopifyProduct(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    upsertShopifyProduct(args: UpsertShopifyProductArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.upsertShopifyProduct = function (this: QueryClient, args: UpsertShopifyProductArgs = {} as UpsertShopifyProductArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("upsertShopifyProduct", buildUpsertShopifyProduct(args), opts);
 };
 
 /** Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge. */

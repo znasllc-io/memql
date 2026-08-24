@@ -102,6 +102,30 @@ type (
 		// declaration means.
 		RowAuthz *parser.RowAuthzDecl `json:"rowAuthz,omitempty"`
 
+		// Origin and MirroredTo carry the data-origins declaration
+		// (epic memql#4378): WHERE changes to this concept are made,
+		// and WHO ELSE holds a copy. Together they derive DataState --
+		// mirror, origin, or native -- which is what the registry, both
+		// SDKs, the write guard and the portal badge read.
+		//
+		// They store what the concept DECLARED, not what it means: an
+		// absent @origin leaves Origin empty, and empty means MemQL
+		// (see parser.OriginDecl.IsMemQLOrigin). Normalising "" to
+		// "memql" here would put the annotation's default into 100+
+		// registry entries that never wrote it, and the derivation
+		// already treats the two as one answer. The WIRE carries the
+		// effective value; storage records the declaration.
+		//
+		// THE WRITE PATH READS THESE. A concept whose DataState is
+		// mirror is read-only by construction: component/memql's
+		// mirror write guard refuses every write to it that does not
+		// come from the connector Origin names -- mutation, tool
+		// handler, raw insert and staged write alike. So nil-vs-set
+		// here is a different set of ACCEPTED WRITES, not carried
+		// metadata.
+		Origin     string   `json:"origin,omitempty"`
+		MirroredTo []string `json:"mirroredTo,omitempty"`
+
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
 

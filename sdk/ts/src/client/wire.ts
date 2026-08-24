@@ -735,6 +735,12 @@ export interface ConceptInfoWire {
   description?: string;
   type?: string;
   displayCard?: DisplayCardWire | null;
+  // The data-origins declaration (epic memql#4378). The `data` prefix
+  // separates these from a CONSTRUCT's `origin`, which answers a
+  // different question -- where the source file lives.
+  dataState?: string;
+  dataOrigin?: string;
+  dataMirroredTo?: string[];
 }
 
 export interface MyAccessResultPayload {

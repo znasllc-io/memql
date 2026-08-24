@@ -1,6 +1,10 @@
-// shopify domain -- thin product index (memql#4137).
+// shopify domain -- thin product index (memql#4137), and MemQL's first
+// declared MIRROR (epic memql#4378).
 //
-// Shopify writes, MemQL reads. The row is a projection of three
+// Shopify writes, MemQL reads -- and since memql#4378 that sentence is
+// enforced rather than intended: @origin("shopify") makes the concept
+// read-only by construction, so a user, an agent, a tool handler or a
+// raw insert aimed at it is refused with mirror_write_refused{shopify}. The row is a projection of three
 // Storefront fields: GID (the row id), handle, availableForSale.
 // Images, collections, prices, and inventory counts are NOT stored.
 // Merchandising still comes from the Storefront API via
@@ -13,6 +17,10 @@
 /// Thin Shopify product projection. Row id IS the product GID
 /// (gid://shopify/Product/...). Three index fields only. clusterOwner:
 /// one catalog per deployment, readable for campaigns/reviews/agents.
+/// A MIRROR: Shopify is the origin, so this row is read-only in MemQL
+/// by construction -- only the shopify connector writes it, under its
+/// own actor. Change a product in Shopify; MemQL's copy follows.
+@origin("shopify")
 @displayCard(primary="handle", secondary="availableForSale", status="present")
 @rowAuthz(clusterOwner)
 concept shopifyProduct {
