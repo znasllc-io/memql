@@ -30,6 +30,7 @@ The complete map of MemQL documentation. Layout + rules:
 - [View Elements & the Fitness Contract](docs/public/concepts/view-elements.md) -- the element library (table, calendar, checklist, timeline, board, charts, map) and how a view decides which element fits a concept and which of its fields fill each slot
 - [Composed Views](docs/public/concepts/composed-views.md) -- a screen for a concept nobody designed a screen for: how the system works out which view elements fit and composes them automatically
 - [Library Document Version History](docs/public/concepts/document-version-history.md) -- the append-only version history every Library document carries; producing, editing, or restoring never overwrites prior content
+- [Data Origins: Mirror, Origin, Native](docs/public/concepts/data-origins.md) -- what MemQL's relationship is to a concept's data. **Mirror**: an external system owns it and MemQL's copy is read-only BY CONSTRUCTION. **Origin**: MemQL owns it and pushes changes out to external mirrors through a durable **outbox**. **Native**: MemQL owns it and nobody else has a copy. Declared with `@origin` / `@mirroredTo`; a **connector** is the integration that fills a mirror or drains an outbox, and runs as a named actor admitted only to the concepts that name it
 
 ### The Language (`language/`)
 - [MemQL Language](docs/public/language/memql.md) — the DSL reference (also embedded in the binary; see `docs/embed.go`).

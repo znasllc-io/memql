@@ -21,6 +21,14 @@ Intake **"plugin"** means **pack**. `memql.RegisterPlugin` is the Go registratio
 
 `dsl/todos`, `dsl/calendar`, and `dsl/campaigns` are **core**. Packs cannot shadow them.
 
+A **connector** is not a fourth word. It is an **integration** that
+implements the connector contract (`component/memql/sync`), which is what
+lets a concept name it in `@origin` or `@mirroredTo` and be filled or
+drained by it. The test is the same one integrations already pass — it
+talks to somebody else's system — and the contract is what makes that
+system's ownership of the data expressible. See
+[data origins](data-origins.md).
+
 The worked example is Shopify, which exists as TWO artifacts on either side of the line:
 
 - `integrations/shopify` is the **integration** — it speaks the Storefront/Admin APIs and receives inbound webhooks. It talks to somebody else's system; that is the whole test.

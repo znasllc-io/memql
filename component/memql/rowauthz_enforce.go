@@ -295,6 +295,24 @@ const (
 // covers a raw query string (which has no declared binding to resolve a
 // tier from) and graph expansion (which has no filter at all).
 func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload []byte) rowAuthzAdmission {
+	// CONNECTOR ACTOR (epic memql#4378, D4). Answered FIRST and never
+	// falls through, in both directions.
+	//
+	// A connector is admitted to the concepts whose @origin or
+	// @mirroredTo names it, regardless of tier -- that is how a mirror's
+	// own filler reaches rows a clusterOwner tier would refuse it. And a
+	// connector reaching a concept that does NOT name it is DENIED here
+	// rather than left to the tier below, which is the half that makes
+	// this a targeted rule instead of a bypass: falling through would
+	// hand a connector whatever the tier grants a stranger, and for the
+	// tree's ~88 undeclared concepts that is everything.
+	if admitted, isConnector := connectorAdmission(ctx, conceptName); isConnector {
+		if admitted {
+			return rowAuthzAdmit
+		}
+		return rowAuthzDeny
+	}
+
 	decl := rowAuthzDeclFor(conceptName)
 	if decl == nil {
 		// UNDECLARED. Not "safe" and not "unchanged" -- unmeasured, in the

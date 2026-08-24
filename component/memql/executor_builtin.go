@@ -52,6 +52,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorError: func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return nil, builtinErrorFromArgs(args)
 		},
+		BuiltinExecutorDataOrigins: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateDataOriginsExpression(ctx)
+		},
 	}
 
 	if e.functions != nil {

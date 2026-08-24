@@ -2066,6 +2066,57 @@ Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
 
 Package: `component/memql/sense/` -- pure Go, no gRPC dependency. gRPC handlers in `component/grpc/sense_handlers.go`.
 
+### Data origins -- Mirror, Origin, Native (epic memql#4378)
+
+**MemQL is the origin of what it owns, a faithful mirror of what it does not,
+and every concept says which.** Two declarations, three derived states, and
+deliberately no fourth -- "shared", two systems both authoring one domain, is
+the option the model rejects and the vocabulary cannot say.
+
+| State | Changes made at | Copies elsewhere | Writable here |
+|---|---|---|---|
+| Mirror | an external origin | MemQL | **no** -- read-only by construction |
+| Origin | MemQL | external mirrors, synced outbound | yes, and it propagates |
+| Native | MemQL | nobody | yes |
+
+```memql
+@origin("shopify")                    concept shopifyProduct { ... }  // mirror
+@origin("memql") @mirroredTo("shopify") concept priceList { ... }     // origin
+                                      concept plan { ... }            // native
+```
+
+**"Read-only by construction" is literal, and STRICTER than the row-authz write
+guard.** `executeWrite` refuses every write to a mirror concept -- mutation,
+tool handler, raw insert, staged write -- that does not come from the connector
+its `@origin` names, with `mirror_write_refused{origin}` and an audit line.
+Neither of `rowauthz_write_guard.go`'s two escapes applies: internal origin says
+*the engine* is writing when the question is whether *shopify* is, and a cluster
+owner's edit to a mirror is reverted by the next reconcile exactly like anyone
+else's -- accepting it would be a write that appears to work and does not last.
+So a mutation bound to a mirror must be `@serverOnly`, or it is generated into
+both SDKs as a method that can only fail (gated by
+`TestMirrorConceptsHaveNoClientReachableMutation`).
+
+**Connectors are named actors, not a bypass.** `auth.ConnectorActor(name)` is
+admitted by row admission to the concepts whose `@origin` or `@mirroredTo` names
+it, **regardless of tier, and to nothing else** -- including the ~88 undeclared
+concepts that admit everyone, which is the half that makes it targeted. No
+request can mint one: `RoleConnector` is outside `ValidRoles()` and outside the
+rank model. A connector is an *integration* implementing the contract in
+`component/memql/sync`; it is not a fourth extension word.
+
+**Registration has two halves.** `sync.Declare(name)` runs from an `init()` and
+says *this build serves a connector by this name*; `sync.Bind(c)` attaches the
+implementation later. The boot check reads the first, because `MemQLEngine.Init`
+runs BEFORE integrations are wired (`app/build_*.go`). An unresolvable name
+**refuses boot**: a mirror nobody fills reads as an empty catalog and a mirror
+target nobody drains accumulates outbox entries forever -- both are silent. A
+build that has declared no connectors at all cannot tell a typo from a correct
+name and says so at Warn rather than refusing; every node binary and
+`cmd/memqllint` declare them, so every real boot checks.
+
+Full doc: [docs/public/concepts/data-origins.md](docs/public/concepts/data-origins.md).
+
 ### Infrastructure concepts
 
 Inventories live in the `.memql` files; what follows is what a reader needs to
@@ -2081,7 +2132,10 @@ user's hostname is `<slug>.<domain>` against a reserved set DERIVED from
 omission; Android / iOS / macOS deliberately have NO enum values, being
 distribution rather than hostnames ([deployables.md](docs/public/operate/deployables.md)).
 Plus `globalSecret` / `globalVariable` (cluster-scoped config),
-`outboundRequest` / `inboundRequest`, `missingCapability`.
+`outboundRequest` / `inboundRequest`, `missingCapability`, plus `dataOrigin` --
+a VIRTUAL projection (the `v1:router:modelCatalog` pattern, never persisted) of
+every concept's data-origins declaration, produced by the `dataOrigins` builtin
+from the live registry (memql#4378).
 
 **Library** (`dsl/library/concepts.memql`): `artifact` is a thin INDEX row
 (memql#693) owning no content -- one per item, carrying the provenance/type

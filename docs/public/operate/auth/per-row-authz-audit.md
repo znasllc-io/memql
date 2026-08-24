@@ -1062,6 +1062,64 @@ If you find yourself reaching for `@public` to "just make the
 validator happy" without a clear reason, the construct probably
 needs a real caller-check instead.
 
+## The connector actor: a named internal writer
+
+Row admission has one actor that is neither a user nor a role: a
+**connector** (epic memql#4378, decision D4). It is the characterised
+internal actor memql#4366 asks for, **for this class of writer only** —
+the planner's system actor is a separate decision and is not this one.
+
+**The rule, in one sentence.** A connector actor is admitted to the rows
+of a concept whose `@origin` or `@mirroredTo` names it, regardless of
+that concept's declared tier, and to no other concept whatever its tier.
+
+```
+auth.ConnectorActor("shopify")   ->  v1:shopify:shopifyProduct   admitted
+                                     (the concept declares @origin("shopify"))
+                                 ->  v1:campaigns:sendJob        refused
+                                 ->  an UNDECLARED concept       refused
+```
+
+That last line is the half that makes this a targeted rule rather than a
+bypass. An undeclared concept admits everyone, so a connector *falling
+through* to the ordinary tiers would inherit exactly that — and the
+undeclared population is the long tail this document is otherwise about.
+`rowAuthzAdmits` therefore answers the connector question **first and in
+both directions**: named → admit, not named → deny, never fall through.
+
+**Why not the internal-origin escape.** The write guard already lets
+trusted server-side Go past a tier by stamping
+`auth.ContextWithInternalOrigin` for one write. That stamp says *the
+engine is doing this*, which is true of a connector and decides nothing:
+it would admit the Shopify connector to campaign rows, to identity rows,
+and to every mirror belonging to some other origin. The connector actor
+says *which* connector is writing, and the concept's own declaration
+answers.
+
+**It is never minted from a request.** There is no header, claim, token
+class or role value that produces one. `auth.ConnectorActor` is the only
+constructor, called by the runtime immediately before it invokes a
+connector's contract method. `RoleConnector` sits deliberately outside
+`ValidRoles()` and outside the rank model, so no user row can carry it,
+no identity can be issued with it, and a value that somehow leaked into
+an ordinary request context would grant *less* than a reader.
+
+**A second gate stands beside this one, and it is stricter.** A concept
+whose `dataState` is `mirror` is read-only by construction: *every* write
+to it is refused unless it comes from the connector its `@origin` names —
+no cluster-owner escape and no internal-origin escape, unlike the write
+guard above. Read
+[data origins](../../concepts/data-origins.md) for why an operator's edit
+to a mirror is refused rather than accepted: it would be reverted by the
+next reconciliation sweep, so accepting it is a write that appears to
+work and does not last.
+
+Implementation: `component/auth/connector_actor.go`,
+`component/memql/rowauthz_connector.go`,
+`component/memql/mirror_write_guard.go`. Measured by
+`TestConnectorRowAdmissionIsScopedToTheConceptsThatNameIt` and
+`TestMirrorWritesAreRefusedForEveryActorButItsConnector`.
+
 ## Related issues
 
 - #55 — JWT claims → caller envelope contract

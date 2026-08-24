@@ -389,6 +389,80 @@ kubectl logs -n memql deploy/bff -f | grep -iE "plug-in|<name>"
 
 ---
 
+## Connectors -- the recipe (epic memql#4378)
+
+A **connector** is an integration that sits on the other side of a data
+boundary: it fills a MIRROR from the system that owns it, or pushes a
+MemQL-**origin** concept's changes out to a system that mirrors it. It is
+not a fourth extension word -- a connector is an integration, and what
+makes it one is that a concept names it in `@origin` or `@mirroredTo` and
+the connector registry can find it under that name.
+
+Read [data origins](../docs/public/concepts/data-origins.md) first; the
+three states are the vocabulary everything below assumes.
+
+**1. Declare the name from an `init()`.**
+
+```go
+const ConnectorName = "shopify"
+
+func init() { memqlsync.Declare(ConnectorName) }
+```
+
+Declaration is separate from binding, and not by preference: the engine's
+boot check resolves `@origin("shopify")` inside `MemQLEngine.Init`, which
+runs BEFORE integrations are wired (`app/build_*.go`: config → database →
+engine → integrations). A registry holding only live instances is empty
+exactly when the check reads it. `Declare` in an `init()` is available
+before all of that.
+
+**2. Implement the contract** (`component/memql/sync`): `Name`,
+`Domains`, `Apply`, `Backfill`, `Reconcile`, `Propagate`,
+`EnsureSubscriptions`. Return `memqlsync.NotImplemented(name, what)` for
+anything you do not serve yet -- the runtime distinguishes that from a
+delivery failure, so an unserved capability is reported rather than
+retried and dead-lettered.
+
+**3. Bind the implementation** from your `memql.RegisterPlugin` factory,
+once configuration is in hand: `memqlsync.Bind(i.Connector())`. `Bind`
+refuses a name nothing declared, which is what keeps the two halves from
+naming different sets.
+
+**4. Declare the domains in DSL.** `@origin("<name>")` on each concept
+you mirror; `@mirroredTo("<name>")` on each MemQL-origin concept you
+drain. A name nothing declared **refuses boot**.
+
+**5. Stamp the actor on every write.** The mirror guard admits exactly
+one identity, and it is not "the engine":
+
+```go
+ctx = auth.ContextWithConnectorActor(ctx, ConnectorName)
+ctx = auth.ContextWithInternalOrigin(ctx)   // only if your mutations are @serverOnly
+```
+
+### What the runtime does for you
+
+Version-guarded apply (a late webhook cannot regress a mirror), the
+inbound dispatcher, the backfill and reconciliation runners, the durable
+outbox and its per-connector drain worker with idempotency, backoff,
+dead-lettering and audit, and the health row the Data origins page reads.
+A connector delivers once and reports what happened; it does not own
+ordering, retry or scheduling.
+
+### What the actor may touch
+
+Row admission admits `ConnectorActor(name)` to the concepts whose
+`@origin` or `@mirroredTo` names it, **regardless of tier, and to nothing
+else** -- including concepts that declare no tier at all, which admit
+every other caller. Your connector cannot read a campaign, an identity,
+or another origin's mirror. That is deliberate: the concept's declaration
+is what grants reach, so a connector gains it only where an author wrote
+its name.
+
+Worked example: `integrations/shopify/connector.go`.
+
+---
+
 ## Debugging Integrations
 
 ```bash

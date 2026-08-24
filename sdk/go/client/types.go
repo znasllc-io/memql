@@ -288,6 +288,30 @@ type Concept struct {
 	// the concept's DSL declaration didn't carry `@displayCard(...)`.
 	// See memql#160.
 	DisplayCard *DisplayCard
+
+	// DataState is MemQL's relationship to this concept's data (epic
+	// memql#4378): "mirror", "origin" or "native". Three values, no
+	// fourth.
+	//
+	// "mirror" is the one that changes what a caller may DO: an
+	// external system owns the data and the engine refuses every write
+	// that does not come from that system's connector. A client
+	// offering an edit over a mirror concept is offering an action the
+	// server will refuse -- read DataState before rendering one.
+	//
+	// Empty only when talking to a server that predates the field.
+	DataState string
+	// DataOrigin names the system where changes to this concept are
+	// made. Never empty on a server that carries the field: a concept
+	// that declared nothing reports "memql", so no client re-derives
+	// the default.
+	//
+	// NOT to be confused with a construct's `Origin`, which is a
+	// different question -- where the SOURCE FILE lives.
+	DataOrigin string
+	// DataMirroredTo names the external systems MemQL pushes this
+	// concept's changes out to. Empty unless DataState is "origin".
+	DataMirroredTo []string
 }
 
 // conceptsFromProto translates a []*memqlv1.ConceptInfo slice into
@@ -300,12 +324,15 @@ func conceptsFromProto(in []*memqlv1.ConceptInfo) []Concept {
 			continue
 		}
 		concept := Concept{
-			Id:          c.GetId(),
-			Version:     c.GetVersion(),
-			Domain:      c.GetDomain(),
-			Entity:      c.GetEntity(),
-			Description: c.GetDescription(),
-			Type:        c.GetType(),
+			Id:             c.GetId(),
+			Version:        c.GetVersion(),
+			Domain:         c.GetDomain(),
+			Entity:         c.GetEntity(),
+			Description:    c.GetDescription(),
+			Type:           c.GetType(),
+			DataState:      c.GetDataState(),
+			DataOrigin:     c.GetDataOrigin(),
+			DataMirroredTo: c.GetDataMirroredTo(),
 		}
 		if dc := c.GetDisplayCard(); dc != nil {
 			concept.DisplayCard = &DisplayCard{

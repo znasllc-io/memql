@@ -239,3 +239,21 @@ concept packState {
   enabled     bool!    @description("Desired per-instance state. false = the pack is mounted-inert on every node's next boot: its namespace stays owned and its concepts (and rows) stay readable, but its queries, mutations, builtins, tools, prompts, automations and Go factories are not loaded.")
   reason      string   @description("Operator note recorded with the flip; shown in the portal's module detail.")
 }
+
+/// Virtual projection of one concept's DATA-ORIGINS declaration (epic memql#4378): what MemQL's
+/// relationship to that concept's data is. Never persisted -- rows are produced at query time by the
+/// `dataOrigins` builtin from the live concept registry, the same shape as v1:router:modelCatalog.
+/// Lives in the concept registry so the engine can shape results without a database round-trip.
+///
+/// This is the INVENTORY half of the Data origins page. The HEALTH half -- backfill cursors, lag,
+/// drift counts, outbox depth -- is per-(concept, connector) operational state that accumulates over
+/// time and is a persisted row instead. Serving both from one place would make a staleness bug in
+/// either look like the other.
+@displayCard(primary="conceptId", secondary="dataState", tertiary="origin")
+concept dataOrigin {
+  conceptId   string!  @description("Canonical id of the concept this row describes. Also the row id -- there is exactly one row per concept and the concept is what it is about. Named conceptId rather than concept because `concept` is a reserved row intrinsic; a payload field by that name is refused at load.")
+  dataState   enum("mirror", "origin", "native")!  @description("MemQL's relationship to this concept's data. mirror: an external system owns it and MemQL holds a faithful read-only copy. origin: MemQL owns it and pushes changes out to the systems in mirroredTo. native: MemQL owns it and nobody else has a copy. There is no fourth state -- two systems both authoring one domain is the option the model rejects.")
+  origin      string!  @description("The system where changes to this concept are made. Never empty: a concept that declared nothing reports \"memql\", so no client re-derives the default. Not to be confused with a CONSTRUCT's origin, which is where its source file lives.")
+  mirroredTo  []string  @description("External systems MemQL pushes this concept's changes out to. Empty unless dataState is \"origin\".")
+  connectors  []string  @description("Every connector name this concept depends on -- its external origin plus every mirror target, sorted. Never contains \"memql\": MemQL is not a connector. This is the set the engine resolves at boot, and an unresolvable name refuses it.")
+}

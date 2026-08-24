@@ -87,7 +87,36 @@ export interface Concept {
   // when the concept's DSL declaration didn't carry
   // `@displayCard(...)`. See memql#160.
   displayCard?: DisplayCard;
+  // dataState is MemQL's relationship to this concept's data (epic
+  // memql#4378). Three values, no fourth.
+  //
+  // "mirror" is the one that changes what a caller may DO: an external
+  // system owns the data, and the engine refuses every write that does
+  // not come from that system's connector. Rendering an editor over a
+  // mirror concept offers an action the server will refuse -- read this
+  // before offering one.
+  //
+  // "" only when talking to a server that predates the field, which is
+  // also why the three are OPTIONAL rather than required: the same
+  // shape has to describe a descriptor that arrived without them.
+  dataState?: DataState | "";
+  // dataOrigin names the system where changes to this concept are made.
+  // Never "" on a server that carries the field: a concept that declared
+  // nothing reports "memql", so no client re-derives the default.
+  //
+  // NOT a construct's `origin`, which is where its source file lives.
+  dataOrigin?: string;
+  // dataMirroredTo names the external systems MemQL pushes this
+  // concept's changes out to. Empty unless dataState is "origin".
+  dataMirroredTo?: string[];
 }
+
+// DataState is the closed set of relationships MemQL can have to a
+// concept's data. A client must DEGRADE on an unrecognised value rather
+// than reject it -- but there is deliberately no fourth state to add:
+// "shared", two systems both authoring one domain, is the option the
+// model rejects.
+export type DataState = "mirror" | "origin" | "native";
 
 export type SubscriptionKind =
   | "telemetry"
@@ -299,6 +328,9 @@ export function conceptsFromWire(in_: ConceptInfoWire[] | undefined): Concept[] 
       entity: c.entity ?? "",
       description: c.description ?? "",
       type: c.type ?? "",
+      dataState: (c.dataState ?? "") as DataState | "",
+      dataOrigin: c.dataOrigin ?? "",
+      dataMirroredTo: c.dataMirroredTo ?? [],
     };
     // memql#160: surface the per-concept rendering hints when the
     // concept declared @displayCard(...).

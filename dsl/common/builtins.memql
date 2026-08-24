@@ -686,3 +686,15 @@ builtin dateKeyInTimezone {
   timezone  string
   now       string
 }
+
+// ---- The data-origins inventory (epic memql#4378) ----
+//
+// Engine-native, and here rather than in dsl/platform because every
+// other registry-projecting builtin -- concepts, tools, functions,
+// routerListModels -- is here too. The concept it projects onto
+// (v1:platform:dataOrigin) lives in platform, which is where the row
+// SHAPE belongs; the reader belongs with its siblings.
+
+@executor("dataOrigins")
+@description("List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.")
+builtin dataOrigins { }

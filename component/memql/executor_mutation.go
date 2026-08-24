@@ -540,6 +540,22 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, errConceptWriteRetired(conceptMeta.Name)
 	}
 
+	// MIRROR CONCEPT: read-only by construction (epic memql#4378, D3).
+	// A concept whose @origin names an external system holds a faithful
+	// copy of data MemQL does not own; only that system's connector
+	// writes it, under its own actor. Refused HERE, beside the retired
+	// check and for the same two reasons: the refusal is a property of
+	// the concept rather than of anything the caller sent, and it must
+	// not cost the read-merge round-trip below to reach.
+	//
+	// Because executeWrite is the single write chokepoint (memql#1709),
+	// one check covers mutations, raw inserts, tool handlers and staged
+	// writes -- which is what the acceptance criteria mean by "all hit
+	// the same seam". See component/memql/mirror_write_guard.go.
+	if err := e.guardMirrorWrite(ctx, conceptMeta.Name); err != nil {
+		return nil, meta, err
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

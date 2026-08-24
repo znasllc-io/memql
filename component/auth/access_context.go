@@ -33,6 +33,22 @@ type AccessContext struct {
 	DisplayName  string
 	Role         Role
 	IdentityId   string
+
+	// ConnectorName is set ONLY on a connector actor (D4,
+	// connector_actor.go): the name a mirror's @origin or an origin's
+	// @mirroredTo has to match for row admission to let this writer
+	// through. Empty on every actor built from a request, and there is
+	// no request shape that sets it -- ConnectorActor is the only
+	// constructor.
+	//
+	// It is a Go field and NOT part of the DSL actor envelope. The
+	// envelope's field set is closed (actor.userId / role / identityId /
+	// isClusterOwner / primaryEmail / now) and is an authoring surface;
+	// widening it would let a filter or a spec branch on which
+	// connector is writing, which is a rule that belongs in one place
+	// -- the concept's own declaration -- rather than restated per
+	// construct.
+	ConnectorName string
 }
 
 // AccessContextKey is the context key for AccessContext values.

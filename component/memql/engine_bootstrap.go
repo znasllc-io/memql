@@ -43,6 +43,15 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.setConceptRelationships(relationshipsByConcept)
 	e.concepts = concepts
 
+	// Resolve every connector name the tree declares (epic memql#4378).
+	// Runs here, immediately after the registry state is derived and
+	// before anything else loads, because an unresolvable @origin makes
+	// a concept unfillable and an unresolvable @mirroredTo makes it
+	// undrainable -- neither of which fails visibly later.
+	if err := e.checkDeclaredConnectors(all); err != nil {
+		return err
+	}
+
 	if len(all) == 0 {
 		e.initialized = true
 		return nil

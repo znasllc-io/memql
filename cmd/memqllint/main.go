@@ -63,6 +63,19 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+
+	// Connector declarations (epic memql#4378). The engine-parity pass
+	// below drives MemQLEngine.Init, which resolves every @origin and
+	// @mirroredTo name against the connector registry -- and a build
+	// that has declared no connectors cannot tell a correct name from a
+	// typo, so it announces that it could not check and passes.
+	//
+	// A lint pass whose claim is "this tree also MOUNTS clean at boot"
+	// has to model the build that boots it. Every node binary
+	// blank-imports the same core plug-in set (app/plugins_core.go,
+	// untagged), so importing the connector packages here is what makes
+	// this lint's answer the engine's answer rather than a weaker one.
+	_ "github.com/znasllc-io/memql/integrations/shopify"
 )
 
 func main() {

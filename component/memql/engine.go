@@ -823,6 +823,15 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// row stored with an empty owner. Refused here, where the actor is
 	// readable, rather than degraded into a filter that quietly returns
 	// somebody's rows to nobody in particular.
+	// CONNECTOR RELAXATION (epic memql#4378, D4), before the refusal
+	// below and before the read runs. enforceRowAuthzOnPlan takes no
+	// context (ruled in memql#3976), so it ANDs a mirror's declared tier
+	// into the plan even when the caller is the very connector the
+	// concept names -- and the connector then reads ZERO ROWS from the
+	// mirror it maintains. An empty result, not an error, which reads
+	// exactly like "the mirror is empty".
+	relaxRowAuthzForConnector(ctx, plan)
+
 	if err := refuseRowAuthzWithoutActor(ctx, plan); err != nil {
 		return nil, err
 	}
@@ -1016,7 +1025,7 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 		return ""
 	}
 	signature := canonicalExpression(plan.Root)
-	if plan.RowAuthzInjected || e.planReferencesActor(plan.Root) || planIsUnbound(plan) {
+	if plan.RowAuthzInjected || plan.RowAuthzRelaxedForConnector || e.planReferencesActor(plan.Root) || planIsUnbound(plan) {
 		signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
 	}
 	// An explicitly staged-scoped read must not share a cache entry with an
