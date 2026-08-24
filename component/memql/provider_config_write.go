@@ -25,10 +25,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -207,11 +207,25 @@ func (e *MemQLEngine) evaluateProviderFederationSetExpression(ctx context.Contex
 // renderProviderConfigCall builds `name(k: "v", ...)` with every value a
 // quoted string literal.
 //
-// Sorted, so a failed call logs identically twice. strconv.Quote rather than
-// interpolation: these values include base64 ciphertext and operator-typed
-// paths, and an unescaped one is a PARSE failure at execute time -- a class
-// this repo has been bitten by before (memql#4256), in a path whose unit tests
-// can pass without ever parsing anything.
+// Sorted, so a failed call logs identically twice.
+//
+// `langparser.QuoteString`, NOT `strconv.Quote`, and the difference is not
+// cosmetic. Go's quoting emits `\x00`, `\a`, `\v` and `\x7f`, and the MemQL
+// lexer REJECTS all four -- so a value carrying any of them renders into a
+// statement that fails to PARSE at execute time. QuoteString is JSON escaping
+// (`\u0000`), which the lexer decodes, and the persisted value is
+// byte-identical either way.
+//
+// It matters because one of these values is operator-typed: the federation
+// form's `value` is a rule id or a filesystem path pasted from a terminal,
+// and a stray control byte in a paste is an ordinary event rather than an
+// exotic one. The rest -- base64 ciphertext, a hex fingerprint, a derived env
+// name -- are safe by construction, which is exactly why using the safe-looking
+// function would have gone unnoticed.
+//
+// Verified empirically rather than assumed: both forms were driven through the
+// front end's own parser, and the four escapes above are the ones that differ.
+// Thanks to the memql-2e session for the pointer.
 func renderProviderConfigCall(name string, args map[string]string) string {
 	keys := sortedConfigKeys(args)
 	parts := make([]string, 0, len(keys))
@@ -219,7 +233,7 @@ func renderProviderConfigCall(name string, args map[string]string) string {
 		if args[k] == "" {
 			continue
 		}
-		parts = append(parts, k+": "+strconv.Quote(args[k]))
+		parts = append(parts, k+": "+langparser.QuoteString(args[k]))
 	}
 	return name + "(" + strings.Join(parts, ", ") + ")"
 }

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -77,6 +78,33 @@ func TestRenderedProviderConfigCallsParse(t *testing.T) {
 				"value": "a\"b\\c\nd",
 			},
 		},
+		{
+			// THE FOUR THAT strconv.Quote GETS WRONG. Go's quoting emits
+			// \x00, \a, \v and \x7f; the MemQL lexer rejects every one, so
+			// this case FAILS against the obvious implementation and passes
+			// only with langparser.QuoteString's JSON escaping. Verified by
+			// driving both forms through this same parser.
+			//
+			// These reach a value because the federation form's field is
+			// operator-typed -- a rule id or a token path pasted from a
+			// terminal -- and a stray control byte in a paste is ordinary.
+			name: "control bytes Go quoting escapes in a form the lexer refuses",
+			fn:   "setGlobalVariable",
+			args: map[string]string{
+				"id":    "var-control-bytes",
+				"name":  "MEMQL_AI_TEST",
+				"value": "nul\x00 bell\a vtab\v del\x7f",
+			},
+		},
+		{
+			name: "non-ASCII, which an operator's path or note can carry",
+			fn:   "setGlobalVariable",
+			args: map[string]string{
+				"id":    "var-unicode",
+				"name":  "MEMQL_AI_TEST",
+				"value": "café — ñ 🔑",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -108,6 +136,27 @@ func TestRenderedCallDropsEmptyValuesRatherThanWritingThem(t *testing.T) {
 	}
 	if _, err := langparser.ParseExpression(stmt); err != nil {
 		t.Fatalf("the trimmed call does not parse: %s: %v", stmt, err)
+	}
+}
+
+// TestRendererUsesLexerCompatibleEscaping states the rule directly, so the
+// reason survives even if the hostile fixture above is ever trimmed.
+//
+// strconv.Quote is the function anyone reaches for, and for these four bytes
+// it produces a literal this engine cannot parse. The failure would land at
+// EXECUTE time on an operator's save, with a parse error naming a column in a
+// statement nobody logged.
+func TestRendererUsesLexerCompatibleEscaping(t *testing.T) {
+	for _, v := range []string{"a\x00b", "a\ab", "a\vb", "a\x7fb"} {
+		goQuoted := strconv.Quote(v)
+		if _, err := langparser.ParseExpression("f(x: " + goQuoted + ")"); err == nil {
+			t.Errorf("strconv.Quote(%q) now parses; if the lexer has grown these escapes "+
+				"this test is stale, but do NOT relax the renderer on that basis alone", v)
+		}
+		stmt := renderProviderConfigCall("setGlobalVariable", map[string]string{"value": v})
+		if _, err := langparser.ParseExpression(stmt); err != nil {
+			t.Errorf("the renderer produced an unparseable literal for %q: %s: %v", v, stmt, err)
+		}
 	}
 }
 
