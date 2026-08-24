@@ -41,12 +41,26 @@ function repoRoot(): string {
 // --- the data ---------------------------------------------------------------
 
 test("the newest barrier is not newer than the reviewed stack pin", () => {
-  // THE POINT. DEFAULT_STACK_TAG is the release the installer actually puts on
-  // a machine, and it moves only when someone reviews the move. A barrier entry
-  // newer than it describes a crossing no operator can make yet -- which means
-  // it was written from a plan rather than from a release, and nothing would
-  // have caught that: the refusal it produces simply never fires, so the entry
-  // looks correct for as long as it is wrong.
+  // THE POINT, RESTATED BECAUSE ITS OLD REASON IS NO LONGER TRUE (memql#4429).
+  //
+  // This used to argue that DEFAULT_STACK_TAG is "the release the installer
+  // actually puts on a machine", so an entry newer than it describes a crossing
+  // NO OPERATOR CAN MAKE -- an unfireable refusal that looks correct for as long
+  // as it is wrong. That premise is gone: a connected install is now seeded with
+  // the NEWEST release the repository lists, and the pin has narrowed to the
+  // offline fallback. An operator can absolutely be running something newer than
+  // this constant.
+  //
+  // The assertion survives on a DIFFERENT reason, and it is the sturdier one:
+  // the pin is still bumped by the release that cuts a tag, so an entry ahead of
+  // it was written from a PLAN rather than from a release. Add the barrier in
+  // the release that ships it.
+  //
+  // What the old premise was hiding is worth stating, because Latest-by-default
+  // makes it live: a barrier that is MISSING is now reachable by default rather
+  // than only by an operator who picked the tag by hand. This test cannot catch
+  // that -- nothing can -- which is why the runbook step is "add the entry in
+  // the release that ships it" and not "add it when someone reports a crossing".
   //
   // Stated as "not ahead" rather than "behind", because the pin moving TO the
   // release that shipped a barrier is the normal, correct state.

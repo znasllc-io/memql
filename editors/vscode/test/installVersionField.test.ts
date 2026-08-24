@@ -5,7 +5,12 @@ import { AddClusterState, DEFAULT_INPUTS, requiredFields } from "../src/state/ad
 import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import { listReleaseTags } from "../src/install/tags.js";
 import { refusedPlatformGuidance } from "../src/state/installProgress.js";
-import { latestLabel, versionChoiceList, withCurrentInSortedPosition } from "../src/webview/installScreens.js";
+import {
+  latestLabel,
+  renderCollectScreen,
+  versionChoiceList,
+  withCurrentInSortedPosition,
+} from "../src/webview/installScreens.js";
 
 // installVersionField.test.ts -- znasllc-io/memql#3882.
 //
@@ -92,6 +97,94 @@ test("an empty listing leaves the offline fallback in place rather than blanking
 
 test("the offline fallback is a real published release, so it can actually install", () => {
   assert.match(DEFAULT_STACK_TAG, /^v\d+\.\d+\.\d+$/);
+});
+
+// ---------------------------------------------------------------------------
+// what the SCREEN actually renders -- the automated half of the manual checklist
+// ---------------------------------------------------------------------------
+
+/** The `<option>` rows of the VERSION select only, as value/selected/label. */
+function versionOptions(html: string): { value: string; selected: boolean; label: string }[] {
+  const open = html.indexOf('<select id="f-version"');
+  assert.notEqual(open, -1, "the version field did not render as a picker");
+  const block = html.slice(open, html.indexOf("</select>", open));
+  return [...block.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => ({
+    value: m[1]!,
+    selected: m[2] !== undefined,
+    label: m[3]!,
+  }));
+}
+
+function collectHtml(choices: string[]): string {
+  return renderCollectScreen({
+    action: "install",
+    values: collectForm().inputs,
+    errors: [],
+    versionChoices: choices,
+  });
+}
+
+test("the rendered picker puts Latest first AND marks it selected", () => {
+  // THE TWO HALVES CAN DISAGREE, which is the whole reason this is asserted on
+  // the MARKUP rather than on versionChoiceList alone. Labelling an entry
+  // "recommended" and selecting a different one is a form that recommends one
+  // thing and does another, and every unit test below would still pass.
+  const s = collectForm();
+  s.seedVersionFromListing("v0.20.3");
+  const html = renderCollectScreen({
+    action: "install",
+    values: s.inputs,
+    errors: [],
+    versionChoices: ["v0.20.3", "v0.19.1", "v0.18.0"],
+  });
+
+  // SCOPED TO THE VERSION SELECT. The collect screen renders the AI-provider
+  // choice too, and a page-wide match counts its options as versions.
+  const options = versionOptions(html);
+  const releases = options.filter((o) => o.value !== "main");
+
+  assert.equal(releases[0]!.value, "v0.20.3", "newest first");
+  assert.equal(releases[0]!.label, latestLabel("v0.20.3"));
+  assert.equal(releases[0]!.selected, true, "the recommended entry must be the selected one");
+  assert.equal(
+    options.filter((o) => o.selected).length,
+    1,
+    "exactly one option may be selected, or the browser picks for us",
+  );
+  assert.deepEqual(
+    releases.map((o) => o.value),
+    ["v0.20.3", "v0.19.1", "v0.18.0"],
+    "no older tag may sit above a newer one -- this is the mis-sort the epic exists to fix",
+  );
+});
+
+test("the rendered main entry names no release, and says what it IS", () => {
+  const html = collectHtml(["v0.20.3", "v0.19.1"]);
+  const main = versionOptions(html).find((o) => o.value === "main")!;
+  assert.match(main.label, /build from source/);
+  assert.doesNotMatch(main.label, /v0\.\d+\.\d+/, "the skew label named a release; it must not now");
+  assert.equal(main.selected, false, "main must never be preselected");
+});
+
+test("an empty listing renders a TEXT BOX prefilled with the offline fallback", () => {
+  // The degrade-to-typing path: git ls-remote needs a network and a git, and an
+  // operator on a plane has neither and still has a cluster to install.
+  const html = collectHtml([]);
+  assert.doesNotMatch(html, /<select id="f-version"/, "no listing means no picker");
+  assert.match(html, new RegExp(`<input id="f-version"[^>]*value="${DEFAULT_STACK_TAG}"`));
+  assert.doesNotMatch(
+    html,
+    /value="main"/,
+    "a text box that accepted 'main' would be an unlabelled branch, which clone-stack.sh refuses",
+  );
+});
+
+test("the version hint states both what Latest is and what main costs", () => {
+  const html = collectHtml(["v0.20.3"]);
+  assert.match(html, /Latest is preselected/);
+  assert.match(html, /BUILDS the node images/);
+  assert.match(html, /Docker/);
+  assert.match(html, /several minutes/);
 });
 
 test("the pin is what the field starts on -- as the OFFLINE FALLBACK", () => {

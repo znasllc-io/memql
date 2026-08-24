@@ -398,8 +398,21 @@ order below and you get all three from one cluster.
       existing cluster...** beside it, and no uninstall card
 - [ ] Pressing **"+"** a second time reveals the page that is already open
       rather than opening a second one -- one machine, one wizard
-- [ ] **Connect to an existing cluster...** collects the cluster's fields in
-      the page's own form and the new cluster appears in the tree
+- [ ] **Connect to an existing cluster...** asks exactly TWO things -- a name
+      and a domain -- and the hint under the domain box updates AS YOU TYPE to
+      read `Will connect to api.<what-you-typed>:443` (memql#4431)
+- [ ] **Advanced** is collapsed, and opening it shows the endpoint already
+      prefilled with that derivation plus an empty token field. Editing the
+      endpoint wins: the registered entry carries what you typed, not the
+      derivation
+- [ ] Typing `memql.localhost` (or `localhost`, or `127.0.0.1`) as the domain is
+      REFUSED, with a message naming **Install a local cluster** as the thing to
+      use instead. The install form's own `memql.localhost` default still works
+- [ ] Saving a valid form with an unreachable domain WARNS with the endpoint and
+      the reason, writes nothing, and relabels the button **Save anyway**;
+      pressing it again registers the cluster (memql#4432)
+- [ ] Saving a valid form for a cluster that IS up registers it with no warning,
+      and the new cluster appears in the tree
 - [ ] With a local cluster installed and answering, the cards include
       **Uninstall the local cluster...** and no longer lead with Install
 - [ ] With one installed but NOT answering (stop it: `k3d cluster stop memql`),
@@ -408,6 +421,21 @@ order below and you get all three from one cluster.
       skipped rather than being done twice
 - [ ] The cluster panel's primary control offers **Repair** for a local
       cluster that is not answering, and opens the same page
+- [ ] The collect form's **Version** field lists releases NEWEST FIRST, with the
+      first entry reading `Latest -- vX.Y.Z (recommended)` and SELECTED. No
+      older tag sits above a newer one (memql#4429 -- the previous form hoisted
+      the pinned tag to the top, which is the mis-sort this replaces)
+- [ ] The tag named in that Latest entry is the one the receipt records at the
+      end of the run, and `kubectl get pods -n memql -o jsonpath` shows node
+      images at that same version
+- [ ] The last entry reads `main -- build from source (for MemQL developers)`
+      and names NO release tag. Selecting it and starting the run: the plan has
+      one more step than a release install (`buildImages`), and after the run
+      `kubectl get pods -n memql -o jsonpath='{.items[*].spec.containers[*].image}'`
+      shows `memql-<node>:local` -- not a ghcr.io image -- with the Deployments
+      row reporting checkout mode at main's commit (memql#4430)
+- [ ] With no network (or no `git`), the Version field degrades to a TEXT BOX
+      prefilled with the extension's pinned release, and the install still runs
 - [ ] The collect form offers the AI provider as a **choice** (anthropic /
       openai), pre-answered, and the provider chosen is the one the run
       verifies the key against -- pick `openai` with an OpenAI key and the run
