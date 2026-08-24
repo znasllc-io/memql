@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strconv"
 	"testing"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -75,11 +76,23 @@ type callSite struct {
 // ones -- an RFC3339 timestamp, a detail object, a message carrying quotes and
 // a newline -- because the renderer's job is to survive them.
 func productionCallSites() []callSite {
-	// A refusal message really does reach the row's `error` field, and a
-	// GitHub error message really can carry quotes. If the renderer got
-	// quoting wrong, this is the value that would prove it.
-	awkward := `tag_created_release_failed: GitHub said "Reference already exists" \ and then
-stopped`
+	// A refusal message really does reach the row's `error` field via
+	// describeRefusal, and it carries GitHub's own message -- remote text this
+	// package does not author.
+	//
+	// THE FOUR CONTROL BYTES ARE THE POINT, and everything else here is
+	// scenery. langparser.QuoteString and strconv.Quote agree on quotes,
+	// backslashes, newlines, tabs, non-ASCII and base64 -- so a fixture built
+	// from the values you would naturally think of passes under BOTH, and a
+	// renderer refactored to %q looks fine. They diverge on exactly four:
+	// NUL, BEL (\a), VT (\v) and DEL. %q renders those as \x00 / \a / \v /
+	// \x7f, and the MemQL lexer rejects every one with "invalid escape
+	// character"; QuoteString emits the \u form the lexer decodes.
+	//
+	// So this fixture is what makes the quoting choice CHECKED rather than
+	// merely correct today.
+	awkward := "tag_created_release_failed: GitHub said \"Reference already exists\" \\ and then\n" +
+		"stopped\x00 \a \v \x7f"
 	return []callSite{
 		// Store.WriteCut -- the happy path, every field populated.
 		{fn: "createReleaseCut", args: map[string]any{
@@ -317,5 +330,50 @@ func TestTheResultNodeSurvivesTheWIREEncoding(t *testing.T) {
 		t.Error("checkError is present on a clean check; the card branches on it being empty, " +
 			"and an empty-string key is fine -- but a NON-empty one here would render " +
 			"'the check could not tell' over a perfectly good result")
+	}
+}
+
+// TestQuoteStringHandlesTheBytesGoQuotingBreaksOn pins the quoting choice
+// against the four bytes that distinguish it.
+//
+// This package renders every call-string value through
+// langparser.QuoteString. That is not a style preference: %q emits Go escapes
+// the MemQL lexer rejects, so ONE control byte turns a statement into a parse
+// failure at execute time -- with the tests green, because a recording fake
+// never parses. A neighbouring session shipped exactly that and caught it
+// only by testing the two functions against each other.
+//
+// The reachable path here is `error`, which carries GitHub's own message
+// through describeRefusal -- remote text this package does not author.
+func TestQuoteStringHandlesTheBytesGoQuotingBreaksOn(t *testing.T) {
+	eng := realEngine(t)
+	// The four, individually, so a failure names which one.
+	for _, tc := range []struct{ name, value string }{
+		{"NUL", "a\x00b"},
+		{"BEL", "a\ab"},
+		{"VT", "a\vb"},
+		{"DEL", "a\x7fb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := "mutation " + renderCall("updateReleaseCutStatus", map[string]any{
+				"version": "v1.2.3", "status": "failed", "error": tc.value,
+			})
+			if _, err := eng.Parse(call); err != nil {
+				t.Fatalf("a %s in the error message made the statement unparseable: %v\n  %s",
+					tc.name, err, call)
+			}
+
+			// THE CONTROL, and it has to be here or the case above is
+			// compatible with a lexer that accepts everything. Go's own
+			// quoting of the same byte must NOT parse -- that divergence
+			// is the whole reason renderValue calls QuoteString.
+			goQuoted := `mutation updateReleaseCutStatus(version:"v1.2.3",status:"failed",error:` +
+				strconv.Quote(tc.value) + `)`
+			if _, err := eng.Parse(goQuoted); err == nil {
+				t.Fatalf("the lexer ACCEPTED Go-quoted %s (%s), so this test would pass against "+
+					"a renderer using %%q and proves nothing about the quoting choice",
+					tc.name, strconv.Quote(tc.value))
+			}
+		})
 	}
 }
