@@ -5075,7 +5075,9 @@ QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRate
 };
 
 /** Every release this cluster cut, newest first. Backs the Releases card on the portal's Deployments page.
-GATED requiresOwner, matching the builtin's Go owner wall rather than the concept's clusterOwner tier -- and the two are not the same question. The tier decides which ROWS a caller may see; this gate decides whether cutting a release is a thing this caller does at all, and the answer the owner ask gives is "only owners". Being the weaker of the two would be the bug: an admin passing the tier while the cut button refuses them would render a history for an action they cannot take.
+TWO TERMS FOR ONE PREDICATE, and both earn their place -- deleting either is the mistake this note exists to prevent.
+`requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
+`actor.isClusterOwner==true` is what the CONCEPT'S TIER already ANDs into every read of it, written out so the enforcement land gate (memql#3172) can decide implication. That gate cannot expand a spec, so with `requiresOwner` alone it reports the read as UNDECIDABLE -- it cannot prove the filter already implies the conjunct, and an undecidable read is one whose result set might silently change when enforcement lands. Spelling the conjunct out settles it, and it narrows nothing: the two terms are the same predicate, since `IsClusterOwner()` IS `Role == RoleOwner`.
 This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A release cut by hand appears here not at all. */
 // Bound concept: v1:cluster:releaseCut (machine-readable: BoundConcepts["releaseCuts"] in generated_concepts.ts).
 export interface ReleaseCutsArgs {
