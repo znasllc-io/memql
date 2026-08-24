@@ -40,6 +40,7 @@ import * as vscode from "vscode";
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { LOG_PANE_SCRIPT, renderScreen } from "./screenLayout.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import {
@@ -266,6 +267,15 @@ export class DeploymentPanel {
    * rebuild would name the one thing the operator did not ask for.
    */
   private runMode: RunMode = "deploy";
+  /**
+   * Whether the Diagnostics section is disclosed (memql#4456).
+   *
+   * THIS PANEL'S OWN, not `AddClusterState`'s, because it is about the PAGE
+   * rather than about a run: it survives a run starting and finishing, and the
+   * instance overview has one with no run in sight. `logsOpen` is the run's and
+   * is reset by `beginRun`; this would be wrong to reset there.
+   */
+  private diagnosticsOpen = false;
   /** The in-flight read `pointAt` started, for a caller that must act on it. */
   private loading: Promise<void> = Promise.resolve();
   private error = "";
@@ -493,6 +503,25 @@ export class DeploymentPanel {
     if (type === "pickTag" && typeof value === "string") {
       this.setTarget(value);
       this.render();
+      return;
+    }
+    // The log disclosure and the Diagnostics section, which are the same
+    // component with two consumers (memql#4455). Both repaint: the flag they
+    // set is what the next render reads.
+    if (type === "toggleLogs") {
+      this.state.toggleLogs();
+      this.render();
+      return;
+    }
+    if (type === "toggleDiagnostics") {
+      this.diagnosticsOpen = !this.diagnosticsOpen;
+      this.render();
+      return;
+    }
+    // Recorded and NOT repainted -- a render would replace the document under
+    // the operator's scrollbar.
+    if (type === "logsFollow" && typeof value === "boolean") {
+      this.state.setLogsFollow(value);
       return;
     }
     if (type === "input" && typeof value === "object" && value !== null) {
@@ -1227,8 +1256,10 @@ export class DeploymentPanel {
   private bodyHtml(): string {
     const instance = this.instance;
     if (instance === undefined) {
-      return `<h1>Deployments</h1>
-<p class="lede">Reading this machine...</p>`;
+      return renderScreen({
+        title: "Deployments",
+        status: `<p class="lede">Reading this machine...</p>`,
+      });
     }
     switch (this.screen) {
       case "runDetail": {
@@ -1240,11 +1271,11 @@ export class DeploymentPanel {
           // row can outlive its record for perfectly ordinary reasons. Bouncing
           // silently to the overview would present that as a click that did
           // nothing, which is the failure this whole screen exists to end.
-          return `<h1>Deployment</h1>
-<p class="lede">This deployment is no longer in the record. Local runs are pruned once there are more than ${RUN_LOG_KEEP} of them, and a remote deployment's rows come from the cluster.</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+          return renderScreen({
+            title: "Deployment",
+            actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
+            status: `<p class="lede">This deployment is no longer in the record. Local runs are pruned once there are more than ${RUN_LOG_KEEP} of them, and a remote deployment's rows come from the cluster.</p>`,
+          });
         }
         return renderRunDetail({
           instance,
@@ -1266,6 +1297,7 @@ export class DeploymentPanel {
           nowMs: Date.now(),
           outcome: this.outcome,
           error: this.error,
+          diagnosticsOpen: this.diagnosticsOpen,
         });
       }
       case "chooseTag":
@@ -1318,6 +1350,7 @@ export class DeploymentPanel {
             // peek(), never get(): bodyHtml is synchronous. loadTags warms it.
             releases: this.deps.releases?.peek(),
             upgrade: this.upgrade(),
+            diagnosticsOpen: this.diagnosticsOpen,
           });
         }
         return renderInstanceOverview({
@@ -1328,6 +1361,7 @@ export class DeploymentPanel {
           error: this.error,
           releases: this.deps.releases?.peek(),
           upgrade: this.upgrade(),
+          diagnosticsOpen: this.diagnosticsOpen,
         });
     }
   }
@@ -1336,8 +1370,20 @@ export class DeploymentPanel {
     steps: StepProgress[];
     mode: RunMode;
     running: boolean;
+    logsOpen: boolean;
+    logsFollow: boolean;
   } {
-    return { steps, mode: this.runMode, running: this.runAbort !== undefined };
+    return {
+      steps,
+      mode: this.runMode,
+      running: this.runAbort !== undefined,
+      // FROM THE SHARED STATE OBJECT, which this panel already owns an instance
+      // of -- so the wizard and this page hold the disclosure the same way, and
+      // a failure auto-discloses here for the same reason and by the same line
+      // of code (memql#4455).
+      logsOpen: this.state.logsOpen,
+      logsFollow: this.state.logsFollow,
+    };
   }
 
   private render(): void {
@@ -1435,6 +1481,7 @@ ${this.bodyHtml()}
     const pick = e.target.closest('select[data-act="pickTag"]');
     if (pick) vscode.postMessage({ type: 'pickTag', value: pick.value });
   });
+${LOG_PANE_SCRIPT}
 </script>
 </body>
 </html>`;

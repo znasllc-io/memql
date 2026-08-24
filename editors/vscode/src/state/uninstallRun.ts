@@ -50,6 +50,16 @@ export class UninstallRunState {
   private failedStepId: string | undefined;
   private problemMessage = "";
   private followUpMessage = "";
+  // The log disclosure, held here for the same reason AddClusterState holds its
+  // own (memql#4455): the panel re-renders wholesale on every `stepLog`, so a
+  // `<details>` an operator opened would close itself a second later.
+  //
+  // A SECOND PAIR OF FIELDS RATHER THAN A SHARED ONE, because these are two
+  // different runs. An operator who opened the log on a failed install and then
+  // started an uninstall should meet a closed pane: the disclosure being open is
+  // a fact about the run they were reading, not a preference.
+  private logsShown = false;
+  private logsFollowTail = true;
 
   get phase(): UninstallPhase {
     return this.currentPhase;
@@ -70,6 +80,27 @@ export class UninstallRunState {
   get failure(): StepProgress | undefined {
     const found = this.rows.find((row) => row.id === this.failedStepId);
     return found === undefined ? undefined : { ...found };
+  }
+
+  /** Whether the removal's output is disclosed. */
+  get logsOpen(): boolean {
+    return this.logsShown;
+  }
+
+  /** Whether the pane should still be pinned to the tail on the next render. */
+  get logsFollow(): boolean {
+    return this.logsFollowTail;
+  }
+
+  /** The operator pressed the disclosure. See `AddClusterState.toggleLogs`. */
+  toggleLogs(): void {
+    this.logsShown = !this.logsShown;
+    if (this.logsShown) this.logsFollowTail = true;
+  }
+
+  /** Recorded, never repainted. See `AddClusterState.setLogsFollow`. */
+  setLogsFollow(follow: boolean): void {
+    this.logsFollowTail = follow;
   }
 
   /** Why the run could not start, when no step ever reported. */
@@ -96,6 +127,10 @@ export class UninstallRunState {
     this.failedStepId = undefined;
     this.problemMessage = "";
     this.followUpMessage = "";
+    // A new removal starts closed, for the reason `AddClusterState.beginRun`
+    // states: an open pane would be showing the previous run's output.
+    this.logsShown = false;
+    this.logsFollowTail = true;
   }
 
   /**
@@ -141,6 +176,11 @@ export class UninstallRunState {
         // operator is being told which step to act on, and the earliest failure
         // is the one the rest may be consequences of.
         if (row.state === "failed" && this.failedStepId === undefined) this.failedStepId = row.id;
+        // FAILURE OPENS THE LOG (memql#4455). A removal that refused has left an
+        // artifact on the machine, and the output is what says which and why;
+        // making the operator find a toggle first would be design spite at the
+        // one moment the log IS the product.
+        if (row.state === "failed") this.logsShown = true;
         return;
       }
       default:

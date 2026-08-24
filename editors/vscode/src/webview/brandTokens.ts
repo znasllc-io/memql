@@ -82,6 +82,30 @@ function declarations(values: Readonly<Record<PaletteKey, string>>): string {
 }
 
 /**
+ * The progress bar's width, as 101 rules rather than an inline style
+ * (memql#4454).
+ *
+ * NOT A STYLISTIC CHOICE. Every panel here runs under
+ * `style-src 'nonce-<...>'` with no `'unsafe-inline'`, and a nonce cannot
+ * apply to a style ATTRIBUTE -- only to a `<style>` element. So
+ * `style="width: 42%"` is not merely discouraged on this surface, it is
+ * DROPPED by the browser, and the bar would render empty at every value with
+ * nothing in any log to say why. Widening the CSP for one bar is the wrong
+ * trade on a page that also renders capability stderr.
+ *
+ * GENERATED, not written out. A hand-maintained table of a hundred rules is a
+ * table with a gap in it, and the gap is a percentage at which the bar
+ * silently renders empty.
+ */
+function percentRules(): string {
+  const rules: string[] = [];
+  for (let percent = 0; percent <= 100; percent += 1) {
+    rules.push(`  .run-bar-fill[data-percent="${percent}"] { width: ${percent}%; }`);
+  }
+  return rules.join("\n");
+}
+
+/**
  * The palette + shared component classes, inlined by every panel under its
  * CSP nonce.
  *
@@ -179,6 +203,66 @@ ${declarations(HIGH_CONTRAST)}
 
   .boundary { color: var(--memql-muted); border-top: 1px solid var(--memql-border);
               margin-top: 18px; padding-top: 10px; font-size: 0.92em; }
+
+  /* ---- the branded run block (memql#4454) ----
+     HERE RATHER THAN IN EITHER PANEL. The wizard and the Deployments page run
+     the same graph through the same renderer, and two copies of this would be
+     two answers to what a MemQL install LOOKS like -- which is the thing the
+     epic is trying to make one answer. */
+  .run-block { display: flex; flex-direction: column; align-items: center;
+               text-align: center; gap: 12px; padding: 22px 0 18px; }
+  .run-block .memql-mark { color: var(--memql-accent); }
+  .run-bar { width: 100%; max-width: 460px; height: 6px; border-radius: 999px;
+             background: var(--memql-raised); overflow: hidden; }
+  .run-bar-fill { height: 100%; background: var(--memql-accent); border-radius: 999px;
+                  transition: width 240ms ease; width: 0; }
+  .run-message { margin: 0; color: var(--memql-fg); }
+  .run-position { color: var(--memql-muted); }
+  .steps-heading { margin-top: 20px; }
+  /* The record, not the headline: quieter than the block above it. */
+  .step-list { font-size: 0.94em; }
+${percentRules()}
+  /* Before runStarted seeds the list there is no total, so the bar says
+     "something is happening" rather than claiming 0%. */
+  .run-bar-fill.indeterminate { width: 40%;
+                                animation: memql-run-indeterminate 1.4s ease-in-out infinite; }
+  @keyframes memql-run-indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+
+  /* ---- the disclosure, shared by the run log and Diagnostics (memql#4455) ---- */
+  .disclosure { margin-top: 18px; border-top: 1px solid var(--memql-border);
+                padding-top: 10px; }
+  .disclosure-toggle { font: inherit; background: none; border: none; padding: 4px 0;
+                       color: var(--memql-accent); cursor: pointer; }
+  .disclosure-toggle:hover { text-decoration: underline; }
+  .disclosure-toggle[disabled] { color: var(--memql-muted); cursor: default;
+                                 text-decoration: none; }
+  .disclosure-toggle:focus-visible { outline: 2px solid var(--memql-accent);
+                                     outline-offset: 2px; }
+  .disclosure-pane { margin-top: 8px; }
+  /* SCROLLABLE AND BOUNDED. An install writes hundreds of lines; a pane that
+     grew with them would push everything above it -- including the actions row
+     this epic just moved to the top -- off the screen. */
+  .log-pane { max-height: 40vh; overflow-y: auto;
+              background: var(--memql-raised); border: 1px solid var(--memql-border);
+              border-radius: 4px; padding: 8px 10px; }
+  .log-step + .log-step { margin-top: 10px; border-top: 1px solid var(--memql-border);
+                          padding-top: 10px; }
+  .log-step-name { color: var(--memql-muted); font-size: 0.9em; margin-bottom: 3px; }
+  .log-step[data-status="failed"] .log-step-name { color: var(--memql-danger); }
+  .log-step-output { margin: 0; white-space: pre-wrap; word-break: break-word;
+                     font-size: 0.9em; color: var(--memql-fg); }
+
+  /* REDUCED MOTION IS HONOURED, and it takes the indeterminate animation with
+     it: a bar that cannot state a percentage still must not pulse at somebody
+     who asked the system to stop moving. It keeps its width, so it still reads
+     as "in progress" rather than as "empty". */
+  @media (prefers-reduced-motion: reduce) {
+    .run-bar-fill { transition: none; }
+    .run-bar-fill.indeterminate { animation: none; }
+  }
 `;
 }
 

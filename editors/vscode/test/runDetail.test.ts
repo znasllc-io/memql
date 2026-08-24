@@ -81,6 +81,7 @@ function detail(over: {
   const instance = over.instance ?? localInstanceOf();
   const run = over.run ?? runOf();
   return renderRunDetail({
+    diagnosticsOpen: false,
     instance,
     run,
     actions: runDetailActions({ instance, run }),

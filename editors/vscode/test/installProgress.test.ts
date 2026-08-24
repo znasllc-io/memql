@@ -22,7 +22,6 @@ import { SYNTHESISED_EXIT_CODES } from "../src/install/runner.js";
 import {
   failureGuidance,
   refusedPlatformGuidance,
-  inlineStepError,
   runIsSettled,
   toStepViews,
 } from "../src/state/installProgress.js";
@@ -110,36 +109,39 @@ test("order is the caller's -- the graph's wave order, not a re-sort", () => {
   );
 });
 
-test("an exit code rides only on a failure", () => {
-  // The load-bearing one. AddClusterState.retry() clears the code, but a step
-  // that succeeded while still carrying one would render "exit 5" beside a tick
-  // -- alarming, and wrong.
-  assert.equal(toStepViews([step({ state: "failed", exitCode: 4 })])[0]?.exitCode, 4);
-  assert.equal(toStepViews([step({ state: "done", exitCode: 5 })])[0]?.exitCode, undefined);
-  assert.equal(toStepViews([step({ state: "skipped", exitCode: 3 })])[0]?.exitCode, undefined);
+test("A CHECKLIST ROW CARRIES NEITHER AN EXIT CODE NOR A LOG LINE", () => {
+  // REPLACES TWO memql#4194 TESTS, and the reason the old behaviour went is
+  // that the page changed underneath it. #4194 put a short redacted last-line
+  // on a failed row because the full log had nowhere on the page to be -- it
+  // went to the MemQL Install output channel, and the inline line ended by
+  // saying so. The run screens now carry a log pane (memql#4455), so that
+  // sentence pointed somewhere else while the thing it described sat one click
+  // below it, and the same stderr rendered twice.
+  //
+  // D4 (memql#4456) gives verbatim output, exit codes and envelope fields
+  // exactly one home. This asserts the checklist is not it. What a row keeps is
+  // what a checklist is for: which step, what state, and the human sentence the
+  // capability itself wrote -- see `detailFor` below.
+  const failed = toStepViews([step({ state: "failed", exitCode: 4, log: "first line\nboom" })])[0];
+  assert.equal(failed?.exitCode, undefined, "the exit code belongs to the pane");
+  assert.equal(failed?.error, undefined, "the output belongs to the pane");
+  assert.equal(failed?.state, "failed", "the row still says the step failed");
+
+  const preserved = toStepViews([step({ state: "preserved", log: "kept" })])[0];
+  assert.equal(preserved?.error, undefined);
+  const done = toStepViews([step({ state: "done", log: "chatter" })])[0];
+  assert.equal(done?.error, undefined);
 });
 
-test("the log's LAST LINE is surfaced where something went wrong, and not on every green step", () => {
-  // Attaching output to all twelve steps buries the one failure in a dozen
-  // disclosures that all say "fine". And the panel keeps only the short
-  // what-failed line (memql#4194, audit 30): the full stderr's home is the
-  // MemQL Install output channel, which the line names.
-  const failed = toStepViews([step({ state: "failed", log: "first line\nboom" })])[0]?.error;
-  assert.match(failed ?? "", /^boom/);
-  assert.doesNotMatch(failed ?? "", /first line/);
-  assert.match(failed ?? "", /MemQL Install output channel/);
-  assert.match(toStepViews([step({ state: "preserved", log: "kept" })])[0]?.error ?? "", /^kept/);
-  assert.equal(toStepViews([step({ state: "done", log: "chatter" })])[0]?.error, undefined);
-});
-
-test("the inline step error is redacted and capped", () => {
-  const home = "/home/op";
-  const long = `wrote /home/op/.memql/x with key sk-ant-abcdef12345678\n${"y".repeat(400)}`;
-  const inline = inlineStepError(long, home);
-  assert.doesNotMatch(inline, /sk-ant/);
-  assert.ok(inline.split("\n")[0]!.length <= 140);
-  const pathy = inlineStepError("could not write /home/op/.memql/receipt", home);
-  assert.match(pathy, /~\/\.memql\/receipt/);
+test("the capability's own reason still reaches the row, because it was written for a human", () => {
+  // The distinction D4 turns on. `reason` is a sentence the capability contract
+  // requires be readable; `log` is whatever the process wrote. Only the second
+  // is demoted, and collapsing them would leave a failed row saying nothing.
+  const view = toStepViews([
+    step({ state: "failed", reason: "the port was already in use", log: "E0814 bind: EADDRINUSE" }),
+  ])[0];
+  assert.match(view?.detail ?? "", /the port was already in use/);
+  assert.doesNotMatch(view?.detail ?? "", /EADDRINUSE/);
 });
 
 test("a guided step says so, alongside any reason", () => {

@@ -112,6 +112,8 @@ test("a failed rebuild offers Retry and Back -- guided has nothing to offer it",
     remedy: "",
   };
   const rebuild = renderFailedScreen({
+    logsOpen: false,
+    logsFollow: true,
     steps: [failure],
     mode: "rebuild",
     running: false,
@@ -124,7 +126,14 @@ test("a failed rebuild offers Retry and Back -- guided has nothing to offer it",
   // Every other run keeps it: the wizard's graph has privileged steps, which is
   // the whole case for the control.
   assert.match(
-    renderFailedScreen({ steps: [failure], mode: "deploy", running: false, failures: [failure] }),
+    renderFailedScreen({
+      steps: [failure],
+      mode: "deploy",
+      running: false,
+      failures: [failure],
+      logsOpen: false,
+      logsFollow: true,
+    }),
     /data-act="guided"/,
   );
 });
@@ -138,10 +147,17 @@ test("the rebuild screen names the checkout and asks one thing", () => {
   assert.match(html, /\/home\/me\/\.memql\/src/);
   assert.match(html, /data-field="nodes"/);
   assert.match(html, /data-act="beginRebuild"/);
-  // The checklist is above the Start button, so it is an informed click.
+  // Above the FIELD it qualifies, and in the first screenful -- re-expressed by
+  // memql#4453 exactly as preflight.test.ts's twin was, and for the same
+  // reason: Start moved to the top of the page, so "above Start" and "above the
+  // form" stopped being the same position. The checklist follows the button up.
   assert.ok(
-    html.indexOf("Before it runs") < html.indexOf('data-act="beginRebuild"'),
-    "the checklist must render before the Start button",
+    html.indexOf('data-act="beginRebuild"') < html.indexOf("Before it runs"),
+    "the actions row comes first on every screen (memql#4453)",
+  );
+  assert.ok(
+    html.indexOf("Before it runs") < html.indexOf('data-field="nodes"'),
+    "the checklist must render above the form whose answer it qualifies",
   );
 });
 

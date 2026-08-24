@@ -129,6 +129,7 @@ const OVERVIEW = {
   // The upgrade button is memql#3997 and has its own tests; these are about
   // what the version says, so every page here draws none.
   upgrade: { kind: "none", reason: "not under test" },
+  diagnosticsOpen: false,
 } as const;
 
 test("the local instance page carries a latest fact beside version", () => {
@@ -166,6 +167,7 @@ test("the remote instance page carries the same latest fact", () => {
     error: "",
     releases: KNOWN,
     upgrade: { kind: "none", reason: "not under test" },
+    diagnosticsOpen: false,
   });
   assert.match(html, /fact-key">latest<\/span><span class="fact-value">v0\.19\.0/);
 });
@@ -231,11 +233,14 @@ test("the tag screen states the lane crossing on a checkout-mode cluster", () =>
   });
   assert.match(html, /returns local to released v0\.19\.0 images/);
   assert.match(html, /runs a checkout build today/);
-  // Above the button, so Start is an informed click -- the same placement rule
-  // the install checklist follows.
+  // Above the PICKER, so the crossing is read before the tag is chosen -- the
+  // same placement rule the install checklist follows, and re-expressed by
+  // memql#4453 for the same reason (see preflight.test.ts). Start is now the
+  // first thing on the page; the crossing rides directly under it, in the first
+  // screenful, rather than at the end of the form.
   assert.ok(
-    html.indexOf("checkout build today") < html.indexOf('data-act="beginDeploy"'),
-    "the crossing must be stated before the Start button",
+    html.indexOf("checkout build today") < html.indexOf('id="tag-pick"'),
+    "the crossing must be stated above the picker it qualifies",
   );
 });
 

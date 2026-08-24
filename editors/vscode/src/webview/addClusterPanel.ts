@@ -52,6 +52,8 @@ import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { maskHomePath, redactForDisplay } from "../install/secrets.js";
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { renderRunLogPane } from "./runLogPane.js";
+import { LOG_PANE_SCRIPT, renderScreen } from "./screenLayout.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
 import { preflightItems, type PreflightInputs, type PreflightItem } from "../state/preflight.js";
@@ -123,6 +125,7 @@ import {
   INPUT_FIELDS,
   renderCollectScreen,
   renderFailedScreen,
+  renderRunBlock,
   renderRunningScreen,
 } from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
@@ -647,6 +650,27 @@ export class AddClusterPanel {
     if (type === "back") {
       this.state.back();
       this.render();
+      return;
+    }
+    // THE LOG DISCLOSURE (memql#4455). A repaint is exactly what this one
+    // wants -- the open/closed flag is what the next render reads -- which is
+    // what makes it different from the keystroke and scroll messages below,
+    // and the reason it is a message at all rather than a `<details>`.
+    if (type === "toggleLogs") {
+      // WHICH RUN'S LOG. This panel drives two: an install/repair, whose steps
+      // live on `state`, and an uninstall, whose steps live on `uninstall`.
+      // They are separate runs with separate step lists, so they hold the
+      // disclosure separately -- and routing on the SCREEN is what keeps the
+      // toggle acting on the pane the operator is actually looking at.
+      this.runStateForScreen().toggleLogs();
+      this.render();
+      return;
+    }
+    // RECORDED, NEVER REPAINTED. Answering a scroll with a render would
+    // replace the document under the operator's scrollbar, which is the
+    // failure this whole state-held arrangement exists to avoid -- inverted.
+    if (type === "logsFollow" && typeof value === "boolean") {
+      this.runStateForScreen().setLogsFollow(value);
       return;
     }
     // RECORDED, NEVER REPAINTED (memql#3538).
@@ -1827,9 +1851,24 @@ ${this.bodyHtml()}
     const owner = document.querySelector('[data-escape-act]');
     if (owner) vscode.postMessage({ type: owner.dataset.escapeAct });
   });
+${LOG_PANE_SCRIPT}
 </script>
 </body>
 </html>`;
+  }
+
+  /**
+   * Which of this panel's two run states owns the log pane on screen now.
+   *
+   * NARROWED TO THE INTERSECTION the disclosure needs, so this cannot become a
+   * general "give me a state" accessor that hands an uninstall screen the
+   * install's step list.
+   */
+  private runStateForScreen(): {
+    toggleLogs(): void;
+    setLogsFollow(follow: boolean): void;
+  } {
+    return this.state.screen === "uninstallPreview" ? this.uninstall : this.state;
   }
 
   private bodyHtml(): string {
@@ -1855,6 +1894,8 @@ ${this.bodyHtml()}
   private runHtml(): string {
     return renderRunningScreen({
       steps: this.state.steps,
+      logsOpen: this.state.logsOpen,
+      logsFollow: this.state.logsFollow,
       mode: this.state.action === "repair" ? "repair" : "install",
       // `runAbort` is set for exactly as long as a run is in flight, which is
       // what distinguishes "starting, no step has reported yet" from "nothing
@@ -1868,6 +1909,8 @@ ${this.bodyHtml()}
     return renderFailedScreen({
       failures: this.state.failures,
       steps: this.state.steps,
+      logsOpen: this.state.logsOpen,
+      logsFollow: this.state.logsFollow,
       mode: this.state.action === "repair" ? "repair" : "install",
       running: this.runAbort !== undefined,
     });
@@ -1899,9 +1942,15 @@ ${this.bodyHtml()}
     // a cluster already in the list has nothing to compose (memql#3741).
     const choices = addClusterMenu(this.verdict, this.localRegistered);
     const cards = choices.map((choice) => this.cardHtml(choice)).join("");
-    return `<h1>Add a MemQL cluster</h1>
-<p class="lede">${escapeHtml(VERDICT_LEDE[this.verdict])}</p>
-${cards}`;
+    // THE CARDS ARE THE ACTIONS on this screen, so the ordering doctrine is
+    // already satisfied by putting them under the lede: there is no separate
+    // buttons row to hoist. Composed through `renderScreen` regardless, so the
+    // screen list in test/screenOrdering.test.ts has nothing to exempt.
+    return renderScreen({
+      title: "Add a MemQL cluster",
+      status: `<p class="lede">${escapeHtml(VERDICT_LEDE[this.verdict])}</p>`,
+      details: cards,
+    });
   }
 
   private cardHtml(choice: AddClusterChoice): string {
@@ -2109,20 +2158,23 @@ Nothing has been written. If the cluster is stopped, behind a VPN, or still depl
     // else on this page: the key listener looks for the attribute rather than
     // acting on every Escape, so a screen that has not opted in -- a run in
     // progress, say -- is not cancelled by a keystroke aimed at a form.
-    return `<h1>Connect to an existing cluster</h1>
-<p class="lede">Registering a cluster records how to reach it. Nothing is installed and nothing on the cluster is touched.</p>
-<div data-escape-act="discard">
-${primary}
+    // THE ESCAPE OWNER MOVES OUT TO WRAP THE WHOLE SCREEN. It used to wrap the
+    // form and its buttons together; with the buttons hoisted above the form
+    // the two would be in different subtrees, and `[data-escape-act]` is found
+    // by a page-wide query, so the wrapper has to contain both or Escape stops
+    // meaning anything here.
+    return `<div data-escape-act="discard">${renderScreen({
+      title: "Connect to an existing cluster",
+      actions: `<button class="primary" type="button" data-connect-act="save">${
+        this.state.connectProbe.state === "failed" ? "Save anyway" : "Save cluster"
+      }</button>
+  <button class="secondary" type="button" data-connect-act="discard">Cancel</button>`,
+      status: `<p class="lede">Registering a cluster records how to reach it. Nothing is installed and nothing on the cluster is touched.</p>
+${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`}`,
+      details: `${primary}
 ${advanced}
-${this.probeHtml()}
-${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`}
-<div class="actions">
-  <button class="primary" type="button" data-connect-act="save">${
-    this.state.connectProbe.state === "failed" ? "Save anyway" : "Save cluster"
-  }</button>
-  <button class="secondary" type="button" data-connect-act="discard">Cancel</button>
-</div>
-</div>`;
+${this.probeHtml()}`,
+    })}</div>`;
   }
 
   /**
@@ -2165,18 +2217,20 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
    */
   private uninstallListHtml(): string {
     if (this.uninstallProblem !== "") {
-      return `<h1>Uninstall the local cluster</h1>
-<p class="lede">MemQL cannot say what an uninstall would remove, so it will not run one.</p>
-<p class="error">${escapeHtml(this.uninstallProblem)}</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
-</div>`;
+      return renderScreen({
+        title: "Uninstall the local cluster",
+        actions: `<button class="secondary" type="button" data-act="uninstallBack">Back</button>`,
+        status: `<p class="lede">MemQL cannot say what an uninstall would remove, so it will not run one.</p>
+<p class="error">${escapeHtml(this.uninstallProblem)}</p>`,
+      });
     }
 
     const preview = this.uninstallPreview;
     if (preview === undefined) {
-      return `<h1>Uninstall the local cluster</h1>
-<p class="lede">Reading the install receipt to work out exactly what is on this machine.</p>`;
+      return renderScreen({
+        title: "Uninstall the local cluster",
+        status: `<p class="lede">Reading the install receipt to work out exactly what is on this machine.</p>`,
+      });
     }
 
     // The projection is removalPreview.ts's, and it re-derives nothing: which
@@ -2198,20 +2252,24 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
     // data-escape-act, so Escape means "leave this alone" HERE and does not
     // reach a screen that never asked for it. Leaving costs nothing: not one
     // step has run.
-    return `<h1>Uninstall the local cluster</h1>
-<p class="lede">${escapeHtml(
-      "This list is the confirmation -- there is no second prompt. It is built from the " +
-        "install receipt, so nothing this machine had before the install is touched.",
-    )}</p>
-<div data-escape-act="uninstallBack">
-${renderToHtml(renderRemovalPreview(items.filter((item) => !this.isShared(item.id))))}
+    // THE BUTTON MOVES ABOVE THE LIST, AND THE LABEL FOLLOWS IT. "Remove the
+    // items above" was true when the button sat under them and is a lie the
+    // moment it sits over them -- so it names what it removes instead of
+    // pointing at where they are. The list is still the confirmation and there
+    // is still no second prompt; what changed is that an operator who has
+    // already read it does not scroll back past it to act.
+    return `<div data-escape-act="uninstallBack">${renderScreen({
+      title: "Uninstall the local cluster",
+      actions: `<button class="primary" type="button" data-act="uninstallStart">Uninstall -- remove the items listed below</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Cancel</button>`,
+      status: `<p class="lede">${escapeHtml(
+        "This list is the confirmation -- there is no second prompt. It is built from the " +
+          "install receipt, so nothing this machine had before the install is touched.",
+      )}</p>`,
+      details: `${renderToHtml(renderRemovalPreview(items.filter((item) => !this.isShared(item.id))))}
 ${elevationNote}
-${this.sharedToolsHtml()}
-<div class="actions">
-  <button class="primary" type="button" data-act="uninstallStart">Uninstall -- remove the items above</button>
-  <button class="secondary" type="button" data-act="uninstallBack">Cancel</button>
-</div>
-</div>`;
+${this.sharedToolsHtml()}`,
+    })}</div>`;
   }
 
   /**
@@ -2395,28 +2453,45 @@ ${this.sharedToolsHtml()}
 ${rows}`;
   }
 
-  /** The removal in flight. */
+  /**
+   * The removal in flight.
+   *
+   * THE SAME RUN BLOCK AS AN INSTALL (memql#4454), from `renderRunBlock` with
+   * `mode: "uninstall"`. The screen stays this panel's -- a removal has no
+   * Retry, no guided mode and its own five phases -- but the mark, the bar and
+   * the one-line narration are the shared ones, because a second progress
+   * display for the one run that takes things away is where the two would
+   * drift apart.
+   */
   private uninstallRunningHtml(): string {
     const steps = this.uninstall.steps;
-    const body =
-      steps.length === 0
-        ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
-        : renderToHtml(renderInstallSteps(toStepViews(steps)));
+    const block = {
+      steps,
+      mode: "uninstall" as const,
+      running: !runIsSettled(steps),
+      logsOpen: this.uninstall.logsOpen,
+      logsFollow: this.uninstall.logsFollow,
+    };
     // Cancel stops at the next wave boundary, so it is offered only while there
     // is a wave left to stop.
-    const actions = runIsSettled(steps)
-      ? ""
-      : `<div class="actions">
-  <button class="secondary" type="button" data-act="uninstallCancel">Cancel</button>
-</div>`;
-
-    return `<h1>Removing the local cluster</h1>
-<p class="lede">${escapeHtml(
-      "Each step reverses one entry in the receipt, in the order the graph gives -- each tool " +
-        "outlives the artifact it is needed to remove.",
-    )}</p>
-${body}
-${actions}`;
+    return renderScreen({
+      title: "Removing the local cluster",
+      actions: runIsSettled(steps)
+        ? ""
+        : `<button class="secondary" type="button" data-act="uninstallCancel">Cancel</button>`,
+      status: `<p class="lede">${escapeHtml(
+        "Each step reverses one entry in the receipt, in the order the graph gives -- each tool " +
+          "outlives the artifact it is needed to remove.",
+      )}</p>
+${renderRunBlock(block)}`,
+      details:
+        steps.length === 0 ? "" : renderToHtml(renderInstallSteps(toStepViews(steps))),
+      logs: renderRunLogPane({
+        steps,
+        open: this.uninstall.logsOpen,
+        follow: this.uninstall.logsFollow,
+      }),
+    });
   }
 
   /** It is off the machine. */
@@ -2437,28 +2512,38 @@ ${actions}`;
         ? ""
         : `<p class="error">${escapeHtml(this.uninstall.followUpProblem)}</p>`;
 
-    return `<h1>The local cluster is off this machine</h1>
-<p class="lede">${escapeHtml(summary)}</p>
-${renderToHtml(renderInstallSteps(toStepViews(steps)))}
-${followUp}
-<div class="actions">
-  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
-</div>`;
+    return renderScreen({
+      title: "The local cluster is off this machine",
+      actions: `<button class="secondary" type="button" data-act="uninstallBack">Back</button>`,
+      status: `<p class="lede">${escapeHtml(summary)}</p>
+${followUp}`,
+      details: renderToHtml(renderInstallSteps(toStepViews(steps))),
+      logs: renderRunLogPane({
+        steps,
+        open: this.uninstall.logsOpen,
+        follow: this.uninstall.logsFollow,
+      }),
+    });
   }
 
   /** The operator stopped it. */
   private uninstallStoppedHtml(): string {
-    return `<h1>Removal stopped</h1>
-<p class="lede">${escapeHtml(
-      "What had already been removed is gone; everything else is still here. An uninstall " +
-        "does not rewrite the receipt, so running it again takes up the rest -- the steps that " +
-        "already ran find their artifact missing and do nothing.",
-    )}</p>
-${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
-<div class="actions">
-  <button class="primary" type="button" data-act="uninstallStart">Run the rest</button>
-  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
-</div>`;
+    return renderScreen({
+      title: "Removal stopped",
+      actions: `<button class="primary" type="button" data-act="uninstallStart">Run the rest</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>`,
+      status: `<p class="lede">${escapeHtml(
+        "What had already been removed is gone; everything else is still here. An uninstall " +
+          "does not rewrite the receipt, so running it again takes up the rest -- the steps that " +
+          "already ran find their artifact missing and do nothing.",
+      )}</p>`,
+      details: renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps))),
+      logs: renderRunLogPane({
+        steps: this.uninstall.steps,
+        open: this.uninstall.logsOpen,
+        follow: this.uninstall.logsFollow,
+      }),
+    });
   }
 
   /**
@@ -2473,31 +2558,42 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     if (failed === undefined) {
       // No step ever reported -- the run could not start. The sentence is the
       // whole of what there is to say.
-      return `<h1>The uninstall did not run</h1>
-<p class="lede">${escapeHtml(
-        this.uninstall.problem === ""
-          ? "The removal ended without reporting a step."
-          : this.uninstall.problem,
-      )}</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
-</div>`;
+      return renderScreen({
+        title: "The uninstall did not run",
+        actions: `<button class="secondary" type="button" data-act="uninstallBack">Back</button>`,
+        status: `<p class="lede">${escapeHtml(
+          this.uninstall.problem === ""
+            ? "The removal ended without reporting a step."
+            : this.uninstall.problem,
+        )}</p>`,
+      });
     }
 
-    const guidance = failureGuidance(failed.exitCode, failed.remedy, failed.reason || failed.log);
-    return `<h1>${escapeHtml(failed.description === "" ? failed.id : failed.description)} failed</h1>
-<p class="lede">${escapeHtml(guidance.headline)}</p>
+    // THE LOG IS NO LONGER THE FALLBACK DETAIL (memql#4456). This used to pass
+    // `failed.reason || failed.log`, which put verbatim stderr into the screen's
+    // status area whenever a capability named no reason -- the one place D4 says
+    // it must never be. The pane below carries it, opened already, because the
+    // state module discloses on failure.
+    const guidance = failureGuidance(failed.exitCode, failed.remedy, failed.reason);
+    return renderScreen({
+      title: `${failed.description === "" ? failed.id : failed.description} failed`,
+      actions: `<button class="primary" type="button" data-act="uninstallStart">Try the removal again</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>`,
+      status: `<p class="lede">${escapeHtml(guidance.headline)}</p>
 <p>${escapeHtml(guidance.advice)}</p>
 <p>${escapeHtml(
-      `The artifact this step names is still on this machine, and the receipt still records it ` +
-        `-- an uninstall never rewrites the receipt, so once the cause is dealt with, running it ` +
-        `again repeats exactly this list.`,
-    )}</p>
-${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
-<div class="actions">
-  <button class="primary" type="button" data-act="uninstallStart">Try the removal again</button>
-  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
-</div>`;
+        `The artifact this step names is still on this machine, and the receipt still records it ` +
+          `-- an uninstall never rewrites the receipt, so once the cause is dealt with, running it ` +
+          `again repeats exactly this list.`,
+      )}</p>`,
+      details: renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps))),
+      logs: renderRunLogPane({
+        steps: this.uninstall.steps,
+        open: this.uninstall.logsOpen,
+        follow: this.uninstall.logsFollow,
+        focusStepId: failed.id,
+      }),
+    });
   }
 
   /**
@@ -2733,26 +2829,27 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     // further to do" -- the exact confident-wrong-report the honest message was
     // written to replace. It said the true thing to nobody.
     if (this.runError !== "") {
-      return `<h1>${escapeHtml(
-        this.state.action === "repair" ? "The repair did not start" : "The install did not start",
-      )}</h1>
-<p class="lede">${escapeHtml(this.runError)}</p>
+      return renderScreen({
+        title:
+          this.state.action === "repair"
+            ? "The repair did not start"
+            : "The install did not start",
+        actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
+        status: `<p class="lede">${escapeHtml(this.runError)}</p>
 <p>${escapeHtml(
-        "Nothing has been changed on this machine -- the run was refused before its first step.",
-      )}</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+          "Nothing has been changed on this machine -- the run was refused before its first step.",
+        )}</p>`,
+      });
     }
 
     if (handoff !== undefined && !handoff.ok) {
       // A failed registry write is NOT a failed install. Say where the cluster
       // answers, so ten minutes of work are not read as wasted.
-      return `<h1>Installed, but not added to your list</h1>
-<p class="lede">${escapeHtml(handoff.message)}</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+      return renderScreen({
+        title: "Installed, but not added to your list",
+        actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
+        status: `<p class="lede">${escapeHtml(handoff.message)}</p>`,
+      });
     }
 
     if (handoff !== undefined && handoff.ok) {
@@ -2813,36 +2910,44 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       // It is the only line here that is not about getting INTO the cluster,
       // and an operator who cannot sign in yet has no use for a provider page.
       const providers = this.providerSettingsBlock();
-      return `<h1>Your cluster is ready</h1>
-<p class="lede">${escapeHtml(
-        `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
-      )}</p>
-${recovery}
-${enrolNote}
-${claimNote}
-${providers}
-<div class="actions">
-  ${enrol}
+      // THE RECOVERY BLOCK STAYS IN THE DETAILS, BELOW THE BUTTONS, and it is
+      // the one place where actions-first needed thinking rather than moving.
+      // It carries a credential shown exactly once and its own Reveal button,
+      // so hoisting it into the top row would put a one-time secret above the
+      // three ways of signing in -- and hoisting only its BUTTON would separate
+      // the control from the sentence explaining what it reveals. The ordering
+      // doctrine is about where the screen's actions go; this block is a piece
+      // of content that happens to contain one.
+      return renderScreen({
+        title: "Your cluster is ready",
+        actions: `${enrol}
   ${claim}
   ${signIn}
   ${this.providerSettingsButton()}
   ${this.openCheckoutButton()}
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+        status: `<p class="lede">${escapeHtml(
+          `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
+        )}</p>`,
+        details: `${recovery}
+${enrolNote}
+${claimNote}
+${providers}`,
+      });
     }
 
     // Terminal without a hand-off: a cancel, or an action that registers
     // nothing. Saying "cancelled" plainly beats an empty success screen.
-    return `<h1>${escapeHtml(this.state.cancelled ? "Cancelled" : "Finished")}</h1>
-<p class="lede">${escapeHtml(
-      this.state.cancelled
-        ? "Whatever had already run is recorded, and can be uninstalled."
-        : "Nothing further to do.",
-    )}</p>
-<div class="actions">
-  ${this.openCheckoutButton()}
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+    return renderScreen({
+      title: this.state.cancelled ? "Cancelled" : "Finished",
+      actions: `${this.openCheckoutButton()}
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+      status: `<p class="lede">${escapeHtml(
+        this.state.cancelled
+          ? "Whatever had already run is recorded, and can be uninstalled."
+          : "Nothing further to do.",
+      )}</p>`,
+    });
   }
 
   /**

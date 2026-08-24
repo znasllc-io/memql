@@ -227,7 +227,7 @@ test("the remote path is refused by the same barrier", () => {
 
 // --- the button --------------------------------------------------------------
 
-const OVERVIEW = { runs: [], actions: [], nowMs: 0, error: "" } as const;
+const OVERVIEW = { runs: [], actions: [], nowMs: 0, error: "", diagnosticsOpen: false } as const;
 
 test("the page draws the button when the move is offered", () => {
   const instance = local("v0.17.1");
@@ -278,6 +278,7 @@ test("the remote page draws it on the same terms", () => {
     error: "",
     releases: PRE_BARRIER,
     upgrade: verdictFor(instance, PRE_BARRIER, "owner"),
+    diagnosticsOpen: false,
   });
   assert.match(html, /data-act="upgrade"/);
   assert.match(html, /Upgrade to v0\.18\.0/);

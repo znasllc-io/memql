@@ -124,6 +124,7 @@ test("each of the three states renders, and the engine's sentence survives verba
   const refusal =
     "deployment status requires the owner or admin cluster role. Topology and deployment history above are ordinary concept rows and are unaffected.";
   const notVisible = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: REMOTE,
     runs: [],
     pipeline: pipelineState(read({ message: refusal, reason: "permissionDenied" }), roleVisibility("developer")),
@@ -139,6 +140,7 @@ test("each of the three states renders, and the engine's sentence survives verba
   assert.doesNotMatch(notVisible, /data-deploy=/);
 
   const notConfigured = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: REMOTE,
     runs: [],
     pipeline: pipelineState(read({ message: "local clusters are operated via `make up`", reason: "unavailable" }), OWNER),
@@ -152,6 +154,7 @@ test("each of the three states renders, and the engine's sentence survives verba
   assert.doesNotMatch(notConfigured, /data-deploy=/);
 
   const present = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: REMOTE,
     runs: [],
     pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
@@ -166,6 +169,7 @@ test("each of the three states renders, and the engine's sentence survives verba
 
 test("an unreachable remote still lists, with its version drawn as unknown", () => {
   const html = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: { name: "staging", kind: "remote", presence: "installed-unreachable", connected: false },
     runs: [],
     pipeline: pipelineState(read({ message: "not connected", reason: "unavailable" }), OWNER),
@@ -181,10 +185,18 @@ test("an unreachable remote still lists, with its version drawn as unknown", () 
   assert.match(html, /unknown/);
 });
 
-test("a remote run's items are labelled Node types, never Steps", () => {
-  // A local run's items are capability-script executions; a remote run's are
-  // per-tier spec rows. The label is the only place that asymmetry is visible.
+test("a remote run's node-type breakdown lives in Diagnostics, still labelled Node types", () => {
+  // TWO CLAIMS, AND memql#4456 ADDED THE SECOND. The first is unchanged: a
+  // local run's items are script executions and a remote run's are per-tier
+  // spec rows, and the label is the only place that asymmetry is visible --
+  // so it travels with them into Diagnostics rather than being left behind.
+  //
+  // The second is the demotion itself. Rendering every historical run's
+  // replicas and digests inline turned a five-row history into fifty rows of
+  // hex; they are one click away now, and the closed-state assertion below is
+  // what says so. Nothing is deleted -- the support case still has all of it.
   const html = renderRemoteInstance({
+    diagnosticsOpen: true,
     instance: REMOTE,
     runs: [
       {
@@ -213,10 +225,37 @@ test("a remote run's items are labelled Node types, never Steps", () => {
   assert.match(html, /2 replicas/);
   assert.match(html, /digest abcdef012345/);
   assert.match(html, /\(pinned\)/);
+  // The whole point of the demotion: closed, the page does not carry them.
+  const closed = renderRemoteInstance({
+    diagnosticsOpen: false,
+    instance: REMOTE,
+    runs: [
+      {
+        id: "d2",
+        instance: "staging",
+        kind: "rollout",
+        toVersion: "v0.9.2",
+        startedAt: "2026-08-13T00:00:00Z",
+        status: "succeeded",
+        items: [
+          { label: "bff", status: "ok", detail: "v0.9.2 (inherited) - 2 replicas - digest abcdef012345" },
+        ],
+      },
+    ],
+    pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
+    nowMs: NOW,
+    outcome: "",
+    error: "",
+    releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
+  });
+  assert.doesNotMatch(closed, /digest abcdef012345/);
+  assert.match(closed, /Show diagnostics/);
 });
 
 test("an outcome line is rendered as the engine wrote it, error or not", () => {
   const refused = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: REMOTE,
     runs: [],
     pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
@@ -233,6 +272,7 @@ test("an outcome line is rendered as the engine wrote it, error or not", () => {
 
 test("everything a remote page draws is escaped", () => {
   const html = renderRemoteInstance({
+    diagnosticsOpen: false,
     instance: { name: "<img src=x>", kind: "remote", presence: "installed-healthy", connected: true },
     runs: [],
     pipeline: pipelineState(read({ message: "<script>alert(1)</script>", reason: "unavailable" }), OWNER),

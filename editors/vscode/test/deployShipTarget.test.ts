@@ -283,6 +283,7 @@ function render(
   runs: readonly Run[] = [],
 ): string {
   return renderRemoteInstance({
+    diagnosticsOpen: false,
     instance,
     runs,
     pipeline: { kind: "present", title: "Deploy", detail: "", actions },

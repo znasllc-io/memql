@@ -660,6 +660,22 @@ export class AddClusterState {
   // nothing at all -- an uninstall, a failed run, an old receipt.
   private recoveryState: RecoveryKeyState = "none";
 
+  // WHETHER THE LOG PANE IS OPEN, AND WHETHER IT IS STILL FOLLOWING THE TAIL
+  // (memql#4455).
+  //
+  // HERE RATHER THAN IN THE DOM, and that is the whole reason these are fields
+  // at all. Both panels re-render by assigning `webview.html`, which replaces
+  // the entire document -- during a run that happens on every `stepLog`,
+  // roughly once a second. A `<details>` an operator opened would close itself
+  // a second later, while they were reading it. So the open/closed flag is
+  // panel state, the toggle is a message like every other control, and the
+  // renderer emits the pane only when this says so.
+  private logsShown = false;
+  // Pinned to the bottom until the operator scrolls up, and re-armed when they
+  // scroll back down. TRUE initially because a pane opened mid-run should show
+  // what is happening NOW; there is nothing above the tail worth landing on.
+  private logsFollowTail = true;
+
   get screen(): Screen {
     return this.currentScreen;
   }
@@ -783,6 +799,40 @@ export class AddClusterState {
   setRecoveryKey(key: string, state: RecoveryKeyState): void {
     this.revealedKey = key;
     this.recoveryState = state;
+  }
+
+  /** Whether the run's output is disclosed. */
+  get logsOpen(): boolean {
+    return this.logsShown;
+  }
+
+  /** Whether the pane should still be pinned to the tail on the next render. */
+  get logsFollow(): boolean {
+    return this.logsFollowTail;
+  }
+
+  /**
+   * The operator pressed the disclosure.
+   *
+   * RE-ARMS THE TAIL ON OPEN, because a pane being opened is a pane nobody has
+   * scrolled yet, and the honest landing place for one opened during a run is
+   * whatever is happening now. Closing leaves the flag alone: it is answered
+   * again the next time the pane is opened.
+   */
+  toggleLogs(): void {
+    this.logsShown = !this.logsShown;
+    if (this.logsShown) this.logsFollowTail = true;
+  }
+
+  /**
+   * The pane was scrolled, and whether it ended up at the bottom.
+   *
+   * RECORDED, NEVER REPAINTED -- the same call every keystroke on these forms
+   * makes. A render replaces the document, so answering a scroll with one would
+   * fight the operator for the scrollbar.
+   */
+  setLogsFollow(follow: boolean): void {
+    this.logsFollowTail = follow;
   }
 
   /**
@@ -1039,6 +1089,12 @@ export class AddClusterState {
     // showing through that would be a stale reveal (memql#4079).
     this.revealedKey = "";
     this.recoveryState = "none";
+    // A NEW RUN STARTS CLOSED. The disclosure being open is a fact about the
+    // failure the operator was just reading, not a preference that should
+    // outlive it -- and carrying it forward would open a pane onto the previous
+    // run's output while this one has produced none.
+    this.logsShown = false;
+    this.logsFollowTail = true;
     return true;
   }
 
@@ -1358,6 +1414,15 @@ export class AddClusterState {
           // decides which one the page LEADS with.
           if (this.failedId === undefined) this.failedId = entry.id;
           this.currentScreen = "failedStep";
+          // FAILURE OPENS THE LOG (memql#4455). The pane is collapsed by
+          // default because for the twelve minutes an install is going well
+          // nobody wants kubectl's account of it -- but at the moment something
+          // breaks the log IS the product, and making the operator find a
+          // toggle first would be design spite. The pane anchors on this step:
+          // `failedId` is already the FIRST failure rather than the last to
+          // settle, so the anchor lands on the one the others may be
+          // consequences of.
+          this.logsShown = true;
         }
         return;
       }

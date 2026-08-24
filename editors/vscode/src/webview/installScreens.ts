@@ -48,7 +48,16 @@ import type {
 import { MAIN_BRANCH_CHOICE, isMainBranchChoice } from "../install/stackPin.js";
 import { compareSemverDesc } from "../install/tags.js";
 import { SUPPORTED_PROVIDERS, optionalFields, requiredFields } from "../state/addCluster.js";
-import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
+import {
+  failureGuidance,
+  runIsSettled,
+  runNarration,
+  runProgress,
+  toStepViews,
+} from "../state/installProgress.js";
+import { brandMarkSvg } from "./brandTokens.js";
+import { renderRunLogPane } from "./runLogPane.js";
+import { renderScreen } from "./screenLayout.js";
 
 /** The collected fields, in the order they are asked for. */
 export const INPUT_FIELDS: readonly InputField[] = [
@@ -270,15 +279,23 @@ export function renderCollectScreen(input: CollectScreenInput): string {
     INPUT_FIELDS.filter((field) => optional.has(field)),
   );
 
-  return `<h1>${escapeHtml(COLLECT_TITLE[input.action] ?? "Install a local cluster")}</h1>
-<p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
-${fields}
-${disclosure}
-${renderPreflight(input.preflight)}
-<div class="actions">
-  <button class="primary" type="button" data-act="begin">Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+  return renderScreen({
+    title: COLLECT_TITLE[input.action] ?? "Install a local cluster",
+    actions: `<button class="primary" type="button" data-act="begin">Start</button>
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+    // THE CHECKLIST MOVES UP WITH THE BUTTON, NOT DOWN AWAY FROM IT
+    // (memql#4453 over memql#4195). "Before it runs" was placed directly above
+    // Start so that pressing Start was an informed click; with Start hoisted to
+    // the top, leaving the checklist among the fields would have put it below
+    // everything it warns about. In the status slot it sits immediately under
+    // the actions row -- above the form rather than at the end of it -- so it is
+    // now visible WITHOUT SCROLLING, which it was not before on a form this
+    // long. What changed is that it is beside the button instead of under it.
+    status: `<p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
+${renderPreflight(input.preflight)}`,
+    details: `${fields}
+${disclosure}`,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -312,20 +329,23 @@ export interface RebuildScreenInput {
  * whole reason this screen exists instead of the button running immediately.
  */
 export function renderRebuildScreen(input: RebuildScreenInput): string {
-  return `<h1>Rebuild from checkout</h1>
-<p class="lede">Builds the node images from ${escapeHtml(
-    input.checkoutDir,
-  )}, imports them into the cluster, points its Application at them, and restarts.</p>
-<div class="field">
+  return renderScreen({
+    title: "Rebuild from checkout",
+    actions: `<button class="primary" type="button" data-act="beginRebuild">Start</button>
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+    // The checklist rides in the status area for the reason renderCollectScreen
+    // states: it is the thing Start needs to be informed BY, so it belongs
+    // beside Start rather than at the end of what Start acts on.
+    status: `<p class="lede">Builds the node images from ${escapeHtml(
+      input.checkoutDir,
+    )}, imports them into the cluster, points its Application at them, and restarts.</p>
+${renderPreflight(input.preflight)}`,
+    details: `<div class="field">
   <label for="f-nodes">Node types to rebuild (comma-separated; empty = all app nodes)</label>
   <input id="f-nodes" data-field="nodes" value="${escapeHtml(input.nodes)}">
   <div class="hint">For example: bff, agent. Leave it empty to rebuild every app node.</div>
-</div>
-${renderPreflight(input.preflight)}
-<div class="actions">
-  <button class="primary" type="button" data-act="beginRebuild">Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+</div>`,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -339,14 +359,34 @@ ${renderPreflight(input.preflight)}
  * with the same steps and the same verify-then-skip behaviour -- what differs
  * is what the operator asked for, and a heading that said "Installing" over a
  * deployment to another tag would describe a reinstall of their machine.
+ *
+ * `uninstall` joined them for the BLOCK, not for the screen (memql#4454). The
+ * removal keeps its own five-phase screen in the wizard -- it has no Retry and
+ * no guided mode, and its wording is about taking a cluster apart -- but it is
+ * still a graph run with steps ahead of it, so it renders the same mark, the
+ * same bar and the same one-line narration through `renderRunBlock`. A
+ * separate progress display for the one run that removes things would be the
+ * place the two drifted.
  */
-export type RunMode = "install" | "repair" | "deploy" | "rebuild";
+export type RunMode = "install" | "repair" | "deploy" | "rebuild" | "uninstall";
 
 export interface RunningScreenInput {
   steps: readonly StepProgress[];
   mode: RunMode;
   /** Whether a run is actually in flight -- see the comment on the empty list. */
   running: boolean;
+  /**
+   * Whether the log disclosure is open, from the STATE module (memql#4455).
+   *
+   * REQUIRED RATHER THAN DEFAULTED, and the compile error is the point. Both
+   * panels re-render wholesale, so this flag has to be threaded from panel
+   * state or the pane can never stay open -- and a default of `false` would
+   * make that failure silent: the toggle would appear to do nothing, once per
+   * second, with nothing in any log to say why.
+   */
+  logsOpen: boolean;
+  /** Whether the pane is still pinned to the tail. See `LogPaneInput.follow`. */
+  logsFollow: boolean;
 }
 
 const RUN_HEADING: Readonly<Record<RunMode, string>> = {
@@ -354,6 +394,7 @@ const RUN_HEADING: Readonly<Record<RunMode, string>> = {
   repair: "Repairing the local cluster",
   deploy: "Deploying to the local cluster",
   rebuild: "Rebuilding the local cluster from its checkout",
+  uninstall: "Removing the local cluster",
 };
 
 const RUN_LEDE: Readonly<Record<RunMode, string>> = {
@@ -369,47 +410,164 @@ const RUN_LEDE: Readonly<Record<RunMode, string>> = {
   // of that work, since it is a single progress row that takes minutes.
   rebuild:
     "Build, import, point the cluster at the images, restart. Each step reports as it goes.",
+  // Each step reverses one entry in the receipt, in the order the graph gives
+  // -- each tool outlives the artifact it is needed to remove.
+  uninstall:
+    "Each step reverses one entry in the receipt, so every tool outlives the artifact it is needed to remove.",
 };
+
+/**
+ * What a finished run of each kind says about itself.
+ *
+ * A SENTENCE, NOT A WORD. "Done" tells an operator the process exited; these
+ * say what now exists, which is what they were waiting to hear.
+ */
+const RUN_DONE: Readonly<Record<RunMode, string>> = {
+  install: "Installed. The cluster is up and ready to sign in to.",
+  repair: "Repaired. Everything that was missing has been put back.",
+  deploy: "Deployed. The cluster is running the version you chose.",
+  rebuild: "Rebuilt. The cluster is running the images built from your checkout.",
+  uninstall: "Removed. Everything the install put on this machine has been taken back.",
+};
+
+/**
+ * A step's description with its full stop taken off, for embedding in a phrase.
+ *
+ * The descriptions are SENTENCES -- the CLI prints them as sentences and the
+ * narration line renders them as one -- so they end in a stop. Every place that
+ * builds a longer phrase around one ("<description> failed", "<description> --
+ * and 2 more in progress") otherwise reads "...services in it. failed", which
+ * is the kind of small wrongness that makes a product look unfinished. Found by
+ * rendering the screens rather than by reading them.
+ */
+function phrase(description: string): string {
+  return description.replace(/\.$/, "");
+}
+
+/**
+ * The branded run block: the mark, a bar, and one line about what is happening
+ * (memql#4454).
+ *
+ * WHAT IT REPLACED. The run screen WAS the step checklist -- thirteen rows,
+ * each accumulating the verbatim stderr of the script behind it. That is a
+ * truthful record and a poor headline: it answers "what did kubectl print"
+ * when the question an operator has during a ten-minute install is "how much
+ * longer, and is it going well". The checklist is still here; it is below the
+ * fold, where a record belongs.
+ *
+ * THE BAR IS DETERMINATE BECAUSE THE NUMBER IS REAL. `runStarted` seeds the
+ * steps AHEAD (state/addCluster.ts says why), so `settled / total` is a fact
+ * about the graph rather than an animation. Before that event lands there is no
+ * total, and the bar renders INDETERMINATE rather than at 0% -- "we do not know
+ * yet" and "nothing has happened yet" are different claims and only one of them
+ * is true then.
+ *
+ * NO INLINE `style` ATTRIBUTE, and this is not a stylistic choice. Every panel
+ * here runs under `style-src 'nonce-...'` with no `'unsafe-inline'`, and a
+ * nonce cannot apply to a style ATTRIBUTE -- so `style="width: 42%"` is not
+ * merely discouraged, it is dropped by the browser and the bar renders empty at
+ * every value. The width arrives through `data-percent` against rules
+ * brandTokens.ts generates for 0..100.
+ */
+export function renderRunBlock(input: RunningScreenInput): string {
+  const progress = runProgress(input.steps);
+  const narration = runNarration(progress);
+  const determinate = progress.total > 0;
+  const settled = runIsSettled(input.steps);
+  // THE FAILED STEP, NOT WHATEVER IS STILL RUNNING. This read
+  // `narration.message` first, which is the description of the steps currently
+  // IN FLIGHT -- so a failure in one branch of a wave was announced under the
+  // name of a healthy step in another ("Issuing the certificate ... failed").
+  // A wave runs under Promise.all and independent branches are allowed to
+  // finish, so the two are routinely different steps. The FIRST failure is the
+  // one named, the same rule `AddClusterState.failedId` follows and for the
+  // same reason: the others may be consequences of it.
+  const failed = input.steps.find((step) => step.state === "failed");
+
+  // WHICH TERMINAL STATE THIS IS, DERIVED RATHER THAN PASSED. A run that is not
+  // in flight and has not settled is one that STOPPED -- cancelled, or aborted
+  // with the panel still on this screen. Deriving it means the block cannot
+  // disagree with the step list beside it, which a third boolean threaded from
+  // two different panels eventually would.
+  const message = failed !== undefined
+    ? `${phrase(failed.description === "" ? failed.id : failed.description)} failed -- see the log below.`
+    : settled
+      ? RUN_DONE[input.mode]
+      : input.steps.length === 0
+        ? input.running
+          ? "Starting. The first step will appear here as it begins."
+          : "Nothing has been run."
+        : !input.running
+          ? "Stopped. Nothing further will run; what had already finished is still done."
+          : narration.message;
+
+  // `aria-valuetext` carries the human position so a screen reader hears
+  // "step 4 of 14" rather than "42 percent", which is the number the sighted
+  // reader is getting from the sentence rather than from the bar.
+  const bar = determinate
+    ? `<div class="run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
+        progress.percent
+      }"${
+        narration.position === ""
+          ? ""
+          : ` aria-valuetext="${escapeHtml(narration.position)}"`
+      }><div class="run-bar-fill" data-percent="${progress.percent}"></div></div>`
+    : `<div class="run-bar indeterminate" role="progressbar" aria-valuetext="Starting"><div class="run-bar-fill indeterminate"></div></div>`;
+
+  const position =
+    narration.position === "" || settled || failed !== undefined
+      ? ""
+      : ` <span class="run-position">${escapeHtml(narration.position)}</span>`;
+
+  return `<div class="run-block">
+  <div class="run-mark">${brandMarkSvg(48)}</div>
+  ${bar}
+  <p class="run-message">${escapeHtml(message)}${position}</p>
+</div>`;
+}
+
+/**
+ * The full step record, below the decision and below the headline.
+ *
+ * STILL EVERY STEP AND EVERY STATE -- nothing was dropped when it stopped being
+ * the headline. view-kit's `renderInstallSteps` over the projection in
+ * state/installProgress.ts, exactly as before; what changed is where it sits.
+ */
+function renderStepDetails(steps: readonly StepProgress[]): string {
+  if (steps.length === 0) return "";
+  return `<h2 class="steps-heading">Steps</h2>
+<div class="step-list">${renderToHtml(renderInstallSteps(toStepViews(steps)))}</div>`;
+}
 
 /**
  * The run in progress.
  *
- * The step list is view-kit's `renderInstallSteps`, fed by a projection that
- * lives in state/installProgress.ts -- this function adds no judgement of its
- * own, which is what lets what an operator sees be asserted in the unit lane.
+ * REPAIR IS THE SAME RUN WITH DIFFERENT WORDING. Every step verifies first and
+ * skips when satisfied, so re-running the graph IS the repair; only the heading
+ * and the lede differ, and there is no second code path below them.
  *
- * REPAIR IS THE SAME RUN WITH DIFFERENT WORDING. Every step verifies first
- * and skips when satisfied, so re-running the graph IS the repair; only the
- * heading and the lede differ, and there is no second code path below them.
+ * ACTIONS FIRST (memql#4453): Cancel is offered for exactly as long as there is
+ * something to stop, and it is offered at the TOP, because an operator who
+ * wants out of a ten-minute run should not have to scroll past the run to
+ * find the way out. A cancelled run leaves a valid receipt -- what ran, ran,
+ * and an uninstall can still take it back -- so this is safe at any point.
  */
 export function renderRunningScreen(input: RunningScreenInput): string {
-  const { steps } = input;
-  const settled = runIsSettled(steps);
-
-  // An empty list now means the run is starting for real -- `startRun()` is
-  // in flight and the first `stepStarted` has not arrived. That claim was
-  // false while the invocation was unwired (memql#3487), which is why this
-  // text is tied to a run being in flight rather than asserted unconditionally:
-  // if no run is in flight and no step has reported, nothing is happening and
-  // the screen says so.
-  const body =
-    steps.length > 0
-      ? renderToHtml(renderInstallSteps(toStepViews(steps)))
-      : input.running
-        ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
-        : `<p class="lede">Nothing has been run.</p>`;
-
-  // Cancel is offered for exactly as long as there is something to stop.
-  // A cancelled run leaves a valid receipt -- what ran, ran, and an uninstall
-  // can still take it back -- so this is safe at any point.
-  const actions = settled
-    ? `<button class="secondary" type="button" data-act="back">Back</button>`
-    : `<button class="secondary" type="button" data-act="cancel">Cancel</button>`;
-
-  return `<h1>${escapeHtml(RUN_HEADING[input.mode])}</h1>
-<p class="lede">${escapeHtml(RUN_LEDE[input.mode])}</p>
-${body}
-<div class="actions">${actions}</div>`;
+  const settled = runIsSettled(input.steps);
+  return renderScreen({
+    title: RUN_HEADING[input.mode],
+    actions: settled
+      ? `<button class="secondary" type="button" data-act="back">Back</button>`
+      : `<button class="secondary" type="button" data-act="cancel">Cancel</button>`,
+    status: `<p class="lede">${escapeHtml(RUN_LEDE[input.mode])}</p>
+${renderRunBlock(input)}`,
+    details: renderStepDetails(input.steps),
+    logs: renderRunLogPane({
+      steps: input.steps,
+      open: input.logsOpen,
+      follow: input.logsFollow,
+    }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -443,13 +601,20 @@ export function renderFailedScreen(input: FailedScreenInput): string {
   const many = failures.length > 1;
   const heading = many
     ? `${failures.length} steps failed`
-    : `${failures[0]!.description === "" ? failures[0]!.id : failures[0]!.description} failed`;
+    : `${phrase(failures[0]!.description === "" ? failures[0]!.id : failures[0]!.description)} failed`;
 
   // Each failure keeps its own name above its own guidance. With one failure
   // the name is already the heading, so repeating it would be noise.
+  //
+  // WHAT IS NO LONGER PASSED TO `failureGuidance` IS THE LOG (memql#4456). It
+  // used to fall back to `failure.log` when the capability named no reason,
+  // which put verbatim stderr into the screen's status area -- the one place
+  // D4 says it must never be. The `reason` is the capability's own sentence,
+  // written for humans by contract; when there is none, the guidance for the
+  // exit code stands on its own and the output is one disclosure away.
   const blocks = failures
     .map((failure) => {
-      const guidance = failureGuidance(failure.exitCode, failure.remedy, failure.reason || failure.log);
+      const guidance = failureGuidance(failure.exitCode, failure.remedy, failure.reason);
       const name = failure.description === "" ? failure.id : failure.description;
       // WHAT THE STEP ITSELF SAID, above the generic advice for its exit code.
       // The guidance is keyed on a number and so can only ever be about a
@@ -481,19 +646,35 @@ ${renderRemedy(failure)}`;
           many ? "Switch these steps to guided" : "Switch this step to guided"
         }</button>`;
 
-  // The labels count. "Retry this step" in front of three failures names one
-  // thing and does another -- the recovery re-runs the graph, and every failed
-  // step goes back into it.
-  return `<h1>${escapeHtml(heading)}</h1>
-${blocks}
-${renderToHtml(renderInstallSteps(toStepViews(input.steps)))}
-<div class="actions">
-  <button class="primary" type="button" data-act="retry">${
-    many ? "Retry these steps" : "Retry this step"
-  }</button>
+  // THE ACTIONS STAY AT THE TOP ON A FAILURE (memql#4453), and this is the
+  // screen most likely to be argued into an exception. It is the same argument
+  // as everywhere else, only sharper: an operator reading a failure is an
+  // operator deciding what to do next, and the failure summary is the INPUT to
+  // that decision rather than a queue in front of it. The labels count --
+  // "Retry this step" in front of three failures names one thing and does
+  // another, because the recovery re-runs the graph and every failed step goes
+  // back into it.
+  return renderScreen({
+    title: heading,
+    actions: `<button class="primary" type="button" data-act="retry">${
+      many ? "Retry these steps" : "Retry this step"
+    }</button>
   ${guided}
-  <button class="secondary" type="button" data-act="cancel">Cancel</button>
-</div>`;
+  <button class="secondary" type="button" data-act="cancel">Cancel</button>`,
+    status: `${renderRunBlock(input)}
+${blocks}`,
+    details: renderStepDetails(input.steps),
+    // OPEN, AND ANCHORED ON THE FIRST FAILURE. `AddClusterState` set `logsOpen`
+    // when the step failed; the anchor is passed here so the panel's script can
+    // bring that step's output into view rather than leaving the operator to
+    // scroll a pane for the one block that matters.
+    logs: renderRunLogPane({
+      steps: input.steps,
+      open: input.logsOpen,
+      follow: input.logsFollow,
+      focusStepId: failures[0]!.id,
+    }),
+  });
 }
 
 /**
