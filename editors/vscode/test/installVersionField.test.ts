@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { DEFAULT_INPUTS, requiredFields } from "../src/state/addCluster.js";
+import { AddClusterState, DEFAULT_INPUTS, requiredFields } from "../src/state/addCluster.js";
 import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import { listReleaseTags } from "../src/install/tags.js";
 import { refusedPlatformGuidance } from "../src/state/installProgress.js";
-import { withCurrentInSortedPosition } from "../src/webview/installScreens.js";
+import { latestLabel, versionChoiceList, withCurrentInSortedPosition } from "../src/webview/installScreens.js";
 
 // installVersionField.test.ts -- znasllc-io/memql#3882.
 //
@@ -21,12 +21,91 @@ import { withCurrentInSortedPosition } from "../src/webview/installScreens.js";
 // existed on the CLI and `--image-tag` on the capability script. Every layer
 // below the wizard already supported this; only the front end could not say it.
 
-test("the pinned default is what the field starts on", () => {
-  // THE PIN IS NOT THE BUG. stackPin.ts argues that a reviewed pin beats
-  // "newest tag" -- a packaged extension carries a staged copy of scripts/ and
-  // runs it against whatever the checkout contains, so the pairing should be
-  // something somebody chose. The gap is that the pin was the ONLY thing the
-  // wizard could express. It stays the default; the field is the override.
+// ---------------------------------------------------------------------------
+// Latest is labelled, and Latest is what an untouched field ends up on
+// (memql#4429)
+// ---------------------------------------------------------------------------
+
+function collectForm(): AddClusterState {
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  return s;
+}
+
+test("the newest listed release is labelled Latest, and its VALUE is that real tag", () => {
+  // NO SENTINEL. What gets submitted is an ordinary version string, so
+  // installPlan, imageTagFor and the receipt all see what they would have seen
+  // had the operator picked the tag by name -- and the receipt NAMES the release
+  // rather than the word "latest", which is what makes the installed version
+  // readable back a month later.
+  const list = versionChoiceList(["v0.20.3", "v0.19.1"], "v0.19.1");
+  assert.equal(list[0]!.value, "v0.20.3");
+  assert.equal(list[0]!.label, latestLabel("v0.20.3"));
+  assert.match(list[0]!.label, /recommended/);
+
+  // ...and it appears ONCE: the labelled entry replaces the bare row.
+  assert.equal(list.filter((c) => c.value === "v0.20.3").length, 1);
+});
+
+test("the Latest label follows the LISTING's newest, not whatever sorts first", () => {
+  // These differ in exactly the case the sorted insert exists for: a current
+  // value the listing does not carry can sort above everything listed, and
+  // calling that "recommended" would be a recommendation the listing does not
+  // support.
+  const list = versionChoiceList(["v0.19.0", "v0.18.0"], "v0.99.0");
+  assert.equal(list[0]!.value, "v0.99.0");
+  assert.equal(list[0]!.label, "v0.99.0", "an unlisted value is present and in order, never endorsed");
+  assert.equal(list[1]!.label, latestLabel("v0.19.0"));
+});
+
+test("the listing seeds the field, so the recommendation IS the selection", () => {
+  const s = collectForm();
+  assert.equal(s.inputs.version, DEFAULT_STACK_TAG, "the offline fallback is where it starts");
+  s.seedVersionFromListing("v0.20.3");
+  assert.equal(s.inputs.version, "v0.20.3");
+});
+
+test("an operator's own answer is never overwritten by a listing landing late", () => {
+  // The listing is async. Somebody who has already chosen must not have that
+  // choice replaced by a network call arriving a second later.
+  const s = collectForm();
+  s.setInput("version", "v0.18.0");
+  s.seedVersionFromListing("v0.20.3");
+  assert.equal(s.inputs.version, "v0.18.0");
+  assert.equal(s.versionWasChosen, true);
+});
+
+test("choosing main is a choice like any other, and survives the listing", () => {
+  const s = collectForm();
+  s.setInput("version", "main");
+  s.seedVersionFromListing("v0.20.3");
+  assert.equal(s.inputs.version, "main");
+});
+
+test("an empty listing leaves the offline fallback in place rather than blanking the field", () => {
+  // Blanking would turn a failed network call into "A version is required."
+  const s = collectForm();
+  s.seedVersionFromListing("");
+  assert.equal(s.inputs.version, DEFAULT_STACK_TAG);
+  assert.equal(s.validate().some((e) => e.field === "version"), false);
+});
+
+test("the offline fallback is a real published release, so it can actually install", () => {
+  assert.match(DEFAULT_STACK_TAG, /^v\d+\.\d+\.\d+$/);
+});
+
+test("the pin is what the field starts on -- as the OFFLINE FALLBACK", () => {
+  // THIS ASSERTION SURVIVED A REVERSED DECISION, SO ITS REASON IS RESTATED
+  // (memql#3882 -> memql#4429). It used to record that a reviewed pin beats
+  // "newest tag", the pin being the house answer and the field its override.
+  // That argument is retired: all four postmortems in stackPin.ts are failures
+  // of installing an OLDER release, none of installing something too new, so a
+  // fresh install now recommends Latest.
+  //
+  // The line still holds, for a different reason. The field starts here because
+  // the listing is ASYNC and validate() refuses a blank required field -- an
+  // operator pressing Start before the listing lands must get a version, not a
+  // complaint. And on a machine that cannot list at all, this is the answer.
   assert.equal(DEFAULT_INPUTS.version, DEFAULT_STACK_TAG);
 });
 

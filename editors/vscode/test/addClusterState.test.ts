@@ -581,13 +581,18 @@ function messageFor(s: AddClusterState, field: string): string | undefined {
 }
 
 test("a complete form produces the entry to write", () => {
+  // THE DOMAIN IS PART OF "COMPLETE" NOW (memql#4431). It was optional while the
+  // ENDPOINT was the first-class field -- which asked for the derived value and
+  // left the thing it derives from as an afterthought.
   const s = connectForm({
     name: "staging",
+    domain: "example.com",
     endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
   assert.deepEqual(s.connectDraft(), {
     name: "staging",
+    domain: "example.com",
     endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
@@ -600,7 +605,7 @@ test("a registered cluster carries NO local key", () => {
   // knows that, so the field is absent rather than false: absent is what the
   // reader means by "not local", and `local: false` is a key the Cockpit drops
   // on its next write anyway.
-  const draft = connectForm({ name: "prod", endpoint: "api.prod.example.com:443" }).connectDraft();
+  const draft = connectForm({ name: "prod", domain: "prod.example.com" }).connectDraft();
   if (draft === undefined) throw new assert.AssertionError({ message: "the form was valid" });
   assert.equal("local" in draft, false);
 });
@@ -608,8 +613,14 @@ test("a registered cluster carries NO local key", () => {
 test("an empty optional field is omitted from the entry, not written as a clear", () => {
   // "" and absent are the same file for a NEW entry but opposite instructions
   // to upsertCluster, where "" DELETES the key.
-  const draft = connectForm({ name: "prod", endpoint: "api.prod.example.com:443" }).connectDraft();
-  assert.deepEqual(draft, { name: "prod", endpoint: "api.prod.example.com:443" });
+  const draft = connectForm({ name: "prod", domain: "prod.example.com" }).connectDraft();
+  // The token is absent, not "". The domain and the endpoint it composes are
+  // both present, because both are now answers the form always has.
+  assert.deepEqual(draft, {
+    name: "prod",
+    domain: "prod.example.com",
+    endpoint: "api.prod.example.com:443",
+  });
 });
 
 test("the endpoint is composed from the domain when the box is left empty", () => {
@@ -652,7 +663,7 @@ test("the duplicate check needs a registry, and without one the write-time wall 
   // clusters.yaml is shared with the Cockpit, so no read here stays
   // authoritative -- which is why this check never became the only one. A
   // clusters.yaml that would not parse simply leaves it silent.
-  const s = connectForm({ name: "staging", endpoint: "api.example.com:443" });
+  const s = connectForm({ name: "staging", domain: "example.com" });
   assert.notEqual(s.connectDraft(), undefined);
 });
 
@@ -726,6 +737,7 @@ test("every field is checked, so all the problems arrive at once", () => {
 test("a field can be revised after it was refused, and the rest of the form survives", () => {
   const s = connectForm({
     name: "staging",
+    domain: "example.com",
     endpoint: "https://api.example.com",
     token: FAKE_TOKEN,
   });
@@ -738,6 +750,7 @@ test("a field can be revised after it was refused, and the rest of the form surv
   s.setConnectInput("endpoint", "api.example.com:443");
   assert.deepEqual(s.connectDraft(), {
     name: "staging-2",
+    domain: "example.com",
     endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
@@ -824,7 +837,7 @@ test("the second wall still refuses a name the first one could not see", async (
 
   const draft = connectForm({
     name: "staging",
-    endpoint: "api.example.com:443",
+    domain: "example.com",
   }).connectDraft();
   if (draft === undefined) throw new assert.AssertionError({ message: "no registry, no conflict" });
   await assert.rejects(

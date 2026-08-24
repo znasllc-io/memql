@@ -18,7 +18,12 @@ import type { ExecEvent } from "../install/executor.js";
 import type { RecoveryKeyState } from "../install/recoveryKey.js";
 import type { AddClusterAction } from "../clusters/presence.js";
 import type { ClustersFile } from "../clusters/model.js";
-import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
+import {
+  composeEndpointFromDomain,
+  identityBaseUrlFor,
+  normalizeDomain,
+  webSocketUrlFor,
+} from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { looksLikeProviderKey } from "../install/secrets.js";
 import { installDomainProblem, DEFAULT_LOCAL_DOMAIN, DEFAULT_STACK_TAG } from "../install/stackPin.js";
@@ -254,6 +259,138 @@ export interface ClusterRegistration {
   token?: string;
 }
 
+/**
+ * The domains this form refuses, and it refuses them BY NAME (memql#4431).
+ *
+ * THIS FORM IS FOR CLUSTERS REACHABLE OVER THE NETWORK. A local install is the
+ * OTHER card on the landing screen, and it does far more than record an address:
+ * it writes /etc/hosts entries, issues an mkcert leaf, creates a k3d cluster and
+ * bootstraps an owner. An operator who types `memql.localhost` here gets a
+ * registry entry pointing at a front door that does not exist, and the failure
+ * arrives later as a connection error naming a hostname they typed themselves --
+ * which reads as "MemQL is broken", not as "you wanted the other button".
+ *
+ * WHY IT IS A VALIDATOR AND NOT A SENTENCE IN THE HINT. Prose is advice; this is
+ * a decision, and it is one the form can make with certainty. Being pure is what
+ * lets the whole refusal list be driven under bare `node --test` rather than
+ * through a webview.
+ *
+ * THE INSTALL FORM'S OWN `memql.localhost` DEFAULT IS UNTOUCHED, and the two
+ * flows diverge here deliberately -- see `DEFAULT_LOCAL_DOMAIN`, which is the
+ * installer's own default and the local overlay's committed Ingress host. The
+ * same string is the RIGHT answer there and a wrong answer here, because there
+ * the wizard is about to make it resolve and here it is only recording it.
+ *
+ * `.localhost` IS THE WHOLE FAMILY, not just the bare label: RFC 6761 reserves
+ * the entire subtree to loopback, so `memql.localhost` and `anything.localhost`
+ * resolve to this machine exactly as `localhost` does.
+ *
+ * Empty is accepted here and reported by the required-field check in its own
+ * words, the way `installDomainProblem` does it.
+ */
+export function connectDomainProblem(domain: string): string | undefined {
+  const trimmed = normalizeDomain(domain).toLowerCase();
+  if (trimmed === "") return undefined;
+
+  const bare = trimmed.replace(/^\[|\]$/g, "");
+  const isLocalhostName = bare === "localhost" || bare.endsWith(".localhost");
+  // 127.0.0.0/8 -- the whole loopback block, not just 127.0.0.1: 127.0.0.2 is
+  // just as local and just as wrong here.
+  const isLoopbackV4 = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
+  const isLoopbackV6 = bare === "::1" || bare === "0:0:0:0:0:0:0:1";
+
+  if (isLocalhostName || isLoopbackV4 || isLoopbackV6) {
+    return (
+      "That is a local install's domain -- use \"Install a local cluster\" instead. " +
+      "This form registers a cluster reachable over the network."
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The stand-in a domain occupies while the webview is composing the hint.
+ *
+ * WHY A TEMPLATE AND NOT A RULE (memql#4431). The hint under the domain box
+ * updates as the operator types, which means something on the WEBVIEW side has
+ * to build `api.<domain>:443`. `endpoint.ts` records at length that this
+ * composition was once inlined in three places, that three copies is three
+ * places to drift from the ingress that actually serves it, and that the drift
+ * is invisible because every copy produces a plausible hostname.
+ *
+ * So the webview is handed the composition ALREADY PERFORMED, by the real
+ * function, over a placeholder -- and substitutes the typed domain into it. The
+ * convention still has exactly one spelling; the script only knows how to
+ * replace a substring.
+ *
+ * The placeholder survives `normalizeDomain` untouched (it has no whitespace and
+ * no leading or trailing dots), which is what makes the template come back with
+ * a hole in it rather than an empty string.
+ */
+export const DERIVATION_PLACEHOLDER = "%DOMAIN%";
+
+/**
+ * The sentence under the domain box: what this form is about to connect to.
+ *
+ * A DERIVATION SHOWN IS A DERIVATION AN OPERATOR CAN CHECK. Two fields now
+ * produce four values -- endpoint, sign-in host, portal URL, registry entry --
+ * and the previous form asked for the endpoint outright precisely because
+ * nothing displayed it. Showing it is what makes asking for it unnecessary.
+ */
+export function derivationLine(domain: string): string {
+  const endpoint = composeEndpointFromDomain(domain);
+  return endpoint === ""
+    ? "MemQL will connect to api.<domain>:443."
+    : `Will connect to ${endpoint}.`;
+}
+
+/**
+ * What a probe is pointed at: the sign-in host, and the front door (memql#4432).
+ *
+ * BOTH, because they are different hosts and they fail differently. `api.<domain>`
+ * serves the gRPC front door the editor dials; `identity.<domain>` serves the
+ * JWKS feed and /oauth/token. A cluster whose ingress routes one and not the
+ * other is a real and common half-configured state, and a probe that only asked
+ * about one of them would call it healthy.
+ */
+export interface ConnectProbeTargets {
+  /** `https://identity.<domain>/.well-known/jwks.json` */
+  jwksUrl: string;
+  /** `api.<domain>:443`, or the operator's Advanced override. */
+  endpoint: string;
+}
+
+/** What the host found, in the only two shapes a form can render. */
+export type ConnectProbeVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * The probe itself, INJECTED (memql#4432).
+ *
+ * It needs a network and Node's https, and this module must not: keeping the
+ * whole registration form -- validation, refusal, revision, the shape of the row
+ * that lands -- drivable under bare `node --test` is what the screen's own
+ * design record already turns on. So the DECISION lives here and only the socket
+ * lives in the panel.
+ */
+export type ConnectProbe = (targets: ConnectProbeTargets) => Promise<ConnectProbeVerdict>;
+
+/** Where a probe stands, as the form renders it. */
+export type ConnectProbeState =
+  | { state: "none" }
+  | { state: "running" }
+  | { state: "passed"; endpoint: string }
+  | { state: "failed"; endpoint: string; reason: string };
+
+/**
+ * What one click of Save should do.
+ *
+ * `invalid` -- the form has problems and they are on the fields.
+ * `warned`  -- the probe failed; the operator is shown why and Save becomes
+ *              "Save anyway". NOTHING is written.
+ * `write`   -- go ahead.
+ */
+export type ConnectSaveOutcome = "invalid" | "warned" | "write";
+
 const EMPTY_CONNECT: ConnectInputs = { name: "", domain: "", endpoint: "", token: "" };
 
 /**
@@ -429,6 +566,7 @@ export class AddClusterState {
   private wasCancelled = false;
   private didSucceed = false;
   private connectValues: ConnectInputs = { ...EMPTY_CONNECT };
+  private connectProbeStatus: ConnectProbeState = { state: "none" };
   private connectErrorList: ConnectFieldError[] = [];
   private connectFailureMessage = "";
   private registry: ClustersFile | undefined;
@@ -836,6 +974,89 @@ export class AddClusterState {
   setConnectInput(field: ConnectField, value: string): void {
     this.connectValues[field] = value;
     this.connectErrorList = this.connectErrorList.filter((e) => e.field !== field);
+    // A VERDICT IS ABOUT THE VALUES IT WAS GIVEN (memql#4432). Once any of them
+    // changes, the previous probe describes a cluster the operator is no longer
+    // registering -- and a stale PASS is the dangerous direction: it would let a
+    // corrected domain be written on the strength of a reachability check that
+    // ran against the typo. Clearing it also retracts the "Save anyway" the
+    // failed state was offering, so the next click probes again.
+    this.connectProbeStatus = { state: "none" };
+  }
+
+  /** Where the reachability probe stands, for the form to render. */
+  get connectProbe(): ConnectProbeState {
+    return this.connectProbeStatus;
+  }
+
+  /**
+   * The two hosts a probe checks, derived exactly as a save would derive them.
+   *
+   * THE SAME DERIVATION THE ROW GETS, called rather than copied: probing one
+   * endpoint and registering another is a green check mark over a cluster that
+   * will not dial. `identityBaseUrlFor` is the `identity.` half of the same
+   * convention `composeEndpointFromDomain` is the `api.` half of, and it already
+   * prefers the domain and falls back to reading it out of an `api.` endpoint --
+   * which is exactly right when Advanced has overridden the endpoint.
+   */
+  connectProbeTargets(): ConnectProbeTargets {
+    const domain = normalizeDomain(this.connectValues.domain);
+    const endpoint = this.connectValues.endpoint.trim() || composeEndpointFromDomain(domain);
+    const identity = identityBaseUrlFor({ name: "", endpoint, domain });
+    return {
+      jwksUrl: identity === undefined ? "" : `${identity}/.well-known/jwks.json`,
+      endpoint,
+    };
+  }
+
+  /**
+   * What one press of Save does: refuse, warn, or write (memql#4432).
+   *
+   * A FAILED PROBE WARNS AND NEVER BLOCKS. Registering a cluster records how to
+   * reach it; it does not require that the cluster is up right now. An operator
+   * legitimately registers one that is stopped, half-deployed, or behind a VPN
+   * they have not connected yet, and a form that refused would be wrong about
+   * all three. So the first click reports the reason and the second writes --
+   * which is also why the button relabels itself rather than a second control
+   * appearing: the operator is confirming the SAME action, informed.
+   *
+   * THE ORDER MATTERS. Validation runs first, so a probe is never spent on a
+   * form that cannot be saved anyway -- and the localhost family is refused by
+   * that validation (memql#4431), which is what keeps the mkcert false-negative
+   * out of this path entirely: Node's fetch cannot verify a local mkcert leaf,
+   * so a `memql.localhost` probe would fail for a reason that says nothing about
+   * the cluster. Public domains carry public chains.
+   */
+  async prepareConnectSave(probe: ConnectProbe): Promise<ConnectSaveOutcome> {
+    const errors = this.validateConnect();
+    this.connectErrorList = errors;
+    this.connectFailureMessage = "";
+    if (errors.length > 0) {
+      this.connectProbeStatus = { state: "none" };
+      return "invalid";
+    }
+
+    // The second click on an unchanged form: "Save anyway".
+    if (this.connectProbeStatus.state === "failed") return "write";
+
+    const targets = this.connectProbeTargets();
+    this.connectProbeStatus = { state: "running" };
+    let verdict: ConnectProbeVerdict;
+    try {
+      verdict = await probe(targets);
+    } catch (err) {
+      // A THROW IS A FAILED PROBE, NOT A FAILED SAVE. The injected function is
+      // the panel's; if it breaks, the operator must still be able to register
+      // their cluster, so this degrades to the warn-and-confirm path rather than
+      // surfacing an exception on a form about someone else's DNS.
+      verdict = { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+
+    if (verdict.ok) {
+      this.connectProbeStatus = { state: "passed", endpoint: targets.endpoint };
+      return "write";
+    }
+    this.connectProbeStatus = { state: "failed", endpoint: targets.endpoint, reason: verdict.reason };
+    return "warned";
   }
 
   /**
@@ -857,19 +1078,35 @@ export class AddClusterState {
       errors.push({ field: "name", message: duplicateNameMessage(name) });
     }
 
-    if (domain !== "" && /\s/.test(domain)) {
+    // THE DOMAIN IS REQUIRED NOW (memql#4431). It was optional, and the endpoint
+    // was the first-class field -- which asked the operator for the DERIVED value
+    // and left the source of the derivation as an afterthought. It is also the
+    // value that names where sign-in POSTs (`identityBaseUrlFor`), so a
+    // registration without one leaves that derivation depending on the endpoint
+    // happening to be spelled `api.<domain>`. Two answers, and everything else
+    // follows from them.
+    if (domain === "") {
+      errors.push({
+        field: "domain",
+        message:
+          "A domain is required: MemQL composes the cluster's endpoint, sign-in host and portal URL from it.",
+      });
+    } else if (/\s/.test(domain)) {
       errors.push({ field: "domain", message: "A domain cannot contain spaces." });
     } else if (domain.includes("://")) {
       errors.push({
         field: "domain",
         message: "A domain is a hostname, not a URL -- drop the scheme.",
       });
+    } else {
+      const local = connectDomainProblem(domain);
+      if (local !== undefined) errors.push({ field: "domain", message: local });
     }
 
-    // The endpoint is DERIVABLE from the domain, so an empty box is only a
-    // problem when nothing else names the front door. This is the same
-    // `api.<domain>:443` convention identityBaseUrlFor reads back off a
-    // registered endpoint, called rather than copied.
+    // The endpoint is DERIVED from the domain, and the Advanced box OVERRIDES it
+    // for the rare non-standard front door. This is the same `api.<domain>:443`
+    // convention identityBaseUrlFor reads back off a registered endpoint, called
+    // rather than copied.
     const endpoint = values.endpoint.trim() || composeEndpointFromDomain(domain);
     if (endpoint === "") {
       errors.push({
@@ -947,6 +1184,7 @@ export class AddClusterState {
    * starts clean rather than resuming a draft the operator abandoned.
    */
   discardConnect(): void {
+    this.connectProbeStatus = { state: "none" };
     this.connectValues = { ...EMPTY_CONNECT };
     this.clearConnectProblems();
     this.chosen = undefined;
