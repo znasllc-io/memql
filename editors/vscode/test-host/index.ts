@@ -151,6 +151,59 @@ smoke("every command the manifest contributes is registered", async () => {
   info(`${contributed.length} contributed commands, all registered`);
 });
 
+smoke("both MemQL colour themes are installed and can be applied", async () => {
+  // The one item on this epic's manual checklist that a unit test structurally
+  // cannot reach (memql#4420, memql#4422). test/themes.test.ts proves the two
+  // JSON files match the palette, that the manifest points at them, and that
+  // the VSIX packs them -- but "VS Code found the file, parsed it and made it
+  // the active theme" is a claim about the WORKBENCH, and the workbench is
+  // only here.
+  //
+  // APPLYING each theme is the assertion, not enumerating them. There is no
+  // API for "what does the theme picker list", and a check that only read
+  // `contributes.themes` back off packageJSON would pass for a theme whose
+  // `path` points at nothing -- which is exactly the failure mode a missing
+  // file produces: the picker lists it and choosing it silently does nothing.
+  // Setting it and watching `activeColorTheme.kind` follow proves the whole
+  // path, because a label VS Code cannot resolve leaves the current theme in
+  // place and the kind unchanged.
+  const ext = extension();
+  await ext.activate();
+
+  const themes: { label: string; uiTheme: string }[] =
+    (ext.packageJSON as { contributes?: { themes?: { label: string; uiTheme: string }[] } })
+      .contributes?.themes ?? [];
+  assert.deepEqual(
+    themes.map((t) => t.label).sort(),
+    ["MemQL Dark", "MemQL Light"],
+    "contributes.themes is not the pair this lane knows how to apply"
+  );
+
+  const workbench = vscode.workspace.getConfiguration("workbench");
+  const original = workbench.get<string>("colorTheme");
+  try {
+    for (const [label, expected] of [
+      ["MemQL Light", vscode.ColorThemeKind.Light],
+      ["MemQL Dark", vscode.ColorThemeKind.Dark],
+    ] as const) {
+      await vscode.workspace
+        .getConfiguration("workbench")
+        .update("colorTheme", label, vscode.ConfigurationTarget.Global);
+      await waitFor(
+        `${label} to become the active theme`,
+        () => vscode.window.activeColorTheme.kind === expected
+      );
+      info(`${label} applied; activeColorTheme.kind = ${vscode.window.activeColorTheme.kind}`);
+    }
+  } finally {
+    // Restore, so a later case reads the theme the host started with rather
+    // than whichever one this loop left behind.
+    await vscode.workspace
+      .getConfiguration("workbench")
+      .update("colorTheme", original, vscode.ConfigurationTarget.Global);
+  }
+});
+
 smoke("the activity-bar container and its views exist", async () => {
   const ext = extension();
   await ext.activate();
