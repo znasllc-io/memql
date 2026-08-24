@@ -244,6 +244,16 @@ COPY clients/portal/package.json clients/portal/package-lock.json ./clients/port
 COPY sdk/ts/package.json ./sdk/ts/
 COPY sdk/ts-viewkit/package.json sdk/ts-viewkit/package-lock.json ./sdk/ts-viewkit/
 
+# The brand tree, which the portal's own stylesheet @imports by relative path
+# (`../../../../brand/fonts.css` and its two siblings, memql#4266): the palette
+# is shared with the identity pages, so it lives at the repo root rather than
+# being copied into two clients. That makes it a SOURCE INPUT of this stage,
+# and one that is invisible from clients/portal alone -- which is why the build
+# went red the first release after it landed while every developer machine,
+# building from a full checkout, stayed green. Kept first among the source
+# copies because it changes less often than any of them.
+COPY brand ./brand
+
 COPY sdk/ts ./sdk/ts
 COPY sdk/ts-viewkit ./sdk/ts-viewkit
 COPY clients/portal ./clients/portal

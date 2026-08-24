@@ -37,9 +37,11 @@
 package ci
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -262,6 +264,155 @@ func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 			"serves the portal (site #1, memql#3711) and staging/prod images must come from " +
 			"the build server (CLAUDE.md); without this entry the edge cannot be deployed " +
 			"above local.")
+	}
+}
+
+// portalBuildStageBlock returns the body of the `portal-build` stage, header
+// line included, up to the next FROM.
+func portalBuildStageBlock(t *testing.T, body string) string {
+	t.Helper()
+	starts := regexp.MustCompile(`(?mi)^FROM\s`).FindAllStringIndex(body, -1)
+	header := regexp.MustCompile(`(?i)\sAS\s+` + regexp.QuoteMeta(portalBuildStage) + `$`)
+	for i, loc := range starts {
+		end := len(body)
+		if i+1 < len(starts) {
+			end = starts[i+1][0]
+		}
+		block := body[loc[0]:end]
+		first := block
+		if nl := strings.IndexByte(block, '\n'); nl >= 0 {
+			first = block[:nl]
+		}
+		if header.MatchString(strings.TrimSpace(first)) {
+			return block
+		}
+	}
+	t.Fatalf("no `%s` stage in the Dockerfile; retarget this guard rather than deleting it",
+		portalBuildStage)
+	return ""
+}
+
+// copySourcesIn returns the SOURCE arguments of every COPY in a stage body --
+// every field but the last, with `--flags` dropped.
+func copySourcesIn(block string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile(`(?mi)^\s*COPY\s+(.*)$`).FindAllStringSubmatch(block, -1) {
+		var args []string
+		for _, f := range strings.Fields(m[1]) {
+			if strings.HasPrefix(f, "--") {
+				continue
+			}
+			args = append(args, f)
+		}
+		if len(args) < 2 {
+			continue
+		}
+		out = append(out, args[:len(args)-1]...)
+	}
+	return out
+}
+
+// The portal's stylesheet reaches OUTSIDE clients/portal, and every tree it
+// reaches into has to be in this stage's build context.
+//
+// # The failure this exists to prevent
+//
+// memql#4266 moved the palette to a repo-root `brand/` tree so the portal and
+// the identity pages could not drift into two palettes, and had the portal
+// @import it by relative path: `../../../../brand/fonts.css`. That is four
+// levels up out of clients/portal/src/styles -- a source input of the
+// portal-build stage that is invisible from clients/portal itself.
+//
+// The stage copies four named trees and did not copy that one, so `vite build`
+// failed to resolve the import and the edge image -- the ONLY node type that
+// builds the SPA -- failed at the first release cut carrying the change, while
+// every developer machine, `make portal-build`, and every pull-request lane
+// stayed green, because all of them build from a full checkout where the tree
+// is simply there. The release build is the one path that does not, and no PR
+// lane builds an image (see the file header), so a static assertion is the
+// only signal before a cut goes red.
+//
+// It is not vacuous-pass-proof, and cannot be: zero escaping imports is a
+// legitimate state, and the honest reading of it is "nothing to check".
+func TestPortalBuildStageCopiesEveryTreeThePortalImports(t *testing.T) {
+	root := RepoRoot()
+	copied := copySourcesIn(portalBuildStageBlock(t, readRepoFile(t, "Dockerfile")))
+
+	portalRel := filepath.Join("clients", "portal")
+	srcDir := filepath.Join(root, portalRel, "src")
+
+	// Top-level tree -> the stylesheets that reach into it, for the message.
+	escapes := map[string]map[string]bool{}
+
+	importRe := regexp.MustCompile(`@import\s+["']([^"']+)["']`)
+	err := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".css") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range importRe.FindAllStringSubmatch(string(raw), -1) {
+			spec := m[1]
+			// Only RELATIVE specifiers address the filesystem; a bare one is a
+			// package name npm resolves out of node_modules.
+			if !strings.HasPrefix(spec, ".") {
+				continue
+			}
+			abs := filepath.Clean(filepath.Join(filepath.Dir(path), spec))
+			rel, relErr := filepath.Rel(root, abs)
+			if relErr != nil || strings.HasPrefix(rel, "..") {
+				// Outside the repository entirely -- a different bug, and not
+				// one a COPY could fix.
+				continue
+			}
+			if rel == portalRel || strings.HasPrefix(rel, portalRel+string(filepath.Separator)) {
+				continue
+			}
+			top := strings.Split(rel, string(filepath.Separator))[0]
+			from, _ := filepath.Rel(root, path)
+			if escapes[top] == nil {
+				escapes[top] = map[string]bool{}
+			}
+			escapes[top][from] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", srcDir, err)
+	}
+
+	trees := make([]string, 0, len(escapes))
+	for tree := range escapes {
+		trees = append(trees, tree)
+	}
+	sort.Strings(trees)
+
+	for _, tree := range trees {
+		found := false
+		for _, src := range copied {
+			if src == tree || strings.HasPrefix(src, tree+"/") {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		importers := make([]string, 0, len(escapes[tree]))
+		for f := range escapes[tree] {
+			importers = append(importers, f)
+		}
+		sort.Strings(importers)
+		t.Errorf("the portal @imports %s/ from %v, but the Dockerfile's `%s` stage never "+
+			"COPYs it (it copies %v). The stage's build context would not contain the tree, "+
+			"so `vite build` cannot resolve the import and the EDGE image fails to build -- "+
+			"at a release cut, not in any pull-request lane. Add `COPY %s ./%s` to that stage.",
+			tree, importers, portalBuildStage, copied, tree, tree)
 	}
 }
 
