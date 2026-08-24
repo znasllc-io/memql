@@ -13,6 +13,7 @@ import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
+import { DataOriginsRoutes } from "../dataorigins/DataOriginsRoutes";
 import { DeployablesRoutes, RetiredSitesRedirect } from "../deployables/DeployablesRoutes";
 import { FleetRoutes } from "../fleet/FleetRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
@@ -27,6 +28,7 @@ import {
   CONCEPT_SCHEMA_CHILD_PATTERN,
 } from "../concepts/urls";
 import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/urls";
+import { DATA_ORIGINS_ROUTE_PATTERN } from "../dataorigins/urls";
 
 // The route table.
 //
@@ -95,6 +97,7 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/u
 //                     replacing /sites/* from memql#3717)
 //   /fleet/*          machines + workbenches -- where work runs (memql#4349)
 //   /modules/*        the module inventory + pack enablement (memql#4191)
+//   /data-origins/*   what MemQL owns, mirrors and pushes out (memql#4378)
 //   /artifacts/*      the Library, browsed and labelled
 //   /nexus/*          Nexus: a goal's world in 3D, its constructs, its
 //                     replay (memql#4369)
@@ -129,6 +132,7 @@ export function AppRoutes(): ReactNode {
           <Route path="deployables/*" element={<DeployablesRoutes />} />
           <Route path="fleet/*" element={<FleetRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
+          <Route path={`${DATA_ORIGINS_ROUTE_PATTERN}/*`} element={<DataOriginsRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
           <Route path="nexus/*" element={<NexusRoutes />} />
           {/* The person, rather than the cluster: the account this

@@ -10,6 +10,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { composedViewPath } from "../compose/urls";
 import { useSavedViews } from "../compose/useSavedViews";
 import { CONCEPTS_ROOT } from "../concepts/urls";
+import { DATA_ORIGINS_ROOT } from "../dataorigins/urls";
 import {
   Archive,
   Bot,
@@ -192,6 +193,11 @@ const CLUSTER: readonly NavItem[] = [{ to: "/integrations", label: "Integrations
 // live on the row detail there (memql#4264) -- which is what removed the
 // second door.
 const CLUSTER_ADMIN: readonly NavItem[] = [
+  // What this cluster owns, mirrors and pushes out (epic memql#4378). In the
+  // ADMIN half of Cluster because every read and every action behind it is
+  // clusterOwner-tier in the engine -- the rail should not advertise a door
+  // that will not open, which is the same rule Modules follows.
+  { to: DATA_ORIGINS_ROOT, label: "Data origins", icon: Plug },
   { to: "/admin/tokens", label: "Sessions and tokens", icon: Inbox },
   { to: "/admin/keys", label: "Signing keys", icon: Shield },
   { to: "/admin/settings", label: "Settings", icon: Shield },

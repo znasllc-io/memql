@@ -8,7 +8,8 @@ import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
 import { OpenInVsCode } from "../components/OpenInVsCode";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Breadcrumbs, DataText, Skeleton, Tabs } from "../ui";
+import { Breadcrumbs, Callout, DataText, Skeleton, Tabs } from "../ui";
+import { OriginBadge, isMirror } from "../dataorigins/OriginBadge";
 import type { ConceptPaneContext } from "./conceptContext";
 import {
   SCHEMA_ROUTE_PATTERN,
@@ -100,12 +101,34 @@ export function ConceptPage(): ReactNode {
         <code className="font-mono text-sm break-all text-muted">{concept.id}</code>
         {concept.type ? <Chip>{concept.type}</Chip> : null}
         {concept.version ? <Chip>{concept.version}</Chip> : null}
+        {/* What MemQL's relationship to this data IS (epic memql#4378).
+            Rendered from the registry descriptor, never from the concept id
+            -- a name convention would be a second answer to a question the
+            server already answers. Renders nothing against a server that
+            predates the fields. */}
+        <OriginBadge
+          dataState={concept.dataState}
+          dataOrigin={concept.dataOrigin}
+          dataMirroredTo={concept.dataMirroredTo}
+        />
         <span className="basis-full" />
         <OpenInVsCode domain={clusterDomainFor(config)} kind="concept" name={concept.id} />
       </header>
 
       {concept.description ? (
         <p className="max-w-3xl text-sm text-muted">{concept.description}</p>
+      ) : null}
+
+      {/* A MIRROR IS READ-ONLY BY CONSTRUCTION (epic memql#4378). The engine
+          refuses every write to it that does not come from its connector, so
+          this says WHY before an operator finds out by being refused. The
+          server is the enforcement; this is the courtesy. */}
+      {isMirror(concept) ? (
+        <Callout tone="warn" title={`Read-only: a mirror of ${concept.dataOrigin ?? ""}`}>
+          MemQL holds a faithful copy and does not own it — change the record at the origin and
+          MemQL&apos;s copy follows. Only that system&apos;s connector writes these rows, so an edit
+          here would be refused.
+        </Callout>
       ) : null}
 
       {/* Tabs are ROUTES, so a schema view is a link someone can send. Active

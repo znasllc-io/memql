@@ -689,12 +689,19 @@ builtin dateKeyInTimezone {
 
 // ---- The data-origins inventory (epic memql#4378) ----
 //
+// @sdk on this and on the four datasync builtins below: most builtins are
+// internal and stay out of the generated SDKs, but these five ARE the
+// operator surface. The portal's Data origins page reads the inventory and
+// drives backfill / pause / retry / discard through them, and a typed
+// method is what keeps that page from hand-building call strings.
+//
 // Engine-native, and here rather than in dsl/platform because every
 // other registry-projecting builtin -- concepts, tools, functions,
 // routerListModels -- is here too. The concept it projects onto
 // (v1:platform:dataOrigin) lives in platform, which is where the row
 // SHAPE belongs; the reader belongs with its siblings.
 
+@sdk
 @executor("dataOrigins")
 @description("List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.")
 builtin dataOrigins { }
@@ -718,6 +725,7 @@ builtin datasyncDispatchInbound {
 @description("Sweep every mirrored domain whose own DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.")
 builtin datasyncReconcileDomains { }
 
+@sdk
 @executor("integration.datasync.startBackfill")
 @description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.")
 builtin datasyncStartBackfill {
@@ -725,6 +733,7 @@ builtin datasyncStartBackfill {
   conceptId  string!
 }
 
+@sdk
 @executor("integration.datasync.setSyncPaused")
 @description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.")
 builtin datasyncSetSyncPaused {
@@ -733,12 +742,14 @@ builtin datasyncSetSyncPaused {
   paused     boolean!
 }
 
+@sdk
 @executor("integration.datasync.retryOutboxEntry")
 @description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.")
 builtin datasyncRetryOutboxEntry {
   entryId  string!
 }
 
+@sdk
 @executor("integration.datasync.discardOutboxEntry")
 @description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.")
 builtin datasyncDiscardOutboxEntry {

@@ -105,6 +105,127 @@ func CampaignStartSendBuild(args CampaignStartSendArgs) string {
 	return b.String()
 }
 
+// DataOrigins -- List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.
+type DataOriginsArgs struct {
+}
+
+// DataOrigins calls the engine builtin dataOrigins.
+func (qc *QueryClient) DataOrigins(ctx context.Context, args DataOriginsArgs) (*Result, error) {
+	call := DataOriginsBuild(args)
+	return qc.executeNamed(ctx, "dataOrigins", call)
+}
+
+func DataOriginsBuild(args DataOriginsArgs) string {
+	_ = args
+	return "builtin dataOrigins()"
+}
+
+// DatasyncDiscardOutboxEntry -- Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.
+type DatasyncDiscardOutboxEntryArgs struct {
+	EntryId string
+	Reason  string
+}
+
+// DatasyncDiscardOutboxEntry calls the engine builtin datasyncDiscardOutboxEntry.
+func (qc *QueryClient) DatasyncDiscardOutboxEntry(ctx context.Context, args DatasyncDiscardOutboxEntryArgs) (*Result, error) {
+	call := DatasyncDiscardOutboxEntryBuild(args)
+	return qc.executeNamed(ctx, "datasyncDiscardOutboxEntry", call)
+}
+
+func DatasyncDiscardOutboxEntryBuild(args DatasyncDiscardOutboxEntryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncDiscardOutboxEntry(")
+	b.WriteString("entryId: ")
+	b.WriteString(quoteMemQL(args.EntryId))
+	if args.Reason != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.
+type DatasyncRetryOutboxEntryArgs struct {
+	EntryId string
+}
+
+// DatasyncRetryOutboxEntry calls the engine builtin datasyncRetryOutboxEntry.
+func (qc *QueryClient) DatasyncRetryOutboxEntry(ctx context.Context, args DatasyncRetryOutboxEntryArgs) (*Result, error) {
+	call := DatasyncRetryOutboxEntryBuild(args)
+	return qc.executeNamed(ctx, "datasyncRetryOutboxEntry", call)
+}
+
+func DatasyncRetryOutboxEntryBuild(args DatasyncRetryOutboxEntryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncRetryOutboxEntry(")
+	b.WriteString("entryId: ")
+	b.WriteString(quoteMemQL(args.EntryId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DatasyncSetSyncPaused -- Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.
+type DatasyncSetSyncPausedArgs struct {
+	Connector string
+	ConceptId string
+	Paused    bool
+}
+
+// DatasyncSetSyncPaused calls the engine builtin datasyncSetSyncPaused.
+func (qc *QueryClient) DatasyncSetSyncPaused(ctx context.Context, args DatasyncSetSyncPausedArgs) (*Result, error) {
+	call := DatasyncSetSyncPausedBuild(args)
+	return qc.executeNamed(ctx, "datasyncSetSyncPaused", call)
+}
+
+func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncSetSyncPaused(")
+	b.WriteString("connector: ")
+	b.WriteString(quoteMemQL(args.Connector))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conceptId: ")
+	b.WriteString(quoteMemQL(args.ConceptId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("paused: ")
+	b.WriteString(fmt.Sprintf("%v", args.Paused))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.
+type DatasyncStartBackfillArgs struct {
+	Connector string
+	ConceptId string
+}
+
+// DatasyncStartBackfill calls the engine builtin datasyncStartBackfill.
+func (qc *QueryClient) DatasyncStartBackfill(ctx context.Context, args DatasyncStartBackfillArgs) (*Result, error) {
+	call := DatasyncStartBackfillBuild(args)
+	return qc.executeNamed(ctx, "datasyncStartBackfill", call)
+}
+
+func DatasyncStartBackfillBuild(args DatasyncStartBackfillArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncStartBackfill(")
+	b.WriteString("connector: ")
+	b.WriteString(quoteMemQL(args.Connector))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conceptId: ")
+	b.WriteString(quoteMemQL(args.ConceptId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
