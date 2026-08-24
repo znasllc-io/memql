@@ -22,6 +22,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -476,4 +477,44 @@ test("the disclosure says installing needs none of it", () => {
 test("a repair gets the same disclosure; uninstall gets none", () => {
   assert.match(collect({ action: "repair" }), /<details class="optional-section"/);
   assert.doesNotMatch(collect({ action: "uninstall" }), /<details class="optional-section"/);
+});
+
+// ---------------------------------------------------------------------------
+// the extraction, as a countable invariant
+// ---------------------------------------------------------------------------
+
+test("exactly ONE producer of a field's markup", async () => {
+  // WHY A SOURCE-LEVEL COUNT RATHER THAN A RENDER ASSERTION. What can go wrong
+  // here is not a wrong page -- it is a SECOND implementation that renders the
+  // same thing, after which the two drift and only one of them gets the next
+  // fix. That is invisible to every behavioural test, because both copies work
+  // on the day they are written.
+  //
+  // The extraction (renderField) exists precisely to prevent that, and this
+  // epic's own rebase is how it nearly came back: memql#4430 rewrote the same
+  // function from the other end, and a merge that took both sides verbatim
+  // would have produced two field renderers that compile, pass, and disagree
+  // six months later.
+  //
+  // `data-invalid=` is the marker because it opens a field's wrapper element
+  // and appears nowhere else in the module -- so counting it counts producers.
+  //
+  // If a legitimate second renderer is ever added, this test should be UPDATED
+  // with the reason rather than deleted; the count is the point, not the 1.
+  const source = await fs.readFile(
+    path.join(REPO_ROOT, "editors", "vscode", "src", "webview", "installScreens.ts"),
+    "utf8",
+  );
+  const producers = source.split("data-invalid=").length - 1;
+  assert.equal(
+    producers,
+    1,
+    `installScreens.ts has ${producers} places emitting a field wrapper; there must be exactly one ` +
+      "(renderField). A second one is how the required list and the optional disclosure start " +
+      "disagreeing about what a field looks like.",
+  );
+
+  // The reachable positive: the marker is actually present, so a rename that
+  // made this count zero cannot pass as "no duplicates".
+  assert.ok(source.includes("function renderField("), "renderField has been renamed or removed");
 });
