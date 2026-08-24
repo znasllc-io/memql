@@ -14,7 +14,7 @@ import { conceptsFromWire } from "../src/client/types.js";
 
 test("conceptsFromWire carries the declaration for all three states", () => {
   const out = conceptsFromWire([
-    { id: "v1:shopify:shopifyProduct", dataState: "mirror", dataOrigin: "shopify" },
+    { id: "v1:shopify:product", dataState: "mirror", dataOrigin: "shopify" },
     {
       id: "v1:wholesale:priceList",
       dataState: "origin",

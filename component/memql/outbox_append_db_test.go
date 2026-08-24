@@ -29,7 +29,7 @@ import (
 // # Why the test declares its own concept
 //
 // The tree ships NO origin concept: the one declared data-origins
-// concept today is a MIRROR (v1:shopify:shopifyProduct), and a mirror
+// concept today is a MIRROR (v1:shopify:product), and a mirror
 // appends nothing. So the append path has no subject in the corpus, and
 // a test that used a real concept would be measuring the empty case.
 //

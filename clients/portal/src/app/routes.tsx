@@ -11,6 +11,7 @@ import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
+import { StoresRoutes } from "../stores/StoresRoutes";
 import { ArtifactsRoutes } from "../artifacts/ArtifactsRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { DataOriginsRoutes } from "../dataorigins/DataOriginsRoutes";
@@ -98,6 +99,7 @@ import { DATA_ORIGINS_ROUTE_PATTERN } from "../dataorigins/urls";
 //   /fleet/*          machines + workbenches -- where work runs (memql#4349)
 //   /modules/*        the module inventory + pack enablement (memql#4191)
 //   /data-origins/*   what MemQL owns, mirrors and pushes out (memql#4378)
+//   /stores/*         the Shopify stores a connector mirrors (memql#4389)
 //   /artifacts/*      the Library, browsed and labelled
 //   /nexus/*          Nexus: a goal's world in 3D, its constructs, its
 //                     replay (memql#4369)
@@ -127,6 +129,7 @@ export function AppRoutes(): ReactNode {
             <Route path={CONCEPT_SCHEMA_CHILD_PATTERN} element={<ConceptSchemaPane />} />
           </Route>
           <Route path="compose/*" element={<ComposeRoutes />} />
+          <Route path="stores/*" element={<StoresRoutes />} />
           <Route path="integrations/*" element={<IntegrationsRoutes />} />
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="deployables/*" element={<DeployablesRoutes />} />

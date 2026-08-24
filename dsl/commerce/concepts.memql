@@ -1,0 +1,238 @@
+// The commerce namespace -- what a wholesale business needs and Shopify does
+// not model.
+//
+// Since 2026-04-02 Shopify carries companies, payment terms, volume pricing
+// and up to three catalogs below Plus. It still does not carry: multi-step or
+// buyer-side approval chains, quotes, credit limits, per-company minimum
+// order values, sales reps and territories, or saved reorder lists. Those are
+// the domains the wholesale application needs MemQL to be the ORIGIN of --
+// authored here, and projected into Shopify only where Shopify has somewhere
+// to put them.
+//
+// Two data states live side by side in this file and the difference is
+// load-bearing:
+//
+//   @origin("memql") @mirroredTo("shopify")  -- authored here, PUSHED out.
+//       A row change queues an outbox entry and the connector writes it into
+//       the store. Used where Shopify can hold the value (a metafield) and
+//       something on Shopify's side reads it.
+//
+//   @origin("memql") alone                   -- authored here, stays here.
+//       Shopify has nowhere to put a quote or an approval chain, so pushing
+//       one would mean inventing a representation and then owning it.
+//
+// Cluster-owner tier throughout, for now. The wholesale application will
+// define the per-user model -- which reps see which companies, which buyers
+// see which quotes -- and that record will re-tier these concepts. Declaring
+// a per-user tier before that model exists would be guessing at an
+// authorization boundary, which is the one thing not worth guessing at.
+
+/// Agent- and operator-authored product copy, projected into Shopify as
+/// metafields in the `memql` namespace. The FIRST origin domain (design D7):
+/// additive, cannot break a store, and the vehicle for agent-written content.
+@origin("memql")
+@mirroredTo("shopify")
+@rowAuthz(clusterOwner)
+@displayCard(primary="productGid", secondary="storeId", status="status")
+concept productContent {
+  /// The v1:shopify:store this content belongs to.
+  storeId       string!
+  /// The mirrored product it describes.
+  productGid    string!
+  /// Long-form copy. Projects to memql.description (multi_line_text_field),
+  /// storefront access public_read so the headless storefront can read it.
+  description   string
+  /// A one-line summary for cards and listings. Projects to memql.summary.
+  summary       string
+  /// Search/merchandising keywords. Projects to memql.keywords (list.single_line_text_field).
+  keywords      []string
+  /// Free-form structured content the storefront renders. Projects to
+  /// memql.blocks (json).
+  blocks        object
+  /// draft   -- authored, not yet pushed
+  /// live    -- pushed and accepted by Shopify
+  /// failed  -- the push dead-lettered; see the outbox entry
+  status        enum("draft", "live", "failed")
+  /// Which agent or person last wrote it.
+  authoredBy    string
+}
+
+/// An internal note about a customer, projected to a memql-namespace
+/// metafield on the Shopify customer. Not storefront-readable.
+@origin("memql")
+@mirroredTo("shopify")
+@rowAuthz(clusterOwner)
+@displayCard(primary="customerGid", secondary="storeId", status="status")
+concept customerNote {
+  storeId      string!
+  customerGid  string!
+  /// Projects to memql.note (multi_line_text_field).
+  note         string
+  status       enum("draft", "live", "failed")
+  authoredBy   string
+}
+
+/// An internal note about a company location, projected the same way.
+@origin("memql")
+@mirroredTo("shopify")
+@rowAuthz(clusterOwner)
+@displayCard(primary="companyLocationGid", secondary="storeId", status="status")
+concept companyLocationNote {
+  storeId             string!
+  companyLocationGid  string!
+  /// Projects to memql.note (multi_line_text_field).
+  note                string
+  status              enum("draft", "live", "failed")
+  authoredBy          string
+}
+
+/// A credit limit for a company location.
+///
+/// Shopify has no credit-limit field, so the limit is projected to a
+/// company-location metafield (memql.creditLimit) where a checkout validation
+/// Function can read it. THE FUNCTION IS NOT HERE: Functions are authored in
+/// the product repository and deployed to the store, and this row is what one
+/// reads. What MemQL owns is the number and its history.
+@origin("memql")
+@mirroredTo("shopify")
+@rowAuthz(clusterOwner)
+@displayCard(primary="companyLocationGid", secondary="limitAmount", tertiary="currencyCode", status="status")
+concept creditLimit {
+  storeId             string!
+  companyGid          string!
+  companyLocationGid  string!
+  /// The limit, as a decimal string. A string because money is a decimal and
+  /// a float is the wrong type for one.
+  limitAmount         string!
+  currencyCode        string!
+  /// Outstanding balance as MemQL last computed it. Advisory: the authority
+  /// on what is owed is the accounting system, and this is what the checkout
+  /// validation compares against.
+  outstandingAmount   string
+  /// active  -- enforced
+  /// hold    -- no new orders regardless of the number
+  /// waived  -- the limit is recorded but not enforced
+  status              enum("active", "hold", "waived", "failed")
+  reviewedAt          datetime
+  reviewedBy          string
+}
+
+/// A quote: priced, time-boxed, and turned into a Shopify draft order when
+/// the buyer accepts.
+///
+/// MemQL-origin and NOT mirrored. Shopify has no quote object, so pushing one
+/// would mean inventing a representation in metafields and then owning it
+/// forever. What crosses over is the ACCEPTED quote, as a draft order with
+/// locked prices -- which is a Shopify object that already exists.
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="quoteNumber", secondary="companyGid", tertiary="totalAmount", status="status")
+concept quote {
+  storeId             string!
+  /// Human-readable reference the buyer and the rep both quote.
+  quoteNumber         string!
+  companyGid          string!
+  companyLocationGid  string
+  /// The buyer this was prepared for, as a Shopify company contact.
+  companyContactGid   string
+  /// The rep who prepared it.
+  salesRepId          string
+  /// Line items: variantGid, quantity, unitAmount, currencyCode, note.
+  /// An array rather than a child concept because a quote line has no life
+  /// of its own -- it is never referenced, never updated alone, and never
+  /// read without its quote.
+  lines               []object
+  currencyCode        string!
+  totalAmount         string
+  /// Free-form terms the rep typed.
+  terms               string
+  /// draft     -- being prepared
+  /// sent      -- with the buyer
+  /// accepted  -- the buyer said yes; a draft order was created
+  /// declined  -- the buyer said no
+  /// expired   -- validUntil passed with no answer
+  status              enum("draft", "sent", "accepted", "declined", "expired")
+  validUntil          datetime
+  sentAt              datetime
+  respondedAt         datetime
+  /// The Shopify draft order acceptance created, once it exists.
+  draftOrderGid       string
+  /// Which approval chain, if any, has to clear before this can be sent.
+  approvalChainId     string
+}
+
+/// An approval chain: who has to say yes, in what order, above what value.
+///
+/// Evaluated in MemQL BEFORE a draft order is sent, which is the whole point
+/// -- Shopify's own order-review Functions run at checkout, by which time the
+/// buyer has already been quoted a price nobody internally approved.
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="name", secondary="companyGid", tertiary="thresholdAmount", status="status")
+concept approvalChain {
+  storeId          string!
+  name             string!
+  /// Scope: a chain applies to one company, or to every company when blank.
+  companyGid       string
+  /// The value above which this chain engages. Blank means always.
+  thresholdAmount  string
+  currencyCode     string
+  /// Ordered steps: {order, approverId, approverEmail, role, decidedAt,
+  /// decision, note}. An array for the same reason a quote's lines are one.
+  steps            []object
+  /// pending   -- awaiting a decision
+  /// approved  -- every step said yes
+  /// rejected  -- a step said no
+  /// inactive  -- the chain is configured but not engaged
+  status           enum("pending", "approved", "rejected", "inactive")
+  /// The quote or draft order this instance is deciding, when it is an
+  /// instance rather than a template.
+  subjectId        string
+  decidedAt        datetime
+}
+
+/// A sales rep. A MemQL identity, deliberately: a rep is a person in the
+/// wholesale business, not a Shopify staff member, and on a non-Plus plan
+/// Shopify will not tell us about staff at all.
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="displayName", secondary="email", tertiary="territoryId", status="active")
+concept salesRep {
+  storeId      string!
+  displayName  string!
+  email        string
+  /// The MemQL user this rep signs in as, when they have one.
+  userId       string
+  territoryId  string
+  active       bool
+}
+
+/// A territory: a named set of companies and locations one rep covers.
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="name", secondary="storeId", status="active")
+concept territory {
+  storeId              string!
+  name                 string!
+  /// The companies in the territory, by mirrored GID.
+  companyGids          []string
+  /// Individual locations, for a company split across territories.
+  companyLocationGids  []string
+  active               bool
+}
+
+/// A saved reorder list: what a buyer buys again.
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="name", secondary="companyGid", status="active")
+concept reorderList {
+  storeId             string!
+  name                string!
+  companyGid          string!
+  companyLocationGid  string
+  companyContactGid   string
+  /// {variantGid, quantity, note} per line.
+  lines               []object
+  lastOrderedAt       datetime
+  active              bool
+}

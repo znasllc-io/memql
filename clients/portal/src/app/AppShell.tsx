@@ -27,6 +27,7 @@ import {
   Rocket,
   ScrollText,
   Shield,
+  Store,
   Users,
   Wrench,
   Blocks,
@@ -198,6 +199,15 @@ const CLUSTER_ADMIN: readonly NavItem[] = [
   // clusterOwner-tier in the engine -- the rail should not advertise a door
   // that will not open, which is the same rule Modules follows.
   { to: DATA_ORIGINS_ROOT, label: "Data origins", icon: Plug },
+  // The stores a Shopify connector mirrors (epic memql#4389): credentials,
+  // scopes, webhook subscriptions, the cost bucket. Here rather than in
+  // Library for the reason directly above -- v1:shopify:store is
+  // clusterOwner-tier and the page refuses anyone else, so a rail entry in
+  // the half everyone sees would be a door that will not open. It sits next
+  // to Data origins because the two are halves of one job: that page runs
+  // backfill, reconciliation and pause for a DOMAIN, this one holds the
+  // credentials and subscriptions of the STORE those domains come from.
+  { to: "/stores", label: "Stores", icon: Store },
   { to: "/admin/tokens", label: "Sessions and tokens", icon: Inbox },
   { to: "/admin/keys", label: "Signing keys", icon: Shield },
   { to: "/admin/settings", label: "Settings", icon: Shield },

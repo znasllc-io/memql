@@ -2023,11 +2023,23 @@ Available integrations (core, registered via the plug-in system):
 actionSearch, agents, auth, avatardirect, chat, dailyspace, database,
 deployversion, email, embedding, files, azureblob (as `storage`),
 harnessRecall, harnessTrace, identity, knowledge, library, liveknowledge,
-openairealtime, rbac, router, similarity, telephony, timeutil, voice,
-workbench, plus node-type-scoped ones (cognition, agent, stt,
+openairealtime, rbac, router, shopify, similarity, telephony, timeutil,
+voice, workbench, plus node-type-scoped ones (cognition, agent, stt,
 openaiVoice) wired explicitly in `app/integrations_*.go` when their
 dependencies sit outside the stable `PluginContext` surface. `training`
 is a product-repo pack, not part of engine-only core.
+
+`shopify` is a CONNECTOR rather than an ordinary integration, and the
+reference implementation of `component/memql/sync.Connector` (epic
+memql#4389): it owns one external system's data, its model is GENERATED
+from that system's schema at a pinned version (`cmd/shopifyschema` ->
+`dsl/shopify/generated/`, 65 concepts), and its five verbs return
+MirrorWrites for the runtime to apply rather than writing themselves.
+Read [integrations/CLAUDE.md](integrations/CLAUDE.md) before writing a
+second one; the operator runbook is
+[docs/public/operate/shopify-connector.md](docs/public/operate/shopify-connector.md)
+and the headless storefront's side is
+[docs/public/operate/shopify-storefront-checklist.md](docs/public/operate/shopify-storefront-checklist.md).
 
 ### Extension Points
 
@@ -2080,9 +2092,9 @@ the option the model rejects and the vocabulary cannot say.
 | Native | MemQL | nobody | yes |
 
 ```memql
-@origin("shopify")                    concept shopifyProduct { ... }  // mirror
-@origin("memql") @mirroredTo("shopify") concept priceList { ... }     // origin
-                                      concept plan { ... }            // native
+@origin("shopify")                      concept product { ... }      // mirror
+@origin("memql") @mirroredTo("shopify") concept creditLimit { ... }  // origin
+                                        concept plan { ... }         // native
 ```
 
 **"Read-only by construction" is literal, and STRICTER than the row-authz write

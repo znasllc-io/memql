@@ -1,0 +1,38 @@
+// The connector's own schedule.
+//
+// Only two, and the shortness is the point: the data-origins runtime
+// (component/datasync) already owns inbound dispatch, the reconciliation
+// runner and the outbox drain, and it drives them from
+// dsl/platform/automations.memql for EVERY connector. What is left here
+// is what is Shopify's alone.
+
+/// Reconcile every store's webhook subscriptions daily.
+///
+/// Shopify retries a failed delivery eight times over four hours and then
+/// DELETES the subscription. A deployment that was unreachable for an
+/// afternoon comes back with its webhooks silently gone -- the mirror
+/// simply stops changing, and nothing anywhere says so. This is what
+/// brings them back, and the store's health is where an operator sees
+/// that it happened.
+///
+/// Not the runtime's job: EnsureSubscriptions is a contract verb, but
+/// nothing generic can know how often a given origin forgets its
+/// subscribers.
+@trigger(schedule="0 15 3 * * *")
+automation reconcileShopifySubscriptions {
+  step ensure {
+    builtin shopifyEnsureSubscriptions ()
+  }
+}
+
+/// Run the queued privacy jobs whose hold has elapsed, hourly.
+///
+/// Hourly rather than on delivery, because both windows are measured in
+/// days -- customers/redact has thirty and shop/redact a 48-hour hold --
+/// and running on receipt would override a merchant's own grace period.
+@trigger(schedule="0 5 * * * *")
+automation runShopifyComplianceJobs {
+  step run {
+    builtin shopifyRunComplianceJobs ()
+  }
+}

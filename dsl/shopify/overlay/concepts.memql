@@ -1,0 +1,120 @@
+// The hand-written half of the shopify domain.
+//
+// dsl/shopify/generated/ is the mirror and is regenerated from the Admin
+// schema; nothing there may be edited. This directory is what a person
+// authors ON TOP of it: the store configuration (MemQL's own, not a mirror
+// of anything), the analytics reads, and the cross-type relationships the
+// generator cannot know because they are domain judgement rather than
+// schema.
+
+/// A configured Shopify store. NATIVE, not a mirror: this is MemQL's own
+/// record of how to reach a store, and Shopify has no corresponding object.
+/// One connector, many stores -- every mirrored row carries the storeId of
+/// the row it came from, and every read is scoped by it.
+@namespace("shopify")
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="domain", secondary="name", tertiary="apiVersion", status="status")
+concept store {
+  /// The myshopify.com domain, e.g. "acme-widgets.myshopify.com". The one
+  /// identifier Shopify never changes; the storefront's public domain does.
+  domain              string!
+  /// Human-readable name for the operator's benefit.
+  name                string
+  /// The custom-distribution app's client id, for the runbook's audit trail.
+  appClientId         string
+  /// Name of the v1:platform:globalSecret row holding the Admin API access
+  /// token. A REFERENCE, never the token: the store row is read by the
+  /// portal and the token is not something a portal read should return.
+  adminTokenRef       string
+  /// Name of the globalSecret row holding the Storefront API token, which
+  /// the headless storefront's site binding consumes.
+  storefrontTokenRef  string
+  /// Name of the globalSecret row holding the webhook signing secret. The
+  /// inbound receiver resolves this per store, which is what lets two
+  /// stores verify independently.
+  webhookSecretRef    string
+  /// The Admin API version this store is pinned to. It must match the
+  /// version the mirror was generated from; a mismatch returns fields the
+  /// concepts do not declare and omits fields they require.
+  apiVersion          string
+  /// The access scopes the app was actually granted, as reported by the
+  /// installation. The portal checks it against what the allowlist needs.
+  scopesGranted       []string
+  /// Shopify's protected customer data approval level. Below the level a
+  /// field needs, Shopify returns null and the mirror stores null -- so
+  /// this is the difference between "the customer has no phone number" and
+  /// "we are not approved to see it".
+  protectedDataLevel  enum("none", "level1", "level2")
+  /// The store's Shopify plan, which decides whether B2B, Plus-only staff
+  /// reads and unlimited catalogs are available at all.
+  plan                string
+  /// configured  -- credentials present, nothing mirrored yet
+  /// backfilling -- the initial Bulk Operations are running
+  /// live        -- webhooks are registered and applying
+  /// paused      -- an operator stopped ingestion; deliveries are staged
+  ///                and not applied
+  /// error       -- the connector could not reach the store
+  status              enum("configured", "backfilling", "live", "paused", "error")
+  /// Free-form health the connector maintains: last delivery per topic,
+  /// subscription reconcile time, per-domain drift, the last error.
+  health              object
+  /// When the connector last completed a subscription reconcile. Shopify
+  /// deletes a subscription after eight consecutive delivery failures, so
+  /// a stale value here is the signal that the store has gone quiet.
+  subscriptionsCheckedAt  datetime
+  /// The MemQL user a customers/data_request export is filed under.
+  ///
+  /// An export is a document about a real person, and the Library is
+  /// owner-tier: it has to belong to somebody. There is no sensible default
+  /// -- the connector actor is not a person and a cluster owner picked at
+  /// random is the wrong person -- so an unset owner FAILS the export with a
+  /// message naming this field, rather than filing it somewhere arbitrary.
+  ownerUserId         string
+  /// Set when the store was purged under shop/redact. The row stays as the
+  /// audit record that a purge happened.
+  redactedAt          datetime
+}
+
+/// One queued Shopify privacy request.
+///
+/// A job rather than an immediate action, because both windows are
+/// measured in days: customers/redact has thirty and shop/redact a
+/// 48-hour hold, and the receiver has five seconds. Running on receipt
+/// would also override a merchant's own grace period if one is
+/// configured.
+///
+/// It is deliberately NOT a v1:platform:outboxEntry. The outbox is for
+/// MemQL-authored rows the connector PUSHES, and its drain hands every
+/// entry to Propagate -- a compliance job handed to Propagate would try
+/// to write a customer's export into Shopify. Same shape of work,
+/// different destination, so a different queue.
+@namespace("shopify")
+@origin("memql")
+@rowAuthz(clusterOwner)
+@displayCard(primary="topic", secondary="storeId", tertiary="customerGid", status="status")
+concept complianceJob {
+  /// The store the request concerns.
+  storeId      string!
+  /// customers/data_request | customers/redact | shop/redact, in the
+  /// spelling Shopify delivers.
+  topic        string!
+  /// The customer, for the two customer topics.
+  customerGid  string
+  /// Shopify's own request id, recorded with the export it produces.
+  requestId    string
+  /// The shop domain as delivered, kept because a store row can be
+  /// removed while a job for it is still queued.
+  shopDomain   string
+  /// Not before this time. The hold, made explicit.
+  dueAt        datetime!
+  /// pending -- waiting for its hold
+  /// done    -- the job ran and was audited
+  /// failed  -- the job errored; lastError says how, and it is retried
+  status       enum("pending", "done", "failed")
+  /// What the run produced, for the audit trail: the artifact id, the
+  /// number of rows scrubbed, or the reason a purge was skipped.
+  outcome      string
+  lastError    string
+  completedAt  datetime
+}

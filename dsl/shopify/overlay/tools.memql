@@ -1,0 +1,55 @@
+// The agent-facing surface over the mirror.
+//
+// Four questions rather than forty: what sold, what is running out, who is
+// coming back, and how is this account doing. Each maps to one builtin that
+// reads the mirror and does its own grouping, because MemQL aggregates COUNT
+// and nothing else.
+//
+// All four are read-only and cost nothing against Shopify's rate limit --
+// which is what makes them worth putting in a conversation rather than in a
+// report somebody runs.
+
+/// What sold in a window, by product or by variant. Reads the mirrored orders and their line items
+/// -- no Shopify API call, so it is free and instant. Use groupBy=variant when the question is
+/// about sizes or colours. Counts CURRENT quantities, so a refunded line is not counted as sold.
+@handler(type="function", name="commerceSold")
+@executionTime("medium")
+tool commerceSold {
+  storeId  string   @description("Which store, when more than one is configured.")
+  from     string   @description("RFC3339 window start. Defaults to 30 days ago.")
+  to       string   @description("RFC3339 window end. Defaults to now.")
+  groupBy  enum("product", "variant") @description("Group by product (default) or by variant.")
+}
+
+/// Which inventory levels at a location are below a threshold. Answers 'what is about to run out'.
+/// A level Shopify reports no available quantity for is reported as unknown rather than as a
+/// stockout.
+@handler(type="function", name="commerceStock")
+@executionTime("fast")
+tool commerceStock {
+  storeId      string   @description("Which store, when more than one is configured.")
+  locationGid  string   @description("The mirrored location's GID.")
+  threshold    integer  @description("Report levels with fewer than this available. Defaults to 5.")
+}
+
+/// Repeat-customer and refund rates for a window. Repeat rate is customers with more than one order
+/// over customers with any order; refund rate is refunds over orders.
+@handler(type="function", name="commerceCustomers")
+@executionTime("medium")
+tool commerceCustomers {
+  storeId  string  @description("Which store, when more than one is configured.")
+  from     string  @description("RFC3339 window start. Defaults to 30 days ago.")
+  to       string  @description("RFC3339 window end. Defaults to now.")
+}
+
+/// One B2B company account: its orders in a window, how many have payment terms still outstanding,
+/// and its credit limit. The orders come from Shopify and the credit limit is MemQL's own -- the
+/// question 'can this account order' needs both and neither system has both.
+@handler(type="function", name="commerceCompany")
+@executionTime("medium")
+tool commerceCompany {
+  storeId     string  @description("Which store, when more than one is configured.")
+  companyGid  string  @description("The mirrored company's GID.")
+  from        string  @description("RFC3339 window start. Defaults to 30 days ago.")
+  to          string  @description("RFC3339 window end. Defaults to now.")
+}

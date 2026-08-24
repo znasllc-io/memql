@@ -14,6 +14,34 @@ var (
 	_ = strings.Builder{}
 )
 
+// AbandonedCheckouts -- Abandoned checkouts since a moment. There is no Checkout object and checkout runs only on Shopify, so this is the whole of what a headless storefront can see of an abandoned session.
+//
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["abandonedCheckouts"] in generated_concepts.go).
+type AbandonedCheckoutsArgs struct {
+	StoreId string
+	Since   string
+}
+
+// AbandonedCheckouts calls the engine query abandonedCheckouts.
+func (qc *QueryClient) AbandonedCheckouts(ctx context.Context, args AbandonedCheckoutsArgs) (*Result, error) {
+	call := AbandonedCheckoutsBuild(args)
+	return qc.executeNamed(ctx, "abandonedCheckouts", call)
+}
+
+func AbandonedCheckoutsBuild(args AbandonedCheckoutsArgs) string {
+	var b strings.Builder
+	b.WriteString("query abandonedCheckouts(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AccessRequestById -- Returns the access request with the given id. Zero or one result.
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["accessRequestById"] in generated_concepts.go).
@@ -957,6 +985,58 @@ func (qc *QueryClient) AppSessionsForUser(ctx context.Context, args AppSessionsF
 func AppSessionsForUserBuild(args AppSessionsForUserArgs) string {
 	_ = args
 	return "query appSessionsForUser()"
+}
+
+// ApprovalChainById -- One approval chain.
+//
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["approvalChainById"] in generated_concepts.go).
+type ApprovalChainByIdArgs struct {
+	ChainId string
+}
+
+// ApprovalChainById calls the engine query approvalChainById.
+func (qc *QueryClient) ApprovalChainById(ctx context.Context, args ApprovalChainByIdArgs) (*Result, error) {
+	call := ApprovalChainByIdBuild(args)
+	return qc.executeNamed(ctx, "approvalChainById", call)
+}
+
+func ApprovalChainByIdBuild(args ApprovalChainByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query approvalChainById(")
+	b.WriteString("chainId: ")
+	b.WriteString(quoteMemQL(args.ChainId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ApprovalChainsForCompany -- The chains that could apply to a company: its own, plus the store-wide ones. Which of them ENGAGES is a threshold comparison the caller makes.
+//
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["approvalChainsForCompany"] in generated_concepts.go).
+type ApprovalChainsForCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+}
+
+// ApprovalChainsForCompany calls the engine query approvalChainsForCompany.
+func (qc *QueryClient) ApprovalChainsForCompany(ctx context.Context, args ApprovalChainsForCompanyArgs) (*Result, error) {
+	call := ApprovalChainsForCompanyBuild(args)
+	return qc.executeNamed(ctx, "approvalChainsForCompany", call)
+}
+
+func ApprovalChainsForCompanyBuild(args ApprovalChainsForCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("query approvalChainsForCompany(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if args.CompanyGid != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyGid: ")
+		b.WriteString(quoteMemQL(args.CompanyGid))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
@@ -1963,6 +2043,78 @@ func CodeMetricsInWindowBuild(args CodeMetricsInWindowArgs) string {
 	return b.String()
 }
 
+// CompanyLocationNoteFor -- The internal note on one company location.
+//
+// Bound concept: v1:commerce:companyLocationNote (machine-readable: BoundConcepts["companyLocationNoteFor"] in generated_concepts.go).
+type CompanyLocationNoteForArgs struct {
+	StoreId            string
+	CompanyLocationGid string
+}
+
+// CompanyLocationNoteFor calls the engine query companyLocationNoteFor.
+func (qc *QueryClient) CompanyLocationNoteFor(ctx context.Context, args CompanyLocationNoteForArgs) (*Result, error) {
+	call := CompanyLocationNoteForBuild(args)
+	return qc.executeNamed(ctx, "companyLocationNoteFor", call)
+}
+
+func CompanyLocationNoteForBuild(args CompanyLocationNoteForArgs) string {
+	var b strings.Builder
+	b.WriteString("query companyLocationNoteFor(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyLocationGid: ")
+	b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComplianceJobsDue -- Privacy jobs whose hold has elapsed. The read the hourly runner makes.
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsDue"] in generated_concepts.go).
+type ComplianceJobsDueArgs struct {
+	AsOf string
+}
+
+// ComplianceJobsDue calls the engine query complianceJobsDue.
+func (qc *QueryClient) ComplianceJobsDue(ctx context.Context, args ComplianceJobsDueArgs) (*Result, error) {
+	call := ComplianceJobsDueBuild(args)
+	return qc.executeNamed(ctx, "complianceJobsDue", call)
+}
+
+func ComplianceJobsDueBuild(args ComplianceJobsDueArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobsDue(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComplianceJobsForStore -- Every privacy job for a store, newest first -- the audit view.
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsForStore"] in generated_concepts.go).
+type ComplianceJobsForStoreArgs struct {
+	StoreId string
+}
+
+// ComplianceJobsForStore calls the engine query complianceJobsForStore.
+func (qc *QueryClient) ComplianceJobsForStore(ctx context.Context, args ComplianceJobsForStoreArgs) (*Result, error) {
+	call := ComplianceJobsForStoreBuild(args)
+	return qc.executeNamed(ctx, "complianceJobsForStore", call)
+}
+
+func ComplianceJobsForStoreBuild(args ComplianceJobsForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobsForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComposedViewById -- Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.go).
@@ -2084,6 +2236,62 @@ func ConsentStatusBuild(args ConsentStatusArgs) string {
 	return b.String()
 }
 
+// CreditLimitForLocation -- The credit limit for one company location -- the read a checkout validation's backing service makes.
+//
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitForLocation"] in generated_concepts.go).
+type CreditLimitForLocationArgs struct {
+	StoreId            string
+	CompanyLocationGid string
+}
+
+// CreditLimitForLocation calls the engine query creditLimitForLocation.
+func (qc *QueryClient) CreditLimitForLocation(ctx context.Context, args CreditLimitForLocationArgs) (*Result, error) {
+	call := CreditLimitForLocationBuild(args)
+	return qc.executeNamed(ctx, "creditLimitForLocation", call)
+}
+
+func CreditLimitForLocationBuild(args CreditLimitForLocationArgs) string {
+	var b strings.Builder
+	b.WriteString("query creditLimitForLocation(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyLocationGid: ")
+	b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreditLimitsForCompany -- Every credit limit for a company, across its locations.
+//
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitsForCompany"] in generated_concepts.go).
+type CreditLimitsForCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+}
+
+// CreditLimitsForCompany calls the engine query creditLimitsForCompany.
+func (qc *QueryClient) CreditLimitsForCompany(ctx context.Context, args CreditLimitsForCompanyArgs) (*Result, error) {
+	call := CreditLimitsForCompanyBuild(args)
+	return qc.executeNamed(ctx, "creditLimitsForCompany", call)
+}
+
+func CreditLimitsForCompanyBuild(args CreditLimitsForCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("query creditLimitsForCompany(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["currentUser"] in generated_concepts.go).
@@ -2099,6 +2307,34 @@ func (qc *QueryClient) CurrentUser(ctx context.Context, args CurrentUserArgs) (*
 func CurrentUserBuild(args CurrentUserArgs) string {
 	_ = args
 	return "query currentUser()"
+}
+
+// CustomerNoteFor -- The internal note on one customer.
+//
+// Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["customerNoteFor"] in generated_concepts.go).
+type CustomerNoteForArgs struct {
+	StoreId     string
+	CustomerGid string
+}
+
+// CustomerNoteFor calls the engine query customerNoteFor.
+func (qc *QueryClient) CustomerNoteFor(ctx context.Context, args CustomerNoteForArgs) (*Result, error) {
+	call := CustomerNoteForBuild(args)
+	return qc.executeNamed(ctx, "customerNoteFor", call)
+}
+
+func CustomerNoteForBuild(args CustomerNoteForArgs) string {
+	var b strings.Builder
+	b.WriteString("query customerNoteFor(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("customerGid: ")
+	b.WriteString(quoteMemQL(args.CustomerGid))
+	b.WriteString(")")
+	return b.String()
 }
 
 // DelegationPolicyForUser wraps the query named "delegationPolicyForUser".
@@ -3424,6 +3660,34 @@ func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) stri
 	return "query libraryWorkspaceLiveSources()"
 }
 
+// LineItemsForOrder -- The line items of one order.
+//
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["lineItemsForOrder"] in generated_concepts.go).
+type LineItemsForOrderArgs struct {
+	StoreId  string
+	OrderGid string
+}
+
+// LineItemsForOrder calls the engine query lineItemsForOrder.
+func (qc *QueryClient) LineItemsForOrder(ctx context.Context, args LineItemsForOrderArgs) (*Result, error) {
+	call := LineItemsForOrderBuild(args)
+	return qc.executeNamed(ctx, "lineItemsForOrder", call)
+}
+
+func LineItemsForOrderBuild(args LineItemsForOrderArgs) string {
+	var b strings.Builder
+	b.WriteString("query lineItemsForOrder(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("orderGid: ")
+	b.WriteString(quoteMemQL(args.OrderGid))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LiveAppSessionsForUser wraps the query named "liveAppSessionsForUser".
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.go).
@@ -3602,6 +3866,28 @@ func (qc *QueryClient) MyWorkspaces(ctx context.Context, args MyWorkspacesArgs) 
 func MyWorkspacesBuild(args MyWorkspacesArgs) string {
 	_ = args
 	return "query myWorkspaces()"
+}
+
+// NeverSold -- Every live variant in the store. `neverSold` is the SET DIFFERENCE the tool computes -- these minus the variants that appear on an order in the window -- because MemQL has no anti-join and inventing one here would mean answering the question wrong rather than not answering it.
+//
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["neverSold"] in generated_concepts.go).
+type NeverSoldArgs struct {
+	StoreId string
+}
+
+// NeverSold calls the engine query neverSold.
+func (qc *QueryClient) NeverSold(ctx context.Context, args NeverSoldArgs) (*Result, error) {
+	call := NeverSoldBuild(args)
+	return qc.executeNamed(ctx, "neverSold", call)
+}
+
+func NeverSoldBuild(args NeverSoldArgs) string {
+	var b strings.Builder
+	b.WriteString("query neverSold(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // NodeSpecsForDeployment -- Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.
@@ -3830,6 +4116,81 @@ func (qc *QueryClient) OAuthClientCORSGrants(ctx context.Context, args OAuthClie
 func OAuthClientCORSGrantsBuild(args OAuthClientCORSGrantsArgs) string {
 	_ = args
 	return "query oAuthClientCORSGrants()"
+}
+
+// OrdersByCompany -- One company's orders in a window -- the B2B account view.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersByCompany"] in generated_concepts.go).
+type OrdersByCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+	From       string
+	To         string
+}
+
+// OrdersByCompany calls the engine query ordersByCompany.
+func (qc *QueryClient) OrdersByCompany(ctx context.Context, args OrdersByCompanyArgs) (*Result, error) {
+	call := OrdersByCompanyBuild(args)
+	return qc.executeNamed(ctx, "ordersByCompany", call)
+}
+
+func OrdersByCompanyBuild(args OrdersByCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("query ordersByCompany(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("from: ")
+	b.WriteString(quoteMemQL(args.From))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
+	b.WriteString(")")
+	return b.String()
+}
+
+// OrdersInWindow -- Orders created in a window. The base read for every sales question: soldByProduct, soldByVariant, repeatCustomers and refundRate all start here and the tool expands or groups from it.
+// `sourceCreatedAt` is Shopify's own createdAt carried as an RFC3339 string (the mirror's mapping rule for timestamps), which sorts and compares chronologically as text in UTC.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersInWindow"] in generated_concepts.go).
+type OrdersInWindowArgs struct {
+	StoreId string
+	From    string
+	To      string
+}
+
+// OrdersInWindow calls the engine query ordersInWindow.
+func (qc *QueryClient) OrdersInWindow(ctx context.Context, args OrdersInWindowArgs) (*Result, error) {
+	call := OrdersInWindowBuild(args)
+	return qc.executeNamed(ctx, "ordersInWindow", call)
+}
+
+func OrdersInWindowBuild(args OrdersInWindowArgs) string {
+	var b strings.Builder
+	b.WriteString("query ordersInWindow(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("from: ")
+	b.WriteString(quoteMemQL(args.From))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
+	b.WriteString(")")
+	return b.String()
 }
 
 // OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
@@ -4146,6 +4507,28 @@ func PatIdentityByKeyHashBuild(args PatIdentityByKeyHashArgs) string {
 	return b.String()
 }
 
+// PaymentTermsOutstanding -- Orders whose payment terms are still outstanding: the B2B receivables question, and the one a credit limit is checked against.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["paymentTermsOutstanding"] in generated_concepts.go).
+type PaymentTermsOutstandingArgs struct {
+	StoreId string
+}
+
+// PaymentTermsOutstanding calls the engine query paymentTermsOutstanding.
+func (qc *QueryClient) PaymentTermsOutstanding(ctx context.Context, args PaymentTermsOutstandingArgs) (*Result, error) {
+	call := PaymentTermsOutstandingBuild(args)
+	return qc.executeNamed(ctx, "paymentTermsOutstanding", call)
+}
+
+func PaymentTermsOutstandingBuild(args PaymentTermsOutstandingArgs) string {
+	var b strings.Builder
+	b.WriteString("query paymentTermsOutstanding(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PendingAccessRequests -- Access requests with status=pending; backs the admin review queue.
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["pendingAccessRequests"] in generated_concepts.go).
@@ -4295,6 +4678,64 @@ func PolicyBuild(args PolicyArgs) string {
 	return b.String()
 }
 
+// ProductContentForProduct -- Product copy for one mirrored product.
+//
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["productContentForProduct"] in generated_concepts.go).
+type ProductContentForProductArgs struct {
+	StoreId    string
+	ProductGid string
+}
+
+// ProductContentForProduct calls the engine query productContentForProduct.
+func (qc *QueryClient) ProductContentForProduct(ctx context.Context, args ProductContentForProductArgs) (*Result, error) {
+	call := ProductContentForProductBuild(args)
+	return qc.executeNamed(ctx, "productContentForProduct", call)
+}
+
+func ProductContentForProductBuild(args ProductContentForProductArgs) string {
+	var b strings.Builder
+	b.WriteString("query productContentForProduct(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("productGid: ")
+	b.WriteString(quoteMemQL(args.ProductGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ProductContentForStore -- Everything the push channel still has to deliver for a store, and everything it already has. `status` narrows to one of them.
+//
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["productContentForStore"] in generated_concepts.go).
+type ProductContentForStoreArgs struct {
+	StoreId string
+	Status  string
+}
+
+// ProductContentForStore calls the engine query productContentForStore.
+func (qc *QueryClient) ProductContentForStore(ctx context.Context, args ProductContentForStoreArgs) (*Result, error) {
+	call := ProductContentForStoreBuild(args)
+	return qc.executeNamed(ctx, "productContentForStore", call)
+}
+
+func ProductContentForStoreBuild(args ProductContentForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query productContentForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProjectById -- Resolve a v1:forge:project by id.
 //
 // Bound concept: v1:forge:project (machine-readable: BoundConcepts["projectById"] in generated_concepts.go).
@@ -4377,6 +4818,168 @@ func (qc *QueryClient) ProvisionedWorkspaces(ctx context.Context, args Provision
 func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 	_ = args
 	return "query provisionedWorkspaces()"
+}
+
+// PurchasableVariants -- Any variant that is currently for sale, across every configured store.
+// One row is the whole answer: the caller is asking "is there a catalog to sell from", not "what is in it", and a campaign guard that paged the catalog to answer a boolean would get slower as the store grew.
+//
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["purchasableVariants"] in generated_concepts.go).
+type PurchasableVariantsArgs struct {
+}
+
+// PurchasableVariants calls the engine query purchasableVariants.
+func (qc *QueryClient) PurchasableVariants(ctx context.Context, args PurchasableVariantsArgs) (*Result, error) {
+	call := PurchasableVariantsBuild(args)
+	return qc.executeNamed(ctx, "purchasableVariants", call)
+}
+
+func PurchasableVariantsBuild(args PurchasableVariantsArgs) string {
+	_ = args
+	return "query purchasableVariants()"
+}
+
+// PurchasableVariantsForStore -- Every mirrored variant that is for sale in one store, newest first. The storefront-facing read; purchasableVariants is the guard's cheap sibling.
+//
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["purchasableVariantsForStore"] in generated_concepts.go).
+type PurchasableVariantsForStoreArgs struct {
+	StoreId string
+}
+
+// PurchasableVariantsForStore calls the engine query purchasableVariantsForStore.
+func (qc *QueryClient) PurchasableVariantsForStore(ctx context.Context, args PurchasableVariantsForStoreArgs) (*Result, error) {
+	call := PurchasableVariantsForStoreBuild(args)
+	return qc.executeNamed(ctx, "purchasableVariantsForStore", call)
+}
+
+func PurchasableVariantsForStoreBuild(args PurchasableVariantsForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query purchasableVariantsForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// QuoteById -- One quote.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quoteById"] in generated_concepts.go).
+type QuoteByIdArgs struct {
+	QuoteId string
+}
+
+// QuoteById calls the engine query quoteById.
+func (qc *QueryClient) QuoteById(ctx context.Context, args QuoteByIdArgs) (*Result, error) {
+	call := QuoteByIdBuild(args)
+	return qc.executeNamed(ctx, "quoteById", call)
+}
+
+func QuoteByIdBuild(args QuoteByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query quoteById(")
+	b.WriteString("quoteId: ")
+	b.WriteString(quoteMemQL(args.QuoteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// QuotesForCompany -- A company's quotes, newest first. `status` narrows to a stage.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesForCompany"] in generated_concepts.go).
+type QuotesForCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+	Status     string
+}
+
+// QuotesForCompany calls the engine query quotesForCompany.
+func (qc *QueryClient) QuotesForCompany(ctx context.Context, args QuotesForCompanyArgs) (*Result, error) {
+	call := QuotesForCompanyBuild(args)
+	return qc.executeNamed(ctx, "quotesForCompany", call)
+}
+
+func QuotesForCompanyBuild(args QuotesForCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("query quotesForCompany(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	if args.Status != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// QuotesForRep -- A rep's quotes.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesForRep"] in generated_concepts.go).
+type QuotesForRepArgs struct {
+	StoreId    string
+	SalesRepId string
+	Status     string
+}
+
+// QuotesForRep calls the engine query quotesForRep.
+func (qc *QueryClient) QuotesForRep(ctx context.Context, args QuotesForRepArgs) (*Result, error) {
+	call := QuotesForRepBuild(args)
+	return qc.executeNamed(ctx, "quotesForRep", call)
+}
+
+func QuotesForRepBuild(args QuotesForRepArgs) string {
+	var b strings.Builder
+	b.WriteString("query quotesForRep(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("salesRepId: ")
+	b.WriteString(quoteMemQL(args.SalesRepId))
+	if args.Status != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// QuotesPastValidity -- Quotes that have passed their validity date and are still open. The read the expiry sweep makes.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesPastValidity"] in generated_concepts.go).
+type QuotesPastValidityArgs struct {
+	StoreId string
+	AsOf    string
+}
+
+// QuotesPastValidity calls the engine query quotesPastValidity.
+func (qc *QueryClient) QuotesPastValidity(ctx context.Context, args QuotesPastValidityArgs) (*Result, error) {
+	call := QuotesPastValidityBuild(args)
+	return qc.executeNamed(ctx, "quotesPastValidity", call)
+}
+
+func QuotesPastValidityBuild(args QuotesPastValidityArgs) string {
+	var b strings.Builder
+	b.WriteString("query quotesPastValidity(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
 }
 
 // RecentAuditEvents wraps the query named "recentAuditEvents".
@@ -4518,6 +5121,102 @@ func RecordsByStateBuild(args RecordsByStateArgs) string {
 		b.WriteString("importSource: ")
 		b.WriteString(quoteMemQL(args.ImportSource))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RefundRate -- Refunds recorded in a window. The RATE is refunds over orders, so the tool divides this by ordersInWindow rather than either read pretending to know the other.
+//
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["refundRate"] in generated_concepts.go).
+type RefundRateArgs struct {
+	StoreId string
+	From    string
+	To      string
+}
+
+// RefundRate calls the engine query refundRate.
+func (qc *QueryClient) RefundRate(ctx context.Context, args RefundRateArgs) (*Result, error) {
+	call := RefundRateBuild(args)
+	return qc.executeNamed(ctx, "refundRate", call)
+}
+
+func RefundRateBuild(args RefundRateArgs) string {
+	var b strings.Builder
+	b.WriteString("query refundRate(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("from: ")
+	b.WriteString(quoteMemQL(args.From))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReorderListsForCompany -- A company's saved reorder lists.
+//
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["reorderListsForCompany"] in generated_concepts.go).
+type ReorderListsForCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+}
+
+// ReorderListsForCompany calls the engine query reorderListsForCompany.
+func (qc *QueryClient) ReorderListsForCompany(ctx context.Context, args ReorderListsForCompanyArgs) (*Result, error) {
+	call := ReorderListsForCompanyBuild(args)
+	return qc.executeNamed(ctx, "reorderListsForCompany", call)
+}
+
+func ReorderListsForCompanyBuild(args ReorderListsForCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("query reorderListsForCompany(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepeatCustomers -- Orders in a window, for the repeat-customer question. The tool groups by customerGid and counts the customers with more than one.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["repeatCustomers"] in generated_concepts.go).
+type RepeatCustomersArgs struct {
+	StoreId string
+	From    string
+	To      string
+}
+
+// RepeatCustomers calls the engine query repeatCustomers.
+func (qc *QueryClient) RepeatCustomers(ctx context.Context, args RepeatCustomersArgs) (*Result, error) {
+	call := RepeatCustomersBuild(args)
+	return qc.executeNamed(ctx, "repeatCustomers", call)
+}
+
+func RepeatCustomersBuild(args RepeatCustomersArgs) string {
+	var b strings.Builder
+	b.WriteString("query repeatCustomers(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("from: ")
+	b.WriteString(quoteMemQL(args.From))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4714,6 +5413,28 @@ func RoutingPolicyForOwnerBuild(args RoutingPolicyForOwnerArgs) string {
 	return "query routingPolicyForOwner()"
 }
 
+// SalesRepsForStore -- Sales reps for a store.
+//
+// Bound concept: v1:commerce:salesRep (machine-readable: BoundConcepts["salesRepsForStore"] in generated_concepts.go).
+type SalesRepsForStoreArgs struct {
+	StoreId string
+}
+
+// SalesRepsForStore calls the engine query salesRepsForStore.
+func (qc *QueryClient) SalesRepsForStore(ctx context.Context, args SalesRepsForStoreArgs) (*Result, error) {
+	call := SalesRepsForStoreBuild(args)
+	return qc.executeNamed(ctx, "salesRepsForStore", call)
+}
+
+func SalesRepsForStoreBuild(args SalesRepsForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query salesRepsForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 // It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable.
 //
@@ -4803,57 +5524,3642 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	return b.String()
 }
 
-// ShopifyProductById -- One thin product by GID.
+// ShopifyAbandonedCheckoutByGid -- One mirrored Shopify AbandonedCheckout by store and GID.
 //
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProductById"] in generated_concepts.go).
-type ShopifyProductByIdArgs struct {
-	ProductId string
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutByGid"] in generated_concepts.go).
+type ShopifyAbandonedCheckoutByGidArgs struct {
+	StoreId string
+	Gid     string
 }
 
-// ShopifyProductById calls the engine query shopifyProductById.
-func (qc *QueryClient) ShopifyProductById(ctx context.Context, args ShopifyProductByIdArgs) (*Result, error) {
-	call := ShopifyProductByIdBuild(args)
-	return qc.executeNamed(ctx, "shopifyProductById", call)
+// ShopifyAbandonedCheckoutByGid calls the engine query shopifyAbandonedCheckoutByGid.
+func (qc *QueryClient) ShopifyAbandonedCheckoutByGid(ctx context.Context, args ShopifyAbandonedCheckoutByGidArgs) (*Result, error) {
+	call := ShopifyAbandonedCheckoutByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyAbandonedCheckoutByGid", call)
 }
 
-func ShopifyProductByIdBuild(args ShopifyProductByIdArgs) string {
+func ShopifyAbandonedCheckoutByGidBuild(args ShopifyAbandonedCheckoutByGidArgs) string {
 	var b strings.Builder
-	b.WriteString("query shopifyProductById(")
-	b.WriteString("productId: ")
-	b.WriteString(quoteMemQL(args.ProductId))
+	b.WriteString("query shopifyAbandonedCheckoutByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
 	b.WriteString(")")
 	return b.String()
 }
 
-// ShopifyProducts -- Index rows, newest first. Optional handle / present filters.
+// ShopifyAbandonedCheckoutForStore -- Live mirrored Shopify AbandonedCheckout rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
 //
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProducts"] in generated_concepts.go).
-type ShopifyProductsArgs struct {
-	Handle     string
-	Present    bool
-	PresentSet bool // set true to send present; required because zero-value bool is ambiguous
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutForStore"] in generated_concepts.go).
+type ShopifyAbandonedCheckoutForStoreArgs struct {
+	StoreId string
+	Since   string
 }
 
-// ShopifyProducts calls the engine query shopifyProducts.
-func (qc *QueryClient) ShopifyProducts(ctx context.Context, args ShopifyProductsArgs) (*Result, error) {
-	call := ShopifyProductsBuild(args)
-	return qc.executeNamed(ctx, "shopifyProducts", call)
+// ShopifyAbandonedCheckoutForStore calls the engine query shopifyAbandonedCheckoutForStore.
+func (qc *QueryClient) ShopifyAbandonedCheckoutForStore(ctx context.Context, args ShopifyAbandonedCheckoutForStoreArgs) (*Result, error) {
+	call := ShopifyAbandonedCheckoutForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyAbandonedCheckoutForStore", call)
 }
 
-func ShopifyProductsBuild(args ShopifyProductsArgs) string {
+func ShopifyAbandonedCheckoutForStoreBuild(args ShopifyAbandonedCheckoutForStoreArgs) string {
 	var b strings.Builder
-	b.WriteString("query shopifyProducts(")
-	if args.Handle != "" {
-		b.WriteString("handle: ")
-		b.WriteString(quoteMemQL(args.Handle))
+	b.WriteString("query shopifyAbandonedCheckoutForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
 	}
-	if args.PresentSet {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("present: ")
-		b.WriteString(fmt.Sprintf("%v", args.Present))
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyArticleByGid -- One mirrored Shopify Article by store and GID.
+//
+// Bound concept: v1:shopify:article (machine-readable: BoundConcepts["shopifyArticleByGid"] in generated_concepts.go).
+type ShopifyArticleByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyArticleByGid calls the engine query shopifyArticleByGid.
+func (qc *QueryClient) ShopifyArticleByGid(ctx context.Context, args ShopifyArticleByGidArgs) (*Result, error) {
+	call := ShopifyArticleByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyArticleByGid", call)
+}
+
+func ShopifyArticleByGidBuild(args ShopifyArticleByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyArticleByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
 	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyArticleCommentByGid -- One mirrored Shopify Comment by store and GID.
+//
+// Bound concept: v1:shopify:articleComment (machine-readable: BoundConcepts["shopifyArticleCommentByGid"] in generated_concepts.go).
+type ShopifyArticleCommentByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyArticleCommentByGid calls the engine query shopifyArticleCommentByGid.
+func (qc *QueryClient) ShopifyArticleCommentByGid(ctx context.Context, args ShopifyArticleCommentByGidArgs) (*Result, error) {
+	call := ShopifyArticleCommentByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyArticleCommentByGid", call)
+}
+
+func ShopifyArticleCommentByGidBuild(args ShopifyArticleCommentByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyArticleCommentByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyArticleCommentForStore -- Live mirrored Shopify Comment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:articleComment (machine-readable: BoundConcepts["shopifyArticleCommentForStore"] in generated_concepts.go).
+type ShopifyArticleCommentForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyArticleCommentForStore calls the engine query shopifyArticleCommentForStore.
+func (qc *QueryClient) ShopifyArticleCommentForStore(ctx context.Context, args ShopifyArticleCommentForStoreArgs) (*Result, error) {
+	call := ShopifyArticleCommentForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyArticleCommentForStore", call)
+}
+
+func ShopifyArticleCommentForStoreBuild(args ShopifyArticleCommentForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyArticleCommentForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyArticleForStore -- Live mirrored Shopify Article rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:article (machine-readable: BoundConcepts["shopifyArticleForStore"] in generated_concepts.go).
+type ShopifyArticleForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyArticleForStore calls the engine query shopifyArticleForStore.
+func (qc *QueryClient) ShopifyArticleForStore(ctx context.Context, args ShopifyArticleForStoreArgs) (*Result, error) {
+	call := ShopifyArticleForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyArticleForStore", call)
+}
+
+func ShopifyArticleForStoreBuild(args ShopifyArticleForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyArticleForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyBlogByGid -- One mirrored Shopify Blog by store and GID.
+//
+// Bound concept: v1:shopify:blog (machine-readable: BoundConcepts["shopifyBlogByGid"] in generated_concepts.go).
+type ShopifyBlogByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyBlogByGid calls the engine query shopifyBlogByGid.
+func (qc *QueryClient) ShopifyBlogByGid(ctx context.Context, args ShopifyBlogByGidArgs) (*Result, error) {
+	call := ShopifyBlogByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyBlogByGid", call)
+}
+
+func ShopifyBlogByGidBuild(args ShopifyBlogByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyBlogByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyBlogForStore -- Live mirrored Shopify Blog rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:blog (machine-readable: BoundConcepts["shopifyBlogForStore"] in generated_concepts.go).
+type ShopifyBlogForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyBlogForStore calls the engine query shopifyBlogForStore.
+func (qc *QueryClient) ShopifyBlogForStore(ctx context.Context, args ShopifyBlogForStoreArgs) (*Result, error) {
+	call := ShopifyBlogForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyBlogForStore", call)
+}
+
+func ShopifyBlogForStoreBuild(args ShopifyBlogForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyBlogForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyBusinessEntityByGid -- One mirrored Shopify BusinessEntity by store and GID.
+//
+// Bound concept: v1:shopify:businessEntity (machine-readable: BoundConcepts["shopifyBusinessEntityByGid"] in generated_concepts.go).
+type ShopifyBusinessEntityByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyBusinessEntityByGid calls the engine query shopifyBusinessEntityByGid.
+func (qc *QueryClient) ShopifyBusinessEntityByGid(ctx context.Context, args ShopifyBusinessEntityByGidArgs) (*Result, error) {
+	call := ShopifyBusinessEntityByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyBusinessEntityByGid", call)
+}
+
+func ShopifyBusinessEntityByGidBuild(args ShopifyBusinessEntityByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyBusinessEntityByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyBusinessEntityForStore -- Live mirrored Shopify BusinessEntity rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:businessEntity (machine-readable: BoundConcepts["shopifyBusinessEntityForStore"] in generated_concepts.go).
+type ShopifyBusinessEntityForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyBusinessEntityForStore calls the engine query shopifyBusinessEntityForStore.
+func (qc *QueryClient) ShopifyBusinessEntityForStore(ctx context.Context, args ShopifyBusinessEntityForStoreArgs) (*Result, error) {
+	call := ShopifyBusinessEntityForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyBusinessEntityForStore", call)
+}
+
+func ShopifyBusinessEntityForStoreBuild(args ShopifyBusinessEntityForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyBusinessEntityForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCatalogByGid -- One mirrored Shopify Catalog by store and GID.
+//
+// Bound concept: v1:shopify:catalog (machine-readable: BoundConcepts["shopifyCatalogByGid"] in generated_concepts.go).
+type ShopifyCatalogByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCatalogByGid calls the engine query shopifyCatalogByGid.
+func (qc *QueryClient) ShopifyCatalogByGid(ctx context.Context, args ShopifyCatalogByGidArgs) (*Result, error) {
+	call := ShopifyCatalogByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCatalogByGid", call)
+}
+
+func ShopifyCatalogByGidBuild(args ShopifyCatalogByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCatalogByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCatalogForStore -- Live mirrored Shopify Catalog rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:catalog (machine-readable: BoundConcepts["shopifyCatalogForStore"] in generated_concepts.go).
+type ShopifyCatalogForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCatalogForStore calls the engine query shopifyCatalogForStore.
+func (qc *QueryClient) ShopifyCatalogForStore(ctx context.Context, args ShopifyCatalogForStoreArgs) (*Result, error) {
+	call := ShopifyCatalogForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCatalogForStore", call)
+}
+
+func ShopifyCatalogForStoreBuild(args ShopifyCatalogForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCatalogForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyChannelByGid -- One mirrored Shopify Channel by store and GID.
+//
+// Bound concept: v1:shopify:channel (machine-readable: BoundConcepts["shopifyChannelByGid"] in generated_concepts.go).
+type ShopifyChannelByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyChannelByGid calls the engine query shopifyChannelByGid.
+func (qc *QueryClient) ShopifyChannelByGid(ctx context.Context, args ShopifyChannelByGidArgs) (*Result, error) {
+	call := ShopifyChannelByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyChannelByGid", call)
+}
+
+func ShopifyChannelByGidBuild(args ShopifyChannelByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyChannelByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyChannelForStore -- Live mirrored Shopify Channel rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:channel (machine-readable: BoundConcepts["shopifyChannelForStore"] in generated_concepts.go).
+type ShopifyChannelForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyChannelForStore calls the engine query shopifyChannelForStore.
+func (qc *QueryClient) ShopifyChannelForStore(ctx context.Context, args ShopifyChannelForStoreArgs) (*Result, error) {
+	call := ShopifyChannelForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyChannelForStore", call)
+}
+
+func ShopifyChannelForStoreBuild(args ShopifyChannelForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyChannelForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCollectionByGid -- One mirrored Shopify Collection by store and GID.
+//
+// Bound concept: v1:shopify:collection (machine-readable: BoundConcepts["shopifyCollectionByGid"] in generated_concepts.go).
+type ShopifyCollectionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCollectionByGid calls the engine query shopifyCollectionByGid.
+func (qc *QueryClient) ShopifyCollectionByGid(ctx context.Context, args ShopifyCollectionByGidArgs) (*Result, error) {
+	call := ShopifyCollectionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCollectionByGid", call)
+}
+
+func ShopifyCollectionByGidBuild(args ShopifyCollectionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCollectionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCollectionForStore -- Live mirrored Shopify Collection rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:collection (machine-readable: BoundConcepts["shopifyCollectionForStore"] in generated_concepts.go).
+type ShopifyCollectionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCollectionForStore calls the engine query shopifyCollectionForStore.
+func (qc *QueryClient) ShopifyCollectionForStore(ctx context.Context, args ShopifyCollectionForStoreArgs) (*Result, error) {
+	call := ShopifyCollectionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCollectionForStore", call)
+}
+
+func ShopifyCollectionForStoreBuild(args ShopifyCollectionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCollectionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyByGid -- One mirrored Shopify Company by store and GID.
+//
+// Bound concept: v1:shopify:company (machine-readable: BoundConcepts["shopifyCompanyByGid"] in generated_concepts.go).
+type ShopifyCompanyByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCompanyByGid calls the engine query shopifyCompanyByGid.
+func (qc *QueryClient) ShopifyCompanyByGid(ctx context.Context, args ShopifyCompanyByGidArgs) (*Result, error) {
+	call := ShopifyCompanyByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyByGid", call)
+}
+
+func ShopifyCompanyByGidBuild(args ShopifyCompanyByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyContactByGid -- One mirrored Shopify CompanyContact by store and GID.
+//
+// Bound concept: v1:shopify:companyContact (machine-readable: BoundConcepts["shopifyCompanyContactByGid"] in generated_concepts.go).
+type ShopifyCompanyContactByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCompanyContactByGid calls the engine query shopifyCompanyContactByGid.
+func (qc *QueryClient) ShopifyCompanyContactByGid(ctx context.Context, args ShopifyCompanyContactByGidArgs) (*Result, error) {
+	call := ShopifyCompanyContactByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyContactByGid", call)
+}
+
+func ShopifyCompanyContactByGidBuild(args ShopifyCompanyContactByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyContactByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyContactForStore -- Live mirrored Shopify CompanyContact rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:companyContact (machine-readable: BoundConcepts["shopifyCompanyContactForStore"] in generated_concepts.go).
+type ShopifyCompanyContactForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCompanyContactForStore calls the engine query shopifyCompanyContactForStore.
+func (qc *QueryClient) ShopifyCompanyContactForStore(ctx context.Context, args ShopifyCompanyContactForStoreArgs) (*Result, error) {
+	call := ShopifyCompanyContactForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyContactForStore", call)
+}
+
+func ShopifyCompanyContactForStoreBuild(args ShopifyCompanyContactForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyContactForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyForStore -- Live mirrored Shopify Company rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:company (machine-readable: BoundConcepts["shopifyCompanyForStore"] in generated_concepts.go).
+type ShopifyCompanyForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCompanyForStore calls the engine query shopifyCompanyForStore.
+func (qc *QueryClient) ShopifyCompanyForStore(ctx context.Context, args ShopifyCompanyForStoreArgs) (*Result, error) {
+	call := ShopifyCompanyForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyForStore", call)
+}
+
+func ShopifyCompanyForStoreBuild(args ShopifyCompanyForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyLocationByGid -- One mirrored Shopify CompanyLocation by store and GID.
+//
+// Bound concept: v1:shopify:companyLocation (machine-readable: BoundConcepts["shopifyCompanyLocationByGid"] in generated_concepts.go).
+type ShopifyCompanyLocationByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCompanyLocationByGid calls the engine query shopifyCompanyLocationByGid.
+func (qc *QueryClient) ShopifyCompanyLocationByGid(ctx context.Context, args ShopifyCompanyLocationByGidArgs) (*Result, error) {
+	call := ShopifyCompanyLocationByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyLocationByGid", call)
+}
+
+func ShopifyCompanyLocationByGidBuild(args ShopifyCompanyLocationByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyLocationByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCompanyLocationForStore -- Live mirrored Shopify CompanyLocation rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:companyLocation (machine-readable: BoundConcepts["shopifyCompanyLocationForStore"] in generated_concepts.go).
+type ShopifyCompanyLocationForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCompanyLocationForStore calls the engine query shopifyCompanyLocationForStore.
+func (qc *QueryClient) ShopifyCompanyLocationForStore(ctx context.Context, args ShopifyCompanyLocationForStoreArgs) (*Result, error) {
+	call := ShopifyCompanyLocationForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCompanyLocationForStore", call)
+}
+
+func ShopifyCompanyLocationForStoreBuild(args ShopifyCompanyLocationForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCompanyLocationForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCustomerByGid -- One mirrored Shopify Customer by store and GID.
+//
+// Bound concept: v1:shopify:customer (machine-readable: BoundConcepts["shopifyCustomerByGid"] in generated_concepts.go).
+type ShopifyCustomerByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCustomerByGid calls the engine query shopifyCustomerByGid.
+func (qc *QueryClient) ShopifyCustomerByGid(ctx context.Context, args ShopifyCustomerByGidArgs) (*Result, error) {
+	call := ShopifyCustomerByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCustomerByGid", call)
+}
+
+func ShopifyCustomerByGidBuild(args ShopifyCustomerByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCustomerByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCustomerForStore -- Live mirrored Shopify Customer rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:customer (machine-readable: BoundConcepts["shopifyCustomerForStore"] in generated_concepts.go).
+type ShopifyCustomerForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCustomerForStore calls the engine query shopifyCustomerForStore.
+func (qc *QueryClient) ShopifyCustomerForStore(ctx context.Context, args ShopifyCustomerForStoreArgs) (*Result, error) {
+	call := ShopifyCustomerForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCustomerForStore", call)
+}
+
+func ShopifyCustomerForStoreBuild(args ShopifyCustomerForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCustomerForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCustomerPaymentMethodByGid -- One mirrored Shopify CustomerPaymentMethod by store and GID.
+//
+// Bound concept: v1:shopify:customerPaymentMethod (machine-readable: BoundConcepts["shopifyCustomerPaymentMethodByGid"] in generated_concepts.go).
+type ShopifyCustomerPaymentMethodByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyCustomerPaymentMethodByGid calls the engine query shopifyCustomerPaymentMethodByGid.
+func (qc *QueryClient) ShopifyCustomerPaymentMethodByGid(ctx context.Context, args ShopifyCustomerPaymentMethodByGidArgs) (*Result, error) {
+	call := ShopifyCustomerPaymentMethodByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyCustomerPaymentMethodByGid", call)
+}
+
+func ShopifyCustomerPaymentMethodByGidBuild(args ShopifyCustomerPaymentMethodByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCustomerPaymentMethodByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyCustomerPaymentMethodForStore -- Live mirrored Shopify CustomerPaymentMethod rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:customerPaymentMethod (machine-readable: BoundConcepts["shopifyCustomerPaymentMethodForStore"] in generated_concepts.go).
+type ShopifyCustomerPaymentMethodForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyCustomerPaymentMethodForStore calls the engine query shopifyCustomerPaymentMethodForStore.
+func (qc *QueryClient) ShopifyCustomerPaymentMethodForStore(ctx context.Context, args ShopifyCustomerPaymentMethodForStoreArgs) (*Result, error) {
+	call := ShopifyCustomerPaymentMethodForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyCustomerPaymentMethodForStore", call)
+}
+
+func ShopifyCustomerPaymentMethodForStoreBuild(args ShopifyCustomerPaymentMethodForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyCustomerPaymentMethodForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 43 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryCarrierServiceByGid -- One mirrored Shopify DeliveryCarrierService by store and GID.
+//
+// Bound concept: v1:shopify:deliveryCarrierService (machine-readable: BoundConcepts["shopifyDeliveryCarrierServiceByGid"] in generated_concepts.go).
+type ShopifyDeliveryCarrierServiceByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyDeliveryCarrierServiceByGid calls the engine query shopifyDeliveryCarrierServiceByGid.
+func (qc *QueryClient) ShopifyDeliveryCarrierServiceByGid(ctx context.Context, args ShopifyDeliveryCarrierServiceByGidArgs) (*Result, error) {
+	call := ShopifyDeliveryCarrierServiceByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryCarrierServiceByGid", call)
+}
+
+func ShopifyDeliveryCarrierServiceByGidBuild(args ShopifyDeliveryCarrierServiceByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryCarrierServiceByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryCarrierServiceForStore -- Live mirrored Shopify DeliveryCarrierService rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:deliveryCarrierService (machine-readable: BoundConcepts["shopifyDeliveryCarrierServiceForStore"] in generated_concepts.go).
+type ShopifyDeliveryCarrierServiceForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyDeliveryCarrierServiceForStore calls the engine query shopifyDeliveryCarrierServiceForStore.
+func (qc *QueryClient) ShopifyDeliveryCarrierServiceForStore(ctx context.Context, args ShopifyDeliveryCarrierServiceForStoreArgs) (*Result, error) {
+	call := ShopifyDeliveryCarrierServiceForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryCarrierServiceForStore", call)
+}
+
+func ShopifyDeliveryCarrierServiceForStoreBuild(args ShopifyDeliveryCarrierServiceForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryCarrierServiceForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 44 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryCustomizationByGid -- One mirrored Shopify DeliveryCustomization by store and GID.
+//
+// Bound concept: v1:shopify:deliveryCustomization (machine-readable: BoundConcepts["shopifyDeliveryCustomizationByGid"] in generated_concepts.go).
+type ShopifyDeliveryCustomizationByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyDeliveryCustomizationByGid calls the engine query shopifyDeliveryCustomizationByGid.
+func (qc *QueryClient) ShopifyDeliveryCustomizationByGid(ctx context.Context, args ShopifyDeliveryCustomizationByGidArgs) (*Result, error) {
+	call := ShopifyDeliveryCustomizationByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryCustomizationByGid", call)
+}
+
+func ShopifyDeliveryCustomizationByGidBuild(args ShopifyDeliveryCustomizationByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryCustomizationByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryCustomizationForStore -- Live mirrored Shopify DeliveryCustomization rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:deliveryCustomization (machine-readable: BoundConcepts["shopifyDeliveryCustomizationForStore"] in generated_concepts.go).
+type ShopifyDeliveryCustomizationForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyDeliveryCustomizationForStore calls the engine query shopifyDeliveryCustomizationForStore.
+func (qc *QueryClient) ShopifyDeliveryCustomizationForStore(ctx context.Context, args ShopifyDeliveryCustomizationForStoreArgs) (*Result, error) {
+	call := ShopifyDeliveryCustomizationForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryCustomizationForStore", call)
+}
+
+func ShopifyDeliveryCustomizationForStoreBuild(args ShopifyDeliveryCustomizationForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryCustomizationForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 43 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryProfileByGid -- One mirrored Shopify DeliveryProfile by store and GID.
+//
+// Bound concept: v1:shopify:deliveryProfile (machine-readable: BoundConcepts["shopifyDeliveryProfileByGid"] in generated_concepts.go).
+type ShopifyDeliveryProfileByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyDeliveryProfileByGid calls the engine query shopifyDeliveryProfileByGid.
+func (qc *QueryClient) ShopifyDeliveryProfileByGid(ctx context.Context, args ShopifyDeliveryProfileByGidArgs) (*Result, error) {
+	call := ShopifyDeliveryProfileByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryProfileByGid", call)
+}
+
+func ShopifyDeliveryProfileByGidBuild(args ShopifyDeliveryProfileByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryProfileByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDeliveryProfileForStore -- Live mirrored Shopify DeliveryProfile rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:deliveryProfile (machine-readable: BoundConcepts["shopifyDeliveryProfileForStore"] in generated_concepts.go).
+type ShopifyDeliveryProfileForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyDeliveryProfileForStore calls the engine query shopifyDeliveryProfileForStore.
+func (qc *QueryClient) ShopifyDeliveryProfileForStore(ctx context.Context, args ShopifyDeliveryProfileForStoreArgs) (*Result, error) {
+	call := ShopifyDeliveryProfileForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyDeliveryProfileForStore", call)
+}
+
+func ShopifyDeliveryProfileForStoreBuild(args ShopifyDeliveryProfileForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDeliveryProfileForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDiscountNodeByGid -- One mirrored Shopify DiscountNode by store and GID.
+//
+// Bound concept: v1:shopify:discountNode (machine-readable: BoundConcepts["shopifyDiscountNodeByGid"] in generated_concepts.go).
+type ShopifyDiscountNodeByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyDiscountNodeByGid calls the engine query shopifyDiscountNodeByGid.
+func (qc *QueryClient) ShopifyDiscountNodeByGid(ctx context.Context, args ShopifyDiscountNodeByGidArgs) (*Result, error) {
+	call := ShopifyDiscountNodeByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyDiscountNodeByGid", call)
+}
+
+func ShopifyDiscountNodeByGidBuild(args ShopifyDiscountNodeByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDiscountNodeByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDiscountNodeForStore -- Live mirrored Shopify DiscountNode rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:discountNode (machine-readable: BoundConcepts["shopifyDiscountNodeForStore"] in generated_concepts.go).
+type ShopifyDiscountNodeForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyDiscountNodeForStore calls the engine query shopifyDiscountNodeForStore.
+func (qc *QueryClient) ShopifyDiscountNodeForStore(ctx context.Context, args ShopifyDiscountNodeForStoreArgs) (*Result, error) {
+	call := ShopifyDiscountNodeForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyDiscountNodeForStore", call)
+}
+
+func ShopifyDiscountNodeForStoreBuild(args ShopifyDiscountNodeForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDiscountNodeForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDraftOrderByGid -- One mirrored Shopify DraftOrder by store and GID.
+//
+// Bound concept: v1:shopify:draftOrder (machine-readable: BoundConcepts["shopifyDraftOrderByGid"] in generated_concepts.go).
+type ShopifyDraftOrderByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyDraftOrderByGid calls the engine query shopifyDraftOrderByGid.
+func (qc *QueryClient) ShopifyDraftOrderByGid(ctx context.Context, args ShopifyDraftOrderByGidArgs) (*Result, error) {
+	call := ShopifyDraftOrderByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyDraftOrderByGid", call)
+}
+
+func ShopifyDraftOrderByGidBuild(args ShopifyDraftOrderByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDraftOrderByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyDraftOrderForStore -- Live mirrored Shopify DraftOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:draftOrder (machine-readable: BoundConcepts["shopifyDraftOrderForStore"] in generated_concepts.go).
+type ShopifyDraftOrderForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyDraftOrderForStore calls the engine query shopifyDraftOrderForStore.
+func (qc *QueryClient) ShopifyDraftOrderForStore(ctx context.Context, args ShopifyDraftOrderForStoreArgs) (*Result, error) {
+	call := ShopifyDraftOrderForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyDraftOrderForStore", call)
+}
+
+func ShopifyDraftOrderForStoreBuild(args ShopifyDraftOrderForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyDraftOrderForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyFulfillmentByGid -- One mirrored Shopify Fulfillment by store and GID.
+//
+// Bound concept: v1:shopify:fulfillment (machine-readable: BoundConcepts["shopifyFulfillmentByGid"] in generated_concepts.go).
+type ShopifyFulfillmentByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyFulfillmentByGid calls the engine query shopifyFulfillmentByGid.
+func (qc *QueryClient) ShopifyFulfillmentByGid(ctx context.Context, args ShopifyFulfillmentByGidArgs) (*Result, error) {
+	call := ShopifyFulfillmentByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyFulfillmentByGid", call)
+}
+
+func ShopifyFulfillmentByGidBuild(args ShopifyFulfillmentByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyFulfillmentByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyFulfillmentForStore -- Live mirrored Shopify Fulfillment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:fulfillment (machine-readable: BoundConcepts["shopifyFulfillmentForStore"] in generated_concepts.go).
+type ShopifyFulfillmentForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyFulfillmentForStore calls the engine query shopifyFulfillmentForStore.
+func (qc *QueryClient) ShopifyFulfillmentForStore(ctx context.Context, args ShopifyFulfillmentForStoreArgs) (*Result, error) {
+	call := ShopifyFulfillmentForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyFulfillmentForStore", call)
+}
+
+func ShopifyFulfillmentForStoreBuild(args ShopifyFulfillmentForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyFulfillmentForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyFulfillmentOrderByGid -- One mirrored Shopify FulfillmentOrder by store and GID.
+//
+// Bound concept: v1:shopify:fulfillmentOrder (machine-readable: BoundConcepts["shopifyFulfillmentOrderByGid"] in generated_concepts.go).
+type ShopifyFulfillmentOrderByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyFulfillmentOrderByGid calls the engine query shopifyFulfillmentOrderByGid.
+func (qc *QueryClient) ShopifyFulfillmentOrderByGid(ctx context.Context, args ShopifyFulfillmentOrderByGidArgs) (*Result, error) {
+	call := ShopifyFulfillmentOrderByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyFulfillmentOrderByGid", call)
+}
+
+func ShopifyFulfillmentOrderByGidBuild(args ShopifyFulfillmentOrderByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyFulfillmentOrderByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyFulfillmentOrderForStore -- Live mirrored Shopify FulfillmentOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:fulfillmentOrder (machine-readable: BoundConcepts["shopifyFulfillmentOrderForStore"] in generated_concepts.go).
+type ShopifyFulfillmentOrderForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyFulfillmentOrderForStore calls the engine query shopifyFulfillmentOrderForStore.
+func (qc *QueryClient) ShopifyFulfillmentOrderForStore(ctx context.Context, args ShopifyFulfillmentOrderForStoreArgs) (*Result, error) {
+	call := ShopifyFulfillmentOrderForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyFulfillmentOrderForStore", call)
+}
+
+func ShopifyFulfillmentOrderForStoreBuild(args ShopifyFulfillmentOrderForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyFulfillmentOrderForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyGiftCardByGid -- One mirrored Shopify GiftCard by store and GID.
+//
+// Bound concept: v1:shopify:giftCard (machine-readable: BoundConcepts["shopifyGiftCardByGid"] in generated_concepts.go).
+type ShopifyGiftCardByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyGiftCardByGid calls the engine query shopifyGiftCardByGid.
+func (qc *QueryClient) ShopifyGiftCardByGid(ctx context.Context, args ShopifyGiftCardByGidArgs) (*Result, error) {
+	call := ShopifyGiftCardByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyGiftCardByGid", call)
+}
+
+func ShopifyGiftCardByGidBuild(args ShopifyGiftCardByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyGiftCardByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyGiftCardForStore -- Live mirrored Shopify GiftCard rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:giftCard (machine-readable: BoundConcepts["shopifyGiftCardForStore"] in generated_concepts.go).
+type ShopifyGiftCardForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyGiftCardForStore calls the engine query shopifyGiftCardForStore.
+func (qc *QueryClient) ShopifyGiftCardForStore(ctx context.Context, args ShopifyGiftCardForStoreArgs) (*Result, error) {
+	call := ShopifyGiftCardForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyGiftCardForStore", call)
+}
+
+func ShopifyGiftCardForStoreBuild(args ShopifyGiftCardForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyGiftCardForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryItemByGid -- One mirrored Shopify InventoryItem by store and GID.
+//
+// Bound concept: v1:shopify:inventoryItem (machine-readable: BoundConcepts["shopifyInventoryItemByGid"] in generated_concepts.go).
+type ShopifyInventoryItemByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyInventoryItemByGid calls the engine query shopifyInventoryItemByGid.
+func (qc *QueryClient) ShopifyInventoryItemByGid(ctx context.Context, args ShopifyInventoryItemByGidArgs) (*Result, error) {
+	call := ShopifyInventoryItemByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryItemByGid", call)
+}
+
+func ShopifyInventoryItemByGidBuild(args ShopifyInventoryItemByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryItemByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryItemForStore -- Live mirrored Shopify InventoryItem rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:inventoryItem (machine-readable: BoundConcepts["shopifyInventoryItemForStore"] in generated_concepts.go).
+type ShopifyInventoryItemForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyInventoryItemForStore calls the engine query shopifyInventoryItemForStore.
+func (qc *QueryClient) ShopifyInventoryItemForStore(ctx context.Context, args ShopifyInventoryItemForStoreArgs) (*Result, error) {
+	call := ShopifyInventoryItemForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryItemForStore", call)
+}
+
+func ShopifyInventoryItemForStoreBuild(args ShopifyInventoryItemForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryItemForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryLevelByGid -- One mirrored Shopify InventoryLevel by store and GID.
+//
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["shopifyInventoryLevelByGid"] in generated_concepts.go).
+type ShopifyInventoryLevelByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyInventoryLevelByGid calls the engine query shopifyInventoryLevelByGid.
+func (qc *QueryClient) ShopifyInventoryLevelByGid(ctx context.Context, args ShopifyInventoryLevelByGidArgs) (*Result, error) {
+	call := ShopifyInventoryLevelByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryLevelByGid", call)
+}
+
+func ShopifyInventoryLevelByGidBuild(args ShopifyInventoryLevelByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryLevelByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryLevelForStore -- Live mirrored Shopify InventoryLevel rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["shopifyInventoryLevelForStore"] in generated_concepts.go).
+type ShopifyInventoryLevelForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyInventoryLevelForStore calls the engine query shopifyInventoryLevelForStore.
+func (qc *QueryClient) ShopifyInventoryLevelForStore(ctx context.Context, args ShopifyInventoryLevelForStoreArgs) (*Result, error) {
+	call := ShopifyInventoryLevelForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryLevelForStore", call)
+}
+
+func ShopifyInventoryLevelForStoreBuild(args ShopifyInventoryLevelForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryLevelForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryShipmentByGid -- One mirrored Shopify InventoryShipment by store and GID.
+//
+// Bound concept: v1:shopify:inventoryShipment (machine-readable: BoundConcepts["shopifyInventoryShipmentByGid"] in generated_concepts.go).
+type ShopifyInventoryShipmentByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyInventoryShipmentByGid calls the engine query shopifyInventoryShipmentByGid.
+func (qc *QueryClient) ShopifyInventoryShipmentByGid(ctx context.Context, args ShopifyInventoryShipmentByGidArgs) (*Result, error) {
+	call := ShopifyInventoryShipmentByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryShipmentByGid", call)
+}
+
+func ShopifyInventoryShipmentByGidBuild(args ShopifyInventoryShipmentByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryShipmentByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryShipmentForStore -- Live mirrored Shopify InventoryShipment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:inventoryShipment (machine-readable: BoundConcepts["shopifyInventoryShipmentForStore"] in generated_concepts.go).
+type ShopifyInventoryShipmentForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyInventoryShipmentForStore calls the engine query shopifyInventoryShipmentForStore.
+func (qc *QueryClient) ShopifyInventoryShipmentForStore(ctx context.Context, args ShopifyInventoryShipmentForStoreArgs) (*Result, error) {
+	call := ShopifyInventoryShipmentForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryShipmentForStore", call)
+}
+
+func ShopifyInventoryShipmentForStoreBuild(args ShopifyInventoryShipmentForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryShipmentForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryTransferByGid -- One mirrored Shopify InventoryTransfer by store and GID.
+//
+// Bound concept: v1:shopify:inventoryTransfer (machine-readable: BoundConcepts["shopifyInventoryTransferByGid"] in generated_concepts.go).
+type ShopifyInventoryTransferByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyInventoryTransferByGid calls the engine query shopifyInventoryTransferByGid.
+func (qc *QueryClient) ShopifyInventoryTransferByGid(ctx context.Context, args ShopifyInventoryTransferByGidArgs) (*Result, error) {
+	call := ShopifyInventoryTransferByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryTransferByGid", call)
+}
+
+func ShopifyInventoryTransferByGidBuild(args ShopifyInventoryTransferByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryTransferByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyInventoryTransferForStore -- Live mirrored Shopify InventoryTransfer rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:inventoryTransfer (machine-readable: BoundConcepts["shopifyInventoryTransferForStore"] in generated_concepts.go).
+type ShopifyInventoryTransferForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyInventoryTransferForStore calls the engine query shopifyInventoryTransferForStore.
+func (qc *QueryClient) ShopifyInventoryTransferForStore(ctx context.Context, args ShopifyInventoryTransferForStoreArgs) (*Result, error) {
+	call := ShopifyInventoryTransferForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyInventoryTransferForStore", call)
+}
+
+func ShopifyInventoryTransferForStoreBuild(args ShopifyInventoryTransferForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyInventoryTransferForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyLocationByGid -- One mirrored Shopify Location by store and GID.
+//
+// Bound concept: v1:shopify:location (machine-readable: BoundConcepts["shopifyLocationByGid"] in generated_concepts.go).
+type ShopifyLocationByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyLocationByGid calls the engine query shopifyLocationByGid.
+func (qc *QueryClient) ShopifyLocationByGid(ctx context.Context, args ShopifyLocationByGidArgs) (*Result, error) {
+	call := ShopifyLocationByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyLocationByGid", call)
+}
+
+func ShopifyLocationByGidBuild(args ShopifyLocationByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyLocationByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyLocationForStore -- Live mirrored Shopify Location rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:location (machine-readable: BoundConcepts["shopifyLocationForStore"] in generated_concepts.go).
+type ShopifyLocationForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyLocationForStore calls the engine query shopifyLocationForStore.
+func (qc *QueryClient) ShopifyLocationForStore(ctx context.Context, args ShopifyLocationForStoreArgs) (*Result, error) {
+	call := ShopifyLocationForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyLocationForStore", call)
+}
+
+func ShopifyLocationForStoreBuild(args ShopifyLocationForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyLocationForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketByGid -- One mirrored Shopify Market by store and GID.
+//
+// Bound concept: v1:shopify:market (machine-readable: BoundConcepts["shopifyMarketByGid"] in generated_concepts.go).
+type ShopifyMarketByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMarketByGid calls the engine query shopifyMarketByGid.
+func (qc *QueryClient) ShopifyMarketByGid(ctx context.Context, args ShopifyMarketByGidArgs) (*Result, error) {
+	call := ShopifyMarketByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketByGid", call)
+}
+
+func ShopifyMarketByGidBuild(args ShopifyMarketByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketForStore -- Live mirrored Shopify Market rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:market (machine-readable: BoundConcepts["shopifyMarketForStore"] in generated_concepts.go).
+type ShopifyMarketForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMarketForStore calls the engine query shopifyMarketForStore.
+func (qc *QueryClient) ShopifyMarketForStore(ctx context.Context, args ShopifyMarketForStoreArgs) (*Result, error) {
+	call := ShopifyMarketForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketForStore", call)
+}
+
+func ShopifyMarketForStoreBuild(args ShopifyMarketForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketWebPresenceByGid -- One mirrored Shopify MarketWebPresence by store and GID.
+//
+// Bound concept: v1:shopify:marketWebPresence (machine-readable: BoundConcepts["shopifyMarketWebPresenceByGid"] in generated_concepts.go).
+type ShopifyMarketWebPresenceByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMarketWebPresenceByGid calls the engine query shopifyMarketWebPresenceByGid.
+func (qc *QueryClient) ShopifyMarketWebPresenceByGid(ctx context.Context, args ShopifyMarketWebPresenceByGidArgs) (*Result, error) {
+	call := ShopifyMarketWebPresenceByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketWebPresenceByGid", call)
+}
+
+func ShopifyMarketWebPresenceByGidBuild(args ShopifyMarketWebPresenceByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketWebPresenceByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketWebPresenceForStore -- Live mirrored Shopify MarketWebPresence rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:marketWebPresence (machine-readable: BoundConcepts["shopifyMarketWebPresenceForStore"] in generated_concepts.go).
+type ShopifyMarketWebPresenceForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMarketWebPresenceForStore calls the engine query shopifyMarketWebPresenceForStore.
+func (qc *QueryClient) ShopifyMarketWebPresenceForStore(ctx context.Context, args ShopifyMarketWebPresenceForStoreArgs) (*Result, error) {
+	call := ShopifyMarketWebPresenceForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketWebPresenceForStore", call)
+}
+
+func ShopifyMarketWebPresenceForStoreBuild(args ShopifyMarketWebPresenceForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketWebPresenceForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketingActivityByGid -- One mirrored Shopify MarketingActivity by store and GID.
+//
+// Bound concept: v1:shopify:marketingActivity (machine-readable: BoundConcepts["shopifyMarketingActivityByGid"] in generated_concepts.go).
+type ShopifyMarketingActivityByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMarketingActivityByGid calls the engine query shopifyMarketingActivityByGid.
+func (qc *QueryClient) ShopifyMarketingActivityByGid(ctx context.Context, args ShopifyMarketingActivityByGidArgs) (*Result, error) {
+	call := ShopifyMarketingActivityByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketingActivityByGid", call)
+}
+
+func ShopifyMarketingActivityByGidBuild(args ShopifyMarketingActivityByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketingActivityByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketingActivityForStore -- Live mirrored Shopify MarketingActivity rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:marketingActivity (machine-readable: BoundConcepts["shopifyMarketingActivityForStore"] in generated_concepts.go).
+type ShopifyMarketingActivityForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMarketingActivityForStore calls the engine query shopifyMarketingActivityForStore.
+func (qc *QueryClient) ShopifyMarketingActivityForStore(ctx context.Context, args ShopifyMarketingActivityForStoreArgs) (*Result, error) {
+	call := ShopifyMarketingActivityForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketingActivityForStore", call)
+}
+
+func ShopifyMarketingActivityForStoreBuild(args ShopifyMarketingActivityForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketingActivityForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketingEventByGid -- One mirrored Shopify MarketingEvent by store and GID.
+//
+// Bound concept: v1:shopify:marketingEvent (machine-readable: BoundConcepts["shopifyMarketingEventByGid"] in generated_concepts.go).
+type ShopifyMarketingEventByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMarketingEventByGid calls the engine query shopifyMarketingEventByGid.
+func (qc *QueryClient) ShopifyMarketingEventByGid(ctx context.Context, args ShopifyMarketingEventByGidArgs) (*Result, error) {
+	call := ShopifyMarketingEventByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketingEventByGid", call)
+}
+
+func ShopifyMarketingEventByGidBuild(args ShopifyMarketingEventByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketingEventByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMarketingEventForStore -- Live mirrored Shopify MarketingEvent rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:marketingEvent (machine-readable: BoundConcepts["shopifyMarketingEventForStore"] in generated_concepts.go).
+type ShopifyMarketingEventForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMarketingEventForStore calls the engine query shopifyMarketingEventForStore.
+func (qc *QueryClient) ShopifyMarketingEventForStore(ctx context.Context, args ShopifyMarketingEventForStoreArgs) (*Result, error) {
+	call := ShopifyMarketingEventForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMarketingEventForStore", call)
+}
+
+func ShopifyMarketingEventForStoreBuild(args ShopifyMarketingEventForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMarketingEventForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMenuByGid -- One mirrored Shopify Menu by store and GID.
+//
+// Bound concept: v1:shopify:menu (machine-readable: BoundConcepts["shopifyMenuByGid"] in generated_concepts.go).
+type ShopifyMenuByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMenuByGid calls the engine query shopifyMenuByGid.
+func (qc *QueryClient) ShopifyMenuByGid(ctx context.Context, args ShopifyMenuByGidArgs) (*Result, error) {
+	call := ShopifyMenuByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMenuByGid", call)
+}
+
+func ShopifyMenuByGidBuild(args ShopifyMenuByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMenuByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMenuForStore -- Live mirrored Shopify Menu rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:menu (machine-readable: BoundConcepts["shopifyMenuForStore"] in generated_concepts.go).
+type ShopifyMenuForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMenuForStore calls the engine query shopifyMenuForStore.
+func (qc *QueryClient) ShopifyMenuForStore(ctx context.Context, args ShopifyMenuForStoreArgs) (*Result, error) {
+	call := ShopifyMenuForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMenuForStore", call)
+}
+
+func ShopifyMenuForStoreBuild(args ShopifyMenuForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMenuForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetafieldDefinitionByGid -- One mirrored Shopify MetafieldDefinition by store and GID.
+//
+// Bound concept: v1:shopify:metafieldDefinition (machine-readable: BoundConcepts["shopifyMetafieldDefinitionByGid"] in generated_concepts.go).
+type ShopifyMetafieldDefinitionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMetafieldDefinitionByGid calls the engine query shopifyMetafieldDefinitionByGid.
+func (qc *QueryClient) ShopifyMetafieldDefinitionByGid(ctx context.Context, args ShopifyMetafieldDefinitionByGidArgs) (*Result, error) {
+	call := ShopifyMetafieldDefinitionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetafieldDefinitionByGid", call)
+}
+
+func ShopifyMetafieldDefinitionByGidBuild(args ShopifyMetafieldDefinitionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetafieldDefinitionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetafieldDefinitionForStore -- Live mirrored Shopify MetafieldDefinition rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:metafieldDefinition (machine-readable: BoundConcepts["shopifyMetafieldDefinitionForStore"] in generated_concepts.go).
+type ShopifyMetafieldDefinitionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMetafieldDefinitionForStore calls the engine query shopifyMetafieldDefinitionForStore.
+func (qc *QueryClient) ShopifyMetafieldDefinitionForStore(ctx context.Context, args ShopifyMetafieldDefinitionForStoreArgs) (*Result, error) {
+	call := ShopifyMetafieldDefinitionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetafieldDefinitionForStore", call)
+}
+
+func ShopifyMetafieldDefinitionForStoreBuild(args ShopifyMetafieldDefinitionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetafieldDefinitionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetaobjectByGid -- One mirrored Shopify Metaobject by store and GID.
+//
+// Bound concept: v1:shopify:metaobject (machine-readable: BoundConcepts["shopifyMetaobjectByGid"] in generated_concepts.go).
+type ShopifyMetaobjectByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMetaobjectByGid calls the engine query shopifyMetaobjectByGid.
+func (qc *QueryClient) ShopifyMetaobjectByGid(ctx context.Context, args ShopifyMetaobjectByGidArgs) (*Result, error) {
+	call := ShopifyMetaobjectByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetaobjectByGid", call)
+}
+
+func ShopifyMetaobjectByGidBuild(args ShopifyMetaobjectByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetaobjectByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetaobjectDefinitionByGid -- One mirrored Shopify MetaobjectDefinition by store and GID.
+//
+// Bound concept: v1:shopify:metaobjectDefinition (machine-readable: BoundConcepts["shopifyMetaobjectDefinitionByGid"] in generated_concepts.go).
+type ShopifyMetaobjectDefinitionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyMetaobjectDefinitionByGid calls the engine query shopifyMetaobjectDefinitionByGid.
+func (qc *QueryClient) ShopifyMetaobjectDefinitionByGid(ctx context.Context, args ShopifyMetaobjectDefinitionByGidArgs) (*Result, error) {
+	call := ShopifyMetaobjectDefinitionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetaobjectDefinitionByGid", call)
+}
+
+func ShopifyMetaobjectDefinitionByGidBuild(args ShopifyMetaobjectDefinitionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetaobjectDefinitionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetaobjectDefinitionForStore -- Live mirrored Shopify MetaobjectDefinition rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:metaobjectDefinition (machine-readable: BoundConcepts["shopifyMetaobjectDefinitionForStore"] in generated_concepts.go).
+type ShopifyMetaobjectDefinitionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMetaobjectDefinitionForStore calls the engine query shopifyMetaobjectDefinitionForStore.
+func (qc *QueryClient) ShopifyMetaobjectDefinitionForStore(ctx context.Context, args ShopifyMetaobjectDefinitionForStoreArgs) (*Result, error) {
+	call := ShopifyMetaobjectDefinitionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetaobjectDefinitionForStore", call)
+}
+
+func ShopifyMetaobjectDefinitionForStoreBuild(args ShopifyMetaobjectDefinitionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetaobjectDefinitionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 42 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyMetaobjectForStore -- Live mirrored Shopify Metaobject rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:metaobject (machine-readable: BoundConcepts["shopifyMetaobjectForStore"] in generated_concepts.go).
+type ShopifyMetaobjectForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyMetaobjectForStore calls the engine query shopifyMetaobjectForStore.
+func (qc *QueryClient) ShopifyMetaobjectForStore(ctx context.Context, args ShopifyMetaobjectForStoreArgs) (*Result, error) {
+	call := ShopifyMetaobjectForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyMetaobjectForStore", call)
+}
+
+func ShopifyMetaobjectForStoreBuild(args ShopifyMetaobjectForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyMetaobjectForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOnlineStoreThemeByGid -- One mirrored Shopify OnlineStoreTheme by store and GID.
+//
+// Bound concept: v1:shopify:onlineStoreTheme (machine-readable: BoundConcepts["shopifyOnlineStoreThemeByGid"] in generated_concepts.go).
+type ShopifyOnlineStoreThemeByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyOnlineStoreThemeByGid calls the engine query shopifyOnlineStoreThemeByGid.
+func (qc *QueryClient) ShopifyOnlineStoreThemeByGid(ctx context.Context, args ShopifyOnlineStoreThemeByGidArgs) (*Result, error) {
+	call := ShopifyOnlineStoreThemeByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyOnlineStoreThemeByGid", call)
+}
+
+func ShopifyOnlineStoreThemeByGidBuild(args ShopifyOnlineStoreThemeByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOnlineStoreThemeByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOnlineStoreThemeForStore -- Live mirrored Shopify OnlineStoreTheme rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:onlineStoreTheme (machine-readable: BoundConcepts["shopifyOnlineStoreThemeForStore"] in generated_concepts.go).
+type ShopifyOnlineStoreThemeForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyOnlineStoreThemeForStore calls the engine query shopifyOnlineStoreThemeForStore.
+func (qc *QueryClient) ShopifyOnlineStoreThemeForStore(ctx context.Context, args ShopifyOnlineStoreThemeForStoreArgs) (*Result, error) {
+	call := ShopifyOnlineStoreThemeForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyOnlineStoreThemeForStore", call)
+}
+
+func ShopifyOnlineStoreThemeForStoreBuild(args ShopifyOnlineStoreThemeForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOnlineStoreThemeForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderByGid -- One mirrored Shopify Order by store and GID.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["shopifyOrderByGid"] in generated_concepts.go).
+type ShopifyOrderByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyOrderByGid calls the engine query shopifyOrderByGid.
+func (qc *QueryClient) ShopifyOrderByGid(ctx context.Context, args ShopifyOrderByGidArgs) (*Result, error) {
+	call := ShopifyOrderByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderByGid", call)
+}
+
+func ShopifyOrderByGidBuild(args ShopifyOrderByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderForStore -- Live mirrored Shopify Order rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["shopifyOrderForStore"] in generated_concepts.go).
+type ShopifyOrderForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyOrderForStore calls the engine query shopifyOrderForStore.
+func (qc *QueryClient) ShopifyOrderForStore(ctx context.Context, args ShopifyOrderForStoreArgs) (*Result, error) {
+	call := ShopifyOrderForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderForStore", call)
+}
+
+func ShopifyOrderForStoreBuild(args ShopifyOrderForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderLineItemByGid -- One mirrored Shopify LineItem by store and GID.
+//
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["shopifyOrderLineItemByGid"] in generated_concepts.go).
+type ShopifyOrderLineItemByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyOrderLineItemByGid calls the engine query shopifyOrderLineItemByGid.
+func (qc *QueryClient) ShopifyOrderLineItemByGid(ctx context.Context, args ShopifyOrderLineItemByGidArgs) (*Result, error) {
+	call := ShopifyOrderLineItemByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderLineItemByGid", call)
+}
+
+func ShopifyOrderLineItemByGidBuild(args ShopifyOrderLineItemByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderLineItemByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderLineItemForStore -- Live mirrored Shopify LineItem rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["shopifyOrderLineItemForStore"] in generated_concepts.go).
+type ShopifyOrderLineItemForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyOrderLineItemForStore calls the engine query shopifyOrderLineItemForStore.
+func (qc *QueryClient) ShopifyOrderLineItemForStore(ctx context.Context, args ShopifyOrderLineItemForStoreArgs) (*Result, error) {
+	call := ShopifyOrderLineItemForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderLineItemForStore", call)
+}
+
+func ShopifyOrderLineItemForStoreBuild(args ShopifyOrderLineItemForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderLineItemForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderTransactionByGid -- One mirrored Shopify OrderTransaction by store and GID.
+//
+// Bound concept: v1:shopify:orderTransaction (machine-readable: BoundConcepts["shopifyOrderTransactionByGid"] in generated_concepts.go).
+type ShopifyOrderTransactionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyOrderTransactionByGid calls the engine query shopifyOrderTransactionByGid.
+func (qc *QueryClient) ShopifyOrderTransactionByGid(ctx context.Context, args ShopifyOrderTransactionByGidArgs) (*Result, error) {
+	call := ShopifyOrderTransactionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderTransactionByGid", call)
+}
+
+func ShopifyOrderTransactionByGidBuild(args ShopifyOrderTransactionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderTransactionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyOrderTransactionForStore -- Live mirrored Shopify OrderTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:orderTransaction (machine-readable: BoundConcepts["shopifyOrderTransactionForStore"] in generated_concepts.go).
+type ShopifyOrderTransactionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyOrderTransactionForStore calls the engine query shopifyOrderTransactionForStore.
+func (qc *QueryClient) ShopifyOrderTransactionForStore(ctx context.Context, args ShopifyOrderTransactionForStoreArgs) (*Result, error) {
+	call := ShopifyOrderTransactionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyOrderTransactionForStore", call)
+}
+
+func ShopifyOrderTransactionForStoreBuild(args ShopifyOrderTransactionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyOrderTransactionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPageByGid -- One mirrored Shopify Page by store and GID.
+//
+// Bound concept: v1:shopify:page (machine-readable: BoundConcepts["shopifyPageByGid"] in generated_concepts.go).
+type ShopifyPageByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyPageByGid calls the engine query shopifyPageByGid.
+func (qc *QueryClient) ShopifyPageByGid(ctx context.Context, args ShopifyPageByGidArgs) (*Result, error) {
+	call := ShopifyPageByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyPageByGid", call)
+}
+
+func ShopifyPageByGidBuild(args ShopifyPageByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPageByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPageForStore -- Live mirrored Shopify Page rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:page (machine-readable: BoundConcepts["shopifyPageForStore"] in generated_concepts.go).
+type ShopifyPageForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyPageForStore calls the engine query shopifyPageForStore.
+func (qc *QueryClient) ShopifyPageForStore(ctx context.Context, args ShopifyPageForStoreArgs) (*Result, error) {
+	call := ShopifyPageForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyPageForStore", call)
+}
+
+func ShopifyPageForStoreBuild(args ShopifyPageForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPageForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPaymentTermsTemplateByGid -- One mirrored Shopify PaymentTermsTemplate by store and GID.
+//
+// Bound concept: v1:shopify:paymentTermsTemplate (machine-readable: BoundConcepts["shopifyPaymentTermsTemplateByGid"] in generated_concepts.go).
+type ShopifyPaymentTermsTemplateByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyPaymentTermsTemplateByGid calls the engine query shopifyPaymentTermsTemplateByGid.
+func (qc *QueryClient) ShopifyPaymentTermsTemplateByGid(ctx context.Context, args ShopifyPaymentTermsTemplateByGidArgs) (*Result, error) {
+	call := ShopifyPaymentTermsTemplateByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyPaymentTermsTemplateByGid", call)
+}
+
+func ShopifyPaymentTermsTemplateByGidBuild(args ShopifyPaymentTermsTemplateByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPaymentTermsTemplateByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPaymentTermsTemplateForStore -- Live mirrored Shopify PaymentTermsTemplate rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:paymentTermsTemplate (machine-readable: BoundConcepts["shopifyPaymentTermsTemplateForStore"] in generated_concepts.go).
+type ShopifyPaymentTermsTemplateForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyPaymentTermsTemplateForStore calls the engine query shopifyPaymentTermsTemplateForStore.
+func (qc *QueryClient) ShopifyPaymentTermsTemplateForStore(ctx context.Context, args ShopifyPaymentTermsTemplateForStoreArgs) (*Result, error) {
+	call := ShopifyPaymentTermsTemplateForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyPaymentTermsTemplateForStore", call)
+}
+
+func ShopifyPaymentTermsTemplateForStoreBuild(args ShopifyPaymentTermsTemplateForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPaymentTermsTemplateForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 42 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPriceListByGid -- One mirrored Shopify PriceList by store and GID.
+//
+// Bound concept: v1:shopify:priceList (machine-readable: BoundConcepts["shopifyPriceListByGid"] in generated_concepts.go).
+type ShopifyPriceListByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyPriceListByGid calls the engine query shopifyPriceListByGid.
+func (qc *QueryClient) ShopifyPriceListByGid(ctx context.Context, args ShopifyPriceListByGidArgs) (*Result, error) {
+	call := ShopifyPriceListByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyPriceListByGid", call)
+}
+
+func ShopifyPriceListByGidBuild(args ShopifyPriceListByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPriceListByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPriceListForStore -- Live mirrored Shopify PriceList rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:priceList (machine-readable: BoundConcepts["shopifyPriceListForStore"] in generated_concepts.go).
+type ShopifyPriceListForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyPriceListForStore calls the engine query shopifyPriceListForStore.
+func (qc *QueryClient) ShopifyPriceListForStore(ctx context.Context, args ShopifyPriceListForStoreArgs) (*Result, error) {
+	call := ShopifyPriceListForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyPriceListForStore", call)
+}
+
+func ShopifyPriceListForStoreBuild(args ShopifyPriceListForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPriceListForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPriceListPriceByGid -- One mirrored Shopify PriceListPrice by store and GID.
+//
+// Bound concept: v1:shopify:priceListPrice (machine-readable: BoundConcepts["shopifyPriceListPriceByGid"] in generated_concepts.go).
+type ShopifyPriceListPriceByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyPriceListPriceByGid calls the engine query shopifyPriceListPriceByGid.
+func (qc *QueryClient) ShopifyPriceListPriceByGid(ctx context.Context, args ShopifyPriceListPriceByGidArgs) (*Result, error) {
+	call := ShopifyPriceListPriceByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyPriceListPriceByGid", call)
+}
+
+func ShopifyPriceListPriceByGidBuild(args ShopifyPriceListPriceByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPriceListPriceByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPriceListPriceForStore -- Live mirrored Shopify PriceListPrice rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:priceListPrice (machine-readable: BoundConcepts["shopifyPriceListPriceForStore"] in generated_concepts.go).
+type ShopifyPriceListPriceForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyPriceListPriceForStore calls the engine query shopifyPriceListPriceForStore.
+func (qc *QueryClient) ShopifyPriceListPriceForStore(ctx context.Context, args ShopifyPriceListPriceForStoreArgs) (*Result, error) {
+	call := ShopifyPriceListPriceForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyPriceListPriceForStore", call)
+}
+
+func ShopifyPriceListPriceForStoreBuild(args ShopifyPriceListPriceForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPriceListPriceForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductByGid -- One mirrored Shopify Product by store and GID.
+//
+// Bound concept: v1:shopify:product (machine-readable: BoundConcepts["shopifyProductByGid"] in generated_concepts.go).
+type ShopifyProductByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyProductByGid calls the engine query shopifyProductByGid.
+func (qc *QueryClient) ShopifyProductByGid(ctx context.Context, args ShopifyProductByGidArgs) (*Result, error) {
+	call := ShopifyProductByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductByGid", call)
+}
+
+func ShopifyProductByGidBuild(args ShopifyProductByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductFeedByGid -- One mirrored Shopify ProductFeed by store and GID.
+//
+// Bound concept: v1:shopify:productFeed (machine-readable: BoundConcepts["shopifyProductFeedByGid"] in generated_concepts.go).
+type ShopifyProductFeedByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyProductFeedByGid calls the engine query shopifyProductFeedByGid.
+func (qc *QueryClient) ShopifyProductFeedByGid(ctx context.Context, args ShopifyProductFeedByGidArgs) (*Result, error) {
+	call := ShopifyProductFeedByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductFeedByGid", call)
+}
+
+func ShopifyProductFeedByGidBuild(args ShopifyProductFeedByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductFeedByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductFeedForStore -- Live mirrored Shopify ProductFeed rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:productFeed (machine-readable: BoundConcepts["shopifyProductFeedForStore"] in generated_concepts.go).
+type ShopifyProductFeedForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyProductFeedForStore calls the engine query shopifyProductFeedForStore.
+func (qc *QueryClient) ShopifyProductFeedForStore(ctx context.Context, args ShopifyProductFeedForStoreArgs) (*Result, error) {
+	call := ShopifyProductFeedForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductFeedForStore", call)
+}
+
+func ShopifyProductFeedForStoreBuild(args ShopifyProductFeedForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductFeedForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductForStore -- Live mirrored Shopify Product rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:product (machine-readable: BoundConcepts["shopifyProductForStore"] in generated_concepts.go).
+type ShopifyProductForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyProductForStore calls the engine query shopifyProductForStore.
+func (qc *QueryClient) ShopifyProductForStore(ctx context.Context, args ShopifyProductForStoreArgs) (*Result, error) {
+	call := ShopifyProductForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductForStore", call)
+}
+
+func ShopifyProductForStoreBuild(args ShopifyProductForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductVariantByGid -- One mirrored Shopify ProductVariant by store and GID.
+//
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["shopifyProductVariantByGid"] in generated_concepts.go).
+type ShopifyProductVariantByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyProductVariantByGid calls the engine query shopifyProductVariantByGid.
+func (qc *QueryClient) ShopifyProductVariantByGid(ctx context.Context, args ShopifyProductVariantByGidArgs) (*Result, error) {
+	call := ShopifyProductVariantByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductVariantByGid", call)
+}
+
+func ShopifyProductVariantByGidBuild(args ShopifyProductVariantByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductVariantByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProductVariantForStore -- Live mirrored Shopify ProductVariant rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["shopifyProductVariantForStore"] in generated_concepts.go).
+type ShopifyProductVariantForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyProductVariantForStore calls the engine query shopifyProductVariantForStore.
+func (qc *QueryClient) ShopifyProductVariantForStore(ctx context.Context, args ShopifyProductVariantForStoreArgs) (*Result, error) {
+	call := ShopifyProductVariantForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductVariantForStore", call)
+}
+
+func ShopifyProductVariantForStoreBuild(args ShopifyProductVariantForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductVariantForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPublicationByGid -- One mirrored Shopify Publication by store and GID.
+//
+// Bound concept: v1:shopify:publication (machine-readable: BoundConcepts["shopifyPublicationByGid"] in generated_concepts.go).
+type ShopifyPublicationByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyPublicationByGid calls the engine query shopifyPublicationByGid.
+func (qc *QueryClient) ShopifyPublicationByGid(ctx context.Context, args ShopifyPublicationByGidArgs) (*Result, error) {
+	call := ShopifyPublicationByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyPublicationByGid", call)
+}
+
+func ShopifyPublicationByGidBuild(args ShopifyPublicationByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPublicationByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyPublicationForStore -- Live mirrored Shopify Publication rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:publication (machine-readable: BoundConcepts["shopifyPublicationForStore"] in generated_concepts.go).
+type ShopifyPublicationForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyPublicationForStore calls the engine query shopifyPublicationForStore.
+func (qc *QueryClient) ShopifyPublicationForStore(ctx context.Context, args ShopifyPublicationForStoreArgs) (*Result, error) {
+	call := ShopifyPublicationForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyPublicationForStore", call)
+}
+
+func ShopifyPublicationForStoreBuild(args ShopifyPublicationForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyPublicationForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyQuantityRuleByGid -- One mirrored Shopify QuantityRule by store and GID.
+//
+// Bound concept: v1:shopify:quantityRule (machine-readable: BoundConcepts["shopifyQuantityRuleByGid"] in generated_concepts.go).
+type ShopifyQuantityRuleByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyQuantityRuleByGid calls the engine query shopifyQuantityRuleByGid.
+func (qc *QueryClient) ShopifyQuantityRuleByGid(ctx context.Context, args ShopifyQuantityRuleByGidArgs) (*Result, error) {
+	call := ShopifyQuantityRuleByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyQuantityRuleByGid", call)
+}
+
+func ShopifyQuantityRuleByGidBuild(args ShopifyQuantityRuleByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyQuantityRuleByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyQuantityRuleForStore -- Live mirrored Shopify QuantityRule rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:quantityRule (machine-readable: BoundConcepts["shopifyQuantityRuleForStore"] in generated_concepts.go).
+type ShopifyQuantityRuleForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyQuantityRuleForStore calls the engine query shopifyQuantityRuleForStore.
+func (qc *QueryClient) ShopifyQuantityRuleForStore(ctx context.Context, args ShopifyQuantityRuleForStoreArgs) (*Result, error) {
+	call := ShopifyQuantityRuleForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyQuantityRuleForStore", call)
+}
+
+func ShopifyQuantityRuleForStoreBuild(args ShopifyQuantityRuleForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyQuantityRuleForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyRefundByGid -- One mirrored Shopify Refund by store and GID.
+//
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["shopifyRefundByGid"] in generated_concepts.go).
+type ShopifyRefundByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyRefundByGid calls the engine query shopifyRefundByGid.
+func (qc *QueryClient) ShopifyRefundByGid(ctx context.Context, args ShopifyRefundByGidArgs) (*Result, error) {
+	call := ShopifyRefundByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyRefundByGid", call)
+}
+
+func ShopifyRefundByGidBuild(args ShopifyRefundByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyRefundByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyRefundForStore -- Live mirrored Shopify Refund rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["shopifyRefundForStore"] in generated_concepts.go).
+type ShopifyRefundForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyRefundForStore calls the engine query shopifyRefundForStore.
+func (qc *QueryClient) ShopifyRefundForStore(ctx context.Context, args ShopifyRefundForStoreArgs) (*Result, error) {
+	call := ShopifyRefundForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyRefundForStore", call)
+}
+
+func ShopifyRefundForStoreBuild(args ShopifyRefundForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyRefundForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyReverseDeliveryByGid -- One mirrored Shopify ReverseDelivery by store and GID.
+//
+// Bound concept: v1:shopify:reverseDelivery (machine-readable: BoundConcepts["shopifyReverseDeliveryByGid"] in generated_concepts.go).
+type ShopifyReverseDeliveryByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyReverseDeliveryByGid calls the engine query shopifyReverseDeliveryByGid.
+func (qc *QueryClient) ShopifyReverseDeliveryByGid(ctx context.Context, args ShopifyReverseDeliveryByGidArgs) (*Result, error) {
+	call := ShopifyReverseDeliveryByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyReverseDeliveryByGid", call)
+}
+
+func ShopifyReverseDeliveryByGidBuild(args ShopifyReverseDeliveryByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyReverseDeliveryByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyReverseDeliveryForStore -- Live mirrored Shopify ReverseDelivery rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:reverseDelivery (machine-readable: BoundConcepts["shopifyReverseDeliveryForStore"] in generated_concepts.go).
+type ShopifyReverseDeliveryForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyReverseDeliveryForStore calls the engine query shopifyReverseDeliveryForStore.
+func (qc *QueryClient) ShopifyReverseDeliveryForStore(ctx context.Context, args ShopifyReverseDeliveryForStoreArgs) (*Result, error) {
+	call := ShopifyReverseDeliveryForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyReverseDeliveryForStore", call)
+}
+
+func ShopifyReverseDeliveryForStoreBuild(args ShopifyReverseDeliveryForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyReverseDeliveryForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyReverseFulfillmentOrderByGid -- One mirrored Shopify ReverseFulfillmentOrder by store and GID.
+//
+// Bound concept: v1:shopify:reverseFulfillmentOrder (machine-readable: BoundConcepts["shopifyReverseFulfillmentOrderByGid"] in generated_concepts.go).
+type ShopifyReverseFulfillmentOrderByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyReverseFulfillmentOrderByGid calls the engine query shopifyReverseFulfillmentOrderByGid.
+func (qc *QueryClient) ShopifyReverseFulfillmentOrderByGid(ctx context.Context, args ShopifyReverseFulfillmentOrderByGidArgs) (*Result, error) {
+	call := ShopifyReverseFulfillmentOrderByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyReverseFulfillmentOrderByGid", call)
+}
+
+func ShopifyReverseFulfillmentOrderByGidBuild(args ShopifyReverseFulfillmentOrderByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyReverseFulfillmentOrderByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 42 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyReverseFulfillmentOrderForStore -- Live mirrored Shopify ReverseFulfillmentOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:reverseFulfillmentOrder (machine-readable: BoundConcepts["shopifyReverseFulfillmentOrderForStore"] in generated_concepts.go).
+type ShopifyReverseFulfillmentOrderForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyReverseFulfillmentOrderForStore calls the engine query shopifyReverseFulfillmentOrderForStore.
+func (qc *QueryClient) ShopifyReverseFulfillmentOrderForStore(ctx context.Context, args ShopifyReverseFulfillmentOrderForStoreArgs) (*Result, error) {
+	call := ShopifyReverseFulfillmentOrderForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyReverseFulfillmentOrderForStore", call)
+}
+
+func ShopifyReverseFulfillmentOrderForStoreBuild(args ShopifyReverseFulfillmentOrderForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyReverseFulfillmentOrderForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 45 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySegmentByGid -- One mirrored Shopify Segment by store and GID.
+//
+// Bound concept: v1:shopify:segment (machine-readable: BoundConcepts["shopifySegmentByGid"] in generated_concepts.go).
+type ShopifySegmentByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifySegmentByGid calls the engine query shopifySegmentByGid.
+func (qc *QueryClient) ShopifySegmentByGid(ctx context.Context, args ShopifySegmentByGidArgs) (*Result, error) {
+	call := ShopifySegmentByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifySegmentByGid", call)
+}
+
+func ShopifySegmentByGidBuild(args ShopifySegmentByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySegmentByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySegmentForStore -- Live mirrored Shopify Segment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:segment (machine-readable: BoundConcepts["shopifySegmentForStore"] in generated_concepts.go).
+type ShopifySegmentForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifySegmentForStore calls the engine query shopifySegmentForStore.
+func (qc *QueryClient) ShopifySegmentForStore(ctx context.Context, args ShopifySegmentForStoreArgs) (*Result, error) {
+	call := ShopifySegmentForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifySegmentForStore", call)
+}
+
+func ShopifySegmentForStoreBuild(args ShopifySegmentForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySegmentForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySellingPlanByGid -- One mirrored Shopify SellingPlan by store and GID.
+//
+// Bound concept: v1:shopify:sellingPlan (machine-readable: BoundConcepts["shopifySellingPlanByGid"] in generated_concepts.go).
+type ShopifySellingPlanByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifySellingPlanByGid calls the engine query shopifySellingPlanByGid.
+func (qc *QueryClient) ShopifySellingPlanByGid(ctx context.Context, args ShopifySellingPlanByGidArgs) (*Result, error) {
+	call := ShopifySellingPlanByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifySellingPlanByGid", call)
+}
+
+func ShopifySellingPlanByGidBuild(args ShopifySellingPlanByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySellingPlanByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySellingPlanForStore -- Live mirrored Shopify SellingPlan rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:sellingPlan (machine-readable: BoundConcepts["shopifySellingPlanForStore"] in generated_concepts.go).
+type ShopifySellingPlanForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifySellingPlanForStore calls the engine query shopifySellingPlanForStore.
+func (qc *QueryClient) ShopifySellingPlanForStore(ctx context.Context, args ShopifySellingPlanForStoreArgs) (*Result, error) {
+	call := ShopifySellingPlanForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifySellingPlanForStore", call)
+}
+
+func ShopifySellingPlanForStoreBuild(args ShopifySellingPlanForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySellingPlanForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySellingPlanGroupByGid -- One mirrored Shopify SellingPlanGroup by store and GID.
+//
+// Bound concept: v1:shopify:sellingPlanGroup (machine-readable: BoundConcepts["shopifySellingPlanGroupByGid"] in generated_concepts.go).
+type ShopifySellingPlanGroupByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifySellingPlanGroupByGid calls the engine query shopifySellingPlanGroupByGid.
+func (qc *QueryClient) ShopifySellingPlanGroupByGid(ctx context.Context, args ShopifySellingPlanGroupByGidArgs) (*Result, error) {
+	call := ShopifySellingPlanGroupByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifySellingPlanGroupByGid", call)
+}
+
+func ShopifySellingPlanGroupByGidBuild(args ShopifySellingPlanGroupByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySellingPlanGroupByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySellingPlanGroupForStore -- Live mirrored Shopify SellingPlanGroup rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:sellingPlanGroup (machine-readable: BoundConcepts["shopifySellingPlanGroupForStore"] in generated_concepts.go).
+type ShopifySellingPlanGroupForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifySellingPlanGroupForStore calls the engine query shopifySellingPlanGroupForStore.
+func (qc *QueryClient) ShopifySellingPlanGroupForStore(ctx context.Context, args ShopifySellingPlanGroupForStoreArgs) (*Result, error) {
+	call := ShopifySellingPlanGroupForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifySellingPlanGroupForStore", call)
+}
+
+func ShopifySellingPlanGroupForStoreBuild(args ShopifySellingPlanGroupForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySellingPlanGroupForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopByGid -- One mirrored Shopify Shop by store and GID.
+//
+// Bound concept: v1:shopify:shop (machine-readable: BoundConcepts["shopifyShopByGid"] in generated_concepts.go).
+type ShopifyShopByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopByGid calls the engine query shopifyShopByGid.
+func (qc *QueryClient) ShopifyShopByGid(ctx context.Context, args ShopifyShopByGidArgs) (*Result, error) {
+	call := ShopifyShopByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopByGid", call)
+}
+
+func ShopifyShopByGidBuild(args ShopifyShopByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopForStore -- Live mirrored Shopify Shop rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shop (machine-readable: BoundConcepts["shopifyShopForStore"] in generated_concepts.go).
+type ShopifyShopForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopForStore calls the engine query shopifyShopForStore.
+func (qc *QueryClient) ShopifyShopForStore(ctx context.Context, args ShopifyShopForStoreArgs) (*Result, error) {
+	call := ShopifyShopForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopForStore", call)
+}
+
+func ShopifyShopForStoreBuild(args ShopifyShopForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopLocaleByGid -- One mirrored Shopify ShopLocale by store and GID.
+//
+// Bound concept: v1:shopify:shopLocale (machine-readable: BoundConcepts["shopifyShopLocaleByGid"] in generated_concepts.go).
+type ShopifyShopLocaleByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopLocaleByGid calls the engine query shopifyShopLocaleByGid.
+func (qc *QueryClient) ShopifyShopLocaleByGid(ctx context.Context, args ShopifyShopLocaleByGidArgs) (*Result, error) {
+	call := ShopifyShopLocaleByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopLocaleByGid", call)
+}
+
+func ShopifyShopLocaleByGidBuild(args ShopifyShopLocaleByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopLocaleByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopLocaleForStore -- Live mirrored Shopify ShopLocale rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopLocale (machine-readable: BoundConcepts["shopifyShopLocaleForStore"] in generated_concepts.go).
+type ShopifyShopLocaleForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopLocaleForStore calls the engine query shopifyShopLocaleForStore.
+func (qc *QueryClient) ShopifyShopLocaleForStore(ctx context.Context, args ShopifyShopLocaleForStoreArgs) (*Result, error) {
+	call := ShopifyShopLocaleForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopLocaleForStore", call)
+}
+
+func ShopifyShopLocaleForStoreBuild(args ShopifyShopLocaleForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopLocaleForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopPolicyByGid -- One mirrored Shopify ShopPolicy by store and GID.
+//
+// Bound concept: v1:shopify:shopPolicy (machine-readable: BoundConcepts["shopifyShopPolicyByGid"] in generated_concepts.go).
+type ShopifyShopPolicyByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopPolicyByGid calls the engine query shopifyShopPolicyByGid.
+func (qc *QueryClient) ShopifyShopPolicyByGid(ctx context.Context, args ShopifyShopPolicyByGidArgs) (*Result, error) {
+	call := ShopifyShopPolicyByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopPolicyByGid", call)
+}
+
+func ShopifyShopPolicyByGidBuild(args ShopifyShopPolicyByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopPolicyByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopPolicyForStore -- Live mirrored Shopify ShopPolicy rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopPolicy (machine-readable: BoundConcepts["shopifyShopPolicyForStore"] in generated_concepts.go).
+type ShopifyShopPolicyForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopPolicyForStore calls the engine query shopifyShopPolicyForStore.
+func (qc *QueryClient) ShopifyShopPolicyForStore(ctx context.Context, args ShopifyShopPolicyForStoreArgs) (*Result, error) {
+	call := ShopifyShopPolicyForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopPolicyForStore", call)
+}
+
+func ShopifyShopPolicyForStoreBuild(args ShopifyShopPolicyForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopPolicyForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsBalanceTransactionByGid -- One mirrored Shopify ShopifyPaymentsBalanceTransaction by store and GID.
+//
+// Bound concept: v1:shopify:shopifyPaymentsBalanceTransaction (machine-readable: BoundConcepts["shopifyShopifyPaymentsBalanceTransactionByGid"] in generated_concepts.go).
+type ShopifyShopifyPaymentsBalanceTransactionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopifyPaymentsBalanceTransactionByGid calls the engine query shopifyShopifyPaymentsBalanceTransactionByGid.
+func (qc *QueryClient) ShopifyShopifyPaymentsBalanceTransactionByGid(ctx context.Context, args ShopifyShopifyPaymentsBalanceTransactionByGidArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsBalanceTransactionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsBalanceTransactionByGid", call)
+}
+
+func ShopifyShopifyPaymentsBalanceTransactionByGidBuild(args ShopifyShopifyPaymentsBalanceTransactionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsBalanceTransactionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 52 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsBalanceTransactionForStore -- Live mirrored Shopify ShopifyPaymentsBalanceTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopifyPaymentsBalanceTransaction (machine-readable: BoundConcepts["shopifyShopifyPaymentsBalanceTransactionForStore"] in generated_concepts.go).
+type ShopifyShopifyPaymentsBalanceTransactionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopifyPaymentsBalanceTransactionForStore calls the engine query shopifyShopifyPaymentsBalanceTransactionForStore.
+func (qc *QueryClient) ShopifyShopifyPaymentsBalanceTransactionForStore(ctx context.Context, args ShopifyShopifyPaymentsBalanceTransactionForStoreArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsBalanceTransactionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsBalanceTransactionForStore", call)
+}
+
+func ShopifyShopifyPaymentsBalanceTransactionForStoreBuild(args ShopifyShopifyPaymentsBalanceTransactionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsBalanceTransactionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 55 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsDisputeByGid -- One mirrored Shopify ShopifyPaymentsDispute by store and GID.
+//
+// Bound concept: v1:shopify:shopifyPaymentsDispute (machine-readable: BoundConcepts["shopifyShopifyPaymentsDisputeByGid"] in generated_concepts.go).
+type ShopifyShopifyPaymentsDisputeByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopifyPaymentsDisputeByGid calls the engine query shopifyShopifyPaymentsDisputeByGid.
+func (qc *QueryClient) ShopifyShopifyPaymentsDisputeByGid(ctx context.Context, args ShopifyShopifyPaymentsDisputeByGidArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsDisputeByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsDisputeByGid", call)
+}
+
+func ShopifyShopifyPaymentsDisputeByGidBuild(args ShopifyShopifyPaymentsDisputeByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsDisputeByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsDisputeForStore -- Live mirrored Shopify ShopifyPaymentsDispute rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopifyPaymentsDispute (machine-readable: BoundConcepts["shopifyShopifyPaymentsDisputeForStore"] in generated_concepts.go).
+type ShopifyShopifyPaymentsDisputeForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopifyPaymentsDisputeForStore calls the engine query shopifyShopifyPaymentsDisputeForStore.
+func (qc *QueryClient) ShopifyShopifyPaymentsDisputeForStore(ctx context.Context, args ShopifyShopifyPaymentsDisputeForStoreArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsDisputeForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsDisputeForStore", call)
+}
+
+func ShopifyShopifyPaymentsDisputeForStoreBuild(args ShopifyShopifyPaymentsDisputeForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsDisputeForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 44 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsPayoutByGid -- One mirrored Shopify ShopifyPaymentsPayout by store and GID.
+//
+// Bound concept: v1:shopify:shopifyPaymentsPayout (machine-readable: BoundConcepts["shopifyShopifyPaymentsPayoutByGid"] in generated_concepts.go).
+type ShopifyShopifyPaymentsPayoutByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopifyPaymentsPayoutByGid calls the engine query shopifyShopifyPaymentsPayoutByGid.
+func (qc *QueryClient) ShopifyShopifyPaymentsPayoutByGid(ctx context.Context, args ShopifyShopifyPaymentsPayoutByGidArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsPayoutByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsPayoutByGid", call)
+}
+
+func ShopifyShopifyPaymentsPayoutByGidBuild(args ShopifyShopifyPaymentsPayoutByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsPayoutByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyPaymentsPayoutForStore -- Live mirrored Shopify ShopifyPaymentsPayout rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopifyPaymentsPayout (machine-readable: BoundConcepts["shopifyShopifyPaymentsPayoutForStore"] in generated_concepts.go).
+type ShopifyShopifyPaymentsPayoutForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopifyPaymentsPayoutForStore calls the engine query shopifyShopifyPaymentsPayoutForStore.
+func (qc *QueryClient) ShopifyShopifyPaymentsPayoutForStore(ctx context.Context, args ShopifyShopifyPaymentsPayoutForStoreArgs) (*Result, error) {
+	call := ShopifyShopifyPaymentsPayoutForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyPaymentsPayoutForStore", call)
+}
+
+func ShopifyShopifyPaymentsPayoutForStoreBuild(args ShopifyShopifyPaymentsPayoutForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyPaymentsPayoutForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 43 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyReturnByGid -- One mirrored Shopify Return by store and GID.
+//
+// Bound concept: v1:shopify:shopifyReturn (machine-readable: BoundConcepts["shopifyShopifyReturnByGid"] in generated_concepts.go).
+type ShopifyShopifyReturnByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyShopifyReturnByGid calls the engine query shopifyShopifyReturnByGid.
+func (qc *QueryClient) ShopifyShopifyReturnByGid(ctx context.Context, args ShopifyShopifyReturnByGidArgs) (*Result, error) {
+	call := ShopifyShopifyReturnByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyReturnByGid", call)
+}
+
+func ShopifyShopifyReturnByGidBuild(args ShopifyShopifyReturnByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyReturnByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyShopifyReturnForStore -- Live mirrored Shopify Return rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:shopifyReturn (machine-readable: BoundConcepts["shopifyShopifyReturnForStore"] in generated_concepts.go).
+type ShopifyShopifyReturnForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyShopifyReturnForStore calls the engine query shopifyShopifyReturnForStore.
+func (qc *QueryClient) ShopifyShopifyReturnForStore(ctx context.Context, args ShopifyShopifyReturnForStoreArgs) (*Result, error) {
+	call := ShopifyShopifyReturnForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyShopifyReturnForStore", call)
+}
+
+func ShopifyShopifyReturnForStoreBuild(args ShopifyShopifyReturnForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyShopifyReturnForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStaffMemberByGid -- One mirrored Shopify StaffMember by store and GID.
+//
+// Bound concept: v1:shopify:staffMember (machine-readable: BoundConcepts["shopifyStaffMemberByGid"] in generated_concepts.go).
+type ShopifyStaffMemberByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyStaffMemberByGid calls the engine query shopifyStaffMemberByGid.
+func (qc *QueryClient) ShopifyStaffMemberByGid(ctx context.Context, args ShopifyStaffMemberByGidArgs) (*Result, error) {
+	call := ShopifyStaffMemberByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyStaffMemberByGid", call)
+}
+
+func ShopifyStaffMemberByGidBuild(args ShopifyStaffMemberByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyStaffMemberByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStaffMemberForStore -- Live mirrored Shopify StaffMember rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:staffMember (machine-readable: BoundConcepts["shopifyStaffMemberForStore"] in generated_concepts.go).
+type ShopifyStaffMemberForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyStaffMemberForStore calls the engine query shopifyStaffMemberForStore.
+func (qc *QueryClient) ShopifyStaffMemberForStore(ctx context.Context, args ShopifyStaffMemberForStoreArgs) (*Result, error) {
+	call := ShopifyStaffMemberForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyStaffMemberForStore", call)
+}
+
+func ShopifyStaffMemberForStoreBuild(args ShopifyStaffMemberForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyStaffMemberForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreCreditAccountByGid -- One mirrored Shopify StoreCreditAccount by store and GID.
+//
+// Bound concept: v1:shopify:storeCreditAccount (machine-readable: BoundConcepts["shopifyStoreCreditAccountByGid"] in generated_concepts.go).
+type ShopifyStoreCreditAccountByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyStoreCreditAccountByGid calls the engine query shopifyStoreCreditAccountByGid.
+func (qc *QueryClient) ShopifyStoreCreditAccountByGid(ctx context.Context, args ShopifyStoreCreditAccountByGidArgs) (*Result, error) {
+	call := ShopifyStoreCreditAccountByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreCreditAccountByGid", call)
+}
+
+func ShopifyStoreCreditAccountByGidBuild(args ShopifyStoreCreditAccountByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyStoreCreditAccountByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreCreditAccountForStore -- Live mirrored Shopify StoreCreditAccount rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:storeCreditAccount (machine-readable: BoundConcepts["shopifyStoreCreditAccountForStore"] in generated_concepts.go).
+type ShopifyStoreCreditAccountForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyStoreCreditAccountForStore calls the engine query shopifyStoreCreditAccountForStore.
+func (qc *QueryClient) ShopifyStoreCreditAccountForStore(ctx context.Context, args ShopifyStoreCreditAccountForStoreArgs) (*Result, error) {
+	call := ShopifyStoreCreditAccountForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreCreditAccountForStore", call)
+}
+
+func ShopifyStoreCreditAccountForStoreBuild(args ShopifyStoreCreditAccountForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyStoreCreditAccountForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySubscriptionContractByGid -- One mirrored Shopify SubscriptionContract by store and GID.
+//
+// Bound concept: v1:shopify:subscriptionContract (machine-readable: BoundConcepts["shopifySubscriptionContractByGid"] in generated_concepts.go).
+type ShopifySubscriptionContractByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifySubscriptionContractByGid calls the engine query shopifySubscriptionContractByGid.
+func (qc *QueryClient) ShopifySubscriptionContractByGid(ctx context.Context, args ShopifySubscriptionContractByGidArgs) (*Result, error) {
+	call := ShopifySubscriptionContractByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifySubscriptionContractByGid", call)
+}
+
+func ShopifySubscriptionContractByGidBuild(args ShopifySubscriptionContractByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySubscriptionContractByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifySubscriptionContractForStore -- Live mirrored Shopify SubscriptionContract rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:subscriptionContract (machine-readable: BoundConcepts["shopifySubscriptionContractForStore"] in generated_concepts.go).
+type ShopifySubscriptionContractForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifySubscriptionContractForStore calls the engine query shopifySubscriptionContractForStore.
+func (qc *QueryClient) ShopifySubscriptionContractForStore(ctx context.Context, args ShopifySubscriptionContractForStoreArgs) (*Result, error) {
+	call := ShopifySubscriptionContractForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifySubscriptionContractForStore", call)
+}
+
+func ShopifySubscriptionContractForStoreBuild(args ShopifySubscriptionContractForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifySubscriptionContractForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 42 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyTenderTransactionByGid -- One mirrored Shopify TenderTransaction by store and GID.
+//
+// Bound concept: v1:shopify:tenderTransaction (machine-readable: BoundConcepts["shopifyTenderTransactionByGid"] in generated_concepts.go).
+type ShopifyTenderTransactionByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyTenderTransactionByGid calls the engine query shopifyTenderTransactionByGid.
+func (qc *QueryClient) ShopifyTenderTransactionByGid(ctx context.Context, args ShopifyTenderTransactionByGidArgs) (*Result, error) {
+	call := ShopifyTenderTransactionByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyTenderTransactionByGid", call)
+}
+
+func ShopifyTenderTransactionByGidBuild(args ShopifyTenderTransactionByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyTenderTransactionByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyTenderTransactionForStore -- Live mirrored Shopify TenderTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:tenderTransaction (machine-readable: BoundConcepts["shopifyTenderTransactionForStore"] in generated_concepts.go).
+type ShopifyTenderTransactionForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyTenderTransactionForStore calls the engine query shopifyTenderTransactionForStore.
+func (qc *QueryClient) ShopifyTenderTransactionForStore(ctx context.Context, args ShopifyTenderTransactionForStoreArgs) (*Result, error) {
+	call := ShopifyTenderTransactionForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyTenderTransactionForStore", call)
+}
+
+func ShopifyTenderTransactionForStoreBuild(args ShopifyTenderTransactionForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyTenderTransactionForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyUrlRedirectByGid -- One mirrored Shopify UrlRedirect by store and GID.
+//
+// Bound concept: v1:shopify:urlRedirect (machine-readable: BoundConcepts["shopifyUrlRedirectByGid"] in generated_concepts.go).
+type ShopifyUrlRedirectByGidArgs struct {
+	StoreId string
+	Gid     string
+}
+
+// ShopifyUrlRedirectByGid calls the engine query shopifyUrlRedirectByGid.
+func (qc *QueryClient) ShopifyUrlRedirectByGid(ctx context.Context, args ShopifyUrlRedirectByGidArgs) (*Result, error) {
+	call := ShopifyUrlRedirectByGidBuild(args)
+	return qc.executeNamed(ctx, "shopifyUrlRedirectByGid", call)
+}
+
+func ShopifyUrlRedirectByGidBuild(args ShopifyUrlRedirectByGidArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyUrlRedirectByGid(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gid: ")
+	b.WriteString(quoteMemQL(args.Gid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyUrlRedirectForStore -- Live mirrored Shopify UrlRedirect rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain.
+//
+// Bound concept: v1:shopify:urlRedirect (machine-readable: BoundConcepts["shopifyUrlRedirectForStore"] in generated_concepts.go).
+type ShopifyUrlRedirectForStoreArgs struct {
+	StoreId string
+	Since   string
+}
+
+// ShopifyUrlRedirectForStore calls the engine query shopifyUrlRedirectForStore.
+func (qc *QueryClient) ShopifyUrlRedirectForStore(ctx context.Context, args ShopifyUrlRedirectForStoreArgs) (*Result, error) {
+	call := ShopifyUrlRedirectForStoreBuild(args)
+	return qc.executeNamed(ctx, "shopifyUrlRedirectForStore", call)
+}
+
+func ShopifyUrlRedirectForStoreBuild(args ShopifyUrlRedirectForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyUrlRedirectForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
 	b.WriteString(")")
 	return b.String()
 }
@@ -5026,6 +9332,62 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
+// SoldByProduct -- Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here.
+//
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.go).
+type SoldByProductArgs struct {
+	StoreId    string
+	ProductGid string
+}
+
+// SoldByProduct calls the engine query soldByProduct.
+func (qc *QueryClient) SoldByProduct(ctx context.Context, args SoldByProductArgs) (*Result, error) {
+	call := SoldByProductBuild(args)
+	return qc.executeNamed(ctx, "soldByProduct", call)
+}
+
+func SoldByProductBuild(args SoldByProductArgs) string {
+	var b strings.Builder
+	b.WriteString("query soldByProduct(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("productGid: ")
+	b.WriteString(quoteMemQL(args.ProductGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SoldByVariant -- The same, by variant. Separate rather than an optional argument because the two answer different merchandising questions and a caller that passed neither would walk the whole order history.
+//
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByVariant"] in generated_concepts.go).
+type SoldByVariantArgs struct {
+	StoreId    string
+	VariantGid string
+}
+
+// SoldByVariant calls the engine query soldByVariant.
+func (qc *QueryClient) SoldByVariant(ctx context.Context, args SoldByVariantArgs) (*Result, error) {
+	call := SoldByVariantBuild(args)
+	return qc.executeNamed(ctx, "soldByVariant", call)
+}
+
+func SoldByVariantBuild(args SoldByVariantArgs) string {
+	var b strings.Builder
+	b.WriteString("query soldByVariant(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("variantGid: ")
+	b.WriteString(quoteMemQL(args.VariantGid))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
 //
 // Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.go).
@@ -5173,6 +9535,102 @@ func StaleClusterNodesBuild(args StaleClusterNodesArgs) string {
 	if args.OlderThan != "" {
 		b.WriteString("olderThan: ")
 		b.WriteString(quoteMemQL(args.OlderThan))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// StockBelow -- Inventory levels at one location. The THRESHOLD is applied by the tool: a level's quantities are a nested object keyed by name (available, committed, on_hand...), which a filter cannot compare against a number.
+//
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["stockBelow"] in generated_concepts.go).
+type StockBelowArgs struct {
+	StoreId     string
+	LocationGid string
+}
+
+// StockBelow calls the engine query stockBelow.
+func (qc *QueryClient) StockBelow(ctx context.Context, args StockBelowArgs) (*Result, error) {
+	call := StockBelowBuild(args)
+	return qc.executeNamed(ctx, "stockBelow", call)
+}
+
+func StockBelowBuild(args StockBelowArgs) string {
+	var b strings.Builder
+	b.WriteString("query stockBelow(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("locationGid: ")
+	b.WriteString(quoteMemQL(args.LocationGid))
+	b.WriteString(")")
+	return b.String()
+}
+
+// StoreByDomain -- One configured store by its myshopify.com domain. The connector resolves a delivery's X-Shopify-Shop-Domain header through this.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["storeByDomain"] in generated_concepts.go).
+type StoreByDomainArgs struct {
+	Domain string
+}
+
+// StoreByDomain calls the engine query storeByDomain.
+func (qc *QueryClient) StoreByDomain(ctx context.Context, args StoreByDomainArgs) (*Result, error) {
+	call := StoreByDomainBuild(args)
+	return qc.executeNamed(ctx, "storeByDomain", call)
+}
+
+func StoreByDomainBuild(args StoreByDomainArgs) string {
+	var b strings.Builder
+	b.WriteString("query storeByDomain(")
+	b.WriteString("domain: ")
+	b.WriteString(quoteMemQL(args.Domain))
+	b.WriteString(")")
+	return b.String()
+}
+
+// StoreById -- One configured store by id.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["storeById"] in generated_concepts.go).
+type StoreByIdArgs struct {
+	StoreId string
+}
+
+// StoreById calls the engine query storeById.
+func (qc *QueryClient) StoreById(ctx context.Context, args StoreByIdArgs) (*Result, error) {
+	call := StoreByIdBuild(args)
+	return qc.executeNamed(ctx, "storeById", call)
+}
+
+func StoreByIdBuild(args StoreByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query storeById(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Stores -- Every configured store. Small by construction -- a deployment mirrors the stores an operator entered -- so the page size is generous.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["stores"] in generated_concepts.go).
+type StoresArgs struct {
+	Status string
+}
+
+// Stores calls the engine query stores.
+func (qc *QueryClient) Stores(ctx context.Context, args StoresArgs) (*Result, error) {
+	call := StoresBuild(args)
+	return qc.executeNamed(ctx, "stores", call)
+}
+
+func StoresBuild(args StoresArgs) string {
+	var b strings.Builder
+	b.WriteString("query stores(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5412,6 +9870,28 @@ func TemplatesBuild(args TemplatesArgs) string {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// TerritoriesForStore -- Territories for a store.
+//
+// Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["territoriesForStore"] in generated_concepts.go).
+type TerritoriesForStoreArgs struct {
+	StoreId string
+}
+
+// TerritoriesForStore calls the engine query territoriesForStore.
+func (qc *QueryClient) TerritoriesForStore(ctx context.Context, args TerritoriesForStoreArgs) (*Result, error) {
+	call := TerritoriesForStoreBuild(args)
+	return qc.executeNamed(ctx, "territoriesForStore", call)
+}
+
+func TerritoriesForStoreBuild(args TerritoriesForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query territoriesForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
 	b.WriteString(")")
 	return b.String()
 }

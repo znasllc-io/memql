@@ -1,0 +1,268 @@
+use shopify.overlay.concepts.{ store, complianceJob }
+use shopify.generated.order.{ order, orderMirror }
+use shopify.generated.orderLineItem.{ orderLineItem, orderLineItemMirror }
+use shopify.generated.refund.{ refund, refundMirror }
+use shopify.generated.inventoryLevel.{ inventoryLevel, inventoryLevelMirror }
+use shopify.generated.abandonedCheckout.{ abandonedCheckout, abandonedCheckoutMirror }
+use shopify.overlay.shapes.{ storeFull }
+use shopify.generated.productVariant.{ productVariant, productVariantMirror }
+use common.traits.{ isNotDeleted, statusIsPending }
+
+/// One configured store by id.
+@actor
+query store storeById {
+  args {
+    storeId  string!
+  }
+  filter  row.id==args.storeId && actor.isClusterOwner==true
+  shape   storeFull
+}
+
+/// One configured store by its myshopify.com domain. The connector resolves
+/// a delivery's X-Shopify-Shop-Domain header through this.
+@actor
+query store storeByDomain {
+  args {
+    domain  string!
+  }
+  filter    domain==args.domain && actor.isClusterOwner==true
+  paginate  1
+  shape     storeFull
+}
+
+/// Every configured store. Small by construction -- a deployment mirrors
+/// the stores an operator entered -- so the page size is generous.
+@actor
+query store stores {
+  args {
+    status  string
+  }
+  filter    actor.isClusterOwner==true && when(args.status) { status==args.status }
+  sort      "domain", "asc"
+  paginate  100
+  shape     storeFull
+}
+
+/// Any variant that is currently for sale, across every configured store.
+///
+/// One row is the whole answer: the caller is asking "is there a catalog to
+/// sell from", not "what is in it", and a campaign guard that paged the
+/// catalog to answer a boolean would get slower as the store grew.
+@actor
+query productVariant purchasableVariants {
+  filter    availableForSale==true && isNotDeleted && actor.isClusterOwner==true
+  sort      "updatedAt", "desc"
+  paginate  1
+}
+
+/// Every mirrored variant that is for sale in one store, newest first. The
+/// storefront-facing read; purchasableVariants is the guard's cheap sibling.
+@actor
+query productVariant purchasableVariantsForStore {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && availableForSale==true && isNotDeleted && actor.isClusterOwner==true
+  sort      "updatedAt", "desc"
+  paginate  100
+}
+
+// ---- analytics over the mirror (memql#4398) -------------------------------
+//
+// MemQL aggregates COUNT and nothing else, so these are windowed ROW reads
+// and the four commerce tools do the grouping and the arithmetic in Go. That
+// split is stated rather than hidden: a query named soldByProduct that
+// quietly returned rows a caller had to add up would be worse than one that
+// says what it returns.
+//
+// The window lives on the ORDER, because the order is what carries a business
+// date. A line item's own `updatedAt` is the mirror's sync time, not the
+// moment it was sold, and windowing on it would answer a different question
+// every time a backfill ran.
+
+/// Orders created in a window. The base read for every sales question:
+/// soldByProduct, soldByVariant, repeatCustomers and refundRate all start
+/// here and the tool expands or groups from it.
+///
+/// `sourceCreatedAt` is Shopify's own createdAt carried as an RFC3339 string
+/// (the mirror's mapping rule for timestamps), which sorts and compares
+/// chronologically as text in UTC.
+@actor
+query order ordersInWindow {
+  args {
+    storeId  string!
+    from     string!
+    to       string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  sort      "sourceCreatedAt", "desc"
+  paginate  250
+  shape     orderMirror
+}
+
+/// The line items of one order.
+@actor
+query orderLineItem lineItemsForOrder {
+  args {
+    storeId    string!
+    orderGid   string!
+  }
+  filter    storeId==args.storeId && parentGid==args.orderGid && isNotDeleted && actor.isClusterOwner==true
+  paginate  250
+  shape     orderLineItemMirror
+}
+
+/// Every mirrored line item that names one product -- what soldByProduct
+/// groups. Unwindowed by construction: the date is the order's, so the tool
+/// intersects this with ordersInWindow rather than filtering here.
+@actor
+query orderLineItem soldByProduct {
+  args {
+    storeId     string!
+    productGid  string!
+  }
+  filter    storeId==args.storeId && productGid==args.productGid && isNotDeleted && actor.isClusterOwner==true
+  paginate  250
+  shape     orderLineItemMirror
+}
+
+/// The same, by variant. Separate rather than an optional argument because
+/// the two answer different merchandising questions and a caller that passed
+/// neither would walk the whole order history.
+@actor
+query orderLineItem soldByVariant {
+  args {
+    storeId     string!
+    variantGid  string!
+  }
+  filter    storeId==args.storeId && variantGid==args.variantGid && isNotDeleted && actor.isClusterOwner==true
+  paginate  250
+  shape     orderLineItemMirror
+}
+
+/// Every live variant in the store. `neverSold` is the SET DIFFERENCE the
+/// tool computes -- these minus the variants that appear on an order in the
+/// window -- because MemQL has no anti-join and inventing one here would
+/// mean answering the question wrong rather than not answering it.
+@actor
+query productVariant neverSold {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true
+  sort      "updatedAt", "desc"
+  paginate  250
+  shape     productVariantMirror
+}
+
+/// Inventory levels at one location. The THRESHOLD is applied by the tool:
+/// a level's quantities are a nested object keyed by name (available,
+/// committed, on_hand...), which a filter cannot compare against a number.
+@actor
+query inventoryLevel stockBelow {
+  args {
+    storeId      string!
+    locationGid  string!
+  }
+  filter    storeId==args.storeId && locationGid==args.locationGid && isNotDeleted && actor.isClusterOwner==true
+  paginate  250
+  shape     inventoryLevelMirror
+}
+
+/// Orders in a window, for the repeat-customer question. The tool groups by
+/// customerGid and counts the customers with more than one.
+@actor
+query order repeatCustomers {
+  args {
+    storeId  string!
+    from     string!
+    to       string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && customerGid!="" && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  sort      "customerGid", "asc"
+  paginate  250
+  shape     orderMirror
+}
+
+/// Refunds recorded in a window. The RATE is refunds over orders, so the tool
+/// divides this by ordersInWindow rather than either read pretending to know
+/// the other.
+@actor
+query refund refundRate {
+  args {
+    storeId  string!
+    from     string!
+    to       string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  sort      "sourceCreatedAt", "desc"
+  paginate  250
+  shape     refundMirror
+}
+
+/// One company's orders in a window -- the B2B account view.
+@actor
+query order ordersByCompany {
+  args {
+    storeId     string!
+    companyGid  string!
+    from        string!
+    to          string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && purchasingEntity.company.id==args.companyGid && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  sort      "sourceCreatedAt", "desc"
+  paginate  250
+  shape     orderMirror
+}
+
+/// Orders whose payment terms are still outstanding: the B2B receivables
+/// question, and the one a credit limit is checked against.
+@actor
+query order paymentTermsOutstanding {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && fullyPaid==false && actor.isClusterOwner==true
+  sort      "sourceCreatedAt", "asc"
+  paginate  250
+  shape     orderMirror
+}
+
+/// Abandoned checkouts since a moment. There is no Checkout object and
+/// checkout runs only on Shopify, so this is the whole of what a headless
+/// storefront can see of an abandoned session.
+@actor
+query abandonedCheckout abandonedCheckouts {
+  args {
+    storeId  string!
+    since    string!
+  }
+  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.since && actor.isClusterOwner==true
+  sort      "sourceCreatedAt", "desc"
+  paginate  250
+  shape     abandonedCheckoutMirror
+}
+
+/// Privacy jobs whose hold has elapsed. The read the hourly runner makes.
+@actor
+query complianceJob complianceJobsDue {
+  args {
+    asOf  datetime!
+  }
+  filter    statusIsPending && dueAt<=args.asOf && actor.isClusterOwner==true
+  sort      "dueAt", "asc"
+  paginate  100
+  shape     complianceJobFull
+}
+
+/// Every privacy job for a store, newest first -- the audit view.
+@actor
+query complianceJob complianceJobsForStore {
+  args {
+    storeId  string!
+  }
+  filter    storeId==args.storeId && actor.isClusterOwner==true
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     complianceJobFull
+}

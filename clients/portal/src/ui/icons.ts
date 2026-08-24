@@ -31,6 +31,10 @@ export {
   Search,
   Shield,
   ShieldCheck,
+  // The Shopify connector's operator surface (memql#4398). A shopfront
+  // rather than a shopping cart: what the page manages is the MERCHANT'S
+  // store, not a basket.
+  Store,
   Sun,
   Upload,
   User,

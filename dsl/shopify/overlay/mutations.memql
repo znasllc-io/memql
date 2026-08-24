@@ -1,0 +1,169 @@
+use shopify.overlay.concepts.{ store, complianceJob }
+
+/// Register a Shopify store. Cluster-owner tier, and the three token
+/// arguments are REFERENCES to globalSecret rows rather than the tokens
+/// themselves -- a mutation that took a token would put it in the call
+/// string, which is rendered into logs on a parse error.
+mutate store createStore {
+  args {
+    storeId             string!
+    domain              string!
+    name                string
+    appClientId         string
+    adminTokenRef       string
+    storefrontTokenRef  string
+    webhookSecretRef    string
+    apiVersion          string
+    protectedDataLevel  string
+    plan                string
+    ownerUserId         string
+  }
+  insert {
+    stamp {
+      id:                 args.storeId
+      domain:             args.domain
+      name:               args.name ?? args.domain
+      appClientId:        args.appClientId ?? ""
+      adminTokenRef:      args.adminTokenRef ?? ""
+      storefrontTokenRef: args.storefrontTokenRef ?? ""
+      webhookSecretRef:   args.webhookSecretRef ?? ""
+      apiVersion:         args.apiVersion ?? ""
+      protectedDataLevel: args.protectedDataLevel ?? "none"
+      plan:               args.plan ?? ""
+      ownerUserId:        args.ownerUserId ?? ""
+      status:             "configured"
+      scopesGranted:      []
+      health:             {}
+    }
+  }
+}
+
+/// Change a store's configuration. Read-merge: an argument left out keeps
+/// its stored value, so rotating one secret reference does not require
+/// re-supplying the other two.
+mutate store updateStore {
+  args {
+    storeId             string!
+    name                string
+    appClientId         string
+    adminTokenRef       string
+    storefrontTokenRef  string
+    webhookSecretRef    string
+    apiVersion          string
+    protectedDataLevel  string
+    plan                string
+    scopesGranted       []string
+    ownerUserId         string
+  }
+  update {
+    accept { name, appClientId, adminTokenRef, storefrontTokenRef, webhookSecretRef, apiVersion, protectedDataLevel, plan, scopesGranted, ownerUserId }
+    stamp {
+      id:                 args.storeId
+    }
+  }
+}
+
+/// Move a store through its lifecycle. Separate from updateStore because
+/// status is the switch ingestion reads: pausing a store is an operational
+/// act, not a configuration edit, and it wants its own audit line.
+mutate store setStoreStatus {
+  args {
+    storeId  string!
+    status   string!
+  }
+  update {
+    id:      args.storeId
+    status:  args.status
+  }
+}
+
+/// Record what the connector last observed about a store. Health is a
+/// single object so the connector can publish a shape the portal renders
+/// without a schema change every time a new counter is worth showing.
+mutate store recordStoreHealth {
+  args {
+    storeId                 string!
+    health                  object!
+    subscriptionsCheckedAt  datetime
+  }
+  update {
+    accept { health, subscriptionsCheckedAt }
+    stamp {
+      id:                     args.storeId
+    }
+  }
+}
+
+/// Stamp the shop/redact purge. The row stays: it is the audit record that
+/// a purge happened, and the domain must not be re-registered silently.
+mutate store markStoreRedacted {
+  args {
+    storeId     string!
+    redactedAt  datetime!
+  }
+  update {
+    id:         args.storeId
+    redactedAt: args.redactedAt
+    status:     "paused"
+  }
+}
+
+/// Queue a Shopify privacy request. Server-only: the caller is the
+/// connector reacting to a verified webhook, so actor.userId names
+/// nobody -- and a client-callable version would let a caller queue a
+/// purge of a merchant's whole mirror.
+///
+/// @createOnly on the lifecycle fields makes a redelivery idempotent: the
+/// id is derived from (store, topic, subject), so Shopify re-sending the
+/// same request lands on the same row without resetting a status the
+/// runner has already moved.
+@serverOnly
+@createOnly("status", "outcome", "lastError")
+mutate complianceJob queueComplianceJob {
+  args {
+    jobId        string!
+    storeId      string!
+    topic        string!
+    customerGid  string
+    requestId    string
+    shopDomain   string
+    dueAt        datetime!
+  }
+  insert {
+    stamp {
+      id:          args.jobId
+      storeId:     args.storeId
+      topic:       args.topic
+      customerGid: args.customerGid ?? ""
+      requestId:   args.requestId ?? ""
+      shopDomain:  args.shopDomain ?? ""
+      dueAt:       args.dueAt
+      status:      "pending"
+      outcome:     ""
+      lastError:   ""
+    }
+  }
+}
+
+/// Record what a privacy job did.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector's hourly runner, which has no user at all -- a job row belongs
+/// to a STORE and to a legal obligation, not to a person. `done` is a claim
+/// that the obligation was met, and only the code that met it can make it.
+@serverOnly
+mutate complianceJob recordComplianceJob {
+  args {
+    jobId      string!
+    status     string!
+    outcome    string
+    lastError  string
+  }
+  update {
+    accept { status, outcome, lastError }
+    stamp {
+      id:           args.jobId
+      completedAt:  now
+    }
+  }
+}

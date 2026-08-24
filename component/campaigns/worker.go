@@ -110,8 +110,10 @@ type Worker struct {
 	now      func() time.Time
 	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
 
-	// shopifyConfigured is the #4140 "index in play" half. Tests inject
-	// it; production leaves it nil and reads shopify.ConfigFromEnv.
+	// shopifyConfigured is the #4140 "catalog in play" half. Tests inject
+	// it; production leaves it nil and asks whether a v1:shopify:store row
+	// exists (memql#4389 -- it used to read the env, which a multi-store
+	// connector configured at runtime cannot answer from).
 	shopifyConfigured func() bool
 
 	// reputation accumulates the per-domain counters this replica observes

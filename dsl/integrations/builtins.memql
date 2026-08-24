@@ -37,9 +37,3 @@ builtin integrationStatus {
   probe  bool
 }
 
-@executor("integration.shopify.fetchProduct")
-@description("Read a Shopify product's GID, handle, and availableForSale from the Storefront or Admin API. Server-side only. Tokens never appear in the reply. Pass id (product GID) and/or handle.")
-builtin shopifyFetchProduct {
-  id      string
-  handle  string
-}

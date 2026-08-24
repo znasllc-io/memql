@@ -1,0 +1,78 @@
+@sdk
+@executor("integration.shopify.ensureSubscriptions")
+@description("Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.")
+builtin shopifyEnsureSubscriptions {
+}
+
+@sdk
+
+@sdk
+
+@sdk
+@executor("integration.shopify.runComplianceJobs")
+@description("Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.")
+builtin shopifyRunComplianceJobs {
+}
+
+@sdk
+
+@executor("integration.shopify.fetchProduct")
+@description("Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.")
+builtin shopifyFetchProduct {
+  storeId  string
+  id       string
+  handle   string
+}
+
+@sdk
+@executor("integration.shopify.shopifyql")
+@description("Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not.")
+builtin shopifyql {
+  storeId  string
+  query    string
+}
+
+@sdk
+@executor("integration.shopify.storeHealth")
+@description("Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.")
+builtin shopifyStoreHealth {
+  storeId  string
+}
+
+@sdk
+@executor("integration.shopify.commerceSold")
+@description("What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.")
+builtin commerceSold {
+  storeId  string
+  from     string
+  to       string
+  groupBy  string
+}
+
+@sdk
+@executor("integration.shopify.commerceStock")
+@description("Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout.")
+builtin commerceStock {
+  storeId      string
+  locationGid  string
+  threshold    integer
+}
+
+@sdk
+@executor("integration.shopify.commerceCustomers")
+@description("Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.")
+builtin commerceCustomers {
+  storeId  string
+  from     string
+  to       string
+}
+
+@sdk
+@executor("integration.shopify.commerceCompany")
+@description("One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.")
+builtin commerceCompany {
+  storeId     string
+  companyGid  string
+  from        string
+  to          string
+}

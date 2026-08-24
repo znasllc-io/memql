@@ -10,9 +10,13 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// The shipped mirror: v1:shopify:shopifyProduct declares
-// @origin("shopify") (epic memql#4378, D8).
-const testMirrorConcept = "v1:shopify:shopifyProduct"
+// The shipped mirror. v1:shopify:shopifyProduct was the first
+// (epic memql#4378, D8); the thin index it named was superseded by the
+// GENERATED mirror in memql#4389, so the constant moved to a concept the
+// generator emits. Any of the sixty-five would do -- what these tests
+// need is a concept that declares @origin("shopify"), not this one in
+// particular -- and `product` is the one a reader will recognise.
+const testMirrorConcept = "v1:shopify:product"
 
 // testEngineOverLoadedTree returns an engine whose registry is the
 // embedded DSL tree, which is where the shipped declarations live.

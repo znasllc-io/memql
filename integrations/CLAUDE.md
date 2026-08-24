@@ -141,7 +141,9 @@ integrations/
 ├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)
 ├── rbac/              # Relational governance rank arithmetic -- canCreatePrincipal, governPrincipal
 ├── router/            # BYOK credential + budget admin -- setApiKey, listModels, listPolicies
-├── shopify/           # Storefront/Admin product read + thin index inbound/reconcile (GID, handle, availableForSale)
+├── shopify/           # THE CONNECTOR: a complete generated mirror of a store,
+│                   # the push channel, and the compliance jobs. The reference
+│                   # implementation of the data-origins contract
 ├── similarity/        # pgvector similarTo() builtin
 ├── stt/               # Speech-to-text -- transcribe (batch capability + streaming session)
 ├── telephony/         # PSTN edge -- number provisioning, call control, E911, consent, DTMF
@@ -239,7 +241,7 @@ Env:
 | `database/` | `healthCheck`, `stats`. The connection is a core component; this exposes management ops |
 | `fileprocessor/` | `files.extractText` -- PDF / DOCX / images (via VisionAIProvider) / text |
 | `azureblob/` | `storage.upload` -- returns the blob URL (registers under the name `storage`) |
-| `shopify/` | `fetchProduct`, `applyInboundProduct`, `reconcileProduct` / `reconcileIndex` (memql#4136-4137). First slice is GID / handle / `availableForSale`; tokens stay off any browser-reachable surface; checkout stays `cart.checkoutUrl`. **Never invents** -- a webhook or reconcile miss RETIRES the row. The plug-in always registers so inbound builtins exist; fetch/persist no-op without `MEMQL_SHOPIFY_STORE_DOMAIN` plus a token |
+| `shopify/` | **The connector** (memql#4389) -- see the section below. `ensureSubscriptions`, `runComplianceJobs`, `fetchProduct`, `shopifyql`, `storeHealth`, and the four `commerce*` analytics tools; the five contract verbs over 65 generated concepts. The plug-in always registers so the capabilities exist; each no-ops with no store row rather than failing |
 
 ---
 
@@ -280,6 +282,49 @@ return full payloads; the `*CardSummary` domains generate canvas-card bodies;
 `knowledge` powers the KnowledgeModal domain picker.
 
 ---
+
+
+## shopify/ -- the connector, filled
+
+`integrations/shopify` is the J1 fill (memql#4389) of the surface J0 left
+declared. Read it before writing a second connector; most of what follows
+generalises.
+
+**The model is generated, not written.** `cmd/shopifyschema` reads Shopify's
+Admin GraphQL schema at a pinned version and emits 65 concepts, their default
+projections, their two reads, the fetch and bulk documents, and the Go routing
+table (`integrations/shopify/generated/`). Nothing under `generated/` is
+edited by hand -- a drift gate fails the build, and a hand edit would be lost
+at the next regeneration anyway. The connector holds NO per-type code: it
+reads a table that says which topic routes to which concept and which document
+fetches it.
+
+**No mirror WRITE is generated**, and that is the contract rather than an
+omission: a connector returns MirrorWrites and the runtime performs the write.
+Emitting a mutation per concept would put a second write path beside it -- 65
+of them -- and the two would have to agree about stamping, about what a
+cleared field means and about which fields a retirement sets.
+
+**Six decisions worth copying into the next connector:**
+
+1. **A webhook is a trigger, not a payload.** Nothing in `apply.go` reads a
+   business field out of a delivery. Payloads lose fields, truncate and arrive
+   out of order; the API does not.
+2. **Reconciliation is a requirement.** Shopify does not guarantee delivery,
+   so every domain is re-checked on a cadence and what a pass heals is counted
+   as DRIFT -- the only evidence anyone gets that live delivery is working.
+3. **Credentials are references.** The store row carries the NAME of a
+   `globalSecret`, never a token, because the row is read by the portal.
+4. **A vendor validation error is `sync.Permanent`.** It arrives inside a 200
+   and will fail identically forever; the drain dead-letters it immediately
+   rather than spending its attempt budget.
+5. **Every write is idempotent on a derived row id.** `MirrorRowID(store, gid)`
+   is a digest, so two tenants sharing an origin id stay separate rows.
+6. **A multi-tenant connector owns its inbound sources.** `InboundSource` is an
+   OPTIONAL interface (`sync.InboundSourceProvider`) rather than a contract
+   verb: only a connector with tenants added at runtime needs one.
+
+Runbook: [docs/public/operate/shopify-connector.md](../docs/public/operate/shopify-connector.md).
 
 ## Adding New Integrations
 

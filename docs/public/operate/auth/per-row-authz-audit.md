@@ -1074,7 +1074,7 @@ of a concept whose `@origin` or `@mirroredTo` names it, regardless of
 that concept's declared tier, and to no other concept whatever its tier.
 
 ```
-auth.ConnectorActor("shopify")   ->  v1:shopify:shopifyProduct   admitted
+auth.ConnectorActor("shopify")   ->  v1:shopify:product          admitted
                                      (the concept declares @origin("shopify"))
                                  ->  v1:campaigns:sendJob        refused
                                  ->  an UNDECLARED concept       refused

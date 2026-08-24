@@ -96,6 +96,110 @@ QueryClient.prototype.campaignStartSend = function (this: QueryClient, args: Cam
   return this.executeNamed("campaignStartSend", buildCampaignStartSend(args), opts);
 };
 
+/** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
+export interface CommerceCompanyArgs {
+  storeId?: string;
+  companyGid?: string;
+  from?: string;
+  to?: string;
+}
+
+export function buildCommerceCompany(args: CommerceCompanyArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.companyGid !== undefined) parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  if (args.from !== undefined) parts.push("from: " + renderMemQLValue(args.from));
+  if (args.to !== undefined) parts.push("to: " + renderMemQLValue(args.to));
+  return "builtin commerceCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    commerceCompany(args: CommerceCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.commerceCompany = function (this: QueryClient, args: CommerceCompanyArgs = {} as CommerceCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("commerceCompany", buildCommerceCompany(args), opts);
+};
+
+/** Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. */
+export interface CommerceCustomersArgs {
+  storeId?: string;
+  from?: string;
+  to?: string;
+}
+
+export function buildCommerceCustomers(args: CommerceCustomersArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.from !== undefined) parts.push("from: " + renderMemQLValue(args.from));
+  if (args.to !== undefined) parts.push("to: " + renderMemQLValue(args.to));
+  return "builtin commerceCustomers(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    commerceCustomers(args: CommerceCustomersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.commerceCustomers = function (this: QueryClient, args: CommerceCustomersArgs = {} as CommerceCustomersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("commerceCustomers", buildCommerceCustomers(args), opts);
+};
+
+/** What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. */
+export interface CommerceSoldArgs {
+  storeId?: string;
+  from?: string;
+  to?: string;
+  groupBy?: string;
+}
+
+export function buildCommerceSold(args: CommerceSoldArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.from !== undefined) parts.push("from: " + renderMemQLValue(args.from));
+  if (args.to !== undefined) parts.push("to: " + renderMemQLValue(args.to));
+  if (args.groupBy !== undefined) parts.push("groupBy: " + renderMemQLValue(args.groupBy));
+  return "builtin commerceSold(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    commerceSold(args: CommerceSoldArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.commerceSold = function (this: QueryClient, args: CommerceSoldArgs = {} as CommerceSoldArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("commerceSold", buildCommerceSold(args), opts);
+};
+
+/** Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. */
+export interface CommerceStockArgs {
+  storeId?: string;
+  locationGid?: string;
+  threshold?: number;
+}
+
+export function buildCommerceStock(args: CommerceStockArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.locationGid !== undefined) parts.push("locationGid: " + renderMemQLValue(args.locationGid));
+  if (args.threshold !== undefined) parts.push("threshold: " + renderMemQLValue(args.threshold));
+  return "builtin commerceStock(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    commerceStock(args: CommerceStockArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.commerceStock = function (this: QueryClient, args: CommerceStockArgs = {} as CommerceStockArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("commerceStock", buildCommerceStock(args), opts);
+};
+
 /** List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page. */
 export interface DataOriginsArgs {
 }
@@ -519,6 +623,113 @@ declare module "./query.js" {
 
 QueryClient.prototype.searchActions = function (this: QueryClient, args: SearchActionsArgs = {} as SearchActionsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("searchActions", buildSearchActions(args), opts);
+};
+
+/** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
+export interface ShopifyEnsureSubscriptionsArgs {
+}
+
+export function buildShopifyEnsureSubscriptions(args: ShopifyEnsureSubscriptionsArgs): string {
+  void args;
+  return "builtin shopifyEnsureSubscriptions()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyEnsureSubscriptions(args?: ShopifyEnsureSubscriptionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyEnsureSubscriptions = function (this: QueryClient, args: ShopifyEnsureSubscriptionsArgs = {} as ShopifyEnsureSubscriptionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyEnsureSubscriptions", buildShopifyEnsureSubscriptions(args), opts);
+};
+
+/** Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. */
+export interface ShopifyFetchProductArgs {
+  storeId?: string;
+  id?: string;
+  handle?: string;
+}
+
+export function buildShopifyFetchProduct(args: ShopifyFetchProductArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.id !== undefined) parts.push("id: " + renderMemQLValue(args.id));
+  if (args.handle !== undefined) parts.push("handle: " + renderMemQLValue(args.handle));
+  return "builtin shopifyFetchProduct(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyFetchProduct(args: ShopifyFetchProductArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyFetchProduct = function (this: QueryClient, args: ShopifyFetchProductArgs = {} as ShopifyFetchProductArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyFetchProduct", buildShopifyFetchProduct(args), opts);
+};
+
+/** Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. */
+export interface ShopifyRunComplianceJobsArgs {
+}
+
+export function buildShopifyRunComplianceJobs(args: ShopifyRunComplianceJobsArgs): string {
+  void args;
+  return "builtin shopifyRunComplianceJobs()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyRunComplianceJobs(args?: ShopifyRunComplianceJobsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, args: ShopifyRunComplianceJobsArgs = {} as ShopifyRunComplianceJobsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyRunComplianceJobs", buildShopifyRunComplianceJobs(args), opts);
+};
+
+/** Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page. */
+export interface ShopifyStoreHealthArgs {
+  storeId?: string;
+}
+
+export function buildShopifyStoreHealth(args: ShopifyStoreHealthArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreHealth(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreHealth(args: ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: ShopifyStoreHealthArgs = {} as ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
+};
+
+/** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. */
+export interface ShopifyqlArgs {
+  storeId?: string;
+  query?: string;
+}
+
+export function buildShopifyql(args: ShopifyqlArgs): string {
+  const parts: string[] = [];
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.query !== undefined) parts.push("query: " + renderMemQLValue(args.query));
+  return "builtin shopifyql(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyql(args: ShopifyqlArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyql = function (this: QueryClient, args: ShopifyqlArgs = {} as ShopifyqlArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyql", buildShopifyql(args), opts);
 };
 
 /** Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef. */

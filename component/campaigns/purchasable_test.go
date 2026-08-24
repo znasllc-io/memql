@@ -48,15 +48,15 @@ func TestProductPurchasableUnavailableOrRetiredRefuses(t *testing.T) {
 		t.Fatal("present but not for sale must refuse")
 	}
 	if ProductPurchasable([]IndexProduct{{Present: false, AvailableForSale: true}}) {
-		t.Fatal("retired row must not count, even if availableForSale is stale-true")
+		t.Fatal("a tombstoned row must not count, even if availableForSale is stale-true")
 	}
 }
 
 func TestShopifyIndexReadsPresentAndRetired(t *testing.T) {
 	engine := &fakeEngine{
 		shopifyProducts: []map[string]any{
-			{"id": "gid://shopify/Product/1", "handle": "retired", "present": false, "availableForSale": false},
-			{"id": "gid://shopify/Product/2", "handle": "hat", "present": true, "availableForSale": true},
+			{"gid": "gid://shopify/ProductVariant/1", "deleted": true, "availableForSale": false},
+			{"gid": "gid://shopify/ProductVariant/2", "deleted": false, "availableForSale": true},
 		},
 	}
 	products, err := NewStore(engine).ShopifyIndex(context.Background())
@@ -67,7 +67,7 @@ func TestShopifyIndexReadsPresentAndRetired(t *testing.T) {
 		t.Fatalf("want both present and retired rows, got %d", len(products))
 	}
 	if CatalogRefusal(false, products) != "" {
-		t.Fatal("one available product must pass even when env is unconfigured")
+		t.Fatal("one available variant must pass even when no store row exists")
 	}
 }
 

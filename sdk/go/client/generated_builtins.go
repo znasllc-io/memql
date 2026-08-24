@@ -105,6 +105,174 @@ func CampaignStartSendBuild(args CampaignStartSendArgs) string {
 	return b.String()
 }
 
+// CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
+type CommerceCompanyArgs struct {
+	StoreId    string
+	CompanyGid string
+	From       string
+	To         string
+}
+
+// CommerceCompany calls the engine builtin commerceCompany.
+func (qc *QueryClient) CommerceCompany(ctx context.Context, args CommerceCompanyArgs) (*Result, error) {
+	call := CommerceCompanyBuild(args)
+	return qc.executeNamed(ctx, "commerceCompany", call)
+}
+
+func CommerceCompanyBuild(args CommerceCompanyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin commerceCompany(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.CompanyGid != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyGid: ")
+		b.WriteString(quoteMemQL(args.CompanyGid))
+	}
+	if args.From != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("from: ")
+		b.WriteString(quoteMemQL(args.From))
+	}
+	if args.To != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("to: ")
+		b.WriteString(quoteMemQL(args.To))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.
+type CommerceCustomersArgs struct {
+	StoreId string
+	From    string
+	To      string
+}
+
+// CommerceCustomers calls the engine builtin commerceCustomers.
+func (qc *QueryClient) CommerceCustomers(ctx context.Context, args CommerceCustomersArgs) (*Result, error) {
+	call := CommerceCustomersBuild(args)
+	return qc.executeNamed(ctx, "commerceCustomers", call)
+}
+
+func CommerceCustomersBuild(args CommerceCustomersArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin commerceCustomers(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.From != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("from: ")
+		b.WriteString(quoteMemQL(args.From))
+	}
+	if args.To != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("to: ")
+		b.WriteString(quoteMemQL(args.To))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.
+type CommerceSoldArgs struct {
+	StoreId string
+	From    string
+	To      string
+	GroupBy string
+}
+
+// CommerceSold calls the engine builtin commerceSold.
+func (qc *QueryClient) CommerceSold(ctx context.Context, args CommerceSoldArgs) (*Result, error) {
+	call := CommerceSoldBuild(args)
+	return qc.executeNamed(ctx, "commerceSold", call)
+}
+
+func CommerceSoldBuild(args CommerceSoldArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin commerceSold(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.From != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("from: ")
+		b.WriteString(quoteMemQL(args.From))
+	}
+	if args.To != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("to: ")
+		b.WriteString(quoteMemQL(args.To))
+	}
+	if args.GroupBy != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupBy: ")
+		b.WriteString(quoteMemQL(args.GroupBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout.
+type CommerceStockArgs struct {
+	StoreId     string
+	LocationGid string
+	Threshold   int
+}
+
+// CommerceStock calls the engine builtin commerceStock.
+func (qc *QueryClient) CommerceStock(ctx context.Context, args CommerceStockArgs) (*Result, error) {
+	call := CommerceStockBuild(args)
+	return qc.executeNamed(ctx, "commerceStock", call)
+}
+
+func CommerceStockBuild(args CommerceStockArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin commerceStock(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.LocationGid != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("locationGid: ")
+		b.WriteString(quoteMemQL(args.LocationGid))
+	}
+	if args.Threshold != 0 {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("threshold: ")
+		b.WriteString(fmt.Sprintf("%v", args.Threshold))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // DataOrigins -- List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.
 type DataOriginsArgs struct {
 }
@@ -678,6 +846,126 @@ func SearchActionsBuild(args SearchActionsArgs) string {
 		}
 		b.WriteString("provider: ")
 		b.WriteString(quoteMemQL(args.Provider))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.
+type ShopifyEnsureSubscriptionsArgs struct {
+}
+
+// ShopifyEnsureSubscriptions calls the engine builtin shopifyEnsureSubscriptions.
+func (qc *QueryClient) ShopifyEnsureSubscriptions(ctx context.Context, args ShopifyEnsureSubscriptionsArgs) (*Result, error) {
+	call := ShopifyEnsureSubscriptionsBuild(args)
+	return qc.executeNamed(ctx, "shopifyEnsureSubscriptions", call)
+}
+
+func ShopifyEnsureSubscriptionsBuild(args ShopifyEnsureSubscriptionsArgs) string {
+	_ = args
+	return "builtin shopifyEnsureSubscriptions()"
+}
+
+// ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.
+type ShopifyFetchProductArgs struct {
+	StoreId string
+	Id      string
+	Handle  string
+}
+
+// ShopifyFetchProduct calls the engine builtin shopifyFetchProduct.
+func (qc *QueryClient) ShopifyFetchProduct(ctx context.Context, args ShopifyFetchProductArgs) (*Result, error) {
+	call := ShopifyFetchProductBuild(args)
+	return qc.executeNamed(ctx, "shopifyFetchProduct", call)
+}
+
+func ShopifyFetchProductBuild(args ShopifyFetchProductArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyFetchProduct(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.Id != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("id: ")
+		b.WriteString(quoteMemQL(args.Id))
+	}
+	if args.Handle != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("handle: ")
+		b.WriteString(quoteMemQL(args.Handle))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyRunComplianceJobs -- Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.
+type ShopifyRunComplianceJobsArgs struct {
+}
+
+// ShopifyRunComplianceJobs calls the engine builtin shopifyRunComplianceJobs.
+func (qc *QueryClient) ShopifyRunComplianceJobs(ctx context.Context, args ShopifyRunComplianceJobsArgs) (*Result, error) {
+	call := ShopifyRunComplianceJobsBuild(args)
+	return qc.executeNamed(ctx, "shopifyRunComplianceJobs", call)
+}
+
+func ShopifyRunComplianceJobsBuild(args ShopifyRunComplianceJobsArgs) string {
+	_ = args
+	return "builtin shopifyRunComplianceJobs()"
+}
+
+// ShopifyStoreHealth -- Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.
+type ShopifyStoreHealthArgs struct {
+	StoreId string
+}
+
+// ShopifyStoreHealth calls the engine builtin shopifyStoreHealth.
+func (qc *QueryClient) ShopifyStoreHealth(ctx context.Context, args ShopifyStoreHealthArgs) (*Result, error) {
+	call := ShopifyStoreHealthBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreHealth", call)
+}
+
+func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreHealth(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not.
+type ShopifyqlArgs struct {
+	StoreId string
+	Query   string
+}
+
+// Shopifyql calls the engine builtin shopifyql.
+func (qc *QueryClient) Shopifyql(ctx context.Context, args ShopifyqlArgs) (*Result, error) {
+	call := ShopifyqlBuild(args)
+	return qc.executeNamed(ctx, "shopifyql", call)
+}
+
+func ShopifyqlBuild(args ShopifyqlArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyql(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	if args.Query != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("query: ")
+		b.WriteString(quoteMemQL(args.Query))
 	}
 	b.WriteString(")")
 	return b.String()

@@ -1,0 +1,37 @@
+use shopify.overlay.concepts.{ store, complianceJob }
+
+/// The store row as the connector and the portal read it.
+///
+/// row.id is projected explicitly because the STORE ID is the row id and
+/// nothing else carries it: it is the segment of the inbound source name,
+/// the scope of every mirror row, and the key of every sync state. A read
+/// that returned the configuration without it would be unusable.
+///
+/// The three credential REFERENCES are projected; the credentials are not,
+/// and cannot be -- the row has never held them.
+@row
+shape store storeFull {
+  row.id
+  domain
+  name
+  appClientId
+  adminTokenRef
+  storefrontTokenRef
+  webhookSecretRef
+  apiVersion
+  scopesGranted
+  protectedDataLevel
+  plan
+  status
+  ownerUserId
+  health
+  subscriptionsCheckedAt
+  redactedAt
+  row.createdAt
+}
+
+/// Every field of a queued privacy job. Empty body: the default
+/// projection over the bound concept.
+@row
+shape complianceJob complianceJobFull {
+}

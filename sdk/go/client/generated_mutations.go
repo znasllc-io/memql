@@ -2336,7 +2336,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -5269,6 +5269,114 @@ func CreateProjectBuild(args CreateProjectArgs) string {
 	return b.String()
 }
 
+// CreateQuote -- Create a quote in draft.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["createQuote"] in generated_concepts.go).
+type CreateQuoteArgs struct {
+	QuoteId            string
+	StoreId            string
+	QuoteNumber        string
+	CompanyGid         string
+	CompanyLocationGid string
+	CompanyContactGid  string
+	SalesRepId         string
+	Lines              []map[string]any
+	CurrencyCode       string
+	TotalAmount        string
+	Terms              string
+	ValidUntil         string
+	ApprovalChainId    string
+}
+
+// CreateQuote calls the engine mutation createQuote.
+func (qc *QueryClient) CreateQuote(ctx context.Context, args CreateQuoteArgs) (*Result, error) {
+	call := CreateQuoteBuild(args)
+	return qc.executeNamed(ctx, "createQuote", call)
+}
+
+func CreateQuoteBuild(args CreateQuoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createQuote(")
+	b.WriteString("quoteId: ")
+	b.WriteString(quoteMemQL(args.QuoteId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("quoteNumber: ")
+	b.WriteString(quoteMemQL(args.QuoteNumber))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	if args.CompanyLocationGid != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyLocationGid: ")
+		b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	}
+	if args.CompanyContactGid != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyContactGid: ")
+		b.WriteString(quoteMemQL(args.CompanyContactGid))
+	}
+	if args.SalesRepId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("salesRepId: ")
+		b.WriteString(quoteMemQL(args.SalesRepId))
+	}
+	if args.Lines != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lines: ")
+		b.WriteString(renderMemQLValue(args.Lines))
+	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("currencyCode: ")
+	b.WriteString(quoteMemQL(args.CurrencyCode))
+	if args.TotalAmount != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("totalAmount: ")
+		b.WriteString(quoteMemQL(args.TotalAmount))
+	}
+	if args.Terms != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("terms: ")
+		b.WriteString(quoteMemQL(args.Terms))
+	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("validUntil: ")
+	b.WriteString(quoteMemQL(args.ValidUntil))
+	if args.ApprovalChainId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("approvalChainId: ")
+		b.WriteString(quoteMemQL(args.ApprovalChainId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateRecord -- Create a data record in draft validation state awaiting check and confirmation
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["createRecord"] in generated_concepts.go).
@@ -6323,6 +6431,106 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 		}
 		b.WriteString("metadata: ")
 		b.WriteString(renderMemQLValue(args.Metadata))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateStore -- Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.go).
+type CreateStoreArgs struct {
+	StoreId            string
+	Domain             string
+	Name               string
+	AppClientId        string
+	AdminTokenRef      string
+	StorefrontTokenRef string
+	WebhookSecretRef   string
+	ApiVersion         string
+	ProtectedDataLevel string
+	Plan               string
+	OwnerUserId        string
+}
+
+// CreateStore calls the engine mutation createStore.
+func (qc *QueryClient) CreateStore(ctx context.Context, args CreateStoreArgs) (*Result, error) {
+	call := CreateStoreBuild(args)
+	return qc.executeNamed(ctx, "createStore", call)
+}
+
+func CreateStoreBuild(args CreateStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domain: ")
+	b.WriteString(quoteMemQL(args.Domain))
+	if args.Name != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.AppClientId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("appClientId: ")
+		b.WriteString(quoteMemQL(args.AppClientId))
+	}
+	if args.AdminTokenRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("adminTokenRef: ")
+		b.WriteString(quoteMemQL(args.AdminTokenRef))
+	}
+	if args.StorefrontTokenRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("storefrontTokenRef: ")
+		b.WriteString(quoteMemQL(args.StorefrontTokenRef))
+	}
+	if args.WebhookSecretRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("webhookSecretRef: ")
+		b.WriteString(quoteMemQL(args.WebhookSecretRef))
+	}
+	if args.ApiVersion != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apiVersion: ")
+		b.WriteString(quoteMemQL(args.ApiVersion))
+	}
+	if args.ProtectedDataLevel != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("protectedDataLevel: ")
+		b.WriteString(quoteMemQL(args.ProtectedDataLevel))
+	}
+	if args.Plan != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("plan: ")
+		b.WriteString(quoteMemQL(args.Plan))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(quoteMemQL(args.OwnerUserId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8423,6 +8631,50 @@ func MarkChunkSupersededBuild(args MarkChunkSupersededArgs) string {
 	return b.String()
 }
 
+// MarkQuoteSent -- Stamp the moment a quote was sent to the buyer.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["markQuoteSent"] in generated_concepts.go).
+type MarkQuoteSentArgs struct {
+	QuoteId string
+}
+
+// MarkQuoteSent calls the engine mutation markQuoteSent.
+func (qc *QueryClient) MarkQuoteSent(ctx context.Context, args MarkQuoteSentArgs) (*Result, error) {
+	call := MarkQuoteSentBuild(args)
+	return qc.executeNamed(ctx, "markQuoteSent", call)
+}
+
+func MarkQuoteSentBuild(args MarkQuoteSentArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation markQuoteSent(")
+	b.WriteString("quoteId: ")
+	b.WriteString(quoteMemQL(args.QuoteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// MarkReorderListOrdered -- Stamp a reorder list as ordered from.
+//
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["markReorderListOrdered"] in generated_concepts.go).
+type MarkReorderListOrderedArgs struct {
+	ListId string
+}
+
+// MarkReorderListOrdered calls the engine mutation markReorderListOrdered.
+func (qc *QueryClient) MarkReorderListOrdered(ctx context.Context, args MarkReorderListOrderedArgs) (*Result, error) {
+	call := MarkReorderListOrderedBuild(args)
+	return qc.executeNamed(ctx, "markReorderListOrdered", call)
+}
+
+func MarkReorderListOrderedBuild(args MarkReorderListOrderedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation markReorderListOrdered(")
+	b.WriteString("listId: ")
+	b.WriteString(quoteMemQL(args.ListId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // MarkResponsibilityIntakePending -- Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips ” -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["markResponsibilityIntakePending"] in generated_concepts.go).
@@ -8441,6 +8693,34 @@ func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingAr
 	b.WriteString("mutation markResponsibilityIntakePending(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(quoteMemQL(args.ResponsibilityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// MarkStoreRedacted -- Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.go).
+type MarkStoreRedactedArgs struct {
+	StoreId    string
+	RedactedAt string
+}
+
+// MarkStoreRedacted calls the engine mutation markStoreRedacted.
+func (qc *QueryClient) MarkStoreRedacted(ctx context.Context, args MarkStoreRedactedArgs) (*Result, error) {
+	call := MarkStoreRedactedBuild(args)
+	return qc.executeNamed(ctx, "markStoreRedacted", call)
+}
+
+func MarkStoreRedactedBuild(args MarkStoreRedactedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation markStoreRedacted(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("redactedAt: ")
+	b.WriteString(quoteMemQL(args.RedactedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8978,6 +9258,42 @@ func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
 		b.WriteString("callCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.CallCount))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordApprovalDecision -- Record one approver's decision and, when the chain is finished, its outcome.
+//
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["recordApprovalDecision"] in generated_concepts.go).
+type RecordApprovalDecisionArgs struct {
+	ChainId string
+	Steps   []map[string]any
+	Status  string
+}
+
+// RecordApprovalDecision calls the engine mutation recordApprovalDecision.
+func (qc *QueryClient) RecordApprovalDecision(ctx context.Context, args RecordApprovalDecisionArgs) (*Result, error) {
+	call := RecordApprovalDecisionBuild(args)
+	return qc.executeNamed(ctx, "recordApprovalDecision", call)
+}
+
+func RecordApprovalDecisionBuild(args RecordApprovalDecisionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordApprovalDecision(")
+	b.WriteString("chainId: ")
+	b.WriteString(quoteMemQL(args.ChainId))
+	if args.Steps != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("steps: ")
+		b.WriteString(renderMemQLValue(args.Steps))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10292,6 +10608,40 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString("executionSurface: ")
 		b.WriteString(quoteMemQL(args.ExecutionSurface))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordStoreHealth -- Record what the connector last observed about a store. Health is a single object so the connector can publish a shape the portal renders without a schema change every time a new counter is worth showing.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["recordStoreHealth"] in generated_concepts.go).
+type RecordStoreHealthArgs struct {
+	StoreId                string
+	Health                 map[string]any
+	SubscriptionsCheckedAt string
+}
+
+// RecordStoreHealth calls the engine mutation recordStoreHealth.
+func (qc *QueryClient) RecordStoreHealth(ctx context.Context, args RecordStoreHealthArgs) (*Result, error) {
+	call := RecordStoreHealthBuild(args)
+	return qc.executeNamed(ctx, "recordStoreHealth", call)
+}
+
+func RecordStoreHealthBuild(args RecordStoreHealthArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordStoreHealth(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("health: ")
+	b.WriteString(renderMemQLValue(args.Health))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subscriptionsCheckedAt: ")
+	b.WriteString(quoteMemQL(args.SubscriptionsCheckedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12429,6 +12779,42 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	return b.String()
 }
 
+// SetCreditLimitStatus -- Move a credit limit between enforced, held and waived.
+//
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["setCreditLimitStatus"] in generated_concepts.go).
+type SetCreditLimitStatusArgs struct {
+	CreditLimitId string
+	Status        string
+	ReviewedBy    string
+}
+
+// SetCreditLimitStatus calls the engine mutation setCreditLimitStatus.
+func (qc *QueryClient) SetCreditLimitStatus(ctx context.Context, args SetCreditLimitStatusArgs) (*Result, error) {
+	call := SetCreditLimitStatusBuild(args)
+	return qc.executeNamed(ctx, "setCreditLimitStatus", call)
+}
+
+func SetCreditLimitStatusBuild(args SetCreditLimitStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setCreditLimitStatus(")
+	b.WriteString("creditLimitId: ")
+	b.WriteString(quoteMemQL(args.CreditLimitId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	if args.ReviewedBy != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reviewedBy: ")
+		b.WriteString(quoteMemQL(args.ReviewedBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetDelegationPolicy wraps the mutation named "setDelegationPolicy".
 //
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.go).
@@ -12964,6 +13350,35 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 	return b.String()
 }
 
+// SetQuoteStatus -- Move a quote through draft -> sent -> accepted | declined | expired.
+// The transitions themselves are checked in Go (component-side, where the approval chain is evaluated); this mutation records the outcome and the timestamps that go with it.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["setQuoteStatus"] in generated_concepts.go).
+type SetQuoteStatusArgs struct {
+	QuoteId string
+	Status  string
+}
+
+// SetQuoteStatus calls the engine mutation setQuoteStatus.
+func (qc *QueryClient) SetQuoteStatus(ctx context.Context, args SetQuoteStatusArgs) (*Result, error) {
+	call := SetQuoteStatusBuild(args)
+	return qc.executeNamed(ctx, "setQuoteStatus", call)
+}
+
+func SetQuoteStatusBuild(args SetQuoteStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setQuoteStatus(")
+	b.WriteString("quoteId: ")
+	b.WriteString(quoteMemQL(args.QuoteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetRecipientSubscription -- Change one recipient's subscription state -- the write behind an operator honouring an unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
 // unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later, an unsubscribe forwarded by support) and stamping the clock would date every one of those to the moment the operator got round to it.
 //
@@ -13020,6 +13435,34 @@ func SetResponsibilityStatusBuild(args SetResponsibilityStatusArgs) string {
 	b.WriteString("responsibilityId: ")
 	b.WriteString(quoteMemQL(args.ResponsibilityId))
 	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetStoreStatus -- Move a store through its lifecycle. Separate from updateStore because status is the switch ingestion reads: pausing a store is an operational act, not a configuration edit, and it wants its own audit line.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["setStoreStatus"] in generated_concepts.go).
+type SetStoreStatusArgs struct {
+	StoreId string
+	Status  string
+}
+
+// SetStoreStatus calls the engine mutation setStoreStatus.
+func (qc *QueryClient) SetStoreStatus(ctx context.Context, args SetStoreStatusArgs) (*Result, error) {
+	call := SetStoreStatusBuild(args)
+	return qc.executeNamed(ctx, "setStoreStatus", call)
+}
+
+func SetStoreStatusBuild(args SetStoreStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setStoreStatus(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -14993,6 +15436,58 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 	return b.String()
 }
 
+// UpdateQuote -- Edit a draft quote's lines and terms.
+//
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["updateQuote"] in generated_concepts.go).
+type UpdateQuoteArgs struct {
+	QuoteId     string
+	Lines       []map[string]any
+	TotalAmount string
+	Terms       string
+	ValidUntil  string
+}
+
+// UpdateQuote calls the engine mutation updateQuote.
+func (qc *QueryClient) UpdateQuote(ctx context.Context, args UpdateQuoteArgs) (*Result, error) {
+	call := UpdateQuoteBuild(args)
+	return qc.executeNamed(ctx, "updateQuote", call)
+}
+
+func UpdateQuoteBuild(args UpdateQuoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateQuote(")
+	b.WriteString("quoteId: ")
+	b.WriteString(quoteMemQL(args.QuoteId))
+	if args.Lines != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lines: ")
+		b.WriteString(renderMemQLValue(args.Lines))
+	}
+	if args.TotalAmount != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("totalAmount: ")
+		b.WriteString(quoteMemQL(args.TotalAmount))
+	}
+	if args.Terms != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("terms: ")
+		b.WriteString(quoteMemQL(args.Terms))
+	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("validUntil: ")
+	b.WriteString(quoteMemQL(args.ValidUntil))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateRecord -- Update a data record (resets validation state to draft)
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["updateRecord"] in generated_concepts.go).
@@ -15449,6 +15944,108 @@ func UpdateSiteStatusBuild(args UpdateSiteStatusArgs) string {
 	return b.String()
 }
 
+// UpdateStore -- Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.go).
+type UpdateStoreArgs struct {
+	StoreId            string
+	Name               string
+	AppClientId        string
+	AdminTokenRef      string
+	StorefrontTokenRef string
+	WebhookSecretRef   string
+	ApiVersion         string
+	ProtectedDataLevel string
+	Plan               string
+	ScopesGranted      []string
+	OwnerUserId        string
+}
+
+// UpdateStore calls the engine mutation updateStore.
+func (qc *QueryClient) UpdateStore(ctx context.Context, args UpdateStoreArgs) (*Result, error) {
+	call := UpdateStoreBuild(args)
+	return qc.executeNamed(ctx, "updateStore", call)
+}
+
+func UpdateStoreBuild(args UpdateStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if args.Name != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.AppClientId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("appClientId: ")
+		b.WriteString(quoteMemQL(args.AppClientId))
+	}
+	if args.AdminTokenRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("adminTokenRef: ")
+		b.WriteString(quoteMemQL(args.AdminTokenRef))
+	}
+	if args.StorefrontTokenRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("storefrontTokenRef: ")
+		b.WriteString(quoteMemQL(args.StorefrontTokenRef))
+	}
+	if args.WebhookSecretRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("webhookSecretRef: ")
+		b.WriteString(quoteMemQL(args.WebhookSecretRef))
+	}
+	if args.ApiVersion != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apiVersion: ")
+		b.WriteString(quoteMemQL(args.ApiVersion))
+	}
+	if args.ProtectedDataLevel != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("protectedDataLevel: ")
+		b.WriteString(quoteMemQL(args.ProtectedDataLevel))
+	}
+	if args.Plan != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("plan: ")
+		b.WriteString(quoteMemQL(args.Plan))
+	}
+	if args.ScopesGranted != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scopesGranted: ")
+		b.WriteString(renderMemQLValue(args.ScopesGranted))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateTaskStatus -- Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.
 //
 // Bound concept: v1:planner:task (machine-readable: BoundConcepts["updateTaskStatus"] in generated_concepts.go).
@@ -15718,6 +16315,494 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		}
 		b.WriteString("activeCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.ActiveCount))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertApprovalChain -- Define or update an approval chain.
+//
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["upsertApprovalChain"] in generated_concepts.go).
+type UpsertApprovalChainArgs struct {
+	ChainId         string
+	StoreId         string
+	Name            string
+	CompanyGid      string
+	ThresholdAmount string
+	CurrencyCode    string
+	Steps           []map[string]any
+	SubjectId       string
+}
+
+// UpsertApprovalChain calls the engine mutation upsertApprovalChain.
+func (qc *QueryClient) UpsertApprovalChain(ctx context.Context, args UpsertApprovalChainArgs) (*Result, error) {
+	call := UpsertApprovalChainBuild(args)
+	return qc.executeNamed(ctx, "upsertApprovalChain", call)
+}
+
+func UpsertApprovalChainBuild(args UpsertApprovalChainArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertApprovalChain(")
+	b.WriteString("chainId: ")
+	b.WriteString(quoteMemQL(args.ChainId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.CompanyGid != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyGid: ")
+		b.WriteString(quoteMemQL(args.CompanyGid))
+	}
+	if args.ThresholdAmount != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("thresholdAmount: ")
+		b.WriteString(quoteMemQL(args.ThresholdAmount))
+	}
+	if args.CurrencyCode != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("currencyCode: ")
+		b.WriteString(quoteMemQL(args.CurrencyCode))
+	}
+	if args.Steps != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("steps: ")
+		b.WriteString(renderMemQLValue(args.Steps))
+	}
+	if args.SubjectId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subjectId: ")
+		b.WriteString(quoteMemQL(args.SubjectId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertCompanyLocationNote -- Write an internal note about a company location.
+//
+// Bound concept: v1:commerce:companyLocationNote (machine-readable: BoundConcepts["upsertCompanyLocationNote"] in generated_concepts.go).
+type UpsertCompanyLocationNoteArgs struct {
+	NoteId             string
+	StoreId            string
+	CompanyLocationGid string
+	Note               string
+	AuthoredBy         string
+}
+
+// UpsertCompanyLocationNote calls the engine mutation upsertCompanyLocationNote.
+func (qc *QueryClient) UpsertCompanyLocationNote(ctx context.Context, args UpsertCompanyLocationNoteArgs) (*Result, error) {
+	call := UpsertCompanyLocationNoteBuild(args)
+	return qc.executeNamed(ctx, "upsertCompanyLocationNote", call)
+}
+
+func UpsertCompanyLocationNoteBuild(args UpsertCompanyLocationNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertCompanyLocationNote(")
+	b.WriteString("noteId: ")
+	b.WriteString(quoteMemQL(args.NoteId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyLocationGid: ")
+	b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	if args.Note != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(quoteMemQL(args.Note))
+	}
+	if args.AuthoredBy != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authoredBy: ")
+		b.WriteString(quoteMemQL(args.AuthoredBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertCreditLimit -- Set a company location's credit limit.
+//
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["upsertCreditLimit"] in generated_concepts.go).
+type UpsertCreditLimitArgs struct {
+	CreditLimitId      string
+	StoreId            string
+	CompanyGid         string
+	CompanyLocationGid string
+	LimitAmount        string
+	CurrencyCode       string
+	OutstandingAmount  string
+	ReviewedBy         string
+}
+
+// UpsertCreditLimit calls the engine mutation upsertCreditLimit.
+func (qc *QueryClient) UpsertCreditLimit(ctx context.Context, args UpsertCreditLimitArgs) (*Result, error) {
+	call := UpsertCreditLimitBuild(args)
+	return qc.executeNamed(ctx, "upsertCreditLimit", call)
+}
+
+func UpsertCreditLimitBuild(args UpsertCreditLimitArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertCreditLimit(")
+	b.WriteString("creditLimitId: ")
+	b.WriteString(quoteMemQL(args.CreditLimitId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyLocationGid: ")
+	b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("limitAmount: ")
+	b.WriteString(quoteMemQL(args.LimitAmount))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("currencyCode: ")
+	b.WriteString(quoteMemQL(args.CurrencyCode))
+	if args.OutstandingAmount != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outstandingAmount: ")
+		b.WriteString(quoteMemQL(args.OutstandingAmount))
+	}
+	if args.ReviewedBy != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reviewedBy: ")
+		b.WriteString(quoteMemQL(args.ReviewedBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertCustomerNote -- Write an internal note about a customer.
+//
+// Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["upsertCustomerNote"] in generated_concepts.go).
+type UpsertCustomerNoteArgs struct {
+	NoteId      string
+	StoreId     string
+	CustomerGid string
+	Note        string
+	AuthoredBy  string
+}
+
+// UpsertCustomerNote calls the engine mutation upsertCustomerNote.
+func (qc *QueryClient) UpsertCustomerNote(ctx context.Context, args UpsertCustomerNoteArgs) (*Result, error) {
+	call := UpsertCustomerNoteBuild(args)
+	return qc.executeNamed(ctx, "upsertCustomerNote", call)
+}
+
+func UpsertCustomerNoteBuild(args UpsertCustomerNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertCustomerNote(")
+	b.WriteString("noteId: ")
+	b.WriteString(quoteMemQL(args.NoteId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("customerGid: ")
+	b.WriteString(quoteMemQL(args.CustomerGid))
+	if args.Note != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(quoteMemQL(args.Note))
+	}
+	if args.AuthoredBy != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authoredBy: ")
+		b.WriteString(quoteMemQL(args.AuthoredBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertProductContent -- Write agent- or operator-authored product copy. The row is MemQL's; the push to Shopify is the outbox's job, triggered by the row change.
+//
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["upsertProductContent"] in generated_concepts.go).
+type UpsertProductContentArgs struct {
+	ContentId   string
+	StoreId     string
+	ProductGid  string
+	Description string
+	Summary     string
+	Keywords    []string
+	Blocks      map[string]any
+	AuthoredBy  string
+}
+
+// UpsertProductContent calls the engine mutation upsertProductContent.
+func (qc *QueryClient) UpsertProductContent(ctx context.Context, args UpsertProductContentArgs) (*Result, error) {
+	call := UpsertProductContentBuild(args)
+	return qc.executeNamed(ctx, "upsertProductContent", call)
+}
+
+func UpsertProductContentBuild(args UpsertProductContentArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertProductContent(")
+	b.WriteString("contentId: ")
+	b.WriteString(quoteMemQL(args.ContentId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("productGid: ")
+	b.WriteString(quoteMemQL(args.ProductGid))
+	if args.Description != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Summary != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(quoteMemQL(args.Summary))
+	}
+	if args.Keywords != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("keywords: ")
+		b.WriteString(renderMemQLValue(args.Keywords))
+	}
+	if args.Blocks != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("blocks: ")
+		b.WriteString(renderMemQLValue(args.Blocks))
+	}
+	if args.AuthoredBy != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authoredBy: ")
+		b.WriteString(quoteMemQL(args.AuthoredBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertReorderList -- Create or update a saved reorder list.
+//
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["upsertReorderList"] in generated_concepts.go).
+type UpsertReorderListArgs struct {
+	ListId             string
+	StoreId            string
+	Name               string
+	CompanyGid         string
+	CompanyLocationGid string
+	CompanyContactGid  string
+	Lines              []map[string]any
+}
+
+// UpsertReorderList calls the engine mutation upsertReorderList.
+func (qc *QueryClient) UpsertReorderList(ctx context.Context, args UpsertReorderListArgs) (*Result, error) {
+	call := UpsertReorderListBuild(args)
+	return qc.executeNamed(ctx, "upsertReorderList", call)
+}
+
+func UpsertReorderListBuild(args UpsertReorderListArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertReorderList(")
+	b.WriteString("listId: ")
+	b.WriteString(quoteMemQL(args.ListId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyGid: ")
+	b.WriteString(quoteMemQL(args.CompanyGid))
+	if args.CompanyLocationGid != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyLocationGid: ")
+		b.WriteString(quoteMemQL(args.CompanyLocationGid))
+	}
+	if args.CompanyContactGid != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyContactGid: ")
+		b.WriteString(quoteMemQL(args.CompanyContactGid))
+	}
+	if args.Lines != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lines: ")
+		b.WriteString(renderMemQLValue(args.Lines))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertSalesRep -- Create or update a sales rep.
+//
+// Bound concept: v1:commerce:salesRep (machine-readable: BoundConcepts["upsertSalesRep"] in generated_concepts.go).
+type UpsertSalesRepArgs struct {
+	RepId       string
+	StoreId     string
+	DisplayName string
+	Email       string
+	UserId      string
+	TerritoryId string
+}
+
+// UpsertSalesRep calls the engine mutation upsertSalesRep.
+func (qc *QueryClient) UpsertSalesRep(ctx context.Context, args UpsertSalesRepArgs) (*Result, error) {
+	call := UpsertSalesRepBuild(args)
+	return qc.executeNamed(ctx, "upsertSalesRep", call)
+}
+
+func UpsertSalesRepBuild(args UpsertSalesRepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertSalesRep(")
+	b.WriteString("repId: ")
+	b.WriteString(quoteMemQL(args.RepId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("displayName: ")
+	b.WriteString(quoteMemQL(args.DisplayName))
+	if args.Email != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("email: ")
+		b.WriteString(quoteMemQL(args.Email))
+	}
+	if args.UserId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userId: ")
+		b.WriteString(quoteMemQL(args.UserId))
+	}
+	if args.TerritoryId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("territoryId: ")
+		b.WriteString(quoteMemQL(args.TerritoryId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertTerritory -- Create or update a territory.
+//
+// Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["upsertTerritory"] in generated_concepts.go).
+type UpsertTerritoryArgs struct {
+	TerritoryId         string
+	StoreId             string
+	Name                string
+	CompanyGids         []string
+	CompanyLocationGids []string
+}
+
+// UpsertTerritory calls the engine mutation upsertTerritory.
+func (qc *QueryClient) UpsertTerritory(ctx context.Context, args UpsertTerritoryArgs) (*Result, error) {
+	call := UpsertTerritoryBuild(args)
+	return qc.executeNamed(ctx, "upsertTerritory", call)
+}
+
+func UpsertTerritoryBuild(args UpsertTerritoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertTerritory(")
+	b.WriteString("territoryId: ")
+	b.WriteString(quoteMemQL(args.TerritoryId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.CompanyGids != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyGids: ")
+		b.WriteString(renderMemQLValue(args.CompanyGids))
+	}
+	if args.CompanyLocationGids != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("companyLocationGids: ")
+		b.WriteString(renderMemQLValue(args.CompanyLocationGids))
 	}
 	b.WriteString(")")
 	return b.String()

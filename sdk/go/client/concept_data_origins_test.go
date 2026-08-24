@@ -14,7 +14,7 @@ import (
 func TestConceptsFromProtoCarryTheDataOriginsDeclaration(t *testing.T) {
 	in := []*memqlv1.ConceptInfo{
 		{
-			Id:             "v1:shopify:shopifyProduct",
+			Id:             "v1:shopify:product",
 			DataState:      "mirror",
 			DataOrigin:     "shopify",
 			DataMirroredTo: nil,

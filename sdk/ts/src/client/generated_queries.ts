@@ -5,6 +5,30 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** Abandoned checkouts since a moment. There is no Checkout object and checkout runs only on Shopify, so this is the whole of what a headless storefront can see of an abandoned session. */
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["abandonedCheckouts"] in generated_concepts.ts).
+export interface AbandonedCheckoutsArgs {
+  storeId: string;
+  since: string;
+}
+
+export function buildAbandonedCheckouts(args: AbandonedCheckoutsArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("since: " + renderMemQLValue(args.since));
+  return "query abandonedCheckouts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    abandonedCheckouts(args: AbandonedCheckoutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.abandonedCheckouts = function (this: QueryClient, args: AbandonedCheckoutsArgs = {} as AbandonedCheckoutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("abandonedCheckouts", buildAbandonedCheckouts(args), opts);
+};
+
 /** Returns the access request with the given id. Zero or one result. */
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["accessRequestById"] in generated_concepts.ts).
 export interface AccessRequestByIdArgs {
@@ -1001,6 +1025,52 @@ QueryClient.prototype.appSessionsForUser = function (this: QueryClient, args: Ap
   return this.executeNamed("appSessionsForUser", buildAppSessionsForUser(args), opts);
 };
 
+/** One approval chain. */
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["approvalChainById"] in generated_concepts.ts).
+export interface ApprovalChainByIdArgs {
+  chainId: string;
+}
+
+export function buildApprovalChainById(args: ApprovalChainByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("chainId: " + renderMemQLValue(args.chainId));
+  return "query approvalChainById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    approvalChainById(args: ApprovalChainByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.approvalChainById = function (this: QueryClient, args: ApprovalChainByIdArgs = {} as ApprovalChainByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("approvalChainById", buildApprovalChainById(args), opts);
+};
+
+/** The chains that could apply to a company: its own, plus the store-wide ones. Which of them ENGAGES is a threshold comparison the caller makes. */
+// Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["approvalChainsForCompany"] in generated_concepts.ts).
+export interface ApprovalChainsForCompanyArgs {
+  storeId: string;
+  companyGid?: string;
+}
+
+export function buildApprovalChainsForCompany(args: ApprovalChainsForCompanyArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.companyGid !== undefined) parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  return "query approvalChainsForCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    approvalChainsForCompany(args: ApprovalChainsForCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.approvalChainsForCompany = function (this: QueryClient, args: ApprovalChainsForCompanyArgs = {} as ApprovalChainsForCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("approvalChainsForCompany", buildApprovalChainsForCompany(args), opts);
+};
+
 /** The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover). */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.ts).
 export interface ApprovalQueueArgs {
@@ -1994,6 +2064,74 @@ QueryClient.prototype.codeMetricsInWindow = function (this: QueryClient, args: C
   return this.executeNamed("codeMetricsInWindow", buildCodeMetricsInWindow(args), opts);
 };
 
+/** The internal note on one company location. */
+// Bound concept: v1:commerce:companyLocationNote (machine-readable: BoundConcepts["companyLocationNoteFor"] in generated_concepts.ts).
+export interface CompanyLocationNoteForArgs {
+  storeId: string;
+  companyLocationGid: string;
+}
+
+export function buildCompanyLocationNoteFor(args: CompanyLocationNoteForArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  return "query companyLocationNoteFor(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    companyLocationNoteFor(args: CompanyLocationNoteForArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.companyLocationNoteFor = function (this: QueryClient, args: CompanyLocationNoteForArgs = {} as CompanyLocationNoteForArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("companyLocationNoteFor", buildCompanyLocationNoteFor(args), opts);
+};
+
+/** Privacy jobs whose hold has elapsed. The read the hourly runner makes. */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsDue"] in generated_concepts.ts).
+export interface ComplianceJobsDueArgs {
+  asOf: string;
+}
+
+export function buildComplianceJobsDue(args: ComplianceJobsDueArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query complianceJobsDue(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsDue(args: ComplianceJobsDueArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsDue = function (this: QueryClient, args: ComplianceJobsDueArgs = {} as ComplianceJobsDueArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsDue", buildComplianceJobsDue(args), opts);
+};
+
+/** Every privacy job for a store, newest first -- the audit view. */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsForStore"] in generated_concepts.ts).
+export interface ComplianceJobsForStoreArgs {
+  storeId: string;
+}
+
+export function buildComplianceJobsForStore(args: ComplianceJobsForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query complianceJobsForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsForStore(args: ComplianceJobsForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsForStore = function (this: QueryClient, args: ComplianceJobsForStoreArgs = {} as ComplianceJobsForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsForStore", buildComplianceJobsForStore(args), opts);
+};
+
 /** Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit. */
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.ts).
 export interface ComposedViewByIdArgs {
@@ -2107,6 +2245,54 @@ QueryClient.prototype.consentStatus = function (this: QueryClient, args: Consent
   return this.executeNamed("consentStatus", buildConsentStatus(args), opts);
 };
 
+/** The credit limit for one company location -- the read a checkout validation's backing service makes. */
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitForLocation"] in generated_concepts.ts).
+export interface CreditLimitForLocationArgs {
+  storeId: string;
+  companyLocationGid: string;
+}
+
+export function buildCreditLimitForLocation(args: CreditLimitForLocationArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyLocationGid: " + renderMemQLValue(args.companyLocationGid));
+  return "query creditLimitForLocation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    creditLimitForLocation(args: CreditLimitForLocationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.creditLimitForLocation = function (this: QueryClient, args: CreditLimitForLocationArgs = {} as CreditLimitForLocationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("creditLimitForLocation", buildCreditLimitForLocation(args), opts);
+};
+
+/** Every credit limit for a company, across its locations. */
+// Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitsForCompany"] in generated_concepts.ts).
+export interface CreditLimitsForCompanyArgs {
+  storeId: string;
+  companyGid: string;
+}
+
+export function buildCreditLimitsForCompany(args: CreditLimitsForCompanyArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  return "query creditLimitsForCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    creditLimitsForCompany(args: CreditLimitsForCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.creditLimitsForCompany = function (this: QueryClient, args: CreditLimitsForCompanyArgs = {} as CreditLimitsForCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("creditLimitsForCompany", buildCreditLimitsForCompany(args), opts);
+};
+
 /** Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row. */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["currentUser"] in generated_concepts.ts).
 export interface CurrentUserArgs {
@@ -2125,6 +2311,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.currentUser = function (this: QueryClient, args: CurrentUserArgs = {} as CurrentUserArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("currentUser", buildCurrentUser(args), opts);
+};
+
+/** The internal note on one customer. */
+// Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["customerNoteFor"] in generated_concepts.ts).
+export interface CustomerNoteForArgs {
+  storeId: string;
+  customerGid: string;
+}
+
+export function buildCustomerNoteFor(args: CustomerNoteForArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("customerGid: " + renderMemQLValue(args.customerGid));
+  return "query customerNoteFor(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customerNoteFor(args: CustomerNoteForArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customerNoteFor = function (this: QueryClient, args: CustomerNoteForArgs = {} as CustomerNoteForArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customerNoteFor", buildCustomerNoteFor(args), opts);
 };
 
 /** delegationPolicyForUser wraps the query named "delegationPolicyForUser". */
@@ -3432,6 +3642,30 @@ QueryClient.prototype.libraryWorkspaceLiveSources = function (this: QueryClient,
   return this.executeNamed("libraryWorkspaceLiveSources", buildLibraryWorkspaceLiveSources(args), opts);
 };
 
+/** The line items of one order. */
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["lineItemsForOrder"] in generated_concepts.ts).
+export interface LineItemsForOrderArgs {
+  storeId: string;
+  orderGid: string;
+}
+
+export function buildLineItemsForOrder(args: LineItemsForOrderArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("orderGid: " + renderMemQLValue(args.orderGid));
+  return "query lineItemsForOrder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    lineItemsForOrder(args: LineItemsForOrderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.lineItemsForOrder = function (this: QueryClient, args: LineItemsForOrderArgs = {} as LineItemsForOrderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("lineItemsForOrder", buildLineItemsForOrder(args), opts);
+};
+
 /** liveAppSessionsForUser wraps the query named "liveAppSessionsForUser". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["liveAppSessionsForUser"] in generated_concepts.ts).
 export interface LiveAppSessionsForUserArgs {
@@ -3621,6 +3855,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.myWorkspaces = function (this: QueryClient, args: MyWorkspacesArgs = {} as MyWorkspacesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("myWorkspaces", buildMyWorkspaces(args), opts);
+};
+
+/** Every live variant in the store. `neverSold` is the SET DIFFERENCE the tool computes -- these minus the variants that appear on an order in the window -- because MemQL has no anti-join and inventing one here would mean answering the question wrong rather than not answering it. */
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["neverSold"] in generated_concepts.ts).
+export interface NeverSoldArgs {
+  storeId: string;
+}
+
+export function buildNeverSold(args: NeverSoldArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query neverSold(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    neverSold(args: NeverSoldArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.neverSold = function (this: QueryClient, args: NeverSoldArgs = {} as NeverSoldArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("neverSold", buildNeverSold(args), opts);
 };
 
 /** Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094. */
@@ -3858,6 +4114,61 @@ declare module "./query.js" {
 
 QueryClient.prototype.oAuthClientCORSGrants = function (this: QueryClient, args: OAuthClientCORSGrantsArgs = {} as OAuthClientCORSGrantsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("oAuthClientCORSGrants", buildOAuthClientCORSGrants(args), opts);
+};
+
+/** One company's orders in a window -- the B2B account view. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersByCompany"] in generated_concepts.ts).
+export interface OrdersByCompanyArgs {
+  storeId: string;
+  companyGid: string;
+  from: string;
+  to: string;
+}
+
+export function buildOrdersByCompany(args: OrdersByCompanyArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  parts.push("from: " + renderMemQLValue(args.from));
+  parts.push("to: " + renderMemQLValue(args.to));
+  return "query ordersByCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    ordersByCompany(args: OrdersByCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.ordersByCompany = function (this: QueryClient, args: OrdersByCompanyArgs = {} as OrdersByCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("ordersByCompany", buildOrdersByCompany(args), opts);
+};
+
+/** Orders created in a window. The base read for every sales question: soldByProduct, soldByVariant, repeatCustomers and refundRate all start here and the tool expands or groups from it.
+`sourceCreatedAt` is Shopify's own createdAt carried as an RFC3339 string (the mirror's mapping rule for timestamps), which sorts and compares chronologically as text in UTC. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersInWindow"] in generated_concepts.ts).
+export interface OrdersInWindowArgs {
+  storeId: string;
+  from: string;
+  to: string;
+}
+
+export function buildOrdersInWindow(args: OrdersInWindowArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("from: " + renderMemQLValue(args.from));
+  parts.push("to: " + renderMemQLValue(args.to));
+  return "query ordersInWindow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    ordersInWindow(args: OrdersInWindowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.ordersInWindow = function (this: QueryClient, args: OrdersInWindowArgs = {} as OrdersInWindowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("ordersInWindow", buildOrdersInWindow(args), opts);
 };
 
 /** Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls. */
@@ -4168,6 +4479,28 @@ QueryClient.prototype.patIdentityByKeyHash = function (this: QueryClient, args: 
   return this.executeNamed("patIdentityByKeyHash", buildPatIdentityByKeyHash(args), opts);
 };
 
+/** Orders whose payment terms are still outstanding: the B2B receivables question, and the one a credit limit is checked against. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["paymentTermsOutstanding"] in generated_concepts.ts).
+export interface PaymentTermsOutstandingArgs {
+  storeId: string;
+}
+
+export function buildPaymentTermsOutstanding(args: PaymentTermsOutstandingArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query paymentTermsOutstanding(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    paymentTermsOutstanding(args: PaymentTermsOutstandingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.paymentTermsOutstanding = function (this: QueryClient, args: PaymentTermsOutstandingArgs = {} as PaymentTermsOutstandingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("paymentTermsOutstanding", buildPaymentTermsOutstanding(args), opts);
+};
+
 /** Access requests with status=pending; backs the admin review queue. */
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["pendingAccessRequests"] in generated_concepts.ts).
 export interface PendingAccessRequestsArgs {
@@ -4320,6 +4653,54 @@ QueryClient.prototype.policy = function (this: QueryClient, args: PolicyArgs = {
   return this.executeNamed("policy", buildPolicy(args), opts);
 };
 
+/** Product copy for one mirrored product. */
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["productContentForProduct"] in generated_concepts.ts).
+export interface ProductContentForProductArgs {
+  storeId: string;
+  productGid: string;
+}
+
+export function buildProductContentForProduct(args: ProductContentForProductArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("productGid: " + renderMemQLValue(args.productGid));
+  return "query productContentForProduct(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    productContentForProduct(args: ProductContentForProductArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.productContentForProduct = function (this: QueryClient, args: ProductContentForProductArgs = {} as ProductContentForProductArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("productContentForProduct", buildProductContentForProduct(args), opts);
+};
+
+/** Everything the push channel still has to deliver for a store, and everything it already has. `status` narrows to one of them. */
+// Bound concept: v1:commerce:productContent (machine-readable: BoundConcepts["productContentForStore"] in generated_concepts.ts).
+export interface ProductContentForStoreArgs {
+  storeId: string;
+  status?: string;
+}
+
+export function buildProductContentForStore(args: ProductContentForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query productContentForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    productContentForStore(args: ProductContentForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.productContentForStore = function (this: QueryClient, args: ProductContentForStoreArgs = {} as ProductContentForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("productContentForStore", buildProductContentForStore(args), opts);
+};
+
 /** Resolve a v1:forge:project by id. */
 // Bound concept: v1:forge:project (machine-readable: BoundConcepts["projectById"] in generated_concepts.ts).
 export interface ProjectByIdArgs {
@@ -4405,6 +4786,147 @@ declare module "./query.js" {
 
 QueryClient.prototype.provisionedWorkspaces = function (this: QueryClient, args: ProvisionedWorkspacesArgs = {} as ProvisionedWorkspacesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("provisionedWorkspaces", buildProvisionedWorkspaces(args), opts);
+};
+
+/** Any variant that is currently for sale, across every configured store.
+One row is the whole answer: the caller is asking "is there a catalog to sell from", not "what is in it", and a campaign guard that paged the catalog to answer a boolean would get slower as the store grew. */
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["purchasableVariants"] in generated_concepts.ts).
+export interface PurchasableVariantsArgs {
+}
+
+export function buildPurchasableVariants(args: PurchasableVariantsArgs): string {
+  void args;
+  return "query purchasableVariants()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    purchasableVariants(args?: PurchasableVariantsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.purchasableVariants = function (this: QueryClient, args: PurchasableVariantsArgs = {} as PurchasableVariantsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("purchasableVariants", buildPurchasableVariants(args), opts);
+};
+
+/** Every mirrored variant that is for sale in one store, newest first. The storefront-facing read; purchasableVariants is the guard's cheap sibling. */
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["purchasableVariantsForStore"] in generated_concepts.ts).
+export interface PurchasableVariantsForStoreArgs {
+  storeId: string;
+}
+
+export function buildPurchasableVariantsForStore(args: PurchasableVariantsForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query purchasableVariantsForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    purchasableVariantsForStore(args: PurchasableVariantsForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.purchasableVariantsForStore = function (this: QueryClient, args: PurchasableVariantsForStoreArgs = {} as PurchasableVariantsForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("purchasableVariantsForStore", buildPurchasableVariantsForStore(args), opts);
+};
+
+/** One quote. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quoteById"] in generated_concepts.ts).
+export interface QuoteByIdArgs {
+  quoteId: string;
+}
+
+export function buildQuoteById(args: QuoteByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("quoteId: " + renderMemQLValue(args.quoteId));
+  return "query quoteById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    quoteById(args: QuoteByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.quoteById = function (this: QueryClient, args: QuoteByIdArgs = {} as QuoteByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("quoteById", buildQuoteById(args), opts);
+};
+
+/** A company's quotes, newest first. `status` narrows to a stage. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesForCompany"] in generated_concepts.ts).
+export interface QuotesForCompanyArgs {
+  storeId: string;
+  companyGid: string;
+  status?: string;
+}
+
+export function buildQuotesForCompany(args: QuotesForCompanyArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query quotesForCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    quotesForCompany(args: QuotesForCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.quotesForCompany = function (this: QueryClient, args: QuotesForCompanyArgs = {} as QuotesForCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("quotesForCompany", buildQuotesForCompany(args), opts);
+};
+
+/** A rep's quotes. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesForRep"] in generated_concepts.ts).
+export interface QuotesForRepArgs {
+  storeId: string;
+  salesRepId: string;
+  status?: string;
+}
+
+export function buildQuotesForRep(args: QuotesForRepArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("salesRepId: " + renderMemQLValue(args.salesRepId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query quotesForRep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    quotesForRep(args: QuotesForRepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.quotesForRep = function (this: QueryClient, args: QuotesForRepArgs = {} as QuotesForRepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("quotesForRep", buildQuotesForRep(args), opts);
+};
+
+/** Quotes that have passed their validity date and are still open. The read the expiry sweep makes. */
+// Bound concept: v1:commerce:quote (machine-readable: BoundConcepts["quotesPastValidity"] in generated_concepts.ts).
+export interface QuotesPastValidityArgs {
+  storeId: string;
+  asOf: string;
+}
+
+export function buildQuotesPastValidity(args: QuotesPastValidityArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query quotesPastValidity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    quotesPastValidity(args: QuotesPastValidityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.quotesPastValidity = function (this: QueryClient, args: QuotesPastValidityArgs = {} as QuotesPastValidityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("quotesPastValidity", buildQuotesPastValidity(args), opts);
 };
 
 /** recentAuditEvents wraps the query named "recentAuditEvents". */
@@ -4521,6 +5043,82 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordsByState = function (this: QueryClient, args: RecordsByStateArgs = {} as RecordsByStateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordsByState", buildRecordsByState(args), opts);
+};
+
+/** Refunds recorded in a window. The RATE is refunds over orders, so the tool divides this by ordersInWindow rather than either read pretending to know the other. */
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["refundRate"] in generated_concepts.ts).
+export interface RefundRateArgs {
+  storeId: string;
+  from: string;
+  to: string;
+}
+
+export function buildRefundRate(args: RefundRateArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("from: " + renderMemQLValue(args.from));
+  parts.push("to: " + renderMemQLValue(args.to));
+  return "query refundRate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    refundRate(args: RefundRateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRateArgs = {} as RefundRateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("refundRate", buildRefundRate(args), opts);
+};
+
+/** A company's saved reorder lists. */
+// Bound concept: v1:commerce:reorderList (machine-readable: BoundConcepts["reorderListsForCompany"] in generated_concepts.ts).
+export interface ReorderListsForCompanyArgs {
+  storeId: string;
+  companyGid: string;
+}
+
+export function buildReorderListsForCompany(args: ReorderListsForCompanyArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("companyGid: " + renderMemQLValue(args.companyGid));
+  return "query reorderListsForCompany(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    reorderListsForCompany(args: ReorderListsForCompanyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.reorderListsForCompany = function (this: QueryClient, args: ReorderListsForCompanyArgs = {} as ReorderListsForCompanyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("reorderListsForCompany", buildReorderListsForCompany(args), opts);
+};
+
+/** Orders in a window, for the repeat-customer question. The tool groups by customerGid and counts the customers with more than one. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["repeatCustomers"] in generated_concepts.ts).
+export interface RepeatCustomersArgs {
+  storeId: string;
+  from: string;
+  to: string;
+}
+
+export function buildRepeatCustomers(args: RepeatCustomersArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("from: " + renderMemQLValue(args.from));
+  parts.push("to: " + renderMemQLValue(args.to));
+  return "query repeatCustomers(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repeatCustomers(args: RepeatCustomersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repeatCustomers = function (this: QueryClient, args: RepeatCustomersArgs = {} as RepeatCustomersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repeatCustomers", buildRepeatCustomers(args), opts);
 };
 
 /** ENGINE: reputation counters from a given UTC day onward, oldest first (memql#3462). The read the warming ramp evaluates and the one an operator runs to answer "what is our complaint rate at gmail.com this week". Cluster-owner gated, and it spans owners for the same reason the suppression list does: one deployment, one sending mailbox, one reputation. The rows carry a domain and four integers and no address.
@@ -4719,6 +5317,28 @@ QueryClient.prototype.routingPolicyForOwner = function (this: QueryClient, args:
   return this.executeNamed("routingPolicyForOwner", buildRoutingPolicyForOwner(args), opts);
 };
 
+/** Sales reps for a store. */
+// Bound concept: v1:commerce:salesRep (machine-readable: BoundConcepts["salesRepsForStore"] in generated_concepts.ts).
+export interface SalesRepsForStoreArgs {
+  storeId: string;
+}
+
+export function buildSalesRepsForStore(args: SalesRepsForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query salesRepsForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    salesRepsForStore(args: SalesRepsForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.salesRepsForStore = function (this: QueryClient, args: SalesRepsForStoreArgs = {} as SalesRepsForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("salesRepsForStore", buildSalesRepsForStore(args), opts);
+};
+
 /** ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.ts).
@@ -4808,50 +5428,3124 @@ QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClien
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
 };
 
-/** One thin product by GID. */
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProductById"] in generated_concepts.ts).
-export interface ShopifyProductByIdArgs {
-  productId: string;
+/** One mirrored Shopify AbandonedCheckout by store and GID. */
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutByGid"] in generated_concepts.ts).
+export interface ShopifyAbandonedCheckoutByGidArgs {
+  storeId: string;
+  gid: string;
 }
 
-export function buildShopifyProductById(args: ShopifyProductByIdArgs): string {
+export function buildShopifyAbandonedCheckoutByGid(args: ShopifyAbandonedCheckoutByGidArgs): string {
   const parts: string[] = [];
-  parts.push("productId: " + renderMemQLValue(args.productId));
-  return "query shopifyProductById(" + parts.join(", ") + ")";
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyAbandonedCheckoutByGid(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    shopifyProductById(args: ShopifyProductByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+    shopifyAbandonedCheckoutByGid(args: ShopifyAbandonedCheckoutByGidArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.shopifyProductById = function (this: QueryClient, args: ShopifyProductByIdArgs = {} as ShopifyProductByIdArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("shopifyProductById", buildShopifyProductById(args), opts);
+QueryClient.prototype.shopifyAbandonedCheckoutByGid = function (this: QueryClient, args: ShopifyAbandonedCheckoutByGidArgs = {} as ShopifyAbandonedCheckoutByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyAbandonedCheckoutByGid", buildShopifyAbandonedCheckoutByGid(args), opts);
 };
 
-/** Index rows, newest first. Optional handle / present filters. */
-// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProducts"] in generated_concepts.ts).
-export interface ShopifyProductsArgs {
-  handle?: string;
-  present?: boolean;
+/** Live mirrored Shopify AbandonedCheckout rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutForStore"] in generated_concepts.ts).
+export interface ShopifyAbandonedCheckoutForStoreArgs {
+  storeId: string;
+  since?: string;
 }
 
-export function buildShopifyProducts(args: ShopifyProductsArgs): string {
+export function buildShopifyAbandonedCheckoutForStore(args: ShopifyAbandonedCheckoutForStoreArgs): string {
   const parts: string[] = [];
-  if (args.handle !== undefined) parts.push("handle: " + renderMemQLValue(args.handle));
-  if (args.present !== undefined) parts.push("present: " + renderMemQLValue(args.present));
-  return "query shopifyProducts(" + parts.join(", ") + ")";
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyAbandonedCheckoutForStore(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    shopifyProducts(args: ShopifyProductsArgs, opts?: QueryCallOptions): Promise<Result>;
+    shopifyAbandonedCheckoutForStore(args: ShopifyAbandonedCheckoutForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.shopifyProducts = function (this: QueryClient, args: ShopifyProductsArgs = {} as ShopifyProductsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("shopifyProducts", buildShopifyProducts(args), opts);
+QueryClient.prototype.shopifyAbandonedCheckoutForStore = function (this: QueryClient, args: ShopifyAbandonedCheckoutForStoreArgs = {} as ShopifyAbandonedCheckoutForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyAbandonedCheckoutForStore", buildShopifyAbandonedCheckoutForStore(args), opts);
+};
+
+/** One mirrored Shopify Article by store and GID. */
+// Bound concept: v1:shopify:article (machine-readable: BoundConcepts["shopifyArticleByGid"] in generated_concepts.ts).
+export interface ShopifyArticleByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyArticleByGid(args: ShopifyArticleByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyArticleByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyArticleByGid(args: ShopifyArticleByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyArticleByGid = function (this: QueryClient, args: ShopifyArticleByGidArgs = {} as ShopifyArticleByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyArticleByGid", buildShopifyArticleByGid(args), opts);
+};
+
+/** One mirrored Shopify Comment by store and GID. */
+// Bound concept: v1:shopify:articleComment (machine-readable: BoundConcepts["shopifyArticleCommentByGid"] in generated_concepts.ts).
+export interface ShopifyArticleCommentByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyArticleCommentByGid(args: ShopifyArticleCommentByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyArticleCommentByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyArticleCommentByGid(args: ShopifyArticleCommentByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyArticleCommentByGid = function (this: QueryClient, args: ShopifyArticleCommentByGidArgs = {} as ShopifyArticleCommentByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyArticleCommentByGid", buildShopifyArticleCommentByGid(args), opts);
+};
+
+/** Live mirrored Shopify Comment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:articleComment (machine-readable: BoundConcepts["shopifyArticleCommentForStore"] in generated_concepts.ts).
+export interface ShopifyArticleCommentForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyArticleCommentForStore(args: ShopifyArticleCommentForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyArticleCommentForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyArticleCommentForStore(args: ShopifyArticleCommentForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyArticleCommentForStore = function (this: QueryClient, args: ShopifyArticleCommentForStoreArgs = {} as ShopifyArticleCommentForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyArticleCommentForStore", buildShopifyArticleCommentForStore(args), opts);
+};
+
+/** Live mirrored Shopify Article rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:article (machine-readable: BoundConcepts["shopifyArticleForStore"] in generated_concepts.ts).
+export interface ShopifyArticleForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyArticleForStore(args: ShopifyArticleForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyArticleForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyArticleForStore(args: ShopifyArticleForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyArticleForStore = function (this: QueryClient, args: ShopifyArticleForStoreArgs = {} as ShopifyArticleForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyArticleForStore", buildShopifyArticleForStore(args), opts);
+};
+
+/** One mirrored Shopify Blog by store and GID. */
+// Bound concept: v1:shopify:blog (machine-readable: BoundConcepts["shopifyBlogByGid"] in generated_concepts.ts).
+export interface ShopifyBlogByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyBlogByGid(args: ShopifyBlogByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyBlogByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyBlogByGid(args: ShopifyBlogByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyBlogByGid = function (this: QueryClient, args: ShopifyBlogByGidArgs = {} as ShopifyBlogByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyBlogByGid", buildShopifyBlogByGid(args), opts);
+};
+
+/** Live mirrored Shopify Blog rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:blog (machine-readable: BoundConcepts["shopifyBlogForStore"] in generated_concepts.ts).
+export interface ShopifyBlogForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyBlogForStore(args: ShopifyBlogForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyBlogForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyBlogForStore(args: ShopifyBlogForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyBlogForStore = function (this: QueryClient, args: ShopifyBlogForStoreArgs = {} as ShopifyBlogForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyBlogForStore", buildShopifyBlogForStore(args), opts);
+};
+
+/** One mirrored Shopify BusinessEntity by store and GID. */
+// Bound concept: v1:shopify:businessEntity (machine-readable: BoundConcepts["shopifyBusinessEntityByGid"] in generated_concepts.ts).
+export interface ShopifyBusinessEntityByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyBusinessEntityByGid(args: ShopifyBusinessEntityByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyBusinessEntityByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyBusinessEntityByGid(args: ShopifyBusinessEntityByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyBusinessEntityByGid = function (this: QueryClient, args: ShopifyBusinessEntityByGidArgs = {} as ShopifyBusinessEntityByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyBusinessEntityByGid", buildShopifyBusinessEntityByGid(args), opts);
+};
+
+/** Live mirrored Shopify BusinessEntity rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:businessEntity (machine-readable: BoundConcepts["shopifyBusinessEntityForStore"] in generated_concepts.ts).
+export interface ShopifyBusinessEntityForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyBusinessEntityForStore(args: ShopifyBusinessEntityForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyBusinessEntityForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyBusinessEntityForStore(args: ShopifyBusinessEntityForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyBusinessEntityForStore = function (this: QueryClient, args: ShopifyBusinessEntityForStoreArgs = {} as ShopifyBusinessEntityForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyBusinessEntityForStore", buildShopifyBusinessEntityForStore(args), opts);
+};
+
+/** One mirrored Shopify Catalog by store and GID. */
+// Bound concept: v1:shopify:catalog (machine-readable: BoundConcepts["shopifyCatalogByGid"] in generated_concepts.ts).
+export interface ShopifyCatalogByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCatalogByGid(args: ShopifyCatalogByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCatalogByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCatalogByGid(args: ShopifyCatalogByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCatalogByGid = function (this: QueryClient, args: ShopifyCatalogByGidArgs = {} as ShopifyCatalogByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCatalogByGid", buildShopifyCatalogByGid(args), opts);
+};
+
+/** Live mirrored Shopify Catalog rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:catalog (machine-readable: BoundConcepts["shopifyCatalogForStore"] in generated_concepts.ts).
+export interface ShopifyCatalogForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCatalogForStore(args: ShopifyCatalogForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCatalogForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCatalogForStore(args: ShopifyCatalogForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCatalogForStore = function (this: QueryClient, args: ShopifyCatalogForStoreArgs = {} as ShopifyCatalogForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCatalogForStore", buildShopifyCatalogForStore(args), opts);
+};
+
+/** One mirrored Shopify Channel by store and GID. */
+// Bound concept: v1:shopify:channel (machine-readable: BoundConcepts["shopifyChannelByGid"] in generated_concepts.ts).
+export interface ShopifyChannelByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyChannelByGid(args: ShopifyChannelByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyChannelByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyChannelByGid(args: ShopifyChannelByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyChannelByGid = function (this: QueryClient, args: ShopifyChannelByGidArgs = {} as ShopifyChannelByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyChannelByGid", buildShopifyChannelByGid(args), opts);
+};
+
+/** Live mirrored Shopify Channel rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:channel (machine-readable: BoundConcepts["shopifyChannelForStore"] in generated_concepts.ts).
+export interface ShopifyChannelForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyChannelForStore(args: ShopifyChannelForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyChannelForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyChannelForStore(args: ShopifyChannelForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyChannelForStore = function (this: QueryClient, args: ShopifyChannelForStoreArgs = {} as ShopifyChannelForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyChannelForStore", buildShopifyChannelForStore(args), opts);
+};
+
+/** One mirrored Shopify Collection by store and GID. */
+// Bound concept: v1:shopify:collection (machine-readable: BoundConcepts["shopifyCollectionByGid"] in generated_concepts.ts).
+export interface ShopifyCollectionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCollectionByGid(args: ShopifyCollectionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCollectionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCollectionByGid(args: ShopifyCollectionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCollectionByGid = function (this: QueryClient, args: ShopifyCollectionByGidArgs = {} as ShopifyCollectionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCollectionByGid", buildShopifyCollectionByGid(args), opts);
+};
+
+/** Live mirrored Shopify Collection rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:collection (machine-readable: BoundConcepts["shopifyCollectionForStore"] in generated_concepts.ts).
+export interface ShopifyCollectionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCollectionForStore(args: ShopifyCollectionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCollectionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCollectionForStore(args: ShopifyCollectionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCollectionForStore = function (this: QueryClient, args: ShopifyCollectionForStoreArgs = {} as ShopifyCollectionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCollectionForStore", buildShopifyCollectionForStore(args), opts);
+};
+
+/** One mirrored Shopify Company by store and GID. */
+// Bound concept: v1:shopify:company (machine-readable: BoundConcepts["shopifyCompanyByGid"] in generated_concepts.ts).
+export interface ShopifyCompanyByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCompanyByGid(args: ShopifyCompanyByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCompanyByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyByGid(args: ShopifyCompanyByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyByGid = function (this: QueryClient, args: ShopifyCompanyByGidArgs = {} as ShopifyCompanyByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyByGid", buildShopifyCompanyByGid(args), opts);
+};
+
+/** One mirrored Shopify CompanyContact by store and GID. */
+// Bound concept: v1:shopify:companyContact (machine-readable: BoundConcepts["shopifyCompanyContactByGid"] in generated_concepts.ts).
+export interface ShopifyCompanyContactByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCompanyContactByGid(args: ShopifyCompanyContactByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCompanyContactByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyContactByGid(args: ShopifyCompanyContactByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyContactByGid = function (this: QueryClient, args: ShopifyCompanyContactByGidArgs = {} as ShopifyCompanyContactByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyContactByGid", buildShopifyCompanyContactByGid(args), opts);
+};
+
+/** Live mirrored Shopify CompanyContact rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:companyContact (machine-readable: BoundConcepts["shopifyCompanyContactForStore"] in generated_concepts.ts).
+export interface ShopifyCompanyContactForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCompanyContactForStore(args: ShopifyCompanyContactForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCompanyContactForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyContactForStore(args: ShopifyCompanyContactForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyContactForStore = function (this: QueryClient, args: ShopifyCompanyContactForStoreArgs = {} as ShopifyCompanyContactForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyContactForStore", buildShopifyCompanyContactForStore(args), opts);
+};
+
+/** Live mirrored Shopify Company rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:company (machine-readable: BoundConcepts["shopifyCompanyForStore"] in generated_concepts.ts).
+export interface ShopifyCompanyForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCompanyForStore(args: ShopifyCompanyForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCompanyForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyForStore(args: ShopifyCompanyForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyForStore = function (this: QueryClient, args: ShopifyCompanyForStoreArgs = {} as ShopifyCompanyForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyForStore", buildShopifyCompanyForStore(args), opts);
+};
+
+/** One mirrored Shopify CompanyLocation by store and GID. */
+// Bound concept: v1:shopify:companyLocation (machine-readable: BoundConcepts["shopifyCompanyLocationByGid"] in generated_concepts.ts).
+export interface ShopifyCompanyLocationByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCompanyLocationByGid(args: ShopifyCompanyLocationByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCompanyLocationByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyLocationByGid(args: ShopifyCompanyLocationByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyLocationByGid = function (this: QueryClient, args: ShopifyCompanyLocationByGidArgs = {} as ShopifyCompanyLocationByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyLocationByGid", buildShopifyCompanyLocationByGid(args), opts);
+};
+
+/** Live mirrored Shopify CompanyLocation rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:companyLocation (machine-readable: BoundConcepts["shopifyCompanyLocationForStore"] in generated_concepts.ts).
+export interface ShopifyCompanyLocationForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCompanyLocationForStore(args: ShopifyCompanyLocationForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCompanyLocationForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCompanyLocationForStore(args: ShopifyCompanyLocationForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCompanyLocationForStore = function (this: QueryClient, args: ShopifyCompanyLocationForStoreArgs = {} as ShopifyCompanyLocationForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCompanyLocationForStore", buildShopifyCompanyLocationForStore(args), opts);
+};
+
+/** One mirrored Shopify Customer by store and GID. */
+// Bound concept: v1:shopify:customer (machine-readable: BoundConcepts["shopifyCustomerByGid"] in generated_concepts.ts).
+export interface ShopifyCustomerByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCustomerByGid(args: ShopifyCustomerByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCustomerByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCustomerByGid(args: ShopifyCustomerByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCustomerByGid = function (this: QueryClient, args: ShopifyCustomerByGidArgs = {} as ShopifyCustomerByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCustomerByGid", buildShopifyCustomerByGid(args), opts);
+};
+
+/** Live mirrored Shopify Customer rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:customer (machine-readable: BoundConcepts["shopifyCustomerForStore"] in generated_concepts.ts).
+export interface ShopifyCustomerForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCustomerForStore(args: ShopifyCustomerForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCustomerForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCustomerForStore(args: ShopifyCustomerForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCustomerForStore = function (this: QueryClient, args: ShopifyCustomerForStoreArgs = {} as ShopifyCustomerForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCustomerForStore", buildShopifyCustomerForStore(args), opts);
+};
+
+/** One mirrored Shopify CustomerPaymentMethod by store and GID. */
+// Bound concept: v1:shopify:customerPaymentMethod (machine-readable: BoundConcepts["shopifyCustomerPaymentMethodByGid"] in generated_concepts.ts).
+export interface ShopifyCustomerPaymentMethodByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyCustomerPaymentMethodByGid(args: ShopifyCustomerPaymentMethodByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyCustomerPaymentMethodByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCustomerPaymentMethodByGid(args: ShopifyCustomerPaymentMethodByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCustomerPaymentMethodByGid = function (this: QueryClient, args: ShopifyCustomerPaymentMethodByGidArgs = {} as ShopifyCustomerPaymentMethodByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCustomerPaymentMethodByGid", buildShopifyCustomerPaymentMethodByGid(args), opts);
+};
+
+/** Live mirrored Shopify CustomerPaymentMethod rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:customerPaymentMethod (machine-readable: BoundConcepts["shopifyCustomerPaymentMethodForStore"] in generated_concepts.ts).
+export interface ShopifyCustomerPaymentMethodForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyCustomerPaymentMethodForStore(args: ShopifyCustomerPaymentMethodForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyCustomerPaymentMethodForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyCustomerPaymentMethodForStore(args: ShopifyCustomerPaymentMethodForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyCustomerPaymentMethodForStore = function (this: QueryClient, args: ShopifyCustomerPaymentMethodForStoreArgs = {} as ShopifyCustomerPaymentMethodForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyCustomerPaymentMethodForStore", buildShopifyCustomerPaymentMethodForStore(args), opts);
+};
+
+/** One mirrored Shopify DeliveryCarrierService by store and GID. */
+// Bound concept: v1:shopify:deliveryCarrierService (machine-readable: BoundConcepts["shopifyDeliveryCarrierServiceByGid"] in generated_concepts.ts).
+export interface ShopifyDeliveryCarrierServiceByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyDeliveryCarrierServiceByGid(args: ShopifyDeliveryCarrierServiceByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyDeliveryCarrierServiceByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryCarrierServiceByGid(args: ShopifyDeliveryCarrierServiceByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryCarrierServiceByGid = function (this: QueryClient, args: ShopifyDeliveryCarrierServiceByGidArgs = {} as ShopifyDeliveryCarrierServiceByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryCarrierServiceByGid", buildShopifyDeliveryCarrierServiceByGid(args), opts);
+};
+
+/** Live mirrored Shopify DeliveryCarrierService rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:deliveryCarrierService (machine-readable: BoundConcepts["shopifyDeliveryCarrierServiceForStore"] in generated_concepts.ts).
+export interface ShopifyDeliveryCarrierServiceForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyDeliveryCarrierServiceForStore(args: ShopifyDeliveryCarrierServiceForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyDeliveryCarrierServiceForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryCarrierServiceForStore(args: ShopifyDeliveryCarrierServiceForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryCarrierServiceForStore = function (this: QueryClient, args: ShopifyDeliveryCarrierServiceForStoreArgs = {} as ShopifyDeliveryCarrierServiceForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryCarrierServiceForStore", buildShopifyDeliveryCarrierServiceForStore(args), opts);
+};
+
+/** One mirrored Shopify DeliveryCustomization by store and GID. */
+// Bound concept: v1:shopify:deliveryCustomization (machine-readable: BoundConcepts["shopifyDeliveryCustomizationByGid"] in generated_concepts.ts).
+export interface ShopifyDeliveryCustomizationByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyDeliveryCustomizationByGid(args: ShopifyDeliveryCustomizationByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyDeliveryCustomizationByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryCustomizationByGid(args: ShopifyDeliveryCustomizationByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryCustomizationByGid = function (this: QueryClient, args: ShopifyDeliveryCustomizationByGidArgs = {} as ShopifyDeliveryCustomizationByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryCustomizationByGid", buildShopifyDeliveryCustomizationByGid(args), opts);
+};
+
+/** Live mirrored Shopify DeliveryCustomization rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:deliveryCustomization (machine-readable: BoundConcepts["shopifyDeliveryCustomizationForStore"] in generated_concepts.ts).
+export interface ShopifyDeliveryCustomizationForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyDeliveryCustomizationForStore(args: ShopifyDeliveryCustomizationForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyDeliveryCustomizationForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryCustomizationForStore(args: ShopifyDeliveryCustomizationForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryCustomizationForStore = function (this: QueryClient, args: ShopifyDeliveryCustomizationForStoreArgs = {} as ShopifyDeliveryCustomizationForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryCustomizationForStore", buildShopifyDeliveryCustomizationForStore(args), opts);
+};
+
+/** One mirrored Shopify DeliveryProfile by store and GID. */
+// Bound concept: v1:shopify:deliveryProfile (machine-readable: BoundConcepts["shopifyDeliveryProfileByGid"] in generated_concepts.ts).
+export interface ShopifyDeliveryProfileByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyDeliveryProfileByGid(args: ShopifyDeliveryProfileByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyDeliveryProfileByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryProfileByGid(args: ShopifyDeliveryProfileByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryProfileByGid = function (this: QueryClient, args: ShopifyDeliveryProfileByGidArgs = {} as ShopifyDeliveryProfileByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryProfileByGid", buildShopifyDeliveryProfileByGid(args), opts);
+};
+
+/** Live mirrored Shopify DeliveryProfile rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:deliveryProfile (machine-readable: BoundConcepts["shopifyDeliveryProfileForStore"] in generated_concepts.ts).
+export interface ShopifyDeliveryProfileForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyDeliveryProfileForStore(args: ShopifyDeliveryProfileForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyDeliveryProfileForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDeliveryProfileForStore(args: ShopifyDeliveryProfileForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDeliveryProfileForStore = function (this: QueryClient, args: ShopifyDeliveryProfileForStoreArgs = {} as ShopifyDeliveryProfileForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDeliveryProfileForStore", buildShopifyDeliveryProfileForStore(args), opts);
+};
+
+/** One mirrored Shopify DiscountNode by store and GID. */
+// Bound concept: v1:shopify:discountNode (machine-readable: BoundConcepts["shopifyDiscountNodeByGid"] in generated_concepts.ts).
+export interface ShopifyDiscountNodeByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyDiscountNodeByGid(args: ShopifyDiscountNodeByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyDiscountNodeByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDiscountNodeByGid(args: ShopifyDiscountNodeByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDiscountNodeByGid = function (this: QueryClient, args: ShopifyDiscountNodeByGidArgs = {} as ShopifyDiscountNodeByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDiscountNodeByGid", buildShopifyDiscountNodeByGid(args), opts);
+};
+
+/** Live mirrored Shopify DiscountNode rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:discountNode (machine-readable: BoundConcepts["shopifyDiscountNodeForStore"] in generated_concepts.ts).
+export interface ShopifyDiscountNodeForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyDiscountNodeForStore(args: ShopifyDiscountNodeForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyDiscountNodeForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDiscountNodeForStore(args: ShopifyDiscountNodeForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDiscountNodeForStore = function (this: QueryClient, args: ShopifyDiscountNodeForStoreArgs = {} as ShopifyDiscountNodeForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDiscountNodeForStore", buildShopifyDiscountNodeForStore(args), opts);
+};
+
+/** One mirrored Shopify DraftOrder by store and GID. */
+// Bound concept: v1:shopify:draftOrder (machine-readable: BoundConcepts["shopifyDraftOrderByGid"] in generated_concepts.ts).
+export interface ShopifyDraftOrderByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyDraftOrderByGid(args: ShopifyDraftOrderByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyDraftOrderByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDraftOrderByGid(args: ShopifyDraftOrderByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDraftOrderByGid = function (this: QueryClient, args: ShopifyDraftOrderByGidArgs = {} as ShopifyDraftOrderByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDraftOrderByGid", buildShopifyDraftOrderByGid(args), opts);
+};
+
+/** Live mirrored Shopify DraftOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:draftOrder (machine-readable: BoundConcepts["shopifyDraftOrderForStore"] in generated_concepts.ts).
+export interface ShopifyDraftOrderForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyDraftOrderForStore(args: ShopifyDraftOrderForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyDraftOrderForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyDraftOrderForStore(args: ShopifyDraftOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyDraftOrderForStore = function (this: QueryClient, args: ShopifyDraftOrderForStoreArgs = {} as ShopifyDraftOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyDraftOrderForStore", buildShopifyDraftOrderForStore(args), opts);
+};
+
+/** One mirrored Shopify Fulfillment by store and GID. */
+// Bound concept: v1:shopify:fulfillment (machine-readable: BoundConcepts["shopifyFulfillmentByGid"] in generated_concepts.ts).
+export interface ShopifyFulfillmentByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyFulfillmentByGid(args: ShopifyFulfillmentByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyFulfillmentByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyFulfillmentByGid(args: ShopifyFulfillmentByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyFulfillmentByGid = function (this: QueryClient, args: ShopifyFulfillmentByGidArgs = {} as ShopifyFulfillmentByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyFulfillmentByGid", buildShopifyFulfillmentByGid(args), opts);
+};
+
+/** Live mirrored Shopify Fulfillment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:fulfillment (machine-readable: BoundConcepts["shopifyFulfillmentForStore"] in generated_concepts.ts).
+export interface ShopifyFulfillmentForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyFulfillmentForStore(args: ShopifyFulfillmentForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyFulfillmentForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyFulfillmentForStore(args: ShopifyFulfillmentForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyFulfillmentForStore = function (this: QueryClient, args: ShopifyFulfillmentForStoreArgs = {} as ShopifyFulfillmentForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyFulfillmentForStore", buildShopifyFulfillmentForStore(args), opts);
+};
+
+/** One mirrored Shopify FulfillmentOrder by store and GID. */
+// Bound concept: v1:shopify:fulfillmentOrder (machine-readable: BoundConcepts["shopifyFulfillmentOrderByGid"] in generated_concepts.ts).
+export interface ShopifyFulfillmentOrderByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyFulfillmentOrderByGid(args: ShopifyFulfillmentOrderByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyFulfillmentOrderByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyFulfillmentOrderByGid(args: ShopifyFulfillmentOrderByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyFulfillmentOrderByGid = function (this: QueryClient, args: ShopifyFulfillmentOrderByGidArgs = {} as ShopifyFulfillmentOrderByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyFulfillmentOrderByGid", buildShopifyFulfillmentOrderByGid(args), opts);
+};
+
+/** Live mirrored Shopify FulfillmentOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:fulfillmentOrder (machine-readable: BoundConcepts["shopifyFulfillmentOrderForStore"] in generated_concepts.ts).
+export interface ShopifyFulfillmentOrderForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyFulfillmentOrderForStore(args: ShopifyFulfillmentOrderForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyFulfillmentOrderForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyFulfillmentOrderForStore(args: ShopifyFulfillmentOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyFulfillmentOrderForStore = function (this: QueryClient, args: ShopifyFulfillmentOrderForStoreArgs = {} as ShopifyFulfillmentOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyFulfillmentOrderForStore", buildShopifyFulfillmentOrderForStore(args), opts);
+};
+
+/** One mirrored Shopify GiftCard by store and GID. */
+// Bound concept: v1:shopify:giftCard (machine-readable: BoundConcepts["shopifyGiftCardByGid"] in generated_concepts.ts).
+export interface ShopifyGiftCardByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyGiftCardByGid(args: ShopifyGiftCardByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyGiftCardByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyGiftCardByGid(args: ShopifyGiftCardByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyGiftCardByGid = function (this: QueryClient, args: ShopifyGiftCardByGidArgs = {} as ShopifyGiftCardByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyGiftCardByGid", buildShopifyGiftCardByGid(args), opts);
+};
+
+/** Live mirrored Shopify GiftCard rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:giftCard (machine-readable: BoundConcepts["shopifyGiftCardForStore"] in generated_concepts.ts).
+export interface ShopifyGiftCardForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyGiftCardForStore(args: ShopifyGiftCardForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyGiftCardForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyGiftCardForStore(args: ShopifyGiftCardForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyGiftCardForStore = function (this: QueryClient, args: ShopifyGiftCardForStoreArgs = {} as ShopifyGiftCardForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyGiftCardForStore", buildShopifyGiftCardForStore(args), opts);
+};
+
+/** One mirrored Shopify InventoryItem by store and GID. */
+// Bound concept: v1:shopify:inventoryItem (machine-readable: BoundConcepts["shopifyInventoryItemByGid"] in generated_concepts.ts).
+export interface ShopifyInventoryItemByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyInventoryItemByGid(args: ShopifyInventoryItemByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyInventoryItemByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryItemByGid(args: ShopifyInventoryItemByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryItemByGid = function (this: QueryClient, args: ShopifyInventoryItemByGidArgs = {} as ShopifyInventoryItemByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryItemByGid", buildShopifyInventoryItemByGid(args), opts);
+};
+
+/** Live mirrored Shopify InventoryItem rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:inventoryItem (machine-readable: BoundConcepts["shopifyInventoryItemForStore"] in generated_concepts.ts).
+export interface ShopifyInventoryItemForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyInventoryItemForStore(args: ShopifyInventoryItemForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyInventoryItemForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryItemForStore(args: ShopifyInventoryItemForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryItemForStore = function (this: QueryClient, args: ShopifyInventoryItemForStoreArgs = {} as ShopifyInventoryItemForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryItemForStore", buildShopifyInventoryItemForStore(args), opts);
+};
+
+/** One mirrored Shopify InventoryLevel by store and GID. */
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["shopifyInventoryLevelByGid"] in generated_concepts.ts).
+export interface ShopifyInventoryLevelByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyInventoryLevelByGid(args: ShopifyInventoryLevelByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyInventoryLevelByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryLevelByGid(args: ShopifyInventoryLevelByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryLevelByGid = function (this: QueryClient, args: ShopifyInventoryLevelByGidArgs = {} as ShopifyInventoryLevelByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryLevelByGid", buildShopifyInventoryLevelByGid(args), opts);
+};
+
+/** Live mirrored Shopify InventoryLevel rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["shopifyInventoryLevelForStore"] in generated_concepts.ts).
+export interface ShopifyInventoryLevelForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyInventoryLevelForStore(args: ShopifyInventoryLevelForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyInventoryLevelForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryLevelForStore(args: ShopifyInventoryLevelForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryLevelForStore = function (this: QueryClient, args: ShopifyInventoryLevelForStoreArgs = {} as ShopifyInventoryLevelForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryLevelForStore", buildShopifyInventoryLevelForStore(args), opts);
+};
+
+/** One mirrored Shopify InventoryShipment by store and GID. */
+// Bound concept: v1:shopify:inventoryShipment (machine-readable: BoundConcepts["shopifyInventoryShipmentByGid"] in generated_concepts.ts).
+export interface ShopifyInventoryShipmentByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyInventoryShipmentByGid(args: ShopifyInventoryShipmentByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyInventoryShipmentByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryShipmentByGid(args: ShopifyInventoryShipmentByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryShipmentByGid = function (this: QueryClient, args: ShopifyInventoryShipmentByGidArgs = {} as ShopifyInventoryShipmentByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryShipmentByGid", buildShopifyInventoryShipmentByGid(args), opts);
+};
+
+/** Live mirrored Shopify InventoryShipment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:inventoryShipment (machine-readable: BoundConcepts["shopifyInventoryShipmentForStore"] in generated_concepts.ts).
+export interface ShopifyInventoryShipmentForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyInventoryShipmentForStore(args: ShopifyInventoryShipmentForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyInventoryShipmentForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryShipmentForStore(args: ShopifyInventoryShipmentForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryShipmentForStore = function (this: QueryClient, args: ShopifyInventoryShipmentForStoreArgs = {} as ShopifyInventoryShipmentForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryShipmentForStore", buildShopifyInventoryShipmentForStore(args), opts);
+};
+
+/** One mirrored Shopify InventoryTransfer by store and GID. */
+// Bound concept: v1:shopify:inventoryTransfer (machine-readable: BoundConcepts["shopifyInventoryTransferByGid"] in generated_concepts.ts).
+export interface ShopifyInventoryTransferByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyInventoryTransferByGid(args: ShopifyInventoryTransferByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyInventoryTransferByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryTransferByGid(args: ShopifyInventoryTransferByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryTransferByGid = function (this: QueryClient, args: ShopifyInventoryTransferByGidArgs = {} as ShopifyInventoryTransferByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryTransferByGid", buildShopifyInventoryTransferByGid(args), opts);
+};
+
+/** Live mirrored Shopify InventoryTransfer rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:inventoryTransfer (machine-readable: BoundConcepts["shopifyInventoryTransferForStore"] in generated_concepts.ts).
+export interface ShopifyInventoryTransferForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyInventoryTransferForStore(args: ShopifyInventoryTransferForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyInventoryTransferForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyInventoryTransferForStore(args: ShopifyInventoryTransferForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyInventoryTransferForStore = function (this: QueryClient, args: ShopifyInventoryTransferForStoreArgs = {} as ShopifyInventoryTransferForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyInventoryTransferForStore", buildShopifyInventoryTransferForStore(args), opts);
+};
+
+/** One mirrored Shopify Location by store and GID. */
+// Bound concept: v1:shopify:location (machine-readable: BoundConcepts["shopifyLocationByGid"] in generated_concepts.ts).
+export interface ShopifyLocationByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyLocationByGid(args: ShopifyLocationByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyLocationByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyLocationByGid(args: ShopifyLocationByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyLocationByGid = function (this: QueryClient, args: ShopifyLocationByGidArgs = {} as ShopifyLocationByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyLocationByGid", buildShopifyLocationByGid(args), opts);
+};
+
+/** Live mirrored Shopify Location rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:location (machine-readable: BoundConcepts["shopifyLocationForStore"] in generated_concepts.ts).
+export interface ShopifyLocationForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyLocationForStore(args: ShopifyLocationForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyLocationForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyLocationForStore(args: ShopifyLocationForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyLocationForStore = function (this: QueryClient, args: ShopifyLocationForStoreArgs = {} as ShopifyLocationForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyLocationForStore", buildShopifyLocationForStore(args), opts);
+};
+
+/** One mirrored Shopify Market by store and GID. */
+// Bound concept: v1:shopify:market (machine-readable: BoundConcepts["shopifyMarketByGid"] in generated_concepts.ts).
+export interface ShopifyMarketByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMarketByGid(args: ShopifyMarketByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMarketByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketByGid(args: ShopifyMarketByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketByGid = function (this: QueryClient, args: ShopifyMarketByGidArgs = {} as ShopifyMarketByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketByGid", buildShopifyMarketByGid(args), opts);
+};
+
+/** Live mirrored Shopify Market rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:market (machine-readable: BoundConcepts["shopifyMarketForStore"] in generated_concepts.ts).
+export interface ShopifyMarketForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMarketForStore(args: ShopifyMarketForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMarketForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketForStore(args: ShopifyMarketForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketForStore = function (this: QueryClient, args: ShopifyMarketForStoreArgs = {} as ShopifyMarketForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketForStore", buildShopifyMarketForStore(args), opts);
+};
+
+/** One mirrored Shopify MarketWebPresence by store and GID. */
+// Bound concept: v1:shopify:marketWebPresence (machine-readable: BoundConcepts["shopifyMarketWebPresenceByGid"] in generated_concepts.ts).
+export interface ShopifyMarketWebPresenceByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMarketWebPresenceByGid(args: ShopifyMarketWebPresenceByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMarketWebPresenceByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketWebPresenceByGid(args: ShopifyMarketWebPresenceByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketWebPresenceByGid = function (this: QueryClient, args: ShopifyMarketWebPresenceByGidArgs = {} as ShopifyMarketWebPresenceByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketWebPresenceByGid", buildShopifyMarketWebPresenceByGid(args), opts);
+};
+
+/** Live mirrored Shopify MarketWebPresence rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:marketWebPresence (machine-readable: BoundConcepts["shopifyMarketWebPresenceForStore"] in generated_concepts.ts).
+export interface ShopifyMarketWebPresenceForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMarketWebPresenceForStore(args: ShopifyMarketWebPresenceForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMarketWebPresenceForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketWebPresenceForStore(args: ShopifyMarketWebPresenceForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketWebPresenceForStore = function (this: QueryClient, args: ShopifyMarketWebPresenceForStoreArgs = {} as ShopifyMarketWebPresenceForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketWebPresenceForStore", buildShopifyMarketWebPresenceForStore(args), opts);
+};
+
+/** One mirrored Shopify MarketingActivity by store and GID. */
+// Bound concept: v1:shopify:marketingActivity (machine-readable: BoundConcepts["shopifyMarketingActivityByGid"] in generated_concepts.ts).
+export interface ShopifyMarketingActivityByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMarketingActivityByGid(args: ShopifyMarketingActivityByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMarketingActivityByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketingActivityByGid(args: ShopifyMarketingActivityByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketingActivityByGid = function (this: QueryClient, args: ShopifyMarketingActivityByGidArgs = {} as ShopifyMarketingActivityByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketingActivityByGid", buildShopifyMarketingActivityByGid(args), opts);
+};
+
+/** Live mirrored Shopify MarketingActivity rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:marketingActivity (machine-readable: BoundConcepts["shopifyMarketingActivityForStore"] in generated_concepts.ts).
+export interface ShopifyMarketingActivityForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMarketingActivityForStore(args: ShopifyMarketingActivityForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMarketingActivityForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketingActivityForStore(args: ShopifyMarketingActivityForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketingActivityForStore = function (this: QueryClient, args: ShopifyMarketingActivityForStoreArgs = {} as ShopifyMarketingActivityForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketingActivityForStore", buildShopifyMarketingActivityForStore(args), opts);
+};
+
+/** One mirrored Shopify MarketingEvent by store and GID. */
+// Bound concept: v1:shopify:marketingEvent (machine-readable: BoundConcepts["shopifyMarketingEventByGid"] in generated_concepts.ts).
+export interface ShopifyMarketingEventByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMarketingEventByGid(args: ShopifyMarketingEventByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMarketingEventByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketingEventByGid(args: ShopifyMarketingEventByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketingEventByGid = function (this: QueryClient, args: ShopifyMarketingEventByGidArgs = {} as ShopifyMarketingEventByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketingEventByGid", buildShopifyMarketingEventByGid(args), opts);
+};
+
+/** Live mirrored Shopify MarketingEvent rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:marketingEvent (machine-readable: BoundConcepts["shopifyMarketingEventForStore"] in generated_concepts.ts).
+export interface ShopifyMarketingEventForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMarketingEventForStore(args: ShopifyMarketingEventForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMarketingEventForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMarketingEventForStore(args: ShopifyMarketingEventForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMarketingEventForStore = function (this: QueryClient, args: ShopifyMarketingEventForStoreArgs = {} as ShopifyMarketingEventForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMarketingEventForStore", buildShopifyMarketingEventForStore(args), opts);
+};
+
+/** One mirrored Shopify Menu by store and GID. */
+// Bound concept: v1:shopify:menu (machine-readable: BoundConcepts["shopifyMenuByGid"] in generated_concepts.ts).
+export interface ShopifyMenuByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMenuByGid(args: ShopifyMenuByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMenuByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMenuByGid(args: ShopifyMenuByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMenuByGid = function (this: QueryClient, args: ShopifyMenuByGidArgs = {} as ShopifyMenuByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMenuByGid", buildShopifyMenuByGid(args), opts);
+};
+
+/** Live mirrored Shopify Menu rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:menu (machine-readable: BoundConcepts["shopifyMenuForStore"] in generated_concepts.ts).
+export interface ShopifyMenuForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMenuForStore(args: ShopifyMenuForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMenuForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMenuForStore(args: ShopifyMenuForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMenuForStore = function (this: QueryClient, args: ShopifyMenuForStoreArgs = {} as ShopifyMenuForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMenuForStore", buildShopifyMenuForStore(args), opts);
+};
+
+/** One mirrored Shopify MetafieldDefinition by store and GID. */
+// Bound concept: v1:shopify:metafieldDefinition (machine-readable: BoundConcepts["shopifyMetafieldDefinitionByGid"] in generated_concepts.ts).
+export interface ShopifyMetafieldDefinitionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMetafieldDefinitionByGid(args: ShopifyMetafieldDefinitionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMetafieldDefinitionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetafieldDefinitionByGid(args: ShopifyMetafieldDefinitionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetafieldDefinitionByGid = function (this: QueryClient, args: ShopifyMetafieldDefinitionByGidArgs = {} as ShopifyMetafieldDefinitionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetafieldDefinitionByGid", buildShopifyMetafieldDefinitionByGid(args), opts);
+};
+
+/** Live mirrored Shopify MetafieldDefinition rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:metafieldDefinition (machine-readable: BoundConcepts["shopifyMetafieldDefinitionForStore"] in generated_concepts.ts).
+export interface ShopifyMetafieldDefinitionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMetafieldDefinitionForStore(args: ShopifyMetafieldDefinitionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMetafieldDefinitionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetafieldDefinitionForStore(args: ShopifyMetafieldDefinitionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetafieldDefinitionForStore = function (this: QueryClient, args: ShopifyMetafieldDefinitionForStoreArgs = {} as ShopifyMetafieldDefinitionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetafieldDefinitionForStore", buildShopifyMetafieldDefinitionForStore(args), opts);
+};
+
+/** One mirrored Shopify Metaobject by store and GID. */
+// Bound concept: v1:shopify:metaobject (machine-readable: BoundConcepts["shopifyMetaobjectByGid"] in generated_concepts.ts).
+export interface ShopifyMetaobjectByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMetaobjectByGid(args: ShopifyMetaobjectByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMetaobjectByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetaobjectByGid(args: ShopifyMetaobjectByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetaobjectByGid = function (this: QueryClient, args: ShopifyMetaobjectByGidArgs = {} as ShopifyMetaobjectByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetaobjectByGid", buildShopifyMetaobjectByGid(args), opts);
+};
+
+/** One mirrored Shopify MetaobjectDefinition by store and GID. */
+// Bound concept: v1:shopify:metaobjectDefinition (machine-readable: BoundConcepts["shopifyMetaobjectDefinitionByGid"] in generated_concepts.ts).
+export interface ShopifyMetaobjectDefinitionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyMetaobjectDefinitionByGid(args: ShopifyMetaobjectDefinitionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyMetaobjectDefinitionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetaobjectDefinitionByGid(args: ShopifyMetaobjectDefinitionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetaobjectDefinitionByGid = function (this: QueryClient, args: ShopifyMetaobjectDefinitionByGidArgs = {} as ShopifyMetaobjectDefinitionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetaobjectDefinitionByGid", buildShopifyMetaobjectDefinitionByGid(args), opts);
+};
+
+/** Live mirrored Shopify MetaobjectDefinition rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:metaobjectDefinition (machine-readable: BoundConcepts["shopifyMetaobjectDefinitionForStore"] in generated_concepts.ts).
+export interface ShopifyMetaobjectDefinitionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMetaobjectDefinitionForStore(args: ShopifyMetaobjectDefinitionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMetaobjectDefinitionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetaobjectDefinitionForStore(args: ShopifyMetaobjectDefinitionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetaobjectDefinitionForStore = function (this: QueryClient, args: ShopifyMetaobjectDefinitionForStoreArgs = {} as ShopifyMetaobjectDefinitionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetaobjectDefinitionForStore", buildShopifyMetaobjectDefinitionForStore(args), opts);
+};
+
+/** Live mirrored Shopify Metaobject rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:metaobject (machine-readable: BoundConcepts["shopifyMetaobjectForStore"] in generated_concepts.ts).
+export interface ShopifyMetaobjectForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyMetaobjectForStore(args: ShopifyMetaobjectForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyMetaobjectForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyMetaobjectForStore(args: ShopifyMetaobjectForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyMetaobjectForStore = function (this: QueryClient, args: ShopifyMetaobjectForStoreArgs = {} as ShopifyMetaobjectForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyMetaobjectForStore", buildShopifyMetaobjectForStore(args), opts);
+};
+
+/** One mirrored Shopify OnlineStoreTheme by store and GID. */
+// Bound concept: v1:shopify:onlineStoreTheme (machine-readable: BoundConcepts["shopifyOnlineStoreThemeByGid"] in generated_concepts.ts).
+export interface ShopifyOnlineStoreThemeByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyOnlineStoreThemeByGid(args: ShopifyOnlineStoreThemeByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyOnlineStoreThemeByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOnlineStoreThemeByGid(args: ShopifyOnlineStoreThemeByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOnlineStoreThemeByGid = function (this: QueryClient, args: ShopifyOnlineStoreThemeByGidArgs = {} as ShopifyOnlineStoreThemeByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOnlineStoreThemeByGid", buildShopifyOnlineStoreThemeByGid(args), opts);
+};
+
+/** Live mirrored Shopify OnlineStoreTheme rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:onlineStoreTheme (machine-readable: BoundConcepts["shopifyOnlineStoreThemeForStore"] in generated_concepts.ts).
+export interface ShopifyOnlineStoreThemeForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyOnlineStoreThemeForStore(args: ShopifyOnlineStoreThemeForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyOnlineStoreThemeForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOnlineStoreThemeForStore(args: ShopifyOnlineStoreThemeForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOnlineStoreThemeForStore = function (this: QueryClient, args: ShopifyOnlineStoreThemeForStoreArgs = {} as ShopifyOnlineStoreThemeForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOnlineStoreThemeForStore", buildShopifyOnlineStoreThemeForStore(args), opts);
+};
+
+/** One mirrored Shopify Order by store and GID. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["shopifyOrderByGid"] in generated_concepts.ts).
+export interface ShopifyOrderByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyOrderByGid(args: ShopifyOrderByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyOrderByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderByGid(args: ShopifyOrderByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderByGid = function (this: QueryClient, args: ShopifyOrderByGidArgs = {} as ShopifyOrderByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderByGid", buildShopifyOrderByGid(args), opts);
+};
+
+/** Live mirrored Shopify Order rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:order (machine-readable: BoundConcepts["shopifyOrderForStore"] in generated_concepts.ts).
+export interface ShopifyOrderForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyOrderForStore(args: ShopifyOrderForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyOrderForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderForStore(args: ShopifyOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderForStore = function (this: QueryClient, args: ShopifyOrderForStoreArgs = {} as ShopifyOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderForStore", buildShopifyOrderForStore(args), opts);
+};
+
+/** One mirrored Shopify LineItem by store and GID. */
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["shopifyOrderLineItemByGid"] in generated_concepts.ts).
+export interface ShopifyOrderLineItemByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyOrderLineItemByGid(args: ShopifyOrderLineItemByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyOrderLineItemByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderLineItemByGid(args: ShopifyOrderLineItemByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderLineItemByGid = function (this: QueryClient, args: ShopifyOrderLineItemByGidArgs = {} as ShopifyOrderLineItemByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderLineItemByGid", buildShopifyOrderLineItemByGid(args), opts);
+};
+
+/** Live mirrored Shopify LineItem rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["shopifyOrderLineItemForStore"] in generated_concepts.ts).
+export interface ShopifyOrderLineItemForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyOrderLineItemForStore(args: ShopifyOrderLineItemForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyOrderLineItemForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderLineItemForStore(args: ShopifyOrderLineItemForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderLineItemForStore = function (this: QueryClient, args: ShopifyOrderLineItemForStoreArgs = {} as ShopifyOrderLineItemForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderLineItemForStore", buildShopifyOrderLineItemForStore(args), opts);
+};
+
+/** One mirrored Shopify OrderTransaction by store and GID. */
+// Bound concept: v1:shopify:orderTransaction (machine-readable: BoundConcepts["shopifyOrderTransactionByGid"] in generated_concepts.ts).
+export interface ShopifyOrderTransactionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyOrderTransactionByGid(args: ShopifyOrderTransactionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyOrderTransactionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderTransactionByGid(args: ShopifyOrderTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderTransactionByGid = function (this: QueryClient, args: ShopifyOrderTransactionByGidArgs = {} as ShopifyOrderTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderTransactionByGid", buildShopifyOrderTransactionByGid(args), opts);
+};
+
+/** Live mirrored Shopify OrderTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:orderTransaction (machine-readable: BoundConcepts["shopifyOrderTransactionForStore"] in generated_concepts.ts).
+export interface ShopifyOrderTransactionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyOrderTransactionForStore(args: ShopifyOrderTransactionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyOrderTransactionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyOrderTransactionForStore(args: ShopifyOrderTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyOrderTransactionForStore = function (this: QueryClient, args: ShopifyOrderTransactionForStoreArgs = {} as ShopifyOrderTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyOrderTransactionForStore", buildShopifyOrderTransactionForStore(args), opts);
+};
+
+/** One mirrored Shopify Page by store and GID. */
+// Bound concept: v1:shopify:page (machine-readable: BoundConcepts["shopifyPageByGid"] in generated_concepts.ts).
+export interface ShopifyPageByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyPageByGid(args: ShopifyPageByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyPageByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPageByGid(args: ShopifyPageByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPageByGid = function (this: QueryClient, args: ShopifyPageByGidArgs = {} as ShopifyPageByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPageByGid", buildShopifyPageByGid(args), opts);
+};
+
+/** Live mirrored Shopify Page rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:page (machine-readable: BoundConcepts["shopifyPageForStore"] in generated_concepts.ts).
+export interface ShopifyPageForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyPageForStore(args: ShopifyPageForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyPageForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPageForStore(args: ShopifyPageForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPageForStore = function (this: QueryClient, args: ShopifyPageForStoreArgs = {} as ShopifyPageForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPageForStore", buildShopifyPageForStore(args), opts);
+};
+
+/** One mirrored Shopify PaymentTermsTemplate by store and GID. */
+// Bound concept: v1:shopify:paymentTermsTemplate (machine-readable: BoundConcepts["shopifyPaymentTermsTemplateByGid"] in generated_concepts.ts).
+export interface ShopifyPaymentTermsTemplateByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyPaymentTermsTemplateByGid(args: ShopifyPaymentTermsTemplateByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyPaymentTermsTemplateByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPaymentTermsTemplateByGid(args: ShopifyPaymentTermsTemplateByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPaymentTermsTemplateByGid = function (this: QueryClient, args: ShopifyPaymentTermsTemplateByGidArgs = {} as ShopifyPaymentTermsTemplateByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPaymentTermsTemplateByGid", buildShopifyPaymentTermsTemplateByGid(args), opts);
+};
+
+/** Live mirrored Shopify PaymentTermsTemplate rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:paymentTermsTemplate (machine-readable: BoundConcepts["shopifyPaymentTermsTemplateForStore"] in generated_concepts.ts).
+export interface ShopifyPaymentTermsTemplateForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyPaymentTermsTemplateForStore(args: ShopifyPaymentTermsTemplateForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyPaymentTermsTemplateForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPaymentTermsTemplateForStore(args: ShopifyPaymentTermsTemplateForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPaymentTermsTemplateForStore = function (this: QueryClient, args: ShopifyPaymentTermsTemplateForStoreArgs = {} as ShopifyPaymentTermsTemplateForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPaymentTermsTemplateForStore", buildShopifyPaymentTermsTemplateForStore(args), opts);
+};
+
+/** One mirrored Shopify PriceList by store and GID. */
+// Bound concept: v1:shopify:priceList (machine-readable: BoundConcepts["shopifyPriceListByGid"] in generated_concepts.ts).
+export interface ShopifyPriceListByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyPriceListByGid(args: ShopifyPriceListByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyPriceListByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPriceListByGid(args: ShopifyPriceListByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPriceListByGid = function (this: QueryClient, args: ShopifyPriceListByGidArgs = {} as ShopifyPriceListByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPriceListByGid", buildShopifyPriceListByGid(args), opts);
+};
+
+/** Live mirrored Shopify PriceList rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:priceList (machine-readable: BoundConcepts["shopifyPriceListForStore"] in generated_concepts.ts).
+export interface ShopifyPriceListForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyPriceListForStore(args: ShopifyPriceListForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyPriceListForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPriceListForStore(args: ShopifyPriceListForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPriceListForStore = function (this: QueryClient, args: ShopifyPriceListForStoreArgs = {} as ShopifyPriceListForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPriceListForStore", buildShopifyPriceListForStore(args), opts);
+};
+
+/** One mirrored Shopify PriceListPrice by store and GID. */
+// Bound concept: v1:shopify:priceListPrice (machine-readable: BoundConcepts["shopifyPriceListPriceByGid"] in generated_concepts.ts).
+export interface ShopifyPriceListPriceByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyPriceListPriceByGid(args: ShopifyPriceListPriceByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyPriceListPriceByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPriceListPriceByGid(args: ShopifyPriceListPriceByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPriceListPriceByGid = function (this: QueryClient, args: ShopifyPriceListPriceByGidArgs = {} as ShopifyPriceListPriceByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPriceListPriceByGid", buildShopifyPriceListPriceByGid(args), opts);
+};
+
+/** Live mirrored Shopify PriceListPrice rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:priceListPrice (machine-readable: BoundConcepts["shopifyPriceListPriceForStore"] in generated_concepts.ts).
+export interface ShopifyPriceListPriceForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyPriceListPriceForStore(args: ShopifyPriceListPriceForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyPriceListPriceForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPriceListPriceForStore(args: ShopifyPriceListPriceForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPriceListPriceForStore = function (this: QueryClient, args: ShopifyPriceListPriceForStoreArgs = {} as ShopifyPriceListPriceForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPriceListPriceForStore", buildShopifyPriceListPriceForStore(args), opts);
+};
+
+/** One mirrored Shopify Product by store and GID. */
+// Bound concept: v1:shopify:product (machine-readable: BoundConcepts["shopifyProductByGid"] in generated_concepts.ts).
+export interface ShopifyProductByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyProductByGid(args: ShopifyProductByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyProductByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductByGid(args: ShopifyProductByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductByGid = function (this: QueryClient, args: ShopifyProductByGidArgs = {} as ShopifyProductByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductByGid", buildShopifyProductByGid(args), opts);
+};
+
+/** One mirrored Shopify ProductFeed by store and GID. */
+// Bound concept: v1:shopify:productFeed (machine-readable: BoundConcepts["shopifyProductFeedByGid"] in generated_concepts.ts).
+export interface ShopifyProductFeedByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyProductFeedByGid(args: ShopifyProductFeedByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyProductFeedByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductFeedByGid(args: ShopifyProductFeedByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductFeedByGid = function (this: QueryClient, args: ShopifyProductFeedByGidArgs = {} as ShopifyProductFeedByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductFeedByGid", buildShopifyProductFeedByGid(args), opts);
+};
+
+/** Live mirrored Shopify ProductFeed rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:productFeed (machine-readable: BoundConcepts["shopifyProductFeedForStore"] in generated_concepts.ts).
+export interface ShopifyProductFeedForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyProductFeedForStore(args: ShopifyProductFeedForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyProductFeedForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductFeedForStore(args: ShopifyProductFeedForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductFeedForStore = function (this: QueryClient, args: ShopifyProductFeedForStoreArgs = {} as ShopifyProductFeedForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductFeedForStore", buildShopifyProductFeedForStore(args), opts);
+};
+
+/** Live mirrored Shopify Product rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:product (machine-readable: BoundConcepts["shopifyProductForStore"] in generated_concepts.ts).
+export interface ShopifyProductForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyProductForStore(args: ShopifyProductForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyProductForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductForStore(args: ShopifyProductForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductForStore = function (this: QueryClient, args: ShopifyProductForStoreArgs = {} as ShopifyProductForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductForStore", buildShopifyProductForStore(args), opts);
+};
+
+/** One mirrored Shopify ProductVariant by store and GID. */
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["shopifyProductVariantByGid"] in generated_concepts.ts).
+export interface ShopifyProductVariantByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyProductVariantByGid(args: ShopifyProductVariantByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyProductVariantByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductVariantByGid(args: ShopifyProductVariantByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductVariantByGid = function (this: QueryClient, args: ShopifyProductVariantByGidArgs = {} as ShopifyProductVariantByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductVariantByGid", buildShopifyProductVariantByGid(args), opts);
+};
+
+/** Live mirrored Shopify ProductVariant rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:productVariant (machine-readable: BoundConcepts["shopifyProductVariantForStore"] in generated_concepts.ts).
+export interface ShopifyProductVariantForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyProductVariantForStore(args: ShopifyProductVariantForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyProductVariantForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProductVariantForStore(args: ShopifyProductVariantForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProductVariantForStore = function (this: QueryClient, args: ShopifyProductVariantForStoreArgs = {} as ShopifyProductVariantForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProductVariantForStore", buildShopifyProductVariantForStore(args), opts);
+};
+
+/** One mirrored Shopify Publication by store and GID. */
+// Bound concept: v1:shopify:publication (machine-readable: BoundConcepts["shopifyPublicationByGid"] in generated_concepts.ts).
+export interface ShopifyPublicationByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyPublicationByGid(args: ShopifyPublicationByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyPublicationByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPublicationByGid(args: ShopifyPublicationByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPublicationByGid = function (this: QueryClient, args: ShopifyPublicationByGidArgs = {} as ShopifyPublicationByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPublicationByGid", buildShopifyPublicationByGid(args), opts);
+};
+
+/** Live mirrored Shopify Publication rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:publication (machine-readable: BoundConcepts["shopifyPublicationForStore"] in generated_concepts.ts).
+export interface ShopifyPublicationForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyPublicationForStore(args: ShopifyPublicationForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyPublicationForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyPublicationForStore(args: ShopifyPublicationForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyPublicationForStore = function (this: QueryClient, args: ShopifyPublicationForStoreArgs = {} as ShopifyPublicationForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyPublicationForStore", buildShopifyPublicationForStore(args), opts);
+};
+
+/** One mirrored Shopify QuantityRule by store and GID. */
+// Bound concept: v1:shopify:quantityRule (machine-readable: BoundConcepts["shopifyQuantityRuleByGid"] in generated_concepts.ts).
+export interface ShopifyQuantityRuleByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyQuantityRuleByGid(args: ShopifyQuantityRuleByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyQuantityRuleByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyQuantityRuleByGid(args: ShopifyQuantityRuleByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyQuantityRuleByGid = function (this: QueryClient, args: ShopifyQuantityRuleByGidArgs = {} as ShopifyQuantityRuleByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyQuantityRuleByGid", buildShopifyQuantityRuleByGid(args), opts);
+};
+
+/** Live mirrored Shopify QuantityRule rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:quantityRule (machine-readable: BoundConcepts["shopifyQuantityRuleForStore"] in generated_concepts.ts).
+export interface ShopifyQuantityRuleForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyQuantityRuleForStore(args: ShopifyQuantityRuleForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyQuantityRuleForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyQuantityRuleForStore(args: ShopifyQuantityRuleForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyQuantityRuleForStore = function (this: QueryClient, args: ShopifyQuantityRuleForStoreArgs = {} as ShopifyQuantityRuleForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyQuantityRuleForStore", buildShopifyQuantityRuleForStore(args), opts);
+};
+
+/** One mirrored Shopify Refund by store and GID. */
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["shopifyRefundByGid"] in generated_concepts.ts).
+export interface ShopifyRefundByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyRefundByGid(args: ShopifyRefundByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyRefundByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyRefundByGid(args: ShopifyRefundByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyRefundByGid = function (this: QueryClient, args: ShopifyRefundByGidArgs = {} as ShopifyRefundByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyRefundByGid", buildShopifyRefundByGid(args), opts);
+};
+
+/** Live mirrored Shopify Refund rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:refund (machine-readable: BoundConcepts["shopifyRefundForStore"] in generated_concepts.ts).
+export interface ShopifyRefundForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyRefundForStore(args: ShopifyRefundForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyRefundForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyRefundForStore(args: ShopifyRefundForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyRefundForStore = function (this: QueryClient, args: ShopifyRefundForStoreArgs = {} as ShopifyRefundForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyRefundForStore", buildShopifyRefundForStore(args), opts);
+};
+
+/** One mirrored Shopify ReverseDelivery by store and GID. */
+// Bound concept: v1:shopify:reverseDelivery (machine-readable: BoundConcepts["shopifyReverseDeliveryByGid"] in generated_concepts.ts).
+export interface ShopifyReverseDeliveryByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyReverseDeliveryByGid(args: ShopifyReverseDeliveryByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyReverseDeliveryByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyReverseDeliveryByGid(args: ShopifyReverseDeliveryByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyReverseDeliveryByGid = function (this: QueryClient, args: ShopifyReverseDeliveryByGidArgs = {} as ShopifyReverseDeliveryByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyReverseDeliveryByGid", buildShopifyReverseDeliveryByGid(args), opts);
+};
+
+/** Live mirrored Shopify ReverseDelivery rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:reverseDelivery (machine-readable: BoundConcepts["shopifyReverseDeliveryForStore"] in generated_concepts.ts).
+export interface ShopifyReverseDeliveryForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyReverseDeliveryForStore(args: ShopifyReverseDeliveryForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyReverseDeliveryForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyReverseDeliveryForStore(args: ShopifyReverseDeliveryForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyReverseDeliveryForStore = function (this: QueryClient, args: ShopifyReverseDeliveryForStoreArgs = {} as ShopifyReverseDeliveryForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyReverseDeliveryForStore", buildShopifyReverseDeliveryForStore(args), opts);
+};
+
+/** One mirrored Shopify ReverseFulfillmentOrder by store and GID. */
+// Bound concept: v1:shopify:reverseFulfillmentOrder (machine-readable: BoundConcepts["shopifyReverseFulfillmentOrderByGid"] in generated_concepts.ts).
+export interface ShopifyReverseFulfillmentOrderByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyReverseFulfillmentOrderByGid(args: ShopifyReverseFulfillmentOrderByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyReverseFulfillmentOrderByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyReverseFulfillmentOrderByGid(args: ShopifyReverseFulfillmentOrderByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyReverseFulfillmentOrderByGid = function (this: QueryClient, args: ShopifyReverseFulfillmentOrderByGidArgs = {} as ShopifyReverseFulfillmentOrderByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyReverseFulfillmentOrderByGid", buildShopifyReverseFulfillmentOrderByGid(args), opts);
+};
+
+/** Live mirrored Shopify ReverseFulfillmentOrder rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:reverseFulfillmentOrder (machine-readable: BoundConcepts["shopifyReverseFulfillmentOrderForStore"] in generated_concepts.ts).
+export interface ShopifyReverseFulfillmentOrderForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyReverseFulfillmentOrderForStore(args: ShopifyReverseFulfillmentOrderForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyReverseFulfillmentOrderForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyReverseFulfillmentOrderForStore(args: ShopifyReverseFulfillmentOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyReverseFulfillmentOrderForStore = function (this: QueryClient, args: ShopifyReverseFulfillmentOrderForStoreArgs = {} as ShopifyReverseFulfillmentOrderForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyReverseFulfillmentOrderForStore", buildShopifyReverseFulfillmentOrderForStore(args), opts);
+};
+
+/** One mirrored Shopify Segment by store and GID. */
+// Bound concept: v1:shopify:segment (machine-readable: BoundConcepts["shopifySegmentByGid"] in generated_concepts.ts).
+export interface ShopifySegmentByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifySegmentByGid(args: ShopifySegmentByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifySegmentByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySegmentByGid(args: ShopifySegmentByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySegmentByGid = function (this: QueryClient, args: ShopifySegmentByGidArgs = {} as ShopifySegmentByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySegmentByGid", buildShopifySegmentByGid(args), opts);
+};
+
+/** Live mirrored Shopify Segment rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:segment (machine-readable: BoundConcepts["shopifySegmentForStore"] in generated_concepts.ts).
+export interface ShopifySegmentForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifySegmentForStore(args: ShopifySegmentForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifySegmentForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySegmentForStore(args: ShopifySegmentForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySegmentForStore = function (this: QueryClient, args: ShopifySegmentForStoreArgs = {} as ShopifySegmentForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySegmentForStore", buildShopifySegmentForStore(args), opts);
+};
+
+/** One mirrored Shopify SellingPlan by store and GID. */
+// Bound concept: v1:shopify:sellingPlan (machine-readable: BoundConcepts["shopifySellingPlanByGid"] in generated_concepts.ts).
+export interface ShopifySellingPlanByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifySellingPlanByGid(args: ShopifySellingPlanByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifySellingPlanByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySellingPlanByGid(args: ShopifySellingPlanByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySellingPlanByGid = function (this: QueryClient, args: ShopifySellingPlanByGidArgs = {} as ShopifySellingPlanByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySellingPlanByGid", buildShopifySellingPlanByGid(args), opts);
+};
+
+/** Live mirrored Shopify SellingPlan rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:sellingPlan (machine-readable: BoundConcepts["shopifySellingPlanForStore"] in generated_concepts.ts).
+export interface ShopifySellingPlanForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifySellingPlanForStore(args: ShopifySellingPlanForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifySellingPlanForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySellingPlanForStore(args: ShopifySellingPlanForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySellingPlanForStore = function (this: QueryClient, args: ShopifySellingPlanForStoreArgs = {} as ShopifySellingPlanForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySellingPlanForStore", buildShopifySellingPlanForStore(args), opts);
+};
+
+/** One mirrored Shopify SellingPlanGroup by store and GID. */
+// Bound concept: v1:shopify:sellingPlanGroup (machine-readable: BoundConcepts["shopifySellingPlanGroupByGid"] in generated_concepts.ts).
+export interface ShopifySellingPlanGroupByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifySellingPlanGroupByGid(args: ShopifySellingPlanGroupByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifySellingPlanGroupByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySellingPlanGroupByGid(args: ShopifySellingPlanGroupByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySellingPlanGroupByGid = function (this: QueryClient, args: ShopifySellingPlanGroupByGidArgs = {} as ShopifySellingPlanGroupByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySellingPlanGroupByGid", buildShopifySellingPlanGroupByGid(args), opts);
+};
+
+/** Live mirrored Shopify SellingPlanGroup rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:sellingPlanGroup (machine-readable: BoundConcepts["shopifySellingPlanGroupForStore"] in generated_concepts.ts).
+export interface ShopifySellingPlanGroupForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifySellingPlanGroupForStore(args: ShopifySellingPlanGroupForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifySellingPlanGroupForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySellingPlanGroupForStore(args: ShopifySellingPlanGroupForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySellingPlanGroupForStore = function (this: QueryClient, args: ShopifySellingPlanGroupForStoreArgs = {} as ShopifySellingPlanGroupForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySellingPlanGroupForStore", buildShopifySellingPlanGroupForStore(args), opts);
+};
+
+/** One mirrored Shopify Shop by store and GID. */
+// Bound concept: v1:shopify:shop (machine-readable: BoundConcepts["shopifyShopByGid"] in generated_concepts.ts).
+export interface ShopifyShopByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopByGid(args: ShopifyShopByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopByGid(args: ShopifyShopByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopByGid = function (this: QueryClient, args: ShopifyShopByGidArgs = {} as ShopifyShopByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopByGid", buildShopifyShopByGid(args), opts);
+};
+
+/** Live mirrored Shopify Shop rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shop (machine-readable: BoundConcepts["shopifyShopForStore"] in generated_concepts.ts).
+export interface ShopifyShopForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopForStore(args: ShopifyShopForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopForStore(args: ShopifyShopForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopForStore = function (this: QueryClient, args: ShopifyShopForStoreArgs = {} as ShopifyShopForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopForStore", buildShopifyShopForStore(args), opts);
+};
+
+/** One mirrored Shopify ShopLocale by store and GID. */
+// Bound concept: v1:shopify:shopLocale (machine-readable: BoundConcepts["shopifyShopLocaleByGid"] in generated_concepts.ts).
+export interface ShopifyShopLocaleByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopLocaleByGid(args: ShopifyShopLocaleByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopLocaleByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopLocaleByGid(args: ShopifyShopLocaleByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopLocaleByGid = function (this: QueryClient, args: ShopifyShopLocaleByGidArgs = {} as ShopifyShopLocaleByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopLocaleByGid", buildShopifyShopLocaleByGid(args), opts);
+};
+
+/** Live mirrored Shopify ShopLocale rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopLocale (machine-readable: BoundConcepts["shopifyShopLocaleForStore"] in generated_concepts.ts).
+export interface ShopifyShopLocaleForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopLocaleForStore(args: ShopifyShopLocaleForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopLocaleForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopLocaleForStore(args: ShopifyShopLocaleForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopLocaleForStore = function (this: QueryClient, args: ShopifyShopLocaleForStoreArgs = {} as ShopifyShopLocaleForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopLocaleForStore", buildShopifyShopLocaleForStore(args), opts);
+};
+
+/** One mirrored Shopify ShopPolicy by store and GID. */
+// Bound concept: v1:shopify:shopPolicy (machine-readable: BoundConcepts["shopifyShopPolicyByGid"] in generated_concepts.ts).
+export interface ShopifyShopPolicyByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopPolicyByGid(args: ShopifyShopPolicyByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopPolicyByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopPolicyByGid(args: ShopifyShopPolicyByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopPolicyByGid = function (this: QueryClient, args: ShopifyShopPolicyByGidArgs = {} as ShopifyShopPolicyByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopPolicyByGid", buildShopifyShopPolicyByGid(args), opts);
+};
+
+/** Live mirrored Shopify ShopPolicy rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopPolicy (machine-readable: BoundConcepts["shopifyShopPolicyForStore"] in generated_concepts.ts).
+export interface ShopifyShopPolicyForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopPolicyForStore(args: ShopifyShopPolicyForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopPolicyForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopPolicyForStore(args: ShopifyShopPolicyForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopPolicyForStore = function (this: QueryClient, args: ShopifyShopPolicyForStoreArgs = {} as ShopifyShopPolicyForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopPolicyForStore", buildShopifyShopPolicyForStore(args), opts);
+};
+
+/** One mirrored Shopify ShopifyPaymentsBalanceTransaction by store and GID. */
+// Bound concept: v1:shopify:shopifyPaymentsBalanceTransaction (machine-readable: BoundConcepts["shopifyShopifyPaymentsBalanceTransactionByGid"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsBalanceTransactionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopifyPaymentsBalanceTransactionByGid(args: ShopifyShopifyPaymentsBalanceTransactionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopifyPaymentsBalanceTransactionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsBalanceTransactionByGid(args: ShopifyShopifyPaymentsBalanceTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsBalanceTransactionByGid = function (this: QueryClient, args: ShopifyShopifyPaymentsBalanceTransactionByGidArgs = {} as ShopifyShopifyPaymentsBalanceTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsBalanceTransactionByGid", buildShopifyShopifyPaymentsBalanceTransactionByGid(args), opts);
+};
+
+/** Live mirrored Shopify ShopifyPaymentsBalanceTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopifyPaymentsBalanceTransaction (machine-readable: BoundConcepts["shopifyShopifyPaymentsBalanceTransactionForStore"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsBalanceTransactionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopifyPaymentsBalanceTransactionForStore(args: ShopifyShopifyPaymentsBalanceTransactionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopifyPaymentsBalanceTransactionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsBalanceTransactionForStore(args: ShopifyShopifyPaymentsBalanceTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsBalanceTransactionForStore = function (this: QueryClient, args: ShopifyShopifyPaymentsBalanceTransactionForStoreArgs = {} as ShopifyShopifyPaymentsBalanceTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsBalanceTransactionForStore", buildShopifyShopifyPaymentsBalanceTransactionForStore(args), opts);
+};
+
+/** One mirrored Shopify ShopifyPaymentsDispute by store and GID. */
+// Bound concept: v1:shopify:shopifyPaymentsDispute (machine-readable: BoundConcepts["shopifyShopifyPaymentsDisputeByGid"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsDisputeByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopifyPaymentsDisputeByGid(args: ShopifyShopifyPaymentsDisputeByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopifyPaymentsDisputeByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsDisputeByGid(args: ShopifyShopifyPaymentsDisputeByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsDisputeByGid = function (this: QueryClient, args: ShopifyShopifyPaymentsDisputeByGidArgs = {} as ShopifyShopifyPaymentsDisputeByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsDisputeByGid", buildShopifyShopifyPaymentsDisputeByGid(args), opts);
+};
+
+/** Live mirrored Shopify ShopifyPaymentsDispute rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopifyPaymentsDispute (machine-readable: BoundConcepts["shopifyShopifyPaymentsDisputeForStore"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsDisputeForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopifyPaymentsDisputeForStore(args: ShopifyShopifyPaymentsDisputeForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopifyPaymentsDisputeForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsDisputeForStore(args: ShopifyShopifyPaymentsDisputeForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsDisputeForStore = function (this: QueryClient, args: ShopifyShopifyPaymentsDisputeForStoreArgs = {} as ShopifyShopifyPaymentsDisputeForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsDisputeForStore", buildShopifyShopifyPaymentsDisputeForStore(args), opts);
+};
+
+/** One mirrored Shopify ShopifyPaymentsPayout by store and GID. */
+// Bound concept: v1:shopify:shopifyPaymentsPayout (machine-readable: BoundConcepts["shopifyShopifyPaymentsPayoutByGid"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsPayoutByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopifyPaymentsPayoutByGid(args: ShopifyShopifyPaymentsPayoutByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopifyPaymentsPayoutByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsPayoutByGid(args: ShopifyShopifyPaymentsPayoutByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsPayoutByGid = function (this: QueryClient, args: ShopifyShopifyPaymentsPayoutByGidArgs = {} as ShopifyShopifyPaymentsPayoutByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsPayoutByGid", buildShopifyShopifyPaymentsPayoutByGid(args), opts);
+};
+
+/** Live mirrored Shopify ShopifyPaymentsPayout rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopifyPaymentsPayout (machine-readable: BoundConcepts["shopifyShopifyPaymentsPayoutForStore"] in generated_concepts.ts).
+export interface ShopifyShopifyPaymentsPayoutForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopifyPaymentsPayoutForStore(args: ShopifyShopifyPaymentsPayoutForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopifyPaymentsPayoutForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyPaymentsPayoutForStore(args: ShopifyShopifyPaymentsPayoutForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyPaymentsPayoutForStore = function (this: QueryClient, args: ShopifyShopifyPaymentsPayoutForStoreArgs = {} as ShopifyShopifyPaymentsPayoutForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyPaymentsPayoutForStore", buildShopifyShopifyPaymentsPayoutForStore(args), opts);
+};
+
+/** One mirrored Shopify Return by store and GID. */
+// Bound concept: v1:shopify:shopifyReturn (machine-readable: BoundConcepts["shopifyShopifyReturnByGid"] in generated_concepts.ts).
+export interface ShopifyShopifyReturnByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyShopifyReturnByGid(args: ShopifyShopifyReturnByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyShopifyReturnByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyReturnByGid(args: ShopifyShopifyReturnByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyReturnByGid = function (this: QueryClient, args: ShopifyShopifyReturnByGidArgs = {} as ShopifyShopifyReturnByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyReturnByGid", buildShopifyShopifyReturnByGid(args), opts);
+};
+
+/** Live mirrored Shopify Return rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:shopifyReturn (machine-readable: BoundConcepts["shopifyShopifyReturnForStore"] in generated_concepts.ts).
+export interface ShopifyShopifyReturnForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyShopifyReturnForStore(args: ShopifyShopifyReturnForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyShopifyReturnForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyShopifyReturnForStore(args: ShopifyShopifyReturnForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyShopifyReturnForStore = function (this: QueryClient, args: ShopifyShopifyReturnForStoreArgs = {} as ShopifyShopifyReturnForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyShopifyReturnForStore", buildShopifyShopifyReturnForStore(args), opts);
+};
+
+/** One mirrored Shopify StaffMember by store and GID. */
+// Bound concept: v1:shopify:staffMember (machine-readable: BoundConcepts["shopifyStaffMemberByGid"] in generated_concepts.ts).
+export interface ShopifyStaffMemberByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyStaffMemberByGid(args: ShopifyStaffMemberByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyStaffMemberByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStaffMemberByGid(args: ShopifyStaffMemberByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStaffMemberByGid = function (this: QueryClient, args: ShopifyStaffMemberByGidArgs = {} as ShopifyStaffMemberByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStaffMemberByGid", buildShopifyStaffMemberByGid(args), opts);
+};
+
+/** Live mirrored Shopify StaffMember rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:staffMember (machine-readable: BoundConcepts["shopifyStaffMemberForStore"] in generated_concepts.ts).
+export interface ShopifyStaffMemberForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyStaffMemberForStore(args: ShopifyStaffMemberForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyStaffMemberForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStaffMemberForStore(args: ShopifyStaffMemberForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStaffMemberForStore = function (this: QueryClient, args: ShopifyStaffMemberForStoreArgs = {} as ShopifyStaffMemberForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStaffMemberForStore", buildShopifyStaffMemberForStore(args), opts);
+};
+
+/** One mirrored Shopify StoreCreditAccount by store and GID. */
+// Bound concept: v1:shopify:storeCreditAccount (machine-readable: BoundConcepts["shopifyStoreCreditAccountByGid"] in generated_concepts.ts).
+export interface ShopifyStoreCreditAccountByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyStoreCreditAccountByGid(args: ShopifyStoreCreditAccountByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyStoreCreditAccountByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreCreditAccountByGid(args: ShopifyStoreCreditAccountByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreCreditAccountByGid = function (this: QueryClient, args: ShopifyStoreCreditAccountByGidArgs = {} as ShopifyStoreCreditAccountByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreCreditAccountByGid", buildShopifyStoreCreditAccountByGid(args), opts);
+};
+
+/** Live mirrored Shopify StoreCreditAccount rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:storeCreditAccount (machine-readable: BoundConcepts["shopifyStoreCreditAccountForStore"] in generated_concepts.ts).
+export interface ShopifyStoreCreditAccountForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyStoreCreditAccountForStore(args: ShopifyStoreCreditAccountForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyStoreCreditAccountForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreCreditAccountForStore(args: ShopifyStoreCreditAccountForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreCreditAccountForStore = function (this: QueryClient, args: ShopifyStoreCreditAccountForStoreArgs = {} as ShopifyStoreCreditAccountForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreCreditAccountForStore", buildShopifyStoreCreditAccountForStore(args), opts);
+};
+
+/** One mirrored Shopify SubscriptionContract by store and GID. */
+// Bound concept: v1:shopify:subscriptionContract (machine-readable: BoundConcepts["shopifySubscriptionContractByGid"] in generated_concepts.ts).
+export interface ShopifySubscriptionContractByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifySubscriptionContractByGid(args: ShopifySubscriptionContractByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifySubscriptionContractByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySubscriptionContractByGid(args: ShopifySubscriptionContractByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySubscriptionContractByGid = function (this: QueryClient, args: ShopifySubscriptionContractByGidArgs = {} as ShopifySubscriptionContractByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySubscriptionContractByGid", buildShopifySubscriptionContractByGid(args), opts);
+};
+
+/** Live mirrored Shopify SubscriptionContract rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:subscriptionContract (machine-readable: BoundConcepts["shopifySubscriptionContractForStore"] in generated_concepts.ts).
+export interface ShopifySubscriptionContractForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifySubscriptionContractForStore(args: ShopifySubscriptionContractForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifySubscriptionContractForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifySubscriptionContractForStore(args: ShopifySubscriptionContractForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifySubscriptionContractForStore = function (this: QueryClient, args: ShopifySubscriptionContractForStoreArgs = {} as ShopifySubscriptionContractForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifySubscriptionContractForStore", buildShopifySubscriptionContractForStore(args), opts);
+};
+
+/** One mirrored Shopify TenderTransaction by store and GID. */
+// Bound concept: v1:shopify:tenderTransaction (machine-readable: BoundConcepts["shopifyTenderTransactionByGid"] in generated_concepts.ts).
+export interface ShopifyTenderTransactionByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyTenderTransactionByGid(args: ShopifyTenderTransactionByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyTenderTransactionByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyTenderTransactionByGid(args: ShopifyTenderTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyTenderTransactionByGid = function (this: QueryClient, args: ShopifyTenderTransactionByGidArgs = {} as ShopifyTenderTransactionByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyTenderTransactionByGid", buildShopifyTenderTransactionByGid(args), opts);
+};
+
+/** Live mirrored Shopify TenderTransaction rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:tenderTransaction (machine-readable: BoundConcepts["shopifyTenderTransactionForStore"] in generated_concepts.ts).
+export interface ShopifyTenderTransactionForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyTenderTransactionForStore(args: ShopifyTenderTransactionForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyTenderTransactionForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyTenderTransactionForStore(args: ShopifyTenderTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyTenderTransactionForStore = function (this: QueryClient, args: ShopifyTenderTransactionForStoreArgs = {} as ShopifyTenderTransactionForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyTenderTransactionForStore", buildShopifyTenderTransactionForStore(args), opts);
+};
+
+/** One mirrored Shopify UrlRedirect by store and GID. */
+// Bound concept: v1:shopify:urlRedirect (machine-readable: BoundConcepts["shopifyUrlRedirectByGid"] in generated_concepts.ts).
+export interface ShopifyUrlRedirectByGidArgs {
+  storeId: string;
+  gid: string;
+}
+
+export function buildShopifyUrlRedirectByGid(args: ShopifyUrlRedirectByGidArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("gid: " + renderMemQLValue(args.gid));
+  return "query shopifyUrlRedirectByGid(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyUrlRedirectByGid(args: ShopifyUrlRedirectByGidArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyUrlRedirectByGid = function (this: QueryClient, args: ShopifyUrlRedirectByGidArgs = {} as ShopifyUrlRedirectByGidArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyUrlRedirectByGid", buildShopifyUrlRedirectByGid(args), opts);
+};
+
+/** Live mirrored Shopify UrlRedirect rows for one store, newest origin update first. `since` narrows to what changed, which is how reconciliation pages without re-reading the whole domain. */
+// Bound concept: v1:shopify:urlRedirect (machine-readable: BoundConcepts["shopifyUrlRedirectForStore"] in generated_concepts.ts).
+export interface ShopifyUrlRedirectForStoreArgs {
+  storeId: string;
+  since?: string;
+}
+
+export function buildShopifyUrlRedirectForStore(args: ShopifyUrlRedirectForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  return "query shopifyUrlRedirectForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyUrlRedirectForStore(args: ShopifyUrlRedirectForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyUrlRedirectForStore = function (this: QueryClient, args: ShopifyUrlRedirectForStoreArgs = {} as ShopifyUrlRedirectForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyUrlRedirectForStore", buildShopifyUrlRedirectForStore(args), opts);
 };
 
 /** Find the active AI participant in a space. */
@@ -5028,6 +8722,54 @@ QueryClient.prototype.skillNeedsRefresh = function (this: QueryClient, args: Ski
   return this.executeNamed("skillNeedsRefresh", buildSkillNeedsRefresh(args), opts);
 };
 
+/** Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here. */
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.ts).
+export interface SoldByProductArgs {
+  storeId: string;
+  productGid: string;
+}
+
+export function buildSoldByProduct(args: SoldByProductArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("productGid: " + renderMemQLValue(args.productGid));
+  return "query soldByProduct(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    soldByProduct(args: SoldByProductArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.soldByProduct = function (this: QueryClient, args: SoldByProductArgs = {} as SoldByProductArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("soldByProduct", buildSoldByProduct(args), opts);
+};
+
+/** The same, by variant. Separate rather than an optional argument because the two answer different merchandising questions and a caller that passed neither would walk the whole order history. */
+// Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByVariant"] in generated_concepts.ts).
+export interface SoldByVariantArgs {
+  storeId: string;
+  variantGid: string;
+}
+
+export function buildSoldByVariant(args: SoldByVariantArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("variantGid: " + renderMemQLValue(args.variantGid));
+  return "query soldByVariant(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    soldByVariant(args: SoldByVariantArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.soldByVariant = function (this: QueryClient, args: SoldByVariantArgs = {} as SoldByVariantArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("soldByVariant", buildSoldByVariant(args), opts);
+};
+
 /** Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view. */
 // Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.ts).
 export interface SpaceMediaArgs {
@@ -5146,6 +8888,96 @@ declare module "./query.js" {
 
 QueryClient.prototype.staleClusterNodes = function (this: QueryClient, args: StaleClusterNodesArgs = {} as StaleClusterNodesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("staleClusterNodes", buildStaleClusterNodes(args), opts);
+};
+
+/** Inventory levels at one location. The THRESHOLD is applied by the tool: a level's quantities are a nested object keyed by name (available, committed, on_hand...), which a filter cannot compare against a number. */
+// Bound concept: v1:shopify:inventoryLevel (machine-readable: BoundConcepts["stockBelow"] in generated_concepts.ts).
+export interface StockBelowArgs {
+  storeId: string;
+  locationGid: string;
+}
+
+export function buildStockBelow(args: StockBelowArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("locationGid: " + renderMemQLValue(args.locationGid));
+  return "query stockBelow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    stockBelow(args: StockBelowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.stockBelow = function (this: QueryClient, args: StockBelowArgs = {} as StockBelowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("stockBelow", buildStockBelow(args), opts);
+};
+
+/** One configured store by its myshopify.com domain. The connector resolves a delivery's X-Shopify-Shop-Domain header through this. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["storeByDomain"] in generated_concepts.ts).
+export interface StoreByDomainArgs {
+  domain: string;
+}
+
+export function buildStoreByDomain(args: StoreByDomainArgs): string {
+  const parts: string[] = [];
+  parts.push("domain: " + renderMemQLValue(args.domain));
+  return "query storeByDomain(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    storeByDomain(args: StoreByDomainArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.storeByDomain = function (this: QueryClient, args: StoreByDomainArgs = {} as StoreByDomainArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("storeByDomain", buildStoreByDomain(args), opts);
+};
+
+/** One configured store by id. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["storeById"] in generated_concepts.ts).
+export interface StoreByIdArgs {
+  storeId: string;
+}
+
+export function buildStoreById(args: StoreByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query storeById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    storeById(args: StoreByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.storeById = function (this: QueryClient, args: StoreByIdArgs = {} as StoreByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("storeById", buildStoreById(args), opts);
+};
+
+/** Every configured store. Small by construction -- a deployment mirrors the stores an operator entered -- so the page size is generous. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["stores"] in generated_concepts.ts).
+export interface StoresArgs {
+  status?: string;
+}
+
+export function buildStores(args: StoresArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query stores(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    stores(args: StoresArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.stores = function (this: QueryClient, args: StoresArgs = {} as StoresArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("stores", buildStores(args), opts);
 };
 
 /** Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side. */
@@ -5384,6 +9216,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.templates = function (this: QueryClient, args: TemplatesArgs = {} as TemplatesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("templates", buildTemplates(args), opts);
+};
+
+/** Territories for a store. */
+// Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["territoriesForStore"] in generated_concepts.ts).
+export interface TerritoriesForStoreArgs {
+  storeId: string;
+}
+
+export function buildTerritoriesForStore(args: TerritoriesForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query territoriesForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    territoriesForStore(args: TerritoriesForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.territoriesForStore = function (this: QueryClient, args: TerritoriesForStoreArgs = {} as TerritoriesForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("territoriesForStore", buildTerritoriesForStore(args), opts);
 };
 
 /** Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version. */
