@@ -140,16 +140,23 @@ func (s *Store) UpdateStatus(ctx context.Context, version, status, errText strin
 // CutByVersion reads one release-cut row, or reports false when this cluster
 // has no row for that version.
 //
-// The read goes through the SAME internal-origin seam, and it has to: the
-// releaseCuts query is gated requiresOwner and this call runs on behalf of a
-// caller the Go wall has already admitted, but the read here is the ROW the
-// status check is about to write, not a listing anyone sees. Reading it under
-// the ordinary path would be a second authorization decision about a caller
-// the handler has already decided about.
+// A BY-ID READ, NOT A SCAN OF THE HISTORY LIST. releaseCuts paginates 50 --
+// correct for a portal list, wrong for a lookup: an installation past its
+// fiftieth release would miss every older version here and the caller would
+// answer version_not_cut, which MEANS "cut by hand, or on another
+// installation". That is a confident wrong answer produced by a page boundary
+// nobody could see from the message, which is exactly the class of thing the
+// rest of this package refuses to do.
+//
+// The read goes through the SAME internal-origin seam as the writes. It runs on
+// behalf of a caller the Go wall has already admitted as an owner, and the row
+// it fetches is the one the status check is about to write rather than a
+// listing anyone sees.
 func (s *Store) CutByVersion(ctx context.Context, version string) (map[string]any, bool, error) {
-	res, err := s.executeServerOnly(ctx, "query releaseCuts()")
+	call := renderCall("releaseCutByVersion", map[string]any{"version": version})
+	res, err := s.executeServerOnly(ctx, "query "+call)
 	if err != nil {
-		return nil, false, fmt.Errorf("release: read the cut history: %w", err)
+		return nil, false, fmt.Errorf("release: read the cut %s: %w", version, err)
 	}
 	if res == nil || res.Bundle == nil {
 		return nil, false, nil
@@ -162,6 +169,10 @@ func (s *Store) CutByVersion(ctx context.Context, version string) (map[string]an
 		if p := node.GetPayload(); p != nil {
 			payload = p.AsMap()
 		}
+		// The by-id filter has already selected; the version check stays
+		// as a belt-and-braces guard against an id collision between
+		// concepts, which resolveFullId makes unlikely rather than
+		// impossible.
 		if asString(payload["version"]) == version {
 			payload["id"] = node.GetId()
 			return payload, true, nil

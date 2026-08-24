@@ -234,3 +234,88 @@ func TestReleaseCutsReadIsRefusedForANonOwner(t *testing.T) {
 		})
 	}
 }
+
+// TestReleaseCutByVersionFindsAVersionPastTheListsPageBoundary is the
+// regression this query exists for.
+//
+// releaseCuts paginates 50, which is right for a portal list and wrong for a
+// lookup. Store.CutByVersion used to scan that list, so an installation past
+// its fiftieth release answered version_not_cut for every older version -- and
+// version_not_cut MEANS "cut by hand, or on another installation". A confident
+// wrong answer produced by a page boundary invisible from the message.
+//
+// The test seeds past the boundary deliberately: 55 newer rows, then asks for
+// the oldest. Against the old scan this fails; against the by-id read it
+// passes. The DB is what makes that difference visible -- no fake-engine test
+// can have a page boundary.
+func TestReleaseCutByVersionFindsAVersionPastTheListsPageBoundary(t *testing.T) {
+	eng, _, ctx := sharedReadMergeEngine(t)
+	own := auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: "v1:identity:user:releasecut-probe",
+		Role:   auth.RoleOwner,
+	})
+	internal := auth.ContextWithInternalOrigin(own)
+
+	// The one this test goes looking for, written FIRST so every other row
+	// sorts newer than it.
+	const buried = "v0.0.0-releasecut-buried"
+	seed := func(version string) {
+		t.Helper()
+		call := fmt.Sprintf(`mutation createReleaseCut(version:%s,bump:"patch",baseSha:%s,`+
+			`requestedBy:%s,status:"dispatched",tagName:%s,dispatchedAt:"2026-08-24T00:00:00Z")`,
+			langparser.QuoteString(version),
+			langparser.QuoteString("0000000000000000000000000000000000000000"),
+			langparser.QuoteString("v1:identity:user:releasecut-probe"),
+			langparser.QuoteString(version))
+		if _, err := eng.Execute(internal, call); err != nil {
+			t.Fatalf("seeding %s: %v", version, err)
+		}
+	}
+	seed(buried)
+	// 55 > the list's paginate 50, so the buried row cannot be on the page.
+	for n := 0; n < 55; n++ {
+		seed(fmt.Sprintf("v0.0.%d-releasecut-filler", n))
+	}
+
+	// The CONTROL: prove the buried row really is off the list, or the
+	// assertion below is about nothing.
+	list, err := eng.Execute(internal, "query releaseCuts()")
+	if err != nil {
+		t.Fatalf("releaseCuts: %v", err)
+	}
+	onTheList := false
+	for _, n := range list.Bundle.GetNodes() {
+		if n == nil || n.GetPayload() == nil {
+			continue
+		}
+		if v, _ := n.GetPayload().AsMap()["version"].(string); v == buried {
+			onTheList = true
+		}
+	}
+	if onTheList {
+		t.Skipf("the buried row is still on the paginated list (%d rows returned), so this test "+
+			"cannot demonstrate the boundary -- raise the filler count above the page size",
+			len(list.Bundle.GetNodes()))
+	}
+
+	// The by-id read must find it anyway.
+	res, err := eng.Execute(internal, fmt.Sprintf("query releaseCutByVersion(version:%s)",
+		langparser.QuoteString(buried)))
+	if err != nil {
+		t.Fatalf("releaseCutByVersion refused an owner: %v", err)
+	}
+	found := false
+	for _, n := range res.Bundle.GetNodes() {
+		if n == nil || n.GetPayload() == nil {
+			continue
+		}
+		if v, _ := n.GetPayload().AsMap()["version"].(string); v == buried {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("releaseCutByVersion did not find %s, which IS in the database but is off the "+
+			"history list's first page. releaseCutStatus would answer version_not_cut -- "+
+			"'cut by hand, or on another installation' -- for a release this cluster made.", buried)
+	}
+}

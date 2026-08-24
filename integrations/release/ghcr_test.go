@@ -96,7 +96,11 @@ type rowEngine struct {
 func (e *rowEngine) Execute(ctx context.Context, call string) (*memql.ExecuteResult, error) {
 	e.calls = append(e.calls, call)
 	e.origins = append(e.origins, auth.OriginFromContext(ctx))
-	if !strings.HasPrefix(call, "query releaseCuts") {
+	// The status path reads ONE row by id (releaseCutByVersion), not the
+	// paginated history list -- see Store.CutByVersion for why. The fake
+	// matches the call the package actually composes, so a change to that
+	// call surfaces here rather than being silently absorbed.
+	if !strings.HasPrefix(call, "query releaseCutByVersion") {
 		return &memql.ExecuteResult{}, nil
 	}
 	if e.row == nil {

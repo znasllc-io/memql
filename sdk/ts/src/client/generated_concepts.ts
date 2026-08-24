@@ -633,6 +633,7 @@ export const BoundConcepts = {
   reinforceHarnessSemanticMemory: "v1:harness:semanticMemory",
   rejectAccessRequest: "v1:identity:accessRequest",
   rejectOverride: "v1:healing:healedOverride",
+  releaseCutByVersion: "v1:cluster:releaseCut",
   releaseCuts: "v1:cluster:releaseCut",
   releaseWorkspace: "v1:workbench:workspace",
   removeAgentFromSpace: "v1:cognition:participant",

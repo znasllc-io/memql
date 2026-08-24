@@ -5078,7 +5078,31 @@ QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRate
 TWO TERMS FOR ONE PREDICATE, and both earn their place -- deleting either is the mistake this note exists to prevent.
 `requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
 `actor.isClusterOwner==true` is what the CONCEPT'S TIER already ANDs into every read of it, written out so the enforcement land gate (memql#3172) can decide implication. That gate cannot expand a spec, so with `requiresOwner` alone it reports the read as UNDECIDABLE -- it cannot prove the filter already implies the conjunct, and an undecidable read is one whose result set might silently change when enforcement lands. Spelling the conjunct out settles it, and it narrows nothing: the two terms are the same predicate, since `IsClusterOwner()` IS `Role == RoleOwner`.
-This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A release cut by hand appears here not at all. */
+This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A release cut by hand appears here not at all. One release cut, by version. The version IS the row id (createReleaseCut stamps `id: args.version`), so this is a single-row read on the primary key's leading column rather than a payload probe -- the distinction row_id_mirror_test.go enforces across the tree, and the reason the filter names `row.id` even though a `version` payload field exists beside it.
+SEPARATE FROM releaseCuts, and not a convenience. releaseCuts paginates 50, which is the right bound for a portal list and the wrong one for a lookup: an installation past its fiftieth release would have releaseCutStatus miss every older version and answer `version_not_cut` -- whose meaning is "cut by hand, or on another installation". A confident wrong answer, arrived at by a page boundary nobody could see from the message.
+Same gate as its sibling, for the same reason; see that note for why both terms are present. */
+// Bound concept: v1:cluster:releaseCut (machine-readable: BoundConcepts["releaseCutByVersion"] in generated_concepts.ts).
+export interface ReleaseCutByVersionArgs {
+  version: string;
+}
+
+export function buildReleaseCutByVersion(args: ReleaseCutByVersionArgs): string {
+  const parts: string[] = [];
+  parts.push("version: " + renderMemQLValue(args.version));
+  return "query releaseCutByVersion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCutByVersion(args: ReleaseCutByVersionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCutByVersion = function (this: QueryClient, args: ReleaseCutByVersionArgs = {} as ReleaseCutByVersionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCutByVersion", buildReleaseCutByVersion(args), opts);
+};
+
+/** releaseCuts wraps the query named "releaseCuts". */
 // Bound concept: v1:cluster:releaseCut (machine-readable: BoundConcepts["releaseCuts"] in generated_concepts.ts).
 export interface ReleaseCutsArgs {
 }

@@ -171,6 +171,26 @@ query node staleClusterNodes {
 ///
 /// This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A
 /// release cut by hand appears here not at all.
+/// One release cut, by version. The version IS the row id (createReleaseCut stamps `id:
+/// args.version`), so this is a single-row read on the primary key's leading column rather than a
+/// payload probe -- the distinction row_id_mirror_test.go enforces across the tree, and the reason
+/// the filter names `row.id` even though a `version` payload field exists beside it.
+///
+/// SEPARATE FROM releaseCuts, and not a convenience. releaseCuts paginates 50, which is the right
+/// bound for a portal list and the wrong one for a lookup: an installation past its fiftieth
+/// release would have releaseCutStatus miss every older version and answer `version_not_cut` --
+/// whose meaning is "cut by hand, or on another installation". A confident wrong answer, arrived at
+/// by a page boundary nobody could see from the message.
+///
+/// Same gate as its sibling, for the same reason; see that note for why both terms are present.
+@actor
+query releaseCut releaseCutByVersion {
+  args {
+    version  string!
+  }
+  filter  row.id==args.version && requiresOwner && actor.isClusterOwner==true
+}
+
 @actor
 query releaseCut releaseCuts {
   filter   requiresOwner && actor.isClusterOwner==true

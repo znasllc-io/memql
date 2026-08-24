@@ -145,10 +145,14 @@ func TestEveryRenderedStatementParsesAndResolves(t *testing.T) {
 			t.Errorf("%s does not parse through the real front end: %v\n  %s", site.fn, err, call)
 		}
 	}
-	// The one READ this package issues. Store.CutByVersion sends it
-	// verbatim, so it is checked verbatim.
-	if _, err := eng.Parse("query releaseCuts()"); err != nil {
-		t.Errorf("the releaseCuts read does not parse: %v", err)
+	// The READ this package composes. It is built by renderCall like the
+	// writes, so it goes through the same two levels.
+	read := "query " + renderCall("releaseCutByVersion", map[string]any{"version": "v1.2.3"})
+	if _, err := eng.Parse(read); err != nil {
+		t.Errorf("the releaseCutByVersion read does not parse: %v\n  %s", err, read)
+	}
+	if fn, err := eng.Functions().Get("releaseCutByVersion"); err != nil || fn == nil {
+		t.Errorf("releaseCutByVersion is not in the function registry: %v", err)
 	}
 	if len(sites) == 0 {
 		t.Fatal("no call sites; this test would pass vacuously")
