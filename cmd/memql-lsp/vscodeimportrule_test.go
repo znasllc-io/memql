@@ -58,6 +58,7 @@ var vscodeImportAllowList = []string{
 	"webview/conceptPanel.ts",           // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/deploymentPanel.ts",        // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
 	"webview/runPanel.ts",               // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
+	"webview/theme.ts",                  // reads memql.appearance + activeColorTheme for webview/appearance.ts, which decides
 }
 
 // vscodeImportPattern matches every spelling of a `vscode` module reference

@@ -5,6 +5,7 @@ import {
   CancellationToken,
   CodeLens,
   commands,
+  ConfigurationTarget,
   Diagnostic,
   DiagnosticSeverity,
   env,
@@ -80,6 +81,15 @@ import {
 } from './clusters/ownershipRoute.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
+import { currentEditorKind } from './webview/theme.js';
+import {
+  OFFER_DISMISS,
+  OFFER_MESSAGE,
+  OFFER_SWITCH,
+  THEME_OFFER_ANSWERED_KEY,
+  memqlThemeFor,
+  shouldOfferMemqlTheme,
+} from './theme/themeOffer.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { composeEndpointFromDomain } from './connection/endpoint.js';
 import { ConnectionManager, type ConnectionState } from './connection/manager.js';
@@ -323,6 +333,14 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
 
   startLanguageClient(context);
 
+  // The one-time offer to wear the brand in the workbench too (memql#4421).
+  //
+  // OUTSIDE THE TRUST GATE, deliberately. It reads two editor settings and
+  // writes one; it touches no credential, opens no connection and looks at
+  // nothing in the workspace. Putting it behind the gate would mean an
+  // operator in a restricted folder never learns the themes exist.
+  offerMemqlThemeOnce(context);
+
   // The runtime surface reads credentials from the home directory and opens a
   // network connection, so it is gated on workspace trust. Language features
   // above are not.
@@ -348,6 +366,51 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // inside a real editor can drive a uri without asking the operator to click
   // VS Code's own "allow this extension to open the URI" prompt.
   return { handleOpenUri };
+}
+
+/**
+ * Show the MemQL colour-theme offer, at most once ever.
+ *
+ * The adapter half of src/theme/themeOffer.ts, which owns every decision here
+ * and is tested without an editor. This function's only job is to fetch the
+ * three inputs, present the notification, and record the answer.
+ *
+ * ANY RESOLUTION COUNTS AS AN ANSWER, including the operator dismissing the
+ * toast with its close button (`undefined`). That is deliberately wider than
+ * "they pressed one of our two buttons": a VS Code notification carrying
+ * actions stays on screen until it is acted on, so `undefined` here means a
+ * person deliberately got rid of it -- and re-asking someone who has already
+ * waved it away is exactly the nagging D4 rules out. The cost of reading it
+ * this way is one lost offer in the rare case the notification is dismissed by
+ * something other than the operator; the cost of the other reading is a prompt
+ * that returns every session forever.
+ *
+ * The theme is written to GLOBAL settings, because `workbench.colorTheme` is a
+ * property of this person's editor rather than of the folder they opened. A
+ * workspace-scoped write would re-theme one project and look broken in the
+ * next window.
+ */
+function offerMemqlThemeOnce(context: ExtensionContext): void {
+  const editorKind = currentEditorKind();
+  const decision = {
+    answered: context.globalState.get<boolean>(THEME_OFFER_ANSWERED_KEY) === true,
+    activeThemeLabel: workspace.getConfiguration('workbench').get<string>('colorTheme') ?? '',
+    editorKind,
+  };
+  if (!shouldOfferMemqlTheme(decision)) return;
+
+  void (async () => {
+    const choice = await window.showInformationMessage(
+      OFFER_MESSAGE,
+      OFFER_SWITCH,
+      OFFER_DISMISS
+    );
+    await context.globalState.update(THEME_OFFER_ANSWERED_KEY, true);
+    if (choice !== OFFER_SWITCH) return;
+    await workspace
+      .getConfiguration('workbench')
+      .update('colorTheme', memqlThemeFor(editorKind), ConfigurationTarget.Global);
+  })();
 }
 
 // startLanguageClient boots the memql-lsp client, or reports why it could not.

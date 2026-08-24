@@ -31,6 +31,7 @@ import * as vscode from "vscode";
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import { brandHeader, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 import { browseConceptPage, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { readClustersFileSafe } from "../clusters/file.js";
@@ -110,6 +111,9 @@ export class ConnectionPanel {
     // reopen would show "expires in 11m" an hour after it did.
     this.ticker = setInterval(() => this.render(), TICK_MS);
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => {
         this.disposed = true;
         if (this.ticker !== undefined) clearInterval(this.ticker);
@@ -356,7 +360,7 @@ ${viewKitStyles}
   .error { color: var(--memql-danger); }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 ${this.bodyHtml()}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();

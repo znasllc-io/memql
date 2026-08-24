@@ -52,6 +52,7 @@ import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { maskHomePath, redactForDisplay } from "../install/secrets.js";
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
 import { preflightItems, type PreflightInputs, type PreflightItem } from "../state/preflight.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
@@ -437,6 +438,9 @@ export class AddClusterPanel {
     );
 
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
     );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -1584,7 +1588,7 @@ ${viewKitStyles}
                   user-select: all; color: var(--memql-data-number); }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 ${brandStrip("MemQL")}
 ${this.bodyHtml()}
 <script nonce="${nonce}">

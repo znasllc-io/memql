@@ -45,6 +45,7 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { AutomationTarget } from "../constructs/runnable.js";
 import type {
@@ -146,6 +147,9 @@ export class AutomationRunPanel {
       { enableScripts: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
     );
@@ -395,7 +399,7 @@ ${viewKitStyles}
   .check input { width: auto; }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 <div class="toolbar">
   ${brandMarkSvg(16)}
   <strong class="data">automation ${escapeHtml(this.target.name)}</strong>
@@ -581,6 +585,9 @@ export class StepTracePanel {
       { enableScripts: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
     );
@@ -671,7 +678,7 @@ ${panelChrome()}
   .summary { padding: 8px 12px; border-top: 1px solid var(--memql-border); color: var(--memql-muted); }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 <div class="toolbar">
   ${brandMarkSvg(16)}
   <strong class="data">${escapeHtml(this.target.name)}</strong>

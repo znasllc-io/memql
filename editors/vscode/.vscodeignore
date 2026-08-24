@@ -1,5 +1,6 @@
 .vscode/**
 src/**
+scripts/**
 test/**
 test-host/**
 dist-test/**

@@ -1,11 +1,26 @@
-// The MemQL brand, as far as a VS Code webview can carry it (memql#4196).
+// The MemQL brand, as far as a VS Code webview can carry it (memql#4196;
+// re-keyed onto the appearance setting in memql#4419).
 //
 // ONE token module for every panel. The palette is memql.io's exactly -- the
-// same hexes the portal redesign (memql#4177) ships -- selected dark/light by
-// the theme class VS Code stamps on the webview body, so the panels read as
-// the same product as the portal and the site while still flipping with the
-// editor. High contrast defers wholesale to VS Code's own variables: a themed
-// green is not worth an accessibility regression.
+// same hexes the portal redesign (memql#4177) ships -- and since memql#4419 it
+// lives next door in palette.ts as DATA, because a theme-JSON generator cannot
+// read a template literal (see that file's header). This module COMPOSES the
+// CSS from it; it no longer holds a hex of its own.
+//
+// WHICH PALETTE APPLIES IS MEMQL'S DECISION NOW, NOT THE EDITOR'S. The dark
+// block used to select on `body.vscode-dark` -- the class VS Code stamps from
+// the EDITOR's theme -- which made `memql.appearance` unimplementable: the
+// cascade had no input but the editor. It now selects on
+// `body[data-memql-theme="dark"]`, which each panel host stamps from
+// appearance.ts's resolver. Do not add the old class back beside the new
+// attribute: whichever rule came last would win, so a forced-light panel under
+// a dark editor would flip to dark with nothing to say why.
+//
+// High contrast defers wholesale to VS Code's own variables and IGNORES the
+// setting: a themed green is not worth an accessibility regression. Those
+// rules keep keying on the `vscode-high-contrast` classes VS Code itself
+// stamps, and appearance.ts stamps no attribute in that case, so exactly one
+// opinion reaches the cascade.
 //
 // WHAT VS CODE DOES NOT ALLOW, stated so nobody re-litigates it:
 //   - No bundled fonts. A webview under `default-src 'none'` loads no font
@@ -27,66 +42,72 @@
 
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
+import { DARK, LIGHT, PALETTE_KEYS, type PaletteKey } from "./palette.js";
+
+/**
+ * What each token becomes under either high-contrast theme.
+ *
+ * Typed as a TOTAL record over PaletteKey, which is the point: adding a
+ * palette token without deciding its high-contrast behaviour is a compile
+ * error rather than a custom property that silently resolves to nothing in the
+ * one theme where legibility matters most.
+ */
+const HIGH_CONTRAST: Readonly<Record<PaletteKey, string>> = {
+  bg: "var(--vscode-editor-background)",
+  surface: "var(--vscode-editor-background)",
+  raised: "var(--vscode-editor-background)",
+  border: "var(--vscode-contrastBorder, var(--vscode-panel-border))",
+  "border-strong": "var(--vscode-contrastBorder, var(--vscode-panel-border))",
+  fg: "var(--vscode-foreground)",
+  muted: "var(--vscode-foreground)",
+  subtle: "var(--vscode-descriptionForeground)",
+  accent: "var(--vscode-focusBorder)",
+  "accent-deep": "var(--vscode-focusBorder)",
+  "on-accent": "var(--vscode-editor-background)",
+  "on-accent-hover": "var(--vscode-editor-background)",
+  danger: "var(--vscode-errorForeground)",
+  "data-number": "var(--vscode-foreground)",
+  "data-string": "var(--vscode-foreground)",
+};
+
+/**
+ * One theme's `--memql-*` declarations, in PALETTE_KEYS order.
+ *
+ * Emitted from the shared key list rather than written out per block, so the
+ * three blocks below cannot fall out of step: a token added to palette.ts
+ * appears in all three, or the total-record types stop compiling.
+ */
+function declarations(values: Readonly<Record<PaletteKey, string>>): string {
+  return PALETTE_KEYS.map((key) => `    --memql-${key}: ${values[key]};`).join("\n");
+}
+
 /**
  * The palette + shared component classes, inlined by every panel under its
- * CSP nonce. Light is the default; `body.vscode-dark` flips to the dark
- * palette; both high-contrast classes remap every token onto VS Code's own
- * variables.
+ * CSP nonce.
+ *
+ * Light is the default; `body[data-memql-theme="dark"]` -- the attribute the
+ * panel host stamps from `memql.appearance` and the editor's kind -- flips to
+ * the dark palette; both high-contrast classes remap every token onto VS
+ * Code's own variables and ignore the setting entirely.
+ *
+ * Light being the DEFAULT rather than a stamped case is deliberate: a panel
+ * rendered before a theme could be resolved, or by a code path that forgot to
+ * stamp, gets a readable light page rather than an unstyled one.
  */
 export function brandStyleBlock(): string {
   return `
-  /* ---- MemQL brand tokens (memql#4196; palette = memql.io / memql#4177) ---- */
+  /* ---- MemQL brand tokens (memql#4196; palette = memql.io / memql#4177,
+         and since memql#4419 it lives in palette.ts) ---- */
   body {
-    --memql-bg: #f2f4ef;
-    --memql-surface: #ffffff;
-    --memql-raised: #e9ede6;
-    --memql-border: #d6ddd4;
-    --memql-border-strong: #c2cabf;
-    --memql-fg: #14201a;
-    --memql-muted: #586159;
-    --memql-subtle: #7c847b;
-    --memql-accent: #047d5a;
-    --memql-accent-deep: #026842;
-    --memql-on-accent: #ffffff;
-    --memql-on-accent-hover: #ffffff;
-    --memql-danger: #b42318;
-    --memql-data-number: #0f766e;
-    --memql-data-string: #b45309;
+${declarations(LIGHT)}
   }
-  body.vscode-dark {
-    --memql-bg: #07090a;
-    --memql-surface: #0b1110;
-    --memql-raised: #0e1311;
-    --memql-border: #18231e;
-    --memql-border-strong: #213029;
-    --memql-fg: #e8e6dd;
-    --memql-muted: #9ca395;
-    --memql-subtle: #6c726a;
-    --memql-accent: #5ccda7;
-    --memql-accent-deep: #026842;
-    --memql-on-accent: #052e21;
-    --memql-on-accent-hover: #ffffff;
-    --memql-danger: #f97066;
-    --memql-data-number: #98ffe0;
-    --memql-data-string: #cbb083;
+  body[data-memql-theme="dark"] {
+${declarations(DARK)}
   }
-  /* High contrast is VS Code's contract, not ours: every token defers. */
+  /* High contrast is VS Code's contract, not ours: every token defers, and the
+     appearance setting does not get a vote. */
   body.vscode-high-contrast, body.vscode-high-contrast-light {
-    --memql-bg: var(--vscode-editor-background);
-    --memql-surface: var(--vscode-editor-background);
-    --memql-raised: var(--vscode-editor-background);
-    --memql-border: var(--vscode-contrastBorder, var(--vscode-panel-border));
-    --memql-border-strong: var(--vscode-contrastBorder, var(--vscode-panel-border));
-    --memql-fg: var(--vscode-foreground);
-    --memql-muted: var(--vscode-foreground);
-    --memql-subtle: var(--vscode-descriptionForeground);
-    --memql-accent: var(--vscode-focusBorder);
-    --memql-accent-deep: var(--vscode-focusBorder);
-    --memql-on-accent: var(--vscode-editor-background);
-    --memql-on-accent-hover: var(--vscode-editor-background);
-    --memql-danger: var(--vscode-errorForeground);
-    --memql-data-number: var(--vscode-foreground);
-    --memql-data-string: var(--vscode-foreground);
+${declarations(HIGH_CONTRAST)}
   }
 
   /* view-kit rides the same tokens, so its lists and tables wear the brand. */

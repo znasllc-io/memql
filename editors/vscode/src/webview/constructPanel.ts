@@ -39,6 +39,7 @@ import * as vscode from "vscode";
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { CatalogConstruct } from "../state/constructCatalog.js";
 import { renderConstructPage } from "./constructScreens.js";
@@ -173,6 +174,9 @@ export class ConstructPanel {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.disposables.push(
+      // The palette is a MemQL setting now, not the editor's theme, so an
+      // OPEN panel repaints when either input moves (memql#4419).
+      ...onAppearanceChange(() => this.render()),
       this.panel.onDidDispose(() => {
         this.disposed = true;
         if (ConstructPanel.open_ === this) ConstructPanel.open_ = undefined;
@@ -362,7 +366,7 @@ ${viewKitStyles}
                      color: var(--vscode-button-secondaryForeground); }
 </style>
 </head>
-<body>
+<body${currentBodyThemeAttr()}>
 ${brandStrip("MemQL")}
 ${body}
 <script nonce="${nonce}">
