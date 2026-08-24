@@ -168,7 +168,7 @@
     {
       "id": "providerKey",
       "script": "install.verifyProviderKey",
-      "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it.",
+      "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it. Skipped, satisfied, when no key was supplied: installing spends no inference, so providers are configured in the portal afterwards.",
       "dependsOn": [
         "detect"
       ],
@@ -204,7 +204,7 @@
     {
       "id": "seedBootstrap",
       "script": "install.seedBootstrap",
-      "description": "Write the identity bootstrap values and the AI provider key into the cluster and restart the nodes that read them, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "description": "Write the identity bootstrap values -- and the AI provider key if one was supplied -- into the cluster and restart the nodes that read them, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
       "dependsOn": [
         "clusterUp"
       ],

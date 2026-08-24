@@ -443,10 +443,25 @@ function endpointProblem(name: string, endpoint: string): string | undefined {
  *
  * A REPAIR NEEDS ONLY THE DOMAIN. It is the same graph re-run over a machine
  * that already has these answers recorded, and every step verifies first and
- * skips when satisfied -- so demanding the owner's name and a provider key
- * again would be asking the operator for what the machine can already see. The
- * domain stays because it is how the cluster is addressed, and a repair
- * pointed at the wrong one is not a repair.
+ * skips when satisfied -- so demanding the owner's name again would be asking
+ * the operator for what the machine can already see. The domain stays because
+ * it is how the cluster is addressed, and a repair pointed at the wrong one is
+ * not a repair.
+ *
+ * NO AI PROVIDER KEY IS REQUIRED BY ANY ACTION (epic memql#4440). This list is
+ * where that requirement lived, and it is the ONLY place it ever lived -- the
+ * engine has always booted keyless (a provider whose key does not resolve
+ * registers as unavailable and is skipped at selection; nothing refuses boot
+ * over it), and `seed-bootstrap.sh` has always returned cleanly when handed
+ * neither `--provider` nor `--provider-key-file`. So a wizard that demanded
+ * one was demanding it on its own authority, for a cluster that did not need
+ * it, and the answer to "why does installing MemQL need an LLM key" was
+ * "it does not".
+ *
+ * The fields did not go away -- see `optionalFields`. Supplied, they behave
+ * exactly as before: verified by the `providerKey` step, then seeded. Left
+ * empty, nothing is verified and nothing is seeded, and provider
+ * configuration happens in the portal at Settings -> AI providers.
  */
 /**
  * The remedy a capability declared, or "" (memql#3551).
@@ -472,8 +487,10 @@ export function requiredFields(action: AddClusterAction): InputField[] {
         "ownerFirstName",
         "ownerLastName",
         "ownerEmail",
-        "provider",
-        "providerKeyFile",
+        // NO PROVIDER, NO KEY FILE (epic memql#4440). They are collected --
+        // see optionalFields -- but nothing waits on them: installing a
+        // cluster spends no inference, so a vendor key is not a thing the
+        // machine needs before it can be built. See the block comment above.
         // Asked for LAST, and pre-filled: it is the one field with a house
         // answer, so it reads as a confirmation rather than a question.
         // A REPAIR does not collect it -- the receipt replays the version the
@@ -506,13 +523,23 @@ export function requiredFields(action: AddClusterAction): InputField[] {
       // naming three values the wizard offered no way to supply. Every other
       // param on that step reached it: `domain` was collected, and
       // `registration-mode` has a default. Only the owner had neither.
+      //
+      // THE KEY FIELDS ARE NO LONGER AMONG THEM (epic memql#4440), and that is
+      // the one part of the paragraph above that has changed rather than been
+      // abandoned. memql#3544's reasoning was about an answer the machine
+      // ALREADY HAS and got wrong; it never contemplated the case where the
+      // recorded answer is that there was never a key -- which is now the
+      // ordinary case, because an install no longer asks for one. A repair
+      // that demanded a key would then be demanding a value that never
+      // existed, on a cluster that is working, and leaving the operator with
+      // no way past a form. The fields are still COLLECTED (optionalFields)
+      // and still PRE-FILLED from the receipt, so the editable-box remedy
+      // memql#3544 built is intact; what is gone is the requirement.
       return [
         "domain",
         "ownerFirstName",
         "ownerLastName",
         "ownerEmail",
-        "provider",
-        "providerKeyFile",
       ];
     case "uninstall":
     case "connect":
@@ -522,6 +549,35 @@ export function requiredFields(action: AddClusterAction): InputField[] {
       // (memql#3741): the domain comes off the install receipt, or off the
       // installer's own default when the receipt is gone. A field here would
       // be the form this exists to remove.
+      return [];
+  }
+}
+
+/**
+ * What each action COLLECTS but never waits for (epic memql#4440).
+ *
+ * A separate list rather than a flag on the fields, because the two questions
+ * a screen asks are genuinely different: `requiredFields` answers "may this
+ * run start", and this answers "what else is worth offering while we are
+ * here". Merging them into one annotated list is what would let a future edit
+ * make an optional field block a run by touching one character.
+ *
+ * The collect screen renders these in a collapsed disclosure, below the
+ * required ones. An empty value is not an error; a MALFORMED one still is --
+ * `validate()` shape-checks these exactly as it does the required fields, so
+ * the paste-the-key-into-the-path-box refusal (memql#3545) survives the
+ * demotion. That is the trap in making a required field optional: the
+ * validation that protected it usually hung off the requirement.
+ */
+export function optionalFields(action: AddClusterAction): InputField[] {
+  switch (action) {
+    case "install":
+    case "installGuided":
+    case "repair":
+      return ["provider", "providerKeyFile"];
+    case "uninstall":
+    case "connect":
+    case "reconnect":
       return [];
   }
 }
@@ -760,6 +816,35 @@ export class AddClusterState {
     return handoff.canSignIn ? "signIn" : "none";
   }
 
+  /**
+   * Where to send an operator whose cluster was built without an AI provider
+   * (epic memql#4440), or "" when there is nothing to say.
+   *
+   * OFFERED ONLY WHEN NOTHING WAS SEEDED. An install that supplied a key
+   * configured its providers as part of the run, and a link inviting the
+   * operator to go and configure them again would read as though the key had
+   * not taken. The empty string means "render no line", which is what the
+   * whole keyed path gets.
+   *
+   * A GETTER HERE, not an HTML string in the panel, for the same reason
+   * `primaryHandoffAction` is (memql#3884): `addClusterPanel.ts` imports
+   * `vscode`, so nothing under `node --test` can render it, and a decision
+   * written into a template is a decision no test can reach.
+   *
+   * The address is composed from the domain the operator gave the installer,
+   * by the same single-label-under-the-domain convention every other host
+   * follows -- `portal.<domain>` is the platform's own site, front-door rule
+   * #1. Requires a successful hand-off, because a run that did not register a
+   * cluster has no domain worth linking into.
+   */
+  get providerSetupUrl(): string {
+    const handoff = this.handoffResult;
+    if (handoff === undefined || !handoff.ok) return "";
+    if (this.values.providerKeyFile.trim() !== "") return "";
+    const domain = handoff.cluster.domain?.trim() ?? "";
+    if (domain === "") return "";
+    return `https://portal.${domain}/settings/providers`;
+  }
 
   // ---------------------------------------------------------------------------
   // routing
@@ -848,7 +933,22 @@ export class AddClusterState {
     return this.versionTouched;
   }
 
-  /** Every problem with what has been entered so far, for the action chosen. */
+  /**
+   * Every problem with what has been entered so far, for the action chosen.
+   *
+   * TWO PASSES, because the two lists fail differently (epic memql#4440). A
+   * required field that is empty is an error and its shape is checked when it
+   * is not; an optional field that is empty is the ordinary case and only its
+   * SHAPE is ever checked.
+   *
+   * The optional pass is not a nicety. Making `providerKeyFile` optional moved
+   * it out of the only loop that ran `problemWith` over it -- so the
+   * paste-the-key refusal (memql#3545), which exists because the value would
+   * otherwise reach a command line every process on the machine can read and
+   * then be written verbatim into the install receipt, would have silently
+   * stopped running. `problemWith` already returns undefined for an empty
+   * value, so the pass costs nothing when the disclosure was never opened.
+   */
   validate(): FieldError[] {
     const action = this.chosen;
     if (action === undefined) return [];
@@ -857,6 +957,10 @@ export class AddClusterState {
       const value = this.values[field];
       const problem =
         value.trim() === "" ? `A ${LABELS[field]} is required.` : this.problemWith(field, value);
+      if (problem !== undefined) errors.push({ field, message: problem });
+    }
+    for (const field of optionalFields(action)) {
+      const problem = this.problemWith(field, this.values[field]);
       if (problem !== undefined) errors.push({ field, message: problem });
     }
     return errors;

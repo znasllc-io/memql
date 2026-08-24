@@ -419,6 +419,39 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
     if (opts.skip.has(step.id)) {
       return { action: "skip", reason: `skipped: ${step.id}` };
     }
+    // NO KEY, NO VENDOR CALL (epic memql#4440).
+    //
+    // `providerKey` runs an authenticated `GET /v1/models` against the vendor.
+    // It spends no tokens, but it is a call to an AI vendor and it needs a
+    // credential -- so with no key supplied there is nothing to verify and
+    // nothing that could be verified. The step is SKIPPED rather than deleted:
+    // an operator who did supply a key keeps the fail-fast verification
+    // exactly where memql#3473 put it, ahead of every mutating step.
+    //
+    // `satisfied: true` IS THE WHOLE THING, and getting it wrong removes the
+    // install. Every mutating step declares `dependsOn: [..., providerKey]`,
+    // and `runStep` blocks a step whose dependency "was skipped without
+    // satisfying what it was there to establish". A bare skip would therefore
+    // cascade through toolK3d, hostsBlock, stackCheckout, clusterUp and
+    // everything below them, and the run would report a tidy list of skips
+    // having installed nothing -- which is exactly how install-e2e's header
+    // records the gate first failing that lane. What the gate establishes is
+    // "no unverified key is about to be seeded into this cluster", and with no
+    // key at all that condition holds already. So it is satisfied, in the
+    // precise sense the field means.
+    //
+    // Nothing downstream needs patching to match: `seedBootstrap` passes
+    // `provider` only when a key file was given and `present()` drops empty
+    // values, so it receives no provider args at all -- and
+    // `stage_provider_key` returns cleanly when handed neither
+    // (scripts/install/seed-bootstrap.sh).
+    if (step.id === "providerKey" && (opts.providerKeyFile ?? "").trim() === "") {
+      return {
+        action: "skip",
+        reason: "no key supplied -- configure AI providers in the portal",
+        satisfied: true,
+      };
+    }
     const stackDir = resolveStackDir(opts);
     const frontDoor = frontDoorFor(opts.domain ?? "");
     let params: Record<string, string> = {};

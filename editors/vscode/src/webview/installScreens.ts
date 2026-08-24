@@ -47,7 +47,7 @@ import type {
 } from "../state/addCluster.js";
 import { MAIN_BRANCH_CHOICE, isMainBranchChoice } from "../install/stackPin.js";
 import { compareSemverDesc } from "../install/tags.js";
-import { SUPPORTED_PROVIDERS, requiredFields } from "../state/addCluster.js";
+import { SUPPORTED_PROVIDERS, optionalFields, requiredFields } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 
 /** The collected fields, in the order they are asked for. */
@@ -91,7 +91,7 @@ export const FIELD_HINTS: Record<InputField, string> = {
   ownerFirstName: "The cluster owner -- you.",
   ownerLastName: "",
   provider:
-    "Which vendor the key below belongs to. The installer makes one authenticated call to check it before anything on this machine changes.",
+    "Which vendor the key below belongs to. Supply one and the installer makes a single authenticated call to check it before anything on this machine changes; leave both empty and it makes none.",
   ownerEmail: "Used to create the owner account. A local cluster sends no mail.",
   providerKeyFile:
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
@@ -157,75 +157,123 @@ export function renderPreflight(items: readonly PreflightItem[] | undefined): st
 <ul class="preflight">${rows}</ul>`;
 }
 
-export function renderCollectScreen(input: CollectScreenInput): string {
-  const required = new Set(requiredFields(input.action));
+/**
+ * One field's markup. Extracted from `renderCollectScreen` when the AI
+ * provider fields became optional (epic memql#4440): the disclosure below the
+ * required fields renders exactly the same control, and a second copy of this
+ * would be a second answer to what a field LOOKS LIKE on this page.
+ */
+function renderField(input: CollectScreenInput, field: InputField): string {
   const { values, errors } = input;
-
-  const fields = INPUT_FIELDS.filter((field) => required.has(field))
-    .map((field) => {
-      const error = errors.find((e) => e.field === field);
-      const hint = FIELD_HINTS[field];
-      const choices = CHOICE_FIELDS[field];
-      // THE ONE FIELD THAT NAMES A FILE GETS A FILE PICKER (memql#3547).
-      //
-      // Typing a path is the error-prone way to name a file, and this is the
-      // path an operator is least able to check: it holds a secret, so
-      // nothing on this page can echo its contents back as confirmation. The
-      // picker removes the whole class -- what it returns exists, is a file,
-      // and is spelled the way the filesystem spells it.
-      //
-      // Typing still works, and both routes end in the same validation. The
-      // dialog is the extension host's (`vscode.window.showOpenDialog`);
-      // a webview cannot open one itself, which is why this is a button that
-      // posts a message rather than an `<input type="file">` -- and an
-      // `<input type="file">` would hand back a File object with no path,
-      // which is not what a `--key-file` flag can be given.
-      const browse =
-        field === "providerKeyFile"
-          ? `<button class="secondary browse" type="button" data-act="browseKeyFile">Browse...</button>`
-          : "";
-      // `version` is the one field whose options are not a constant: they come
-      // off the remote at page-open time. Falls through to the text box when
-      // the listing is empty, which is what makes a no-network install still
-      // able to name a version.
-      //
-      // `main` is appended to that listing as a labelled choice rather than a
-      // tag (memql#3901, relabelled by memql#4430). It is NOT offered when the
-      // listing is empty: with no network the field is a free-text box, and a
-      // text box that accepts "main" would be an unlabelled branch, which
-      // clone-stack.sh refuses on purpose -- and a from-source lane with no
-      // network could not clone the repository it would build from anyway.
-      const fieldChoices: readonly VersionChoice[] | undefined =
-        field === "version"
-          ? (input.versionChoices ?? []).length === 0
-            ? undefined
-            : versionChoiceList(input.versionChoices ?? [], values.version)
-          : choices?.map((choice) => ({ value: choice, label: choice }));
-      const control =
-        fieldChoices === undefined
-          ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
-              values[field],
-            )}">${browse}</div>`
-          : `<select id="f-${field}" data-field="${field}">${fieldChoices
-              .map(
-                (choice) =>
-                  `<option value="${escapeHtml(choice.value)}"${
-                    choice.value === values[field] ? " selected" : ""
-                  }>${escapeHtml(choice.label)}</option>`,
-              )
-              .join("")}</select>`;
-      return `<div class="field" data-invalid="${error !== undefined}">
+  const error = errors.find((e) => e.field === field);
+  const hint = FIELD_HINTS[field];
+  const choices = CHOICE_FIELDS[field];
+  // THE ONE FIELD THAT NAMES A FILE GETS A FILE PICKER (memql#3547).
+  //
+  // Typing a path is the error-prone way to name a file, and this is the
+  // path an operator is least able to check: it holds a secret, so
+  // nothing on this page can echo its contents back as confirmation. The
+  // picker removes the whole class -- what it returns exists, is a file,
+  // and is spelled the way the filesystem spells it.
+  //
+  // Typing still works, and both routes end in the same validation. The
+  // dialog is the extension host's (`vscode.window.showOpenDialog`);
+  // a webview cannot open one itself, which is why this is a button that
+  // posts a message rather than an `<input type="file">` -- and an
+  // `<input type="file">` would hand back a File object with no path,
+  // which is not what a `--key-file` flag can be given.
+  const browse =
+    field === "providerKeyFile"
+      ? `<button class="secondary browse" type="button" data-act="browseKeyFile">Browse...</button>`
+      : "";
+  // `version` is the one field whose options are not a constant: they come
+  // off the remote at page-open time. Falls through to the text box when
+  // the listing is empty, which is what makes a no-network install still
+  // able to name a version.
+  //
+  // `main` is appended to that listing as a labelled choice rather than a
+  // tag (memql#3901, relabelled by memql#4430). It is NOT offered when the
+  // listing is empty: with no network the field is a free-text box, and a
+  // text box that accepts "main" would be an unlabelled branch, which
+  // clone-stack.sh refuses on purpose -- and a from-source lane with no
+  // network could not clone the repository it would build from anyway.
+  const fieldChoices: readonly VersionChoice[] | undefined =
+    field === "version"
+      ? (input.versionChoices ?? []).length === 0
+        ? undefined
+        : versionChoiceList(input.versionChoices ?? [], values.version)
+      : choices?.map((choice) => ({ value: choice, label: choice }));
+  const control =
+    fieldChoices === undefined
+      ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
+          values[field],
+        )}">${browse}</div>`
+      : `<select id="f-${field}" data-field="${field}">${fieldChoices
+          .map(
+            (choice) =>
+              `<option value="${escapeHtml(choice.value)}"${
+                choice.value === values[field] ? " selected" : ""
+              }>${escapeHtml(choice.label)}</option>`,
+          )
+          .join("")}</select>`;
+  return `<div class="field" data-invalid="${error !== undefined}">
   <label for="f-${field}">${escapeHtml(FIELD_LABELS[field])}</label>
   ${control}
   ${hint === "" ? "" : `<div class="hint">${escapeHtml(hint)}</div>`}
   ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
 </div>`;
-    })
+}
+
+/**
+ * The AI-provider disclosure (epic memql#4440).
+ *
+ * COLLAPSED, AND THAT IS THE POINT. Installation spends no inference, so the
+ * honest presentation of a vendor key is "there is a slot for this if you
+ * happen to have one", not a field between the operator and the Start button.
+ * An operator with no key -- which after this epic is the expected case --
+ * should be able to read the form top to bottom and never learn that LLM
+ * vendors exist.
+ *
+ * FORCED OPEN when one of its fields is in error, because a validation
+ * message inside a closed `<details>` is a form that refuses to start and
+ * will not say why. That is the failure mode a disclosure introduces, and it
+ * is the only reason this function takes the errors at all.
+ */
+export function renderProviderDisclosure(
+  input: CollectScreenInput,
+  fields: readonly InputField[],
+): string {
+  if (fields.length === 0) return "";
+  const invalid = fields.some((field) => input.errors.some((e) => e.field === field));
+  const rendered = fields.map((field) => renderField(input, field)).join("");
+  return `<details class="optional-section"${invalid ? " open" : ""}>
+  <summary>AI provider (optional -- configure later in the portal)</summary>
+  <p class="hint">${escapeHtml(
+    "Nothing here is needed to install, start, repair or upgrade the cluster, and leaving it empty makes no call to any AI vendor. Providers are configured after the install at Settings -> AI providers in the portal, where workload identity federation is the recommended path for Anthropic. Supply a key here only if you already have one and would rather it were seeded during the run.",
+  )}</p>
+  ${rendered}
+</details>`;
+}
+
+export function renderCollectScreen(input: CollectScreenInput): string {
+  const required = new Set(requiredFields(input.action));
+  const optional = new Set(optionalFields(input.action));
+
+  const fields = INPUT_FIELDS.filter((field) => required.has(field))
+    .map((field) => renderField(input, field))
     .join("");
+  // Filtered from INPUT_FIELDS rather than taken from `optionalFields`
+  // directly, so the disclosure lists them in the same declared order as
+  // everything else on the page.
+  const disclosure = renderProviderDisclosure(
+    input,
+    INPUT_FIELDS.filter((field) => optional.has(field)),
+  );
 
   return `<h1>${escapeHtml(COLLECT_TITLE[input.action] ?? "Install a local cluster")}</h1>
 <p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
 ${fields}
+${disclosure}
 ${renderPreflight(input.preflight)}
 <div class="actions">
   <button class="primary" type="button" data-act="begin">Start</button>

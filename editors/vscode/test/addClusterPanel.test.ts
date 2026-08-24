@@ -315,24 +315,54 @@ async function until(condition: () => boolean, what: string): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
-// Defect 1: a repair with no recorded key must be REFUSED, not started
+// A repair with no recorded key RUNS -- it does not refuse, and it calls no
+// vendor (epic memql#4440, reversing the memql#3544 refusal on purpose)
 // -----------------------------------------------------------------------------
 
-test("a repair with no recorded provider key is refused before anything runs", async () => {
+test("a repair with no recorded provider key runs, and contacts no vendor", async () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE, and the inversion is the whole
+  // point of the epic rather than an oversight.
+  //
+  // The refusal it guarded ("MemQL has no record of an AI provider key for
+  // this machine. Install rather than repair...") was the honest sentence for
+  // a graph in which every mutating step waited on a vendor call: without a
+  // key path the run could not pass wave 2, so refusing up front beat dying
+  // at exit 2 nine minutes in.
+  //
+  // After memql#4440 an install supplies no key in the ordinary case, so
+  // "no record of an AI provider key" became true of nearly every cluster --
+  // and the remedy it named, REINSTALLING, is destructive advice for a machine
+  // whose only problem was that repair declined to run. `providerKey` now
+  // skips, satisfied, so the repair simply proceeds.
   const runner = await fakeRunner();
   const h = open({ action: "repair", runner, verdict: "installed-unreachable" });
   try {
-    // A repair now COLLECTS the key path (memql#3544) and the panel pre-fills
-    // it from the receipt. There is no receipt here, so the box stays empty and
-    // the refusal is the form's own -- which is the improvement: it names the
-    // field, and it happens before any step runs.
+    // The owner fields still have to be supplied -- there is no receipt here,
+    // and `seedBootstrap` genuinely refuses a partial bootstrap set
+    // (znasllc-io#3888). That requirement is untouched by this epic; what
+    // changed is that the key path is no longer beside them.
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
+    h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
+    h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
     h.post({ type: "begin" });
-    await until(() => /provider key file is required/i.test(h.html()), "the refusal");
 
-    // THE ASSERTION THAT MATTERS. Not that a message was rendered -- that the
-    // graph was never entered. Reaching wave 2 with no `--key-file` is the
-    // defect, and it is invisible to any assertion about state.
-    assert.equal(runner.calls.length, 0, "a repair with no key must not run a single step");
+    await until(() => runner.calls.length > 0, "the graph to be entered");
+
+    // THE ASSERTION THAT MATTERS, and it is now two-sided.
+    assert.ok(
+      !/provider key file is required/i.test(h.html()),
+      "the repair still refuses over a key it does not need",
+    );
+    assert.ok(
+      !/no record of an AI provider key/i.test(h.html()),
+      "the repair still tells the operator to reinstall a working cluster",
+    );
+    // VENDOR SILENCE, which is the guarantee this epic exists to make. Not
+    // "the run started" -- that a repair with no key contacts nobody.
+    assert.ok(
+      !runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
+      "a keyless repair made an authenticated call to an AI vendor",
+    );
   } finally {
     h.close();
   }

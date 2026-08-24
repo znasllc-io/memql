@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { AddClusterState, requiredFields } from "../src/state/addCluster.js";
+import { AddClusterState, optionalFields, requiredFields } from "../src/state/addCluster.js";
 import type { ExecEvent } from "../src/install/executor.js";
 import type { Step } from "../src/install/graph.js";
 
@@ -118,8 +118,9 @@ test("an install needs everything up front; a repair needs what it can get wrong
     "ownerFirstName",
     "ownerLastName",
     "ownerEmail",
-    "provider",
-    "providerKeyFile",
+    // NO PROVIDER FIELDS (epic memql#4440). They are collected -- see
+    // `optionalFields` and zeroKeyInstall.test.ts -- but nothing waits on
+    // them, because installing a cluster spends no inference.
     // memql#3882. Collected LAST and pre-filled with DEFAULT_STACK_TAG, so it
     // reads as a confirmation rather than a question -- the pin stays the
     // reviewed answer and the field is the override.
@@ -139,13 +140,19 @@ test("an install needs everything up front; a repair needs what it can get wrong
   // exactly "what the receipt can be wrong about": the common case is still no
   // typing, because the panel pre-fills them, and what changed is that they are
   // reachable.
+  //
+  // THE KEY FIELDS LEFT THIS LIST IN epic memql#4440, and the reason is the
+  // one the paragraph above could not have anticipated: after that epic the
+  // ordinary install supplies no key, so "what the receipt can be wrong
+  // about" stopped including a key path for most clusters -- there is nothing
+  // recorded to be wrong. Demanding one would have made repair unreachable on
+  // exactly the installs this product now recommends. Both are still
+  // collected and still pre-filled from the receipt.
   assert.deepEqual(requiredFields("repair"), [
     "domain",
     "ownerFirstName",
     "ownerLastName",
     "ownerEmail",
-    "provider",
-    "providerKeyFile",
   ]);
   assert.deepEqual(requiredFields("uninstall"), []);
   assert.deepEqual(requiredFields("connect"), []);
@@ -157,7 +164,13 @@ test("the provider is one of the fields collected, and it is pre-answered", () =
   // key had no route through this wizard, though verify-provider-key.sh
   // supports one. Every test enumerated the other five fields, so "collected on
   // one pass" read as satisfied at a glance.
-  assert.ok(requiredFields("install").includes("provider"));
+  //
+  // COLLECTED, not required (epic memql#4440): the assertion moved from
+  // `requiredFields` to `optionalFields`, which is the whole content of that
+  // epic's wizard half. The pre-answer stays, because the field still exists
+  // and a closed set still deserves a default.
+  assert.ok(optionalFields("install").includes("provider"));
+  assert.ok(!requiredFields("install").includes("provider"));
   assert.equal(
     new AddClusterState().inputs.provider,
     "anthropic",
