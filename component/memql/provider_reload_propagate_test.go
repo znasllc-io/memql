@@ -441,3 +441,70 @@ func TestProviderBuiltinsAreNotAICallable(t *testing.T) {
 			"the assertions above would pass against a generator that does nothing at all")
 	}
 }
+
+// TestProviderAuthStatusReasonNeverCarriesTheCredential covers the one path
+// where a leak could actually happen (epic memql#4440).
+//
+// THE OTHER TESTS CANNOT REACH IT. When a key does not resolve there is no key
+// to leak, and when everything works `reason` is empty. The dangerous case is
+// the narrow one in between: the credential RESOLVES -- so
+// `entry.Config.Auth["apiKey"]` holds the plaintext, boot having substituted
+// it in place -- and then the client constructor REFUSES. `reason` is then the
+// constructor's own error, and that string is rendered into a browser.
+//
+// Every constructor names the auth map's KEY ("apiKey") rather than its value
+// today. This is what keeps that true: an error message edited to interpolate
+// the value would be an entirely reasonable-looking change, and nothing else
+// in the tree would notice it had put a vendor credential onto an operator's
+// screen.
+func TestProviderAuthStatusReasonNeverCarriesTheCredential(t *testing.T) {
+	const secret = "sk-test-must-never-reach-a-browser-4440"
+	resolver := newSeededResolver()
+	resolver.seed("MEMQL_AI_OPENAI_API_KEY", secret)
+	installSeededResolver(t, resolver)
+
+	e := engineWithProviders(t, events.NewBus())
+	registerParsedProviders(nil, e.providers, []parsedProviderConfig{
+		{cfg: &ProviderConfig{
+			Name: "brokenButKeyed",
+			// A type no constructor serves, so newAIProvider refuses AFTER
+			// auth resolution has already succeeded. That ordering is the
+			// whole point of the fixture.
+			Type:  "NoSuchVendor",
+			Model: "m",
+			Auth:  map[string]string{"apiKey": "${MEMQL_AI_OPENAI_API_KEY}"},
+		}, origin: "test:brokenButKeyed"},
+	})
+
+	entry, ok := e.providers.Entry("brokenButKeyed")
+	if !ok || entry == nil {
+		t.Fatal("the fixture provider was not registered")
+	}
+	// The fixture is only meaningful if the key DID resolve into the entry --
+	// otherwise this is just another unresolved provider and proves nothing.
+	if got := entry.Config.Auth["apiKey"]; got != secret {
+		t.Fatalf("the fixture's key did not resolve (auth[apiKey]=%q); "+
+			"this test would then be checking the wrong path entirely", got)
+	}
+	if entry.Available {
+		t.Fatal("the fixture provider constructed; it must fail construction")
+	}
+
+	nodes, err := e.evaluateProviderAuthStatusExpression(clusterOwnerCtx("user-owner"))
+	if err != nil {
+		t.Fatalf("providerAuthStatus: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected one row, got %d", len(nodes))
+	}
+	payload := string(nodes[0].Payload)
+
+	// The reachable positive: a reason IS present, so the absence below is
+	// about redaction rather than about an empty field.
+	if strings.Contains(payload, `"reason":""`) {
+		t.Fatalf("no reason was reported, so this test asserts nothing: %s", payload)
+	}
+	if strings.Contains(payload, secret) {
+		t.Fatalf("the credential reached the projection's payload: %s", payload)
+	}
+}
