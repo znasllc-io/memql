@@ -174,9 +174,9 @@ func newTestCockpitAppExecutor(t *testing.T) *CockpitAppExecutor {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	exec, err := NewCockpitAppExecutor(logger, dispatcher, &workerservice.SessionRunner{
-		Registry: workerservice.NewRegistry(logger, nil),
-	}, nil)
+	// No Registry on the runner: it runs the session it is GIVEN, and
+	// selection is the Fleet router's, asked by the executor.
+	exec, err := NewCockpitAppExecutor(logger, dispatcher, &workerservice.SessionRunner{}, nil)
 	if err != nil {
 		t.Fatalf("NewCockpitAppExecutor: %v", err)
 	}
