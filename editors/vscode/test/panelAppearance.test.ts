@@ -125,13 +125,31 @@ test("every panel subscribes to appearance changes", () => {
 });
 
 test("no panel reads memql.appearance for itself", () => {
-  // ONE resolver, one reading of it (D2). A panel that called
-  // getConfiguration("memql") directly would be a second opinion about the
-  // same setting -- and the one most likely to forget that high contrast wins.
+  // ONE resolver, one reading of it (D2). A panel that read the setting
+  // directly would be a second opinion about it -- and the one most likely to
+  // forget that high contrast wins, since that rule lives in appearance.ts and
+  // nowhere near a panel.
+  //
+  // MATCHED ON THE KEY, not on the word "memql". An earlier draft also flagged
+  // a bare `'memql'`, which is too broad to live in a shared tree: src/ uses
+  // single-quoted strings in places, `memql` is this extension's own prefix for
+  // every command, view and viewType, and a panel naming one for an unrelated
+  // reason would fail this gate with a message about appearance. Reading the
+  // setting REQUIRES naming its key, so the key is what to look for.
   const offenders = panelFiles()
-    .filter(({ text }) => text.includes('getConfiguration("memql")') || text.includes("'memql'"))
+    .filter(
+      ({ text }) =>
+        text.includes('getConfiguration("memql")') ||
+        text.includes("getConfiguration('memql')") ||
+        text.includes('"appearance"') ||
+        text.includes("'appearance'"),
+    )
     .map(({ name }) => name);
-  assert.deepEqual(offenders, [], "resolve through src/webview/theme.ts, never in a panel");
+  assert.deepEqual(
+    offenders,
+    [],
+    "resolve through src/webview/theme.ts (currentBodyThemeAttr / onAppearanceChange), never in a panel",
+  );
 });
 
 // -----------------------------------------------------------------------------
