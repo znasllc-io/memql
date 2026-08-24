@@ -60,6 +60,21 @@ test("does not offer under either high-contrast theme", () => {
   }
 });
 
+test("does not offer under an editor kind this build does not recognise", () => {
+  // The asymmetry with effectiveTheme is deliberate, and worth stating because
+  // it looks like an inconsistency.
+  //
+  // effectiveTheme lets a FORCED setting win over an unknown kind: the user
+  // said "dark", so give them dark. Here nobody has said anything -- WE are
+  // initiating -- and the last kind VS Code added was HighContrastLight, a
+  // second high-contrast variant. So the likeliest unknown kind is one where
+  // offering would be the harmful case above. Declining to offer costs a
+  // nicety; the theme is still one keystroke away in the picker.
+  assert.equal(shouldOfferMemqlTheme({ ...UNANSWERED, editorKind: 99 }), false);
+  assert.equal(shouldOfferMemqlTheme({ ...UNANSWERED, editorKind: -1 }), false);
+  assert.equal(shouldOfferMemqlTheme({ ...UNANSWERED, editorKind: 0 }), false);
+});
+
 test("matches the offered theme to the editor's current kind", () => {
   // Someone on a light editor who accepts must land on MemQL Light. Offering
   // the dark one and switching them to it is a takeover wearing a button.

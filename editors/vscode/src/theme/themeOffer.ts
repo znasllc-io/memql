@@ -87,11 +87,19 @@ export function memqlThemeFor(editorKind: number): string {
 export function shouldOfferMemqlTheme(inputs: ThemeOfferInputs): boolean {
   if (inputs.answered) return false;
   if (isMemqlTheme(inputs.activeThemeLabel)) return false;
-  if (
-    inputs.editorKind === COLOR_THEME_KIND.highContrast ||
-    inputs.editorKind === COLOR_THEME_KIND.highContrastLight
-  ) {
-    return false;
-  }
-  return true;
+  // Stated in the POSITIVE, which is what closes the unknown-kind hole: offer
+  // only when we KNOW the editor is plain light or plain dark. Written as
+  // "not high contrast" it would offer under any kind this build has never
+  // heard of, and the last kind VS Code added was HighContrastLight -- a
+  // second high-contrast variant. So the likeliest unknown kind is exactly
+  // the one where offering does harm.
+  //
+  // The asymmetry with effectiveTheme is deliberate. There a forced setting
+  // wins over an unknown kind, because the user said what they wanted. Here
+  // nobody has said anything and WE are initiating, so declining costs a
+  // nicety -- the themes are still one keystroke away in the picker -- while
+  // offering wrongly invites somebody out of high contrast.
+  return (
+    inputs.editorKind === COLOR_THEME_KIND.light || inputs.editorKind === COLOR_THEME_KIND.dark
+  );
 }
