@@ -20,9 +20,13 @@
 // record is read as settled fact by everyone downstream, so a silent skip can
 // become a specification error nobody thinks to check.
 //
-// `src/run/preflight.ts` and `test/runLog.test.ts` carried one each, found by
-// this sweep's first run. Same cause every time: a NUL written as a RAW BYTE
-// where an escape was meant.
+// This sweep's first run then found three more: two in `src/run/preflight.ts`
+// (one a separator, one inside the comment explaining it), one in
+// `test/runLog.test.ts`, and one in `test/panelAppearance.test.ts` -- the last
+// of those written three commits earlier by the author of this file, in the
+// comment describing the hazard. Same cause every time: a NUL written as a RAW
+// BYTE where an escape was meant. Three authors, one of whom had just spent an
+// hour on the consequences; that is why this is a gate and not a note.
 //
 // THE FIX IS ALWAYS BEHAVIOUR-PRESERVING. Write the escape:
 //

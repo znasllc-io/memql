@@ -18,10 +18,14 @@
 //     dismiss without reading. src/auth/passkeyOffer.ts's header makes the same
 //     point about the same failure.
 //   * already on a MemQL theme -- there is nothing to offer.
-//   * high contrast -- an accessibility choice, and neither MemQL theme is a
-//     high-contrast theme. Inviting somebody out of high contrast is the one
-//     version of this prompt that could do actual harm. Same stance D1 takes
-//     for the panels: high contrast wins.
+//   * ANY editor kind that is not plain light or plain dark. That covers both
+//     high-contrast kinds, which is the case that matters: high contrast is an
+//     accessibility choice, neither MemQL theme is a high-contrast theme, and
+//     inviting somebody out of it is the one version of this prompt that could
+//     do actual harm. Stating it positively rather than as "not high contrast"
+//     is deliberate -- the latter offers under a kind this build has never
+//     heard of, and the last kind VS Code added was HighContrastLight, a
+//     SECOND high-contrast variant. Same stance D1 takes for the panels.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go):
 // the decision is the part worth testing, and src/extension.ts supplies the
