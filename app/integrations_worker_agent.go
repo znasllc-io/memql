@@ -158,8 +158,9 @@ func (a *App) setupCockpitAppExecutor(
 	}
 
 	runner := &worker.SessionRunner{
-		Logger:      a.Logger,
-		Registry:    svc.Registry(),
+		Logger: a.Logger,
+		// No registry: the runner runs the session it is GIVEN. Selection
+		// is the Fleet router's, asked by the executor.
 		Store:       store,
 		Auditor:     auditor,
 		MCPEndpoint: mcpEndpoint,

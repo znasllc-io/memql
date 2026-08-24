@@ -35,11 +35,10 @@ const (
 
 // SessionRunner runs app sessions on behalf of a caller.
 type SessionRunner struct {
-	Logger   *slog.Logger
-	Registry *Registry
-	Store    AppSessionStore
-	Minter   CredentialMinter
-	Auditor  Auditor
+	Logger  *slog.Logger
+	Store   AppSessionStore
+	Minter  CredentialMinter
+	Auditor Auditor
 	// MCPEndpoint is the streamable-HTTP MCP URL handed to the app.
 	MCPEndpoint string
 	// Clock is injectable for tests.
