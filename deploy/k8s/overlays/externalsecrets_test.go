@@ -432,3 +432,142 @@ func TestCloudKeepsTheVoiceExternalSecrets(t *testing.T) {
 		}
 	}
 }
+
+// engineCoreExternalSecrets are the ExternalSecrets every install renders no
+// matter which modules are enabled. They belong to the engine itself, so no
+// overlay holds them off and an overlay that did would be broken rather than
+// minimal.
+//
+// Mapped to the file that declares them, matching voiceExternalSecrets, so the
+// classification below reads as one table split by owner.
+var engineCoreExternalSecrets = map[string]string{
+	// BOTH live in deploy/external-secrets/, not deploy/k8s/base/ -- they are
+	// wired onto an instance by scripts/deploy/wire-external-secrets.sh rather
+	// than composed by an overlay, which is why no overlay has a patch for
+	// either and why neither could ever be held off by one.
+	"memql-secrets":          filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
+	"memql-secrets-identity": filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
+}
+
+// TestEveryExternalSecretIsClassified is the memql#4488 ratchet: the thing that
+// makes voiceExternalSecrets COMPLETE rather than merely correct.
+//
+// The hold gates above are keyed on voiceExternalSecrets, and that list is
+// hand-maintained ON PURPOSE -- its own comment explains why discovery is the
+// wrong instrument here, and it is right. "Which ExternalSecrets are voice's?"
+// cannot be answered by scanning, because a third voice object arriving under a
+// component name nobody thought of (app.kubernetes.io/name: sip, say) is not
+// recognisable as voice's to any rule written today. Discovery would report it
+// as not-voice and wave it through.
+//
+// But that leaves the list with a hole of exactly that shape. A new
+// ExternalSecret in base is:
+//
+//   - walked by walkExternalSecrets, so it appears in the corpus;
+//   - absent from voiceExternalSecrets, so NO gate requires a hold for it;
+//   - therefore rendered by cloud-entry, resolving a Key Vault entry that a
+//     voice-off install deliberately does not have.
+//
+// Which is ESO reporting SecretSyncedError, the Application reading Degraded
+// forever on a correctly installed cluster, and the runbook eventually writing
+// it down as expected noise. That is memql#4487 returning by the one route
+// memql#4487's own gates cannot see.
+//
+// So this does not try to classify anything. It requires that SOMEBODY has:
+// every ExternalSecret the walk finds must be listed as engine-core (rendered
+// everywhere) or as a module's (held off where that module is off). An
+// unclassified one fails here, at the moment it is added, with both repairs
+// named -- which is the only moment the answer is cheap and obvious.
+//
+// THE TWO REPAIRS ARE DIFFERENT DECISIONS, and neither is a formality:
+//
+//   - engine-core means "this renders on every install, including one with
+//     every optional module off". If that is not true of the object, this is
+//     the wrong bucket and the install it breaks is the minimal one nobody
+//     tests.
+//   - module-owned means the module's hold must ALSO learn about it, which is
+//     the cloud-entry delete patch the gates above then require.
+func TestEveryExternalSecretIsClassified(t *testing.T) {
+	classified := map[string]string{}
+	for name := range engineCoreExternalSecrets {
+		classified[name] = "engine-core"
+	}
+	for name := range voiceExternalSecrets {
+		if owner, dup := classified[name]; dup {
+			t.Errorf("ExternalSecret %q is classified as both %s and voice-owned; it can only be one, "+
+				"and the two buckets have opposite consequences for a voice-off render", name, owner)
+			continue
+		}
+		classified[name] = "voice"
+	}
+
+	found := walkExternalSecrets(t)
+	if len(found) == 0 {
+		t.Fatal("the walk found no ExternalSecret at all, so this gate examined nothing. " +
+			"See TestTheExternalSecretWalkSeesTheOnesWeKnowAbout -- the checker is failing, not the tree passing.")
+	}
+
+	seen := map[string]bool{}
+	for _, f := range found {
+		name := f.Metadata.Name
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		if _, ok := classified[name]; ok {
+			continue
+		}
+		t.Errorf("ExternalSecret %q (%s) is classified by nothing.\n"+
+			"Every ExternalSecret must be declared either engine-core -- rendered on EVERY install, "+
+			"including one with every optional module off -- by adding it to engineCoreExternalSecrets, "+
+			"or as belonging to a module, by adding it to that module's map (voiceExternalSecrets today), "+
+			"which then requires the module's overlay hold to remove it.\n"+
+			"Unclassified means no gate requires a hold, so a voice-off install renders it, ESO cannot "+
+			"resolve the Key Vault entry that deliberately does not exist, and the Application is "+
+			"Degraded forever on a correctly installed cluster -- memql#4487 returning by the one route "+
+			"its own gates cannot see (memql#4488).", name, f.file)
+	}
+
+	// The reverse direction: a classification naming an object the walk cannot
+	// find is a stale entry, and a stale entry in voiceExternalSecrets silently
+	// weakens the hold gates -- they iterate the map, so a name that no longer
+	// exists in base simply stops being checked while still looking covered.
+	for name, owner := range classified {
+		if !seen[name] {
+			t.Errorf("ExternalSecret %q is classified as %s but the walk does not find it in the tree. "+
+				"Either it was renamed or removed and the classification is stale, or the walk has stopped "+
+				"seeing the file that declares it.", name, owner)
+		}
+	}
+
+	// The mapped file is part of the classification, so it has to be checked
+	// too. A path nobody reads drifts silently: these were written from memory
+	// as deploy/k8s/base/externalsecret-memql*.yaml, which do not exist, and
+	// every assertion above still passed -- the map values were decoration.
+	for name, rel := range allClassifiedFiles() {
+		raw, err := os.ReadFile(rel)
+		if err != nil {
+			t.Errorf("ExternalSecret %q is mapped to %s, which cannot be read: %v", name, rel, err)
+			continue
+		}
+		if !strings.Contains(string(raw), "name: "+name) {
+			t.Errorf("ExternalSecret %q is mapped to %s, which does not declare it", name, rel)
+		}
+	}
+
+	t.Logf("classified %d ExternalSecret(s): %d engine-core, %d voice-owned",
+		len(seen), len(engineCoreExternalSecrets), len(voiceExternalSecrets))
+}
+
+// allClassifiedFiles merges the two classification maps into one name -> file
+// lookup, so the file-existence check reads both without repeating itself.
+func allClassifiedFiles() map[string]string {
+	out := map[string]string{}
+	for name, file := range engineCoreExternalSecrets {
+		out[name] = file
+	}
+	for name, file := range voiceExternalSecrets {
+		out[name] = file
+	}
+	return out
+}
