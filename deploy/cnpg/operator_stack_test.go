@@ -272,6 +272,13 @@ func TestOperatorInstallsArePinnedToExactVersions(t *testing.T) {
 		"deploy/ingress-nginx/install/kustomization.yaml": {
 			"/ingress-nginx/releases/download/controller-v1.13.2/deploy.yaml",
 		},
+		// The alerting stack (memql#4499). It belongs in this registry for the
+		// same reason as the rest AND one of its own: an operator upgrade here
+		// rolls the controller that EVALUATES every alert, and a cluster whose
+		// alerting is silently not running looks exactly like a healthy one.
+		"deploy/prometheus-operator/install/kustomization.yaml": {
+			"/prometheus-operator/releases/download/v0.87.0/bundle.yaml",
+		},
 	}
 
 	for file, wantRefs := range installs {

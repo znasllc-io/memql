@@ -79,6 +79,7 @@ cap_spec_param_required "clusterName"    "AKS cluster name -- the kubeconfig is 
 cap_spec_param "repoRoot"       "MemQL checkout holding the pinned operator installs (default: the checkout this script is in)"
 cap_spec_param "acmeEmail"      "ACME account email for the letsencrypt-prod ClusterIssuer. OMIT to skip the issuer -- there is no default, because a wrong address is where the expiry warnings go"
 cap_spec_param "ingressClass"   "IngressClass name the manifests declare (default nginx)"
+cap_spec_param "skipMonitoring" "do not install the prometheus-operator or apply deploy/k8s/monitoring. Set only when alerting is genuinely owned elsewhere: absent alerting produces a cluster that LOOKS QUIET, which is what a healthy one looks like"
 cap_spec_param "timeoutSeconds" "per-operator rollout wait (default 300)"
 cap_spec_param "dryRun"         "plan only; apply nothing"
 
@@ -95,6 +96,7 @@ CLUSTER_NAME="$(cap_param clusterName "")"
 REPO_ROOT="$(cap_param repoRoot "$(cd "${SCRIPT_DIR}/../.." && pwd)")"
 ACME_EMAIL="$(cap_param acmeEmail "")"
 INGRESS_CLASS="$(cap_param ingressClass "nginx")"
+SKIP_MONITORING="$(cap_param skipMonitoring "false")"
 TIMEOUT_SECONDS="$(cap_param timeoutSeconds "300")"
 DRY_RUN="$(cap_param dryRun "false")"
 
@@ -141,7 +143,8 @@ function validate_arguments() {
     local d
     for d in deploy/cert-manager/install deploy/cnpg/install \
              deploy/external-secrets/crds deploy/external-secrets/install \
-             deploy/ingress-nginx/install; do
+             deploy/ingress-nginx/install deploy/prometheus-operator/install \
+             deploy/k8s/monitoring; do
         [[ -d "${REPO_ROOT}/${d}" ]] \
             || cap_fail 2 "--repoRoot ${REPO_ROOT} does not look like a MemQL checkout: ${d} is missing. The operator versions are pinned in the repository, so this script needs one."
     done
@@ -269,6 +272,46 @@ EOF
     cap_changed
 }
 
+# ---- 8. the alerting stack --------------------------------------------------
+#
+# THE WORST MEMBER OF THE SILENT-DEPENDENCY CLASS (memql#4499). A missing Secret
+# leaves a pod in ContainerCreating -- visible, eventually investigated. A
+# missing ALERTING STACK produces a cluster that looks QUIET, and silence is
+# what a healthy system produces. Absent alerting is indistinguishable from
+# nothing being wrong, for as long as it lasts.
+#
+# memql#4460 is the proof: an instance ran its entire life with WAL archiving
+# broken and an empty backup container. Two of the five database alerts would
+# have fired -- one within five minutes -- and neither could, because
+# deploy/k8s/monitoring reached no cluster. Its only invocation in the whole
+# tree was a manual kubectl in its own README.
+function ensure_monitoring() {
+    if [[ "$SKIP_MONITORING" == "true" ]]; then
+        cap_warn "--skipMonitoring: neither the prometheus-operator nor deploy/k8s/monitoring will be installed. Every MemQL alert -- WAL archiving, volume fill, replication, auth -- will be ABSENT on this cluster, and absent alerting looks exactly like a healthy cluster."
+        note_skipped "monitoring"
+        return 0
+    fi
+
+    # The operator install is verify-first on its CRD, which is also what makes
+    # BRING-YOUR-OWN work with no flag: a cluster already running a Prometheus
+    # stack HAS this CRD, so the install is skipped and only the rules below are
+    # applied -- against the operator that is already there.
+    apply_pinned "prometheus-operator" "deploy/prometheus-operator/install" \
+        "crd/prometheusrules.monitoring.coreos.com"
+
+    # The rules are applied EVERY time, not probed for. They are the payload,
+    # they change with the engine, and `kubectl apply` converges -- so skipping
+    # them because an older copy exists is how a cluster ends up evaluating last
+    # release's alerts.
+    if would_change "apply deploy/k8s/monitoring (PodMonitors + PrometheusRules)"; then
+        return 0
+    fi
+    kubectl apply --server-side --force-conflicts -k "${REPO_ROOT}/deploy/k8s/monitoring" >/dev/null \
+        || cap_fail 5 "failed to apply deploy/k8s/monitoring -- the alert rules are not installed, and a cluster with no alerts looks exactly like a healthy one"
+    note_installed "monitoring"
+    cap_changed
+}
+
 function collect_result() {
     cap_result_set "clusterName" "$CLUSTER_NAME"
     cap_result_set "installed"   "$INSTALLED"
@@ -308,6 +351,8 @@ function main() {
 
     apply_pinned "ingress-nginx" "deploy/ingress-nginx/install" "ingressclass/${INGRESS_CLASS}"
     wait_rollout "ingress-nginx" "ingress-nginx" ingress-nginx-controller
+
+    ensure_monitoring
 
     # LAST: the issuer's admission webhook is cert-manager's, and it must be
     # serving before a ClusterIssuer can be admitted.

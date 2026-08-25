@@ -56,6 +56,7 @@ cap_spec_param "namespace"    "namespace the instance runs in (default memql)"
 cap_spec_param "ingressClass" "IngressClass the manifests declare (default nginx)"
 cap_spec_param "clusterIssuer" "ClusterIssuer the front door annotates (default letsencrypt-prod)"
 cap_spec_param "requireIssuer" "treat a missing ClusterIssuer as a failure rather than a warning (default true)"
+cap_spec_param "requireMonitoring" "check that the alert rules are installed and evaluable (default true). Absent alerting is the one dependency whose absence looks exactly like health"
 
 cap_handle_meta "$@"
 cap_parse_flags "$@"
@@ -64,6 +65,7 @@ NAMESPACE="$(cap_param namespace "memql")"
 INGRESS_CLASS="$(cap_param ingressClass "nginx")"
 CLUSTER_ISSUER="$(cap_param clusterIssuer "letsencrypt-prod")"
 REQUIRE_ISSUER="$(cap_param requireIssuer "true")"
+REQUIRE_MONITORING="$(cap_param requireMonitoring "true")"
 
 PRESENT=""
 MISSING=""
@@ -121,6 +123,21 @@ function run_checks() {
     check "memql-secrets" \
         "the merge shell. Both memql-secrets ExternalSecrets use creationPolicy: Merge, which merges into an existing Secret and does not create one -- so without it the Secret simply never appears" \
         "secret/memql-secrets" -n "$NAMESPACE"
+
+    if [[ "$REQUIRE_MONITORING" == "true" ]]; then
+        # Two checks, because either alone passes on a broken half: the CRD
+        # without the rules is an operator evaluating nothing, and the rules
+        # are not applicable without the CRD.
+        check "prometheus-operator" \
+            "no PrometheusRule CRD, so deploy/k8s/monitoring cannot be applied and no MemQL alert can be evaluated" \
+            crd/prometheusrules.monitoring.coreos.com
+
+        check "memql-alert-rules" \
+            "the PrometheusRules are not on this cluster. This is the one absence that looks exactly like health -- a cluster with no alerts is QUIET, and quiet is what a working system sounds like. memql#4460 ran an instance's whole life with WAL archiving broken because two alerts that would have fired were never deployed" \
+            prometheusrule/memql-database -n "$NAMESPACE"
+    else
+        cap_info "--requireMonitoring=false; not checking the alert rules"
+    fi
 
     if [[ "$REQUIRE_ISSUER" == "true" ]]; then
         check "$CLUSTER_ISSUER" \

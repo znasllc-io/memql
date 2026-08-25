@@ -283,8 +283,10 @@ action tagRelease {
 // Backend: scripts/deploy/install-cluster-operators.sh.
 /// Install the cluster operators and cluster-scoped objects every committed manifest assumes are
 /// already present -- cert-manager, CloudNativePG, the External Secrets CRDs and controller,
-/// ingress-nginx, and the ACME ClusterIssuer -- from the versions pinned in the repository.
-/// Idempotent and verify-first: a converged cluster makes no call that changes anything.
+/// ingress-nginx, the prometheus-operator with this platform's alert rules, and the ACME
+/// ClusterIssuer -- from the versions pinned in the repository. Idempotent and verify-first: a
+/// converged cluster makes no call that changes anything, and a cluster already running a
+/// Prometheus stack keeps its own operator and receives only the rules.
 action installClusterOperators {
   args {
     subscriptionId string!
@@ -293,10 +295,11 @@ action installClusterOperators {
     repoRoot       string
     acmeEmail      string
     ingressClass   string
+    skipMonitoring boolean
     timeoutSeconds string
     dryRun         boolean
   }
-  capability script(script: "deploy.installClusterOperators", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, repoRoot: args.repoRoot, acmeEmail: args.acmeEmail, ingressClass: args.ingressClass, timeoutSeconds: args.timeoutSeconds, dryRun: args.dryRun)
+  capability script(script: "deploy.installClusterOperators", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, repoRoot: args.repoRoot, acmeEmail: args.acmeEmail, ingressClass: args.ingressClass, skipMonitoring: args.skipMonitoring, timeoutSeconds: args.timeoutSeconds, dryRun: args.dryRun)
 }
 
 // Backend: scripts/deploy/seed-instance-secrets.sh.
@@ -365,12 +368,13 @@ action registerGitOpsRepo {
 /// structured result carrying `passed` and the list of what is missing.
 action verifyInstallDependencies {
   args {
-    namespace     string
-    ingressClass  string
-    clusterIssuer string
-    requireIssuer boolean
+    namespace         string
+    ingressClass      string
+    clusterIssuer     string
+    requireIssuer     boolean
+    requireMonitoring boolean
   }
-  capability script(script: "deploy.verifyInstallDependencies", namespace: args.namespace, ingressClass: args.ingressClass, clusterIssuer: args.clusterIssuer, requireIssuer: args.requireIssuer)
+  capability script(script: "deploy.verifyInstallDependencies", namespace: args.namespace, ingressClass: args.ingressClass, clusterIssuer: args.clusterIssuer, requireIssuer: args.requireIssuer, requireMonitoring: args.requireMonitoring)
 }
 
 // Backend: scripts/deploy/settle-after-sync.sh.

@@ -191,9 +191,10 @@ with no log line, because the container never starts.
 They are scripted, in order, and each is idempotent and verify-first:
 
 ```bash
-# Steps 1-7: kubeconfig, cert-manager, CNPG + Barman, the ESO CRDs, External
-# Secrets, ingress-nginx + its IngressClass, and the letsencrypt-prod
-# ClusterIssuer -- all from the versions pinned in this repository.
+# Steps 1-8: kubeconfig, cert-manager, CNPG + Barman, the ESO CRDs, External
+# Secrets, ingress-nginx + its IngressClass, the prometheus-operator with this
+# platform's alert rules, and the letsencrypt-prod ClusterIssuer -- all from the
+# versions pinned in this repository.
 scripts/deploy/install-cluster-operators.sh \
   --subscriptionId=<sub> --resourceGroup=<rg> --clusterName=<aks> \
   --acmeEmail=<ops@example.com> --dryRun=true
@@ -229,6 +230,18 @@ Two things worth knowing before you start:
 - **The credential transport is an input, not a preference.** Deploy keys are
   disabled org-wide at some organisations, which makes the ssh path unavailable
   rather than unattractive.
+- **The alert rules are installed here, and that is the point.**
+  `deploy/k8s/monitoring` holds every alert this platform ships -- WAL
+  archiving, volume fill, replication, auth -- and until now nothing installed
+  it: its only invocation in the whole tree was a manual `kubectl` in its own
+  README. That is the worst member of the silent-dependency class, because a
+  missing Secret leaves a pod in `ContainerCreating` and **a missing alerting
+  stack produces a cluster that looks quiet** -- and quiet is what a healthy
+  system sounds like. One instance ran its entire life with WAL archiving broken
+  because the two alerts that would have caught it were never deployed. If you
+  already run a Prometheus stack, the operator install is skipped automatically
+  (the CRD is the probe) and only the rules are applied; `--skipMonitoring=true`
+  turns the whole step off, and the script says plainly what that costs.
 
 The same eleven steps run as one automation -- `installInstance`, raised by
 `instance.installRequested` -- with `argoSync` last and the settle after it.

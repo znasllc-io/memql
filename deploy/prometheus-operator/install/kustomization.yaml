@@ -1,0 +1,51 @@
+# prometheus-operator install -- the CRDs deploy/k8s/monitoring is written
+# against, and the controller that acts on them (memql#4499, epic memql#4490).
+#
+# WHY THIS EXISTS. deploy/k8s/monitoring holds every PodMonitor and
+# PrometheusRule this platform ships -- the WAL-archiving pair, the volume-fill
+# pair, the replication pair, the auth alerts. NOTHING INSTALLED IT. Its only
+# invocation anywhere in the tree was a manual `kubectl apply -k` inside its own
+# README, so on every instance actually deployed, every alert was inert.
+#
+# THAT IS THE #4473 CLASS, AND IT IS THE WORST MEMBER OF IT. A missing Secret
+# leaves a pod in ContainerCreating -- visible, and eventually investigated. A
+# missing ALERTING STACK produces a cluster that looks QUIET. Silence is what a
+# healthy system produces, so absent alerting is indistinguishable from nothing
+# being wrong, indefinitely.
+#
+# It is not hypothetical: memql#4460 ran for an instance's entire life with WAL
+# archiving broken and an empty backup container. Two of the five database
+# alerts would have fired on it -- one within five minutes -- and neither could,
+# because neither was deployed.
+#
+# WHY THE MONITORING KUSTOMIZATION STAYS OUT OF THE APP OVERLAY. Its header
+# gives the correct reason and this does not change it: these are
+# prometheus-operator CRDs, and wiring them into the app would make
+# `kubectl apply -k deploy/k8s/overlays/cloud` fail on a cluster with no
+# operator. That is an argument about WHERE they are applied, and it was read as
+# an argument for no install path existing at all. The install path is here.
+#
+# BRING-YOUR-OWN IS THE DEFAULT AND NEEDS NO FLAG.
+# scripts/deploy/install-cluster-operators.sh probes for
+# `crd/prometheusrules.monitoring.coreos.com` before applying this, exactly as
+# it does for every other operator. An operator who already runs a Prometheus
+# stack has that CRD, so this install is SKIPPED and only the rules are
+# applied -- which is the behaviour a flag would have had to be set correctly to
+# get.
+#
+# CRDs ONLY, deliberately. This installs the operator and its CRDs; it does not
+# install Prometheus itself, Alertmanager, or any scrape configuration beyond
+# what deploy/k8s/monitoring declares. Where alerts are ROUTED is an operator
+# decision (which Alertmanager, which receiver, which escalation), and a default
+# for it would be a decision made in the wrong place. What this guarantees is
+# that the rules EXIST on the cluster and are evaluated -- which is the half
+# that was missing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # prometheus-operator v0.87.0 -- the bundle: CRDs, the controller Deployment,
+  # its RBAC, and its own `default`-namespaced objects. Pinned exactly for the
+  # same reason as every other operator here: an upgrade rolls the controller
+  # that evaluates every alert, and it must happen when an operator decides.
+  - https://github.com/prometheus-operator/prometheus-operator/releases/download/v0.87.0/bundle.yaml
