@@ -8,6 +8,7 @@ import {
   Button,
   ButtonLink,
   Callout,
+  Checkbox,
   ConfirmDialog,
   Field,
   Panel,
@@ -177,17 +178,12 @@ function SettingsForm({
         writes={writes}
         onSave={() => writes.save(GROUP_NOTIFICATIONS, { notifications: draft.notifications })}
       >
-        <Field label="Notifications" hint="Whether this account receives notifications.">
-          <Select
-            ariaLabel="Notifications"
-            value={draft.notifications ? "on" : "off"}
-            onChange={(next) => set({ notifications: next === "on" })}
-            disabled={busy(GROUP_NOTIFICATIONS)}
-          >
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </Select>
-        </Field>
+        <Checkbox
+          checked={draft.notifications}
+          onChange={(next) => set({ notifications: next })}
+          disabled={busy(GROUP_NOTIFICATIONS)}
+          label="Send me notifications"
+        />
       </SettingsGroup>
 
       <SettingsGroup
@@ -203,20 +199,13 @@ function SettingsForm({
           })
         }
       >
-        <Field
-          label="Daily space"
-          hint="When on, a space is provisioned for you each day and yesterday's is rolled over."
-        >
-          <Select
-            ariaLabel="Daily space"
-            value={draft.dailySpaceEnabled ? "on" : "off"}
-            onChange={(next) => set({ dailySpaceEnabled: next === "on" })}
-            disabled={busy(GROUP_DAILY_SPACE)}
-          >
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </Select>
-        </Field>
+        <Checkbox
+          checked={draft.dailySpaceEnabled}
+          onChange={(next) => set({ dailySpaceEnabled: next })}
+          disabled={busy(GROUP_DAILY_SPACE)}
+          label="Give me a daily space"
+          hint="A space is provisioned for you each day, and yesterday's is rolled over."
+        />
         <Field
           label="At rollover"
           hint="What happens to yesterday's space. Archived spaces age out; saved ones are kept indefinitely."
@@ -427,13 +416,14 @@ function SettingsGroup({
             {message}
           </Callout>
         )}
+        {/* A stacked form's submit, so a bare div rather than FormActions --
+            that component exists to align a button with the fields BESIDE it
+            in a FormRow, and its label-height spacer would be a stray gap
+            here. Default size (sm) deliberately: `sm` IS the control line, and
+            an xs button is the 26px-beside-a-36px-field shape memql#4504
+            removed. Same as admin/SettingsPage's stacked save. */}
         <div>
-          <Button
-            type="submit"
-            size="xs"
-            busy={writes.busyGroup === group}
-            busyLabel="Saving…"
-          >
+          <Button type="submit" busy={writes.busyGroup === group} busyLabel="Saving…">
             Save
           </Button>
         </div>

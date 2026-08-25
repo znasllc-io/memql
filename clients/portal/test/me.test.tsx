@@ -539,7 +539,9 @@ describe("/me/settings -- the user settings surface (memql#4523)", () => {
     // show what the cluster ACTS on, which is the documented default. Both of
     // the first two default to TRUE, which is exactly where a falsy read would
     // render "off" and quietly lie.
-    expect((screen.getByLabelText(/^Notifications/) as HTMLSelectElement).value).toBe("on");
+    expect((screen.getByRole("checkbox", { name: /Send me notifications/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
     expect((screen.getByLabelText(/^During a takeover/) as HTMLSelectElement).value).toBe("clean");
     expect((screen.getByLabelText(/^Microphone/) as HTMLSelectElement).value).toBe("toggle");
   });
