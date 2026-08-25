@@ -53,10 +53,27 @@ type SendError struct {
 	// Detail is the provider's own message, truncated by the caller
 	// before it is persisted.
 	Detail string
+	// Cause is the underlying error, for a failure classified from one
+	// rather than from a provider response -- there is no status code to
+	// read on a send we refused before the wire. Exposed through Unwrap so
+	// one value answers both questions a caller has: IsPermanent for the
+	// retry decision, errors.Is for what it actually was.
+	Cause error
 }
+
+// Unwrap exposes Cause to errors.Is / errors.As. Nil-safe: a SendError built
+// from a provider response carries no cause and unwraps to nothing.
+func (e *SendError) Unwrap() error { return e.Cause }
 
 func (e *SendError) Error() string {
 	switch {
+	// A refusal that never reached a provider has no status to report, and
+	// "(status 0)" in front of an operator-facing message reads as a bug in
+	// the message rather than the point of it. Narrow by construction: only
+	// an error classified from a Cause takes this branch, so the SMTP
+	// unclassified case (status 0, no cause) keeps its existing wording.
+	case e.StatusCode == 0 && e.Cause != nil:
+		return e.Detail
 	case e.Throttled && e.RetryAfter > 0:
 		return fmt.Sprintf("email: provider throttled (status %d, retry after %s): %s", e.StatusCode, e.RetryAfter, e.Detail)
 	case e.Throttled:

@@ -80,14 +80,7 @@ func (s *EngineEmailSender) SendMagicLink(ctx context.Context, in magiclink.Send
 		// Last-resort fallback: log to slog at info level. The link
 		// shows up in operator logs so magic-link auth still "works"
 		// in dev when no email plug-in is wired.
-		if s.Logger != nil {
-			s.Logger.Info("identity: no email sender configured, logging magic link",
-				slog.String("to", in.Email),
-				slog.String("subject", subject),
-				slog.String("link", in.LinkURL),
-			)
-		}
-		return nil
+		return s.noSender("magic link", in.Email, subject, slog.String("link", in.LinkURL))
 	}
 
 	return sender.Send(ctx, email.Message{
@@ -121,6 +114,48 @@ func (s *EngineEmailSender) resolveSender() email.Sender {
 		return nil
 	}
 	return emailInt.SenderAccess()
+}
+
+// noSender is what every path here does when the engine has no email
+// integration wired at all -- and the answer depends on the install
+// (memql#4477).
+//
+// On a local one, logging the message and returning nil is right: the log IS
+// the inbox, and it is how a developer with no mail credentials completes a
+// sign-in. On an install that must really deliver mail it is the
+// fails-upward defect one layer out from the one the email package now
+// closes -- the issuer would record the send as having worked, and the person
+// waiting on the message would be the only evidence that it did not.
+//
+// Refusing here does not fail the sign-in request. Every caller of these
+// three methods already logs or audits the error and carries on, which is
+// deliberate: the magic-link row is a real credential that can be
+// re-requested, and an HTTP response that varied with delivery would be an
+// oracle for which addresses are registered.
+func (s *EngineEmailSender) noSender(what, to, subject string, extra ...slog.Attr) error {
+	if email.DeliveryRequired() {
+		err := email.RefuseLogOnly("send")
+		if s.Logger != nil {
+			attrs := append([]slog.Attr{
+				slog.String("to", to),
+				slog.String("subject", subject),
+				slog.String("error", err.Error()),
+			}, extra...)
+			s.Logger.LogAttrs(context.Background(), slog.LevelError,
+				"identity: no email sender configured and this install must deliver mail; refusing to report "+what+" as sent",
+				attrs...)
+		}
+		return err
+	}
+	if s.Logger != nil {
+		attrs := append([]slog.Attr{
+			slog.String("to", to),
+			slog.String("subject", subject),
+		}, extra...)
+		s.Logger.LogAttrs(context.Background(), slog.LevelInfo,
+			"identity: no email sender configured, logging "+what, attrs...)
+	}
+	return nil
 }
 
 // buildMagicLinkText assembles the plain-text body. Email clients

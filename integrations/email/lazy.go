@@ -103,8 +103,18 @@ func (l *LazySender) resolve(ctx context.Context) Sender {
 		return sender
 	}
 
+	// The baseline is whatever the caller passed, which on an install that
+	// must deliver mail is a LogSender that refuses every Send (email.go).
+	// Reached only when the boot gate did not fire -- a node that never
+	// materialized the plug-in, or a credential seeded into rows that has
+	// since been cleared -- so the honest line here is not "using LogSender".
 	if l.logger != nil {
-		l.logger.Info("email: no Graph or SMTP credentials in env or memql, using LogSender")
+		if DeliveryRequired() {
+			l.logger.Error("email: no Graph or SMTP credentials in env or memql; sends will be REFUSED",
+				"error", RefuseLogOnly("send"))
+		} else {
+			l.logger.Info("email: no Graph or SMTP credentials in env or memql, using LogSender")
+		}
 	}
 	return l.envResolved // LogSender baseline
 }

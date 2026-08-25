@@ -7,19 +7,46 @@
 # would not error; it would archive nowhere while the Cluster reported Ready,
 # which is the failure mode this whole layer exists to prevent.
 #
-# HOST FIRST, IN BOTH FORMS (memql#4496). The account rides the hostname on
-# the real service and the first path segment on the emulator; the container
-# is the path segment after that:
+# HOST FIRST, IN BOTH FORMS (memql#4496 / memql#4460). The account rides the
+# hostname on the real service and the first path segment on the emulator; the
+# container is the path segment after that:
 #
 #   real Azure Blob   https://<account>.blob.core.windows.net/<container>/
 #   Azurite (local)   http://azurite:10000/<account>/<container>
 #
-# A container-only "azure://<container>/" value puts the container where the
-# host belongs: under inheritFromAzureAD the SDK is left with no account
-# endpoint and fails as "connection string ... emulated storage", and a host
-# with no container segment fails as "Please specify a container name". The
-# only symptom either way is ContinuousArchivingFailing on a healthy-looking
-# Cluster.
+# THIS IS NOT A SPELLING PREFERENCE, IT SELECTS A CODE PATH. barman branches on
+# the URL host alone, before it looks at any credential
+# (barman/cloud_providers/azure_blob_storage.py):
+#
+#   if parsed_url.netloc.endswith("blob.core.windows.net"):
+#       ... real Azure; authenticate with the supplied credential
+#   else:
+#       ... EMULATED STORAGE; requires AZURE_STORAGE_CONNECTION_STRING
+#
+# So a container-only "azure://<container>/" puts the container where the host
+# belongs, and a real account is read as an emulator. Under inheritFromAzureAD
+# there is no connection string to find, and the sidecar fails every archive
+# and every retention pass with
+#
+#   Barman cloud backup delete exception:
+#   A connection string must be provided when using emulated storage
+#
+# The opposite error is the other half of the same trap: a host with no
+# container segment fails as "Please specify a container name".
+#
+# NOTHING UPSTREAM OF EITHER REPORTS IT. The Cluster stays Ready, the pods stay
+# healthy, and the only symptom is ContinuousArchivingFailing plus WAL that is
+# never recycled -- which fills the WAL volume until CNPG's free-space guard
+# refuses to start Postgres (memql#4459). One live instance ran its entire life
+# this way with an empty backup container (memql#4468).
+#
+# `azureCredentials.storageAccount` DOES NOT RESCUE THIS. It exists on the CRD
+# and looks like the right place to name the account, but barman decides the
+# branch above from the URL and never reads AZURE_STORAGE_ACCOUNT at all. The
+# host is the only place the account counts.
+#
+# TestBackupDestinationSurvivesBarmansEmulatorBranch reimplements that branch
+# over every rendered overlay.
 #
 # CREDENTIALS are a connection string read from a Secret. The NAME below is the
 # contract; locally `make secrets` writes it, in the cloud ESO syncs it from Key

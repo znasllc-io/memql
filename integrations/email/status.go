@@ -409,6 +409,19 @@ func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationRe
 
 	if cfg.mode == "log" {
 		report.Configured = AnswerNo
+		// Two different facts share this one resolved mode, and the console
+		// must not render them the same way (memql#4477). On a local install
+		// log-only is what was asked for, and DEGRADED -- running, answering,
+		// not delivering -- is the honest word. On an install that must
+		// really deliver mail every send is now REFUSED, which is a broken
+		// integration, and an amber row there reads as a known dev posture.
+		if DeliveryRequired() {
+			report.Health = HealthUnhealthy
+			report.Detail = "No sender is configured and this install must deliver mail, so every send is refused rather than written to the log. " +
+				RefuseLogOnly("send").Error() + ". " +
+				"Both lanes must resolve from ONE source -- the resolver takes Graph or SMTP wholesale from the environment, or wholesale from stored rows, and will not mix them."
+			return report
+		}
 		report.Health = HealthDegraded
 		report.Detail = "No sender is configured, so the integration is running in log-only mode: every send succeeds, writes a line to the node log, and delivers nothing. " +
 			"Configure Microsoft Graph (tenant id, client id, client secret, sender address) or SMTP (host and from-address), all four from the same source -- the resolver takes a lane wholesale from the environment, or wholesale from stored rows, and will not mix them."

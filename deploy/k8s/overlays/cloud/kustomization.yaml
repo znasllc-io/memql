@@ -201,16 +201,20 @@ patches:
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
-      # HOST FIRST (memql#4496): barman-cloud's Azure grammar is
+      # HOST FIRST (memql#4496 / memql#4460): barman-cloud's Azure grammar is
       #   https://<account>.blob.core.windows.net/<container>/
-      # -- the account is the HOSTNAME and the container is the leading path
-      # segment. The old container-only "azure://memql-db-backups/" put the
-      # container where the host belongs, leaving the AD credential no account
-      # endpoint: barman failed that as "connection string ... emulated
-      # storage" (the retired cluster's exact error), and a host with no
-      # container segment fails as "Please specify a container name". The
-      # storage account is an install value -- capture it, do not reconstruct
-      # it (docs/public/operate/azure-entry-install.md).
+      # -- account in the hostname, container as the leading path segment.
+      #
+      # THE HOST IS NOT COSMETIC, IT SELECTS A CODE PATH. barman branches on
+      # this host alone, before it reads any credential: anything not ending in
+      # `blob.core.windows.net` is treated as an EMULATOR and then requires a
+      # connection string, which `inheritFromAzureAD` deliberately does not
+      # provide. So the old container-only "azure://memql-db-backups/" failed
+      # as "connection string ... emulated storage"; a host with no container
+      # segment fails as "Please specify a container name". Either way the
+      # failure is silent -- Ready Cluster, healthy pods, WAL never recycled.
+      # See deploy/k8s/components/cnpg-db/objectstore.yaml for the branch, and
+      # TestBackupDestinationSurvivesBarmansEmulatorBranch for the gate.
       - op: replace
         path: /spec/configuration/destinationPath
         value: "https://REPLACE-WITH-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/"

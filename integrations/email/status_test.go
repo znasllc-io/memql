@@ -53,6 +53,13 @@ func clearEmailEnv(t *testing.T) {
 			t.Setenv(spec.legacy, "")
 		}
 	}
+	// The domain decides whether log-only is a choice or a defect
+	// (delivery.go), so it decides whether the report calls the lane degraded
+	// or unhealthy. Blank it here: leaving it to the ambient environment
+	// makes every log-only assertion below depend on whether the developer
+	// running the test happens to export MEMQL_DOMAIN.
+	t.Setenv(DomainEnv, "")
+	t.Setenv(AllowLogOnlyEnv, "")
 }
 
 // rowStore fakes the v1:platform:globalVariable / globalSecret resolvers the

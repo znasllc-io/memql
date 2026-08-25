@@ -30,7 +30,10 @@ Alert rules (prometheus-operator CRDs):
     than it succeeded, 5m. This one loses DATA rather than availability.
   - **MemqlDatabaseWALNeverArchived** -- a 30-minute-old cluster that has never
     archived. The day-one case a wrong `destinationPath` produces, which the
-    rule above cannot see (neither timestamp is set).
+    rule above cannot see (neither timestamp is set). **The sentinel is `-1`,
+    not `0`** -- CNPG coalesces a NULL `last_archived_time` to minus one, so
+    the `== 0` form this rule carried until memql#4468 was unsatisfiable and
+    the rule could never fire, on day one or ever. `rules_test.go` gates it.
   - **MemqlDatabaseVolumeFillingUp / AlmostFull** -- under 20% / 10% free.
     Postgres stops rather than degrades when a volume fills.
   - **MemqlDatabaseReplicaLagging** -- over 5m behind for 10m: the failover
@@ -38,6 +41,24 @@ Alert rules (prometheus-operator CRDs):
   - **MemqlDatabaseReplicaNotStreaming** -- in recovery with the WAL receiver
     down. Not lagging, NOT REPLICATING; lag reads flat, so the rule above
     cannot catch it.
+
+**There is deliberately NO backup-age alert here, and that is a finding rather
+than a gap.** The three metrics that would carry one --
+`cnpg_collector_last_available_backup_timestamp`,
+`cnpg_collector_first_recoverability_point`,
+`cnpg_collector_last_failed_backup_timestamp` -- were deprecated in
+CloudNativePG v1.26, and its release note states they "will no longer update
+when using plugin-based backups (e.g. Barman Cloud via CNPG-I)". That is
+exactly how MemQL runs, everywhere and on purpose, so on this deployment all
+three are pinned at zero forever and any rule built on one fires permanently or
+never. `rules_test.go` refuses them.
+
+Verify backups by reading the object store instead, which is the only check
+that distinguishes "configured" from "actually wrote a byte":
+
+```bash
+make db-backup-verify ACCOUNT=<storage-account>
+```
 
   Scraped by `podmonitor-database.yaml`, which is separate from the app
   PodMonitor because CNPG's instance manager serves its own metrics on :9187 --

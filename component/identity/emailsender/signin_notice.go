@@ -61,15 +61,9 @@ func (s *EngineEmailSender) SendNewSignIn(ctx context.Context, in identity.SignI
 
 	sender := s.resolveSender()
 	if sender == nil {
-		if s.Logger != nil {
-			s.Logger.Info("identity: no email sender configured, logging new-sign-in notice",
-				slog.String("to", in.Email),
-				slog.String("subject", subject),
-				slog.String("source", in.Source),
-				slog.String("ip", in.SourceIP),
-			)
-		}
-		return nil
+		return s.noSender("new-sign-in notice", in.Email, subject,
+			slog.String("source", in.Source),
+			slog.String("ip", in.SourceIP))
 	}
 
 	return sender.Send(ctx, email.Message{
@@ -201,13 +195,7 @@ func (s *EngineEmailSender) SendSignInDisabledNotice(ctx context.Context, in mag
 
 	sender := s.resolveSender()
 	if sender == nil {
-		if s.Logger != nil {
-			s.Logger.Info("identity: no email sender configured, logging sign-in-disabled notice",
-				slog.String("to", in.Email),
-				slog.String("subject", subject),
-			)
-		}
-		return nil
+		return s.noSender("sign-in-disabled notice", in.Email, subject)
 	}
 
 	return sender.Send(ctx, email.Message{

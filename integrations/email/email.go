@@ -191,17 +191,49 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 // Useful for local dev where no SMTP relay is wired.
 type LogSender struct {
 	logger *slog.Logger
+	// refusal is non-nil when this install must really deliver mail
+	// (delivery.go). Then every Send fails instead of logging a line and
+	// returning nil.
+	//
+	// The check lives HERE, on the type, rather than only in the selection
+	// below, because the selection is not the only construction site:
+	// component/grpc/guest_handlers.go builds a LogSender directly on three
+	// fallback paths that never touch the plug-in factory. A guard placed
+	// only at selection would leave those reporting success forever, which
+	// is the exact defect (memql#4477).
+	refusal error
 }
 
-// NewLogSender returns a Sender that logs messages at Info level.
+// NewLogSender returns a Sender that logs messages at Info level -- or, on an
+// install that must really deliver mail, one that refuses every send.
+//
+// The decision is taken HERE and cached, not re-read per Send: a process's
+// MEMQL_DOMAIN does not change under it, and a per-send read would make the
+// behaviour depend on whatever last mutated the environment.
 func NewLogSender(logger *slog.Logger) *LogSender {
-	return &LogSender{logger: logger}
+	l := &LogSender{logger: logger}
+	if DeliveryRequired() {
+		l.refusal = refusalSendError("send")
+	}
+	return l
 }
 
-// Send logs the message without attempting delivery.
+// Send logs the message without attempting delivery, or refuses.
 func (l *LogSender) Send(_ context.Context, msg Message) error {
 	if err := msg.Validate(); err != nil {
 		return err
+	}
+	if l.refusal != nil {
+		// Logged as well as returned: the caller may be a path that swallows
+		// the error, and an operator grepping the node log for why mail
+		// stopped needs the sentence naming the four env vars.
+		if l.logger != nil {
+			l.logger.Error("email: refusing to log-only a message on an install that must deliver it",
+				"to", msg.To,
+				"subject", msg.Subject,
+				"error", l.refusal)
+		}
+		return l.refusal
 	}
 	if l.logger == nil {
 		return nil
@@ -243,10 +275,20 @@ func DefaultEnvKeys() EnvKeys {
 //     MEMQL_EMAIL_SENDER all set → GraphSender. Legacy names
 //     (`AZURE_*` / `MAIL_*`) are still accepted as a fallback.
 //  2. SMTP (fallback): SMTP_HOST + SMTP_FROM_ADDR set → SMTPSender.
-//  3. Neither set → LogSender (dev / no-delivery mode).
+//  3. Neither set → LogSender (dev / no-delivery mode) on a LOCAL install,
+//     and an ERROR on one that must really deliver mail (memql#4477).
+//
+// Case 3 is why this returns an error at all. The plug-in factory hands it
+// straight to app.materializePlugins, which fatals -- so a cloud install now
+// refuses to boot with a message naming the four env vars, instead of running
+// for days in log-only mode telling every layer above that mail was sent.
+// That is a deliberate exception to materializePlugins' "registrants that can
+// run in degraded mode should return a no-op instance so the app still boots":
+// degraded is precisely what must not happen here, because it is
+// indistinguishable from working.
 //
 // Prefix is optional (e.g. "MEMQL_"). Pass "" for no prefix.
-func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
+func NewSenderFromEnv(prefix string, logger *slog.Logger) (Sender, error) {
 	reader := env.NewEnvReader(strings.TrimRight(prefix, "_"))
 
 	// --- Graph path -----------------------------------------------------
@@ -281,7 +323,7 @@ func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
 				"sender", graphCfg.SenderAddr,
 				"tenantId", graphCfg.TenantId)
 		}
-		return NewGraphSender(graphCfg, nil, logger)
+		return NewGraphSender(graphCfg, nil, logger), nil
 	}
 
 	// --- SMTP fallback --------------------------------------------------
@@ -289,11 +331,14 @@ func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
 	host, _ := reader.String(smtpKeys.Host)
 	host = strings.TrimSpace(host)
 	if host == "" {
+		if err := refuseLogOnlySelection(logger, "no sender configured"); err != nil {
+			return nil, err
+		}
 		if logger != nil {
 			logger.Info("email: no sender configured, using LogSender",
 				"hint", "set MEMQL_EMAIL_AZURE_TENANT_ID / MEMQL_EMAIL_AZURE_CLIENT_ID / MEMQL_EMAIL_AZURE_CLIENT_SECRET / MEMQL_EMAIL_SENDER for Microsoft Graph, or SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_ADDR for SMTP")
 		}
-		return NewLogSender(logger)
+		return NewLogSender(logger), nil
 	}
 
 	cfg := SMTPConfig{Host: host}
@@ -316,11 +361,33 @@ func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
 		cfg.FromName = strings.TrimSpace(v)
 	}
 	if cfg.FromAddr == "" {
+		// The second fall-through, and the one that reads like a typo rather
+		// than an omission: a host is set, so the operator plainly intended
+		// to send. Refusing it is if anything more clearly right than the
+		// no-configuration case above.
+		if err := refuseLogOnlySelection(logger, "SMTP_HOST set but SMTP_FROM_ADDR missing"); err != nil {
+			return nil, err
+		}
 		if logger != nil {
 			logger.Warn("email: SMTP_HOST set but SMTP_FROM_ADDR missing; falling back to LogSender")
 		}
-		return NewLogSender(logger)
+		return NewLogSender(logger), nil
 	}
 
-	return NewSMTPSender(cfg, logger)
+	return NewSMTPSender(cfg, logger), nil
+}
+
+// refuseLogOnlySelection returns the boot refusal when this install must
+// really deliver mail, and nil when log-only is a legitimate choice here. The
+// nil case still logs, so a `.localhost` cluster and a break-glass cloud
+// cluster both say out loud what they settled on.
+func refuseLogOnlySelection(logger *slog.Logger, because string) error {
+	if !DeliveryRequired() {
+		return nil
+	}
+	err := RefuseLogOnly("boot")
+	if logger != nil {
+		logger.Error("email: refusing to boot in log-only mode", "because", because, "error", err)
+	}
+	return err
 }
