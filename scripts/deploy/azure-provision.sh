@@ -473,6 +473,13 @@ function collect_result() {
         [[ -n "$eso_client" ]] && cap_result_set "esoClientId" "$eso_client"
         [[ -n "$db_client"  ]] && cap_result_set "dbClientId"  "$db_client"
     fi
+    # UNCONDITIONAL, and not decoration. A function whose LAST statement is a
+    # `[[ ... ]] && cmd` returns 1 when the test is false, and under `set -e`
+    # that aborts the caller BEFORE cap_ok is ever reached -- so the envelope
+    # reads "aborted (exit 1) without an explicit result" on a run that did
+    # everything right, with changed:true beside it. Measured on both scripts
+    # in this directory (memql#4490).
+    return 0
 }
 
 function main() {

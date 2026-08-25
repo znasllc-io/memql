@@ -182,15 +182,71 @@ superseded by the build server (reproducible, native linux/amd64, provenance).
 
 ## 4. Bootstrap the cluster
 
+There are **eleven ordered steps** between a provisioned substrate and an ArgoCD
+sync that means anything, and six of them are dependencies that exist on no
+manifest in either repository. Every one of those six **fails silently** -- a
+missing Secret named by a volume leaves a pod in `ContainerCreating` forever
+with no log line, because the container never starts.
+
+They are scripted, in order, and each is idempotent and verify-first:
+
 ```bash
-az aks get-credentials -g <rg> -n <aks> --overwrite-existing
-kubectl get nodes -o wide
+# Steps 1-8: kubeconfig, cert-manager, CNPG + Barman, the ESO CRDs, External
+# Secrets, ingress-nginx + its IngressClass, the prometheus-operator with this
+# platform's alert rules, and the letsencrypt-prod ClusterIssuer -- all from the
+# versions pinned in this repository.
+scripts/deploy/install-cluster-operators.sh \
+  --subscriptionId=<sub> --resourceGroup=<rg> --clusterName=<aks> \
+  --acmeEmail=<ops@example.com> --dryRun=true
+
+# Steps 8-9: the namespace, the EMPTY memql-secrets shell, and credential
+# GENERATION into this instance's own vault. See step 6 below.
+scripts/deploy/seed-instance-secrets.sh --keyVaultName=<kv> --dryRun=true
+
+# Step 10: this instance's SecretStore and ExternalSecrets, rendered from its
+# own vault and its own identity. esoClientId comes from provisioning's result
+# envelope in step 2.
+scripts/deploy/wire-external-secrets.sh \
+  --keyVaultName=<kv> --tenantId=<tenant> --esoClientId=<guid> --dryRun=true
+
+# Step 11: the ArgoCD repository credential and the AppProject sourceRepos
+# entry. Without the second, the Application is refused as "repo not permitted
+# in project" -- which stops reconciliation while looking harmless.
+scripts/deploy/register-gitops-repo.sh \
+  --repoUrl=<https://...> --transport=https --tokenFile=<path> --dryRun=true
 ```
 
-Then install ArgoCD, cert-manager and the CNPG operator, and apply the
-Applications. [azure-entry-install.md](azure-entry-install.md) carries the
-manifest-level detail, including the DNS-01 prerequisites and the voice-off
-holds. Follow it rather than improvising: several of its steps exist because a
+Drop `--dryRun=true` to apply. Each writes one JSON envelope to stdout and its
+logs to stderr, so `--print-spec` tells you the parameters without running
+anything.
+
+Two things worth knowing before you start:
+
+- **`--acmeEmail` has no default, deliberately.** A wrong address is where the
+  expiry warnings go. Omit it and the ClusterIssuer is skipped, which means
+  Certificates stay `Pending` and ingress-nginx serves its self-signed default
+  -- the site **loads**, with a browser warning, which is why this one is easy
+  to miss.
+- **The credential transport is an input, not a preference.** Deploy keys are
+  disabled org-wide at some organisations, which makes the ssh path unavailable
+  rather than unattractive.
+- **The alert rules are installed here, and that is the point.**
+  `deploy/k8s/monitoring` holds every alert this platform ships -- WAL
+  archiving, volume fill, replication, auth -- and until now nothing installed
+  it: its only invocation in the whole tree was a manual `kubectl` in its own
+  README. That is the worst member of the silent-dependency class, because a
+  missing Secret leaves a pod in `ContainerCreating` and **a missing alerting
+  stack produces a cluster that looks quiet** -- and quiet is what a healthy
+  system sounds like. One instance ran its entire life with WAL archiving broken
+  because the two alerts that would have caught it were never deployed. If you
+  already run a Prometheus stack, the operator install is skipped automatically
+  (the CRD is the probe) and only the rules are applied; `--skipMonitoring=true`
+  turns the whole step off, and the script says plainly what that costs.
+
+The same eleven steps run as one automation -- `installInstance`, raised by
+`instance.installRequested` -- with `argoSync` last and the settle after it.
+[azure-entry-install.md](azure-entry-install.md) carries the manifest-level
+detail. Follow it rather than improvising: several of its steps exist because a
 previous install failed in a way that looked healthy.
 
 ## 5. Apply the instance's OWN Application
@@ -225,13 +281,31 @@ now fails the build on each.
 External Secrets reads the key vault as the `id-eso-*` identity, federated to
 the `external-secrets-kv` service account in step 2. Write the values it expects:
 
-```bash
-az keyvault secret set --vault-name <kv> --name <secret-name> --value <value>
-```
+`scripts/deploy/seed-instance-secrets.sh` (step 4 above) generates the seven
+entries the mesh reads. Three properties of it are worth stating, because each
+was learned the expensive way:
 
-The set is instance-specific; take it from the instance repository rather than
-this page, which would go stale. **If you are migrating, read the old vault
-before deleting it** -- provider API keys frequently exist nowhere else.
+- **It GENERATES; it never migrates, and it has no flag that would.** A retired
+  vault's entries are *another cluster's* master key, operator key and DSN. A
+  new instance is a new trust domain. On the last rebuild, four of the seven did
+  not exist in the retired vault at all, so a migration would have imported a
+  dead value and still left four gaps.
+- **Create-if-absent, never overwrite.** Regenerating the master key after
+  anything has been encrypted under it destroys the ability to read it back, and
+  the caller is an automation with at-least-once delivery. Rotation is a
+  separate, explicit verb -- not a re-run.
+- **The DSN and the CNPG credential carry ONE password.** Generate them
+  independently and the cluster comes up **healthy** and the engine cannot log
+  in: every pod Running, every probe green, an authentication failure in the
+  logs. On a re-run the password is read back out of the existing DSN.
+
+No value is written to a log line, to the result envelope, or to argv -- every
+one reaches `az` and `kubectl` through a file in a mode-700 directory that is
+shredded on exit. The envelope reports counts and names.
+
+**If you are migrating provider API keys, read the old vault before deleting
+it** -- those frequently exist nowhere else, and they are the one category that
+is genuinely the operator's to carry across.
 
 ## 7. Verify -- and do not accept `Healthy` as the answer
 
@@ -271,6 +345,72 @@ The wildcard matches exactly one label, which is why every host is a single
 label under the domain. Certificates are a separate matter from routing: an
 HTTP-01 issuer cannot issue for the wildcard, so without a DNS-01 issuer the
 certificate names exact hosts only. See [front-door.md](front-door.md).
+
+## Resetting an instance
+
+"Start fresh" reads as "rebuild everything". For an **ownership reset** -- you
+are re-testing the take-ownership flow, or handing the instance to a different
+first owner -- it means one thing only:
+
+> **Wipe the database. Leave everything else exactly where it is.**
+
+Ownership lives in `v1:identity:user` rows and the credentials that point at
+them. Dropping the database is what un-claims the instance. Nothing above the
+database records who owns it.
+
+### What an ownership reset must NOT rebuild
+
+| Resource | Why leaving it alone is correct |
+|---|---|
+| The front-door **certificate** | Re-issuing walks into a Let's Encrypt rate limit -- see below. This is the one that bites. |
+| The Azure **substrate** | Resource group, AKS, node pools and identities carry no ownership state. `azure-provision.sh` is idempotent, so re-running it is a slow no-op at best. |
+| The container **registry** | Images are addressed by digest and are not owner-scoped. |
+| The **key vault** | The master key, operator key and signing key are the instance's identity, not the owner's. Rotating them on a reset also invalidates every value already encrypted under the old master key. |
+| **DNS** | The records point at the ingress controller's public IP, which the reset does not move. |
+
+Rebuilding any of these is pure churn. Rebuilding the certificate is worse than
+churn.
+
+### The certificate is rate-limited, and the limit is not visible from here
+
+Let's Encrypt enforces a **duplicate-certificate limit of 5 per exact set of
+names per week**. Every front-door reissue for the same host list spends one.
+A handful of reinstall loops exhausts it, and the instance is then left with
+**no TLS and a multi-day wait** -- an outcome strictly worse than whatever was
+being re-tested.
+
+The trap is that the reinstall loop *feels* cheap and reversible, and for every
+other resource on this page it is. This one resource breaks the pattern in both
+halves: the counter is enforced on Let's Encrypt's side where the operator
+cannot read it, and once exhausted **no action on the operator's side shortens
+the wait**. There is nothing to retry, restart, or escalate.
+
+So: an ownership reset does not touch cert-manager, does not delete the
+`Certificate` or its Secret, and does not delete the namespace those live in.
+If a certificate must genuinely be replaced, change the name set (which starts
+a fresh bucket) rather than reissuing the same one.
+
+### Doing the reset
+
+```bash
+# 1. Scale the mesh down so nothing reconnects mid-wipe.
+kubectl scale deploy -n memql --all --replicas=0
+
+# 2. Drop and recreate the application database. The CNPG Cluster, its PVCs,
+#    and memql-db-app-creds all stay -- only the contents go.
+kubectl exec -n memql memql-db-1 -- psql -U postgres -c \
+  'DROP DATABASE memql WITH (FORCE);'
+kubectl exec -n memql memql-db-1 -- psql -U postgres -c \
+  'CREATE DATABASE memql OWNER memql;'
+
+# 3. Scale back up. Migrations run on startup and the instance comes up
+#    unclaimed, ready for the first owner to take it.
+kubectl scale deploy -n memql --all --replicas=1
+```
+
+Then mint an enrolment or recovery credential for the new first owner exactly as
+on a first install -- the instance is in the same state a fresh one is, because
+the database is the only thing that recorded otherwise.
 
 ## Tearing down
 

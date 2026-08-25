@@ -92,8 +92,27 @@ var capabilityScriptAllowlist = map[string]string{
 	"deploy.azureProvision": "scripts/deploy/azure-provision.sh",
 	"deploy.azureScale":     "scripts/deploy/azure-scale.sh",
 	"deploy.azureTeardown":  "scripts/deploy/azure-teardown.sh",
-	"overlay.revert":     "scripts/deploy/revert-overlay.sh",
-	"argocd.sync":        "scripts/deploy/argo-sync.sh",
+
+	// The INSTALL phase -- the eleven ordered steps between a provisioned
+	// substrate and an argoSync that means something (epic memql#4490).
+	// installInstance was a one-step alias for argoSync, and argoSync against a
+	// freshly provisioned cluster syncs nothing, because on that cluster there
+	// is no ArgoCD and none of the operators every committed manifest assumes.
+	//
+	// Six of those steps are dependencies that exist on no manifest in either
+	// repository and every one of them fails SILENTLY, which is why they are
+	// scripts rather than a runbook paragraph: a missing Secret named by a
+	// volume leaves a pod in ContainerCreating forever with no log line,
+	// because the container never starts.
+	"deploy.installClusterOperators":   "scripts/deploy/install-cluster-operators.sh",
+	"deploy.seedInstanceSecrets":       "scripts/deploy/seed-instance-secrets.sh",
+	"deploy.wireExternalSecrets":       "scripts/deploy/wire-external-secrets.sh",
+	"deploy.registerGitOpsRepo":        "scripts/deploy/register-gitops-repo.sh",
+	"deploy.verifyInstallDependencies": "scripts/deploy/verify-install-dependencies.sh",
+	"deploy.settleAfterSync":           "scripts/deploy/settle-after-sync.sh",
+	"deploy.renderDiff":                "scripts/deploy/render-diff.sh",
+	"overlay.revert":                   "scripts/deploy/revert-overlay.sh",
+	"argocd.sync":                      "scripts/deploy/argo-sync.sh",
 
 	// Local-cluster install/uninstall substrate (epic #3357, install(11) /
 	// #3368). Registration here is what makes an install script REACHABLE from

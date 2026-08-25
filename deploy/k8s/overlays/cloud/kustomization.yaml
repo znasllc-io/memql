@@ -140,6 +140,25 @@ patches:
   # Everything here is an endpoint or a class name. The SHAPE -- four
   # resources, the preloaded library, the plugin archiver, the declared
   # extensions -- comes from the component; the SIZES come from the preset.
+  # STORAGE CLASS <-> NODE POOL ZONALITY -- one coupling, two files (memql#4497).
+  # Premium SSD v2 attaches ONLY to a VM in an availability zone. Pinning this
+  # class here therefore REQUIRES that the substrate under it was created with
+  # zonal node pools -- `scripts/deploy/azure-provision.sh --zones=<z>`, whose
+  # default is `1` for exactly this reason. These are not two independent
+  # defaults that happen to agree; the overlay is the side that states the
+  # requirement and the script is the side that has to satisfy it.
+  #
+  # Getting it wrong fails three layers from the cause, at the CNPG initdb pod:
+  #
+  #   Managed disks with 'PremiumV2_LRS' storage account type can be used only
+  #   with Virtual Machines in an Availability Zone.
+  #
+  # and a PVC-bind probe does NOT detect it -- the PV provisions fine and only
+  # the attach fails, so only a pod reaching Running is proof. It is also
+  # sticky: PVs provisioned while non-zonal carry an empty
+  # topology.disk.csi.azure.com/zone that can never match a zonal node, so
+  # fixing the pool is not enough -- the PVCs must be recycled and the CNPG
+  # Cluster recreated. Gated by ../substrate_overlay_coupling_test.go.
   - target: { kind: Cluster, name: memql-db }
     patch: |
       # Premium SSD v2, and it is LRS/zonal-only -- which is CORRECT here rather
@@ -321,5 +340,11 @@ components:
   # THE DATABASE (epic memql#3842 / #3847 / #3850), with the `top` preset's
   # numbers: 3 instances across 3 zones, 4 vCPU / 16 GiB, 256 + 64 GiB. The
   # SHAPE comes from the component; the preset supplies only sizes.
+  # INTERNAL TLS (memql#4484) -- the memql-ca / identity-tls chain every mesh
+  # node mounts and NOTHING used to create. Before this the pods sat in
+  # ContainerCreating forever with no log line, because the container never
+  # started. Composed before cnpg-db only for readability; it patches nothing,
+  # so its position carries no meaning.
+  - ../../components/internal-tls
   - ../../components/cnpg-db
   - ../../components/cnpg-db/presets/top

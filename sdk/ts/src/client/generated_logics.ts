@@ -383,6 +383,27 @@ QueryClient.prototype.governanceCanManagePrincipal = function (this: QueryClient
   return this.executeNamed("governanceCanManagePrincipal", buildGovernanceCanManagePrincipal(args), opts);
 };
 
+/** Map the install-dependency existence check to a label: "ok" when everything the manifests assume is present, else "missing". Fail-closed -- a blank result reads as "missing", never as "ok". */
+export interface InstallDependencyVerdictArgs {
+  passed?: unknown;
+}
+
+export function buildInstallDependencyVerdict(args: InstallDependencyVerdictArgs): string {
+  const parts: string[] = [];
+  if (args.passed !== undefined) parts.push("passed: " + renderMemQLValue(args.passed));
+  return "logic installDependencyVerdict(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    installDependencyVerdict(args: InstallDependencyVerdictArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.installDependencyVerdict = function (this: QueryClient, args: InstallDependencyVerdictArgs = {} as InstallDependencyVerdictArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("installDependencyVerdict", buildInstallDependencyVerdict(args), opts);
+};
+
 /** Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit. */
 export interface KillSwitchSuspendsRunningPlansArgs {
   event: Record<string, unknown>;
@@ -572,6 +593,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseWorkspaceOnPlanTerminal = function (this: QueryClient, args: ReleaseWorkspaceOnPlanTerminalArgs = {} as ReleaseWorkspaceOnPlanTerminalArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseWorkspaceOnPlanTerminal", buildReleaseWorkspaceOnPlanTerminal(args), opts);
+};
+
+/** Map the render-diff result to a label installInstance switches on: "blocked" when the diff was REQUIRED and did not pass, else "clear". A first install passes required=false, because there is no previous ref to diff against. */
+export interface RenderDiffVerdictArgs {
+  passed?: unknown;
+  required?: unknown;
+}
+
+export function buildRenderDiffVerdict(args: RenderDiffVerdictArgs): string {
+  const parts: string[] = [];
+  if (args.passed !== undefined) parts.push("passed: " + renderMemQLValue(args.passed));
+  if (args.required !== undefined) parts.push("required: " + renderMemQLValue(args.required));
+  return "logic renderDiffVerdict(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    renderDiffVerdict(args: RenderDiffVerdictArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.renderDiffVerdict = function (this: QueryClient, args: RenderDiffVerdictArgs = {} as RenderDiffVerdictArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("renderDiffVerdict", buildRenderDiffVerdict(args), opts);
 };
 
 /** PURE routing decision table for a newly submitted v1:forge:request: submitter role -> the next approval-pipeline status. owner fast-tracks to queued (pre-approved); admin/writer to needs_approval; anyone else (reader) to needs_validation. Returns the status string only -- the automation switches on it and stamps approvedByUserId solely in the queued (owner) case. No graph reads or writes (ADR section 2.1). P1 #2368. */

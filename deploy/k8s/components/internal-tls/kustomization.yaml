@@ -1,0 +1,23 @@
+# INTERNAL TLS as a composable unit (memql#4484).
+#
+# WHY A COMPONENT RATHER THAN A FILE IN EACH OVERLAY. Kustomize's load
+# restrictor refuses a sibling path, so an overlay cannot reference another
+# overlay's copy -- which is why dns01-wildcard-tls.yaml exists twice, byte for
+# byte, and has to be kept in step by hand. `components/` is reachable from
+# every overlay, so this ships ONCE.
+#
+# WHY NOT IN `base`. base is composed by the LOCAL overlay too, and locally
+# these two Secrets are minted with openssl by `make secrets`, which skips when
+# they already exist. Two mechanisms racing to own one Secret is the kind of
+# thing that works until it does not, and the failure would be a certificate
+# nobody can explain the provenance of. A cloud overlay composes this; local
+# composes the script.
+#
+# REQUIRES cert-manager, which scripts/deploy/install-cluster-operators.sh
+# installs as step 2 of the install phase -- before anything that mounts these
+# Secrets is scheduled.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - internal-ca.yaml

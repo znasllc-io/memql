@@ -28,8 +28,15 @@ func TestDeploymentActionsValidateStrictly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the authored deployment actions must validate under strict capability arg-typing: %v", err)
 	}
-	if len(acts) != 12 {
-		t.Fatalf("expected 12 authored deployment actions, got %d", len(acts))
+	// The count is pinned so that an action DISAPPEARING in a refactor fails
+	// here rather than as an automation step that silently stops happening.
+	// 12 -> 19 with the install phase (epic memql#4490): the seven between a
+	// provisioned substrate and an argoSync that means something.
+	if len(acts) != 19 {
+		t.Fatalf("expected 19 authored deployment actions, got %d.\n"+
+			"If you ADDED one, update this count. If the count DROPPED, find out which action "+
+			"went and why: each of these is the backend of a lifecycle step, and several exist "+
+			"because the step they perform failed silently when nobody did it.", len(acts))
 	}
 	// Spot-check the integration-backed action resolves to the write capability.
 	var sawTagRelease bool

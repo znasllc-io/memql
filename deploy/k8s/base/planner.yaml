@@ -36,6 +36,14 @@ spec:
         - name: memql-ca
           secret:
             secretName: memql-ca
+        # ONLY ca.crt. cert-manager issues memql-ca as a kubernetes.io/tls
+        # Secret carrying tls.crt, tls.key AND ca.crt, and a volume with no
+        # `items:` projects EVERY key -- which would put the internal CA's
+        # PRIVATE KEY inside this pod, with SSL_CERT_DIR scanning it. The
+        # openssl path (make secrets) produces ca.crt alone, so the selector is
+        # correct for both and the two remain interchangeable (memql#4484).
+            items:
+              - { key: ca.crt, path: ca.crt }
         # The pod's OWN identity, minted for Anthropic and nobody else
         # (memql#4336). audience is what makes this token non-interchangeable
         # with the default kube-api-access one: Anthropic verifies it against

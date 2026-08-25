@@ -377,6 +377,26 @@ func GovernanceCanManagePrincipalBuild(args GovernanceCanManagePrincipalArgs) st
 	return b.String()
 }
 
+// InstallDependencyVerdict -- Map the install-dependency existence check to a label: "ok" when everything the manifests assume is present, else "missing". Fail-closed -- a blank result reads as "missing", never as "ok".
+type InstallDependencyVerdictArgs struct {
+	Passed any
+}
+
+// InstallDependencyVerdict calls the engine logic installDependencyVerdict.
+func (qc *QueryClient) InstallDependencyVerdict(ctx context.Context, args InstallDependencyVerdictArgs) (*Result, error) {
+	call := InstallDependencyVerdictBuild(args)
+	return qc.executeNamed(ctx, "installDependencyVerdict", call)
+}
+
+func InstallDependencyVerdictBuild(args InstallDependencyVerdictArgs) string {
+	var b strings.Builder
+	b.WriteString("logic installDependencyVerdict(")
+	b.WriteString("passed: ")
+	b.WriteString(renderMemQLValue(args.Passed))
+	b.WriteString(")")
+	return b.String()
+}
+
 // KillSwitchSuspendsRunningPlans -- Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.
 type KillSwitchSuspendsRunningPlansArgs struct {
 	Event map[string]any
@@ -561,6 +581,32 @@ func ReleaseWorkspaceOnPlanTerminalBuild(args ReleaseWorkspaceOnPlanTerminalArgs
 	b.WriteString("logic releaseWorkspaceOnPlanTerminal(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RenderDiffVerdict -- Map the render-diff result to a label installInstance switches on: "blocked" when the diff was REQUIRED and did not pass, else "clear". A first install passes required=false, because there is no previous ref to diff against.
+type RenderDiffVerdictArgs struct {
+	Passed   any
+	Required any
+}
+
+// RenderDiffVerdict calls the engine logic renderDiffVerdict.
+func (qc *QueryClient) RenderDiffVerdict(ctx context.Context, args RenderDiffVerdictArgs) (*Result, error) {
+	call := RenderDiffVerdictBuild(args)
+	return qc.executeNamed(ctx, "renderDiffVerdict", call)
+}
+
+func RenderDiffVerdictBuild(args RenderDiffVerdictArgs) string {
+	var b strings.Builder
+	b.WriteString("logic renderDiffVerdict(")
+	b.WriteString("passed: ")
+	b.WriteString(renderMemQLValue(args.Passed))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("required: ")
+	b.WriteString(renderMemQLValue(args.Required))
 	b.WriteString(")")
 	return b.String()
 }

@@ -499,6 +499,19 @@ func TestEachIngressTLSHostsAreItsCertifiableRuleHosts(t *testing.T) {
 // certificate without it is a trap for whoever later retires HTTP-01). What
 // survives is the invariant that was doing the work: no SAN nothing serves,
 // and -- asserted next door, per Secret -- no tls host without a SAN.
+//
+// IT APPLIES TO ACME CERTIFICATES ONLY (memql#4484). The reason above is the
+// scope: an ORDER is what a useless SAN costs, and only an ACME issuer places
+// orders. An internally-issued certificate -- the memql-ca / identity-tls chain
+// off a selfSigned Issuer -- costs nothing, is never served by the front door,
+// and carries in-cluster Service names by design. Holding it to this rule would
+// be asking an internal certificate to justify itself against a public one.
+//
+// WHICH ISSUERS ARE ACME IS DERIVED, not listed: the rendered Issuer and
+// ClusterIssuer objects are read and the ones carrying `spec.acme` are the ACME
+// ones. So a NEW internal certificate needs no edit here, and a new ACME
+// certificate is covered the moment it renders -- which is the direction the
+// mistakes go in.
 func TestEveryRequestedSANIsAHostTheFrontDoorServes(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
@@ -514,7 +527,15 @@ func TestEveryRequestedSANIsAHostTheFrontDoorServes(t *testing.T) {
 				t.Fatal("no front-door rule hosts rendered; this gate cannot pass on an overlay it did not read")
 			}
 
+			acme := acmeIssuersIn(t, rendered)
+			if len(acme) == 0 {
+				t.Fatal("no ACME issuer rendered; this gate cannot pass on an overlay whose " +
+					"certificates it classified as all-internal")
+			}
 			for _, c := range certificatesIn(t, rendered) {
+				if !acme[c.IssuerName] {
+					continue // internal chain: no order, no renewal, no front door
+				}
 				for _, s := range c.DNSNames {
 					if !ruleHosts[s] {
 						t.Errorf("the %s overlay's Certificate %s requests %q, which no front-door rule "+
@@ -950,4 +971,37 @@ func TestRenderedHostsAreExactlyTheProduct(t *testing.T) {
 			}
 		})
 	}
+}
+
+// acmeIssuersIn returns the names of every rendered Issuer / ClusterIssuer that
+// places ACME orders, by reading `spec.acme` rather than by matching a name.
+//
+// Derived on purpose. A name list ("letsencrypt-*") would silently stop
+// covering an ACME issuer somebody named differently -- and this gate's whole
+// job is to catch a SAN that costs money, so failing OPEN on an unrecognised
+// name is the one direction it must not fail in.
+func acmeIssuersIn(t *testing.T, rendered string) map[string]bool {
+	t.Helper()
+
+	out := map[string]bool{}
+	eachDocument(t, rendered, func(kind string, doc *yaml.Node) {
+		if kind != "Issuer" && kind != "ClusterIssuer" {
+			return
+		}
+		var i struct {
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				ACME map[string]any `yaml:"acme"`
+			} `yaml:"spec"`
+		}
+		if err := doc.Decode(&i); err != nil {
+			t.Fatalf("decoding an %s: %v", kind, err)
+		}
+		if len(i.Spec.ACME) > 0 {
+			out[i.Metadata.Name] = true
+		}
+	})
+	return out
 }

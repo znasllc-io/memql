@@ -1,0 +1,36 @@
+# ingress-nginx install -- the controller and the IngressClass every Ingress in
+# this tree names (memql#4473, epic memql#4490).
+#
+# WHY IT WAS MISSING AND WHY THAT WAS INVISIBLE. Six Ingresses declare
+# `ingressClassName: nginx`. Nothing created an IngressClass or a controller,
+# and Kubernetes does not object: an Ingress naming an absent class is a valid
+# object that simply nothing acts on. It sits with ADDRESS empty forever, which
+# reads exactly like "still starting" -- so the cluster looks like it is
+# converging when nothing is going to happen.
+#
+# That is the shared shape of the six undeclared dependencies this epic closes:
+# assumed-installed by a committed manifest, installed by nothing, failing in a
+# way that does not name itself.
+#
+# LOCAL DOES NOT USE THIS. k3d ships traefik and the local overlay's front door
+# is written for it (deploy/k8s/overlays/local/front-door.yaml). The ingress
+# controller is one of the documented environment-parity VALUES -- traefik
+# versus nginx annotations -- not a difference in the shape of the system.
+#
+# The pin is exact and gated by deploy/cnpg/operator_stack_test.go. A floating
+# ref on the object that terminates every external request is not a
+# convenience.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # ingress-nginx controller v1.13.2, the cloud provider manifest: Deployment,
+  # the `nginx` IngressClass, RBAC, the admission webhook, and its own
+  # `ingress-nginx` Namespace. Ships a LoadBalancer Service, which on AKS is
+  # what allocates the public IP every DNS record on this install points at.
+  #
+  # No `namespace:` here, deliberately, for the same reason cert-manager's
+  # install declares none: the manifest ships its own namespace and makes
+  # cluster-scoped and cross-namespace references to itself that a namespace
+  # transformer would rewrite.
+  - https://github.com/kubernetes/ingress-nginx/releases/download/controller-v1.13.2/deploy.yaml
