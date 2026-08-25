@@ -9,6 +9,16 @@ owner: znas
 
 # Deploy-Bundle Runbook -- `make deploy` via deployEngineCluster
 
+> **RETIRED INVOCATION (2026-08-25).** The cockpit's `deploy` / `run`
+> subcommands (and its embedded engine runtime) were removed in the
+> memql-cockpit 0.10.0 slim-down (epic:cockpit-revival, memql#4550), so
+> the `memql-cockpit deploy` commands below no longer exist to run.
+> The supported deploy path is the one in CLAUDE.md: build-server
+> images, pin {engine version, bundle digest, client digest} in the
+> instance overlay, merge, ArgoCD reconciles. This runbook is kept as
+> the record of the deploy-as-a-pack design until the DSL lifecycle
+> automations (memql#4490) replace it.
+
 How to run a deployment of the PURE ENGINE mesh through the DSL deploy
 bundle (`deployEngineCluster`, dsl/deployment/) from the cockpit, end to
 end. This is the deploy-as-a-pack path proven live on 2026-07-04

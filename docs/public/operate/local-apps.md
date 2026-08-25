@@ -34,7 +34,7 @@ The engine drives exactly two apps today — **Claude Code** (`claude-code`) and
         │
         │  AppSessionStart {credential, mcpEndpoint, workspace, prompt}
         ▼
-   WorkerService.Stream  ═══════════════════════►  memql-cockpit
+   WorkerService.Stream  ═══════════════════════►  memql (cockpit)
         │                                              │
         │  ◄══ AppSessionChunk (stdout/stderr/event) ══ │ runs `claude -p`
         │  ═══ AppSessionControl (cancel / renew) ════► │

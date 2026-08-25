@@ -18,7 +18,7 @@ truth now that the implementation plan has shipped end-to-end.
 ## 1. What is a worker?
 
 A worker is the **user's own machine** running
-`memql-cockpit worker run`. It connects to a MemQL cluster via
+`memql worker run`. It connects to a MemQL cluster via
 `WorkerService.Stream` (gRPC bidi), advertises its capabilities
 (HEADLESS, optionally COMPUTERUSE), and accepts dispatched tool calls
 (`workerHost.*`, `workerComputer.*`) from agents acting in
@@ -32,7 +32,7 @@ see workers owned by the user whose session they're acting in.
 ## 2. Install
 
 Pick the installer for your OS. `install-mac.sh` and `install-linux.sh` ship
-from the `memql-cockpit` repo (the worker is a run mode of the Cockpit
+from the `memql` repo (the worker is a run mode of the Cockpit
 binary), not from this engine repo's `scripts/install/` -- that directory
 carries the cluster-bring-up installers (`mkcert-setup.sh`,
 `hosts-entries.sh`, `install-binary.sh`, ...) and has no `install-mac.sh` /
@@ -41,7 +41,7 @@ carries the cluster-bring-up installers (`mkcert-setup.sh`,
 ### macOS
 
 ```bash
-curl -fsSL https://app.example.com/admin/workers/install/install-mac.sh | \
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
     --cluster https://app.example.com \
@@ -51,10 +51,10 @@ curl -fsSL https://app.example.com/admin/workers/install/install-mac.sh | \
 The install script:
 
 1. Downloads the appropriate binary
-   (`memql-cockpit-darwin-arm64` or `memql-cockpit-computeruse-darwin-arm64`).
+   (`memql-darwin-arm64` or `memql-computeruse-darwin-arm64`).
 2. Writes `~/.memql/worker.yaml` with the token + cluster URL.
 3. Drops a LaunchAgent at
-   `~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist`
+   `~/Library/LaunchAgents/com.znasllc.memql-worker.plist`
    and `launchctl load`s it.
 
 The first time you run the computer-use variant, macOS will prompt for
@@ -63,8 +63,8 @@ Settings → Privacy & Security). Approve both, then re-run the
 service:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist
-launchctl load   ~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist
+launchctl unload ~/Library/LaunchAgents/com.znasllc.memql-worker.plist
+launchctl load   ~/Library/LaunchAgents/com.znasllc.memql-worker.plist
 ```
 
 For an interactive walkthrough that probes both permissions,
@@ -72,20 +72,19 @@ opens System Settings to the right pane, and verifies per-binary
 TCC status, run:
 
 ```bash
-./bin/memql-cockpit-computeruse worker setup
+memql worker setup
 ```
 
-The setup flow is a single-panel TUI built on the same
-`cli/ui` + `cli/canvas` primitives as the operations console
-(see `cli/CLAUDE.md` in the memql-cockpit repo — every interactive
-surface in `memql-cockpit` uses the TUI). Detects non-TTY
-callers and falls back to a plain printf path so install
-scripts piping the wizard's output don't break.
+The setup flow is plain sequential terminal output (the cockpit's
+TUI is retired): it probes each permission, pauses for approval where
+a grant is missing, and re-probes. Pass `--non-interactive` for
+scripted installs -- it reports what is missing with honest exit
+codes and never prompts.
 
 ### Linux
 
 ```bash
-curl -fsSL https://app.example.com/admin/workers/install/install-linux.sh | \
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-linux.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
     --cluster https://app.example.com \
@@ -93,7 +92,7 @@ curl -fsSL https://app.example.com/admin/workers/install/install-linux.sh | \
 ```
 
 The install script writes a user-systemd unit at
-`~/.config/systemd/user/memql-cockpit-worker.service` and starts
+`~/.config/systemd/user/memql-worker.service` and starts
 it. On Wayland the worker registers HEADLESS only; X11 sessions
 get COMPUTERUSE as well.
 
@@ -128,7 +127,7 @@ dial with TLS on 443 unless another port is given; `http://` and
 `ws://` dial in the clear; a value with no scheme is dialled in the
 clear whatever its port, because a port number is not evidence of a
 transport -- `agent.example.com:443` and `agent.example.com:8443` are
-equally silent about TLS. Pairing (`memql-cockpit worker pair`) writes
+equally silent about TLS. Pairing (`memql worker pair`) writes
 this file for you and the server now supplies the scheme, so this only
 bites a hand-written config. If you edit it, write the scheme
 (memql#3437).
@@ -166,7 +165,7 @@ http:
 Reload after edits:
 
 ```bash
-kill -HUP $(pgrep memql-cockpit)
+kill -HUP $(pgrep memql)
 ```
 
 ---
@@ -401,7 +400,7 @@ report failure on a success.
 
 The portal cannot drive identity's `POST /pair/codes` flow: that endpoint
 authenticates with `Authorization: Bearer <access token>` and the portal
-deliberately has no way to read the token it holds. `memql-cockpit worker pair`
+deliberately has no way to read the token it holds. `memql worker pair`
 stays the right shape for a machine that can redeem a short code interactively.
 
 ### 5.6 The cross-node forward (memql#4352)
@@ -524,7 +523,7 @@ UI: `/fleet/machines` in the portal -> Revoke, per machine. The owner can
 also rename it (`displayName`) and edit its `operatorLabels` from the same
 card; see section 5.
 
-CLI: `memql-cockpit` → connect → run mutation:
+SDK / VS Code extension -- run the mutation:
 
 ```memql fragment
 revokeWorker(
@@ -638,7 +637,7 @@ All seven phases shipped:
     `MemqlService.Stream`; the AddWorkerModal calls these directly,
     so the plain token never lives outside the gRPC reply).
   - macOS TCC + Linux X11 pre-flight wizard
-    (`memql-cockpit-computeruse worker setup`).
+    (`memql-computeruse worker setup`).
   - Prometheus metrics on `127.0.0.1:9100/metrics`.
   - Per-call rlimits (`RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NOFILE`)
     and optional setuid drop via

@@ -20,7 +20,7 @@ Every product built on MemQL follows the same constellation (see
 | `znasllc-io/memql` (this repo) | The engine + node-type binaries (bff / voice / cognition / agent / planner / workbench / mcp / identity) and the wire protocol. **Upstream.** |
 | the product's **carrier** repo | Imports MemQL's Go packages, registers its DSL subtree + product integrations through the plugin-SDK seams, and builds the deployable backend (carrier) images. Owns the product's deploy/release estate. |
 | the product's **frontend** repo | The SPA and its client-side deploy config. |
-| `znasllc-io/memql-cockpit` | The **CLI / ops console** (display name "MemQL Cockpit"), and the worker run-mode binary. A gRPC client of MemQL. |
+| `znasllc-io/memql-cockpit` | The **fleet worker CLI** (display name "MemQL Cockpit"), installed as the `memql` command; the worker run-mode binary. A gRPC client of MemQL. |
 
 The concrete repo names, versions, and pin values for a given product
 live in that product's carrier repo (its VERSIONING/COMPATIBILITY
