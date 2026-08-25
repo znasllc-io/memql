@@ -3,7 +3,7 @@
 //
 // The consumer this exists for is sign-in (memql#4596). Four surfaces reach
 // signInToCluster -- the dial-failure toast's "Sign in" action, the palette
-// command, the ownership walk, "Sign In with Code" -- and nothing stopped two
+// command, the ownership walk, "Sign In With a Device Code" -- and nothing stopped two
 // of them running the flow for one cluster at once: two loopback listeners,
 // two browser tabs or device codes, two progress notifications, and the
 // second credential overwriting the first. Joining is deliberately chosen
@@ -30,6 +30,16 @@ export class SingleFlight<T> {
    * A joiner's `fn` is NOT invoked. That is the contract: the underlying
    * flow runs once, and everyone observes its outcome.
    */
+  /**
+   * has reports whether a flight for `key` is currently in the air. The
+   * consumer uses it to TELL a joiner they are joining -- a silently absorbed
+   * request reads as the command doing nothing, worst when the joiner asked
+   * for a different grant than the one flying.
+   */
+  has(key: string): boolean {
+    return this.inFlight.has(key);
+  }
+
   run(key: string, fn: () => Promise<T>): Promise<T> {
     const existing = this.inFlight.get(key);
     if (existing !== undefined) return existing;

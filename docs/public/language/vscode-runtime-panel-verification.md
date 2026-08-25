@@ -374,10 +374,10 @@ and `refresh_token` keys deliberately blank.
 - [ ] **A slow browser sign-in is NOT abandoned** (memql#4594): start
       **MemQL: Sign In** and leave the browser page unfinished past the old
       two-minute mark -- the progress notification stays (after a quiet minute
-      it names the cancel + `MemQL: Sign In with Code` exits), NO device code
+      it names the cancel + `MemQL: Sign In With a Device Code` exits), NO device code
       appears, and completing the page at minute nine still signs the editor
       in. Only past ten minutes does it end, as a warning naming
-      `MemQL: Sign In with Code`
+      `MemQL: Sign In With a Device Code`
 - [ ] Renaming a signed-in cluster (**MemQL: Edit Cluster**, change the name)
       leaves it signed in (memql#3515). Rename it, then reconnect: no
       credential prompt. The stranded half is invisible by construction --

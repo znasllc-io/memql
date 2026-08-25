@@ -103,26 +103,40 @@ export function showDeviceCodeActions(
   const OPEN = 'Open Approval Page';
   const target = deviceCodeOpenTarget(authorization);
 
-  // Best effort, up front: on a host with a browser this lands the person on
-  // the pre-filled approval page before they have read the toast. A failure
-  // is the headless case the code + URL exist for -- recorded, not shown.
-  void Promise.resolve(env.openExternal(Uri.parse(target))).then(undefined, (err: unknown) => {
+  const recordOpenFailure = (detail: string): void => {
     if (diagnostics !== undefined) {
       recordDiagnostic(
         diagnostics,
         'the device approval page could not be opened here',
-        errorText(err),
+        detail,
         new Date().toISOString(),
       );
     }
-  });
+  };
+  // env.openExternal signals failure BOTH ways -- rejecting, and resolving
+  // false -- and a handler for only the rejection misses the way most hosts
+  // actually say no. Shared with the button below so a failed click lands in
+  // the record too.
+  const openApprovalPage = (): void => {
+    void Promise.resolve(env.openExternal(Uri.parse(target))).then(
+      (opened) => {
+        if (opened === false) recordOpenFailure('openExternal answered false');
+      },
+      (err: unknown) => recordOpenFailure(errorText(err)),
+    );
+  };
+
+  // Best effort, up front: on a host with a browser this lands the person on
+  // the pre-filled approval page before they have read the toast. A failure
+  // is the headless case the code + URL exist for -- recorded, not shown.
+  openApprovalPage();
 
   void Promise.resolve(
     window.showInformationMessage(deviceCodeActionMessage(authorization, via), COPY, OPEN),
   ).then(async (choice) => {
     if (isSettled() || choice === undefined) return;
     if (choice === COPY) await env.clipboard.writeText(authorization.userCode);
-    else await env.openExternal(Uri.parse(target));
+    else openApprovalPage();
     // Deliberately NOT re-shown: the progress line still carries the code,
     // and the click was the person USING the notification, not dismissing it
     // unserved. Re-summoning here is the "friend copy code" storm.

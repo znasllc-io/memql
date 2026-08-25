@@ -45,10 +45,15 @@ package dslconformance
 // # What this does not catch
 //
 // A writer outside component/identity/http calling createAuthSession
-// directly. The funnel (session_row.go) is deliberately the one seam that
-// creates authSession rows, so the scope matches the design; the live half
-// (component/memql/create_auth_session_source_db_test.go) additionally pins
-// that every DECLARED value survives the real engine.
+// directly -- and one such seam EXISTS today: component/grpc's
+// CreateAuthSessionRow composes the same mutation from a map literal this
+// scanner cannot match. It currently has zero callers and forwards a
+// caller-supplied Source rather than minting a literal, so no value escapes
+// the gate today; a future caller passing its own literal there would. The
+// funnel (session_row.go) is deliberately the one seam that creates
+// authSession rows in the identity service, so the scope matches the design;
+// the live half (component/memql/create_auth_session_source_db_test.go)
+// additionally pins that every DECLARED value survives the real engine.
 
 import (
 	"fmt"

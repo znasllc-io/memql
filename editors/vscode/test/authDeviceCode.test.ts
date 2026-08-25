@@ -261,7 +261,7 @@ test("a callback that never arrives does NOT fall back -- the browser attempt wa
   // longer than the deadline, the fallback fired under a live browser tab,
   // the tab's redirect then hit a closed port, and the person signed in a
   // second time on /device. A timeout now propagates instead; the advice
-  // (signin.ts) names `MemQL: Sign In with Code` for the host that truly
+  // (signin.ts) names `MemQL: Sign In With a Device Code` for the host that truly
   // cannot receive the callback.
   const fake = identity();
 
@@ -578,6 +578,34 @@ test("a cluster with no identity service is misconfigured, not device-signable",
     runDeviceCodeFlow({ name: "bare", endpoint: "host:443" }, { fetch: identity().fetch }),
   );
   assert.equal(err.kind, "misconfigured");
+});
+
+test("cancelling during the device-authorization request never shows a code", async () => {
+  // The cancel lands while POST /device/code is in flight. Without an abort
+  // check between the response and onUserCode, the flow would still put the
+  // code on screen -- and the UI half would open a browser tab -- for a
+  // sign-in the person just cancelled; approving that page mints a session
+  // nothing is polling for.
+  const fake = identity();
+  const aborter = new AbortController();
+  const codes: DeviceAuthorization[] = [];
+  const fetchThatLosesTheRace: typeof fake.fetch = async (url, init) => {
+    const response = await fake.fetch(url, init);
+    if (String(url).endsWith("/device/code")) aborter.abort();
+    return response;
+  };
+
+  const err = await rejection(
+    runDeviceCodeFlow(cluster(), {
+      fetch: fetchThatLosesTheRace,
+      signal: aborter.signal,
+      sleep: recordingSleep().sleep,
+      onUserCode: (authorization) => codes.push(authorization),
+    }),
+  );
+
+  assert.equal(err.kind, "cancelled");
+  assert.deepEqual(codes, [], "a cancelled sign-in must not put a code on screen");
 });
 
 // -----------------------------------------------------------------------------

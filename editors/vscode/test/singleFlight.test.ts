@@ -3,7 +3,7 @@
 //
 // Nothing used to stop two sign-ins to one cluster running at once: the
 // dial-failure toast's "Sign in" action, the palette command, the ownership
-// walk and "Sign In with Code" all reached signInToCluster independently, and
+// walk and "Sign In With a Device Code" all reached signInToCluster independently, and
 // two in-flight flows meant two listeners, two browser tabs or code
 // notifications, and two progress notifications. The join makes the second
 // request OBSERVE the first instead of duplicating it.
@@ -84,6 +84,25 @@ test("the slot is reusable after a resolution", async () => {
   assert.equal(await run(), 1);
   assert.equal(await run(), 2, "a settled flight must not be replayed to a later caller");
   assert.equal(runs, 2);
+});
+
+test("has() reports an in-flight key, and only while it is in the air", async () => {
+  // The consumer: signInToCluster tells a joiner "a sign-in is already in
+  // progress" instead of silently absorbing their request -- which matters
+  // most when the joiner asked for a DIFFERENT grant (the device-code
+  // command while a browser flow waits) and would otherwise watch nothing
+  // happen for up to the callback deadline.
+  const flights = new SingleFlight<string>();
+  const gate = deferred<string>();
+
+  assert.equal(flights.has("znas"), false);
+  const flight = flights.run("znas", () => gate.promise);
+  assert.equal(flights.has("znas"), true);
+  assert.equal(flights.has("local"), false, "keys are independent");
+
+  gate.resolve("done");
+  await flight;
+  assert.equal(flights.has("znas"), false, "a settled flight is no longer in the air");
 });
 
 test("a synchronously-throwing flow still rejects and releases", async () => {

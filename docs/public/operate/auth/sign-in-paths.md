@@ -321,7 +321,7 @@ closed the listener that tab was about to redirect to, and stacked a second
 flow's notifications over the first. The callback deadline is now ten minutes
 (the magic-link TTL scale), the progress notification stays cancellable the
 whole time and explains itself after a quiet minute, and a timeout is reported
-as a warning whose advice names `MemQL: Sign In with Code` for the host that
+as a warning whose advice names `MemQL: Sign In With a Device Code` for the host that
 genuinely cannot receive the callback.
 
 It also deliberately does **not** trigger on `cancelled` (the user stopped it),

@@ -229,7 +229,7 @@ test("describeSignInFailure reports a timeout as a warning, not an error", () =>
   // advice is the only remaining route to the device grant for a host that
   // cannot receive the callback -- so it must NAME the command.
   assert.ok(
-    report.message.includes("MemQL: Sign In with Code"),
+    report.message.includes("MemQL: Sign In With a Device Code"),
     `the timeout advice must name the device-code command; got: ${report.message}`,
   );
 });

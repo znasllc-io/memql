@@ -66,7 +66,7 @@
 //                       port dressed as "go back"), stacked a second flow's
 //                       notifications over the first, and had them sign in
 //                       twice. A timeout now propagates as the warning it is;
-//                       the advice names `MemQL: Sign In with Code` for the
+//                       the advice names `MemQL: Sign In With a Device Code` for the
 //                       host that genuinely cannot receive the callback, and
 //                       the deadline itself is sized for the magic-link round
 //                       trip (loopback.ts).
@@ -214,7 +214,7 @@ export interface DeviceCodeDeps {
 
 /**
  * How a device-code flow came to run: the operator asked for it
- * (`MemQL: Sign In with Code`), or the auto-fallback fired because this host
+ * (`MemQL: Sign In With a Device Code`), or the auto-fallback fired because this host
  * cannot do loopback at all. The single action message reads differently --
  * a deliberate flow has no switch to explain.
  */
@@ -341,6 +341,11 @@ export async function runDeviceCodeFlow(
     fetch: doFetch,
   });
 
+  // Re-checked between the authorization landing and the code going on
+  // screen: a cancel that raced the POST must not pop a browser tab and an
+  // action message for a sign-in the person already ended -- approving that
+  // page would mint a session nothing is polling for.
+  throwIfAborted(signal);
   deps.onUserCode?.(authorization);
 
   const tokens = await pollForDeviceTokens({

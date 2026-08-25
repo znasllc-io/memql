@@ -137,12 +137,17 @@ func (f *deviceFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Ex
 		// engine refused it -- so the suite's green was a statement about the
 		// fake. Reading the schema the real executor loads makes this branch
 		// fail the way production did.
-		if src := deviceArg(q, "source"); !authSessionSourceEnum().allowed[src] {
-			if err := authSessionSourceEnum().err; err != nil {
-				return nil, fmt.Errorf("createAuthSession: loading the embedded authSession source enum: %w", err)
-			}
+		// The load error is inspected FIRST, not discovered via an empty
+		// allowed-map -- that ordering worked only by the accident that a
+		// failed load leaves the map empty, and a future partial-load would
+		// have surfaced as a misleading enum refusal.
+		enum := authSessionSourceEnum()
+		if enum.err != nil {
+			return nil, fmt.Errorf("createAuthSession: loading the embedded authSession source enum: %w", enum.err)
+		}
+		if src := deviceArg(q, "source"); !enum.allowed[src] {
 			return nil, fmt.Errorf("createAuthSession: argument \"source\": value %s is not in enum %v (embedded tree, memql#4592)",
-				src, authSessionSourceEnum().values)
+				src, enum.values)
 		}
 		f.sessions++
 		return emptyResult(), nil
