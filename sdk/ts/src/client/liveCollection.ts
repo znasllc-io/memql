@@ -67,14 +67,50 @@ export interface LiveCollectionSpec<T = Row> {
   // (`payload_omitted`) event. Without it such events are dropped: rendering
   // an id-only payload as a row yields a card whose every field is blank.
   reread?: (rowId: string, signal: AbortSignal) => Promise<T | null>;
-  // Re-apply the READ's own scope to a folded row.
+  // Re-apply the READ's own scope to a FOLDED row.
   //
-  // A subscription is scoped by concept; a read is usually scoped by more
-  // than that. The two disagree the moment a caller can see rows the list
+  // A subscription is scoped by concept; a read is usually scoped by more than
+  // that. The two disagree the moment a caller can see rows the list
   // deliberately excludes -- the fleet page's lesson, where an owner's
   // subscription carries machines the scoped read filtered out, and folding
   // them in makes rows appear that a refresh then removes.
+  //
+  // IT DOES NOT TOUCH SEEDED ROWS, and that is deliberate rather than an
+  // omission. The read is the authority on membership (see runSeed), and this
+  // predicate is a CLIENT-SIDE MIRROR of a decision the server already made --
+  // typically over state that resolves asynchronously, like the caller's own
+  // user id. Applying a not-yet-resolved mirror to the seed empties the list
+  // and then repopulates it, which looks exactly like a page that loaded
+  // nothing.
+  //
+  // So: NARROW IN `seed`, which is entirely the caller's code and is where a
+  // read's meaning belongs -- including a narrowing no query declares. Use
+  // this to say the same thing about events.
   inScope?: (row: T) => boolean;
+  // Re-read EVERY event through `reread`, not only the id-only ones.
+  //
+  // The default trusts a full payload, which is right for a list whose event
+  // rate is high and whose rows are cheap. It is wrong for a surface that is
+  // about to move to the `granted` tier: there, the id-only path is the one
+  // most events will take, and having two code paths means the trusted one is
+  // the one that stops being exercised and quietly rots. Making the re-read
+  // the ONLY path costs a round trip per event and removes the branch.
+  //
+  // Requires `reread`; without it this is ignored, because dropping every
+  // event would be a worse answer than trusting the payload.
+  rereadEveryEvent?: boolean;
+  // Decide whether an arriving copy REPLACES the one held.
+  //
+  // The default is last-write-wins, which is correct when arrivals are
+  // ordered. They are not always: two re-reads issued a moment apart can
+  // settle in either order, and for a concept that carries its own version
+  // watermark that means an older copy can roll a newer one backwards --
+  // silently, and only under load.
+  //
+  // Return false to keep what is held. Called with `held === undefined` for a
+  // row the collection has not seen, where returning false would mean the row
+  // can never arrive at all.
+  supersedes?: (incoming: T, held: T | undefined) => boolean;
   // CDC verbs. Defaults to all three.
   actions?: GraphAction[];
   // Walk every page during a seed (default true). A surface that shows one
@@ -234,7 +270,7 @@ export class LiveCollection<T = Row> {
     // SUBSCRIBE FIRST. See the module comment: registration is synchronous
     // server-side, so a row written during the seed arrives as an event and
     // folds by id. Reading first can miss it forever.
-    if (this.subscriptions !== null && typeof this.subscriptions.subscribeGraph === "function") {
+    if (this.subscriptions && typeof this.subscriptions.subscribeGraph === "function") {
       try {
         this.unsubscribe = this.subscriptions.subscribeGraph((event) => this.fold(event), {
           concept: this.spec.concept,
@@ -314,13 +350,13 @@ export class LiveCollection<T = Row> {
       return;
     }
 
-    if (event.payloadOmitted) {
+    const reread = this.spec.reread;
+    if (event.payloadOmitted || (this.spec.rereadEveryEvent && reread)) {
       // The `granted` tier cannot be decided against one row at fan-out, so
       // the engine sent the identity and left the decision to a read
       // (memql#4309). A REFUSED read drops the event silently: the caller was
       // not entitled to the row, and announcing that one changed would leak
       // exactly what the gate withheld.
-      const reread = this.spec.reread;
       if (!reread) return;
       const abort = new AbortController();
       void reread(id, abort.signal)
@@ -351,7 +387,9 @@ export class LiveCollection<T = Row> {
       this.remove(id);
       return;
     }
-    if (!this.rowsById.has(id)) this.order.push(id);
+    const held = this.rowsById.get(id);
+    if (this.spec.supersedes && !this.spec.supersedes(row, held)) return;
+    if (held === undefined) this.order.push(id);
     this.rowsById.set(id, row);
     this.bump();
   }
@@ -524,6 +562,7 @@ export class LiveStore {
   private readonly values = new Map<string, LiveValue<never>>();
   private readonly lingerMs: number;
   private readonly teardown: Array<() => void> = [];
+  private readonly gapListeners = new Set<() => void>();
   private lastSeq = 0;
   private disposed = false;
 
@@ -572,7 +611,12 @@ export class LiveStore {
   collection<T>(key: string, spec: LiveCollectionSpec<T>): LiveHandle<LiveCollection<T>> {
     let existing = this.collections.get(key) as LiveCollection<T> | undefined;
     if (!existing) {
-      existing = new LiveCollection<T>(spec, this.host.subscriptions, this.lingerMs);
+      // `?? null` because the host may be a Connection-SHAPED object rather
+      // than a Connection -- an older SDK, or a test double narrowed to the
+      // methods its subject uses. The declared type says "a manager or null";
+      // an absent field is neither, and the collection's own guard is what
+      // turns that into "no liveness" rather than a call on undefined.
+      existing = new LiveCollection<T>(spec, this.host.subscriptions ?? null, this.lingerMs);
       this.collections.set(key, existing as unknown as LiveCollection<never>);
     }
     existing.retain();
@@ -606,9 +650,34 @@ export class LiveStore {
     };
   }
 
+  // onGap notifies a consumer that the stream lost continuity -- an overflow,
+  // a non-contiguous sequence, or a reconnect (memql#4539).
+  //
+  // Collections re-seed themselves; this exists for a surface that folds by
+  // hand for a reason the collection cannot express -- the concept browser's
+  // arrivals BAND is the case: it accumulates arrivals ALONGSIDE a paged walk
+  // rather than into it, because the walk's keyset cursor orders ascending and
+  // splicing a row created now guarantees a duplicate when paging reaches it.
+  //
+  // Such a consumer must not read seq / gap_before itself. Continuity is a
+  // property of the STREAM, and a handler watching one subscription sees holes
+  // that belong to its neighbours and misses its own. This is the one reading.
+  onGap(handler: () => void): () => void {
+    this.gapListeners.add(handler);
+    return () => this.gapListeners.delete(handler);
+  }
+
   reseedAll(): void {
     for (const c of this.collections.values()) c.reseed();
     for (const v of this.values.values()) v.refresh();
+    for (const notify of [...this.gapListeners]) {
+      try {
+        notify();
+      } catch {
+        // A consumer's handler is its own bug; one throwing must not stop the
+        // rest of the store from recovering.
+      }
+    }
   }
 
   dispose(): void {
@@ -620,6 +689,7 @@ export class LiveStore {
     for (const v of this.values.values()) v.close();
     this.collections.clear();
     this.values.clear();
+    this.gapListeners.clear();
   }
 
   private observeDelivery(event: Event): void {

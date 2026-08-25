@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useMemo } from "react";
+import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useLive } from "../cluster/useLive";
+import { useMyAccess } from "../cluster/useMyAccess";
 
 // The caller's goals, for the picker and the recent-goals strip.
 //
@@ -21,6 +23,8 @@ import { useCluster } from "../cluster/ClusterProvider";
 // The statuses that mean "this goal is going right now". Listed rather than
 // inferred from a negation, because `queued` and `waitingForSlot` are also
 // not-terminal and belong BELOW a running goal rather than above it.
+const PLAN_CONCEPT = "v1:planner:plan";
+
 const RUNNING = new Set(["running", "routing", "planning"]);
 const OPEN = new Set([
   "running",
@@ -65,38 +69,52 @@ function toGoal(row: Row): Goal {
 }
 
 export function useGoals(): GoalsState {
-  const { query, subscriptions, status } = useCluster();
-  const [rows, setRows] = useState<Row[]>([]);
-  // True from mount for the reason every other read surface in this portal
-  // starts true: a read is effectively in flight, and `false` would claim
-  // "you have no goals" before anything had been asked.
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [epoch, setEpoch] = useState(0);
+  const { query, status } = useCluster();
+  const { access } = useMyAccess();
+  const userId = access?.userId ?? "";
+  const connected = query !== null && status === "connected";
 
-  useEffect(() => {
-    if (query === null) return;
-    let live = true;
-    setLoading(true);
-    setError("");
-    void query
-      .plansForUser({})
-      .then((result) => {
-        if (live) setRows(result.rows());
-      })
-      .catch((err: unknown) => {
-        if (live) setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, [query, epoch]);
+  // LIVE THROUGH THE STORE (memql#4539, carrying memql#4528). The picker and
+  // the index list these, and a goal started from the console appearing only
+  // after a reload is the kind of staleness that makes an operator doubt the
+  // button worked. It used to re-run the owner-scoped read on EVERY plan event
+  // in the cluster; the rows fold now.
+  //
+  // THE SCOPE RE-FILTER IS LOAD-BEARING HERE, not a formality.
+  // `v1:planner:plan` declares no row-authz tier yet (memql#4366), so this
+  // feed carries events for other people's plans. `plansForUser` is gated on
+  // requestedBy==actor.userId server-side, and `inScope` says the same thing
+  // about an arriving event -- without it, folding an event's payload would
+  // put somebody else's goal straight into this list. That is exactly the
+  // difference between a re-read trigger, which was safe by accident, and a
+  // fold, which has to be safe on purpose.
+  // The key carries the caller's id, so the collection is re-created when
+  // access resolves -- but the READ is not gated on it. Waiting for the id
+  // would hold the picker in "loading" for a caller whose access never
+  // resolves at all (a PAT with no user row), and the seed does not need it:
+  // plansForUser is owner-scoped server-side. `inScope` refusing every fold
+  // until the id is known is what keeps the unresolved window safe.
+  const live = useLive<Row>(
+    connected ? `nexus:goals:${userId}` : null,
+    () => ({
+      concept: PLAN_CONCEPT,
+      actions: ["created", "updated"],
+      paged: false,
+      seed: async (_cursor, signal) => {
+        if (query === null) return { rows: [], nextCursor: "" };
+        const result = await query.plansForUser({}, { signal });
+        return { rows: result.rows(), nextCursor: "" };
+      },
+      reread: async (rowId, signal) => {
+        if (query === null) return null;
+        return getRowByConceptAndId(query, PLAN_CONCEPT, rowId, { signal });
+      },
+      inScope: (row) => userId !== "" && rowString(row, "requestedBy") === userId,
+    }),
+  );
 
   const goals = useMemo(() => {
-    const list = rows.map(toGoal).filter((goal) => goal.id !== "");
+    const list = live.rows.map(toGoal).filter((goal) => goal.id !== "");
     // Running first, then newest first within each group. A total order, so
     // the picker does not reshuffle between renders.
     list.sort((a, b) => {
@@ -105,41 +123,18 @@ export function useGoals(): GoalsState {
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
     return list;
-  }, [rows]);
-
-  // LIVE (memql#4528). The picker and the index list these, and a goal
-  // started from the console appearing only after a reload is the kind of
-  // staleness that makes an operator doubt the button worked. Same shape as
-  // the rail's saved views and the console's tiles: a CDC arrival bumps the
-  // epoch and the owner-scoped read above runs again -- no poll, and no
-  // splicing of a partial row into a list the read owns.
-  //
-  // The re-read is what makes this safe to subscribe to at all.
-  // `v1:planner:plan` declares no row-authz tier yet (memql#4366), so this
-  // feed can carry an event for somebody else's plan; the handler reads
-  // nothing off the event and `plansForUser` is gated on
-  // requestedBy==actor.userId server-side, so the worst such an event costs
-  // is one redundant read.
-  useEffect(() => {
-    if (subscriptions === null || status !== "connected") return;
-    try {
-      return subscriptions.subscribeGraph(() => setEpoch((n) => n + 1), {
-        concept: "v1:planner:plan",
-        actions: ["created", "updated"],
-      });
-    } catch {
-      // A cluster whose subscription surface refuses is still perfectly usable
-      // here -- the list is correct, it just stops being live. Failing the
-      // whole hook over the live half would be worse than losing it.
-      return;
-    }
-  }, [subscriptions, status]);
+  }, [live.rows]);
 
   return {
     goals,
-    loading,
-    error,
+    // True from mount, and true while there is no connection, for the reason
+    // every other read surface in this portal starts true: `false` claims "you
+    // have no goals", and the index page renders that claim as a full empty
+    // state. Reporting it before a read has even been attempted put that
+    // sentence on screen for one frame on every load.
+    loading: !connected || live.state === "seeding",
+    error: live.error,
     mostRecentId: goals[0]?.id ?? "",
-    reload: () => setEpoch((n) => n + 1),
+    reload: live.reload,
   };
 }

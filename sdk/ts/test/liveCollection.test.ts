@@ -240,6 +240,32 @@ test("a re-read that finds nothing removes the row", async () => {
   store.dispose();
 });
 
+test("inScope governs FOLDED rows; the seed narrows itself", async () => {
+  // The read is the authority on membership, and inScope is a CLIENT-SIDE
+  // MIRROR of a decision the server already made -- usually over state that
+  // resolves asynchronously, like the caller's own user id. Applying a
+  // not-yet-resolved mirror to the seed would empty the list and repopulate
+  // it, which looks exactly like a page that loaded nothing. A narrowing no
+  // query declares belongs in `seed`, which is the caller's own code.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "v1:cluster:node",
+    seed: async () => ({
+      rows: [{ id: "workbench-0", nodeType: "workbench" }],  // narrowed HERE
+      nextCursor: "",
+    }),
+    inScope: (row) => row["nodeType"] === "workbench",
+  });
+  await settle();
+  assert.deepEqual(handle.value.snapshot.rows.map((r) => r["id"]), ["workbench-0"]);
+
+  // ...and the same predicate keeps the subscription from widening it.
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "bff-0", nodeType: "bff" } }));
+  assert.deepEqual(handle.value.snapshot.rows.map((r) => r["id"]), ["workbench-0"]);
+  store.dispose();
+});
+
 test("the scope re-filter keeps a broad subscription from widening a scoped read", async () => {
   // The fleet lesson: an owner's subscription carries rows the scoped read
   // excluded, and folding them in makes rows appear that a refresh removes.
@@ -498,5 +524,104 @@ test("the snapshot is identity-stable until something changes", async () => {
 
   subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "b" } }));
   assert.notEqual(handle.value.snapshot, first);
+  store.dispose();
+});
+
+// ---------------------------------------------------------------------
+// rereadEveryEvent + supersedes -- the two options the Nexus feed needs
+// ---------------------------------------------------------------------
+
+test("rereadEveryEvent resolves a FULL-payload event through the read too", async () => {
+  // One code path instead of two. The branch that trusts a payload is the one
+  // that stops being exercised on a concept heading for the `granted` tier,
+  // and a rotting branch is worse than a round trip.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const reads: string[] = [];
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    reread: async (id) => {
+      reads.push(id);
+      return { id, name: "authoritative" };
+    },
+    rereadEveryEvent: true,
+  });
+  await settle();
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "r1", name: "from-the-event" } }));
+  await settle();
+  assert.deepEqual(reads, ["r1"]);
+  assert.equal(handle.value.snapshot.rows[0]?.["name"], "authoritative");
+  store.dispose();
+});
+
+test("rereadEveryEvent without a reread falls back to trusting the payload", async () => {
+  // Dropping every event would be a worse answer than the default.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    rereadEveryEvent: true,
+  });
+  await settle();
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "r1" } }));
+  await settle();
+  assert.equal(handle.value.snapshot.rows.length, 1);
+  store.dispose();
+});
+
+test("supersedes refuses a row that would roll a newer one backwards", async () => {
+  // Two re-reads issued a moment apart can settle in either order. Without a
+  // watermark that means an older copy overwrites a newer one -- silently,
+  // and only under load.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "r1", version: 5 }], nextCursor: "" }),
+    supersedes: (incoming, held) =>
+      held === undefined || Number(incoming["version"] ?? 0) >= Number(held["version"] ?? 0),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r1", version: 3 } }));
+  assert.equal(handle.value.snapshot.rows[0]?.["version"], 5, "the older copy was refused");
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r1", version: 7 } }));
+  assert.equal(handle.value.snapshot.rows[0]?.["version"], 7, "and a newer one lands");
+
+  // A row never seen must not be refusable into nonexistence.
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "r2", version: 1 } }));
+  assert.equal(handle.value.snapshot.rows.length, 2);
+  store.dispose();
+});
+
+test("onGap gives a hand-rolled consumer the same continuity signal", async () => {
+  // A surface that folds by hand -- the concept browser's arrivals band --
+  // must not read seq / gap_before itself: continuity is a stream property and
+  // a per-subscription reading is wrong in both directions.
+  const subs = new FakeSubscriptions();
+  const h = hostWith(subs);
+  const store = new LiveStore(h.host);
+  let gaps = 0;
+  const off = store.onGap(() => gaps++);
+
+  subs.deliver(event({ seq: 1 }));
+  subs.deliver(event({ seq: 2 }));
+  assert.equal(gaps, 0, "a contiguous run is not a gap");
+
+  subs.deliver(event({ seq: 9 }));
+  assert.equal(gaps, 1, "a hole is");
+
+  subs.deliver(event({ seq: 10, gapBefore: true }));
+  assert.equal(gaps, 2, "and so is the server's own flag");
+
+  h.cycle(1);
+  assert.equal(gaps, 3, "a reconnect is a gap by construction");
+
+  off();
+  subs.deliver(event({ seq: 99 }));
+  assert.equal(gaps, 3, "unsubscribed");
   store.dispose();
 });

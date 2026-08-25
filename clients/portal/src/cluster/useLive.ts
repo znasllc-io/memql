@@ -28,13 +28,30 @@ import type {
 import { useCluster } from "./ClusterProvider";
 import { bumpActivity } from "./activity";
 
-// EMPTY is what a surface renders before there is a connection to read over.
-// "disconnected" rather than "seeding": nothing is in flight, and a spinner
-// over a connection that does not exist is the console lying about progress.
-const EMPTY: LiveSnapshot<never> = { rows: [], state: "disconnected", error: "", version: 0 };
-const EMPTY_VALUE: LiveValueSnapshot<never> = {
+// IDLE is what a surface renders with NO key and no connection: nothing is in
+// flight, and a spinner over a read nobody asked for is the console lying
+// about progress.
+const IDLE: LiveSnapshot<never> = { rows: [], state: "disconnected", error: "", version: 0 };
+const IDLE_VALUE: LiveValueSnapshot<never> = {
   value: null,
   state: "disconnected",
+  error: "",
+  version: 0,
+};
+
+// PENDING is the FIRST FRAME with a key and a live connection: the effect that
+// retains the collection has not run yet, so there is no snapshot to read.
+//
+// It must be "seeding", not "disconnected". A caller that keys off a value
+// resolved a moment earlier -- a goal's world opening once its plan lands --
+// gets exactly one render in this state, and reporting it as "disconnected"
+// tells the page its reads are DONE. What that looks like is a list rendering
+// empty for one frame and then filling in, which is indistinguishable from a
+// flake and is how a partial answer gets asserted as the whole one.
+const PENDING: LiveSnapshot<never> = { rows: [], state: "seeding", error: "", version: 0 };
+const PENDING_VALUE: LiveValueSnapshot<never> = {
+  value: null,
+  state: "seeding",
   error: "",
   version: 0,
 };
@@ -68,8 +85,16 @@ export function useLive<T = Row>(
   const specRef = useRef(spec);
   specRef.current = spec;
 
+  // WANTED is about the KEY, not about the store. A caller that has asked for
+  // a collection is waiting for one even in the frame before the connection's
+  // store exists -- and reporting "disconnected" there tells the page its
+  // reads are DONE, which is how a partial world gets rendered as a whole one.
+  // A genuinely dead connection is handled by the status override below.
+  const wanted = key !== null;
   const handleRef = useRef<LiveHandle<LiveCollection<T>> | null>(null);
-  const [snapshot, setSnapshot] = useState<LiveSnapshot<T>>(EMPTY as LiveSnapshot<T>);
+  const [snapshot, setSnapshot] = useState<LiveSnapshot<T>>(
+    (wanted ? PENDING : IDLE) as LiveSnapshot<T>,
+  );
 
   // RETAIN INSIDE THE EFFECT, never during render. React 19's StrictMode
   // renders twice before committing, and a retain taken during render would
@@ -82,7 +107,7 @@ export function useLive<T = Row>(
   useEffect(() => {
     if (store === null || key === null) {
       handleRef.current = null;
-      setSnapshot(EMPTY as LiveSnapshot<T>);
+      setSnapshot(IDLE as LiveSnapshot<T>);
       return;
     }
     const handle = store.collection<T>(key, specRef.current());
@@ -103,14 +128,21 @@ export function useLive<T = Row>(
 
   const reload = useCallback(() => handleRef.current?.value.reseed(), []);
 
+  // A key that just changed is a DIFFERENT collection, and the effect that
+  // attaches it has not run yet -- so the snapshot in state still belongs to
+  // the previous key. Reporting it would hand the caller the old collection's
+  // rows under the new key's name.
+  const attached = handleRef.current !== null && snapshot.version > 0;
+  const effective = wanted && !attached ? (PENDING as LiveSnapshot<T>) : snapshot;
+
   return {
-    rows: snapshot.rows,
+    rows: effective.rows,
     // A dead connection OUTRANKS the collection's own view. The store hears a
     // drop through its host, but a surface mounted while already disconnected
     // has a collection that never got to be live at all -- and rendering its
     // "seeding" would be a spinner over a socket nobody is holding.
-    state: status === "connected" ? snapshot.state : "disconnected",
-    error: snapshot.error,
+    state: status === "connected" ? effective.state : "disconnected",
+    error: effective.error,
     reload,
   };
 }
@@ -137,15 +169,16 @@ export function useLiveValue<T>(
   const readRef = useRef(read);
   readRef.current = read;
 
+  const wanted = key !== null;
   const handleRef = useRef<{ release: () => void } | null>(null);
   const [snapshot, setSnapshot] = useState<LiveValueSnapshot<T>>(
-    EMPTY_VALUE as LiveValueSnapshot<T>,
+    (wanted ? PENDING_VALUE : IDLE_VALUE) as LiveValueSnapshot<T>,
   );
 
   useEffect(() => {
     if (store === null || key === null) {
       handleRef.current = null;
-      setSnapshot(EMPTY_VALUE as LiveValueSnapshot<T>);
+      setSnapshot(IDLE_VALUE as LiveValueSnapshot<T>);
       return;
     }
     const handle = store.value<T>(key, (signal) => readRef.current(signal));
@@ -164,10 +197,42 @@ export function useLiveValue<T>(
     handle?.value?.refresh();
   }, []);
 
+  const attached = handleRef.current !== null && snapshot.version > 0;
+  const effective = wanted && !attached ? (PENDING_VALUE as LiveValueSnapshot<T>) : snapshot;
+
   return {
-    value: snapshot.value,
-    state: status === "connected" ? snapshot.state : "disconnected",
-    error: snapshot.error,
+    value: effective.value,
+    state: status === "connected" ? effective.state : "disconnected",
+    error: effective.error,
     reload,
   };
+}
+
+/**
+ * Subscribe to the STREAM's continuity signal: a counter bumped whenever the
+ * connection loses its thread (an overflow, a hole in the sequence, or a
+ * reconnect).
+ *
+ * Store-backed surfaces need none of this -- their collections re-seed
+ * themselves. It exists for a surface that folds by hand for a reason the
+ * collection cannot express: the concept browser's arrivals BAND accumulates
+ * alongside a paged walk rather than into it, because the walk's keyset cursor
+ * orders ascending and splicing a row created now guarantees a duplicate when
+ * paging reaches it.
+ *
+ * Such a surface must NOT read `event.seq` / `event.gapBefore` itself.
+ * Continuity is a property of the stream, so a handler watching one
+ * subscription sees holes that belong to its neighbours and misses its own.
+ * This is the one correct reading, taken once by the store.
+ */
+export function useLiveContinuity(): number {
+  const { store } = useCluster();
+  const [gaps, setGaps] = useState(0);
+
+  useEffect(() => {
+    if (store === null) return;
+    return store.onGap(() => setGaps((n) => n + 1));
+  }, [store]);
+
+  return gaps;
 }

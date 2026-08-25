@@ -144,16 +144,59 @@ describe("starting a goal from the console", () => {
     await waitFor(() => expect(callsNamed(h.calls, "plansForUser").length).toBeGreaterThan(0));
     const before = callsNamed(h.calls, "plansForUser").length;
 
-    // A CDC arrival on the plan concept re-runs the OWNER-SCOPED read; the
-    // event's own payload is never spliced into the list.
+    // A CDC arrival FOLDS IN (memql#4539). It used to re-run the whole
+    // owner-scoped read on every plan event in the cluster; the row lands from
+    // the event now, and the read count does NOT move.
     h.emit("v1:planner:plan", {
       topic: "graph.node.created.v1:planner:plan",
-      kind: "created",
-      payload: { id: "plan-new" },
+      kind: "NODE_CREATED",
+      payload: {
+        id: "plan-new",
+        goal: "Plan a summer drop",
+        status: "running",
+        requestedBy: OWNER_ID,
+        createdAt: "2026-08-25T11:00:00Z",
+        kind: "userGoal",
+      },
     } as never);
 
     await waitFor(() =>
-      expect(callsNamed(h.calls, "plansForUser").length).toBeGreaterThan(before),
+      expect(screen.getByRole("option", { name: /plan a summer drop/i })).toBeTruthy(),
     );
+    expect(callsNamed(h.calls, "plansForUser").length).toBe(before);
+  });
+
+  it("never folds another person's goal into the picker", async () => {
+    // v1:planner:plan declares no row-authz tier yet (memql#4366), so this
+    // feed carries events for plans the caller may not see. The read is gated
+    // server-side; the fold has to be gated here, or the store would put
+    // somebody else's goal straight into the list.
+    const first: Row = {
+      id: "plan-spring",
+      goal: "Build a spring catalog",
+      status: "running",
+      requestedBy: OWNER_ID,
+      createdAt: "2026-08-25T10:00:00Z",
+      kind: "userGoal",
+    };
+    const h = nexusHarness({ goals: [first] });
+    renderNexus(h, "/nexus/plan-spring");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /goal/i })).toBeTruthy());
+
+    h.emit("v1:planner:plan", {
+      topic: "graph.node.created.v1:planner:plan",
+      kind: "NODE_CREATED",
+      payload: {
+        id: "plan-someone-else",
+        goal: "Somebody else's goal",
+        status: "running",
+        requestedBy: "user-not-me",
+        createdAt: "2026-08-25T11:00:00Z",
+        kind: "userGoal",
+      },
+    } as never);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/somebody else's goal/i)).toBeNull();
   });
 });

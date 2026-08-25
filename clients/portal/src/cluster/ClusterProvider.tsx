@@ -294,7 +294,13 @@ export function ClusterProvider({
         );
         // liveStoreFor is memoized on the connection inside the SDK, so this
         // is the ONE store for this stream however many times it is asked for.
-        setStore(conn.subscriptions ? liveStoreFor(conn) : null);
+        //
+        // Built whenever there is a CONNECTION, not only when there is a
+        // subscription manager. A store with no subscriptions still seeds,
+        // dedupes and reference-counts -- it simply has no liveness -- and
+        // gating it on `subscriptions` would leave a read-only connection
+        // unable to perform a plain read at all.
+        setStore(liveStoreFor(conn));
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setEngineVersion(conn.engineVersion ?? "");
@@ -364,11 +370,17 @@ export function ClusterProvider({
     return () => {
       cancelled = true;
       if (connectionRef.current === connection) connectionRef.current = null;
-      // Dispose BEFORE close: the store's teardown unregisters its stream
-      // observer and every collection's subscription, and doing it after the
-      // socket is gone leaves those registrations on a dead dispatcher.
-      if (connection) disposeLiveStoreFor(connection);
       connection?.close();
+      // THE STORE IS NOT DISPOSED HERE, deliberately. This cleanup runs on
+      // every re-run of the dial effect, including benign ones (a new auth
+      // source identity, a Retry), and the store is keyed on the CONNECTION
+      // inside the SDK -- so tearing it down here kills reads that are still
+      // in flight for a connection the next run may hand straight back.
+      //
+      // Its lifetime is the connection's: a connection that is closed and
+      // dropped takes its store with it (the registry is a WeakMap), and the
+      // one moment worth being explicit about is a FINAL close, which the
+      // done() handler above disposes on.
     };
   }, [auth, dial, attempt, enabled]);
 

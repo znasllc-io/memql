@@ -200,7 +200,7 @@ const machines = store.collection<Row>("myMachines", {
   concept: "v1:worker:registration",
   seed: (cursor, signal) => readPage(cursor, signal),
   reread: (id, signal) => getRowByConceptAndId(conn.query, concept, id, { signal }),
-  inScope: (row) => row.ownerUserId === me,       // the READ's scope, re-applied
+  inScope: (row) => row.ownerUserId === me,       // re-applied to folded rows
 });
 
 machines.value.subscribe(() => paint(machines.value.snapshot));

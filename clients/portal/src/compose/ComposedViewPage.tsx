@@ -5,6 +5,7 @@ import { sanitizeArrangement, profileConcept, type Arrangement } from "@znasllc-
 import { useCluster } from "../cluster/ClusterProvider";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
+import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Container, EmptyState, PageHeader, Skeleton } from "../ui";
@@ -144,6 +145,21 @@ function SavedSection({
             onRetry={data.retry}
           />
         }
+      />
+      {/* LIVE (memql#4539), for the reason ViewPage states: this section
+          already held a subscription and discarded every event. */}
+      {data.liveDegraded !== "" ? (
+        <p className="rounded-lg border border-warn bg-warn-subtle/40 px-3 py-1.5 text-xs text-fg">
+          Live updates are off for this section: {data.liveDegraded}. Rows already loaded
+          are still correct; use Reload to see what has changed since.
+        </p>
+      ) : null}
+      <LiveBandPanel
+        band={data.live}
+        concept={concept}
+        onSelect={onSelect}
+        onReload={data.reload}
+        selectedRowId={rowId}
       />
       <ArrangementBands arrangement={live} concept={concept} rows={data.rows} onSelect={onSelect} />
       <RowDetailDialog

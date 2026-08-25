@@ -1,4 +1,9 @@
-import { renderMemQLValue, type QueryClient, type Result } from "@znasllc-io/memql-sdk-core/client";
+import {
+  renderMemQLValue,
+  type QueryCallOptions,
+  type QueryClient,
+  type Result,
+} from "@znasllc-io/memql-sdk-core/client";
 
 // The Fleet's named calls, composed here rather than through the generated
 // typed surface.
@@ -55,8 +60,11 @@ function renderLabelMap(labels: Record<string, string>): string {
 // ---------------------------------------------------------------------------
 
 // The signed-in person's own machines. Declares no arguments.
-export function myWorkersWithStatus(query: QueryClient): Promise<Result> {
-  return query.executeNamed("myWorkersWithStatus", "query myWorkersWithStatus()");
+export function myWorkersWithStatus(
+  query: QueryClient,
+  opts: QueryCallOptions = {},
+): Promise<Result> {
+  return query.executeNamed("myWorkersWithStatus", "query myWorkersWithStatus()", opts);
 }
 
 // Every machine in the cluster. The engine refuses this to anyone who is not a
@@ -67,12 +75,22 @@ export function myWorkersWithStatus(query: QueryClient): Promise<Result> {
 // ownerUserId is optional and narrows to one owner. Omitted when blank: the
 // DSL's `when(args.ownerUserId)` guard drops an ABSENT argument and keeps an
 // empty string, so sending "" would filter for rows owned by nobody.
-export function allWorkersWithStatus(query: QueryClient, ownerUserId?: string): Promise<Result> {
+export function allWorkersWithStatus(
+  query: QueryClient,
+  optsOrOwner: QueryCallOptions | string = {},
+  maybeOpts: QueryCallOptions = {},
+): Promise<Result> {
+  // The owner narrowing is optional and rare; every caller today passes only
+  // call options. Taking either in the second slot keeps the existing
+  // narrowing call shape working without a second exported name.
+  const ownerUserId = typeof optsOrOwner === "string" ? optsOrOwner : undefined;
+  const opts = typeof optsOrOwner === "string" ? maybeOpts : optsOrOwner;
   const parts: string[] = [];
   if (ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(ownerUserId));
   return query.executeNamed(
     "allWorkersWithStatus",
     "query allWorkersWithStatus(" + parts.join(", ") + ")",
+    opts,
   );
 }
 
@@ -106,17 +124,29 @@ export function invocationsForWorker(
 }
 
 // The caller's own workspaces, live and released, newest first.
-export function myWorkspaces(query: QueryClient): Promise<Result> {
-  return query.executeNamed("myWorkspaces", "query myWorkspaces()");
+export function myWorkspaces(query: QueryClient, opts: QueryCallOptions = {}): Promise<Result> {
+  return query.executeNamed("myWorkspaces", "query myWorkspaces()", opts);
 }
 
 // Every workspace in the cluster, for a cluster owner. `status` narrows to one
 // lifecycle value and is omitted when absent, for the same `when(...)` reason
 // allWorkersWithStatus's ownerUserId is.
-export function allWorkspaces(query: QueryClient, status?: string): Promise<Result> {
+export function allWorkspaces(
+  query: QueryClient,
+  optsOrStatus: QueryCallOptions | string = {},
+  maybeOpts: QueryCallOptions = {},
+): Promise<Result> {
+  // Either shape in the second slot, for the reason allWorkersWithStatus
+  // takes either: the narrowing is optional and the call options are not.
+  const status = typeof optsOrStatus === "string" ? optsOrStatus : undefined;
+  const opts = typeof optsOrStatus === "string" ? maybeOpts : optsOrStatus;
   const parts: string[] = [];
   if (status !== undefined) parts.push("status: " + renderMemQLValue(status));
-  return query.executeNamed("allWorkspaces", "query allWorkspaces(" + parts.join(", ") + ")");
+  return query.executeNamed(
+    "allWorkspaces",
+    "query allWorkspaces(" + parts.join(", ") + ")",
+    opts,
+  );
 }
 
 // ---------------------------------------------------------------------------
