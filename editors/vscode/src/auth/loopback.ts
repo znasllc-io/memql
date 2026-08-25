@@ -15,7 +15,7 @@
 //
 // PORT 0 asks the kernel for an ephemeral port, which is what makes this work
 // without reserving anything: the redirect URI is REGISTERED portless
-// (`http://127.0.0.1/callback`, see register.ts) and identity's RFC 8252
+// (`http://127.0.0.1/callback`, see wellKnownClient.ts) and identity's RFC 8252
 // matcher accepts any port on a loopback URI whose scheme, host and path agree
 // (component/identity/config.go, matchesLoopbackAnyPort).
 //

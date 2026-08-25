@@ -50,6 +50,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -57,6 +58,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
@@ -314,6 +316,37 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// THE ROLE FLOOR (memql#4516). The third and last place the code flow can
+	// mint a credential, so it consults the same identity.CheckClientRoleFloor
+	// the magic-link verifier and the SSO fast path do. Without it, a reader
+	// refused through the emailed link would simply present a passkey instead
+	// and be admitted -- the floor has to sit on the MINT, not on one factor.
+	//
+	// The role is read from the user row rather than from a session, because
+	// authenticating is what this handler just did: there is no session yet.
+	if refusal := s.passkeyRoleFloorRefusal(ctx, asserted.OAuth.ClientId, userId); refusal != nil {
+		s.auditPasskey(r, identity.AuditActionRoleFloorRefused, userId, asserted.Row.ID,
+			identity.AuditOutcomeBlocked, "role_below_client_floor", refusal.AuditDetail())
+		// Hand the browser the client's own callback carrying the OAuth error
+		// envelope, so the refusal reaches the application that asked and the
+		// editor can print error_description verbatim. passkey-login.js
+		// navigates on redirectTo and does not read `success`, so a refused
+		// ceremony ends where an approved one would -- at the client -- rather
+		// than as an inline message the extension never sees.
+		if target, err := buildClientErrorCallback(asserted.OAuth.RedirectURI, "access_denied",
+			refusal.Description(), asserted.OAuth.State); err == nil {
+			writeJSON(w, http.StatusOK, WebAuthnLoginFinishResponse{
+				ErrorCode:  "role_floor",
+				Error:      refusal.Description(),
+				RedirectTo: target,
+			})
+			return
+		}
+		writeJSON(w, http.StatusForbidden, WebAuthnLoginFinishResponse{
+			ErrorCode: "role_floor", Error: refusal.Description()})
+		return
+	}
+
 	// The auth code. Identical shape to the one the magic-link verifier
 	// mints -- same five OAuth fields, same 60-second life, same
 	// digest-only persistence (the plaintext travels back on the
@@ -413,6 +446,47 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		Success:    true,
 		RedirectTo: target,
 	})
+}
+
+// passkeyRoleFloorRefusal resolves the user's cluster-wide role and asks the
+// one role-floor rule about it. Returns nil to admit.
+//
+// The lookup is skipped entirely for a client that declares no floor, which is
+// every client but the built-in editor -- so the portal and every MCP connector
+// pay nothing for this.
+func (s *Server) passkeyRoleFloorRefusal(ctx context.Context, clientId, userId string) *identity.RoleFloorRefusal {
+	if !identity.ClientDeclaresRoleFloor(clientId) {
+		return nil
+	}
+	role := ""
+	if s.Store != nil {
+		if row, err := s.Store.LookupUserById(ctx, userId); err == nil && row != nil {
+			role = row.Role
+		} else if err != nil {
+			s.logErr("webauthn: role lookup for the client role floor failed", err)
+			// Fail CLOSED. A floor that opens when the database blinks is not
+			// a floor; the person retries and the operator sees the log line.
+		}
+	}
+	return identity.CheckClientRoleFloor(clientId, auth.Role(role))
+}
+
+// buildClientErrorCallback is buildClientCallback's refusal counterpart: the
+// client's registered redirect URI carrying an OAuth error envelope
+// (RFC 6749 §4.1.2.1) instead of a code.
+func buildClientErrorCallback(redirectURI, code, description, state string) (string, error) {
+	u, err := url.Parse(redirectURI)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("error", code)
+	q.Set("error_description", description)
+	if state != "" {
+		q.Set("state", state)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // newPasskeyAuthCode mints a one-time OAuth auth code: 32 bytes of

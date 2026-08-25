@@ -249,9 +249,11 @@ export function wrongTokenClassMessage(clusterName: string, tokenClass: TokenCla
 
 export function missingCredentialMessage(clusterName: string): string {
   return (
-    `Cluster "${clusterName}" has no credential. Set \`token\` in clusters.yaml to an identity-issued ` +
-    "JWT access token (the `access_token` from POST <identity>/oauth/token), and set `refresh_token` " +
-    "alongside it so the extension can renew it as it expires."
+    `Cluster "${clusterName}" has no credential. Run "MemQL: Sign In" to get one -- it writes both ` +
+    "`token` and `refresh_token` for you, so the extension can renew as it expires. " +
+    "Sign-in from an editor needs the developer role or above on the cluster, and is refused with a " +
+    "message naming your role if you have less. " +
+    "Hand-editing `token` with an identity-issued JWT access token still works for an unattended setup."
   );
 }
 

@@ -195,6 +195,44 @@ func (s *Server) handleDevicePost(w http.ResponseWriter, r *http.Request) {
 	ctx := auth.ContextWithUserActor(r.Context(), claims.Subject)
 
 	approved := action == "approve"
+
+	// THE ROLE FLOOR (memql#4516). The same identity.CheckClientRoleFloor the
+	// three code-flow mint paths consult (the list is in
+	// magiclink/verifier.go) -- one rule, so the device fallback can never be
+	// the way around it. That is the whole reason this call is here: the
+	// fallback exists precisely for the hosts where the code flow cannot run,
+	// so a floor applied only to the code flow would be optional in practice.
+	//
+	// A refusal DENIES the grant rather than leaving it pending. The device
+	// is polling; leaving the row approvable would have it poll until the
+	// window expires and then report a timeout, when what actually happened
+	// is a decision somebody should be told about. Denying makes the next
+	// poll answer access_denied immediately.
+	if approved {
+		if refusal := identity.CheckClientRoleFloor(row.ClientId, auth.Role(claims.Role)); refusal != nil {
+			if err := s.deviceFlow.Adapter.Deny(ctx, row.ID); err != nil {
+				s.Logger.Warn("device: deny after a role-floor refusal failed", "id", row.ID, "error", err)
+			}
+			s.deviceAudit(r, identity.AuditEvent{
+				Category:      identity.AuditCategoryIdentity,
+				Action:        identity.AuditActionRoleFloorRefused,
+				ActorUserId:   claims.Subject,
+				ActorEmail:    claims.Email,
+				ActorRole:     claims.Role,
+				TargetType:    "deviceCode",
+				TargetId:      row.ID,
+				Outcome:       identity.AuditOutcomeBlocked,
+				FailureReason: "role_below_client_floor",
+				Detail:        refusal.AuditDetail(),
+			})
+			s.renderDevice(w, r, webtempl.DeviceData{
+				Layout: s.LayoutData(r, "Sign-in not allowed", false, nil, nil),
+				Flash:  &webtempl.Flash{Kind: "error", Message: refusal.Description()},
+			})
+			return
+		}
+	}
+
 	var err error
 	if approved {
 		err = s.deviceFlow.Adapter.Approve(ctx, row.ID)

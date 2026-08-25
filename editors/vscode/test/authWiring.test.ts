@@ -210,3 +210,48 @@ test("no two modules declare a function named signInToCluster", () => {
       "which one runs, and one of them is dead."
   );
 });
+
+test("no code or user-facing copy still names the registration endpoint", () => {
+  // memql#4517's error-copy sweep, asserted rather than reviewed.
+  //
+  // The extension no longer registers: identity carries this editor as a
+  // compiled-in first-party client (src/auth/wellKnownClient.ts). A surviving
+  // message about /register or dynamic client registration would send an
+  // operator to enable a setting that has nothing to do with their problem --
+  // which is precisely the wrong turn the reported failure produced
+  // ("registration_disabled" reads as "turn registration on").
+  //
+  // COMMENTS ARE EXEMPT on purpose: the history is why the portless redirect
+  // URI and the `registrationFailed` error kind are shaped the way they are,
+  // and deleting that reasoning along with the code would leave two puzzles.
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const rel = path.relative(SRC, file);
+    for (const [i, line] of fs.readFileSync(file, "utf8").split("\n").entries()) {
+      if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+      if (/["'`][^"'`]*\/register\b/.test(line) || /dynamic client registration/i.test(line)) {
+        offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `registration survives in code or copy:\n${offenders.join("\n")}`,
+  );
+});
+
+test("src/auth/register.ts is gone, and nothing imports it", () => {
+  // The deletion itself, pinned. `ensureClientId` was the first thing every
+  // sign-in called and the first thing to fail on a DCR-off cluster; a
+  // reintroduction would restore that failure quietly.
+  assert.equal(
+    fs.existsSync(path.join(SRC, "auth", "register.ts")),
+    false,
+    "register.ts was deleted in memql#4517 -- the well-known client lives in wellKnownClient.ts",
+  );
+  const importers = sourceFiles(SRC).filter((file) =>
+    /from\s+["'][^"']*auth\/register\.js["']/.test(fs.readFileSync(file, "utf8")),
+  );
+  assert.deepEqual(importers.map((f) => path.relative(SRC, f)), []);
+});

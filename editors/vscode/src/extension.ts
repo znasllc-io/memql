@@ -1711,9 +1711,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         accessToken: credentials.accessToken,
         refreshToken: credentials.refreshToken,
         expiresAtEpochSeconds: credentials.expiresAtEpochSeconds,
-        // The client_id is written separately by the ClientIdWriter below --
-        // it is registered before the tokens exist, so it is not part of this
-        // payload. "" leaves the stored value alone.
+        // No client_id travels with a sign-in: it is the operator's own
+        // `clientId` override, or the well-known first-party id compiled into
+        // both halves (auth/wellKnownClient.ts). "" leaves any stored value
+        // alone, which is what keeps an entry from the old registration path
+        // working untouched.
         clientId: '',
       }),
     signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
@@ -3754,9 +3756,6 @@ async function signInToCluster(
         await performSignIn(cluster, {
           signal: aborter.signal,
           store: deps.store,
-          persistClientId: async (clusterName, clientId) => {
-            await upsertCluster(deps.clustersPath, { name: clusterName, clientId });
-          },
           // The choice of grant is selectSignInRunner's, in auth/signin.ts,
           // where a test can reach it (memql#3515). This file binds the two
           // runners to vscode; it does not decide between them.

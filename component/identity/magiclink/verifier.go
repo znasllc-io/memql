@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/registration"
 )
@@ -24,6 +25,27 @@ var (
 	ErrTokenAlreadyUsed  = errors.New("magiclink: token already consumed")
 	ErrOAuthCtxCorrupted = errors.New("magiclink: oauth context unparseable")
 )
+
+// RoleFloorError is returned by Finish when the link was valid, the person is
+// who they say they are, and the CLIENT that started the sign-in declares a
+// role floor this user does not meet (identity.CheckClientRoleFloor).
+//
+// It is a type rather than a sentinel because the caller has to do more than
+// pick a message: the refusal has to reach the relying party as a standard
+// OAuth error redirect, so the handler needs the redirect URI and state that
+// were already validated on this row. A refused sign-in is an ANSWER, not a
+// breakage, and the extension that asked deserves to be told which role it
+// needs rather than left to time out.
+type RoleFloorError struct {
+	Refusal identity.RoleFloorRefusal
+	// RedirectURI + State come off the consumed row and were validated
+	// against the client earlier in Finish, so building the error redirect
+	// from them cannot become an open redirect.
+	RedirectURI string
+	State       string
+}
+
+func (e *RoleFloorError) Error() string { return e.Refusal.Description() }
 
 // Verifier consumes magic-link tokens. Like Issuer, it is constructed
 // once at app boot.
@@ -227,8 +249,14 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 
 	newUser := false
 	var userId string
+	// effectiveRole is the cluster-wide role this sign-in carries -- read off
+	// an existing row, or the one about to be written for a first login. The
+	// role floor below reads it, which is why it is hoisted out of the
+	// create-user branch rather than declared inside it.
+	effectiveRole := ""
 	if user != nil && user.ID != "" {
 		userId = user.ID
+		effectiveRole = user.Role
 	} else {
 		// First login: create the user.
 		newUser = true
@@ -288,6 +316,7 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		if err := v.Store.CreateUserOnFirstLogin(ctx, userId, displayName, row.Email, role, internal, seed); err != nil {
 			return nil, fmt.Errorf("magiclink: create user: %w", err)
 		}
+		effectiveRole = role
 		v.audit(ctx, identity.AuditEvent{
 			Category:    identity.AuditCategoryIdentity,
 			Action:      "user_registered",
@@ -364,6 +393,49 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		if v.Logger != nil {
 			v.Logger.Warn("magiclink: create identity row failed",
 				slog.String("error", err.Error()))
+		}
+	}
+
+	// THE ROLE FLOOR (memql#4516). One of FOUR places a signed-in person is
+	// known at the moment a credential would be minted, all calling the one
+	// rule, identity.CheckClientRoleFloor:
+	//
+	//   this file                                    magic-link sign-in
+	//   http/webauthn_login.go                       a passkey assertion
+	//   web/redirect_authenticated.go                the /authorize SSO fast path
+	//   web/device.go                                the RFC 8628 approval
+	//
+	// The first three are all the CODE flow -- it can reach an auth code three
+	// different ways, and a floor on one factor is not a floor. If you are
+	// adding a fifth way to mint, it belongs on this list.
+	//
+	// It runs AFTER the user row exists (being refused the editor is not a
+	// reason to refuse someone an account -- they may sign into the portal a
+	// moment later) and BEFORE the auth code, so nothing redeemable is ever
+	// created. The link is already consumed at this point, deliberately: a
+	// refused attempt must not leave a live link behind to retry.
+	if !adminSession {
+		if refusal := identity.CheckClientRoleFloor(clientId, auth.Role(effectiveRole)); refusal != nil {
+			v.audit(ctx, identity.AuditEvent{
+				Category:      identity.AuditCategoryIdentity,
+				Action:        identity.AuditActionRoleFloorRefused,
+				TargetType:    "magicLinkRequest",
+				TargetId:      row.ID,
+				TargetEmail:   row.Email,
+				ActorUserId:   userId,
+				ActorEmail:    row.Email,
+				ActorRole:     effectiveRole,
+				SourceIP:      in.SourceIP,
+				UserAgent:     in.UserAgent,
+				Outcome:       identity.AuditOutcomeBlocked,
+				FailureReason: "role_below_client_floor",
+				Detail:        refusal.AuditDetail(),
+			})
+			return nil, &RoleFloorError{
+				Refusal:     *refusal,
+				RedirectURI: redirectURI,
+				State:       state,
+			}
 		}
 	}
 

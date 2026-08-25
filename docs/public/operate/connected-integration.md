@@ -142,7 +142,9 @@ ways to get one:
   **disabled by default** (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`, memql#3719); set
   it true on clusters that expose an MCP surface, and it answers
   `403 registration_disabled` until you do. Returns a public `client_id` with no
-  secret, which is why PKCE is mandatory.
+  secret, which is why PKCE is mandatory. This is for THIRD-PARTY connectors:
+  first-party editors never use it, being compiled into every identity node
+  ([Connecting an Editor](auth/connecting-editors.md)).
 - **Configured at boot** — `MEMQL_IDENTITY_REGISTERED_CLIENTS`, a JSON array of
   `{clientId, redirectURIs[]}`. This is how the platform's own clients (the
   portal, the Cockpit) are seeded.

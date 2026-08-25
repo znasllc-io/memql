@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 )
 
@@ -184,6 +185,26 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 			next(w, r)
 			return
 		}
+		// THE ROLE FLOOR (memql#4516). The SSO fast path is a THIRD way to
+		// reach an auth code -- an already-signed-in browser lands on
+		// /authorize and never sees a login form -- so it consults the same
+		// identity.CheckClientRoleFloor as the other two. Omitting it here
+		// would mean a reader refused on their first sign-in was admitted on
+		// the second, once their browser held a session.
+		//
+		// The refusal leaves as an OAuth error redirect rather than falling
+		// through to the form: the person is already signed in, so a login
+		// page would ask them for something they have and explain nothing,
+		// while the client would wait for a callback that never comes.
+		if refusal := identity.CheckClientRoleFloor(clientId, auth.Role(claims.Role)); refusal != nil {
+			if s.Logger != nil {
+				s.Logger.Info("identity-web: SSO sign-in refused by the client role floor",
+					"client_id", clientId, "user_id", claims.Subject, "role", claims.Role)
+			}
+			s.auditRoleFloorRefusal(r, claims, clientId, refusal)
+			s.redirectAuthorizeError(w, r, redirectURI, state, "access_denied", refusal.Description())
+			return
+		}
 		mint, err := s.mintSSOAuthCode(r.Context(), MintSSOAuthCodeInput{
 			UserId:      claims.Subject,
 			ClientId:    clientId,
@@ -206,6 +227,34 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 		}
 		http.Redirect(w, r, buildSSORedirect(redirectURI, mint.Code, state), http.StatusSeeOther)
 	}
+}
+
+// auditRoleFloorRefusal writes the one audit row every role-floor refusal
+// writes, from the SSO fast path. Best-effort: the refusal itself has already
+// been decided, and losing the row must not change the answer.
+//
+// It rides mlAudit rather than a sink of its own because it is the same sink
+// the magic-link half of this flow writes to, and a refusal that landed in a
+// different log from the sign-in it refused would be harder to correlate than
+// it is worth.
+func (s *Server) auditRoleFloorRefusal(r *http.Request, claims *identity.AccessTokenClaims, clientId string, refusal *identity.RoleFloorRefusal) {
+	if s == nil || s.mlAudit == nil || claims == nil || refusal == nil {
+		return
+	}
+	s.mlAudit.Log(r.Context(), identity.AuditEvent{
+		Category:      identity.AuditCategoryIdentity,
+		Action:        identity.AuditActionRoleFloorRefused,
+		ActorUserId:   claims.Subject,
+		ActorEmail:    claims.Email,
+		ActorRole:     claims.Role,
+		TargetType:    "oauthClient",
+		TargetId:      clientId,
+		SourceIP:      clientIP(r),
+		UserAgent:     r.Header.Get("User-Agent"),
+		Outcome:       identity.AuditOutcomeBlocked,
+		FailureReason: "role_below_client_floor",
+		Detail:        refusal.AuditDetail(),
+	})
 }
 
 // buildSSORedirect appends ?code=...&state=... to the registered

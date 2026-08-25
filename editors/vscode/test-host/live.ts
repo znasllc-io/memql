@@ -43,6 +43,8 @@ import { browseConceptPage, getRowByConceptAndId } from "@znasllc-io/memql-sdk-c
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { readClustersFile } from "../src/clusters/file.js";
+import { identityBaseUrlFor } from "../src/connection/endpoint.js";
+import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import { ConnectionManager } from "../src/connection/manager.js";
 import type { Bundle } from "../src/run/bundle.js";
@@ -423,6 +425,86 @@ smoke("a concept subscription can be established", async () => {
   const subscriptions = connected().subscriptions;
   assert.notEqual(subscriptions, undefined, "a connected manager must expose a SubscriptionManager");
   info("subscription manager present; row delivery stays with the manual checklist (it needs a write)");
+});
+
+// -----------------------------------------------------------------------------
+// First-party sign-in against the live identity (memql#4518)
+// -----------------------------------------------------------------------------
+//
+// WHAT THESE CAN AND CANNOT BE. Completing a sign-in needs a browser and a
+// person clicking a link, so this lane cannot drive one end to end -- and it is
+// READ-ONLY by the rule at the top of this file, which a device-authorization
+// request would break (it writes a row). What it CAN do, against a real
+// cluster, is prove the two facts the reported failure was made of: this
+// cluster does not offer registration, and it serves the editor anyway.
+//
+// AND THEY ARE NOT THE GATE. Everything here skips unless an operator points
+// the lane at a credentialed cluster, which no CI lane does -- so treat a green
+// run of this file as a live confirmation, never as coverage. The gate is
+// in-process and runs everywhere: component/identity/web/dcr_off_signin_test.go
+// on the server side, editors/vscode/test/authWellKnownClient.test.ts on this
+// side, and test/fixtures/first-party-client-contract.json pinning the two
+// constants to each other.
+
+/** The issuer of the configured cluster, or a skip. */
+async function liveIssuer(): Promise<string> {
+  const cluster = await configuredCluster();
+  const issuer = identityBaseUrlFor(cluster);
+  if (issuer === undefined) {
+    skip(`cluster "${cluster.name}" names no identity service, so there is nothing to probe`);
+  }
+  return issuer;
+}
+
+smoke("the live cluster does NOT advertise dynamic client registration", async () => {
+  // RFC 8414 §2 makes registration_endpoint OPTIONAL precisely so a server can
+  // signal non-support by omitting it. A cluster that still advertised it while
+  // answering 403 would be telling every client to register there.
+  const issuer = await liveIssuer();
+  const res = await fetch(`${issuer}/.well-known/oauth-authorization-server`);
+  assert.equal(res.ok, true, `GET /.well-known/oauth-authorization-server: ${res.status}`);
+  const doc = (await res.json()) as Record<string, unknown>;
+
+  if (doc.registration_endpoint !== undefined) {
+    warn(
+      "this cluster has DCR ENABLED, so it is not the posture memql#4514 is about -- " +
+        "the cases below still prove the built-in client works, which is the part that matters",
+    );
+  } else {
+    info("registration_endpoint absent: DCR is off, which is the default posture");
+  }
+  assert.equal(typeof doc.device_authorization_endpoint, "string",
+    "the device fallback must be discoverable rather than guessed");
+});
+
+smoke("the live cluster serves the editor's authorize page with no client configured", async () => {
+  // The exact request the browser flow opens, with the well-known client id and
+  // a loopback callback on an arbitrary port. A 400 here IS the reported bug --
+  // one layer in from the 403 that used to precede it.
+  const issuer = await liveIssuer();
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: WELL_KNOWN_CLIENT_ID,
+    redirect_uri: "http://127.0.0.1:54321/callback",
+    state: "host-lane-probe",
+    code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    code_challenge_method: "S256",
+  });
+  const res = await fetch(`${issuer}/authorize?${query.toString()}`, { redirect: "manual" });
+  const body = await res.text();
+
+  assert.equal(res.status, 200, `GET /authorize returned ${res.status}; body: ${body.slice(0, 400)}`);
+  assert.equal(
+    body.includes("Unknown client"),
+    false,
+    "this cluster does not carry the built-in editor client -- it predates memql#4515",
+  );
+  assert.equal(
+    body.includes("Invalid redirect URI"),
+    false,
+    "the ephemeral-port callback was refused -- the registered redirect URI has stopped being portless",
+  );
+  info("the live identity resolves memql-vscode and accepts an ephemeral-port loopback callback");
 });
 
 // -----------------------------------------------------------------------------

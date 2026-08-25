@@ -1,0 +1,43 @@
+{
+  "$comment": [
+    "THE CONTRACT BETWEEN TWO REPOSITORY HALVES THAT NEVER IMPORT EACH OTHER.",
+    "",
+    "The identity service carries the MemQL editor as a compiled-in first-party OAuth",
+    "client (component/identity/builtin_clients.go). The VS Code extension authorizes as",
+    "that client without registering (editors/vscode/src/auth/wellKnownClient.ts). Nothing",
+    "in the build links the two: they are separate languages, separate modules and separate",
+    "release artifacts, and each is individually tested.",
+    "",
+    "So the two constants below have to be written down once and asserted from both sides.",
+    "A disagreement is invisible until a released extension meets a released cluster, and it",
+    "presents as 'Unknown client' on the consent page or as invalid_client on /device/code --",
+    "which reads exactly like the 403 registration_disabled failure this work removed, and",
+    "would send the next reader down the same wrong path (memql#4514).",
+    "",
+    "'redirectURI' is PORTLESS and that is load-bearing rather than cosmetic. The extension's",
+    "loopback listener takes an ephemeral port, so the URI the browser actually returns to",
+    "carries a different number every sign-in. RFC 8252 section 7.3 grants an any-port",
+    "exception ONLY to a registered loopback URI with no explicit port -- a registered URI",
+    "that carries a port opts back into exact-match (component/identity/config.go,",
+    "matchesLoopbackAnyPort). Adding a port here would silently break every callback.",
+    "",
+    "Read by component/identity/first_party_client_contract_test.go (Go) and",
+    "editors/vscode/test/firstPartyClientContract.test.ts (TypeScript). Changing a value",
+    "here obliges both -- and strands every already-released editor, so treat it as frozen."
+  ],
+  "clientId": "memql-vscode",
+  "clientName": "MemQL for VS Code",
+  "redirectURI": "http://127.0.0.1/callback",
+  "minRole": "developer",
+  "acceptedCallbacks": [
+    "http://127.0.0.1:54321/callback",
+    "http://127.0.0.1:1/callback",
+    "http://127.0.0.1:65535/callback",
+    "http://127.0.0.1/callback"
+  ],
+  "rejectedCallbacks": [
+    "http://127.0.0.1:54321/other",
+    "https://127.0.0.1:54321/callback",
+    "http://evil.example.com:54321/callback"
+  ]
+}

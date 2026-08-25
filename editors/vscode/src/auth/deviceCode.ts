@@ -110,7 +110,7 @@ import { identityBaseUrlFor } from "../connection/endpoint.js";
 import { AuthFlowError, errorText, isAuthFlowError, type AuthFlowErrorKind } from "./errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps, type AuthFlowTokens } from "./flow.js";
 import { generatePkcePair } from "./pkce.js";
-import { ensureClientId } from "./register.js";
+import { resolveClientId } from "./wellKnownClient.js";
 
 /** The RFC 8628 grant_type URN. Must equal http.DeviceGrantType. */
 export const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -180,7 +180,6 @@ export interface DeviceCodeDeps {
   /** Injected delay, so a test does not wait out a real poll interval. */
   sleep?: SleepFn;
   /** Overrides the client_name shown on the approval screen. */
-  clientName?: string;
   /**
    * Called ONCE, the moment the codes exist and before the first poll.
    *
@@ -218,25 +217,21 @@ export interface DeviceCodeFallbackDeps extends AuthFlowDeps, DeviceCodeDeps {
  * signInWithDeviceCodeFallback runs the loopback flow and, when this host
  * cannot do loopback, the device flow instead.
  *
- * The client registration happens HERE, once, and the resolved client_id is
- * handed to whichever flow runs. Letting each flow register its own would mint
- * a second OAuth client every time the fallback fires -- the loopback attempt
- * registers, throws, and loses the id it just created (an AuthFlowError carries
- * no payload), and nothing ever revokes the orphan. `clientIdWasRegistered` is
- * carried out of here so the caller still persists a freshly minted id exactly
- * once.
+ * The client_id is resolved HERE and handed to whichever grant runs, so both
+ * see the same value. It used to matter far more than it does: resolution was
+ * an RFC 7591 registration, and letting each flow do its own minted a second
+ * OAuth client every time the fallback fired -- the loopback attempt
+ * registered, threw, and lost the id it had just created, leaving an orphan
+ * nothing revoked. Resolution is now a constant lookup (wellKnownClient.ts),
+ * so the shape survives only because one resolution for two grants is still
+ * the clearer arrangement.
  */
 export async function signInWithDeviceCodeFallback(
   cluster: ClusterConfig,
   deps: DeviceCodeFallbackDeps,
 ): Promise<AuthFlowTokens> {
-  const issuer = requireIssuer(cluster);
-  const { clientId, registered } = await ensureClientId({
-    issuer,
-    clientId: cluster.clientId,
-    clientName: deps.clientName,
-    fetch: deps.fetch ?? defaultFetch,
-  });
+  requireIssuer(cluster);
+  const clientId = resolveClientId(cluster.clientId);
   const authorized: ClusterConfig = { ...cluster, clientId };
 
   let tokens: AuthFlowTokens;
@@ -247,7 +242,7 @@ export async function signInWithDeviceCodeFallback(
     deps.onFallback?.(err as AuthFlowError);
     tokens = await runDeviceCodeFlow(authorized, deps);
   }
-  return { ...tokens, clientIdWasRegistered: registered || tokens.clientIdWasRegistered };
+  return tokens;
 }
 
 /**
@@ -270,12 +265,7 @@ export async function runDeviceCodeFlow(
 
   throwIfAborted(signal);
 
-  const { clientId, registered } = await ensureClientId({
-    issuer,
-    clientId: cluster.clientId,
-    clientName: deps.clientName,
-    fetch: doFetch,
-  });
+  const clientId = resolveClientId(cluster.clientId);
 
   // PKCE, even though there is no redirect to intercept. identity binds the
   // challenge to the row at request time and REQUIRES the verifier at
@@ -309,7 +299,6 @@ export async function runDeviceCodeFlow(
     ...tokens,
     expiresAtEpochSeconds: tokens.expiresInSeconds > 0 ? nowSeconds + tokens.expiresInSeconds : 0,
     clientId,
-    clientIdWasRegistered: registered,
   };
 }
 

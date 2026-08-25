@@ -1,4 +1,4 @@
-// The end-to-end browser sign-in flow: register -> authorize -> callback ->
+// The end-to-end browser sign-in flow: authorize -> callback ->
 // exchange.
 //
 // The "browser" here is the injected openExternal: it receives the real
@@ -15,6 +15,7 @@ import type { HttpRequestInit, HttpResponseLike } from "../src/connection/creden
 import { isAuthFlowError } from "../src/auth/errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps } from "../src/auth/flow.js";
 import { codeChallengeS256 } from "../src/auth/pkce.js";
+import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
 
 const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
@@ -29,7 +30,7 @@ function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
 }
 
 // -----------------------------------------------------------------------------
-// A fake identity service: /register mints a client_id, /oauth/token redeems a
+// A fake identity service: /oauth/token redeems a
 // code. Every request it saw is recorded, so a test can assert what was NOT
 // sent as easily as what was.
 // -----------------------------------------------------------------------------
@@ -41,8 +42,6 @@ interface FakeIdentity {
 }
 
 interface FakeIdentityOptions {
-  registerStatus?: number;
-  registerBody?: unknown;
   tokenStatus?: number;
   tokenBody?: unknown;
 }
@@ -54,16 +53,16 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
     urls: () => calls.map((c) => c.url),
     fetch: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
-      const isRegister = url.endsWith("/register");
-      const status = isRegister ? (options.registerStatus ?? 201) : (options.tokenStatus ?? 200);
-      const payload = isRegister
-        ? (options.registerBody ?? { client_id: "mcp_minted" })
-        : (options.tokenBody ?? {
-            access_token: "ACCESS",
-            refresh_token: "REFRESH",
-            token_type: "Bearer",
-            expires_in: 900,
-          });
+      // ONE endpoint, deliberately: /register is not among the requests this
+      // extension may make any more (memql#4517), so a stray call to it shows
+      // up in `urls()` rather than being quietly answered.
+      const status = options.tokenStatus ?? 200;
+      const payload = options.tokenBody ?? {
+        access_token: "ACCESS",
+        refresh_token: "REFRESH",
+        token_type: "Bearer",
+        expires_in: 900,
+      };
       return {
         ok: status >= 200 && status < 300,
         status,
@@ -135,7 +134,7 @@ function deps(net: FakeIdentity, ui: FakeBrowser, extra: Partial<AuthFlowDeps> =
 
 // -----------------------------------------------------------------------------
 
-test("signs in end to end: registers, authorizes, redeems, returns the tokens", async () => {
+test("signs in end to end: authorizes, redeems, returns the tokens", async () => {
   const net = identity();
   const ui = browser();
 
@@ -145,10 +144,12 @@ test("signs in end to end: registers, authorizes, redeems, returns the tokens", 
   assert.equal(tokens.refreshToken, "REFRESH");
   assert.equal(tokens.expiresInSeconds, 900);
   assert.equal(tokens.expiresAtEpochSeconds, Math.floor(NOW_MS / 1000) + 900);
-  assert.equal(tokens.clientId, "mcp_minted");
-  assert.equal(tokens.clientIdWasRegistered, true, "a freshly minted id must be flagged for persistence");
+  // No cluster clientId, so the well-known first-party id (memql#4515). The
+  // exchange is the ONLY request a browser sign-in makes now: registration used
+  // to come first, and it is what failed on every DCR-off cluster.
+  assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
 
-  assert.deepEqual(net.urls(), [`${ISSUER}/register`, `${ISSUER}/oauth/token`]);
+  assert.deepEqual(net.urls(), [`${ISSUER}/oauth/token`]);
 });
 
 test("the authorization URL is a PKCE S256 code request against this flow's own listener", async () => {
@@ -161,7 +162,7 @@ test("the authorization URL is a PKCE S256 code request against this flow's own 
   const url = new URL(ui.resolved[0] ?? "");
   assert.equal(url.origin + url.pathname, `${ISSUER}/authorize`);
   assert.equal(url.searchParams.get("response_type"), "code");
-  assert.equal(url.searchParams.get("client_id"), "mcp_minted");
+  assert.equal(url.searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.ok((url.searchParams.get("code_challenge") ?? "").length >= 43);
   assert.ok((url.searchParams.get("state") ?? "").length > 0);
@@ -199,7 +200,7 @@ test("the code_verifier redeemed matches the code_challenge that was authorized"
   assert.ok(exchange !== undefined);
   assert.equal(exchange.body.grant_type, "authorization_code");
   assert.equal(exchange.body.code, "AUTHCODE");
-  assert.equal(exchange.body.client_id, "mcp_minted");
+  assert.equal(exchange.body.client_id, WELL_KNOWN_CLIENT_ID);
   assert.equal(exchange.body.redirect_uri, authorize.searchParams.get("redirect_uri"));
 
   const verifier = exchange.body.code_verifier;
@@ -207,7 +208,10 @@ test("the code_verifier redeemed matches the code_challenge that was authorized"
   assert.equal(codeChallengeS256(verifier as string), authorize.searchParams.get("code_challenge"));
 });
 
-test("registration is SKIPPED when the cluster already carries a client_id", async () => {
+test("a cluster clientId OVERRIDES the well-known id", async () => {
+  // The override is what keeps two cases working: an operator's own static
+  // client, and an entry still carrying an id the deleted registration path
+  // minted. Neither is migrated or rewritten -- the value is simply read.
   const net = identity();
   const ui = browser();
 
@@ -217,8 +221,7 @@ test("registration is SKIPPED when the cluster already carries a client_id", asy
   );
 
   assert.equal(tokens.clientId, "mcp_stored");
-  assert.equal(tokens.clientIdWasRegistered, false);
-  assert.deepEqual(net.urls(), [`${ISSUER}/oauth/token`], "no /register call may be made");
+  assert.deepEqual(net.urls(), [`${ISSUER}/oauth/token`]);
   assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), "mcp_stored");
 });
 
@@ -237,7 +240,7 @@ test("a state mismatch is refused and the code is NEVER exchanged", async () => 
 
   assert.deepEqual(
     net.urls(),
-    [`${ISSUER}/register`],
+    [],
     "the token endpoint was called with a code that failed the state check",
   );
 });
@@ -250,7 +253,7 @@ test("a missing state is a mismatch, not a pass", async () => {
     () => runAuthorizationFlow(cluster(), deps(net, ui)),
     (err: unknown) => isAuthFlowError(err) && err.kind === "stateMismatch",
   );
-  assert.deepEqual(net.urls(), [`${ISSUER}/register`]);
+  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
 });
 
 test("an OAuth error envelope on the callback reports authorizationDenied", async () => {
@@ -271,7 +274,7 @@ test("an OAuth error envelope on the callback reports authorizationDenied", asyn
       return true;
     },
   );
-  assert.deepEqual(net.urls(), [`${ISSUER}/register`]);
+  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
 });
 
 test("a callback with neither code nor error reports invalidCallback", async () => {
@@ -306,7 +309,7 @@ test("a callback that never arrives fails as timeout, distinguishably", async ()
       return true;
     },
   );
-  assert.deepEqual(net.urls(), [`${ISSUER}/register`]);
+  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
 });
 
 test("an abort during the wait fails as cancelled, not as timeout", async () => {
@@ -472,10 +475,7 @@ test("an explicit issuer wins over the domain convention", async () => {
     deps(net, ui),
   );
 
-  assert.deepEqual(net.urls(), [
-    "https://auth.example.com/register",
-    "https://auth.example.com/oauth/token",
-  ]);
+  assert.deepEqual(net.urls(), ["https://auth.example.com/oauth/token"]);
 });
 
 test("a server that reports no expires_in leaves the expiry unknown rather than expired", async () => {

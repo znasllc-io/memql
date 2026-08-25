@@ -416,6 +416,19 @@ func (s *Server) finishSignIn(w http.ResponseWriter, r *http.Request, row *ident
 		CrossDevice: crossDevice,
 	})
 	if err != nil {
+		// A ROLE-FLOOR REFUSAL IS AN ANSWER, NOT A BREAKAGE (memql#4516).
+		// It leaves through the standard OAuth error redirect rather than
+		// the landing page, because the thing that needs to hear it is the
+		// application that started the sign-in -- the editor renders
+		// error_description verbatim in a notification. Rendering a page
+		// here instead would leave the extension waiting on a callback that
+		// never arrives, which is the failure this epic exists to remove.
+		var floor *magiclink.RoleFloorError
+		if errors.As(err, &floor) && floor.RedirectURI != "" {
+			s.redirectAuthorizeError(w, r, floor.RedirectURI, floor.State,
+				"access_denied", floor.Refusal.Description())
+			return
+		}
 		s.renderInspectError(w, r, err)
 		return
 	}
@@ -511,12 +524,24 @@ func (s *Server) renderInspectError(w http.ResponseWriter, r *http.Request, err 
 		s.renderLandingProblem(w, r, "Already used", "This sign-in link has already been used. Please request a new one.")
 	case errors.Is(err, magiclink.ErrOAuthCtxCorrupted):
 		s.renderLandingProblem(w, r, "Sign-in error", "We could not complete sign-in. Please request a new link.")
+	case isRoleFloorError(err):
+		// Only reachable when the refusal carried no redirect URI to send
+		// the OAuth error envelope to (finishSignIn takes the redirect path
+		// otherwise). Show the person the same sentence the client would
+		// have received.
+		s.renderLandingProblem(w, r, "Sign-in not allowed", err.Error())
 	default:
 		if s.Logger != nil {
 			s.Logger.Error("identity-web: magic-link failed", "error", err)
 		}
 		s.renderLandingProblem(w, r, "Sign-in error", "Something went wrong completing sign-in. Please request a new link.")
 	}
+}
+
+// isRoleFloorError reports whether err is a client role-floor refusal.
+func isRoleFloorError(err error) bool {
+	var floor *magiclink.RoleFloorError
+	return errors.As(err, &floor)
 }
 
 // renderLandingProblem renders one of the terminal states of the flow.

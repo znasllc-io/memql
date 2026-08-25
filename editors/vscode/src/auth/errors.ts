@@ -22,10 +22,20 @@
 //                       attempted. Fix: set `issuer` (or `domain`).
 //                       NOT retryable.
 //
-//   registrationFailed  POST <issuer>/register was refused, unreachable, or
-//                       returned a body carrying no client_id. No browser was
-//                       opened. Retryable once the server is reachable /
-//                       MEMQL_IDENTITY_OAUTH_DCR_ENABLED is on.
+//   registrationFailed  The DEVICE AUTHORIZATION REQUEST (POST
+//                       <issuer>/device/code) was refused, unreachable, or
+//                       returned an unreadable body. Nothing was opened and no
+//                       code exists. Retryable once the server is reachable.
+//
+//                       The name is older than what it now covers: it used to
+//                       mean POST <issuer>/register, back when this extension
+//                       obtained its client_id by RFC 7591 dynamic client
+//                       registration. That path is gone -- identity carries the
+//                       editor as a compiled-in first-party client
+//                       (wellKnownClient.ts) -- and the kind was kept rather
+//                       than renamed because these kinds are a CONTRACT, and a
+//                       rename is a breaking change for a downstream consumer
+//                       branching on it. The kind is never shown to a person.
 //
 //   bindFailed          The one-shot loopback listener could not bind
 //                       127.0.0.1:0. Nothing was opened and no code exists.
