@@ -163,8 +163,10 @@ function main() {
   wal_epoch="$(newest_blob_epoch  "$account" "$container" "${server}/wals/" "$auth")"
   now="$(date -u +%s)"
 
-  cap_result_set     account       "$account"
-  cap_result_set     container     "$container"
+  # account/container are already on the envelope from the read check above.
+  # cap_result_set APPENDS rather than replaces, so setting a key twice emits a
+  # DUPLICATE JSON key -- syntactically legal, and resolved differently by
+  # different parsers. Only the fields not yet set belong here.
   cap_result_set     server        "$server"
   cap_result_set_raw maxAgeHours   "$max_age"
 
