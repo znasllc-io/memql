@@ -74,10 +74,24 @@ scheduled automation for pull -- and the browser reads it same-origin
 through `/_memql/*` ([below](#apiproxy-same-origin-access-to-your-data)).
 
 The concrete win this buys: because the browser talks to your OWN cluster
-for data rather than to a third-party API directly, no third-party
-credential (a Shopify Storefront token, a CMS API key) ever has to ship to
-the browser at all -- a conventional headless setup calling the vendor
-directly cannot make that claim.
+for data rather than to a third-party API directly, no **privileged**
+third-party credential -- a Shopify Admin API token, a CMS write key --
+ever has to exist in the browser's reach. Those live in a MemQL
+integration, server-side, and the browser reads the results out of the
+graph.
+
+**Said precisely, because the loose version of this claim is wrong.** It is
+not that no third-party credential ever reaches the browser. A
+`shopify_storefront` site is served a **public Storefront API token**, at
+serve time, in its `runtime-config.json`
+(`component/edge/runtimeconfig.go`) -- and that is correct and deliberate.
+A Storefront access token is a public credential by Shopify's own design:
+scoped to unauthenticated storefront operations, rate-limited per buyer IP,
+and embedded in shipped client code by Shopify's own SDKs and by Hydrogen.
+It cannot read orders, cannot read customers and cannot mutate the store.
+The claim worth making is about the credentials where the distinction
+matters, and it survives intact: **the Admin API token is never on the
+serve path and never in a browser.**
 
 ---
 
