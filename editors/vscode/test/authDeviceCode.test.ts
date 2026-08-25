@@ -1,7 +1,7 @@
 // The device-code fallback: when it fires, when it must NOT, and how it polls.
 //
 // The fake identity service below answers all three endpoints the two flows
-// touch (/register, /device/code, /oauth/token) and records every request, so a
+// touch (/device/code, /oauth/token) and records every request, so a
 // case can assert what was NOT sent -- "no device authorization was requested"
 // is the whole point of half the cases here.
 //
@@ -28,6 +28,7 @@ import { AuthFlowError, isAuthFlowError } from "../src/auth/errors.js";
 import type { AuthFlowDeps } from "../src/auth/flow.js";
 import type { LoopbackListener } from "../src/auth/loopback.js";
 import { persistSignIn, refreshTokenSecretKey, type SecretStore } from "../src/auth/store.js";
+import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
 
 const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
@@ -98,9 +99,10 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
     fetch: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
 
-      if (url.endsWith("/register")) {
-        return reply(201, { client_id: "mcp_minted" });
-      }
+      // /register has no branch here on purpose: it is not a request this
+      // extension may make any more (memql#4517). Every call is recorded above
+      // regardless of which branch answers it, so the `urls()` assertions are
+      // what would catch one coming back.
       if (url.endsWith("/device/code")) {
         return reply(
           options.deviceStatus ?? 200,
@@ -238,7 +240,7 @@ test("a loopback listener that cannot bind falls back to the device code", async
   assert.deepEqual(
     fake.urls(),
     [`${ISSUER}/device/code`, `${ISSUER}/oauth/token`],
-    "the fallback must not re-register: the client_id was already on the cluster",
+    "the fallback resolves one client_id and hands it to both grants",
   );
   assert.equal(codes[0]?.userCode, "BCDF-GHJK");
   assert.equal(codes[0]?.verificationUri, `${ISSUER}/device`);
@@ -504,7 +506,7 @@ test("the poll presents the RFC 8628 grant with the device code and the PKCE ver
   assert.ok(typeof poll.code_verifier === "string" && poll.code_verifier !== "");
 });
 
-test("a cluster with no client_id registers exactly once across the fallback", async () => {
+test("a cluster with no client_id resolves the well-known id once across the fallback", async () => {
   const fake = identity();
 
   const tokens = await signInWithDeviceCodeFallback(cluster({ clientId: undefined }), {
@@ -516,11 +518,10 @@ test("a cluster with no client_id registers exactly once across the fallback", a
 
   assert.equal(
     fake.urls().filter((u) => u.endsWith("/register")).length,
-    1,
-    "registering once per flow would orphan an OAuth client on every fallback",
+    0,
+    "the extension no longer registers: identity carries this client compiled in (memql#4515)",
   );
-  assert.equal(tokens.clientId, "mcp_minted");
-  assert.equal(tokens.clientIdWasRegistered, true, "so the caller persists the minted id");
+  assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
 });
 
 test("device tokens go into the same store the loopback path uses", async () => {

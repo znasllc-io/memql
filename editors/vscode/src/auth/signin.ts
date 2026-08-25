@@ -37,8 +37,9 @@ import type { AuthFlowTokens } from "./flow.js";
  * What a completed sign-in hands to the store.
  *
  * A subset of AuthFlowTokens on purpose: `clientId` is registry data that
- * belongs in clusters.yaml next to the endpoint, not credential data, so it
- * travels a different path (see ClientIdWriter).
+ * belongs in clusters.yaml next to the endpoint, not credential data. Nothing
+ * writes it any more -- it is the operator's own override or a compiled-in
+ * constant (wellKnownClient.ts) -- so it simply does not travel here.
  */
 export interface SignInCredentials {
   /** The identity-issued JWT access token to dial the bff with. */
@@ -63,9 +64,6 @@ export interface SignInTokenStore {
   persistSignIn(clusterName: string, credentials: SignInCredentials): Promise<void>;
   signOut(clusterName: string): Promise<void>;
 }
-
-/** Writes the registered `client_id` back into clusters.yaml. */
-export type ClientIdWriter = (clusterName: string, clientId: string) => Promise<void>;
 
 /** Runs the browser flow. Bound to runAuthorizationFlow by the adapter layer. */
 export type AuthFlowRunner = (
@@ -118,7 +116,6 @@ export function selectSignInRunner(flow: SignInFlow, runners: SignInFlowRunners)
 
 export interface PerformSignInDeps {
   runFlow: AuthFlowRunner;
-  persistClientId: ClientIdWriter;
   store: SignInTokenStore;
   /** Wired to the progress notification's CancellationToken. */
   signal?: AbortSignal;
@@ -127,8 +124,6 @@ export interface PerformSignInDeps {
 export interface SignInOutcome {
   /** The client_id the flow authorized with. */
   clientId: string;
-  /** True when that client_id was newly minted and written to clusters.yaml. */
-  clientIdPersisted: boolean;
   /** The access token's reported lifetime, for the confirmation message. */
   expiresInSeconds: number;
 }
@@ -167,28 +162,22 @@ export function signInCanRecover(reason: ConnectionErrorReason): boolean {
 /**
  * performSignIn runs the flow and persists what came back.
  *
- * ORDERING IS DELIBERATE: the `client_id` is written BEFORE the tokens. It is
- * registration data rather than a credential -- a dynamically registered client
- * that is minted and then forgotten leaves an orphan registration on the
- * identity service and re-registers on every sign-in. The tokens can be re-
- * earned by signing in again; a lost client_id cannot be recovered at all. So
- * the unrecoverable half is committed first, and a token-store failure
- * propagates with the registration already safe.
+ * IT NO LONGER WRITES clusters.yaml, and the deletion is the point. The
+ * client_id used to be minted by RFC 7591 registration, which made it
+ * unrecoverable state that had to be committed before the tokens -- lose it and
+ * the next sign-in registered a second client nothing would ever revoke. There
+ * is nothing minted any more: the id is either the operator's own `clientId`
+ * override or a compiled-in constant (wellKnownClient.ts), and writing a
+ * constant into the file would only turn today's default into tomorrow's pin.
+ *
+ * So this persists exactly the credentials, and an existing entry carrying an
+ * id from the old path keeps working untouched -- it is read as an override.
  */
 export async function performSignIn(
   cluster: ClusterConfig,
   deps: PerformSignInDeps,
 ): Promise<SignInOutcome> {
   const tokens = await deps.runFlow(cluster, deps.signal);
-
-  // Written when the flow minted one, and ALSO when it differs from what the
-  // file holds -- the second condition costs one write and closes the case
-  // where a stale client_id was reconciled somewhere upstream.
-  const stored = (cluster.clientId ?? "").trim();
-  const shouldPersistClientId = tokens.clientIdWasRegistered || stored !== tokens.clientId;
-  if (shouldPersistClientId) {
-    await deps.persistClientId(cluster.name, tokens.clientId);
-  }
 
   await deps.store.persistSignIn(cluster.name, {
     accessToken: tokens.accessToken,
@@ -199,7 +188,6 @@ export async function performSignIn(
 
   return {
     clientId: tokens.clientId,
-    clientIdPersisted: shouldPersistClientId,
     expiresInSeconds: tokens.expiresInSeconds,
   };
 }
@@ -284,7 +272,7 @@ function adviceFor(kind: AuthFlowErrorKind): string {
     case "misconfigured":
       return 'Edit the cluster ("MemQL: Edit Cluster") and set its domain, or add an `issuer` to clusters.yaml.';
     case "registrationFailed":
-      return "Nothing was opened and no credential changed. Retry once the identity service is reachable and accepting dynamic client registration.";
+      return "Nothing was opened and no credential changed. Retry once the identity service is reachable.";
     case "bindFailed":
       return "This is a local machine problem -- a firewall or sandbox preventing a loopback listener -- not a problem with the cluster.";
     case "timeout":
@@ -292,7 +280,7 @@ function adviceFor(kind: AuthFlowErrorKind): string {
     case "browserUnavailable":
       return "This host cannot open a browser. Sign in on a machine that can and put the resulting `token` (and `refresh_token`) into clusters.yaml.";
     case "authorizationDenied":
-      return "No credential was issued and nothing stored changed.";
+      return "No credential was issued and nothing stored changed. Signing in from an editor needs the developer role or above on the cluster; if the message above names your role, ask a cluster owner or admin to raise it.";
     case "stateMismatch":
       return "The authorization code was discarded without being redeemed. Something replayed or forged the callback -- do not simply retry until you know what.";
     case "invalidCallback":

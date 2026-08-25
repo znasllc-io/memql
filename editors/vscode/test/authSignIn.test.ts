@@ -33,15 +33,13 @@ function tokens(overrides: Partial<AuthFlowTokens> = {}): AuthFlowTokens {
     refreshToken: "refresh-1",
     expiresInSeconds: 900,
     expiresAtEpochSeconds: 1_800_000_900,
-    clientId: "mcp_minted",
-    clientIdWasRegistered: true,
+    clientId: "memql-vscode",
     ...overrides,
   };
 }
 
 interface Recorder {
   deps: PerformSignInDeps;
-  clientIds: Array<{ clusterName: string; clientId: string }>;
   persisted: Array<{ clusterName: string; credentials: SignInCredentials }>;
   signedOut: string[];
   order: string[];
@@ -49,10 +47,9 @@ interface Recorder {
 
 function recorder(
   run: PerformSignInDeps["runFlow"] = async () => tokens(),
-  failures: { clientId?: Error; persist?: Error } = {},
+  failures: { persist?: Error } = {},
 ): Recorder {
   const rec: Recorder = {
-    clientIds: [],
     persisted: [],
     signedOut: [],
     order: [],
@@ -62,11 +59,6 @@ function recorder(
     runFlow: async (c, signal) => {
       rec.order.push("flow");
       return run(c, signal);
-    },
-    persistClientId: async (clusterName, clientId) => {
-      rec.order.push("clientId");
-      if (failures.clientId !== undefined) throw failures.clientId;
-      rec.clientIds.push({ clusterName, clientId });
     },
     store: {
       persistSignIn: async (clusterName, credentials) => {
@@ -119,11 +111,10 @@ test("signInCanRecover covers exactly the credential failures", () => {
 // performSignIn
 // -----------------------------------------------------------------------------
 
-test("performSignIn persists a freshly minted client_id and the tokens", async () => {
+test("performSignIn persists the tokens", async () => {
   const rec = recorder();
   const outcome = await performSignIn(cluster(), rec.deps);
 
-  assert.deepEqual(rec.clientIds, [{ clusterName: "local", clientId: "mcp_minted" }]);
   assert.deepEqual(rec.persisted, [
     {
       clusterName: "local",
@@ -135,36 +126,30 @@ test("performSignIn persists a freshly minted client_id and the tokens", async (
       },
     },
   ]);
-  assert.equal(outcome.clientId, "mcp_minted");
-  assert.equal(outcome.clientIdPersisted, true);
+  assert.equal(outcome.clientId, "memql-vscode");
   assert.equal(outcome.expiresInSeconds, 900);
 });
 
-test("performSignIn writes the client_id BEFORE the tokens", async () => {
-  // The ordering is the point: tokens can be re-earned by signing in again, a
-  // client_id that is minted and then dropped cannot be recovered at all.
+test("performSignIn does NOT write clusters.yaml (memql#4517)", async () => {
+  // It used to, and the deletion is deliberate. The client_id was minted by
+  // RFC 7591 registration, which made it unrecoverable state that had to be
+  // committed before the tokens. Nothing is minted any more -- the id is the
+  // operator's own override or a compiled-in constant -- and writing a
+  // constant into the file would only turn today's default into tomorrow's
+  // pin. `order` is the assertion: exactly two steps, and no third.
   const rec = recorder();
   await performSignIn(cluster(), rec.deps);
-  assert.deepEqual(rec.order, ["flow", "clientId", "tokens"]);
+  assert.deepEqual(rec.order, ["flow", "tokens"]);
 });
 
-test("performSignIn leaves an already-registered client_id alone", async () => {
-  const rec = recorder(async () =>
-    tokens({ clientId: "existing", clientIdWasRegistered: false }),
-  );
+test("performSignIn reports an operator's clientId override unchanged", async () => {
+  // An entry carrying an id from the deleted registration path must keep
+  // working: it is read as an override and neither migrated nor rewritten.
+  const rec = recorder(async () => tokens({ clientId: "existing" }));
   const outcome = await performSignIn(cluster({ clientId: "existing" }), rec.deps);
 
-  assert.deepEqual(rec.clientIds, [], "an unchanged client_id must not be rewritten");
-  assert.equal(outcome.clientIdPersisted, false);
+  assert.equal(outcome.clientId, "existing");
   assert.equal(rec.persisted.length, 1, "the tokens are still stored");
-});
-
-test("performSignIn writes a client_id that disagrees with the file", async () => {
-  const rec = recorder(async () =>
-    tokens({ clientId: "reconciled", clientIdWasRegistered: false }),
-  );
-  await performSignIn(cluster({ clientId: "stale" }), rec.deps);
-  assert.deepEqual(rec.clientIds, [{ clusterName: "local", clientId: "reconciled" }]);
 });
 
 test("performSignIn stores nothing when the flow fails", async () => {
@@ -172,18 +157,13 @@ test("performSignIn stores nothing when the flow fails", async () => {
     throw new AuthFlowError("timeout", "nobody finished the page");
   });
   await assert.rejects(() => performSignIn(cluster(), rec.deps), /nobody finished the page/);
-  assert.deepEqual(rec.clientIds, []);
   assert.deepEqual(rec.persisted, []);
 });
 
-test("performSignIn propagates a token-store failure with the client_id already safe", async () => {
+test("performSignIn propagates a token-store failure", async () => {
   const rec = recorder(undefined, { persist: new Error("secret storage refused") });
   await assert.rejects(() => performSignIn(cluster(), rec.deps), /secret storage refused/);
-  assert.deepEqual(
-    rec.clientIds,
-    [{ clusterName: "local", clientId: "mcp_minted" }],
-    "the registration is committed first precisely so it survives this",
-  );
+  assert.deepEqual(rec.persisted, []);
 });
 
 test("performSignIn hands its AbortSignal to the flow", async () => {
@@ -316,7 +296,6 @@ function stubRunner(label: string, seen: string[]): AuthFlowRunner {
       accessToken: "A",
       refreshToken: "R",
       clientId: "c",
-      clientIdWasRegistered: false,
       expiresInSeconds: 900,
       expiresAtEpochSeconds: 900,
     } as AuthFlowTokens;

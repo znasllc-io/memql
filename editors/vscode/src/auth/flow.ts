@@ -1,4 +1,4 @@
-// The browser sign-in flow: register -> authorize -> callback -> exchange.
+// The browser sign-in flow: authorize -> callback -> exchange.
 //
 // -----------------------------------------------------------------------------
 // WHAT THIS DOES AND DOES NOT OWN
@@ -59,7 +59,7 @@ import {
   type LoopbackOptions,
 } from "./loopback.js";
 import { generatePkcePair, generateState } from "./pkce.js";
-import { ensureClientId } from "./register.js";
+import { resolveClientId } from "./wellKnownClient.js";
 
 /** Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL string. */
 export type ExternalUriResolver = (url: string) => string | Promise<string>;
@@ -85,8 +85,6 @@ export interface AuthFlowDeps {
   signal?: AbortSignal;
   /** Injected clock, so the computed expiry is assertable. Defaults to Date.now. */
   now?: () => number;
-  /** Overrides the client_name shown on the consent screen. */
-  clientName?: string;
 }
 
 export interface AuthFlowTokens {
@@ -100,10 +98,12 @@ export interface AuthFlowTokens {
   expiresAtEpochSeconds: number;
   /** The scope string the server returned, when it returned one. */
   scope?: string;
-  /** The client_id this flow authorized with -- existing or freshly minted. */
+  /**
+   * The client_id this flow authorized with: the cluster's override, or the
+   * well-known first-party id. Reported so a caller can log or display it;
+   * nothing persists it, because there is nothing minted to keep.
+   */
   clientId: string;
-  /** True when clientId was minted by this call and the caller must persist it. */
-  clientIdWasRegistered: boolean;
 }
 
 /**
@@ -130,14 +130,10 @@ export async function runAuthorizationFlow(
   const now = deps.now ?? (() => Date.now());
   const startListener = deps.startListener ?? startLoopbackListener;
 
-  // Registration first: it is the only step that can fail without anything
-  // being bound or opened, so failing here costs the operator nothing.
-  const { clientId, registered } = await ensureClientId({
-    issuer,
-    clientId: cluster.clientId,
-    clientName: deps.clientName,
-    fetch: doFetch,
-  });
+  // A local constant lookup, not a network call: identity carries this client
+  // compiled in (wellKnownClient.ts). The step that used to be the first thing
+  // to fail -- POST /register against a cluster with DCR off -- is gone.
+  const clientId = resolveClientId(cluster.clientId);
 
   const pkce = generatePkcePair();
   const state = generateState();
@@ -196,7 +192,6 @@ export async function runAuthorizationFlow(
       expiresAtEpochSeconds:
         tokens.expiresInSeconds > 0 ? nowSeconds + tokens.expiresInSeconds : 0,
       clientId,
-      clientIdWasRegistered: registered,
     };
   } finally {
     // Idempotent: on the success path the wait has already settled and this is
