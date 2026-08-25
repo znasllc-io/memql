@@ -2,8 +2,21 @@
 #
 #   instances   1
 #   resources   1 vCPU / 4 GiB
-#   storage     32 GiB data + 16 GiB WAL
+#   storage     32 GiB data + 32 GiB WAL
 #   HA          OFF
+#
+# THE WAL VOLUME IS 32 GiB BECAUSE 16 GiB WAS NOT SURVIVABLE (memql#4459). WAL
+# is recycled only once it has been ARCHIVED, so any archiving stall converts
+# the WAL volume into an unbounded write buffer. On a live entry instance a
+# broken barman destination (memql#4460) did exactly that over one weekend: the
+# 16 GiB volume filled, CNPG's free-space guard REFUSED TO START Postgres
+# ("Not enough WAL disk space, avoid starting PostgreSQL"), the mesh crashlooped
+# behind the dead database and the front door served 503s.
+#
+# This size is a TIME BUDGET, not a capacity estimate -- it buys the hours in
+# which MemqlDatabaseWALArchivingFailing can be noticed and acted on. It is
+# therefore not a substitute for archiving working, and raising it further is
+# not a fix for an archiver that is down.
 #
 # THE HA-OFF DEFAULT IS THE PRODUCT DECISION, not an oversight: a single
 # instance has no automatic failover, so a node loss is a restore rather than a
@@ -25,7 +38,7 @@ patches:
       - { op: replace, path: /spec/instances, value: 1 }
       - { op: replace, path: /spec/enablePDB, value: false }
       - { op: replace, path: /spec/storage/size, value: 32Gi }
-      - { op: replace, path: /spec/walStorage/size, value: 16Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 32Gi }
       - op: replace
         path: /spec/resources
         value:

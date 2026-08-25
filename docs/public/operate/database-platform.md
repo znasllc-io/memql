@@ -44,6 +44,18 @@ None of this can live in a manifest, and each item is load-bearing.
 | Soft delete (blobs + containers) | **on**, ≥ 30 days | a delete is recoverable, and matches the PITR window |
 | Container | `memql-db-backups` | the overlay names it |
 
+**Put the account name into the overlay's `destinationPath`, in the HOST.** Both
+cloud overlays ship
+`azure://REPLACE-WITH-BACKUP-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/`;
+substitute the account you created above. This is not cosmetic and it is not
+optional — barman decides which code path a destination takes from the host
+alone, before it reads any credential, and a host that is a bare container name
+is read as an **emulator** which then demands a connection string that workload
+identity deliberately does not provide. The overlays carried the bare-container
+form until memql#4460 and archived nothing for an instance's entire lifetime,
+with a Ready `Cluster` and healthy pods throughout.
+`TestBackupDestinationSurvivesBarmansEmulatorBranch` refuses the bare form now.
+
 **The cluster identity gets write, not purge.** Grant the federated managed
 identity `Storage Blob Data Contributor` on this account and **do not** grant
 delete/purge rights at the account level, and put the account in a resource
@@ -126,6 +138,46 @@ noticed:
 
 A stalled archiver becomes a full WAL volume within hours: WAL is *retained*
 rather than recycled while archiving is broken. Fix the archiver before resizing.
+That sequence is not hypothetical — it is memql#4459 exactly, and it is why the
+`entry` tier's WAL volume is 32 GiB rather than 16.
+
+**A full WAL volume does not degrade the database, it prevents it from
+starting.** CNPG has a free-space guard that refuses to launch Postgres at all
+rather than start an instance that will wedge:
+
+```
+Not enough WAL disk space, avoid starting PostgreSQL
+error: no free disk space for WALs
+```
+
+So the recovery is not "restart it" — the pod will `CrashLoopBackOff`
+indefinitely, and on memql#4459 it did so 225 times over ~18 hours. Expand the
+PVC first (online for both storage classes in use), confirm the reported
+capacity has actually grown, and only then delete the pod. Everything that
+depends on the database crashloops behind it, so the visible symptom is the
+front door serving 503s rather than anything naming Postgres.
+
+### Verifying a backup actually landed
+
+**No alert here covers backup age, deliberately.** The CNPG metrics that would
+carry one (`cnpg_collector_last_available_backup_timestamp` and its two
+siblings) were deprecated in v1.26 and **do not update at all under
+plugin-based backups**, which is the mode MemQL runs in everywhere — so they sit
+at zero forever and a rule built on one fires permanently or never.
+
+An `ObjectStore` reports whether it *parsed*, never whether a byte was written.
+The check that means something reads the container:
+
+```bash
+make db-backup-verify ACCOUNT=<storage-account>
+make db-backup-verify ACCOUNT=<storage-account> MAX_AGE_HOURS=48
+```
+
+It reports base-backup and WAL-archive ages separately (they fail
+independently), and it distinguishes *"nothing has ever been written"* from
+*"I was not allowed to look"* — Azure storage RBAC is data-plane, so
+subscription **Owner grants no read on blobs**, and a refused listing must
+never be reported as a missing backup.
 
 ### Grafana dashboard
 

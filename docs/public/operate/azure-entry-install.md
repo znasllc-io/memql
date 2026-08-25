@@ -47,7 +47,7 @@ numbers an entry / client install actually wants:
 
 | | `overlays/cloud` | `overlays/cloud-entry` |
 |---|---|---|
-| Database | `cnpg-db/presets/top` | `cnpg-db/presets/entry` (1 instance, 32+16 GiB) |
+| Database | `cnpg-db/presets/top` | `cnpg-db/presets/entry` (1 instance, 32+32 GiB) |
 | Mesh replicas | 2 | 1 |
 | Voice / LiveKit / MCP | running pins + fail-closed placeholders | replicas 0 (voice-off) |
 
@@ -487,7 +487,13 @@ repo-credential writes, and the Argo source switch are owner-gated.
   `MEMQL_DOMAIN`, the CNPG `serviceAccountTemplate` workload-identity
   client id (`REPLACE-WITH-DB-IDENTITY-CLIENT-ID` in the overlay), and the
   backup `ObjectStore` `destinationPath` (the storage account is an install
-  value -- capture it, do not reconstruct it).
+  value -- capture it, do not reconstruct it). **The account belongs in the
+  HOST**, i.e.
+  `azure://<account>.blob.core.windows.net/memql-db-backups/`, replacing the
+  overlay's `REPLACE-WITH-BACKUP-STORAGE-ACCOUNT`: barman reads a bare
+  container host as an emulator and then requires a connection string that
+  workload identity does not supply, archiving nothing while the `Cluster`
+  reports Ready (memql#4460).
 - **Out of band -- no engine manifest defines them:** the cluster-scoped
   `ClusterIssuer letsencrypt-prod` (HTTP-01) plus `letsencrypt-dns01`
   (DNS-01, which unlike the first one IS in git -- overlays/cloud-entry

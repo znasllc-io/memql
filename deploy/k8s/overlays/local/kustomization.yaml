@@ -454,14 +454,27 @@ patches:
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
-      # AN EMULATOR DESTINATION IS A FULL HTTP URL INCLUDING THE ACCOUNT, not
-      # the `azure://<container>/` form staging uses against real Blob. barman
-      # refuses the scheme form here outright --
+      # EVERY DESTINATION NAMES THE ACCOUNT; only the SPELLING differs between
+      # an emulator and a real account:
+      #
+      #   Azurite (here)    http://azurite:10000/<account>/<container>
+      #   real Azure Blob   azure://<account>.blob.core.windows.net/<container>/
+      #
+      # This comment used to describe `azure://<container>/` as "the form
+      # staging uses against real Blob". IT IS NOT A VALID FORM ANYWHERE, and
+      # believing it was is memql#4460: barman decides real-vs-emulated from the
+      # HOST alone, so a bare container host sends a real Azure account down the
+      # emulator path, where it then demands a connection string that workload
+      # identity does not supply. Here that same bare form fails one step later
+      # and more loudly, because local DOES supply a connection string, so
+      # barman gets past the credential check and into the path split:
       #   "emulated storage URL azure://memql-db-backups/ is malformed"
-      # -- and it surfaces as ContinuousArchivingFailing on a Cluster that still
+      # Both surface as ContinuousArchivingFailing on a Cluster that still
       # reports Ready, with an exit status naming neither the URL nor the shape.
-      # This is a property of Azurite, not of the environment, which is why it
-      # is the one line where local's value differs in kind rather than degree.
+      #
+      # So local's value differs from the cloud's in SPELLING, not in kind --
+      # and it is the connection string, not the URL, that makes the emulator
+      # path work at all.
       - op: replace
         path: /spec/configuration/destinationPath
         value: "http://azurite:10000/devstoreaccount1/memql-db-backups"

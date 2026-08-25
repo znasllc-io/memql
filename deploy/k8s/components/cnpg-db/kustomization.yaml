@@ -27,7 +27,7 @@
 #       patch: |
 #         - op: replace
 #           path: /spec/configuration/destinationPath
-#           value: "azure://memql-db-backups/"
+#           value: "azure://<account>.blob.core.windows.net/memql-db-backups/"
 #
 #   images:
 #     - name: memql-db
@@ -41,6 +41,10 @@
 #      so this component ships the placeholder below; a rendered overlay that
 #      still contains it would archive nowhere.
 #      TestNoOverlayShipsThePlaceholderBackupDestination refuses that.
+#      IT MUST NAME THE STORAGE ACCOUNT IN THE HOST -- barman reads a bare
+#      container host as an EMULATOR and then demands a connection string
+#      (memql#4460). objectstore.yaml carries the branch;
+#      TestBackupDestinationSurvivesBarmansEmulatorBranch refuses the rest.
 #   2. The image. This component names `memql-db` with no tag, so an overlay
 #      that forgets the `images:` entry fails to pull rather than silently
 #      running some other Postgres.

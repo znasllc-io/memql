@@ -103,11 +103,22 @@ func TestCloudEntryUsesTheEntryPreset(t *testing.T) {
 	if !strings.Contains(rendered, "instances: 1") {
 		t.Error("memql-db is not 1 instance; cloud-entry must compose cnpg-db/presets/entry")
 	}
+	// Data and WAL are BOTH 32Gi at this tier since memql#4459, so a bare
+	// substring match can no longer tell them apart, and a check that cannot
+	// fail for one of the two things it names is worse than no check.
+	//
+	// Two things this deliberately does NOT do. It does not assert "16Gi
+	// appears nowhere" -- that would fire on any unrelated 16Gi somebody adds
+	// later (a memory limit, say) and report it as a WAL regression. And it
+	// does not model the CNPG CRD: the authoritative per-field assertion is
+	// TestPresetsMatchTheirDocumentedTiers, which decodes the Cluster. What is
+	// being checked HERE is only that cloud-entry composes the entry preset.
 	if !strings.Contains(rendered, "32Gi") {
 		t.Error("memql-db data volume is not 32Gi")
 	}
-	if !strings.Contains(rendered, "16Gi") {
-		t.Error("memql-db WAL volume is not 16Gi")
+	if got := walStorageSize(rendered); got != "32Gi" {
+		t.Errorf("memql-db walStorage size = %q, want 32Gi -- the entry preset must not regress to the "+
+			"16Gi that filled and stopped Postgres (memql#4459)", got)
 	}
 	if strings.Contains(rendered, "256Gi") {
 		t.Error("memql-db still carries the top preset 256Gi data volume")
@@ -285,4 +296,36 @@ func TestCloudKeepsLiveKitLoadBalancers(t *testing.T) {
 			t.Errorf("cloud overlay Service %s has externalTrafficPolicy=%q, want Local", name, r.Spec.ExternalTrafficPolicy)
 		}
 	}
+}
+
+// walStorageSize returns the `size:` under the rendered Cluster's walStorage
+// block, or "" if there is none.
+//
+// Scanned line-wise rather than matched with one regex because YAML key order
+// inside the block is not a guarantee we should depend on: a regex requiring
+// `size:` to follow `walStorage:` immediately would start failing the day
+// something reorders the map, and it would fail claiming the WAL volume is the
+// wrong size -- which is a false report about a real risk, the worst kind.
+func walStorageSize(rendered string) string {
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "walStorage:" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		for _, sub := range lines[i+1:] {
+			trimmed := strings.TrimSpace(sub)
+			if trimmed == "" {
+				continue
+			}
+			// Left the block: same or shallower indentation.
+			if len(sub)-len(strings.TrimLeft(sub, " ")) <= indent {
+				break
+			}
+			if v, ok := strings.CutPrefix(trimmed, "size:"); ok {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	return ""
 }

@@ -67,9 +67,22 @@ spec:
         # cluster whose archiving has NEVER worked would stay silent under (1)
         # alone. That is exactly the state a misconfigured destinationPath
         # produces on day one.
+        #
+        # THE SENTINEL IS -1, NOT 0, AND THIS ALERT TESTED 0 UNTIL memql#4468.
+        # CNPG's built-in pg_stat_archiver query coalesces a NULL timestamp to
+        # MINUS ONE, not to zero:
+        #
+        #   COALESCE(EXTRACT(EPOCH FROM last_archived_time), -1) AS last_archived_time
+        #
+        # A zero would mean "archived at 1970-01-01T00:00:00Z", which no cluster
+        # ever reports. So `== 0` was unsatisfiable: the rule written to catch a
+        # wrong destinationPath on day one could not fire on day one or on any
+        # other day, and it sat green through an entire instance lifetime whose
+        # backup container stayed empty (memql#4460). An alert that cannot fire
+        # is worse than a missing one, because its presence is read as coverage.
         - alert: MemqlDatabaseWALNeverArchived
           expr: |
-            cnpg_pg_stat_archiver_last_archived_time == 0
+            cnpg_pg_stat_archiver_last_archived_time == -1
           for: 30m
           labels:
             severity: critical
