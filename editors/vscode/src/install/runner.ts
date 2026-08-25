@@ -354,6 +354,13 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "deploy.settleAfterSync": "scripts/deploy/settle-after-sync.sh",
   "deploy.renderDiff": "scripts/deploy/render-diff.sh",
 
+  // Release + version provenance (epic memql#4493). reportInstanceVersion
+  // reports the declared, rendered and running engine refs together;
+  // release.engine publishes a GitHub release and verifies the image build it
+  // triggers actually started -- a pushed git tag builds nothing.
+  "deploy.reportInstanceVersion": "scripts/deploy/report-instance-version.sh",
+  "release.engine": "scripts/release/release-engine.sh",
+
   // Tenant lifecycle (epic memql#3852, task memql#3853).
   "fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
   "fleet.tenantSuspend": "scripts/fleet/tenant-suspend.sh",

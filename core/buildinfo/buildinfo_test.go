@@ -2,6 +2,7 @@ package buildinfo
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,115 @@ func TestVersionIsNeverEmpty(t *testing.T) {
 		stampRelease(t, stamp)
 		if Version() == "" {
 			t.Fatalf("Version() = \"\" with release stamped as %q", stamp)
+		}
+	}
+}
+
+// stampCommit sets the link-time commit variable for the duration of one test.
+func stampCommit(t *testing.T, value string) {
+	t.Helper()
+	prior := commit
+	commit = value
+	t.Cleanup(func() { commit = prior })
+}
+
+// TestStampedCommitWins pins the source ORDER (memql#4486). The link-time stamp
+// must beat the toolchain's VCS table, because those two disagree in exactly
+// the case that matters: an image built from a Docker context has no .git, so
+// only the stamp is populated -- and a developer binary built from a checkout
+// has both, where the stamp is the one the build deliberately set.
+func TestStampedCommitWins(t *testing.T) {
+	stampCommit(t, "0123456789abcdef0123456789abcdef01234567")
+
+	if got, want := Commit(), "0123456789abcdef0123456789abcdef01234567"; got != want {
+		t.Fatalf("Commit() = %q, want the link-time stamp %q", got, want)
+	}
+	if got, want := ShortCommit(), "0123456789ab"; got != want {
+		t.Fatalf("ShortCommit() = %q, want %q (git's 12-character abbreviation)", got, want)
+	}
+}
+
+// TestCommitStampIsTrimmed mirrors the release half: the value arrives through
+// a shell and a Dockerfile, and a trailing newline must not become part of the
+// revision. A whitespace-only stamp is an unset build arg, not a revision of "".
+func TestCommitStampIsTrimmed(t *testing.T) {
+	stampCommit(t, "  abc123def456\n")
+	if got, want := Commit(), "abc123def456"; got != want {
+		t.Fatalf("Commit() = %q, want %q", got, want)
+	}
+
+	stampCommit(t, "   ")
+	// Falls through to the VCS table, which in a test binary may or may not be
+	// populated depending on how the test was invoked. The contract being
+	// pinned is only that a blank stamp is not itself the answer.
+	if got := Commit(); strings.TrimSpace(got) != got {
+		t.Fatalf("Commit() = %q; a whitespace-only stamp must not be returned as a revision", got)
+	}
+}
+
+// TestDirtyRevisionKeepsItsSuffix guards the abbreviation from silently
+// laundering a dirty build into a clean-looking one. ShortCommit truncates the
+// sha, and a naive truncation drops the suffix -- which turns "these bytes are
+// not what that commit contains" into a confident, wrong revision, the same
+// failure class the release half of this package exists to prevent.
+func TestDirtyRevisionKeepsItsSuffix(t *testing.T) {
+	stampCommit(t, "0123456789abcdef0123456789abcdef01234567-dirty")
+
+	if got, want := ShortCommit(), "0123456789ab-dirty"; got != want {
+		t.Fatalf("ShortCommit() = %q, want %q -- a dirty build must not abbreviate to a clean revision", got, want)
+	}
+}
+
+// TestLogAttrsOmitsAnUnknownCommit pins the omission rather than an empty
+// field. A structured log field carrying "" matches a query filtering on
+// commit and reads, to a person, as an answered question.
+func TestLogAttrsOmitsAnUnknownCommit(t *testing.T) {
+	stampCommit(t, "")
+
+	attrs := LogAttrs()
+	if len(attrs)%2 != 0 {
+		t.Fatalf("LogAttrs() = %v, which is not alternating key/value pairs", attrs)
+	}
+	for i := 0; i < len(attrs); i += 2 {
+		if attrs[i] == "commit" {
+			if v, _ := attrs[i+1].(string); v == "" {
+				t.Fatal("LogAttrs() emitted commit=\"\"; an unknown revision must be omitted, not logged empty")
+			}
+		}
+	}
+
+	// And when it IS known, it must be present.
+	stampCommit(t, "0123456789abcdef")
+	attrs = LogAttrs()
+	var found bool
+	for i := 0; i < len(attrs); i += 2 {
+		if attrs[i] == "commit" {
+			found = true
+			if got, want := attrs[i+1], "0123456789ab"; got != want {
+				t.Fatalf("LogAttrs() commit = %v, want %v", got, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("LogAttrs() omitted commit on a stamped build")
+	}
+}
+
+// TestLogAttrsAlwaysNamesAVersion is the boot line's contract: whatever else is
+// unknown, the line states a version, because a boot line that omits it leaves
+// the operator exactly where memql#4486 found them.
+func TestLogAttrsAlwaysNamesAVersion(t *testing.T) {
+	for _, stamp := range []string{"", "v1.2.3"} {
+		stampRelease(t, stamp)
+		attrs := LogAttrs()
+		var version any
+		for i := 0; i < len(attrs); i += 2 {
+			if attrs[i] == "version" {
+				version = attrs[i+1]
+			}
+		}
+		if v, _ := version.(string); v == "" {
+			t.Fatalf("LogAttrs() named no version with release stamped %q", stamp)
 		}
 	}
 }

@@ -41,6 +41,9 @@ Two findings this write-up did NOT contain were raised against it afterwards and
 are also closed: the version-bump render diff (#4483) and the ownership-reset
 certificate rate limit (#4479).
 
+Three more, from the same bring-up, are recorded in §14 below and closed by epic
+#4493 and the completeness half of #4488.
+
 One thing here is now WRONG and is left in place with this correction rather
 than edited, because the correction is the more useful record: §3 item 2 says
 `make secrets` mints the internal CA "from mkcert". It does not -- mkcert mints
@@ -464,7 +467,54 @@ matching does not fail — it silently renders the object it was supposed to
 remove, which is the same permanent-red class as everything above. Corrected
 and gated with the rest in memql#4487.
 
+## 14. A cluster could not say what it was running
+
+Three findings that belong together, because each is a version fact living
+somewhere a person cannot read it.
+
+**No node logged a version at boot, and the intuitive answer was WRONG rather
+than merely unavailable** (memql#4486). Asked *"what version is running?"*, the
+honest answer required mapping a live image digest back to a GHCR tag. The
+value was already in the binary — `core/buildinfo` has carried the release
+since memql#3998 — and nothing ever printed it.
+
+Stamping the release alone would not have been enough. An instance declares
+`ENGINE_REF=v0.19.6` and composes `cloud-entry?ref=v0.19.6` while its binaries
+are **0.19.5**, because a tag's image pins are written *before* that tag's own
+images exist, and `v0.19.6`'s `cloud-entry` says so in a comment. Manifests and
+binaries legitimately differ by one release. So *"we are on v0.19.6"* is a
+statement about **manifests** that every reader hears as a statement about
+**code** — and during an incident that is the difference between reading the
+right diff and the wrong one.
+
+Closed by stamping the git revision beside the release, logging both from
+`app.newApp` (the one constructor all ten node types share, so no build tag can
+make the line inert), and having `repairInstance` report the **triple** —
+declared, rendered, running — as a sibling of the dependency gate rather than
+nested under it. A refused repair is exactly when an operator needs to know
+what is executing.
+
+**A git tag builds no images** (memql#4485). `build-engine-images` is
+`workflow_dispatch`-only; its single automatic trigger is a
+`release: [published]` event. Measured against the repository: **thirteen tags
+between v0.16.0 and v0.19.7 carry no release**, so every 0.19.x image came from
+a dispatch somebody remembered to run — walking straight back into the gap
+memql#2519 was opened to close. Closed by `release.engine`, which publishes the
+release and then **polls for the dispatched run**, because the bridge is an
+event handler and one that silently does not fire is indistinguishable from one
+that has not fired yet.
+
+**A module's hold could go stale** (memql#4488, completeness half). §12 removed
+voice's two ExternalSecrets from the cloud-entry render. The list driving that
+is hand-maintained — correctly, since a third voice object arriving under an
+unanticipated component name is not recognisable as voice's to any rule — but
+nothing required a NEW ExternalSecret to be classified at all, so it would
+render on a voice-off install and bring §12's permanent `Degraded` straight
+back. Closed by requiring every ExternalSecret to be declared engine-core or
+module-owned, failing at the moment one is added.
+
 > Numbering note: memql#4477 and memql#4478 cite these as §10 and §12 of an
 > earlier draft of this write-up; they are §10 and §11 here. memql#4487 and
 > memql#4489 cite §25 and §26 of the same draft; both are folded into §12
-> here, with the ordering traps in §13.
+> here, with the ordering traps in §13. memql#4485 and memql#4486 cite §15 and
+> §18 of that draft; both are §14 here.

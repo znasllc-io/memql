@@ -16,6 +16,8 @@ package app
 import (
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/database"
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity/verifier"
@@ -34,6 +37,7 @@ import (
 	"github.com/znasllc-io/memql/component/router"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/service"
+	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/logger"
@@ -278,7 +282,52 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 		a.overrides.AssertSelfAuthenticatedSurface = server.AssertSelfAuthenticatedRoutesFailClosed
 	}
 
+	logBuildIdentity(a.Logger)
+
 	return a
+}
+
+// logBuildIdentity writes the one line that lets a running cluster state what
+// it is running (memql#4486).
+//
+// Before this, answering "what version is running?" required mapping a live
+// image DIGEST back to a registry tag, because no node said anything at boot --
+// there was no version or commit field anywhere in a node's startup output. The
+// value was already IN the binary (core/buildinfo, memql#3998); nothing ever
+// printed it.
+//
+// AND THE INTUITIVE ANSWER IS WRONG, NOT MERELY UNAVAILABLE, which is what
+// makes a log line worth adding rather than a runbook step. An instance
+// declares ENGINE_REF=v0.19.6 and composes cloud-entry?ref=v0.19.6 while its
+// binaries are 0.19.5, because a tag's image pins are written before that tag's
+// own images exist. So "we are on v0.19.6" is a statement about MANIFESTS that
+// every reader hears as a statement about CODE, and during an incident that is
+// the difference between reading the right diff and the wrong one. The commit
+// is the field that settles it.
+//
+// IT LIVES IN newApp, WHICH IS DELIBERATE. newApp is the one constructor every
+// tagged Build() calls, so the line reaches all ten node types with no build
+// tag able to make it inert -- a failure mode this repository has shipped
+// before. Putting it in a per-node Build() would give nine node types a boot
+// line and one silence, and the silent one would be discovered during an
+// incident.
+//
+// It is INFO on the node's own logger, so it lands on stdout for a server (what
+// kubectl logs and cloud ingestion already collect) and on stderr for a CLI
+// subcommand -- which is what keeps `bearer=$(... mint)` capturing a bearer and
+// not a log line (memql#353).
+func logBuildIdentity(log *slog.Logger) {
+	if log == nil {
+		return
+	}
+	attrs := buildinfo.LogAttrs()
+	if nt := envregistry.ResolveNodeType(); nt != "" {
+		attrs = append(attrs, "nodeType", nt)
+	}
+	if id := strings.TrimSpace(os.Getenv("MEMQL_NODE_ID")); id != "" {
+		attrs = append(attrs, "nodeId", id)
+	}
+	log.Info("memql node build identity", attrs...)
 }
 
 // fatal logs a fatal error and exits. Uses the injectable FatalWithLogger.

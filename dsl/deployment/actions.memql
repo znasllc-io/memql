@@ -413,3 +413,50 @@ action renderDiff {
   }
   capability script(script: "deploy.renderDiff", overlayPath: args.overlayPath, toRef: args.toRef, fromRef: args.fromRef, acceptKinds: args.acceptKinds, outputDir: args.outputDir)
 }
+
+// =============================================================================
+//   Release + version provenance (epic memql#4493)
+// =============================================================================
+//
+// A cluster should be able to say what it is running, and a version that was
+// cut should have images. Neither held: no node logged a version at boot, and
+// thirteen tags between v0.16.0 and v0.19.7 carry no GitHub release -- which
+// means no images, because a pushed git tag triggers nothing.
+
+// Backend: scripts/deploy/report-instance-version.sh.
+/// Report an instance's DECLARED ref (product.env ENGINE_REF), RENDERED ref (what the overlay
+/// composes) and RUNNING images together, plus what the nodes report about themselves. The three
+/// are ALLOWED to differ -- a tag's image pins are written before that tag's own images exist, so
+/// an instance declaring v0.19.6 legitimately runs 0.19.5 binaries. Quoting any one of them alone
+/// answers "what version is running?" with a statement about a different layer, which during an
+/// incident is the difference between reading the right diff and the wrong one. Reports rather
+/// than refuses: divergence here is usually correct.
+action reportInstanceVersion {
+  args {
+    namespace   string
+    overlayPath string
+    productEnv  string
+    declaredRef string
+    dryRun      boolean
+  }
+  capability script(script: "deploy.reportInstanceVersion", namespace: args.namespace, overlayPath: args.overlayPath, productEnv: args.productEnv, declaredRef: args.declaredRef, dryRun: args.dryRun)
+}
+
+// Backend: scripts/release/release-engine.sh.
+/// Publish a GitHub RELEASE for an engine version and then verify the image build it triggers
+/// actually started. A pushed git tag builds NOTHING: build-engine-images is dispatch-only and its
+/// single automatic trigger is a `release: [published]` event. The verification is the point -- the
+/// bridge is an event handler, and one that silently does not fire is indistinguishable from one
+/// that has not fired yet, until the version is deployed and every pod lands in ImagePullBackOff.
+/// Idempotent on an already-published release; REFUSES a draft, which emits no publish event.
+action releaseEngine {
+  args {
+    version     string!
+    repo        string
+    notes       string
+    targetSha   string
+    pollSeconds string
+    dryRun      boolean
+  }
+  capability script(script: "release.engine", version: args.version, repo: args.repo, notes: args.notes, targetSha: args.targetSha, pollSeconds: args.pollSeconds, dryRun: args.dryRun)
+}
