@@ -48,6 +48,18 @@
   var timer = null;
   var finished = false;
 
+  // sawState remembers that some poll got a readable answer, which can only
+  // happen while this browser holds the matching binding cookie. It is what
+  // lets a later 404 mean "the binding was spent" rather than "there never
+  // was one".
+  var sawState = false;
+
+  // terminal marks the poll as concluded with its answer on screen. Only the
+  // 404-after-a-200 branch needs it: every other conclusion returns before
+  // schedule(), but that branch flows through the shared null path below,
+  // which re-arms.
+  var terminal = false;
+
   function stop(message, subtle) {
     if (timer) window.clearTimeout(timer);
     timer = null;
@@ -80,6 +92,17 @@
     })
       .then(function (res) {
         if (res.status === 404) {
+          if (sawState) {
+            // The binding matched a poll ago and now it does not. Two
+            // things do that: finishSignIn cleared memql_ml for the whole
+            // browser (the link completed same-device in the email-link
+            // tab), or the cookie aged out at the row's own expiry. Either
+            // way this tab's wait is over -- without this branch it kept
+            // saying "waiting" and re-polled a dead row until the deadline.
+            terminal = true;
+            stop("This sign-in was finished in another tab, or the link has expired. You can close this page, or request a new link if you are not signed in.", true);
+            return null;
+          }
           // Unknown id, or this browser does not hold the binding. Both
           // answer the same way on purpose, and neither is recoverable by
           // polling harder.
@@ -94,6 +117,7 @@
           schedule();
           return;
         }
+        sawState = true;
         switch (body.state) {
           case "approved":
             finish();
@@ -116,7 +140,7 @@
   }
 
   function schedule() {
-    if (finished) return;
+    if (finished || terminal) return;
     timer = window.setTimeout(tick, POLL_MS);
   }
 
