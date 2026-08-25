@@ -24,7 +24,9 @@ import { RefreshCw } from "../ui/icons";
 //
 // GREEN IS THE TRANSPORT: `status === "connected"` is green, everything else
 // is red. Connecting is not connected -- an amber "nearly" would let a console
-// that is not reading anything look like one that is.
+// that is not reading anything look like one that is. RECONNECTING (memql#4537)
+// is red for exactly that reason: the SDK will probably recover in a second,
+// and until it does the console is not reading anything.
 //
 // THE NODE ID IS THE DOT'S LABEL. It names the replica serving THIS stream
 // (ServerHello.node_id), which in a mesh is a different fact from "which
@@ -43,17 +45,27 @@ const LABELS: Record<string, string> = {
   idle: "Not connected",
   connecting: "Connecting",
   connected: "Connected",
+  reconnecting: "Reconnecting",
   closed: "Disconnected",
   error: "Connection failed",
 };
 
 export function RailStatus({ collapsed }: { collapsed: boolean }): ReactNode {
-  const { status, nodeId, engineVersion, error, reconnect } = useCluster();
+  const { status, nodeId, engineVersion, error, reconnect, reconnectAttempt } = useCluster();
 
   const tone = status === "connected" ? "ok" : "danger";
   const versionLabel = engineVersion === "" ? "dev" : engineVersion;
-  const statusLabel = LABELS[status] ?? status;
-  const canRetry = status === "error" || status === "closed";
+  // The attempt count rides the label rather than a separate element: it is
+  // the difference between "this blipped" and "this has been down a while",
+  // which is the only question a person asks of a reconnecting indicator.
+  const statusLabel =
+    status === "reconnecting" && reconnectAttempt > 1
+      ? `Reconnecting (${reconnectAttempt})`
+      : (LABELS[status] ?? status);
+  // Reconnecting is retryable too, and the button means something different
+  // there: the SDK is already retrying on a backoff, so pressing it is
+  // "sooner" rather than "instead" (memql#4537).
+  const canRetry = status === "error" || status === "closed" || status === "reconnecting";
 
   // Collapsed, the node id has nowhere to render, so it joins the tooltip --
   // together with the status word and the error, which are the two other

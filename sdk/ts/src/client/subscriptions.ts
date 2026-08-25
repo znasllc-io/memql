@@ -48,9 +48,29 @@ export interface GraphSubscribeOptions {
   actions?: GraphAction[];
 }
 
+// SubscribeFields is the wire shape of one registered subscription, RETAINED
+// so it can be replayed on a fresh stream after a reconnect (memql#4537).
+//
+// Retaining the spec -- not just the handler -- is the whole change: before
+// this, resubscription after a redial worked only because a consumer happened
+// to re-run the code that subscribed (in the portal, a React effect keyed on
+// the new manager's identity). That is emergent, not contractual, and a
+// consumer without that accident simply went deaf.
+interface SubscribeFields {
+  kind: ReturnType<typeof subscriptionKindWire>;
+  filter?: string;
+  concept?: string;
+  actions?: ReturnType<typeof graphActionWire>[];
+}
+
+interface SubscriptionRecord {
+  handler: EventHandler;
+  fields: SubscribeFields;
+}
+
 export class SubscriptionManager {
   private readonly dispatcher: Dispatcher;
-  private readonly subs = new Map<string, EventHandler>();
+  private readonly subs = new Map<string, SubscriptionRecord>();
   private readonly eventUnregister: Unregister;
   private stopped = false;
 
@@ -59,16 +79,51 @@ export class SubscriptionManager {
     this.eventUnregister = dispatcher.addEventListener((msg) => {
       const payload = readServerPayload(msg);
       if (payload?.kind !== "event") return;
-      const handler = this.subs.get(payload.value.subscriptionId);
-      if (!handler) return;
+      const record = this.subs.get(payload.value.subscriptionId);
+      if (!record) return;
       try {
-        handler(eventFromWire(payload.value));
+        record.handler(eventFromWire(payload.value));
       } catch {
         // Consumer handlers are isolated -- a thrown error is the
         // consumer's bug, not ours. Drop silently to avoid breaking
         // unrelated subscriptions.
       }
     });
+  }
+
+  // replay re-sends every live subscription on a freshly redialed stream
+  // (memql#4537). Called by the Connection after a successful reconnect,
+  // BEFORE consumers are told the cycle happened -- so a consumer that
+  // re-seeds on the cycle notification is already subscribed when its read
+  // goes out, which is the subscribe-then-read ordering the whole contract
+  // rests on (memql#4536, design D2).
+  //
+  // Subscription IDS ARE REUSED. They are client-minted and scoped to a
+  // stream, so the new server session has never seen them, and reusing them
+  // keeps every handler registration valid -- minting fresh ids would orphan
+  // the handler map and silently deliver nothing.
+  //
+  // Returns how many were replayed, which is what a test asserts on.
+  replay(): number {
+    if (this.stopped) return 0;
+    let sent = 0;
+    for (const [subscriptionId, record] of this.subs) {
+      try {
+        this.dispatcher.send({ subscribe: { subscriptionId, ...record.fields } });
+        sent++;
+      } catch {
+        // The fresh socket died between redial and replay. The reconnect
+        // loop is already watching for that; another attempt replays this
+        // same map.
+      }
+    }
+    return sent;
+  }
+
+  // activeCount is the number of live subscriptions. Exposed for consumers
+  // (and tests) that reason about what a reconnect will replay.
+  get activeCount(): number {
+    return this.subs.size;
   }
 
   // subscribeGraph opens a STRUCTURED graph subscription and returns an
@@ -105,18 +160,10 @@ export class SubscriptionManager {
 
   // register stamps a fresh subscription id, wires the handler, and sends
   // the SubscribeMsg envelope. Shared by subscribe + subscribeGraph.
-  private register(
-    handler: EventHandler,
-    fields: {
-      kind: ReturnType<typeof subscriptionKindWire>;
-      filter?: string;
-      concept?: string;
-      actions?: ReturnType<typeof graphActionWire>[];
-    },
-  ): Unregister {
+  private register(handler: EventHandler, fields: SubscribeFields): Unregister {
     if (this.stopped) throw new Error("subscription manager stopped");
     const subscriptionId = newShortId();
-    this.subs.set(subscriptionId, handler);
+    this.subs.set(subscriptionId, { handler, fields });
     this.dispatcher.send({
       subscribe: { subscriptionId, ...fields },
     });

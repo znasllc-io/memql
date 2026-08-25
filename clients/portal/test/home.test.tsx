@@ -140,6 +140,8 @@ describe("the console home", () => {
         kind: "NODE_CREATED",
         timestamp: new Date(),
         payloadOmitted: true,
+        seq: 0,
+        gapBefore: false,
         payload: { id: "v1:identity:auditEvent:x", concept: "v1:identity:auditEvent" },
       });
     });

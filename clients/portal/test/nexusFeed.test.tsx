@@ -265,6 +265,8 @@ const CREATED: Omit<Event, "payload" | "payloadOmitted"> = {
   subscriptionId: "sub",
   kind: "NODE_CREATED",
   timestamp: null,
+  seq: 0,
+  gapBefore: false,
 };
 
 describe("useGoalWorld", () => {
@@ -278,6 +280,8 @@ describe("useGoalWorld", () => {
       // No payload at all -- the granted-tier shape (memql#4309).
       payload: { id: "t9", concept: "v1:planner:task" },
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
     });
 
     await waitFor(() => expect(screen.getByTestId("tasks").textContent).toBe("t9"));
@@ -296,6 +300,8 @@ describe("useGoalWorld", () => {
       ...CREATED,
       payload: taskRow("t-ghost"),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
     });
 
     await waitFor(() => expect(h.rowReads).toContain("t-ghost"));
@@ -311,6 +317,8 @@ describe("useGoalWorld", () => {
       ...CREATED,
       payload: { id: "t-secret", concept: "v1:planner:task" },
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
     });
 
     await waitFor(() => expect(h.rowReads).toContain("t-secret"));
@@ -331,6 +339,8 @@ describe("useGoalWorld", () => {
       ...CREATED,
       payload: { id: "t1", concept: "v1:planner:task" },
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
     });
     await waitFor(() => expect(screen.getByTestId("tasks").textContent).toBe("t1"));
 

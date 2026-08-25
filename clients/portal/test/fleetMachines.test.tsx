@@ -348,6 +348,8 @@ describe("the machines list", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {
         id: "wk-3",
         concept: REGISTRATION,
@@ -382,6 +384,8 @@ describe("the machines list", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {
         id: "wk-9",
         concept: REGISTRATION,
@@ -711,6 +715,8 @@ describe("adding a machine", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {
         id: "wk-new",
         concept: REGISTRATION,

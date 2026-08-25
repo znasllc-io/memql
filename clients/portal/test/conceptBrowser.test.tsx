@@ -416,6 +416,8 @@ describe("live updates", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-900", concept: NODE, name: "pod-brand-new", state: "healthy" },
     });
 
@@ -440,6 +442,8 @@ describe("live updates", () => {
       kind: "NODE_UPDATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-000", concept: NODE },
     });
 
@@ -461,6 +465,8 @@ describe("live updates", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-900", concept: NODE, name: "pod-brand-new" },
     });
     await waitFor(() => expect(screen.getByText(/New since you opened this/)).toBeTruthy());
@@ -559,6 +565,8 @@ describe("id-only live notifications", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-005", concept: NODE },
     });
 
@@ -579,6 +587,8 @@ describe("id-only live notifications", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-005", concept: NODE },
     });
 
@@ -600,6 +610,8 @@ describe("id-only live notifications", () => {
       kind: "NODE_UPDATED",
       timestamp: new Date(),
       payloadOmitted: true,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-000", concept: NODE },
     });
 
@@ -616,6 +628,8 @@ describe("id-only live notifications", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: { id: "node-900", concept: NODE, name: "pod-brand-new", state: "healthy" },
     });
 

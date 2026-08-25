@@ -23,6 +23,19 @@ export type Unregister = () => void;
 export interface DispatcherOptions {
   socket: WebSocket;
   logger?: Pick<Console, "warn" | "info" | "error"> | null;
+  // supervised hands TERMINATION SEMANTICS to the owning Connection
+  // (memql#4537). A supervised dispatcher treats a socket close as the end of
+  // one TRANSPORT rather than the end of itself: pending requests fail, the
+  // transport-close listeners fire, and `done()` stays unresolved because the
+  // Connection is about to redial and rebind.
+  //
+  // It is what makes the dispatcher's IDENTITY survive a reconnect, which
+  // matters more than it looks: every typed client in a consumer app
+  // (DeployControlClient, ModulesClient, IdentityAdminClient, ...) is
+  // constructed over a dispatcher and held for the app's lifetime. Swapping
+  // the dispatcher on redial would leave every one of them writing to a dead
+  // socket, with no error until the next call.
+  supervised?: boolean;
 }
 
 export interface PendingError extends Error {
@@ -41,24 +54,66 @@ interface PendingEntry {
 }
 
 export class Dispatcher {
-  private readonly socket: WebSocket;
+  private socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
+  private readonly supervised: boolean;
   private readonly pending = new Map<string, PendingEntry>();
   private readonly streams = new Map<string, StreamListener>();
   private readonly eventListeners = new Set<ServerListener>();
+  private readonly transportCloseListeners = new Set<() => void>();
 
   private stopped = false;
   private unexpected = false;
+  // socketDown is "the CURRENT transport is gone", as distinct from `stopped`
+  // ("this dispatcher is finished"). Only a supervised dispatcher can be in
+  // the first state without the second.
+  private socketDown = false;
   private readonly doneResolvers: Array<() => void> = [];
   private readonly unexpectedResolvers: Array<() => void> = [];
 
   constructor(opts: DispatcherOptions) {
     this.socket = opts.socket;
     this.logger = opts.logger ?? null;
+    this.supervised = opts.supervised === true;
 
-    this.socket.addEventListener("message", this.handleMessage);
-    this.socket.addEventListener("close", this.handleClose);
-    this.socket.addEventListener("error", this.handleError);
+    this.attach(this.socket);
+  }
+
+  // rebind points this dispatcher at a fresh socket after a reconnect
+  // (memql#4537). Listener registrations -- event fanout handlers, per-request
+  // stream listeners -- SURVIVE, because they belong to the consumer, not to
+  // the transport. Anything that was in flight when the old socket died has
+  // already been failed; nothing is replayed here.
+  rebind(socket: WebSocket): void {
+    if (this.stopped) throw new Error("dispatcher stopped");
+    this.detach(this.socket);
+    this.socket = socket;
+    this.socketDown = false;
+    // A fresh transport is not "unexpectedly closed". Resetting the flag is
+    // what makes a LATER unexpectedClose() wait for the next real drop
+    // instead of resolving immediately on a promise created after recovery.
+    this.unexpected = false;
+    this.attach(socket);
+  }
+
+  // onTransportClose fires when the CURRENT socket dies while supervised.
+  // The Connection uses it to drive the reconnect loop; consumers use
+  // done() / unexpectedClose() as before.
+  onTransportClose(handler: () => void): Unregister {
+    this.transportCloseListeners.add(handler);
+    return () => this.transportCloseListeners.delete(handler);
+  }
+
+  private attach(socket: WebSocket): void {
+    socket.addEventListener("message", this.handleMessage);
+    socket.addEventListener("close", this.handleClose);
+    socket.addEventListener("error", this.handleError);
+  }
+
+  private detach(socket: WebSocket): void {
+    socket.removeEventListener("message", this.handleMessage);
+    socket.removeEventListener("close", this.handleClose);
+    socket.removeEventListener("error", this.handleError);
   }
 
   // send writes an envelope. Assigns messageId when missing. Returns
@@ -152,16 +207,17 @@ export class Dispatcher {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    this.socket.removeEventListener("message", this.handleMessage);
-    this.socket.removeEventListener("close", this.handleClose);
-    this.socket.removeEventListener("error", this.handleError);
+    this.socketDown = true;
+    this.detach(this.socket);
+    this.transportCloseListeners.clear();
     this.failAllPending(pendingError("dispatcher stopped", "closed"));
     for (const resolve of this.doneResolvers) resolve();
     this.doneResolvers.length = 0;
   }
 
   private rawSend(msg: ClientMessage): void {
-    if (this.socket.readyState !== WS_OPEN) {
+    if (this.stopped) throw new Error("dispatcher stopped");
+    if (this.socketDown || this.socket.readyState !== WS_OPEN) {
       throw new Error(`socket not open (readyState=${this.socket.readyState})`);
     }
     this.socket.send(JSON.stringify(msg));
@@ -228,13 +284,31 @@ export class Dispatcher {
 
   private readonly handleClose = (): void => {
     if (this.stopped) return; // already torn down via stop()
-    this.stopped = true;
+    if (this.socketDown) return; // one close per transport
+    this.socketDown = true;
     this.failAllPending(pendingError("stream closed", "transport"));
     // Reaching here without our own stop() call -> treat as
     // unexpected. The Connection owner sets stopped before
     // initiating a graceful close, so this branch only fires on
     // server / network terminations.
     this.markUnexpected();
+
+    if (this.supervised) {
+      // The Connection owns what happens next. done() deliberately stays
+      // unresolved: with auto-reconnect on, "the connection is finished" is
+      // a decision only the Connection can make, and resolving here would
+      // tell every consumer the connection ended each time a node rolled.
+      for (const handler of [...this.transportCloseListeners]) {
+        try {
+          handler();
+        } catch (err) {
+          this.logger?.warn?.("memql sdk: transport-close listener threw", err);
+        }
+      }
+      return;
+    }
+
+    this.stopped = true;
     for (const resolve of this.doneResolvers) resolve();
     this.doneResolvers.length = 0;
   };
@@ -245,7 +319,7 @@ export class Dispatcher {
     // will follow. Mark unexpected so consumers waiting on
     // unexpectedClose() resolve before the close event clears
     // pending requests.
-    if (!this.stopped) this.markUnexpected();
+    if (!this.stopped && !this.socketDown) this.markUnexpected();
   };
 
   private markUnexpected(): void {

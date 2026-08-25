@@ -354,6 +354,8 @@ describe("the workspaces list", () => {
       kind: "NODE_CREATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {
         id: "ws-new",
         concept: WORKSPACE,
@@ -381,6 +383,8 @@ describe("the workspaces list", () => {
       kind: "NODE_UPDATED",
       timestamp: new Date(),
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {
         id: "ws-live",
         concept: WORKSPACE,
