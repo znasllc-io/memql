@@ -18847,8 +18847,32 @@ type IdentityAdminResult struct {
 	// and telling an operator that is the difference between a link they
 	// understand and one they think is a gate.
 	RegistrationMode string `protobuf:"bytes,10,opt,name=registration_mode,json=registrationMode,proto3" json:"registration_mode,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Whether the invitation email actually left the process, set by
+	// issue_user_invitation ONLY (memql#4584).
+	//
+	// NOT redundant with `ok`. `ok` says the invitation was ISSUED -- the row
+	// exists and invitation_url admits somebody. This says whether the recipient
+	// was TOLD. The two are deliberately separable: a delivery fault does not
+	// fail the issue, because the link is what actually admits and discarding a
+	// minted credential over a transient mail outage would be the worse loss.
+	//
+	// False with an empty invitation_email_error means no send was attempted
+	// (the node has no mail wired). False WITH an error means one was tried and
+	// failed. A console must be able to tell those apart -- the first is a
+	// configuration statement, the second is an incident.
+	InvitationEmailSent bool `protobuf:"varint,11,opt,name=invitation_email_sent,json=invitationEmailSent,proto3" json:"invitation_email_sent,omitempty"`
+	// Why invitation delivery failed; empty when it did not fail (memql#4584).
+	//
+	// Present so the failure is retrievable by the caller rather than buried in
+	// a log line on a node nobody is tailing. The defect this closes was an
+	// invitation that looked sent and never was; one that looks sent, fails, and
+	// says so only to slog is the same defect wearing a different hat.
+	//
+	// Never carries the link. It is the sender's own error text, which names
+	// transport and configuration faults only.
+	InvitationEmailError string `protobuf:"bytes,12,opt,name=invitation_email_error,json=invitationEmailError,proto3" json:"invitation_email_error,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *IdentityAdminResult) Reset() {
@@ -18947,6 +18971,20 @@ func (x *IdentityAdminResult) GetInvitationUrl() string {
 func (x *IdentityAdminResult) GetRegistrationMode() string {
 	if x != nil {
 		return x.RegistrationMode
+	}
+	return ""
+}
+
+func (x *IdentityAdminResult) GetInvitationEmailSent() bool {
+	if x != nil {
+		return x.InvitationEmailSent
+	}
+	return false
+}
+
+func (x *IdentityAdminResult) GetInvitationEmailError() string {
+	if x != nil {
+		return x.InvitationEmailError
 	}
 	return ""
 }
@@ -22190,7 +22228,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x16revoke_user_invitation\x18\x15 \x01(\v2-.znasllc.memql.v1.RevokeUserInvitationRequestH\x00R\x14revokeUserInvitation\x12]\n" +
 	"\x14reset_sign_in_policy\x18\x16 \x01(\v2*.znasllc.memql.v1.ResetSignInPolicyRequestH\x00R\x11resetSignInPolicy\x12f\n" +
 	"\x17set_user_shared_mailbox\x18\x17 \x01(\v2-.znasllc.memql.v1.SetUserSharedMailboxRequestH\x00R\x14setUserSharedMailboxB\t\n" +
-	"\arequest\"\xe4\x02\n" +
+	"\arequest\"\xce\x03\n" +
 	"\x13IdentityAdminResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
@@ -22204,7 +22242,9 @@ const file_memql_proto_rawDesc = "" +
 	"\frecovery_key\x18\b \x01(\tR\vrecoveryKey\x12%\n" +
 	"\x0einvitation_url\x18\t \x01(\tR\rinvitationUrl\x12+\n" +
 	"\x11registration_mode\x18\n" +
-	" \x01(\tR\x10registrationMode\"g\n" +
+	" \x01(\tR\x10registrationMode\x122\n" +
+	"\x15invitation_email_sent\x18\v \x01(\bR\x13invitationEmailSent\x124\n" +
+	"\x16invitation_email_error\x18\f \x01(\tR\x14invitationEmailError\"g\n" +
 	"\x1aIssueUserInvitationRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x1f\n" +

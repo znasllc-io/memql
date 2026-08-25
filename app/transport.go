@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/adminops"
+	"github.com/znasllc-io/memql/component/identity/emailsender"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -114,6 +116,11 @@ func (a *App) transportBase() {
 			// is: an owner who changes the mode from the portal should not
 			// have to restart a node for the next invitation to respect it.
 			RegistrationPolicy: a.registrationPolicy,
+			// The invitation email (memql#4584). Points at the SAME
+			// integration plug-in the magic-link issuer sends through, so a
+			// cluster keeps one mail path with one set of credentials and one
+			// failure mode. See the note on sendInvitationEmail.
+			SendInvitationEmail: a.sendInvitationEmail,
 		})
 		if err != nil {
 			a.fatal("identity admin: build failed", "error", err)
@@ -442,6 +449,63 @@ func (a *App) publicIdentityBaseURL(ctx context.Context) string {
 		return ""
 	}
 	return "https://identity." + domain
+}
+
+// sendInvitationEmail delivers an issued invitation to its recipient
+// (memql#4584).
+//
+// # It reuses the magic-link sender, deliberately
+//
+// emailsender.EngineEmailSender is the shim the identity service already sends
+// every magic link through: it resolves the engine-resident email integration
+// plug-in off the integration registry at call time and hands it a Message.
+// That is the code path a production node is describing when it logs
+// `"msg":"email sent via graph","sender":"noreply@<domain>"`.
+//
+// Building a second path here -- a Graph client of its own, a second set of
+// MEMQL_EMAIL_* reads, a second place to be misconfigured -- would double the
+// surface on which mail can silently stop working, which is the exact failure
+// memql#4477 spent a release closing. So this constructs the same shim and
+// calls it. The shim's own no-sender branch then applies unchanged: log-only
+// on a local install, a refusal on one that must really deliver.
+//
+// # Why the shim is built per call
+//
+// For the reason publicIdentityBaseURL and registrationPolicy resolve per
+// call: BRANDING lives in the cluster settings row, an owner can change it
+// from the portal, and a shim built once at boot would keep sending the old
+// brand until the node restarted. Construction is two struct fields and no
+// I/O; the settings read is the same one its two siblings already do.
+//
+// The engine is the only hard requirement. Without one there is nothing to
+// resolve an integration off, so the seam reports that rather than pretending
+// to have sent something.
+func (a *App) sendInvitationEmail(ctx context.Context, in adminops.InvitationEmail) error {
+	if a == nil || a.engine == nil {
+		return fmt.Errorf("identity admin: no engine on this node, so no invitation email could be sent")
+	}
+
+	// Brand, from the settings row when it answers. Absent is not an error:
+	// emailsender defaults the name to "MemQL" and the template has a default
+	// colour, so an unbranded cluster still sends a correct invitation.
+	var cfg identity.Config
+	store := &identity.Store{Engine: a.engine, Logger: a.Logger}
+	if row, err := store.ReadClusterSettings(ctx); err == nil && row != nil {
+		cfg.BrandName = row.BrandName
+		cfg.BrandPrimaryColor = row.BrandPrimaryColor
+		cfg.BrandLogoDataURI = row.BrandLogoDataURI
+	}
+
+	return emailsender.New(a.engine, a.Logger, cfg).SendUserInvitation(ctx, emailsender.UserInvitationInput{
+		Email:             in.To,
+		InviterName:       in.InviterName,
+		Role:              in.Role,
+		LinkURL:           in.LinkURL,
+		ExpiresAt:         in.ExpiresAt,
+		BrandName:         cfg.BrandName,
+		BrandPrimaryColor: cfg.BrandPrimaryColor,
+		BrandLogoDataURI:  cfg.BrandLogoDataURI,
+	})
 }
 
 // registrationPolicy resolves the cluster's registration mode and its domain
