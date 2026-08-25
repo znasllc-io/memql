@@ -334,6 +334,13 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "overlay.revert": "scripts/deploy/revert-overlay.sh",
   "argocd.sync": "scripts/deploy/argo-sync.sh",
 
+  // Azure substrate lifecycle (epic memql#4463). The deploy backends above
+  // place WORKLOADS onto a cluster; these three act on the cluster ITSELF --
+  // provision it, resize it, delete it.
+  "deploy.azureProvision": "scripts/deploy/azure-provision.sh",
+  "deploy.azureScale": "scripts/deploy/azure-scale.sh",
+  "deploy.azureTeardown": "scripts/deploy/azure-teardown.sh",
+
   // Tenant lifecycle (epic memql#3852, task memql#3853).
   "fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
   "fleet.tenantSuspend": "scripts/fleet/tenant-suspend.sh",
