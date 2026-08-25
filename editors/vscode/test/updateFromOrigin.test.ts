@@ -370,16 +370,32 @@ test("the screen offers both strategies and preselects the one that changes less
   assert.match(merging, /<option value="merge" selected>/);
 });
 
-test("Start is disabled exactly when the checklist found a blocking case", () => {
-  const open = renderUpdateScreen({ checkoutDir: "/src", nodes: "", strategy: "fastForward" });
-  assert.doesNotMatch(open, /data-act="beginUpdate" disabled/);
+test("Start is disabled while gathering and when the checklist found a blocking case", () => {
+  const items = [{ label: "Branch", state: "ok" as const, detail: "main, from origin." }];
+  const ready = renderUpdateScreen({
+    checkoutDir: "/src",
+    nodes: "",
+    strategy: "fastForward",
+    preflight: items,
+  });
+  assert.doesNotMatch(ready, /data-act="beginUpdate" disabled/);
+
   const blocked = renderUpdateScreen({
     checkoutDir: "/src",
     nodes: "",
     strategy: "fastForward",
+    preflight: items,
     blocked: true,
   });
   assert.match(blocked, /data-act="beginUpdate" disabled/);
+
+  // STILL GATHERING. The run is sent a --branch resolved from this read, so a
+  // Start pressed before it lands would be refused for a missing parameter the
+  // operator never saw a field for -- and it says so rather than showing a dead
+  // button with no explanation.
+  const gathering = renderUpdateScreen({ checkoutDir: "/src", nodes: "", strategy: "fastForward" });
+  assert.match(gathering, /data-act="beginUpdate" disabled/);
+  assert.match(gathering, /Checking what an update would do/);
 });
 
 test("the screen names the checkout and promises what happens to uncommitted work", () => {

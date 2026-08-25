@@ -378,6 +378,17 @@ export interface UpdateScreenInput {
 }
 
 /**
+ * What the screen says while it is still finding out.
+ *
+ * The rebuild screen shows nothing in this gap and its Start stays live,
+ * because nothing that Start SENDS depends on the facts. Here one thing does --
+ * the branch, which is read off the checkout when it is on one and off the
+ * install's record when it is not -- so Start waits, and waiting silently
+ * reads as a broken button.
+ */
+const UPDATE_GATHERING = `<p class="hint">Checking what an update would do...</p>`;
+
+/**
  * The two things an update asks before it runs.
  *
  * The node list is the rebuild screen's field, unchanged and for its reasons.
@@ -392,9 +403,18 @@ export interface UpdateScreenInput {
  * in a merge they did not ask for is the wrong way round.
  */
 export function renderUpdateScreen(input: UpdateScreenInput): string {
-  const start = input.blocked === true
-    ? `<button class="primary" type="button" data-act="beginUpdate" disabled>Start</button>`
-    : `<button class="primary" type="button" data-act="beginUpdate">Start</button>`;
+  // DISABLED WHILE GATHERING, unlike the rebuild screen's, and for one concrete
+  // reason: the run is sent a `--branch`, resolved as "the branch the checkout
+  // is on, or the one the install recorded when it is on none". A detached
+  // checkout is ordinary here -- a release install detaches at a tag and a
+  // repair detaches at an exact commit -- so a Start pressed in the second
+  // before the read lands would send no branch at all and be refused for a
+  // missing parameter the operator never saw a field for.
+  const gathering = input.preflight === undefined;
+  const start =
+    input.blocked === true || gathering
+      ? `<button class="primary" type="button" data-act="beginUpdate" disabled>Start</button>`
+      : `<button class="primary" type="button" data-act="beginUpdate">Start</button>`;
   const option = (value: UpdateStrategy, label: string): string =>
     `<option value="${value}"${input.strategy === value ? " selected" : ""}>${escapeHtml(label)}</option>`;
   return renderScreen({
@@ -404,7 +424,7 @@ export function renderUpdateScreen(input: UpdateScreenInput): string {
     status: `<p class="lede">Brings ${escapeHtml(
       input.checkoutDir,
     )} up to date with the latest code, then builds the node images from it, imports them into the cluster, and restarts. Your uncommitted changes come along; if they cannot, this stops and tells you which files are involved.</p>
-${renderPreflight(input.preflight)}`,
+${gathering ? UPDATE_GATHERING : renderPreflight(input.preflight)}`,
     details: `<div class="field">
   <label for="f-strategy">If this checkout has commits the branch does not</label>
   <select id="f-strategy" data-field="strategy">${option(
