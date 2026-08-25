@@ -761,7 +761,32 @@ jobs:
         # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/...
+        #
+        # `./deploy/...` CLOSES A HOLE THIS BUCKET ALREADY MEANT TO COVER
+        # (memql#4487). `**/*.yaml` is a `gates` entry, and two deploy trees
+        # are routed here BY NAME with comments saying which Go test reads
+        # them -- but the selector above never included the packages those
+        # tests live in, so `deploy/fleet/**` reached `gates` and
+        # TestBundleImageCopiesTheBundle still did not run. RUN_GATES is false
+        # whenever RUN_GO is true, so a manifest-only PR is EXACTLY the diff
+        # that reaches this step and nothing else: go-tests skips (its `if` is
+        # ci || go || dsl), and every gate under deploy/ sat unreached.
+        #
+        # What that made inert is the whole render-gate family -- the
+        # front-door staleness checks, the voice-off holds, and the
+        # ExternalSecret gates added with this comment. Deleting a
+        # `$patch: delete` from an overlay is a yaml-only diff by
+        # construction, which is to say the gate was absent for precisely the
+        # change it exists to catch, and `ci-required` went green over it.
+        #
+        # Cost is ~20s, against component/memql's ~90s in the STATED BOUNDARY
+        # above -- and unlike that package, these tests read the bucket files
+        # themselves rather than merely importing something that does.
+        # deploy/ is not a db-gated tree, so this adds no database dependency;
+        # the render halves self-skip without kustomize or kubectl on the
+        # runner, and the text-level halves, which are the ones that must not
+        # skip, do not.
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
