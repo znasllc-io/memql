@@ -27,6 +27,12 @@ export const INSTALL_PLATFORM_LABEL: Record<InstallPlatform, string> = {
 // The placeholder rendered when this deployment publishes no domain. Written
 // as something that is obviously NOT a URL so a copied command fails loudly at
 // the shell rather than dialling a host nobody meant.
+
+// THE SCRIPT COMES FROM THE memql-cockpit REPO, pinned to main: the cluster
+// serves no installer (the old /admin/workers/install path never had a
+// server on the engine), and the installer is versioned with the worker it
+// installs. The composed command still carries this cluster's URL + the
+// minted token as arguments.
 export const CLUSTER_URL_PLACEHOLDER = "<your cluster URL>";
 
 // workerClusterUrl derives the value a worker dials from the cluster's own
@@ -63,7 +69,7 @@ export interface InstallCommandInput {
 // is unreadable in a page and no easier to paste.
 export function installCommand(input: InstallCommandInput): string {
   const cluster = input.clusterUrl === "" ? CLUSTER_URL_PLACEHOLDER : input.clusterUrl;
-  const script = `${cluster}/admin/workers/install/install-${input.platform}.sh`;
+  const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-${input.platform}.sh`;
   const lines = [
     `curl -fsSL ${script} | \\`,
     `  bash -s -- \\`,

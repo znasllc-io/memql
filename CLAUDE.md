@@ -160,9 +160,10 @@ without one is normal.
 - [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
 - [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- static topology model + observe runtime + cockpit drill-down
 
-**Tooling:** **memql-cockpit** -- terminal-native IDE and operations console.
-Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that
-repo's CLAUDE.md and Makefile.
+**Tooling:** **MemQL Cockpit** -- the fleet worker runtime + cluster CLI,
+installed as the `memql` command on operator machines (the TUI it once
+carried is retired). Lives in its own repo at
+`github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md.
 
 ---
 
@@ -1063,9 +1064,9 @@ sandboxed first-choice surface for headless work is the Workbench, below.
 - **Token mint:** server-side via `CreateWorkerTokenMsg` / `RevokeWorkerTokenMsg`
   on `MemqlService.Stream`. The plain token comes back in the reply ONCE; only
   the SHA-256 hash persists (`component/identity/workertoken/`).
-- **Worker side:** `memql-cockpit worker run`, a run mode of the Cockpit binary
+- **Worker side:** `memql worker run`, a run mode of the Cockpit binary
   built from the `memql-cockpit` repo. macOS TCC / Linux X11 pre-flight via
-  `memql-cockpit-computeruse worker setup`.
+  `memql worker setup` (computeruse build).
 - **Per-user routing, and NO machine id.** Every worker is owned by exactly one
   `v1:identity:user`; only agents in that user's sessions reach it. The dispatch
   builtins take `requireLabels` / `preferLabels` and **no `workerId`** (design

@@ -25,7 +25,7 @@ See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for
 
 - New DSL annotations or constructs require a design note in the issue first
 - Reference files under `dsl/_reference/` are the source of truth for syntax; keep them in sync if behavior changes
-- Lint any new or changed `.memql` files with `make dsl-lint` (runs `go run ./cmd/memqllint dsl/` in-repo, no separate binary needed) or, if you have it installed, the cockpit linter (`memql-cockpit lint dsl/`) — both catch structural issues
+- Lint any new or changed `.memql` files with `make dsl-lint` (runs `go run ./cmd/memqllint dsl/` in-repo, no separate binary needed) or, if you have it installed, the cockpit linter (`memql lint dsl/`) — both catch structural issues
 
 ## License
 
