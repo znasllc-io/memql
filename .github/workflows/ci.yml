@@ -1481,6 +1481,22 @@ jobs:
       # so the 600s budget below is RESTORED with real headroom, not
       # re-bridged.
       #
+      # THE BRIDGE IS BACK, AND THE HEADROOM IT WAS RESTORED WITH IS SPENT
+      # (2026-08-25). The package has grown from the ~322s that justified the
+      # restore to 594.969s, and the two numbers that show it come from ONE
+      # commit run twice: PR memql#4562 reported
+      # `ok github.com/znasllc-io/memql/component/memql 594.969s` and passed;
+      # the same tree on main reported 600.460s and panicked. Five seconds of
+      # variance, on either side of the line. Nothing in that diff touches
+      # this package -- it depends on the change only through two new scalar
+      # fields on one generated proto message -- so the author blamed was not
+      # the cause, which is memql#3257's signature for the third time.
+      #
+      # 600 -> 900 again, and again as a BRIDGE. The rule above stands: the
+      # fix for the cost is to split by CONCERN, and that is memql#4569. This
+      # buys the headroom the warn machinery needs to exist before it can
+      # warn, which is the same reason the first bridge was taken.
+      #
       # -run SHARDING WAS CONSIDERED FOR THIS STEP AND REJECTED. Partitioning
       # one package's tests across several `go test -run <pattern>` blocks
       # would hand each shard its own budget, but the partition is maintained
@@ -1510,11 +1526,25 @@ jobs:
       # FAILURE needs `|| status=$?` plus `exit "$status"`, and `exit` is one of
       # the control keywords above. On a timeout the step NAME already carries
       # the attribution that was missing, so the loss is small.
+      #
+      # THE REPORT COMPARED TWO DIFFERENT THINGS, WHICH IS WHY IT NEVER
+      # WARNED (2026-08-25). `$SECONDS` is STEP wall time -- compile plus test
+      # -- and the budget bounds the TEST ONLY, so the line read
+      # `used 642s of its 600s budget` on a run that PASSED with 594.969s of
+      # test. A report that is over budget on every green run is a report
+      # nobody can act on, and it printed exactly that through both recorded
+      # breaches (memql#4075 quotes `used 628s of its 600s budget` from one).
+      #
+      # It states what it measures now, and points at the number the budget is
+      # actually about -- go test's own per-package line. It is also a
+      # `::notice::`, so it lands in the run SUMMARY rather than only in a log
+      # that gets opened after something is already red. Still no conditional:
+      # `if` is one of the control keywords that would disarm this lane's gate.
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=600s ./component/memql/...
-          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
+          go test -count=1 -timeout=900s ./component/memql/...
+          echo "::notice::component/memql step wall time (compile + test): $((SECONDS - start))s. The 900s budget bounds the TEST ONLY -- read that off the 'ok github.com/znasllc-io/memql/component/memql <N>s' line in this step's log. On 2026-08-25 it was 594.969s, which is why the budget is bridged to 900 (memql#4569)."
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --
       # integrations/embedding (memql#4037) and component/backup, when its
