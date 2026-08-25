@@ -341,6 +341,19 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "deploy.azureScale": "scripts/deploy/azure-scale.sh",
   "deploy.azureTeardown": "scripts/deploy/azure-teardown.sh",
 
+  // The INSTALL phase (epic memql#4490) -- the eleven ordered steps between a
+  // provisioned substrate and an argoSync that means something. Six of them are
+  // dependencies that exist on no manifest and every one fails SILENTLY, which
+  // is why they are scripts: a missing Secret named by a volume leaves a pod in
+  // ContainerCreating forever with no log line.
+  "deploy.installClusterOperators": "scripts/deploy/install-cluster-operators.sh",
+  "deploy.seedInstanceSecrets": "scripts/deploy/seed-instance-secrets.sh",
+  "deploy.wireExternalSecrets": "scripts/deploy/wire-external-secrets.sh",
+  "deploy.registerGitOpsRepo": "scripts/deploy/register-gitops-repo.sh",
+  "deploy.verifyInstallDependencies": "scripts/deploy/verify-install-dependencies.sh",
+  "deploy.settleAfterSync": "scripts/deploy/settle-after-sync.sh",
+  "deploy.renderDiff": "scripts/deploy/render-diff.sh",
+
   // Tenant lifecycle (epic memql#3852, task memql#3853).
   "fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
   "fleet.tenantSuspend": "scripts/fleet/tenant-suspend.sh",
