@@ -214,6 +214,12 @@ Enable it only on clusters that expose an MCP surface; everywhere else it is an
 unauthenticated write endpoint with no consumer. When off, `POST /register`
 answers `403 registration_disabled` and persists nothing.
 
+**First-party editors never use this endpoint.** The MemQL VS Code extension is
+carried as a compiled-in client on every identity node, so it signs in with DCR
+off and nothing configured -- enabling DCR neither helps nor hinders it. Turning
+this on is a decision about third-party MCP connectors and nothing else. See
+[Connecting an Editor](connecting-editors.md).
+
 The reasoning, since "disabled by default" otherwise reads as mere caution:
 under one-cluster-per-customer most clusters route no `mcp.<domain>` at all, and
 their OAuth clients -- the portal, the Cockpit, the customer's own SPAs -- are

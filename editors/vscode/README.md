@@ -294,6 +294,22 @@ That page is the one to open when a cluster will not come up. Nothing on it
 overlaps the portal, which knows nothing about `clusters.yaml` or VS Code's
 secret storage.
 
+**Signing in needs nothing configured on either side.** Every identity node
+carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
+**MemQL: Sign In** works against a cluster on the day it is installed. It opens
+your browser and catches the callback on a loopback port; when this host cannot
+do that -- Remote-SSH, a dev container, a machine with no browser -- it falls
+back automatically to a short code you approve on another device. Nothing is
+registered with the cluster at any point, and the `clientId` field in
+`clusters.yaml` is an override you will usually not set.
+
+**Sign-in needs the developer role or above on the cluster.** The editor is a
+management surface, so writer and reader are refused -- with a message naming
+your role, in both flows. Ask a cluster owner or admin to raise it.
+
+Operator-facing detail:
+[Connecting an Editor](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/auth/connecting-editors.md).
+
 **Remove takes the row, not the cluster.** It drops the entry from
 `~/.memql/clusters.yaml`, deletes the credential this editor stored, and closes
 the connection if it was the live one. **Nothing on the machine is touched**:
