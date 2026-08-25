@@ -6,10 +6,23 @@
 //
 // The report was two vertical scrollbars, the outer one reaching up past the
 // header -- i.e. the DOCUMENT scrolling, which this shell is built so it never
-// can. It was not reproducible from source. The real shell was rendered
-// through these same providers, its DOM served with the real built stylesheet,
-// and measured in Chromium inside iframes at eight viewport heights from
-// 1020px down to 400px:
+// can.
+//
+// IT REPRODUCES, and the first pass at this file said it did not. That pass
+// measured /concepts, which happens to contain nothing that triggers it; the
+// route sweep in the visual pass found it on /fleet/machines with the
+// AddMachine form open, which is one of the two pages the operator
+// screenshotted. The cause and the fix are in AppShell.tsx beside `main`:
+// an absolutely-positioned element with no positioned ancestor is laid out
+// against the VIEWPORT, so `overflow: auto` on main does not clip it -- it
+// extends the document instead. `relative` on main makes the page's scroll
+// region the containing block for the page's own out-of-flow content.
+// Measured: 1187px document against a 1020px viewport, and 1020 with the fix.
+//
+// The rest of what the first pass measured still holds, and is worth keeping
+// because it rules things out. The real shell was rendered through these same
+// providers, its DOM served with the real built stylesheet, and measured in
+// Chromium inside iframes at eight viewport heights from 1020px down to 400px:
 //
 //   document.scrollHeight == clientHeight at every height
 //   the rail's floor -- everything in it that cannot shrink -- is 162px, so it
@@ -31,9 +44,11 @@
 //        the rail can no longer absorb the height it was given, the nav spills,
 //        and the document grows past the header.
 //
-// So the conclusion is that HEAD is sound and the deployed 0.19.9 bundle
-// predates it -- and the thing worth keeping is not a fix but the INVARIANT,
-// asserted below, whose violation was measured to reproduce the bug.
+// So there are TWO ways to grow this document, and they are unrelated: the
+// rail losing the ability to shrink, and an out-of-flow descendant escaping
+// main. Both are asserted below, and both assertions were measured to
+// reproduce the symptom when violated -- which is the only reason either is
+// worth the line it takes up.
 //
 // -----------------------------------------------------------------------------
 // WHY THESE ARE CLASS ASSERTIONS AND NOT MEASUREMENTS
@@ -160,6 +175,23 @@ describe("the shell frame is a fixed frame, and the document never scrolls", () 
     // min-w-0 is the horizontal half of the same rule: without it a wide table
     // widens the row rather than scrolling inside it.
     expect(classes).toContain("min-w-0");
+  });
+
+  it("makes main the containing block for its own out-of-flow content", async () => {
+    // THE SECOND MEASURED FAILURE, and the one that actually reproduced the
+    // operator's screenshot. `overflow: auto` clips a descendant only when
+    // this element is on that descendant's containing-block chain. An
+    // absolutely-positioned element with no positioned ancestor is laid out
+    // against the VIEWPORT instead, so it escapes the scroll region entirely
+    // and extends the document -- a second bar at the right edge, running up
+    // past the header.
+    //
+    // It is not hypothetical: Tailwind's `sr-only` is position:absolute, and
+    // one of them inside ui/LabelChips put 167px of document overflow on
+    // /fleet/machines. Removing `relative` here brings it straight back, for
+    // that span and for every absolutely-positioned thing any page adds later.
+    const container = await renderShell();
+    expect(tokensOf(container.querySelector("main"))).toContain("relative");
   });
 
   it("keeps the rail's scroll box shrinkable -- the measured failure", async () => {
