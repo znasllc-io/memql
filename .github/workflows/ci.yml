@@ -1510,11 +1510,24 @@ jobs:
       # FAILURE needs `|| status=$?` plus `exit "$status"`, and `exit` is one of
       # the control keywords above. On a timeout the step NAME already carries
       # the attribution that was missing, so the loss is small.
+      # THE BUDGET WAS OUTGROWN, SO IT MOVED (600s -> 900s). The headroom line
+      # below is what caught it, and it had been saying so for a while: recent
+      # runs reported 510s, 584s, 630s and 638s against a 600s budget. At that
+      # margin the lane stops being a test result and becomes a coin toss on
+      # runner speed -- `main` went red across four consecutive commits whose
+      # only content was documentation and one DSL comment, with a zero-line
+      # diff to component/memql, and the timeout panic named no hung test.
+      #
+      # A red lane nobody can attribute to a change is worse than a slow one:
+      # it trains the reader to merge through red. 900s keeps a real hang
+      # bounded while fitting inside the job's `timeout-minutes: 20` -- the job
+      # runs ~12 min today, so the budget can grow again before the job's own
+      # ceiling is the binding constraint.
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=600s ./component/memql/...
-          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
+          go test -count=1 -timeout=900s ./component/memql/...
+          echo "headroom: component/memql used $((SECONDS - start))s of its 900s budget"
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --
       # integrations/embedding (memql#4037) and component/backup, when its
