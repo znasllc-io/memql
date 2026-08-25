@@ -41,11 +41,18 @@
 // (memql#4486). That fallback reads a table the LINKER wrote, so it is not a
 // value a running process can be told either.
 //
+// EVERY build passes it, not only the release one (memql#4574). The toolchain
+// fallback cannot fire inside an image build -- .dockerignore excludes .git --
+// so scripts/lib/engine_build_args.sh, the shared mapping behind `make dev` and
+// the editor's rebuild-from-checkout, sets MEMQL_COMMIT from the checkout it is
+// building. It does NOT set MEMQL_RELEASE, because neither of its callers is
+// cutting one.
+//
 // release is EMPTY in a bare `go build .`, in `make dev`, and in any image
 // built off a branch. The emptiness is the point: a binary that was not cut
-// from a release must not name one. Version answers DevVersion there, which no
-// release-tag parser accepts, so a client gets "cannot compare" instead of a
-// confident wrong answer.
+// from a release must not name one. Version answers a DevVersion-prefixed
+// string there, which no release-tag parser accepts, so a client gets "cannot
+// compare" instead of a confident wrong answer.
 //
 // # What this does NOT fix
 //
@@ -69,7 +76,7 @@ import (
 )
 
 // DevVersion is what a binary that was not cut from a release says about
-// itself.
+// itself, and the prefix of what it says when it also knows its commit.
 //
 // It is deliberately not parseable as a release tag. Any client comparing a
 // cluster's version against the newest release must land on "cannot compare"
@@ -96,19 +103,71 @@ func IsRelease() bool {
 }
 
 // Version returns what this binary states about itself: the release it was cut
-// from, or DevVersion when it was not cut from one. It never returns empty, and
-// it never returns a release tag the binary was not built from.
+// from, or `dev+<short commit>` when it was not cut from one. It never returns
+// empty, and it never returns a release tag the binary was not built from.
 //
 // This is the single answer for the whole process. main.go's
 // resolveServiceVersion returns it (which is what reaches app.RunConfig.Version,
 // and from there the engine's memqlVersion() builtin), and component/grpc reads
 // it for ServerHello.engine_version, so the two surfaces a client can ask
 // cannot disagree.
+//
+// # Why the commit rides the STRING here, and only for a dev build (memql#4575)
+//
+// A cluster built from a checkout used to answer the bare word "dev", which is
+// honest and useless: a developer who rebuilt an hour ago and one who installed
+// last week read the same word, and nothing else on the machine could say which
+// source was running. The commit is the answer, and this is where it reaches
+// every surface at once -- the portal's rail footer, the editor's cluster row,
+// the boot log, memqlVersion() -- because they all already render this one
+// string.
+//
+// The alternative was a second field everywhere, and for the editor that
+// alternative does not work. Its recorded version lives in the operator's
+// clusters.yaml, and the cockpit rewrites that file from its own struct and
+// DROPS every key it does not model (editors/vscode/src/clusters/model.ts
+// documents this for `version` itself). A new `commit:` key there would work
+// until the operator's next cockpit command silently erased it. `version` is a
+// key both tools already model, and model.ts already anticipates what lands
+// here: "a release tag, but equally a branch name, a commit sha".
+//
+// `+` is SemVer build metadata, and `dev+a1b2c3d4e5f6` is still unparseable as
+// a release -- editors/vscode/src/version/compare.ts requires `v?X.Y.Z` before
+// it will look at anything else. So `notComparable` remains the answer, the
+// learners' rule that a non-release-shaped value may not overwrite a recorded
+// release still holds, and nothing downstream has to learn a new shape.
+//
+// A RELEASE build is left alone. A release's version is what the whole
+// upgrade comparison rests on -- it is compared, sorted, matched against an
+// image tag and rendered in a dozen places -- and appending build metadata to
+// it puts the same fact in two places and hands every one of those callers a
+// string with a part they must remember to ignore. The release build states
+// its commit through ServerHello.engine_commit instead, which is the case that
+// needs it most: a tag's image pins are written before that tag's own images
+// exist, so an instance declaring ENGINE_REF=v0.19.6 legitimately runs 0.19.5
+// binaries, and only the commit can say which source is executing.
 func Version() string {
 	if r := Release(); r != "" {
 		return r
 	}
+	if c := ShortCommit(); c != "" {
+		return DevVersion + "+" + c
+	}
+	// No release and no commit: an unstamped build outside a VCS checkout.
+	// The bare word is the honest answer, not a placeholder.
 	return DevVersion
+}
+
+// IsDevVersion reports whether a version string is what an uncut build states
+// about itself, in either of its two forms.
+//
+// Exported because "is this a dev build" is a question several surfaces ask and
+// a `== "dev"` comparison is now WRONG for the common case -- a stamped local
+// build answers `dev+<sha>`. A predicate is what keeps that from being
+// rediscovered one caller at a time.
+func IsDevVersion(version string) bool {
+	v := strings.TrimSpace(version)
+	return v == DevVersion || strings.HasPrefix(v, DevVersion+"+")
 }
 
 // commit is the git revision this binary was built from, stamped at link time

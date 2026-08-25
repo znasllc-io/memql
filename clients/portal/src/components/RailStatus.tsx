@@ -37,6 +37,21 @@ import { RefreshCw } from "../ui/icons";
 // uncut build. Not ServerHello.version, which is the wire protocol ("v1") and
 // was rendered here as though it were the product.
 //
+// AND THE COMMIT BESIDE IT (memql#4576). "dev" alone was honest and useless:
+// a cluster rebuilt an hour ago and one installed last week read identically,
+// so the one question this footer exists to answer -- is this running the code
+// I think it is -- could not be answered from it.
+//
+// The commit is appended only when it is not ALREADY in the version. An uncut
+// build states `dev+<commit>`, because the plugin's recorded version has
+// nowhere else to carry it; a release states its tag and carries the commit in
+// the separate field. One rule covers both, and printing "dev+a1b2c3d4e5f6 ·
+// a1b2c3d4e5f6" is the failure it exists to prevent.
+//
+// AN UNKNOWN COMMIT RENDERS NOTHING -- not "unknown", not an empty
+// parenthetical. The same call core/buildinfo's LogAttrs makes for the same
+// reason: a field that looks answered and is not is worse than an absent one.
+//
 // ONE role="status" IN THE WHOLE SHELL, and it is this one. A screen reader
 // gets one live region for connection changes; a second would announce the
 // same transition twice.
@@ -50,11 +65,27 @@ const LABELS: Record<string, string> = {
   error: "Connection failed",
 };
 
+/**
+ * What this connection is running, as one string.
+ *
+ * PURE, and exported so the four cases are testable without a provider: a
+ * release with a commit, an uncut build whose version already carries the
+ * commit, an uncut build that knows no commit, and a node too old to state
+ * either.
+ */
+export function buildLabel(engineVersion: string, engineCommit: string): string {
+  const version = engineVersion.trim() === "" ? "dev" : engineVersion.trim();
+  const commit = engineCommit.trim();
+  if (commit === "" || version.includes(commit)) return version;
+  return `${version} · ${commit}`;
+}
+
 export function RailStatus({ collapsed }: { collapsed: boolean }): ReactNode {
-  const { status, nodeId, engineVersion, error, reconnect, reconnectAttempt } = useCluster();
+  const { status, nodeId, engineVersion, engineCommit, error, reconnect, reconnectAttempt } =
+    useCluster();
 
   const tone = status === "connected" ? "ok" : "danger";
-  const versionLabel = engineVersion === "" ? "dev" : engineVersion;
+  const versionLabel = buildLabel(engineVersion, engineCommit);
   // The attempt count rides the label rather than a separate element: it is
   // the difference between "this blipped" and "this has been down a while",
   // which is the only question a person asks of a reconnecting indicator.

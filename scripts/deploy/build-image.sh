@@ -51,7 +51,7 @@ function main() {
     # binary; voice needs CGO + the voice-runtime stage. Shared mapping with
     # scripts/k3d/dev.sh via scripts/lib/engine_build_args.sh -- without it
     # every node type built as the bff-default binary.
-    engine_build_args_for_node "$nodeType"
+    engine_build_args_for_node "$nodeType" "$workdir"
     cap_result_set buildTags "$nodeType"
     cap_result_set target "$ENGINE_BUILD_TARGET"
 

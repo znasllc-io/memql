@@ -1997,6 +1997,12 @@ func (s *streamSession) handleClientHello(envelope *memqlv1.MemqlClientMessage, 
 		// resolveServiceVersion() in main.go returns the same call, so the
 		// answer here and the answer memqlVersion() gives cannot disagree.
 		EngineVersion: buildinfo.Version(),
+		// EngineCommit is the revision that binary was built from (memql#4575),
+		// read from the same link-time source for the same reason. It is EMPTY
+		// rather than absent when unknown, which is the honest answer and the
+		// one clients are told to render as unknown -- see the field comment in
+		// memql.proto for why a release's revision cannot ride EngineVersion.
+		EngineCommit: buildinfo.ShortCommit(),
 	}
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_ServerHello{

@@ -62,6 +62,44 @@ export function returnsToReleasedImages(instanceName: string, releasedTag: strin
  * 0, which prints "0 uncommitted files" and is far worse: it is a CLAIM that
  * the tree was clean, made from a field that was never reported.
  */
+/**
+ * What the operator is told when an update-and-rebuild lands.
+ *
+ * READ OFF BOTH ENVELOPES, and off nothing else -- the same rule `rebuiltMessage`
+ * states, applied to the step that moved the checkout as well as the one that
+ * built it. What the operator asked for is not evidence of what happened: an
+ * update that found nothing to apply is a success, and reporting it as "brought
+ * up to date" would be a claim the run did not make.
+ *
+ * THE OUTCOME IS READ, NOT INFERRED FROM THE COMMITS. `upToDate` and a
+ * fast-forward of zero commits are indistinguishable by sha, and only one of
+ * them is worth a sentence.
+ */
+export function updatedMessage(
+  instanceName: string,
+  update: Record<string, unknown> | undefined,
+  rebuild: Record<string, unknown> | undefined,
+): string {
+  const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+  const outcome = str(update?.outcome);
+  const behind = update?.behind;
+  const count =
+    typeof behind === "number" && Number.isFinite(behind) && behind > 0
+      ? `${String(behind)} new commit${behind === 1 ? "" : "s"}`
+      : "the latest";
+  const lead =
+    outcome === "upToDate"
+      ? "Already up to date"
+      : outcome === "merged"
+        ? "Combined the latest with your own commits"
+        : outcome === "fastForward"
+          ? `Brought your checkout up to date with ${count}`
+          : // An outcome the envelope did not carry is left unnamed rather than
+            // guessed at -- the same discipline as the dirtyCount guard below.
+            "Updated your checkout";
+  return `${lead}. ${rebuiltMessage(instanceName, rebuild)}`;
+}
+
 export function rebuiltMessage(
   instanceName: string,
   result: Record<string, unknown> | undefined,

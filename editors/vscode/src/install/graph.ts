@@ -182,6 +182,20 @@ export function rebuildGraphPath(repoRoot: string): string {
 }
 
 /**
+ * The update-then-rebuild document (memql#4578).
+ *
+ * A SECOND DOCUMENT RATHER THAN A FLAG ON THE FIRST. "Test what I have" and
+ * "test the latest with what I have" are two things an operator asks for, and a
+ * flag would make the second reachable through the button labelled the first --
+ * which is the one surprise that matters to somebody holding uncommitted work.
+ * Its second step is byte-identical to rebuild.json's, so the lane stays pinned
+ * by the document on both paths.
+ */
+export function updateRebuildGraphPath(repoRoot: string): string {
+  return path.join(repoRoot, "scripts", "install", "graph", "update-rebuild.json");
+}
+
+/**
  * The install document for a lane (memql#4430).
  *
  * TWO DOCUMENTS, ONE KIND. `install-main.json` is install.json with three

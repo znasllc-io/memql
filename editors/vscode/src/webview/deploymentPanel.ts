@@ -71,6 +71,7 @@ import {
   installSessionOptions,
   runInstall,
   runRebuild,
+  runUpdateRebuild,
   type SessionHooks,
 } from "../install/session.js";
 import { listReleaseTags, tagProblem, type TagListing } from "../install/tags.js";
@@ -84,13 +85,21 @@ import type { Instance, Run } from "../state/deployments.js";
 import { buildCatalog, type CatalogInputs } from "../state/deploymentsCatalog.js";
 import {
   recordedCheckout,
+  recordedStackBranch,
   recordedDomain,
   recordedProvider,
   recordedProviderKeyFile,
   readReceipt,
 } from "../install/receipt.js";
-import { rebuiltMessage } from "../state/imageLane.js";
+import { rebuiltMessage, updatedMessage } from "../state/imageLane.js";
 import { rebuildPreflightItems, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
+import {
+  updateIsBlocked,
+  updatePreflightItems,
+  type UpdatePreflightInputs,
+  type UpdateStrategy,
+} from "../state/updatePreflight.js";
+import { readUpdateState } from "../install/updateState.js";
 import { RunRecorder } from "../state/runRecorder.js";
 import { defaultRunsDir, RUN_LOG_KEEP } from "../state/runLog.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
@@ -105,6 +114,7 @@ import {
 import {
   renderFailedScreen,
   renderRebuildScreen,
+  renderUpdateScreen,
   renderRunningScreen,
   type RunMode,
 } from "./installScreens.js";
@@ -135,7 +145,14 @@ const REBUILD_TIMEOUT_MS = 2_700_000;
  */
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
 
-type Screen = "overview" | "runDetail" | "chooseTag" | "rebuildPreflight" | "running" | "failedStep";
+type Screen =
+  | "overview"
+  | "runDetail"
+  | "chooseTag"
+  | "rebuildPreflight"
+  | "updatePreflight"
+  | "running"
+  | "failedStep";
 
 export interface DeploymentPanelDeps {
   /** Everything buildCatalog needs, minus what this panel resolves itself. */
@@ -259,6 +276,24 @@ export class DeploymentPanel {
    * thing the screen asked for.
    */
   private rebuildFacts: Omit<RebuildPreflightInputs, "nodes"> | undefined;
+  /**
+   * What the next update does when the checkout has commits its branch does not.
+   *
+   * Defaults to the answer that CHANGES LESS: refusing leaves the checkout
+   * exactly as it was and costs a second click, while combining writes a commit
+   * and can stop half-way with conflicts to resolve. A default that can leave a
+   * developer in a merge they did not ask for is the wrong way round.
+   */
+  private updateStrategy: UpdateStrategy = "fastForward";
+  /**
+   * The update checklist's FACTS, undefined while they are being gathered.
+   *
+   * Same shape and same reason as `rebuildFacts`, and `strategy` is left out of
+   * it for the reason `nodes` is: it is an input the operator can still change
+   * on that screen, so the list is worded at RENDER time from these plus
+   * whatever the field says now.
+   */
+  private updateFacts: Omit<UpdatePreflightInputs, "nodes" | "strategy"> | undefined;
   /**
    * Which run the progress screen is describing.
    *
@@ -530,10 +565,26 @@ export class DeploymentPanel {
       // repaint replaces the whole document and would take the caret with it.
       if (field === "tag" && typeof text === "string") this.target = text.trim();
       if (field === "nodes" && typeof text === "string") this.rebuildNodes = text.trim();
+      // The strategy is a <select>, so it has a CLOSED set of values and an
+      // unrecognised one is dropped rather than coerced -- a value that reached
+      // `install.updateStack` unrecognised would exit 2 with a message about a
+      // flag the operator never typed.
+      if (field === "strategy" && (text === "fastForward" || text === "merge")) {
+        this.updateStrategy = text;
+        // REPAINTED, unlike the text fields above: the checklist's "your own
+        // commits" line is worded from this, so leaving it stale would show an
+        // operator the consequences of the choice they just changed away from.
+        // There is no caret in a <select> to lose.
+        this.render();
+      }
       return;
     }
     if (type === "beginRebuild") {
       await this.startRebuild();
+      return;
+    }
+    if (type === "beginUpdate") {
+      await this.startUpdate();
       return;
     }
     if (type === "beginDeploy") {
@@ -552,7 +603,11 @@ export class DeploymentPanel {
       // failure screen is shared by both kinds of run, so a retry that always
       // called startDeploy would answer a failed rebuild by moving the cluster
       // to a release tag -- silently, from a button labelled "Retry this step".
-      await (this.runMode === "rebuild" ? this.startRebuild() : this.startDeploy());
+      await (this.runMode === "rebuild"
+        ? this.startRebuild()
+        : this.runMode === "update"
+          ? this.startUpdate()
+          : this.startDeploy());
       return;
     }
     if (type === "guided") {
@@ -560,7 +615,7 @@ export class DeploymentPanel {
       // says why), so this is a message the page never rendered -- dropped, the
       // same call `choose` makes for an action an instance does not offer,
       // rather than run as a second Retry.
-      if (this.runMode === "rebuild") return;
+      if (this.runMode === "rebuild" || this.runMode === "update") return;
       this.state.switchToGuided();
       this.render();
       await this.startDeploy();
@@ -605,6 +660,10 @@ export class DeploymentPanel {
       // question and needs facts about THIS instance -- its checkout, its image
       // source -- which the wizard has no screen for and no reason to learn.
       await this.openRebuild();
+      return;
+    }
+    if (id === "updateAndRebuild") {
+      await this.openUpdate();
       return;
     }
     if (id !== "createDeployment") return;
@@ -856,6 +915,167 @@ export class DeploymentPanel {
       void vscode.window.showInformationMessage(
         rebuiltMessage(
           instance.name,
+          report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
+        ),
+      );
+    }
+
+    this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
+    if (this.screen === "overview") await this.load();
+    else this.render();
+  }
+
+  // -------------------------------------------------------------------------
+  // update from origin and rebuild (memql#4578)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Opens the update screen and gathers the facts its checklist states.
+   *
+   * PAINTS FIRST, THEN GATHERS, and the staleness guard is `openRebuild`'s --
+   * both for its reasons. What this adds is one more async read, and the reason
+   * it is safe to put on a checklist is that `readUpdateState` DOES NOT FETCH:
+   * it asks the remote for one line and computes the two counts only when the
+   * answer is already in the local object store. A checklist that fetched would
+   * sit blank through the one-time deepening of a shallow clone.
+   *
+   * THE FALLBACK BRANCH COMES OFF THE RECEIPT. A checkout on no branch is
+   * ordinary here -- a release install detaches at a tag, a repair detaches at
+   * an exact commit -- and the install recorded which ref it asked for, so the
+   * page can offer the update instead of a refusal the operator cannot act on.
+   */
+  private async openUpdate(): Promise<void> {
+    const instance = this.instance;
+    if (instance === undefined) return;
+    this.screen = "updatePreflight";
+    this.error = "";
+    this.updateFacts = undefined;
+    this.render();
+
+    const dir = instance.checkout ?? "";
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    const recorded = recordedCheckout(receipt);
+    const [dockerReachable, checkoutIsMemql, state, update] = await Promise.all([
+      this.dockerReachable(),
+      isMemqlCheckout(dir),
+      readCheckoutState(dir),
+      readUpdateState(dir, { fallbackBranch: recordedStackBranch(receipt) }),
+    ]);
+    if (this.disposed || this.screen !== "updatePreflight") return;
+    this.updateFacts = {
+      dockerReachable,
+      checkoutDir: dir,
+      checkoutIsMemql,
+      ...(state === undefined ? {} : { state }),
+      ...(update === undefined ? {} : { update }),
+      imageSource: instance.imageSource ?? "",
+      releasedTag: recorded.tag,
+    };
+    this.render();
+  }
+
+  /**
+   * Brings this cluster's checkout up to date and then rebuilds from it.
+   *
+   * THE SAME RUN MACHINERY AGAIN. It differs from `startRebuild` in the graph
+   * document, three more params and the wording -- which is the whole argument
+   * for it being a second graph rather than a second implementation.
+   *
+   * A REFUSED UPDATE ENDS THE RUN, and that is the graph's doing rather than
+   * this method's: `rebuildFromCheckout` depends on `updateCheckout`, so a step
+   * that refuses stops the build from ever starting on a checkout the operator
+   * was just told could not be moved. The failure screen then offers what they
+   * were actually trying to do.
+   */
+  private async startUpdate(): Promise<void> {
+    if (this.runAbort !== undefined) return;
+    const instance = this.instance;
+    const checkout = instance?.checkout ?? "";
+    if (instance === undefined || checkout === "") {
+      this.error =
+        "MemQL has no record of a checkout for this cluster, so there is nothing to update. " +
+        "Repair the install to clone one.";
+      this.screen = "overview";
+      this.render();
+      return;
+    }
+
+    this.error = "";
+    this.runMode = "update";
+    this.screen = "running";
+    this.render();
+
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: instance.name,
+      kind: "update",
+      entropy: randomBytes(4).toString("hex"),
+    });
+    this.deps.refreshTree();
+
+    const controller = new AbortController();
+    this.runAbort = controller;
+
+    // The branch the update moves to, resolved the same way the checklist
+    // resolved it: the checkout's own branch when it has one, and the ref the
+    // install recorded when it does not. Empty is passed as absent, which lets
+    // the script apply its own answer rather than being handed "".
+    const branch = this.updateFacts?.update?.branch ?? "";
+
+    let report: ExecutionReport | undefined;
+    let failure: string | undefined;
+    try {
+      report = await runUpdateRebuild(
+        {
+          root: this.deps.installRoot,
+          receiptFile: this.deps.receiptFile,
+          skip: new Set<string>(),
+          provider: "",
+          stepParams: {},
+          stackDir: checkout,
+          nodes: this.rebuildNodes,
+          branch,
+          strategy: this.updateStrategy,
+          timeoutMs: REBUILD_TIMEOUT_MS,
+        },
+        {
+          onEvent: (event) => {
+            this.state.apply(event);
+            void recorder.apply(event);
+            this.render();
+          },
+          signal: controller.signal,
+          ...(this.deps.runScript !== undefined ? { run: this.deps.runScript } : {}),
+        },
+      );
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.runAbort = undefined;
+    }
+
+    const cancelled = controller.signal.aborted;
+    const ok = !cancelled && failure === undefined && report?.ok === true;
+    await recorder.finish(cancelled ? "cancelled" : ok ? "succeeded" : "failed");
+    this.deps.refreshTree();
+
+    if (this.disposed) return;
+    if (failure !== undefined) {
+      this.error = failure;
+      this.state.finish({ ok: false });
+    } else {
+      this.state.finish({ ok: report?.ok === true });
+    }
+
+    if (ok) {
+      // The catalog is stale for the reason startRebuild gives -- the cluster
+      // loaded a new DSL tree seconds ago -- and MORE so here, since the tree
+      // it loaded is not even the one that was on disk when the page opened.
+      void vscode.commands.executeCommand("memql.constructs.refresh");
+      void vscode.window.showInformationMessage(
+        updatedMessage(
+          instance.name,
+          report?.outcomes.find((o) => o.id === "updateCheckout")?.envelope?.result,
           report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
         ),
       );
@@ -1321,6 +1541,22 @@ export class DeploymentPanel {
                   ...this.rebuildFacts,
                   nodes: this.rebuildNodes,
                 }),
+              }),
+        });
+      case "updatePreflight":
+        return renderUpdateScreen({
+          checkoutDir: instance.checkout ?? "",
+          nodes: this.rebuildNodes,
+          strategy: this.updateStrategy,
+          ...(this.updateFacts === undefined
+            ? {}
+            : {
+                preflight: updatePreflightItems({
+                  ...this.updateFacts,
+                  nodes: this.rebuildNodes,
+                  strategy: this.updateStrategy,
+                }),
+                blocked: updateIsBlocked(this.updateFacts.update),
               }),
         });
       case "running":

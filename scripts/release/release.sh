@@ -193,8 +193,16 @@ function resolve_sha() {
     # X.Y.Z tag is traceable back to an exact commit. A dirty tree is
     # flagged so we never cut a "clean" release from uncommitted work.
     SHORT_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+    # The full revision is what gets LINKED into the binary (memql#4486); the
+    # short one stays the image label it always was. Both carry the same
+    # dirty-tree flag, so a "clean" release can never be cut from uncommitted
+    # work through either surface.
+    FULL_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "")"
     if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain 2>/dev/null)" ]]; then
         SHORT_SHA="${SHORT_SHA}-dirty"
+        if [[ -n "$FULL_SHA" ]]; then
+            FULL_SHA="${FULL_SHA}-dirty"
+        fi
     fi
 }
 
@@ -295,6 +303,14 @@ function build_image() {
         # rather than reporting a build stamp derived from a stale file. Same
         # value as the tag and the version label -- one release, stated once.
         --build-arg "MEMQL_RELEASE=${VERSION}"
+        # And the REVISION, for the same reason one release down (memql#4486):
+        # the tag says which release this is, the commit says which source is
+        # executing, and a tag's image pins are written before that tag's own
+        # images exist -- so the two legitimately differ and only the commit can
+        # point an incident at the right diff. FULL_SHA rather than SHORT_SHA:
+        # ShortCommit() abbreviates for display, and a stamp that arrives
+        # pre-abbreviated cannot be un-abbreviated.
+        --build-arg "MEMQL_COMMIT=${FULL_SHA}"
         --label "org.opencontainers.image.version=${VERSION}"
         --label "org.opencontainers.image.revision=${SHORT_SHA}"
         "${REPO_ROOT}"

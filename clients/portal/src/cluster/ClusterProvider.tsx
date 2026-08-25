@@ -147,10 +147,16 @@ export interface ClusterState {
   nodeId: string;
   serverVersion: string;
   // The release the node's binary was cut from (ServerHello.engine_version).
-  // Empty when the node predates the field or the binary was not cut -- the
-  // profile renders that as "dev". Not ServerHello.version (the wire
-  // protocol, "v1").
+  // Empty when the node predates the field; an uncut binary reports
+  // "dev+<commit>", or the bare "dev" when it does not know its own revision.
+  // Not ServerHello.version (the wire protocol, "v1").
   engineVersion: string;
+  // The revision that binary was built from (ServerHello.engine_commit),
+  // abbreviated to 12 hex characters and suffixed "-dirty" when it was built
+  // from a modified tree. Empty when the node cannot establish it or predates
+  // the field -- both render as nothing at all, never as an empty parenthetical
+  // (memql#4576).
+  engineCommit: string;
   // Human-readable failure, empty unless status === "error".
   error: string;
   // Redial. Safe to call in any state; tears down whatever is live first.
@@ -201,6 +207,7 @@ export function ClusterProvider({
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
   const [engineVersion, setEngineVersion] = useState("");
+  const [engineCommit, setEngineCommit] = useState("");
   const [error, setError] = useState("");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [connectionCycle, setConnectionCycle] = useState(0);
@@ -304,6 +311,7 @@ export function ClusterProvider({
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setEngineVersion(conn.engineVersion ?? "");
+        setEngineCommit(conn.engineCommit ?? "");
         setStatus("connected");
         setReconnectAttempt(0);
 
@@ -406,6 +414,7 @@ export function ClusterProvider({
       nodeId,
       serverVersion,
       engineVersion,
+      engineCommit,
       error,
       reconnect,
       reconnectAttempt,
@@ -420,6 +429,7 @@ export function ClusterProvider({
       nodeId,
       serverVersion,
       engineVersion,
+      engineCommit,
       error,
       reconnect,
       reconnectAttempt,

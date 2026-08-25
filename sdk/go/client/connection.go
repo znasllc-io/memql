@@ -96,11 +96,17 @@ type Connection struct {
 	// release. Read EngineVersion for that.
 	Version string
 	// EngineVersion is the release the node's binary was cut from --
-	// e.g. "v0.18.1" -- or "dev" when it was not cut from a release
-	// (memql#3998). Empty when the node predates the field, which is a
-	// meaningful third answer: it says the cluster is older than this
+	// e.g. "v0.18.1" -- or "dev+<12 hex>" when it was not cut from a release
+	// (memql#3998, memql#4575). Empty when the node predates the field, which
+	// is a meaningful third answer: it says the cluster is older than this
 	// contract, not that it has no version.
 	EngineVersion string
+	// EngineCommit is the git revision that binary was built from, abbreviated
+	// to 12 hex characters and suffixed "-dirty" when it was built from a
+	// modified tree (memql#4575). Empty when the node cannot establish it or
+	// predates the field; both mean "render as unknown", so they are not told
+	// apart here.
+	EngineCommit string
 }
 
 // ConnectConfig configures a new gRPC connection.
@@ -465,6 +471,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 		c.NodeId = hello.GetNodeId()
 		c.Version = hello.GetVersion()
 		c.EngineVersion = hello.GetEngineVersion()
+		c.EngineCommit = hello.GetEngineCommit()
 		if c.logger != nil {
 			c.logger.Info("connected to MemQL node",
 				"nodeId", c.NodeId,

@@ -139,14 +139,17 @@ var capabilityScriptAllowlist = map[string]string{
 	// looking healthy everywhere else. install_allowlist_test.go walks
 	// scripts/install/ and fails on any unregistered cap_init id, so adding an
 	// install capability is a two-file change by construction.
-	"install.refreshPins":       "scripts/install/refresh-tool-pins.sh",
-	"install.detect":            "scripts/install/detect.sh",
-	"install.dockerAccess":      "scripts/install/docker-access.sh",
-	"install.nssTools":          "scripts/install/nss-tools.sh",
-	"install.binary":            "scripts/install/install-binary.sh",
-	"install.hostsEntries":      "scripts/install/hosts-entries.sh",
-	"install.mkcert":            "scripts/install/mkcert-setup.sh",
-	"install.cloneStack":        "scripts/install/clone-stack.sh",
+	"install.refreshPins":  "scripts/install/refresh-tool-pins.sh",
+	"install.detect":       "scripts/install/detect.sh",
+	"install.dockerAccess": "scripts/install/docker-access.sh",
+	"install.nssTools":     "scripts/install/nss-tools.sh",
+	"install.binary":       "scripts/install/install-binary.sh",
+	"install.hostsEntries": "scripts/install/hosts-entries.sh",
+	"install.mkcert":       "scripts/install/mkcert-setup.sh",
+	"install.cloneStack":   "scripts/install/clone-stack.sh",
+	// The sequel to the clone (memql#4577): move a checkout an install already
+	// made forward to the tip of its branch, or refuse without touching it.
+	"install.updateStack":       "scripts/install/update-stack.sh",
 	"install.seedBootstrap":     "scripts/install/seed-bootstrap.sh",
 	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
 	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",

@@ -46,6 +46,7 @@ import type {
   StepProgress,
 } from "../state/addCluster.js";
 import { MAIN_BRANCH_CHOICE, isMainBranchChoice } from "../install/stackPin.js";
+import type { UpdateStrategy } from "../state/updatePreflight.js";
 import { compareSemverDesc } from "../install/tags.js";
 import { SUPPORTED_PROVIDERS, optionalFields, requiredFields } from "../state/addCluster.js";
 import {
@@ -349,6 +350,78 @@ ${renderPreflight(input.preflight)}`,
 }
 
 // ---------------------------------------------------------------------------
+// update from origin and rebuild (memql#4578)
+// ---------------------------------------------------------------------------
+
+export interface UpdateScreenInput {
+  /** The checkout that gets updated and then built. Named, never assumed. */
+  checkoutDir: string;
+  /** Comma-separated node types, or "" for all app nodes. */
+  nodes: string;
+  /** What the run does when the checkout has commits the branch does not. */
+  strategy: UpdateStrategy;
+  /**
+   * The update checklist (state/updatePreflight.ts). Absent while the panel is
+   * still gathering it -- git and the Docker probe are both async -- and the
+   * screen renders without, exactly as the rebuild and collect screens do.
+   */
+  preflight?: readonly PreflightItem[];
+  /**
+   * Whether the checklist found something that makes Start pointless.
+   *
+   * TWO CASES ONLY (see `updateIsBlocked`), and both are refusals the script
+   * makes before it fetches. Everything else is a MAYBE that only the run can
+   * settle, and a Start disabled on a maybe would withhold a button whose
+   * outcome is very often success.
+   */
+  blocked?: boolean;
+}
+
+/**
+ * The two things an update asks before it runs.
+ *
+ * The node list is the rebuild screen's field, unchanged and for its reasons.
+ * The strategy is the one genuinely new question, and it is a question rather
+ * than a policy because the two answers suit two different people: somebody
+ * testing main wants to be told their own commits are in the way, and somebody
+ * mid-feature wants them combined. Neither is a safe default for the other.
+ *
+ * IT DEFAULTS TO THE ONE THAT CHANGES LESS. Refusing leaves the checkout
+ * exactly as it was and costs a second click; combining writes a commit and can
+ * stop half-way with conflicts to resolve. A default that can leave a developer
+ * in a merge they did not ask for is the wrong way round.
+ */
+export function renderUpdateScreen(input: UpdateScreenInput): string {
+  const start = input.blocked === true
+    ? `<button class="primary" type="button" data-act="beginUpdate" disabled>Start</button>`
+    : `<button class="primary" type="button" data-act="beginUpdate">Start</button>`;
+  const option = (value: UpdateStrategy, label: string): string =>
+    `<option value="${value}"${input.strategy === value ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  return renderScreen({
+    title: "Update from origin and rebuild",
+    actions: `${start}
+  <button class="secondary" type="button" data-act="back">Back</button>`,
+    status: `<p class="lede">Brings ${escapeHtml(
+      input.checkoutDir,
+    )} up to date with the latest code, then builds the node images from it, imports them into the cluster, and restarts. Your uncommitted changes come along; if they cannot, this stops and tells you which files are involved.</p>
+${renderPreflight(input.preflight)}`,
+    details: `<div class="field">
+  <label for="f-strategy">If this checkout has commits the branch does not</label>
+  <select id="f-strategy" data-field="strategy">${option(
+    "fastForward",
+    "Stop and tell me (nothing is changed)",
+  )}${option("merge", "Combine them with the latest")}</select>
+  <div class="hint">Combining writes a commit, so it needs everything committed or set aside first.</div>
+</div>
+<div class="field">
+  <label for="f-nodes">Node types to rebuild (comma-separated; empty = all app nodes)</label>
+  <input id="f-nodes" data-field="nodes" value="${escapeHtml(input.nodes)}">
+  <div class="hint">For example: bff, agent. Leave it empty to rebuild every app node.</div>
+</div>`,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // running
 // ---------------------------------------------------------------------------
 
@@ -368,7 +441,7 @@ ${renderPreflight(input.preflight)}`,
  * separate progress display for the one run that removes things would be the
  * place the two drifted.
  */
-export type RunMode = "install" | "repair" | "deploy" | "rebuild" | "uninstall";
+export type RunMode = "install" | "repair" | "deploy" | "rebuild" | "update" | "uninstall";
 
 export interface RunningScreenInput {
   steps: readonly StepProgress[];
@@ -394,6 +467,7 @@ const RUN_HEADING: Readonly<Record<RunMode, string>> = {
   repair: "Repairing the local cluster",
   deploy: "Deploying to the local cluster",
   rebuild: "Rebuilding the local cluster from its checkout",
+  update: "Updating your checkout and rebuilding the local cluster from it",
   uninstall: "Removing the local cluster",
 };
 
@@ -410,6 +484,12 @@ const RUN_LEDE: Readonly<Record<RunMode, string>> = {
   // of that work, since it is a single progress row that takes minutes.
   rebuild:
     "Build, import, point the cluster at the images, restart. Each step reports as it goes.",
+  // The update runs FIRST and can stop the run before a single image is built,
+  // which is the one thing this sentence has to say that the rebuild's does
+  // not: an operator watching the first row is watching the step that decides
+  // whether the other one happens at all.
+  update:
+    "Update first, then build, import, point the cluster at the images, restart. If your own changes cannot be brought up to date, nothing is built.",
   // Each step reverses one entry in the receipt, in the order the graph gives
   // -- each tool outlives the artifact it is needed to remove.
   uninstall:
@@ -427,6 +507,7 @@ const RUN_DONE: Readonly<Record<RunMode, string>> = {
   repair: "Repaired. Everything that was missing has been put back.",
   deploy: "Deployed. The cluster is running the version you chose.",
   rebuild: "Rebuilt. The cluster is running the images built from your checkout.",
+  update: "Up to date and rebuilt. The cluster is running the images built from your checkout.",
   uninstall: "Removed. Everything the install put on this machine has been taken back.",
 };
 
@@ -640,7 +721,7 @@ ${renderRemedy(failure)}`;
   // disagreeing, and the heading above would then name one run while the
   // buttons below served another.
   const guided =
-    input.mode === "rebuild"
+    input.mode === "rebuild" || input.mode === "update"
       ? ""
       : `<button class="secondary" type="button" data-act="guided">${
           many ? "Switch these steps to guided" : "Switch this step to guided"
