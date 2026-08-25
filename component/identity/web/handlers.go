@@ -963,9 +963,17 @@ func (s *Server) pickOAuthCtx(ctx context.Context, clientId, redirectURI, fallba
 	if state == "" {
 		state = randomState()
 	}
-	// No relying parties at all (no static config AND no DB store for
-	// dynamically-registered clients) -> nothing to match.
-	if len(s.Cfg.RegisteredClients) == 0 && s.Store == nil {
+	// No relying parties at all -> nothing to match.
+	//
+	// THIS SHORT-CIRCUIT COUNTS THREE SOURCES, NOT TWO (memql#4515). It used
+	// to read "no static config AND no DB store", which was exhaustive while
+	// those were the only two places a client could come from. The compiled-in
+	// first-party registry is a third, and it exists on a cluster that has
+	// neither -- so leaving the old test in place made the SSO fast path
+	// refuse to match the built-in editor client on precisely the hardened,
+	// nothing-configured cluster this epic exists to serve.
+	if len(s.Cfg.RegisteredClients) == 0 && s.Store == nil &&
+		identity.FindBuiltinClient(clientId) == nil {
 		return "", "", state, false
 	}
 
