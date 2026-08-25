@@ -64,6 +64,21 @@ ARG CGO_ENABLED=0
 # and cannot verify is worse than one it knows it cannot compare.
 ARG MEMQL_RELEASE=""
 
+# MEMQL_COMMIT is the git revision this image was built from. It is linked into
+# the binary beside MEMQL_RELEASE and logged at boot (memql#4486).
+#
+# It is a SEPARATE fact from the release, and the reason is specific to how this
+# repository cuts releases: a tag's image pins are written BEFORE that tag's own
+# images exist, so an instance declaring ENGINE_REF=v0.19.6 legitimately runs
+# 0.19.5 binaries. "We are on v0.19.6" is then a statement about MANIFESTS that
+# every reader hears as a statement about CODE. The revision is the one value
+# that settles which source is executing.
+#
+# A Docker build context carries no .git, so the toolchain cannot stamp this
+# itself -- inside an image build this ARG is the only source there is.
+# build-engine-images.yml passes github.sha.
+ARG MEMQL_COMMIT=""
+
 WORKDIR /app
 
 # When CGO is on (the voice node) we need the C toolchain headers for libopus,
@@ -215,7 +230,7 @@ RUN bash scripts/identity/build-css.sh
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE}" -o /app/bin/memql .
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o /app/bin/memql .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck

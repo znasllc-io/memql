@@ -57,7 +57,10 @@
 // those sources; it does not make it the only one.
 package buildinfo
 
-import "strings"
+import (
+	"runtime/debug"
+	"strings"
+)
 
 // DevVersion is what a binary that was not cut from a release says about
 // itself.
@@ -100,4 +103,113 @@ func Version() string {
 		return r
 	}
 	return DevVersion
+}
+
+// commit is the git revision this binary was built from, stamped at link time
+// by the same build that stamps release:
+//
+//	go build -ldflags "-X github.com/znasllc-io/memql/core/buildinfo.commit=<sha>" .
+//
+// Why a release tag was not enough (memql#4486). Asked "what version is
+// running?", the honest answer required mapping a running image DIGEST back to
+// a registry tag, because no node stated anything at boot. Adding the release
+// alone would not have fixed it, for a reason specific to how this repository
+// cuts releases: an instance declares ENGINE_REF=v0.19.6 and composes
+// cloud-entry?ref=v0.19.6, but the BINARIES are 0.19.5 -- a tag's image pins
+// are written before that tag's own images exist. Manifests and binaries
+// legitimately differ by one release, so the release tag alone still cannot
+// tell an operator which SOURCE is executing. The commit can, and during an
+// incident that is the difference between reading the right diff and the wrong
+// one.
+var commit string
+
+// Commit returns the git revision this binary was built from, or "" when it
+// cannot be established. The empty return is meaningful -- callers must render
+// it as unknown rather than passing it on as if it were a revision.
+//
+// Two sources, in order, and NEITHER is a runtime input:
+//
+//  1. the link-time stamp above, which is what an image build sets. A Docker
+//     build context carries no .git, so this is the ONLY source that works for
+//     a released image -- which is precisely why the stamp exists.
+//  2. the toolchain's own VCS stamping (debug.ReadBuildInfo's vcs.revision),
+//     which covers `go build .` on a developer machine, where there is no
+//     release to stamp and the question is still worth answering.
+//
+// Source 2 is not a hole in the contract the package comment states. That
+// contract forbids a version a RUNNING PROCESS CAN BE TOLD -- an env var, a
+// file on disk, a setter. debug.ReadBuildInfo reads a table the linker wrote
+// into the binary; there is no way to change what it answers without producing
+// a different binary, which is the same property the -X stamp has.
+//
+// A build from a dirty tree reports its revision with a "-dirty" suffix. The
+// suffix is load-bearing: a revision that names a commit whose contents were
+// not what was built is the same class of confident-and-wrong answer the
+// release half of this package exists to prevent.
+func Commit() string {
+	if c := strings.TrimSpace(commit); c != "" {
+		return c
+	}
+	return vcsCommit()
+}
+
+// vcsCommit reads the revision the Go toolchain stamped at build time. It
+// returns "" when the binary was not built from a VCS checkout -- which is the
+// normal case inside a container image build.
+func vcsCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	var revision string
+	var modified bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = strings.TrimSpace(s.Value)
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if revision == "" {
+		return ""
+	}
+	if modified {
+		return revision + "-dirty"
+	}
+	return revision
+}
+
+// ShortCommit returns Commit() abbreviated to the 12 hex characters git itself
+// uses for an unambiguous short revision, preserving any "-dirty" suffix. It
+// returns "" exactly when Commit() does.
+func ShortCommit() string {
+	c := Commit()
+	if c == "" {
+		return ""
+	}
+	dirty := strings.HasSuffix(c, "-dirty")
+	sha := strings.TrimSuffix(c, "-dirty")
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	if dirty {
+		return sha + "-dirty"
+	}
+	return sha
+}
+
+// LogAttrs returns the build identity as alternating slog key/value pairs, for
+// the one line every node writes at boot (app.newApp).
+//
+// commit is OMITTED rather than logged empty when it cannot be established. A
+// structured field carrying "" is worse than an absent one: a log query
+// filtering on commit matches it, and an operator reading the line sees a field
+// that looks answered.
+func LogAttrs() []any {
+	attrs := []any{"version", Version(), "release", IsRelease()}
+	if c := ShortCommit(); c != "" {
+		attrs = append(attrs, "commit", c)
+	}
+	return attrs
 }

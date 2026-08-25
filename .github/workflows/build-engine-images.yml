@@ -214,11 +214,25 @@ jobs:
           # registry. Before this, a released node reported a build stamp
           # derived from a checked-in file that had been stale since v0.16.1,
           # so no installed cluster could say which release it was running.
+          #
+          # MEMQL_COMMIT is github.sha, and that is deliberately the commit this
+          # run COMPILED rather than the commit the release tag points at
+          # (memql#4486). The checkout above takes no `ref:`, so it checks out
+          # github.sha; on a workflow_dispatch that is the default branch's head
+          # at dispatch time, which can legitimately have moved past the tag by
+          # the time the release bridge fires.
+          #
+          # Stamping the tag's commit instead would name source that was not
+          # built. The whole point of carrying a revision is that it settles
+          # which code is executing, so it has to be the code that went through
+          # the compiler -- and when it differs from the tag, that difference is
+          # a fact an operator needs rather than one to paper over.
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
             CGO_ENABLED=${{ matrix.cgo }}
             PORTAL_DIST_STAGE=${{ matrix.portal }}
             MEMQL_RELEASE=${{ inputs.version }}
+            MEMQL_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
             ${{ env.GHCR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}

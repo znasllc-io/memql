@@ -111,8 +111,25 @@ var capabilityScriptAllowlist = map[string]string{
 	"deploy.verifyInstallDependencies": "scripts/deploy/verify-install-dependencies.sh",
 	"deploy.settleAfterSync":           "scripts/deploy/settle-after-sync.sh",
 	"deploy.renderDiff":                "scripts/deploy/render-diff.sh",
-	"overlay.revert":                   "scripts/deploy/revert-overlay.sh",
-	"argocd.sync":                      "scripts/deploy/argo-sync.sh",
+
+	// Release + version provenance (epic memql#4493).
+	//
+	// deploy.reportInstanceVersion reports the DECLARED, RENDERED and RUNNING
+	// engine refs together (memql#4486). They are allowed to differ -- a tag's
+	// image pins are written before that tag's own images exist -- so quoting
+	// any one of them alone answers "what version is running?" with a statement
+	// about a different layer, which is how an incident ends up reading the
+	// wrong diff.
+	//
+	// release.engine publishes a GitHub RELEASE and then proves the image build
+	// started (memql#4485). A pushed git tag builds nothing: the only automatic
+	// trigger for build-engine-images is a `release: [published]` event.
+	// Thirteen tags between v0.16.0 and v0.19.7 carry no release, so every
+	// 0.19.x image came from a dispatch somebody remembered to run.
+	"deploy.reportInstanceVersion": "scripts/deploy/report-instance-version.sh",
+	"release.engine":               "scripts/release/release-engine.sh",
+	"overlay.revert":               "scripts/deploy/revert-overlay.sh",
+	"argocd.sync":                  "scripts/deploy/argo-sync.sh",
 
 	// Local-cluster install/uninstall substrate (epic #3357, install(11) /
 	// #3368). Registration here is what makes an install script REACHABLE from

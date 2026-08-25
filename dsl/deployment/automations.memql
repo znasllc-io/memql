@@ -447,9 +447,42 @@ automation repairInstance {
     ingressClass  string
     clusterIssuer string
     requireIssuer boolean
+    overlayPath   string
+    productEnv    string
+    declaredRef   string
     dryRun        boolean
   }
 
+  // WHAT IS RUNNING, before anything is said about whether it is healthy
+  // (memql#4486).
+  //
+  // A repair report that names one version answers a question nobody asked. The
+  // three refs an instance carries are ALLOWED to differ: a tag's image pins are
+  // written before that tag's own images exist, so an instance declaring
+  // ENGINE_REF=v0.19.6 legitimately runs 0.19.5 binaries. "We are on v0.19.6" is
+  // then a statement about MANIFESTS that every reader hears as a statement
+  // about CODE -- and during an incident that is the difference between reading
+  // the right diff and the wrong one.
+  //
+  // IT IS A SIBLING OF THE GATE, NOT NESTED UNDER IT, and that is the whole
+  // point. The dependency verdict below refuses to sync when something is
+  // absent, and a refused repair is EXACTLY when an operator needs to know what
+  // is executing. Nesting this under the verdict would withhold the report
+  // precisely on the runs that motivate reading one.
+  //
+  // It reports and never refuses. Divergence here is usually correct, so a step
+  // that failed on difference would fail on almost every healthy instance --
+  // the same mistake memql#4475 names about reading the first Degraded as
+  // failure.
+  step version {
+    action reportInstanceVersion(
+      namespace,
+      overlayPath,
+      productEnv,
+      declaredRef,
+      dryRun
+    )
+  }
   step verify {
     action verifyInstallDependencies(
       namespace,
