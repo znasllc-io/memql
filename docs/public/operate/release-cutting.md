@@ -231,9 +231,60 @@ the same code.
   inputs, so matching a run to a version is a guess. The registry is the truth
   an operator actually needs.
 
+  This is still true, and the `releaseEngine` capability below does not
+  contradict it. That capability asserts something strictly weaker and
+  checkable -- *a build was dispatched after this release was published* -- which
+  is what a bridge firing looks like and what its **not** firing does not. It
+  never claims the run it finds is building that exact version.
+
 ---
 
-## 10. Where the records live
+## 10. The same cut from a lifecycle automation
+
+The portal button above is one path. `releaseEngine`
+(`scripts/release/release-engine.sh`, capability `release.engine`) is the
+other: the deploy pack's action, for a lifecycle that cuts a version as a step
+rather than a person pressing a button.
+
+It exists because of a failure the button cannot have and a script can:
+
+> A pushed git tag builds **nothing**. `build-engine-images` is
+> `workflow_dispatch`-only and its single automatic trigger is a
+> `release: [published]` event.
+
+Thirteen tags between `v0.16.0` and `v0.19.7` carry no release, so every 0.19.x
+image came from a dispatch somebody remembered to run. A tag nobody dispatched
+for is a version that looks cut and cannot be deployed.
+
+So the capability publishes a **release**, then waits for a build-engine-images
+run that postdates it, and **fails when none appears**. That second step is the
+point: the bridge is an event handler, and one that silently does not fire is
+indistinguishable from one that has not fired yet -- until the version is
+deployed and every pod lands in `ImagePullBackOff`.
+
+Three behaviours worth knowing before using it:
+
+| Situation | What happens |
+|---|---|
+| the release already exists, published | idempotent; it still waits for the build |
+| the release exists as a **draft** | **refused**. A draft emits no `release: [published]` event, so it builds no images while looking like a release in the UI |
+| the build ran and **failed** | reported (`buildRunConclusion`), not swallowed. The bridge fired, which is what this checks; a failed build is a different problem with a different fix |
+
+```bash
+scripts/release/release-engine.sh --version=0.19.10 --dryRun=true   # verify credential + state, create nothing
+scripts/release/release-engine.sh --version=0.19.10
+```
+
+The result reports the **GHCR** prefix as well as the tag. That half of the
+build is public and tenant-independent, and it is what made a full cloud
+bring-up possible without ever authenticating to the retired subscription -- an
+instance lifecycle should pull from there by digest and `az acr import` into its
+own registry, rather than assuming access to whichever ACR the build workflow
+targets.
+
+---
+
+## 11. Where the records live
 
 - `v1:cluster:releaseCut` -- append-only, one timeline per version, cluster-owner
   tier. The row id **is** the version.
