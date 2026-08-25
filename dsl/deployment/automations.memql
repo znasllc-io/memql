@@ -226,3 +226,132 @@ automation deployEngineCluster {
     }
   }
 }
+
+// =============================================================================
+//   Instance lifecycle -- provision / install / update / repair / deprovision
+// =============================================================================
+//
+// deployEngineCluster above rolls a VERSION onto a cluster that already exists.
+// The automations below own the cluster itself, across its whole life
+// (epic memql#4463).
+//
+// WHY THIS IS A SEPARATE SET OF VERBS. The first cloud instance was created by
+// hand, so nothing in this tree could recreate it. Its ArgoCD Application then
+// pinned a git revision that later vanished from the repository, and at that
+// point the running cluster was the ONLY surviving record of the installation:
+// unreproducible, and un-auditable. A lifecycle you can only perform by hand is
+// a lifecycle nobody can review, test, or repeat -- so each verb below is an
+// automation, driven by an event, recorded on the graph.
+//
+// COMPOSITION. `bringUpInstance` calls `provisionInstance` and then
+// `installInstance` as SUB-AUTOMATIONS -- the `automation <name>( ... )` step
+// form, the same kind-prefixed invocation shape as `logic <name>( ... )`. That
+// keeps each verb independently runnable (an operator repairing an instance
+// must not have to run provisioning to get there) while the common path stays
+// one event.
+//
+// WHERE THEY RUN. The cockpit/runner surface, OUTSIDE the target cluster --
+// inherited from dsl/deployment/ with no per-action annotation (I13). That is
+// not incidental here: a cluster cannot provision itself, and an instance must
+// not drive the roll that replaces its own pods. For the FIRST instance the
+// runner is a local k3d MemQL (`make up`) or CI; afterwards any instance other
+// than the target can drive it.
+
+@trigger(event="instance.provisionRequested")
+automation provisionInstance {
+  args {
+    instanceId     string!
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    registryName   string!
+    keyVaultName   string!
+    location       string
+    dryRun         boolean
+  }
+
+  step provision {
+    action provisionAzureInfrastructure(
+      subscriptionId,
+      resourceGroup,
+      clusterName,
+      registryName,
+      keyVaultName,
+      location,
+      dryRun
+    )
+  }
+}
+
+@trigger(event="instance.installRequested")
+automation installInstance {
+  args {
+    instanceId    string!
+    clusterName   string!
+    resourceGroup string!
+    overlayPath   string!
+    revision      string!
+    dryRun        boolean
+  }
+
+  step adopt {
+    action argoSync(app: "memql", revision: revision, dryRun)
+  }
+}
+
+@trigger(event="instance.repairRequested")
+automation repairInstance {
+  args {
+    instanceId string!
+    revision   string!
+    dryRun     boolean
+  }
+
+  // Repair is a re-sync, deliberately: ArgoCD reconciling git IS the
+  // desired-state engine, so "make the cluster match source again" is the
+  // whole verb. Anything more -- editing live objects to match an expectation
+  // held somewhere else -- would reintroduce the second source of truth this
+  // epic exists to remove.
+  step resync {
+    action argoSync(app: "memql", revision: revision, dryRun)
+  }
+}
+
+@trigger(event="instance.bringUpRequested")
+automation bringUpInstance {
+  args {
+    instanceId     string!
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    registryName   string!
+    keyVaultName   string!
+    overlayPath    string!
+    revision       string!
+    location       string
+    dryRun         boolean
+  }
+
+  step substrate {
+    automation provisionInstance(
+      instanceId,
+      subscriptionId,
+      resourceGroup,
+      clusterName,
+      registryName,
+      keyVaultName,
+      location,
+      dryRun
+    )
+  }
+  step workloads {
+    automation installInstance(
+      instanceId,
+      clusterName,
+      resourceGroup,
+      overlayPath,
+      revision,
+      dryRun
+    )
+  }
+}

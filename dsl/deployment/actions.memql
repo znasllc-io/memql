@@ -162,6 +162,63 @@ action notifyDeploy {
 }
 
 // =============================================================================
+//   Substrate actions (capability shell.script) -- memql#4463
+// =============================================================================
+//
+// The actions above place WORKLOADS onto a cluster. The two below act on the
+// cluster ITSELF: the Azure substrate it runs on, and how big that substrate
+// is. They exist because the first cloud instance was created by hand, so
+// nothing in this tree could recreate it -- and when its ArgoCD Application
+// pinned a git revision that later vanished, the running cluster became the
+// only surviving record of the installation (memql#4463).
+//
+// They are ordinary deploy-pack actions in every other respect: a single
+// capability call over typed args, no graph touch, no logic call, and the
+// cockpit/runner surface. That last point is not incidental HERE -- a cluster
+// cannot provision itself, and an instance must not drive the roll that
+// replaces its own pods, so the runner being OUTSIDE the target cluster is
+// what makes these safe to author at all.
+
+// Backend: scripts/deploy/azure-provision.sh.
+/// Create or converge the Azure substrate one MemQL instance runs on -- resource group, container
+/// registry, key vault, backup storage, AKS cluster, and the workload identities its pods
+/// authenticate as. Idempotent: converged infrastructure is left untouched.
+action provisionAzureInfrastructure {
+  args {
+    subscriptionId        string!
+    resourceGroup         string!
+    clusterName           string!
+    registryName          string!
+    keyVaultName          string!
+    registryResourceGroup string
+    backupStorageAccount  string
+    location              string
+    meshNodeCount         string
+    dbNodeCount           string
+    dryRun                boolean
+  }
+  capability script(script: "deploy.azureProvision", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, registryName: args.registryName, keyVaultName: args.keyVaultName, registryResourceGroup: args.registryResourceGroup, backupStorageAccount: args.backupStorageAccount, location: args.location, meshNodeCount: args.meshNodeCount, dbNodeCount: args.dbNodeCount, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/azure-scale.sh.
+/// Resize an instance: the node count of an AKS node pool, the replica count of the mesh
+/// Deployments, or both. Nodes are the cost axis; replicas are the availability axis, and below two
+/// replicas a PodDisruptionBudget permits no disruption at all, so node maintenance cannot proceed.
+action scaleInstance {
+  args {
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    nodePool       string
+    nodeCount      string
+    replicas       string
+    namespace      string
+    dryRun         boolean
+  }
+  capability script(script: "deploy.azureScale", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, nodePool: args.nodePool, nodeCount: args.nodeCount, replicas: args.replicas, namespace: args.namespace, dryRun: args.dryRun)
+}
+
+// =============================================================================
 //   Integration-backed deploy action (capability integration.*)
 // =============================================================================
 
