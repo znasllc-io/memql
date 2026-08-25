@@ -39,6 +39,7 @@ import {
   installGraphPath,
   loadGraphFile,
   rebuildGraphPath,
+  updateRebuildGraphPath,
   type Elevation,
   type Graph,
   type GraphKind,
@@ -181,6 +182,24 @@ export interface SessionOptions {
    * nothing.
    */
   appName?: string;
+  /**
+   * The remote and branch an UPDATE reads, and what it does when the checkout
+   * has commits that branch does not.
+   *
+   * Read by `updateRebuildPlan` only, and all three are honestly optional in
+   * the same way `nodes` is: `install.updateStack` defaults the remote to
+   * `origin`, takes the branch the checkout is on, and refuses rather than
+   * combining. `present()` dropping an empty value is what lets those defaults
+   * apply -- passing `--branch=` would be a branch name of "" and exit 2.
+   *
+   * `branch` earns its place beyond that. A checkout on NO branch has nothing
+   * to update to, and that is an ordinary state here: a release install
+   * detaches at a tag and a repair detaches at an exact commit. This is where
+   * the panel supplies the branch the install recorded.
+   */
+  remote?: string;
+  branch?: string;
+  strategy?: string;
   /**
    * Extra environment for every step's child process.
    *
@@ -756,6 +775,61 @@ export function rebuildPlan(opts: SessionOptions): (step: Step) => StepPlan {
 }
 
 /**
+ * The update-then-rebuild plan: where to update, then where to build from.
+ *
+ * TWO STEPS, AND THE PLAN NAMES BOTH. It is `rebuildPlan` with one step in
+ * front, and it keeps that function's discipline exactly: anything that is not
+ * one of the two is SKIPPED rather than run with these params, so a caller who
+ * hands this the install document gets nothing out of it instead of an
+ * `install.cloneStack` invocation carrying a `--strategy`.
+ *
+ * WHAT IT DOES NOT PASS IS STILL THE POINT. `--image-source=checkout` remains
+ * pinned by the GRAPH on the second step, and the executor merges graph params
+ * LAST, so "update, but keep running released images" is not reachable through
+ * this button either.
+ *
+ * Both steps are pointed at `resolveStackDir` -- the same derivation
+ * `stackCheckout`, `clusterUp` and `rebuildPlan` share. One directory, read
+ * once: an update that moved a different checkout from the one the build then
+ * read would produce an image whose provenance nothing on the machine could
+ * state.
+ */
+export function updateRebuildPlan(opts: SessionOptions): (step: Step) => StepPlan {
+  const stackDir = resolveStackDir(opts);
+  return (step: Step): StepPlan => {
+    if (opts.skip.has(step.id)) return { action: "skip", reason: `skipped: ${step.id}` };
+    if (step.id === "updateCheckout") {
+      return {
+        action: "run",
+        params: {
+          ...present({
+            dest: stackDir,
+            remote: opts.remote,
+            branch: opts.branch,
+            strategy: opts.strategy,
+          }),
+          ...(opts.stepParams[step.id] ?? {}),
+        },
+      };
+    }
+    if (step.id === "rebuildFromCheckout") {
+      return {
+        action: "run",
+        params: {
+          ...present({
+            "repo-root": stackDir,
+            "app-name": opts.appName,
+            node: normalizeNodeList(opts.nodes ?? ""),
+          }),
+          ...(opts.stepParams[step.id] ?? {}),
+        },
+      };
+    }
+    return { action: "skip", reason: `not an update step: ${step.id}` };
+  };
+}
+
+/**
  * The uninstall plan: read straight off the receipt.
  *
  * Two facts only the install knows, and both come back from here:
@@ -848,6 +922,28 @@ export async function runRebuild(
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFile(rebuildGraphPath(opts.root)));
   return execute(graph, rebuildPlan(opts), opts, hooks, opts.receiptFile);
+}
+
+/**
+ * Runs the update-then-rebuild graph: bring the checkout up to date, then build
+ * from it (memql#4578).
+ *
+ * THE SAME MACHINERY AGAIN, and for the reason `runRebuild` gives. The one
+ * thing worth saying about the pair is the ORDER, which the document's
+ * `dependsOn` fixes rather than this function: `TopoOrder` returns WAVES, so
+ * two independent steps would run CONCURRENTLY -- a build reading a working
+ * tree while git rewrites it, producing an image whose source nothing can name.
+ *
+ * A REFUSED UPDATE STOPS THE RUN, which is the whole point of it being a step.
+ * The build must not proceed on a checkout the operator was just told could not
+ * be moved; the failure screen is where they are offered the build on its own.
+ */
+export async function runUpdateRebuild(
+  opts: SessionOptions,
+  hooks: SessionHooks = {},
+): Promise<ExecutionReport> {
+  const graph = hooks.graph ?? (await loadGraphFile(updateRebuildGraphPath(opts.root)));
+  return execute(graph, updateRebuildPlan(opts), opts, hooks, opts.receiptFile);
 }
 
 /**

@@ -3427,7 +3427,37 @@ type ServerHello struct {
 	// Only clusters cut AFTER this ships can answer. It cannot teach v0.18.0 to
 	// introduce itself, which is why the plugin's recorded-version chain exists
 	// and why this is one source in it rather than the whole feature.
+	//
+	// A build NOT cut from a release states `dev+<12 hex>` here since
+	// memql#4575, or the bare "dev" when it does not know its own revision. Both
+	// are unparseable as a release, so a comparing client still lands on "cannot
+	// compare"; what changed is that it can now tell one uncut build from
+	// another.
 	EngineVersion string `protobuf:"bytes,3,opt,name=engine_version,json=engineVersion,proto3" json:"engine_version,omitempty"`
+	// The git revision this engine binary was built from, abbreviated to the 12
+	// hex characters git itself uses, with a "-dirty" suffix when the tree it was
+	// built from had uncommitted changes. Empty when it cannot be established --
+	// which is a real answer, and clients must render it as unknown rather than
+	// passing it on (memql#4575).
+	//
+	// WHY THIS EXISTS BESIDE engine_version RATHER THAN INSIDE IT. For an uncut
+	// build the revision rides the version string, because that string is what
+	// every version surface already renders and the plugin's recorded version has
+	// nowhere else to put it. For a RELEASE build it cannot: that value is
+	// compared, sorted and matched against an image tag, and gluing a second fact
+	// onto it hands every one of those callers something to remember to ignore.
+	//
+	// And the release build is the case that needs the revision most. A tag's
+	// image pins are written before that tag's own images exist, so an instance
+	// declaring ENGINE_REF=v0.19.6 legitimately runs 0.19.5 binaries -- manifests
+	// and binaries differ by one release by construction, and during an incident
+	// the revision is the difference between reading the right diff and the wrong
+	// one.
+	//
+	// Additive, and additive in the SAFE direction, for the reason engine_version
+	// states above: this travels server -> client, and both client stacks ignore
+	// unknown fields on that leg.
+	EngineCommit  string `protobuf:"bytes,4,opt,name=engine_commit,json=engineCommit,proto3" json:"engine_commit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3479,6 +3509,13 @@ func (x *ServerHello) GetVersion() string {
 func (x *ServerHello) GetEngineVersion() string {
 	if x != nil {
 		return x.EngineVersion
+	}
+	return ""
+}
+
+func (x *ServerHello) GetEngineCommit() string {
+	if x != nil {
+		return x.EngineCommit
 	}
 	return ""
 }
@@ -20814,11 +20851,12 @@ const file_memql_proto_rawDesc = "" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x19\n" +
 	"\bsdk_name\x18\x02 \x01(\tR\asdkName\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
-	"sdkVersion\"g\n" +
+	"sdkVersion\"\x8c\x01\n" +
 	"\vServerHello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
-	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\":\n" +
+	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\x12#\n" +
+	"\rengine_commit\x18\x04 \x01(\tR\fengineCommit\":\n" +
 	"\fHeartbeatMsg\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"2\n" +
 	"\x06AckMsg\x12(\n" +

@@ -119,10 +119,22 @@ export interface Instance {
  * `rebuild` is also local, and outside the install graph entirely -- a
  * `k3d.dev` rebuild-from-checkout run (memql#4246), which is how a local
  * cluster starts running a developer's own edits instead of a release.
+ * `update` is `rebuild` with the checkout brought up to date first
+ * (memql#4578) -- a separate kind rather than a flavour of `rebuild`, because
+ * the run log is what an operator reads to answer "what did I do to this
+ * cluster", and "rebuilt from my checkout" and "moved my checkout and then
+ * rebuilt" are two different answers.
  * `rollout` is every remote run, because a remote instance's runs are read
  * from `v1:cluster:deployment` and that concept records one kind of event.
  */
-export type RunKind = "install" | "upgrade" | "repair" | "uninstall" | "rebuild" | "rollout";
+export type RunKind =
+  | "install"
+  | "upgrade"
+  | "repair"
+  | "uninstall"
+  | "rebuild"
+  | "update"
+  | "rollout";
 
 /**
  * Where a run ended up.

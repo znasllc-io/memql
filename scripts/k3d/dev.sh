@@ -383,7 +383,7 @@ function build_engine_node() {
     # nodeType -> build-args mapping shared with the deploy.buildImage
     # capability backend (scripts/lib/engine_build_args.sh, memql#2379) so
     # the two local build paths cannot drift.
-    engine_build_args_for_node "$node"
+    engine_build_args_for_node "$node" "$REPO_ROOT"
     if [[ "$node" == "voice" ]]; then
         warn "voice node requires libopus headers -- building from repo Dockerfile."
         warn "If the build fails with 'opus.h not found', see docs/public/build/build-tags.md."

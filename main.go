@@ -169,9 +169,11 @@ func resolveShutdownGracePeriod(logger *slog.Logger) time.Duration {
 //     honestly is that it had two ways to be told what to say and no way to
 //     know.
 //
-// A build that was not cut from a release now says "dev", which no release
-// parser accepts -- the client gets "cannot compare" instead of a confident
-// wrong answer.
+// A build that was not cut from a release now says "dev+<12 hex>" -- the word,
+// plus the revision it was built from -- or the bare "dev" when no revision can
+// be established (memql#4575). Neither parses as a release, so the client gets
+// "cannot compare" instead of a confident wrong answer, and the one that
+// carries a revision can also say WHICH uncut build it is.
 func resolveServiceVersion() string {
 	return buildinfo.Version()
 }

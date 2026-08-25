@@ -79,16 +79,41 @@ test("an installed cluster with a checkout is offered a rebuild, in both orders"
   // It sits after Repair rather than beside Create deployment: an operator on
   // this row is choosing between "move to a release" and "run my own code", and
   // the second is the specialised one.
+  //
+  // The update sits immediately AFTER the rebuild (memql#4578), and the
+  // adjacency is the point: they are the same crossing with and without a
+  // fetch, so an operator comparing them should not have to read past a third
+  // verb to find the other one.
   assert.deepEqual(
     instanceActions(withCheckout("installed-healthy")).map((a) => a.id),
-    ["createDeployment", "repair", "rebuildFromCheckout", "uninstall"],
+    ["createDeployment", "repair", "rebuildFromCheckout", "updateAndRebuild", "uninstall"],
   );
-  // The unreachable ordering still leads with repair, and the rebuild keeps its
-  // place relative to the other three.
+  // The unreachable ordering still leads with repair, and both keep their place
+  // relative to the other three.
   assert.deepEqual(
     instanceActions(withCheckout("installed-unreachable")).map((a) => a.id),
-    ["repair", "createDeployment", "rebuildFromCheckout", "uninstall"],
+    ["repair", "createDeployment", "rebuildFromCheckout", "updateAndRebuild", "uninstall"],
   );
+});
+
+test("the update is offered under exactly the rebuild's gate, and reaches its own graph", () => {
+  // SAME GATE. A rebuild needs something to build from; this needs the same
+  // thing and nothing more. Whether the checkout can actually be moved is the
+  // checklist's question and then the run's, both of which can say WHY --
+  // withholding the button on those grounds would be the panel guessing at a
+  // refusal it is not the authority on.
+  assert.equal(offersAction(local("installed-healthy"), "updateAndRebuild"), false);
+  assert.equal(offersAction(withCheckout("installed-healthy"), "updateAndRebuild"), true);
+  assert.equal(offersAction(withCheckout("absent"), "updateAndRebuild"), false);
+
+  const update = instanceActions(withCheckout("installed-healthy")).find(
+    (a) => a.id === "updateAndRebuild",
+  );
+  // Its OWN graph, never the rebuild's. Routing it into `rebuildGraph` would
+  // give an operator who asked for the latest code a build of what was already
+  // on disk, reported as a success.
+  assert.equal(update?.flow, "updateRebuildGraph");
+  assert.equal(update?.tier, undefined);
 });
 
 test("a rebuild reaches the rebuild graph and nothing else", () => {

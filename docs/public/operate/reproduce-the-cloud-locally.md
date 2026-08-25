@@ -359,6 +359,45 @@ overrides, which returns the cluster to released images -- rebuild again to go
 back to the checkout's. Without `--image-source=checkout` nothing is patched, so
 `make dev` behaves exactly as it always has.
 
+### ...and bringing that checkout up to date first
+
+**Update from origin and rebuild** sits beside it and is the same crossing with
+a fetch in front: `install.updateStack` over the recorded checkout, then the
+identical rebuild step, driven by `scripts/install/graph/update-rebuild.json`.
+Both buttons stay, because they answer two different questions -- "test just
+what I have" and "test the latest with what I have" -- and neither is a mode of
+the other.
+
+**A refusal changes nothing on disk.** That is the property the whole thing is
+arranged around, because the person who presses this is a developer holding
+uncommitted work:
+
+| What it finds | What it does |
+|---|---|
+| behind, and your edits do not touch what is arriving | fast-forwards; your edits come along |
+| your edits touch files the update also changes | stops, names the files, changes nothing |
+| commits here the branch does not have | stops and says so -- or combines them, if you chose that |
+| conflicts while combining | stops, names the paths, and **leaves the conflict in the editor to resolve** |
+| a merge or rebase already under way | stops before it fetches |
+
+The safety is git's rather than ours: `git merge --ff-only` and `git checkout
+--detach` both carry uncommitted edits across and both refuse atomically. What
+the script adds is computing the overlap first, so the refusal names files and
+the checklist can predict it instead of reporting it afterwards.
+
+**A wizard-installed checkout is cloned `--depth 1`, and the first update
+deepens it.** At depth 1 the local commit and a freshly fetched tip share no
+ancestry in the object store, so git cannot see a fast-forward and every update
+would report a divergence that is not real. It happens once per checkout and
+the checklist says so before you start.
+
+**A release install's checkout is detached at a tag and has no branch to
+update to.** That is the honest answer rather than a gap: the checklist says so
+and offers no branch of its own, because substituting `main` would quietly
+offer to move a pinned cluster onto the tip of a branch nobody named. A `main`
+install repaired since is detached too, and there the branch the install
+recorded is used.
+
 ## Multi-node mesh testing
 
 ```bash

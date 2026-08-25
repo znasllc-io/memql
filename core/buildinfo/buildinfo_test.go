@@ -34,8 +34,13 @@ func stampRelease(t *testing.T, value string) {
 // three releases behind (or, worse, that they are current) on the strength of a
 // number nobody set.
 //
-// A test build is by definition unstamped, so this asserts the default.
+// A test build is by definition unstamped, so this asserts the default. The
+// commit is cleared explicitly rather than assumed absent: it is a separate
+// stamp with its own fallback, and Version() now reads it (memql#4575), so
+// leaving it to chance would make this test's subject depend on how the test
+// binary happened to be built.
 func TestUnstampedBuildDoesNotNameARelease(t *testing.T) {
+	stampCommit(t, "")
 	if got := Release(); got != "" {
 		t.Fatalf("test binaries are not release builds; Release() = %q, want \"\"", got)
 	}
@@ -91,6 +96,9 @@ func TestStampedBuildStatesItsRelease(t *testing.T) {
 				t.Fatalf("IsRelease() = %v, want %v", got, want)
 			}
 
+			// With no release the version falls to the dev form, which in a
+			// test binary carries no commit (see TestUncutBuildStatesItsCommit).
+			stampCommit(t, "")
 			wantVersion := tc.want
 			if wantVersion == "" {
 				wantVersion = DevVersion
@@ -219,6 +227,106 @@ func TestLogAttrsAlwaysNamesAVersion(t *testing.T) {
 		}
 		if v, _ := version.(string); v == "" {
 			t.Fatalf("LogAttrs() named no version with release stamped %q", stamp)
+		}
+	}
+}
+
+// TestUncutBuildStatesItsCommit is the memql#4575 half: a binary not cut from a
+// release says WHICH uncut build it is.
+//
+// The word "dev" alone was honest and useless -- a developer who rebuilt an
+// hour ago and one who installed last week read the same string, on every
+// surface, and nothing else on the machine could say which source was running.
+//
+// THE POSITIVE CONTROL MATTERS HERE. A test binary carries no VCS revision
+// (the go command stamps vcs.revision for `go build`/`go install` of a main
+// package, not for a test binary), so `Version()` answers the bare word in
+// this process by default and an assertion that only checked that would pass
+// against a Version() that had never learned the new branch. Every case below
+// stamps the commit explicitly.
+func TestUncutBuildStatesItsCommit(t *testing.T) {
+	stampRelease(t, "")
+
+	for _, tc := range []struct {
+		name   string
+		commit string
+		want   string
+	}{
+		{
+			name:   "full sha abbreviates to twelve",
+			commit: "0123456789abcdef0123456789abcdef01234567",
+			want:   "dev+0123456789ab",
+		},
+		{
+			// The suffix survives, for the reason TestDirtyRevisionKeepsItsSuffix
+			// gives: a developer rebuilding to test an edit HAS an edit, so this
+			// is the ordinary shape on the lane this feature exists for.
+			name:   "dirty tree keeps its suffix",
+			commit: "0123456789abcdef0123456789abcdef01234567-dirty",
+			want:   "dev+0123456789ab-dirty",
+		},
+		{
+			// No release and no commit: the bare word is the honest answer, not
+			// a placeholder, and it must not become "dev+".
+			name:   "no commit at all",
+			commit: "",
+			want:   DevVersion,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stampCommit(t, tc.commit)
+			if got := Version(); got != tc.want {
+				t.Fatalf("Version() = %q, want %q", got, tc.want)
+			}
+			if releaseShaped.MatchString(Version()) {
+				t.Fatalf("Version() = %q parses as a release tag -- a build that was not cut "+
+					"from a release must land a comparing client on \"cannot compare\"", Version())
+			}
+		})
+	}
+}
+
+// TestAReleaseVersionCarriesNoCommit pins the other side of the split, and it
+// is the one a future reader is most likely to "fix".
+//
+// Appending the commit to a release's version would look symmetric and would
+// break the thing the release version is FOR: it is compared, sorted, matched
+// against an image tag and rendered in a dozen places, none of which want a
+// second fact glued on. The release's commit travels on
+// ServerHello.engine_commit instead.
+func TestAReleaseVersionCarriesNoCommit(t *testing.T) {
+	stampRelease(t, "v0.19.1")
+	stampCommit(t, "0123456789abcdef0123456789abcdef01234567")
+
+	if got, want := Version(), "v0.19.1"; got != want {
+		t.Fatalf("Version() = %q, want the bare release %q", got, want)
+	}
+	// The commit is still knowable -- it just does not ride the version.
+	if got, want := ShortCommit(), "0123456789ab"; got != want {
+		t.Fatalf("ShortCommit() = %q, want %q", got, want)
+	}
+}
+
+// TestIsDevVersionCoversBothForms exists because `== "dev"` is now WRONG for
+// the common case, and a predicate is what stops that being rediscovered one
+// caller at a time.
+func TestIsDevVersionCoversBothForms(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{in: "dev", want: true},
+		{in: "dev+0123456789ab", want: true},
+		{in: "dev+0123456789ab-dirty", want: true},
+		{in: "  dev+abc  ", want: true},
+		{in: "v0.19.1", want: false},
+		{in: "", want: false},
+		// Not a dev version: a release that merely starts with the letters.
+		{in: "development", want: false},
+		{in: "devastating-1.0", want: false},
+	} {
+		if got := IsDevVersion(tc.in); got != tc.want {
+			t.Errorf("IsDevVersion(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 }

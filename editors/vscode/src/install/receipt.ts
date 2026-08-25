@@ -595,6 +595,31 @@ export function recordedStackRefKind(receipt: Receipt | null): string {
   return typeof kind === "string" ? kind.trim() : "";
 }
 
+/**
+ * The BRANCH a previous run checked out, or "" when it did not check out one.
+ *
+ * A DIFFERENT QUESTION FROM `recordedCheckout`, and it must not be answered by
+ * it. That one says how to REPRODUCE the recorded state, and for a branch
+ * install the answer is deliberately the commit -- replaying the ref would turn
+ * a repair into an upgrade (memql#3605). This says which branch the checkout
+ * belongs to, which is what an UPDATE needs and what a repair must never use.
+ *
+ * EMPTY FOR A TAG OR COMMIT INSTALL, and that emptiness is the right answer
+ * rather than a gap to fill in. A release install pins a tag on purpose; a
+ * caller substituting `main` there would quietly offer to move a pinned cluster
+ * onto the tip of a branch nobody named.
+ *
+ * It exists at all because a detached checkout is ORDINARY on the branch lane:
+ * a repair reconciles onto an exact commit and detaches, so the branch the
+ * install asked for is no longer readable from HEAD (memql#4578).
+ */
+export function recordedStackBranch(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  if (recordedStackRefKind(receipt) !== "branch") return "";
+  const ref = entryFor(receipt, "stackCheckout")?.result?.ref;
+  return typeof ref === "string" ? ref.trim() : "";
+}
+
 /** The directory `install.cloneStack` put the checkout in, or "" when the receipt records none. */
 export function recordedStackDir(receipt: Receipt | null): string {
   if (!receipt) return "";

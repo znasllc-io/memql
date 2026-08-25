@@ -182,6 +182,23 @@ export function rebuildGraphPath(repoRoot: string): string {
 }
 
 /**
+ * The update-then-rebuild document (memql#4578).
+ *
+ * A SECOND DOCUMENT RATHER THAN A FLAG ON THE FIRST. "Test what I have" and
+ * "test the latest with what I have" are two things an operator asks for, and a
+ * flag would make the second reachable through the button labelled the first --
+ * which is the one surprise that matters to somebody holding uncommitted work.
+ * Its second step is rebuild.json's step in every field but one -- the
+ * dependency edge that makes the update run first -- and
+ * `update_rebuild_variant_test.go` fails the build if that stops being true.
+ * So `--image-source=checkout` stays pinned by the document on both paths, and
+ * neither button can quietly start building differently from the other.
+ */
+export function updateRebuildGraphPath(repoRoot: string): string {
+  return path.join(repoRoot, "scripts", "install", "graph", "update-rebuild.json");
+}
+
+/**
  * The install document for a lane (memql#4430).
  *
  * TWO DOCUMENTS, ONE KIND. `install-main.json` is install.json with three

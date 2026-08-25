@@ -376,6 +376,7 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "install.hostsEntries": "scripts/install/hosts-entries.sh",
   "install.mkcert": "scripts/install/mkcert-setup.sh",
   "install.cloneStack": "scripts/install/clone-stack.sh",
+  "install.updateStack": "scripts/install/update-stack.sh",
   "install.seedBootstrap": "scripts/install/seed-bootstrap.sh",
   "install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
   "install.verifyFrontDoor": "scripts/install/verify-frontdoor.sh",

@@ -272,6 +272,9 @@ var rebuildJSON []byte
 //go:embed install-main.json
 var installMainJSON []byte
 
+//go:embed update-rebuild.json
+var updateRebuildJSON []byte
+
 var (
 	installOnce sync.Once
 	installG    *Graph
@@ -288,6 +291,10 @@ var (
 	installMainOnce sync.Once
 	installMainG    *Graph
 	installMainErr  error
+
+	updateRebuildOnce sync.Once
+	updateRebuildG    *Graph
+	updateRebuildErr  error
 )
 
 // Install returns the shipped install graph.
@@ -340,6 +347,33 @@ func InstallFromMain() (*Graph, error) {
 func Rebuild() (*Graph, error) {
 	rebuildOnce.Do(func() { rebuildG, rebuildErr = Load(rebuildJSON, "rebuild.json") })
 	return rebuildG, rebuildErr
+}
+
+// UpdateRebuild is the two-step graph the extension's "Update from origin and
+// rebuild" runs: bring the recorded checkout up to date, then rebuild from it
+// (memql#4578).
+//
+// IT IS NOT A MODE OF Rebuild. Two documents rather than one with a flag,
+// because they are two things an operator asks for: "test what I have" and
+// "test the latest with what I have". A flag would make the second reachable
+// from the button labelled the first, which is the one mistake here that
+// surprises somebody holding uncommitted work.
+//
+// AND THE SECOND STEP IS Rebuild's STEP, in every field but the dependency
+// edge below -- asserted by update_rebuild_variant_test.go rather than claimed
+// here, because the failure is silent: change the build's params or its verify
+// in one document and not the other and both buttons still work, they simply
+// stop building the same way.
+//
+// The edge from `rebuildFromCheckout` to `updateCheckout` is the whole safety
+// story on this lane. TopoOrder returns WAVES, so without it the build would
+// run CONCURRENTLY with the update -- reading a working tree while git is
+// rewriting it, and producing an image nobody can name the source of.
+func UpdateRebuild() (*Graph, error) {
+	updateRebuildOnce.Do(func() {
+		updateRebuildG, updateRebuildErr = Load(updateRebuildJSON, "update-rebuild.json")
+	})
+	return updateRebuildG, updateRebuildErr
 }
 
 // Load parses and fully validates a graph document. It refuses anything an

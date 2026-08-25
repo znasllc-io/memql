@@ -107,6 +107,18 @@ var coverageAllowList = map[string]exemption{
 	},
 	".dockerignore": {
 		reason: "docker build-context metadata; no PR lane builds an image (see the Dockerfile note below)",
+		mentionedBy: map[string]string{
+			"commit_stamp_test.go": "prose, not a reference CI executes. " +
+				"TestEveryEngineImageLinksTheCommitIntoTheBinary names this file in its header " +
+				"and its failure message to say WHY the MEMQL_COMMIT build arg is the only " +
+				"source a node has for its own revision: this file excludes .git, so the Go " +
+				"toolchain's vcs.revision stamping -- the fallback core/buildinfo.Commit() " +
+				"relies on for a plain `go build .` -- cannot fire inside an image build " +
+				"(memql#4574). The test reads Dockerfiles and one shell script and never opens " +
+				"this one. Recorded rather than reworded away, per the precedent the " +
+				"deploy/k8s/base/tls/*.sh entry sets: phrasing a comment to dodge the check " +
+				"would be the first step to the check meaning nothing.",
+		},
 	},
 
 	// --- GitHub-side configuration, interpreted by GitHub and not by a lane ---

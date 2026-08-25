@@ -1,0 +1,39 @@
+{
+  "name": "update-rebuild",
+  "kind": "install",
+  "description": "Bring your source checkout up to date with the latest code, then rebuild this cluster's MemQL images from it and restart it on them.",
+  "steps": [
+    {
+      "id": "updateCheckout",
+      "script": "install.updateStack",
+      "description": "Bringing your source checkout up to date with the latest code. If your own changes cannot be combined with it, this stops and tells you which files are involved, leaving everything as it was.",
+      "dependsOn": [],
+      "elevation": "none",
+      "timeoutSeconds": 900,
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.commitAfter"
+      }
+    },
+    {
+      "id": "rebuildFromCheckout",
+      "script": "k3d.dev",
+      "description": "Building MemQL from your source checkout, loading it into the cluster, and restarting the cluster on it.",
+      "params": {
+        "image-source": "checkout"
+      },
+      "dependsOn": [
+        "updateCheckout"
+      ],
+      "elevation": "none",
+      "receipt": "rebuild",
+      "preExistingPath": "none",
+      "timeoutSeconds": 2700,
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.imageSource",
+        "value": "checkout"
+      }
+    }
+  ]
+}

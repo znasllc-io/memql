@@ -6,6 +6,7 @@
 //   Create deployment      install graph  stackCheckout + up        deploy-control Deploy
 //   Repair                 --             re-run graph              --
 //   Rebuild from checkout  --             k3d.dev over the checkout --
+//   Update and rebuild     --             the same, latest first    --
 //   Uninstall              --             uninstall graph           --
 //   Cut version            --             --                        developer+
 //   Promote                --             --                        admin+
@@ -52,6 +53,7 @@ export type InstanceActionId =
   | "createDeployment"
   | "repair"
   | "rebuildFromCheckout"
+  | "updateAndRebuild"
   | "uninstall"
   | "cutVersion"
   | "rolloutAction"
@@ -73,6 +75,8 @@ export type InstanceActionFlow =
   | "repairGraph"
   /** The one-step rebuild graph: k3d.dev over the recorded checkout, image-source=checkout. */
   | "rebuildGraph"
+  /** The two-step graph: bring the recorded checkout up to date, then rebuild from it. */
+  | "updateRebuildGraph"
   /** The uninstall graph, behind its removal preview. */
   | "uninstallGraph"
   /** A deploy-control RPC against the target cluster. */
@@ -151,6 +155,32 @@ const REBUILD: InstanceAction = {
   flow: "rebuildGraph",
 };
 
+/**
+ * "Update from origin and rebuild" (memql#4578) -- the same crossing as REBUILD,
+ * with the latest code in it.
+ *
+ * IT IS NOT A MODE OF REBUILD, and the two live side by side because they
+ * answer two different questions. "Test just what I have" is the offline one
+ * and is what a developer wants mid-change; "test the latest with what I have"
+ * is what they want before they push. Folding the second into the first as a
+ * checkbox would put a network fetch and a moving working tree behind a button
+ * whose label promises neither.
+ *
+ * IT IS OFFERED UNDER THE SAME GATE. A rebuild needs something to build from;
+ * this needs the same thing and nothing more. Whether the checkout can actually
+ * be moved -- a branch to move to, no merge half-finished, no colliding edits
+ * -- is answered by the checklist and then by the run, both of which can say
+ * WHY. Withholding the button on those grounds would be the panel guessing at a
+ * refusal it is not the authority on.
+ */
+const UPDATE_AND_REBUILD: InstanceAction = {
+  id: "updateAndRebuild",
+  label: "Update from origin and rebuild",
+  detail:
+    "Bring the recorded checkout up to date, then build images from it and roll the cluster onto them.",
+  flow: "updateRebuildGraph",
+};
+
 const UNINSTALL: InstanceAction = {
   id: "uninstall",
   label: "Uninstall",
@@ -216,7 +246,7 @@ export function instanceActions(
     // Offering a button whose only possible outcome is a refusal teaches an
     // operator that the extension is broken.
     const hasCheckout = (instance.checkout ?? "") !== "";
-    const rebuild = hasCheckout ? [REBUILD] : [];
+    const rebuild = hasCheckout ? [REBUILD, UPDATE_AND_REBUILD] : [];
     return instance.presence === "absent"
       ? [CREATE_LOCAL_ABSENT]
       : // `installed-unreachable` gets the same set as `installed-healthy`:

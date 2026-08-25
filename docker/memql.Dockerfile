@@ -25,6 +25,14 @@ ARG CGO_ENABLED=0
 # scripts/release/release.sh passes its --version here.
 ARG MEMQL_RELEASE=""
 
+# MEMQL_COMMIT is the git revision this image was built from. It is linked into
+# the binary beside MEMQL_RELEASE and is what answers "which SOURCE is
+# executing" -- a question the release tag alone cannot, because a tag's image
+# pins are written before that tag's own images exist, so manifests and
+# binaries legitimately differ by one release (memql#4486). Unset means the
+# node reports no commit, which callers render as unknown.
+ARG MEMQL_COMMIT=""
+
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev bash curl
 
@@ -83,7 +91,7 @@ RUN bash scripts/identity/build-css.sh
 # The -installsuffix cgo flag is only meaningful for static (CGO-free)
 # builds, so it is omitted; CGO_ENABLED is the build arg (0 for default node
 # types, 1 for the voice node).
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE}" -o memql .
+RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o memql .
 
 # Build the health check binary (always CGO-free, for distroless containers)
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o healthcheck ./cmd/healthcheck

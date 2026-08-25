@@ -135,11 +135,16 @@ export class Connection {
   nodeId = "";
   // The wire protocol version the node speaks ("v1"), not its release.
   serverVersion = "";
-  // The release the node's binary was cut from -- "v0.18.1", or "dev" when it
-  // was not cut from a release (memql#3998). Stays "" against a node that
-  // predates the field, which is how a caller tells "older than this contract"
-  // apart from "not a release build".
+  // The release the node's binary was cut from -- "v0.18.1", or "dev+<12 hex>"
+  // when it was not cut from a release (memql#3998, memql#4575). Stays ""
+  // against a node that predates the field, which is how a caller tells "older
+  // than this contract" apart from "not a release build".
   engineVersion = "";
+  // The revision that binary was built from, abbreviated to 12 hex characters
+  // ("-dirty" when the tree was modified). Stays "" when the node cannot
+  // establish it OR predates the field; both mean "render this as unknown",
+  // which is why they are not told apart here (memql#4575).
+  engineCommit = "";
 
   private socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
@@ -632,6 +637,7 @@ export class Connection {
         this.nodeId = payload.value.nodeId ?? "";
         this.serverVersion = payload.value.version ?? "";
         this.engineVersion = payload.value.engineVersion ?? "";
+        this.engineCommit = payload.value.engineCommit ?? "";
       }
     } finally {
       clearTimeout(timer);

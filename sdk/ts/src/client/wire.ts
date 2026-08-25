@@ -640,11 +640,16 @@ export interface ServerHelloPayload {
   nodeId?: string;
   // The WIRE PROTOCOL version the node speaks ("v1"), not its release.
   version?: string;
-  // The release the node's binary was cut from -- e.g. "v0.18.1" -- or "dev"
-  // when it was not cut from a release (memql#3998). Absent when the node
-  // predates the field, which says the cluster is older than this contract
-  // rather than that it has no version.
+  // The release the node's binary was cut from -- e.g. "v0.18.1" -- or
+  // "dev+<12 hex>" when it was not cut from a release (memql#3998,
+  // memql#4575). Absent when the node predates the field, which says the
+  // cluster is older than this contract rather than that it has no version.
   engineVersion?: string;
+  // The git revision the node's binary was built from, abbreviated to 12 hex
+  // characters and suffixed "-dirty" when built from a modified tree
+  // (memql#4575). Absent or empty when it cannot be established -- render it
+  // as unknown rather than passing it on.
+  engineCommit?: string;
 }
 
 export interface QueryResultPayload {

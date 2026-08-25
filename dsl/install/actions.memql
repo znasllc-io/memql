@@ -298,6 +298,30 @@ action cloneStackAtTag {
   )
 }
 
+// Backend: scripts/install/update-stack.sh. The SEQUEL to the clone above, and
+// the only place a checkout an install already made moves forward. It builds
+// nothing -- the rebuild step after it does that -- and a refusal from it leaves
+// the checkout exactly as it was, which is what lets a developer press the
+// button while holding uncommitted work.
+/// Bring the pinned local source directory up to date with its branch, or stop and say why it cannot be.
+action updateStackToBranch {
+  args {
+    dest     string
+    remote   string
+    branch   string
+    strategy string
+    git      string
+  }
+  capability script(
+    script: "install.updateStack",
+    dest: args.dest,
+    remote: args.remote,
+    branch: args.branch,
+    strategy: args.strategy,
+    git: args.git
+  )
+}
+
 // Backend: scripts/k3d/up.sh -- the SAME script `make up` runs, and the same
 // manifests ArgoCD reconciles in staging. The install graph reaches for it
 // rather than growing an install-only bring-up path, because the moment local

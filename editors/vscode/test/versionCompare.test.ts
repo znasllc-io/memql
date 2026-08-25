@@ -130,6 +130,14 @@ const NOT_COMPARABLE: ReadonlyArray<readonly [string, string]> = [
   ["HEAD", "a symbolic ref"],
   ["a256ab11", "a short commit sha"],
   ["a256ab11c4f0e9d3b7a1428f6e5d0c9b3a7f2e18", "a full commit sha"],
+  ["dev", "what a binary not cut from a release says"],
+  // THE NEW SHAPE (memql#4575), and the one most likely to be "fixed" into
+  // something that parses. `+` is SemVer build metadata, so a reader who
+  // reaches for the spec finds a form the grammar knows -- but there is no
+  // X.Y.Z in front of it, and a value that started comparing would place a
+  // developer's laptop somewhere on the release line.
+  ["dev+a1b2c3d4e5f6", "an uncut build naming its revision"],
+  ["dev+a1b2c3d4e5f6-dirty", "an uncut build from a modified tree"],
   ["0.15.0-1737072000", "the Dockerfile's build stamp"],
   ["v0.15.0-1737072000", "the build stamp with a v prefix"],
   ["v1", "the literal ServerHello.version"],

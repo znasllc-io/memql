@@ -97,9 +97,43 @@ process: `resolveServiceVersion` in `main.go` returns it (so it reaches
 client sees on connect.
 
 A build that was **not** cut from a release — `go build .`, `make dev`,
-any branch image — leaves the stamp empty and reports `dev`. That is
-deliberate. `dev` parses as no release tag at all, so a client comparing
-versions lands on "cannot compare" instead of a confident wrong answer.
+any branch image — leaves the release stamp empty and reports
+`dev+<12 hex>`: the word, plus the revision it was built from, plus
+`-dirty` when that tree had uncommitted changes. It reports the bare
+`dev` only when it cannot establish a revision at all.
+
+Both forms are deliberate and both are safe for the same reason: a
+release parser wants `vX.Y.Z` before it will look at anything else, so
+neither parses as a release tag and a client comparing versions lands on
+"cannot compare" instead of a confident wrong answer.
+
+**Why the revision rides the string here and not for a release**
+(memql#4575). A cluster built from a checkout used to answer the bare
+word, which is honest and useless: a developer who rebuilt an hour ago
+and one who installed last week read the same thing. The revision is the
+answer, and the version string is where it reaches every surface at once
+— the portal's rail footer, the editor's cluster row, the boot log,
+`memqlVersion()` — because they all already render this one value. The
+editor in particular has nowhere else to put it: its recorded version
+lives in the operator's `clusters.yaml`, and the cockpit rewrites that
+file from its own struct and drops every key it does not model.
+
+A **release** keeps its bare tag. That value is compared, sorted and
+matched against an image tag in a dozen places, and gluing a second fact
+onto it hands every one of them something to remember to ignore. A
+release states its revision through `ServerHello.engine_commit` instead
+— which is the case that needs it most, because a tag's image pins are
+written before that tag's own images exist, so an instance declaring
+`ENGINE_REF=v0.19.6` legitimately runs 0.19.5 binaries and only the
+revision can say which source is executing.
+
+**The revision has to be passed in, even locally.** `.dockerignore`
+excludes `.git`, so the Go toolchain's own `vcs.revision` stamping —
+which covers a plain `go build .` — cannot fire inside an image build.
+The `MEMQL_COMMIT` build arg is the only source there, and until
+memql#4574 the shared local mapping (`scripts/lib/engine_build_args.sh`,
+used by `make dev` and by the editor's rebuild) passed nothing, so every
+locally built image carried no revision at all.
 
 There is no environment variable and no file. Both existed and both were
 removed rather than demoted:
@@ -116,7 +150,8 @@ removed rather than demoted:
   ways to be told what to say and no way to know.
 
 `TestEveryEngineImageLinksTheReleaseIntoTheBinary` and the guards beside
-it (`release_stamp_test.go`) hold this in place, because `-X` is
+it (`release_stamp_test.go`), together with the revision's own half in
+`commit_stamp_test.go`, hold this in place, because `-X` is
 **silently ignored** when its target does not resolve: a renamed
 variable or a typo'd import path breaks nothing visible and quietly
 turns every subsequent release into `dev`.
