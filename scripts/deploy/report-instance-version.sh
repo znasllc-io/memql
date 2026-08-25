@@ -201,10 +201,21 @@ function resolve_reported() {
     # `reported` is reported absent, never inferred from the image tag -- an
     # inferred value would agree with `running` by construction and so could
     # never disagree with it, which is the one thing it is here to be able to do.
-    line="$(kubectl logs -n "$NAMESPACE" -l app.kubernetes.io/part-of=memql --tail=-1 --prefix=false 2>/dev/null \
+    # --limit-bytes BOUNDS THE FETCH, and the bound is what makes this safe in
+    # the case the note below describes. The boot line is written once, at
+    # process start, so it is at the very TOP of a pod's log -- a small prefix
+    # always contains it when it exists.
+    #
+    # Without the bound, `grep -m1` terminates the stream early on a HIT and
+    # not at all on a MISS: a cluster whose nodes predate memql#4486 has no
+    # boot line anywhere, so every byte of every pod's log would be pulled
+    # across the API server to discover that. That is exactly the cluster most
+    # likely to be running this, and the slowest possible way to learn nothing.
+    local limit="--limit-bytes=262144"
+    line="$(kubectl logs -n "$NAMESPACE" -l app.kubernetes.io/part-of=memql $limit --prefix=false 2>/dev/null \
         | grep -m1 'build identity' || true)"
     if [[ -z "$line" ]]; then
-        line="$(kubectl logs -n "$NAMESPACE" "deploy/identity" --tail=-1 2>/dev/null | grep -m1 'build identity' || true)"
+        line="$(kubectl logs -n "$NAMESPACE" "deploy/identity" $limit 2>/dev/null | grep -m1 'build identity' || true)"
     fi
     if [[ -z "$line" ]]; then
         note "no build-identity boot line found in pod logs -- either the logs have rotated, or these nodes predate memql#4486 and cannot state their own version"
