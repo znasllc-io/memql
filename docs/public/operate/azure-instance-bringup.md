@@ -123,6 +123,29 @@ registry, the key vault, and the storage account. If you are rebuilding under
 names an old instance still holds, that instance must be deleted first, and a
 key vault additionally **purged** (deletion reserves its name for 90 days).
 
+**Two couplings the script now checks for you**, both learned from a real
+bring-up:
+
+- **VM size.** The default is not universally available -- newer subscriptions
+  frequently carry v5/v7 and ARM families and offer no v4 at all. The script
+  resolves each size against `az vm list-skus` for the region before creating
+  anything, and refuses with exit 3 naming the region. This is most of what
+  makes `--dryRun` worth running: without it a plan-only run reports "would
+  create AKS cluster" and the real failure lands about four minutes later, after
+  the resource group, registry, vault and storage account are already real.
+- **Availability zones.** `--zones` defaults to `1`, and that default is
+  load-bearing rather than cautious: `cloud-entry` pins
+  `storageClass: managed-csi-premium-v2`, and **Premium SSD v2 attaches only to
+  a VM in an availability zone**. A non-zonal cluster provisions fine and then
+  strands the database pod on an attach error naming the disk type, three layers
+  from the cause. Pass `--zones=` to opt out deliberately; the script warns.
+
+  **A PVC-bind probe does not detect this.** The PV provisions and reports
+  `ProvisioningSucceeded`; only the *attach* fails, so nothing short of a pod
+  reaching `Running` proves it. It is also sticky -- PVs provisioned while
+  non-zonal carry an empty zone topology that can never match a zonal node, so
+  fixing the pool is not enough and the PVCs must be recycled.
+
 **The ordering is load-bearing in one place.** A federated identity credential
 names the cluster's OIDC issuer URL, which does not exist until the cluster
 does. That is why provisioning is one script rather than a checklist: getting
