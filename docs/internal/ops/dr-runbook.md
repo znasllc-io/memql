@@ -141,6 +141,29 @@ that continuous rather than a nightly granularity.
 economises on drills. The cost of a rehearsal is rounding error against the cost
 of discovering the restore path is broken during an incident.
 
+### Before the drill: prove there is something to restore
+
+```bash
+make db-backup-verify ACCOUNT=<storage-account>
+```
+
+A restore drill that fails because **no backup was ever written** looks, from
+the transcript, very like a broken restore path — and the two need completely
+different fixes. Settle it first. This check reads the container rather than the
+configuration, which is the distinction that matters: an `ObjectStore` reports
+whether it parsed, never whether a byte was written, and one live instance ran
+its whole life with a valid-looking one and an empty container (memql#4460 →
+memql#4468).
+
+It also refuses to guess. Azure storage RBAC is **data-plane**, so subscription
+Owner grants no read on blobs; a refused listing exits 3 saying so, rather than
+reporting a missing backup.
+
+There is no Prometheus equivalent, deliberately —
+`cnpg_collector_last_available_backup_timestamp` and its siblings do not update
+under plugin-based backups (CNPG v1.26 deprecation), which is the mode we run
+in, so they are pinned at zero here.
+
 ### Rehearsal — scripted, and safe by construction
 
 ```bash

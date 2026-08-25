@@ -186,9 +186,16 @@ patches:
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
+      # THE HOST MUST BE THE STORAGE ACCOUNT'S BLOB ENDPOINT, not the bare
+      # container (memql#4460). barman branches on this host alone, before it
+      # reads any credential: anything not ending in `blob.core.windows.net` is
+      # treated as an EMULATOR and then requires a connection string, which
+      # `inheritFromAzureAD` deliberately does not provide. The failure is
+      # silent -- Ready Cluster, healthy pods, WAL that is never recycled.
+      # See deploy/k8s/components/cnpg-db/objectstore.yaml for the branch.
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://memql-db-backups/"
+        value: "azure://REPLACE-WITH-BACKUP-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/"
       # inheritFromAzureAD replaces the connection string entirely: the sidecar
       # uses the pod's federated identity. This is what "no storage keys
       # in-cluster" means concretely.

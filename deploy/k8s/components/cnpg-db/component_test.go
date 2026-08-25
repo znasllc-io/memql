@@ -171,7 +171,7 @@ func TestPresetsMatchTheirDocumentedTiers(t *testing.T) {
 		cpu, mem  string
 		maxConns  string
 	}{
-		{"entry", 1, false, "32Gi", "16Gi", "1", "4Gi", "200"},
+		{"entry", 1, false, "32Gi", "32Gi", "1", "4Gi", "200"},
 		{"mid", 2, true, "128Gi", "32Gi", "2", "8Gi", "400"},
 		{"top", 3, true, "256Gi", "64Gi", "4", "16Gi", "400"},
 	} {
@@ -330,4 +330,156 @@ func TestComponentImageIsPinnedByEveryConsumer(t *testing.T) {
 				filepath.Base(dir), c.Spec.ImageName)
 		}
 	}
+}
+
+// objectStoreDoc is the ObjectStore fields that decide whether barman can
+// authenticate at all.
+type objectStoreDoc struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Configuration struct {
+			DestinationPath  string `yaml:"destinationPath"`
+			AzureCredentials struct {
+				ConnectionString   *struct{} `yaml:"connectionString"`
+				InheritFromAzureAD bool      `yaml:"inheritFromAzureAD"`
+			} `yaml:"azureCredentials"`
+		} `yaml:"configuration"`
+	} `yaml:"spec"`
+}
+
+// azureBlobStorageDomain is the suffix barman tests the destination HOST
+// against. Copied from barman/cloud_providers/azure_blob_storage.py.
+const azureBlobStorageDomain = "blob.core.windows.net"
+
+// readsAsEmulatedStorage reimplements barman's destination branch.
+//
+// This is the whole of memql#4460 in three lines. barman decides which code
+// path a destination takes from the URL HOST ALONE, before it reads any
+// credential:
+//
+//	if parsed_url.netloc.endswith("blob.core.windows.net"):
+//	    ... real Azure; authenticate with the supplied credential
+//	else:
+//	    ... EMULATED STORAGE; requires AZURE_STORAGE_CONNECTION_STRING
+//
+// So `azure://memql-db-backups/` -- which reads as an obvious shorthand and is
+// what both cloud overlays shipped -- puts a real Azure account on the emulator
+// path, where `inheritFromAzureAD` supplies nothing it can use.
+//
+// The host is parsed by hand rather than with net/url because the schemes in
+// play are not uniform (`azure://`, `http://`) and only the authority matters.
+func readsAsEmulatedStorage(destination string) bool {
+	rest := destination
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	host := rest
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndex(host, ":"); i >= 0 { // strip :port
+		host = host[:i]
+	}
+	return !strings.HasSuffix(host, azureBlobStorageDomain)
+}
+
+// TestBarmanEmulatorBranchIsModelledCorrectly pins the predicate itself.
+//
+// A gate that walks the overlays proves nothing if the predicate underneath it
+// is wrong, and the case that matters most is the one that already shipped: the
+// table below carries the exact destination the cloud overlays used to hold, as
+// a value that MUST read as emulated. Without that row this file could pass
+// while modelling the branch backwards.
+func TestBarmanEmulatorBranchIsModelledCorrectly(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		destination string
+		emulated    bool
+	}{
+		// The regression. This is verbatim what deploy/k8s/overlays/cloud and
+		// cloud-entry shipped until memql#4460, against a real Azure account.
+		{"the #4460 regression: bare container host", "azure://memql-db-backups/", true},
+		{"account-qualified host", "azure://stexample.blob.core.windows.net/memql-db-backups/", false},
+		{"account-qualified host, https scheme", "https://stexample.blob.core.windows.net/memql-db-backups/", false},
+		{"the component placeholder", "PATCH-ME-IN-THE-OVERLAY", true},
+		// Azurite. Genuinely emulated, and correct as long as a connection
+		// string is supplied -- which is what the local overlay does.
+		{"azurite", "http://azurite:10000/devstoreaccount1/memql-db-backups", true},
+		// A port must not defeat the suffix test.
+		{"account host with a port", "https://stexample.blob.core.windows.net:443/memql-db-backups/", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := readsAsEmulatedStorage(tc.destination); got != tc.emulated {
+				t.Errorf("readsAsEmulatedStorage(%q) = %v, want %v", tc.destination, got, tc.emulated)
+			}
+		})
+	}
+}
+
+// TestBackupDestinationSurvivesBarmansEmulatorBranch is the overlay gate.
+//
+// An ObjectStore whose destination reads as emulated storage MUST supply a
+// connection string, because that is the only credential barman's emulator path
+// can use. Every other combination fails at the first archive and at every
+// retention pass, with a Ready Cluster and healthy pods above it -- so nothing
+// short of reading the sidecar's log reveals it, and one live instance ran its
+// whole life that way with an empty backup container (memql#4468) and a WAL
+// volume that filled until Postgres refused to start (memql#4459).
+//
+// This is the check that would have caught memql#4460 at render time.
+func TestBackupDestinationSurvivesBarmansEmulatorBranch(t *testing.T) {
+	root := repoRoot(t)
+	overlays, err := filepath.Glob(filepath.Join(root, "deploy", "k8s", "overlays", "*"))
+	if err != nil {
+		t.Fatalf("globbing overlays: %v", err)
+	}
+
+	var checked int
+	for _, dir := range overlays {
+		if _, err := os.Stat(filepath.Join(dir, "kustomization.yaml")); err != nil {
+			continue
+		}
+		name := filepath.Base(dir)
+		rendered := renderDir(t, dir)
+
+		dec := yaml.NewDecoder(strings.NewReader(rendered))
+		for {
+			var d objectStoreDoc
+			err := dec.Decode(&d)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("%s: decoding rendered manifests: %v", name, err)
+			}
+			if d.Kind != "ObjectStore" {
+				continue
+			}
+			checked++
+
+			dest := d.Spec.Configuration.DestinationPath
+			if !readsAsEmulatedStorage(dest) {
+				continue // real-Azure path; the credential is barman's business
+			}
+			if d.Spec.Configuration.AzureCredentials.ConnectionString != nil {
+				continue // emulated AND carrying the one credential that path accepts
+			}
+			t.Errorf("the %s overlay's ObjectStore %q sets destinationPath %q, which barman reads as "+
+				"EMULATED STORAGE (its host does not end in %q) -- and supplies no connectionString, "+
+				"which is the only credential that path can use. Every archive and every retention pass "+
+				"will fail with \"A connection string must be provided when using emulated storage\", "+
+				"while the Cluster reports Ready. Name the storage account in the host: "+
+				"azure://<account>.%s/<container>/ (memql#4460).",
+				name, d.Metadata.Name, dest, azureBlobStorageDomain, azureBlobStorageDomain)
+		}
+	}
+
+	// A gate that examined nothing must say so rather than pass quietly.
+	if checked == 0 {
+		t.Skip("no overlay renders an ObjectStore; nothing to check")
+	}
+	t.Logf("checked %d ObjectStore(s) across the overlays", checked)
 }

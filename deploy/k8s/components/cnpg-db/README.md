@@ -31,7 +31,7 @@ patches:
     patch: |
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://memql-db-backups/"
+        value: "azure://<account>.blob.core.windows.net/memql-db-backups/"
 
 images:
   - name: memql-db
@@ -82,7 +82,7 @@ Values only — never divergent manifests.
 
 | Preset | Instances | Resources | Storage (data + WAL) | HA | `max_connections` |
 |---|---|---|---|---|---|
-| `entry` | 1 | 1 vCPU / 4 GiB | 32 + 16 GiB | off | 200 |
+| `entry` | 1 | 1 vCPU / 4 GiB | 32 + 32 GiB | off | 200 |
 | `mid` | 2 | 2 vCPU / 8 GiB | 128 + 32 GiB | on | 400 |
 | `top` | 3 | 4 vCPU / 16 GiB | 256 + 64 GiB | on, 3 zones | 400 |
 

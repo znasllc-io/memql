@@ -391,6 +391,32 @@ db-image:
 		$${SMOKE:+--smokeTest=$${SMOKE}} \
 		$${CLUSTER:+--cluster=$${CLUSTER}}
 
+.PHONY: db-backup-verify
+
+## Verify a database backup ACTUALLY LANDED, by looking in the container
+## (memql#4468, epic memql#4496).
+##
+## An ObjectStore reports whether it parsed, never whether a byte was written.
+## One live instance ran its entire life with a valid-looking ObjectStore, a
+## Ready Cluster, healthy pods and an EMPTY backup container (memql#4460). The
+## only check that catches that is this one.
+##
+## THERE IS NO PROMETHEUS ALERT FOR THIS, and that is not an oversight:
+## CloudNativePG deprecated cnpg_collector_last_available_backup_timestamp in
+## v1.26 and it does not update at all under plugin-based backups, which is
+## what MemQL uses. A rule built on it fires forever or never. See
+## scripts/deploy/db-backup-verify.sh.
+##
+##   make db-backup-verify ACCOUNT=stexamplebackup
+##   make db-backup-verify ACCOUNT=stexamplebackup MAX_AGE_HOURS=48
+db-backup-verify:
+	@bash scripts/deploy/db-backup-verify.sh \
+		--account="$${ACCOUNT:?set ACCOUNT=<storage account holding the backup container>}" \
+		$${CONTAINER:+--container=$${CONTAINER}} \
+		$${SERVER:+--server=$${SERVER}} \
+		$${MAX_AGE_HOURS:+--max-age-hours=$${MAX_AGE_HOURS}} \
+		$${AUTH:+--auth=$${AUTH}}
+
 .PHONY: db-restore-drill
 
 ## Restore the latest database backup into a scratch namespace, prove the

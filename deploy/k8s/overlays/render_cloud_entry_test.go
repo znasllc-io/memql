@@ -10,6 +10,7 @@ package overlays
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -103,11 +104,18 @@ func TestCloudEntryUsesTheEntryPreset(t *testing.T) {
 	if !strings.Contains(rendered, "instances: 1") {
 		t.Error("memql-db is not 1 instance; cloud-entry must compose cnpg-db/presets/entry")
 	}
+	// Data and WAL are BOTH 32Gi at this tier since memql#4459, so a bare
+	// substring match can no longer tell them apart -- and a check that cannot
+	// fail for one of the two things it names is worse than no check. Match the
+	// walStorage block itself.
 	if !strings.Contains(rendered, "32Gi") {
 		t.Error("memql-db data volume is not 32Gi")
 	}
-	if !strings.Contains(rendered, "16Gi") {
-		t.Error("memql-db WAL volume is not 16Gi")
+	if !regexp.MustCompile(`(?m)^\s*walStorage:\n\s*size:\s*32Gi\s*$`).MatchString(rendered) {
+		t.Error("memql-db WAL volume is not 32Gi; the entry preset must not regress to 16Gi (memql#4459)")
+	}
+	if strings.Contains(rendered, "16Gi") {
+		t.Error("memql-db still carries the pre-#4459 16Gi WAL volume")
 	}
 	if strings.Contains(rendered, "256Gi") {
 		t.Error("memql-db still carries the top preset 256Gi data volume")
