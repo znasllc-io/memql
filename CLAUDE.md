@@ -2327,6 +2327,36 @@ preferred, SMTPSender fallback, LogSender for dev; env `AZURE_TENANT_ID` /
 `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `MAIL_SENDER` / `MAIL_FROM_NAME`,
 or the `SMTP_*` family, or neither).
 
+**"or neither" is a LOCAL-ONLY option (memql#4477).** `LogSender` wrote the
+message to the pod log and returned `nil`, so mail did not fail silently -- it
+failed UPWARD: the setup wizard said the link was sent, the audit row recorded
+`magic_link_issued` with `outcome=success`, and the only evidence was a human
+not receiving mail, which is indistinguishable from a spam filter. A failure
+that hangs gets investigated; one that reports success does not. So log-only
+is a choice a local install may make and an error everywhere else, decided
+from `MEMQL_DOMAIN`: unset, a loopback literal, `*.localhost` or
+`*.local.<domain>` keeps it; anything else REFUSES BOOT, naming the four Graph
+vars and the SMTP pair. The break-glass is `MEMQL_EMAIL_ALLOW_LOG_ONLY=true`,
+which exists for `make up DOMAIN=lab.example.com` -- a genuinely local cluster
+on a name that looks like production. Four layers were reporting success and
+all four changed: boot (the plug-in factory errors, `materializePlugins`
+fatals -- a deliberate exception to its "degrade rather than fail" note,
+because degraded here is indistinguishable from working), send (a `LogSender`
+built anywhere else returns a permanent `SendError`), the audit row
+(`outcome=failure` / `delivery_failed`, while the ROW and the HTTP response
+stay identical, because a response that varied with delivery would enumerate
+registered addresses), and the portal (`unhealthy`, not `degraded`).
+[identity-service.md](docs/public/operate/auth/identity-service.md#log-only-mail-is-refused-off-a-local-domain-memql4477).
+
+**`Mail.Send` (Application) is tenant-wide until it is scoped** (memql#4478).
+Its Entra display name is literally "Send mail as any user". Narrowing it to
+the one sender mailbox needs an Exchange `ApplicationAccessPolicy`, which is
+Exchange Online PowerShell and NOT reachable from `az` -- which is why it gets
+skipped. One app registration per instance, and any automation that adds a
+secret must pass `az ad app credential reset --append`: without it the command
+DELETES every existing secret on the registration.
+[azure-entry-install.md](docs/public/operate/azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
+
 **The guest write path is ENGINE DSL, split across two domains** (memql#4258).
 The five constructs `guest_handlers.go` names once existed in no `.memql` file
 at all, so every guest-invite write failed at execute with `function "..." not

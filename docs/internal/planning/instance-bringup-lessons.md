@@ -289,3 +289,83 @@ behind it.
 -- all 54 objects stayed behind one invalid Service. Fixed in the instance repo;
 belongs upstream, since any instance composing `cloud-entry` with voice off hits
 it. Refs memql#4225.
+
+## 10. Mail does not fail silently -- it fails UPWARD
+
+The sharpest finding of the bring-up, and a different failure *class* from
+everything above. The install-dependency class (§3) fails **silently**: a pod
+hangs and says nothing. This one reports **success at every layer**.
+
+With no mail credentials, `integrations/email`'s `NewSenderFromEnv` selected a
+`LogSender`, which wrote the message to the pod log and returned `nil`. So:
+
+```
+email: no sender configured, using LogSender
+email (log-only mode, not delivered)  to=...  subject="Claim ownership of MemQL"
+```
+
+...the setup wizard said the link was sent, and the audit row recorded
+`magic_link_issued` with `outcome=success`. The only evidence was a human not
+receiving mail, which is indistinguishable from a spam filter. On this
+instance the cluster owner could not claim their own cluster and **nothing
+anywhere said why**.
+
+A failure that hangs eventually gets investigated. A failure that reports
+success does not. A no-delivery mode is right for local development; on a
+cloud install it converts "mail is unconfigured" -- a loud, fixable condition
+-- into "the owner is confused about their inbox".
+
+**Fixed in memql#4477.** Log-only is now refused on any install whose
+`MEMQL_DOMAIN` is not a local name, at boot and at send, with the audit row
+and the portal's integration report changed to match. `MEMQL_DOMAIN` was the
+right discriminator because it is already the one seeded value every node
+derives from, so the gate introduces no new fact to keep in sync. Break-glass:
+`MEMQL_EMAIL_ALLOW_LOG_ONLY=true`.
+
+**For the lifecycle work (§8, memql#4472 / memql#4473):** mail belongs in
+`installInstance` rather than a follow-up step, and `repairInstance` should
+assert the **sender**, not the send -- the boot line `email: using Microsoft
+Graph sender` with a non-empty sender is the check. A send needs a recipient,
+and a health check that mails a real person every time it runs is a worse
+failure than not knowing.
+
+**The break-glass recovery, worth recording either way.** Because `LogSender`
+writes the whole message, a magic link issued in log-only mode is recoverable:
+
+```bash
+kubectl logs deploy/identity -n memql | grep -A5 "log-only mode"
+```
+
+A cluster is therefore never actually locked out by this. Two constraints: the
+link expires in 10 minutes, and links are device-bound (memql#4300) -- it must
+be opened in the browser that requested it, which holds the `memql_ml` cookie.
+
+## 11. The mail app registration could send as any mailbox in the tenant
+
+The security half of the same area. The Graph sender needs `Mail.Send`
+(Application), whose Entra display name is literally **"Send mail as any
+user"** -- and that is precisely what it grants: the app can send as any
+mailbox in the tenant, not only the configured sender.
+
+Narrowing it to one mailbox requires an Exchange `ApplicationAccessPolicy`,
+which is **Exchange Online PowerShell and not reachable from `az`**. Nothing
+in the documented bring-up path applied one, so unless an operator knew to do
+it by hand, every instance stood up this way had a tenant-wide send capability
+sitting in a Key Vault.
+
+A destructive adjacency found the same day: **`az ad app credential reset`
+without `--append` deletes every existing secret** on the app registration.
+Adding a secret for a new cluster to a shared registration is therefore a
+one-flag difference between additive and destructive -- and here the secret it
+destroyed was labelled `memql-keep-it`.
+
+**Fixed in memql#4478**, as documentation, because both halves are operator
+actions on a tenant this repo has no access to: the `New-ApplicationAccessPolicy`
+invocation with both-directions verification, the `--append` requirement, and a
+new app registration per instance rather than one shared across instances --
+which bounds a leaked secret to one instance and makes the wrong reset flag
+cost nothing. See
+[azure-entry-install.md](../../public/operate/azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
+
+> Numbering note: memql#4477 and memql#4478 cite these as §10 and §12 of an
+> earlier draft of this write-up. They are §10 and §11 here.

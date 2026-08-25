@@ -437,6 +437,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 
 	linkURL := buildMagicLinkURL(i.Cfg.BaseURL, plainToken)
 
+	var sendErr error
 	if i.Sender != nil {
 		brandName := i.Cfg.BrandName
 		if brandName == "" {
@@ -454,6 +455,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 			// Log but don't fail the request — the row is already
 			// persisted; the user can request another link if the
 			// email never arrives.
+			sendErr = err
 			if i.Logger != nil {
 				i.Logger.Warn("magiclink: sender failed",
 					slog.String("email", email),
@@ -463,7 +465,21 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 		}
 	}
 
-	i.audit(ctx, identity.AuditEvent{
+	// THE AUDIT ROW SAYS WHETHER DELIVERY HAPPENED (memql#4477).
+	//
+	// It used to be stamped success unconditionally, which made this one of
+	// the layers that reported a message as sent when nothing left the
+	// process -- and it is the layer an operator actually reads when someone
+	// says a link never arrived. Success here sends them to a spam folder and
+	// to their DNS records, never to the sender configuration that is wrong.
+	//
+	// What deliberately does NOT change: the row stays written and Issue
+	// still returns nil. The credential is real and can be re-requested, and
+	// the caller's outcome must be identical whatever happened here -- an
+	// HTTP response that varied with delivery would be an oracle for which
+	// addresses are registered. So the honest answer goes to the trail, which
+	// is admin-gated, and not to the requester.
+	ev := identity.AuditEvent{
 		Category:      identity.AuditCategoryAuth,
 		Action:        "magic_link_issued",
 		TargetType:    "magicLinkRequest",
@@ -477,7 +493,17 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 			"clientId":    in.ClientId,
 			"redirectURI": in.RedirectURI,
 		},
-	})
+	}
+	if sendErr != nil {
+		ev.Outcome = identity.AuditOutcomeFailure
+		// The reason is a fixed token, matching the vocabulary
+		// sign_in_notification_sent already uses. The provider's own text
+		// stays in the slog line above: an audit row is read by every admin,
+		// and third-party error prose is the one place a credential could
+		// plausibly be echoed back at us.
+		ev.FailureReason = "delivery_failed"
+	}
+	i.audit(ctx, ev)
 
 	return out, nil
 }

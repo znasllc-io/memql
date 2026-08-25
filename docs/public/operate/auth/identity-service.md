@@ -464,7 +464,66 @@ plug-in (`integrations/email`). Configure exactly one sender:
 - **SMTP fallback** (`SMTP_HOST` + `SMTP_PORT` + `SMTP_USERNAME` +
   `SMTP_PASSWORD` + `SMTP_FROM_ADDR`) -- development only.
 - **LogSender** -- both unset; emails are written to the slog
-  stream. Dev only.
+  stream. Dev only, and **refused outright on an install that is not local**
+  (below).
+
+### Log-only mail is REFUSED off a local domain (memql#4477)
+
+With nothing configured, the email lane used to select a `LogSender` that
+wrote the message to the pod log and returned `nil`. Mail did not fail
+silently -- it **failed upward**. Every layer above reported success: the
+setup wizard said the link was sent, the audit row recorded
+`magic_link_issued` with `outcome=success`, and the portal's integration row
+said "degraded", which on a dev cluster means "as intended". The only evidence
+was a human not receiving mail, which is indistinguishable from a spam filter.
+On the first real cloud instance the cluster owner could not claim their own
+cluster and nothing anywhere said why.
+
+A failure that hangs eventually gets investigated. A failure that reports
+success does not. So log-only is now a choice a local install may make and an
+error everywhere else, decided from `MEMQL_DOMAIN`:
+
+| `MEMQL_DOMAIN` | With no mail credentials |
+|---|---|
+| unset, a loopback literal, `*.localhost`, or `*.local.<domain>` | `LogSender`, exactly as before |
+| anything else | **the node refuses to boot**, naming the four Graph vars and the SMTP pair |
+
+Four layers changed, and each one closes a different way of not finding out:
+
+- **Boot** -- the plug-in factory returns an error, which
+  `app.materializePlugins` fatals on. A misconfigured cloud install fails
+  where the operator is watching instead of a week later.
+- **Send** -- a `LogSender` built anywhere else (the guest-invite fallbacks
+  build one directly) returns a permanent `SendError` rather than `nil`.
+- **The audit trail** -- `magic_link_issued` is stamped
+  `outcome=failure`, `failureReason=delivery_failed` when the send failed.
+  The row is still written and the HTTP response is unchanged: the link is a
+  real credential that can be re-requested, and a response that varied with
+  delivery would tell an unauthenticated visitor which addresses are
+  registered.
+- **The portal** -- the email integration reports `unhealthy` rather than
+  `degraded`, because on this install nothing can be sent at all.
+
+**Break-glass: `MEMQL_EMAIL_ALLOW_LOG_ONLY=true`.** `make up
+DOMAIN=lab.example.com` stands up a genuinely local parity cluster on a name
+that looks like production, and refusing to boot it would be a regression for
+a developer who never wanted mail. Setting this says log-only is deliberate
+here; the boot log says so, and the portal keeps calling the lane degraded.
+Never set it on an install real people sign in to -- their sign-in links go to
+the pod log.
+
+**The break-glass recovery, worth knowing either way.** Because `LogSender`
+writes the whole message, a magic link issued in log-only mode is
+recoverable:
+
+```bash
+kubectl logs deploy/identity -n memql | grep -A5 "log-only mode"
+```
+
+Two constraints: the link expires in 10 minutes, and links are device-bound
+(memql#4300) -- it must be opened in the browser that requested it, the one
+holding the `memql_ml` cookie. So a cluster is never actually locked out by
+this; it just gives no sign that it is the reason.
 
 ### The Graph sender lives on the MAILBOX tenant, not the AKS tenant
 
@@ -487,8 +546,7 @@ EVERYTHING the sender needs is created on the MAILBOX tenant:
   secret;
 - the `Mail.Send` APPLICATION permission, with admin consent granted;
 - the Exchange `ApplicationAccessPolicy` that scopes that app to the one
-  sender mailbox (hardening; without it `Mail.Send` is every mailbox in
-  the tenant);
+  sender mailbox -- **not optional**, see below;
 - and therefore `MEMQL_EMAIL_AZURE_TENANT_ID` = that tenant's id, and
   `MEMQL_EMAIL_AZURE_CLIENT_ID` / `_CLIENT_SECRET` = that app's.
 
@@ -503,6 +561,27 @@ curl -s "https://login.microsoftonline.com/getuserrealm.srf?login=noreply@<domai
 # The tenant id itself: the issuer is https://sts.windows.net/<tenant-id>/
 curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configuration" | jq -r .issuer
 ```
+
+### `Mail.Send` (Application) is tenant-wide until it is scoped (memql#4478)
+
+The Entra display name for the permission is literally **"Send mail as any
+user"**, and that is what it grants: the app registration can send as every
+mailbox in the tenant, not only as `MEMQL_EMAIL_SENDER`. Narrowing it needs an
+Exchange `ApplicationAccessPolicy` (or the newer RBAC for Applications), which
+is **Exchange Online PowerShell and not reachable from `az`** -- which is
+precisely why it gets skipped, and why every instance stood up without it has
+a tenant-wide send capability sitting in a Key Vault.
+
+The invocation, the both-directions verification, and the
+`az ad app credential reset --append` trap that goes with it are in
+[azure-entry-install.md](../azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
+Two rules travel with them:
+
+- **One app registration per instance.** A leaked secret then costs one
+  instance rather than every instance sharing the registration.
+- **`az ad app credential reset` without `--append` deletes every existing
+  secret on the registration.** On the bring-up this was found on, the secret
+  it destroyed was labelled `memql-keep-it`.
 
 ### Next client install: verify the mailbox before wiring Graph
 

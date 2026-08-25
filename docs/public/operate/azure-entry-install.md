@@ -444,9 +444,18 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
       licenses, or `MailboxNotEnabledForRESTAPI` on the first send, means
       no Exchange mailbox -- license it or pick another sender before
       wiring anything.
-- [ ] Create `id-memql-mail`, grant `Mail.Send` (Application) with admin
-      consent, and apply the `ApplicationAccessPolicy` -- on the mailbox
+- [ ] Create **a new `id-memql-mail` app registration for THIS instance** --
+      never reuse another instance's. Two reasons, and the second one has
+      already cost somebody a secret: the blast radius of a leaked client
+      secret is one instance rather than all of them, and adding a secret to
+      a shared registration is one flag away from destroying the others (see
+      the `--append` warning below).
+- [ ] Grant `Mail.Send` (Application) with admin consent -- on the mailbox
       tenant only.
+- [ ] **Apply an `ApplicationAccessPolicy`, and do not treat it as optional.**
+      Until you do, this app can send as ANY mailbox in the tenant. See the
+      section below for the invocation; it is Exchange Online PowerShell and
+      is not reachable from `az`, which is exactly why it gets skipped.
 - [ ] Do NOT create the mail app on the AKS tenant. Do NOT recreate
       `noreply@<domain>` on the AKS directory: a same-named object on the
       wrong tenant sends every later diagnosis down the wrong path.
@@ -457,6 +466,63 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
 - [ ] Send one magic link; the identity log shows `email: using Microsoft
       Graph sender` at boot and `sendMail` answering `202`. A `404` on
       `/users/<sender>` is the tenant; a `401` is the credential.
+
+### `Mail.Send` is tenant-wide until you scope it
+
+The Entra display name for the permission is literally **"Send mail as any
+user"**, and that is what it grants. An app registration holding it can send
+as every mailbox in the tenant -- the CEO's included -- not only as the sender
+address you configured. Nothing in the Azure portal, in `az`, or in this
+install path narrows it for you, so an instance stood up without the step
+below has a tenant-wide send capability sitting in a Key Vault.
+
+Narrowing it is Exchange Online PowerShell. There is no `az` equivalent and no
+portal blade, which is the whole reason the step goes missing:
+
+```powershell
+# Install-Module ExchangeOnlineManagement -Scope CurrentUser
+Connect-ExchangeOnline -Organization <mailbox-tenant-domain>
+
+# 1. A mail-enabled security group whose only member is the sender mailbox.
+#    The policy scopes to a GROUP, so this is how "only noreply@" is spelled.
+New-DistributionGroup -Name "memql-mail-senders" `
+  -Type Security `
+  -PrimarySmtpAddress "memql-mail-senders@<domain>" `
+  -Members "noreply@<domain>"
+
+# 2. Restrict the app to that group. -AppId is MEMQL_EMAIL_AZURE_CLIENT_ID.
+New-ApplicationAccessPolicy `
+  -AppId <client-id> `
+  -PolicyScopeGroupId "memql-mail-senders@<domain>" `
+  -AccessRight RestrictAccess `
+  -Description "MemQL transactional mail: may send only as noreply@<domain>."
+
+# 3. Verify BOTH directions. A policy that grants is not evidence it denies.
+Test-ApplicationAccessPolicy -Identity "noreply@<domain>"  -AppId <client-id>
+Test-ApplicationAccessPolicy -Identity "<a-real-person>@<domain>" -AppId <client-id>
+# want: Granted, then Denied. Allow up to ~30 minutes for replication before
+# reading a Granted-everywhere result as a failed policy.
+```
+
+Microsoft also offers **RBAC for Applications** (`New-ManagementRoleAssignment
+-App ... -Role "Application Mail.Send" -CustomResourceScope ...`) as a newer,
+more granular way to say the same thing. It is likewise Exchange Online
+PowerShell. Prefer it if your tenant supports it; the requirement this
+checklist is enforcing is that the app is scoped by ONE of them, not which.
+
+> **`az ad app credential reset` without `--append` DELETES every existing
+> secret on the app registration.** On the bring-up this was found on, the
+> secret it destroyed was labelled `memql-keep-it`. Any automation that
+> provisions mail credentials must pass `--append`:
+>
+> ```bash
+> az ad app credential reset --id <client-id> --append --years 2
+> ```
+>
+> A one-flag difference between additive and destructive, on a command whose
+> name says "reset" and whose default is "replace all", is the second and
+> independent reason to give every instance its own app registration: on a
+> registration nothing else uses, the wrong flag costs you nothing.
 
 Full runbook:
 [auth/identity-service.md](auth/identity-service.md#email-delivery).
