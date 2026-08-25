@@ -103,6 +103,14 @@ func hashGuestToken(plain string) string {
 // plug-in via the engine's registry means app/transport doesn't have
 // to wire the sender explicitly -- email is a self-registering plug-in
 // in integrations/email/plugin.go.
+//
+// The fallback is DEV-ONLY by construction now (memql#4477): a LogSender
+// built on an install whose MEMQL_DOMAIN is not a local name refuses every
+// Send rather than logging the message and returning nil. These three call
+// sites are why that check lives on the type instead of only in
+// NewSenderFromEnv -- nothing here goes through the plug-in factory, so a
+// guard placed only there would leave a guest invite reporting success while
+// the invitation email went to a pod log.
 func (s *streamSession) resolveEmailSender() email.Sender {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return email.NewLogSender(s.logger)
@@ -416,7 +424,10 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: persist invitation", err)
 	}
 
-	// Fire the email. Fall back to a LogSender so dev doesn't crash.
+	// Fire the email. Falls back to a LogSender so dev doesn't crash; on an
+	// install that must really deliver mail that fallback REFUSES, and the
+	// error handling below turns it into an honest email_failed rather than
+	// an invitation nobody receives.
 	sender := s.resolveEmailSender()
 	joinURL := joinURLBase + "/join/" + plainToken
 	if err := email.SendGuestInvite(ctx, sender, email.GuestInviteParams{

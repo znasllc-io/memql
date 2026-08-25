@@ -16,7 +16,15 @@ import "github.com/znasllc-io/memql/component/memql"
 // stash; that target has never existed and the seeder reads a .env file.)
 func init() {
 	memql.RegisterPlugin("email", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		envSender := NewSenderFromEnv("", pctx.Logger)
+		envSender, err := NewSenderFromEnv("", pctx.Logger)
+		if err != nil {
+			// Returned rather than swallowed: app.materializePlugins fatals on
+			// a factory error, which is the point (memql#4477). An install
+			// that must deliver mail and cannot is refused at boot, where the
+			// operator is watching, instead of at the moment somebody cannot
+			// sign in a week later.
+			return nil, err
+		}
 		lazySender := NewLazySender(envSender, pctx.ResolveSystemVariable, pctx.ResolveSystemSecret, pctx.Logger)
 		return NewIntegration(lazySender, pctx.Logger), nil
 	})
