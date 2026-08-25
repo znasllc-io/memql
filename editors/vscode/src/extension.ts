@@ -35,6 +35,7 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
+import { SingleFlight } from './async/singleFlight.js';
 import {
   runDeviceCodeFlow,
   signInWithDeviceCodeFallback,
@@ -3712,7 +3713,37 @@ async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute
 // until a human dismissed a notification, which makes the command unusable from
 // any automated caller (the host smoke lane included) and buys nothing -- the
 // message offers no choice to read back.
+// One sign-in flow per cluster at a time (memql#4596). Four surfaces reach
+// this -- the dial-failure toast's "Sign in" action, the palette command, the
+// ownership walk, "Sign In With a Device Code" -- and nothing used to stop two of them
+// running at once: two listeners, two browser tabs or code notifications, two
+// progress notifications. A second request now JOINS the in-flight attempt
+// and observes its outcome (joining, not cancel-and-restart: the person
+// asking again is usually the person mid-way through the first flow's browser
+// page, and a `flow` argument on a joined call is deliberately not honoured
+// -- one flow at a time is the point). Keyed by cluster name; different
+// clusters stay independent.
+const signInFlights = new SingleFlight<boolean>();
+
 async function signInToCluster(
+  cluster: ClusterConfig,
+  deps: SignInDeps,
+  flow: SignInFlow = 'auto'
+): Promise<boolean> {
+  // Said out loud, not silently absorbed. The joiner most worth telling is
+  // the one who ran "MemQL: Sign In With a Device Code" while a browser flow
+  // waits on its (now ten-minute) callback: their request is deliberately
+  // not honoured as a second flow, so without this line the documented
+  // recovery gesture would read as a command that does nothing.
+  if (signInFlights.has(cluster.name)) {
+    void window.showInformationMessage(
+      `MemQL: a sign-in to "${cluster.name}" is already in progress -- finish it, or cancel it from its progress notification first.`
+    );
+  }
+  return signInFlights.run(cluster.name, () => runSignInToCluster(cluster, deps, flow));
+}
+
+async function runSignInToCluster(
   cluster: ClusterConfig,
   deps: SignInDeps,
   flow: SignInFlow = 'auto'
@@ -3732,14 +3763,47 @@ async function signInToCluster(
       // Read by the code notification at every step, so a flow that finished or
       // was cancelled while the notification sat open does not re-summon it.
       let settled = false;
+      // True once a device code owns the progress line; the quiet-wait hint
+      // below must never overwrite it.
+      let deviceCodeShown = false;
+      // True from the moment the auto-fallback fires. Declared here, above
+      // the hint timer that reads it: after a bindFailed fallback the line
+      // says "switching to a device code..." while POST /device/code runs,
+      // and the hint overwriting THAT with browser-flow advice would claim a
+      // flow is running that is not. Also read by onUserCode (the action
+      // message explains the switch) and the failure path (so an error in the
+      // fallback flow still says why a device code was being tried at all).
+      let fallbackFired = false;
+      // The browser wait can legitimately run for minutes -- the magic-link
+      // round trip is enter-email, wait for the mail, click, approve -- and a
+      // spinner that says nothing for that long reads as hung (memql#4594,
+      // which replaced the old answer: silently switching to a device code
+      // under the person's live tab). One update, after a quiet minute,
+      // naming both exits.
+      const quietHint =
+        flow === 'deviceCode'
+          ? undefined
+          : setTimeout(() => {
+              if (settled || deviceCodeShown || fallbackFired) return;
+              progress.report({
+                message:
+                  'still waiting for the browser sign-in -- magic-link emails can take a minute. Cancel and run "MemQL: Sign In With a Device Code" if the page cannot reach this machine.',
+              });
+            }, 60_000);
       // Both grants report the user code the same way, and the device code is
       // the one thing a person has to READ off the screen and carry to another
       // one -- so it goes on the progress line (undismissable, lives exactly as
       // long as the polling) and into a message with the two actions a
       // progress line cannot render.
       const onUserCode = (authorization: DeviceAuthorization): void => {
+        deviceCodeShown = true;
         progress.report({ message: deviceCodeProgressLine(authorization) });
-        showDeviceCodeActions(authorization, () => settled);
+        showDeviceCodeActions(
+          authorization,
+          () => settled,
+          fallbackFired ? 'fallback' : 'deliberate',
+          sinkFor(connectionOutput)
+        );
       };
       // asExternalUri is not decoration: under Remote-SSH, Codespaces or a dev
       // container the browser runs on a different machine from this extension
@@ -3766,8 +3830,10 @@ async function signInToCluster(
                 onUserCode,
                 resolveExternalUri,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
-                onFallback: (reason) =>
-                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput)),
+                onFallback: (reason) => {
+                  fallbackFired = true;
+                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));
+                },
               }),
             deviceCode: (target, signal) => runDeviceCodeFlow(target, { signal, onUserCode }),
           }),
@@ -3777,16 +3843,27 @@ async function signInToCluster(
         if (report.level !== 'silent') {
           noteDiagnostic(connectionOutput, `sign-in to "${cluster.name}" failed`, report.message);
         }
+        // A failure INSIDE the fallback flow says why a device code was
+        // being tried at all. The switch's own toast is gone (memql#4595 --
+        // the explanation rides the code message), and the code message only
+        // exists once /device/code succeeds; without this suffix, a person
+        // who asked for a browser sign-in reads an error about a device flow
+        // they never requested.
+        const shown =
+          fallbackFired && report.level !== 'silent'
+            ? `${briefMessage(report.message)} (A browser sign-in was not possible on this host, so a device code was tried; the reason is in the MemQL Connection output.)`
+            : briefMessage(report.message);
         if (report.level === 'error') {
-          void offerDetails('error', connectionOutput, briefMessage(report.message));
+          void offerDetails('error', connectionOutput, shown);
         } else if (report.level === 'warning') {
-          void offerDetails('warning', connectionOutput, briefMessage(report.message));
+          void offerDetails('warning', connectionOutput, shown);
         }
         return false;
       } finally {
         // Before the dispose, so a code notification still open when the flow
         // resolves stops re-summoning itself rather than outliving the sign-in.
         settled = true;
+        if (quietHint !== undefined) clearTimeout(quietHint);
         cancelSubscription.dispose();
       }
 

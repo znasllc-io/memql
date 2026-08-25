@@ -32,17 +32,19 @@
 //   clear "no browser here" and gets an error message instead of the flow built
 //   for precisely that host.
 //
-// So the trigger set is the ENVIRONMENT LIMITATIONS, named by `kind` and never
-// by message text (errors.ts exists so this branch can be exact):
+// So the trigger set is the ENVIRONMENT LIMITATIONS THAT ARE KNOWABLE BEFORE
+// OR AT BROWSER-OPEN, named by `kind` and never by message text (errors.ts
+// exists so this branch can be exact):
 //
 //   bindFailed          The loopback listener could not bind. Nothing was
 //                       opened, no code exists, and the machine will refuse the
 //                       next attempt identically.
-//   timeout             The listener bound and the browser was opened, but
-//                       nothing came back within the deadline. On a remote or
-//                       firewalled host that is what "the browser could not
-//                       reach 127.0.0.1" looks like from in here.
 //   browserUnavailable  This host cannot open a browser at all.
+//
+// That boundary buys an INVARIANT the whole sign-in UX leans on (memql#4594):
+// the device flow never starts while a browser tab may still complete. Both
+// triggers fire before any page could have opened, so switching cannot orphan
+// a live sign-in.
 //
 // browserUnavailable IS a trigger, deliberately. It was split out of
 // `cancelled` by memql#3402 for this exact decision: nobody declined anything,
@@ -51,8 +53,23 @@
 // headless user the fallback exists for -- and the taxonomy's own header says
 // so ("This kind is a FALLBACK TRIGGER").
 //
-// And the non-triggers, which are errors rather than limitations:
+// And the non-triggers, which are errors (or live attempts) rather than
+// pre-open limitations:
 //
+//   timeout             WAS a trigger until memql#4594, and the field failure
+//                       is why it stopped: the listener bound, the browser
+//                       opened, and the deadline fired while a person was mid
+//                       magic-link round trip -- enter email, wait for the
+//                       mail, click, approve -- which routinely outlives any
+//                       reasonable deadline. The auto-switch closed the
+//                       listener their tab was about to redirect to (a dead
+//                       port dressed as "go back"), stacked a second flow's
+//                       notifications over the first, and had them sign in
+//                       twice. A timeout now propagates as the warning it is;
+//                       the advice names `MemQL: Sign In With a Device Code` for the
+//                       host that genuinely cannot receive the callback, and
+//                       the deadline itself is sized for the magic-link round
+//                       trip (loopback.ts).
 //   cancelled           The user stopped it. Starting a second flow they did
 //                       not ask for is the opposite of honouring that.
 //   stateMismatch       A security refusal. Retrying it through another channel
@@ -144,10 +161,14 @@ export const MAX_POLL_INTERVAL_SECONDS = 60;
  */
 export const MAX_CONSECUTIVE_POLL_TRANSPORT_FAILURES = 3;
 
-/** The kinds that mean "this environment cannot do loopback". See the header. */
+/**
+ * The kinds that mean "this environment cannot do loopback", all knowable
+ * before or at browser-open. `timeout` is deliberately absent: a browser was
+ * opened, so a live tab may still complete, and switching under it is the
+ * memql#4594 failure. See the header.
+ */
 const FALLBACK_TRIGGER_KINDS: ReadonlySet<AuthFlowErrorKind> = new Set<AuthFlowErrorKind>([
   "bindFailed",
-  "timeout",
   "browserUnavailable",
 ]);
 
@@ -189,6 +210,45 @@ export interface DeviceCodeDeps {
    * ignored) so a slow UI cannot delay the poll clock.
    */
   onUserCode?: (authorization: DeviceAuthorization) => void;
+}
+
+/**
+ * How a device-code flow came to run: the operator asked for it
+ * (`MemQL: Sign In With a Device Code`), or the auto-fallback fired because this host
+ * cannot do loopback at all. The single action message reads differently --
+ * a deliberate flow has no switch to explain.
+ */
+export type DeviceCodeVia = "deliberate" | "fallback";
+
+/**
+ * deviceCodeOpenTarget is where "open the approval page" goes: the pre-filled
+ * form when the server offered one (the /device page reads `?user_code=`), so
+ * nobody transcribes a code a URL already carries; the bare page otherwise.
+ */
+export function deviceCodeOpenTarget(authorization: DeviceAuthorization): string {
+  return authorization.verificationUriComplete || authorization.verificationUri;
+}
+
+/**
+ * deviceCodeActionMessage is the ONE notification a device-code flow shows
+ * (memql#4595). It always carries the code and the bare verification URL --
+ * the second-device path types those into a phone -- and, when the flow got
+ * here by fallback, the explanation that used to be a separate toast. The
+ * full failure detail stays in the MemQL Connection output; this is the
+ * sentence, not the record.
+ */
+export function deviceCodeActionMessage(
+  authorization: DeviceAuthorization,
+  via: DeviceCodeVia,
+): string {
+  const finish = `enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in`;
+  if (via === "fallback") {
+    return (
+      `MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). ` +
+      `Finish with a device code instead: ${finish} -- on another device if this one cannot open the page.`
+    );
+  }
+  return `MemQL: ${finish}. The approval page should have opened with the code pre-filled -- use the buttons if it did not.`;
 }
 
 /**
@@ -281,6 +341,11 @@ export async function runDeviceCodeFlow(
     fetch: doFetch,
   });
 
+  // Re-checked between the authorization landing and the code going on
+  // screen: a cancel that raced the POST must not pop a browser tab and an
+  // action message for a sign-in the person already ended -- approving that
+  // page would mint a session nothing is polling for.
+  throwIfAborted(signal);
   deps.onUserCode?.(authorization);
 
   const tokens = await pollForDeviceTokens({

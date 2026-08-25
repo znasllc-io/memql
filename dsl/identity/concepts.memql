@@ -255,7 +255,7 @@ concept authSession {
   identityId      string  @description("v1:identity:identity the session was minted from (typically the magic_link variant). Same caveat as userId.")
   subject         string!  @description("JWT subject claim. The canonical key for revoke-all; populated unconditionally so all-sessions revoke works even when the user record hasn't been bootstrapped yet.")
   tokenHash       string!  @description("SHA-256 hex digest of the bearer token. Primary lookup key in the auth hot path; the plain token is never stored.")
-  source          enum("bff_exchange", "oidc_cookie")!  @description("Which auth flow created the row. bff_exchange = SPA token path (Authorization: Bearer). oidc_cookie = browser memql_auth-cookie path. Both variants are produced by the identity service's magic-link / refresh handlers.")
+  source          enum("bff_exchange", "oidc_cookie", "device_code")!  @description("Which auth flow created the row. bff_exchange = SPA token path (Authorization: Bearer). oidc_cookie = browser memql_auth-cookie path. device_code = RFC 8628 device grant redeemed at /oauth/token (memql#3410; editor and CLI sign-ins). What makes a device-originated session distinguishable in /me/devices and in an incident review.")
   clientLabel     string  @description("Best-effort human label parsed from User-Agent at issuance. Drives the device list in future per-session UIs.")
   expiresAt       datetime!  @description("Mirror of the JWT expiry. Sessions past this are dead even if not revoked.")
   lastActivityAt  datetime  @description("Bumped opportunistically by the auth middleware. Useful for surfacing 'last seen' on each device.")

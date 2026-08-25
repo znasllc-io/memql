@@ -18,6 +18,8 @@ import type { HttpRequestInit, HttpResponseLike } from "../src/connection/creden
 import {
   DEVICE_GRANT_TYPE,
   MAX_POLL_INTERVAL_SECONDS,
+  deviceCodeActionMessage,
+  deviceCodeOpenTarget,
   runDeviceCodeFlow,
   shouldFallBackToDeviceCode,
   signInWithDeviceCodeFallback,
@@ -190,7 +192,7 @@ async function rejection(promise: Promise<unknown>): Promise<AuthFlowError> {
 // -----------------------------------------------------------------------------
 
 test("the fallback triggers on exactly the environment limitations", () => {
-  for (const kind of ["bindFailed", "timeout", "browserUnavailable"] as const) {
+  for (const kind of ["bindFailed", "browserUnavailable"] as const) {
     assert.equal(
       shouldFallBackToDeviceCode(new AuthFlowError(kind, "x")),
       true,
@@ -198,6 +200,13 @@ test("the fallback triggers on exactly the environment limitations", () => {
     );
   }
   for (const kind of [
+    // timeout is deliberately NOT a trigger (memql#4594). Both remaining
+    // triggers are knowable before or at browser-open, so no live tab can
+    // exist when the device flow starts. A timeout means a browser WAS
+    // opened and nothing came back -- overwhelmingly a person still mid
+    // magic-link round trip, and switching flows under them closes the
+    // listener their tab is about to redirect to.
+    "timeout",
     "cancelled",
     "stateMismatch",
     "exchangeRejected",
@@ -247,18 +256,26 @@ test("a loopback listener that cannot bind falls back to the device code", async
   assert.equal(fallbacks[0]?.kind, "bindFailed", "the switch is announced, not silent");
 });
 
-test("a callback that never arrives falls back to the device code", async () => {
+test("a callback that never arrives does NOT fall back -- the browser attempt was live", async () => {
+  // The 2026-08-25 field failure (memql#4594): a magic-link round trip took
+  // longer than the deadline, the fallback fired under a live browser tab,
+  // the tab's redirect then hit a closed port, and the person signed in a
+  // second time on /device. A timeout now propagates instead; the advice
+  // (signin.ts) names `MemQL: Sign In With a Device Code` for the host that truly
+  // cannot receive the callback.
   const fake = identity();
 
-  const tokens = await signInWithDeviceCodeFallback(cluster(), {
-    ...loopbackDeps(fake, {
-      startListener: listenerThatFails(new AuthFlowError("timeout", "nothing arrived")),
+  const err = await rejection(
+    signInWithDeviceCodeFallback(cluster(), {
+      ...loopbackDeps(fake, {
+        startListener: listenerThatFails(new AuthFlowError("timeout", "nothing arrived")),
+      }),
+      sleep: recordingSleep().sleep,
     }),
-    sleep: recordingSleep().sleep,
-  });
+  );
 
-  assert.equal(tokens.accessToken, "ACCESS");
-  assert.equal(fake.deviceRequests().length, 1);
+  assert.equal(err.kind, "timeout");
+  assert.deepEqual(fake.deviceRequests(), [], "no device authorization may be requested");
 });
 
 test("a host that cannot open a browser at all falls back to the device code", async () => {
@@ -561,4 +578,122 @@ test("a cluster with no identity service is misconfigured, not device-signable",
     runDeviceCodeFlow({ name: "bare", endpoint: "host:443" }, { fetch: identity().fetch }),
   );
   assert.equal(err.kind, "misconfigured");
+});
+
+test("cancelling during the device-authorization request never shows a code", async () => {
+  // The cancel lands while POST /device/code is in flight. Without an abort
+  // check between the response and onUserCode, the flow would still put the
+  // code on screen -- and the UI half would open a browser tab -- for a
+  // sign-in the person just cancelled; approving that page mints a session
+  // nothing is polling for.
+  const fake = identity();
+  const aborter = new AbortController();
+  const codes: DeviceAuthorization[] = [];
+  const fetchThatLosesTheRace: typeof fake.fetch = async (url, init) => {
+    const response = await fake.fetch(url, init);
+    if (String(url).endsWith("/device/code")) aborter.abort();
+    return response;
+  };
+
+  const err = await rejection(
+    runDeviceCodeFlow(cluster(), {
+      fetch: fetchThatLosesTheRace,
+      signal: aborter.signal,
+      sleep: recordingSleep().sleep,
+      onUserCode: (authorization) => codes.push(authorization),
+    }),
+  );
+
+  assert.equal(err.kind, "cancelled");
+  assert.deepEqual(codes, [], "a cancelled sign-in must not put a code on screen");
+});
+
+// -----------------------------------------------------------------------------
+// The one-notification UX (memql#4595): what the single action message says,
+// and where "open" goes. The vscode-bound half (deviceCodeUi.ts) stays thin --
+// one showing per flow, no re-summon after a click -- and these pure helpers
+// carry everything worth asserting about it.
+// -----------------------------------------------------------------------------
+
+function authorizationFixture(overrides: Partial<DeviceAuthorization> = {}): DeviceAuthorization {
+  return {
+    deviceCode: "mql_dvc_x",
+    userCode: "BCDF-GHJK",
+    verificationUri: "https://identity.example.com/device",
+    verificationUriComplete: "https://identity.example.com/device?user_code=BCDF-GHJK",
+    expiresInSeconds: 600,
+    intervalSeconds: 5,
+    ...overrides,
+  };
+}
+
+test("the open target prefers the pre-filled verification URI", () => {
+  assert.equal(
+    deviceCodeOpenTarget(authorizationFixture()),
+    "https://identity.example.com/device?user_code=BCDF-GHJK",
+  );
+  assert.equal(
+    deviceCodeOpenTarget(authorizationFixture({ verificationUriComplete: "" })),
+    "https://identity.example.com/device",
+    "a server that sent no complete URI still gets the bare page",
+  );
+});
+
+// WHY THE TWO CASES BELOW COMPARE THE WHOLE SENTENCE
+//
+// The obvious assertion -- `message.includes("https://identity.example.com/
+// device")` -- is a shape CodeQL rejects, and it is right to in general: a
+// substring test whose needle is a URL is nearly always a trust decision ("is
+// this link one of ours?"), and a substring can sit anywhere, so an
+// attacker-controlled host may precede or follow it and still pass
+// (js/incomplete-url-substring-sanitization). Rewriting it as an unanchored
+// regex only trades that alert for js/regex/missing-regexp-anchor, which the
+// same reasoning earns; both were raised against this file in turn.
+//
+// Nothing here is authorising anything -- the haystack is a notification
+// sentence and the result decides nothing -- so both alerts were noise about
+// test wording. But the fix belongs in the test rather than in the scanner's
+// dismissal list: a dismissal lives in GitHub, teaches nobody, and the next
+// person asserting on a toast writes the flagged shape again and re-argues it
+// from scratch. An equality compare is CodeQL's own recommended remediation,
+// trips neither query, and is the stronger assertion anyway -- a reworded
+// sentence fails loudly here instead of passing on a coincidental substring.
+//
+// The narrower `assert.ok`s are kept beside it on purpose. They are the
+// INVARIANTS, not the wording: whoever updates an expected string above must
+// still leave a deliberate flow explaining no switch, and a fallback naming
+// both the switch and where the full reason lives.
+test("the deliberate action message carries the code and page, and no fallback talk", () => {
+  const message = deviceCodeActionMessage(authorizationFixture(), "deliberate");
+  assert.equal(
+    message,
+    "MemQL: enter code BCDF-GHJK at https://identity.example.com/device to finish signing in. " +
+      "The approval page should have opened with the code pre-filled -- use the buttons if it did not.",
+  );
+  assert.ok(
+    !message.toLowerCase().includes("browser sign-in"),
+    `a deliberate device flow must not explain a switch nobody made: ${message}`,
+  );
+});
+
+test("the fallback action message explains the switch in the same notification", () => {
+  // ONE notification for the whole fallback (memql#4595): the explanation
+  // that used to be its own toast rides the action message instead, and the
+  // full reason stays in the MemQL Connection output.
+  const message = deviceCodeActionMessage(authorizationFixture(), "fallback");
+  assert.equal(
+    message,
+    "MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). " +
+      "Finish with a device code instead: enter code BCDF-GHJK at " +
+      "https://identity.example.com/device to finish signing in -- on another device if this one " +
+      "cannot open the page.",
+  );
+  assert.ok(
+    message.toLowerCase().includes("browser sign-in"),
+    `the switch must be explained where the code is shown: ${message}`,
+  );
+  assert.ok(
+    message.includes("MemQL Connection"),
+    `the message must say where the full reason lives: ${message}`,
+  );
 });

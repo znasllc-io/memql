@@ -2573,7 +2573,7 @@ type CreateAuthSessionArgs struct {
 	SessionId string
 	Subject   string
 	TokenHash string
-	// Enum: bff_exchange | oidc_cookie
+	// Enum: bff_exchange | oidc_cookie | device_code
 	Source      string
 	UserId      string
 	IdentityId  string

@@ -65,8 +65,13 @@ test("binds 127.0.0.1, never a wider interface", async () => {
   });
 });
 
-test("the default deadline is two minutes", () => {
-  assert.equal(DEFAULT_CALLBACK_TIMEOUT_MS, 120_000);
+test("the default deadline is ten minutes -- the magic-link scale", () => {
+  // 120s abandoned people mid magic-link round trip (memql#4594): the flow's
+  // primary human factor is enter-email -> wait for mail -> click -> approve,
+  // which routinely outlives two minutes. Ten minutes matches the magic-link
+  // TTL and the device-authorization window; the progress notification is
+  // cancellable the whole time, so the longer wait is not a trap.
+  assert.equal(DEFAULT_CALLBACK_TIMEOUT_MS, 600_000);
 });
 
 test("serves the callback once and hands back its query parameters", async () => {

@@ -47,11 +47,18 @@ export const CALLBACK_PATH = "/callback";
 /**
  * How long the listener waits for the callback before giving up.
  *
- * Two minutes is long enough for a person to read an authorization page,
- * switch to a password manager, and click; short enough that an abandoned
- * sign-in does not leave a port open for the rest of the session.
+ * Sized for the MAGIC-LINK round trip, which is the identity service's
+ * primary human factor: enter an email, wait for the mail to arrive, click
+ * the link, approve, and let the requesting tab finish -- routinely longer
+ * than the two minutes this used to be. Two minutes abandoned people
+ * mid-sign-in (memql#4594): the deadline fired, the then-automatic device
+ * fallback closed this listener, and the browser's eventual redirect hit a
+ * dead port. Ten minutes matches the magic-link TTL and the
+ * device-authorization window (both 600s defaults), and the progress
+ * notification carrying the wait is cancellable the whole time, so the
+ * longer deadline is a bounded backstop rather than a trap.
  */
-export const DEFAULT_CALLBACK_TIMEOUT_MS = 120_000;
+export const DEFAULT_CALLBACK_TIMEOUT_MS = 600_000;
 
 /** The raw query parameters the callback carried. Interpreting them is flow.ts's job. */
 export interface CallbackParams {

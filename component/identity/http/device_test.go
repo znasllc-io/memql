@@ -3,8 +3,10 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +16,10 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/devicecode"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/dsl"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -125,6 +130,25 @@ func (f *deviceFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Ex
 		return emptyResult(), nil
 
 	case strings.Contains(q, "createAuthSession("):
+		// Validated against the EMBEDDED TREE's enum, not accepted blind. The
+		// field 500 (memql#4592) lived exactly in the gap this closes: the
+		// grant handler, the store and the mutation string were all real, and
+		// the one fake link accepted `source: "device_code"` while every real
+		// engine refused it -- so the suite's green was a statement about the
+		// fake. Reading the schema the real executor loads makes this branch
+		// fail the way production did.
+		// The load error is inspected FIRST, not discovered via an empty
+		// allowed-map -- that ordering worked only by the accident that a
+		// failed load leaves the map empty, and a future partial-load would
+		// have surfaced as a misleading enum refusal.
+		enum := authSessionSourceEnum()
+		if enum.err != nil {
+			return nil, fmt.Errorf("createAuthSession: loading the embedded authSession source enum: %w", enum.err)
+		}
+		if src := deviceArg(q, "source"); !enum.allowed[src] {
+			return nil, fmt.Errorf("createAuthSession: argument \"source\": value %s is not in enum %v (embedded tree, memql#4592)",
+				src, enum.values)
+		}
 		f.sessions++
 		return emptyResult(), nil
 
@@ -198,6 +222,60 @@ func (f *deviceFakeEngine) snapshot() deviceFakeRow {
 	return *f.row
 }
 
+// sessionSourceEnum is the fake's read of the schema the real executor
+// enforces: the createAuthSession args block's `source` enum, off the same
+// embedded tree the engine loads. Cached once per process -- the tree does
+// not change under a test run.
+type sessionSourceEnum struct {
+	allowed map[string]bool
+	values  []string
+	err     error
+}
+
+var (
+	sessionSourceEnumOnce sync.Once
+	sessionSourceEnumVal  sessionSourceEnum
+)
+
+func authSessionSourceEnum() sessionSourceEnum {
+	sessionSourceEnumOnce.Do(func() {
+		v := sessionSourceEnum{allowed: map[string]bool{}}
+		tree, err := dslimports.Load(dsl.Tree())
+		if err != nil {
+			v.err = err
+			sessionSourceEnumVal = v
+			return
+		}
+		for _, file := range tree.Files {
+			if file == nil {
+				continue
+			}
+			for _, def := range file.Definitions {
+				d, ok := def.(*languageAst.FunctionDef)
+				if !ok || d.Name != "createAuthSession" || d.Type != languageAst.FunctionTypeMutation || d.ArgsSchema == nil {
+					continue
+				}
+				for _, f := range d.ArgsSchema.Fields {
+					if f.Name != "source" {
+						continue
+					}
+					for _, e := range f.Enum {
+						s := fmt.Sprint(e)
+						v.allowed[s] = true
+						v.values = append(v.values, s)
+					}
+				}
+			}
+		}
+		sort.Strings(v.values)
+		if len(v.values) == 0 {
+			v.err = fmt.Errorf("createAuthSession declares no source enum in the embedded tree; the fake's gate would pass vacuously")
+		}
+		sessionSourceEnumVal = v
+	})
+	return sessionSourceEnumVal
+}
+
 func emptyResult() *memqlengine.ExecuteResult {
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}
 }
@@ -213,24 +291,31 @@ func stampOrEmpty(t time.Time) string {
 // engine call. The device store writes its args with %q and no spaces,
 // so this is a deliberately narrow reader rather than a parser.
 func deviceArg(q, key string) string {
-	i := strings.Index(q, key+`:"`)
-	if i < 0 {
-		return ""
-	}
-	rest := q[i+len(key)+2:]
-	var b strings.Builder
-	for j := 0; j < len(rest); j++ {
-		if rest[j] == '\\' && j+1 < len(rest) {
-			b.WriteByte(rest[j+1])
-			j++
+	// Two spacings, because two writers: devicecode's store emits the compact
+	// `key:"v"`, identity's store (createAuthSession among others) emits
+	// `key: "v"` via writeKVString. Matching only the compact form made the
+	// session-write gate below read every `source` as "" (memql#4593).
+	for _, sep := range []string{`:"`, `: "`} {
+		i := strings.Index(q, key+sep)
+		if i < 0 {
 			continue
 		}
-		if rest[j] == '"' {
-			break
+		rest := q[i+len(key)+len(sep):]
+		var b strings.Builder
+		for j := 0; j < len(rest); j++ {
+			if rest[j] == '\\' && j+1 < len(rest) {
+				b.WriteByte(rest[j+1])
+				j++
+				continue
+			}
+			if rest[j] == '"' {
+				break
+			}
+			b.WriteByte(rest[j])
 		}
-		b.WriteByte(rest[j])
+		return b.String()
 	}
-	return b.String()
+	return ""
 }
 
 func deviceIntArg(q, key string) int {

@@ -1551,7 +1551,7 @@ export interface CreateAuthSessionArgs {
   sessionId: string;
   subject: string;
   tokenHash: string;
-  // Enum: bff_exchange | oidc_cookie
+  // Enum: bff_exchange | oidc_cookie | device_code
   source: string;
   userId?: string;
   identityId?: string;

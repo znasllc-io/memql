@@ -4,56 +4,50 @@
 // WHY THIS FILE EXISTS SEPARATELY
 // -----------------------------------------------------------------------------
 //
-// deviceCode.ts carries the protocol and stays free of `vscode`, so it runs in
-// the fast `node --test` lane. Everything below is API wiring with no logic
-// worth unit-testing -- a progress notification, a clipboard write, an
-// openExternal -- which is exactly the shape the import allowlist in
-// cmd/memql-lsp/vscodeimportrule_test.go is for. Keeping it here rather than in
-// extension.ts also keeps the activation file's edit down to an import and one
-// registerCommand, which matters while memql#3403 is rewriting the same file on
-// another branch.
+// deviceCode.ts carries the protocol AND the words (deviceCodeActionMessage,
+// deviceCodeOpenTarget) and stays free of `vscode`, so both run in the fast
+// `node --test` lane. Everything below is API wiring with no logic worth
+// unit-testing -- a progress notification, a clipboard write, an openExternal
+// -- which is exactly the shape the import allowlist in
+// cmd/memql-lsp/vscodeimportrule_test.go is for.
 //
 // -----------------------------------------------------------------------------
-// KEEPING THE CODE ON SCREEN
+// ONE NOTIFICATION PER FLOW (memql#4595)
 // -----------------------------------------------------------------------------
 //
-// The user has to read a code off this screen and type it into another one,
-// which can take a minute -- so the code cannot be a toast that disappears
-// while they are unlocking their phone. Two surfaces carry it, deliberately:
+// The 2026-08-25 field storm was this file's old shape compounding: a
+// "falling back" toast, then a code notification that RE-SUMMONED itself
+// after every button click -- copy the code, and the message you just acted
+// on comes straight back. Two rules replace it:
 //
-//   THE PROGRESS NOTIFICATION lives for exactly as long as the polling does and
-//   cannot be dismissed by accident. It carries the code AND the verification
-//   URL as text, so even a user who closes everything else can still read both.
+//   THE PROGRESS NOTIFICATION stays the undismissable copy of the code and
+//   the URL, alive exactly as long as the polling (deviceCodeProgressLine).
+//   A person who closes everything else can still read both there.
 //
-//   AN INFORMATION MESSAGE carries the two ACTIONS -- Copy Code, and a button
-//   that opens the verification page -- because a notification's progress
-//   message renders no buttons and no links. It is re-shown after each click
-//   (clicking it is not finishing with it), and NOT re-shown after a dismissal,
-//   because re-summoning a notification a person just closed is nagging.
+//   ONE ACTION MESSAGE per flow. It is shown once, carries the two actions a
+//   progress line cannot render (Copy Code / Open Approval Page), and -- when
+//   the flow got here by fallback -- the explanation that used to be its own
+//   toast. A click performs its action and does NOT re-show the message: the
+//   code is still on the progress line, and re-summoning a notification a
+//   person just acted on teaches them to dismiss MemQL toasts unread.
 //
-// -----------------------------------------------------------------------------
-// WHAT THIS FILE IS AND IS NOT (memql#3515)
-// -----------------------------------------------------------------------------
-//
-// PRESENTATION ONLY. It used to carry two full sign-in shells of its own --
-// `signInWithDeviceCode` and an exported `signInToCluster` -- and the second was
-// the bug memql#3515 was filed about: `MemQL: Sign In` called a PRIVATE function
-// of the same name in extension.ts that ran loopback with no fallback, so the
-// capability here shipped with zero importers. A host that genuinely could not
-// do loopback sat through the callback deadline and was told it had failed,
-// while the code to hand it a device code sat right here.
-//
-// The resolution is one sign-in shell, in extension.ts, because that is where
-// the rest of a sign-in lives: the tree refresh, the reconnect of the selected
-// cluster, and the kind-based failure levels from src/auth/signin.ts. This file
-// keeps the part that is genuinely about the DEVICE CODE and nothing else --
-// putting it on screen and keeping it there.
+// The approval page is also OPENED up front, best effort, at the pre-filled
+// URL (the /device page reads `?user_code=`), so on any host with a browser
+// the whole dance is "click Approve". A host that cannot open one -- the
+// genuinely headless box the device grant exists for -- fails that open
+// quietly into the Connection output and leans on the code + URL.
 
 import { env, Uri, window, type Progress } from 'vscode';
 
 import type { AuthFlowError } from './errors.js';
+import { errorText } from './errors.js';
 import { recordDiagnostic, type DiagnosticSink } from '../state/diagnostics.js';
-import type { DeviceAuthorization } from './deviceCode.js';
+import {
+  deviceCodeActionMessage,
+  deviceCodeOpenTarget,
+  type DeviceAuthorization,
+  type DeviceCodeVia,
+} from './deviceCode.js';
 
 /**
  * deviceCodeProgressLine is what the progress notification shows while polling.
@@ -66,12 +60,14 @@ export function deviceCodeProgressLine(authorization: DeviceAuthorization): stri
 }
 
 /**
- * announceDeviceCodeFallback explains the switch when loopback proved
- * impossible. A flow that silently changes shape reads as a bug.
+ * announceDeviceCodeFallback records the switch when loopback proved
+ * impossible: the progress line changes and the reason lands in the MemQL
+ * Connection channel (memql#4194, audit 6).
  *
- * The toast says WHAT happened; WHY lives in the MemQL Connection channel
- * (memql#4194, audit 6) -- the AuthFlowError's message is a raw transport or
- * OAuth detail, which is record material rather than toast material.
+ * NO TOAST OF ITS OWN (memql#4595). The explanation the old information
+ * message carried now rides the single action message
+ * (deviceCodeActionMessage via="fallback"), which arrives moments later with
+ * the code -- one notification instead of two stacked ones.
  */
 export function announceDeviceCodeFallback(
   progress: Progress<{ message?: string }>,
@@ -84,45 +80,65 @@ export function announceDeviceCodeFallback(
   if (diagnostics !== undefined) {
     recordDiagnostic(
       diagnostics,
-      'browser sign-in could not complete; fell back to a device code',
+      'browser sign-in is not possible on this host; using a device code',
       reason.message,
       new Date().toISOString(),
     );
   }
-  void window.showInformationMessage(
-    'MemQL: the browser sign-in could not complete on this host. Falling back to a device code -- details in the MemQL Connection output.',
-  );
 }
 
 /**
- * showDeviceCodeActions puts the two buttons on screen and keeps them there for
- * as long as the user is using them. `isSettled` is read at each step so a flow
- * that finished (or was cancelled) while a notification sat open does not
- * re-summon it afterwards.
+ * showDeviceCodeActions opens the approval page and puts the one action
+ * message on screen. `isSettled` is read before any action so a flow that
+ * finished (or was cancelled) while the notification sat open does not act
+ * afterwards.
  */
 export function showDeviceCodeActions(
   authorization: DeviceAuthorization,
   isSettled: () => boolean,
+  via: DeviceCodeVia,
+  diagnostics?: DiagnosticSink,
 ): void {
   const COPY = 'Copy Code';
-  const OPEN = 'Open Verification Page';
-  const message = `MemQL: enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in.`;
-  // The pre-filled form when the server offered one -- it saves the person
-  // typing the code twice when they open the page on THIS machine.
-  const target = authorization.verificationUriComplete || authorization.verificationUri;
+  const OPEN = 'Open Approval Page';
+  const target = deviceCodeOpenTarget(authorization);
 
-  const show = (): void => {
-    if (isSettled()) return;
-    void Promise.resolve(window.showInformationMessage(message, COPY, OPEN)).then(
-      async (choice) => {
-        if (isSettled() || choice === undefined) return;
-        if (choice === COPY) await env.clipboard.writeText(authorization.userCode);
-        else await env.openExternal(Uri.parse(target));
-        // Clicking a button is not finishing with the code: polling continues,
-        // so the code goes back on screen.
-        show();
+  const recordOpenFailure = (detail: string): void => {
+    if (diagnostics !== undefined) {
+      recordDiagnostic(
+        diagnostics,
+        'the device approval page could not be opened here',
+        detail,
+        new Date().toISOString(),
+      );
+    }
+  };
+  // env.openExternal signals failure BOTH ways -- rejecting, and resolving
+  // false -- and a handler for only the rejection misses the way most hosts
+  // actually say no. Shared with the button below so a failed click lands in
+  // the record too.
+  const openApprovalPage = (): void => {
+    void Promise.resolve(env.openExternal(Uri.parse(target))).then(
+      (opened) => {
+        if (opened === false) recordOpenFailure('openExternal answered false');
       },
+      (err: unknown) => recordOpenFailure(errorText(err)),
     );
   };
-  show();
+
+  // Best effort, up front: on a host with a browser this lands the person on
+  // the pre-filled approval page before they have read the toast. A failure
+  // is the headless case the code + URL exist for -- recorded, not shown.
+  openApprovalPage();
+
+  void Promise.resolve(
+    window.showInformationMessage(deviceCodeActionMessage(authorization, via), COPY, OPEN),
+  ).then(async (choice) => {
+    if (isSettled() || choice === undefined) return;
+    if (choice === COPY) await env.clipboard.writeText(authorization.userCode);
+    else openApprovalPage();
+    // Deliberately NOT re-shown: the progress line still carries the code,
+    // and the click was the person USING the notification, not dismissing it
+    // unserved. Re-summoning here is the "friend copy code" storm.
+  });
 }

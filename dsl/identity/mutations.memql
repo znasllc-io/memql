@@ -843,7 +843,7 @@ mutate oauthClient setOAuthClientCORSOrigins {
 //   sessionId    (string)            - UUID-derived node ID
 //   subject      (string)            - JWT sub claim (canonical lookup key)
 //   tokenHash    (string)            - SHA-256 hex of the bearer token
-//   source       (string)            - "bff_exchange" | "oidc_cookie"
+//   source       (string)            - "bff_exchange" | "oidc_cookie" | "device_code"
 //   userId       (string, optional)  - v1:identity:user; "" when bootstrap hasn't run
 //   identityId   (string, optional)  - v1:identity:identity row authorizing the session; same caveat as userId
 //   clientLabel  (string, optional)  - Human label parsed from User-Agent
@@ -856,7 +856,7 @@ mutate authSession createAuthSession {
     sessionId    string!
     subject      string!
     tokenHash    string!
-    source       enum("bff_exchange", "oidc_cookie")!
+    source       enum("bff_exchange", "oidc_cookie", "device_code")!
     userId       string
     identityId   string
     clientLabel  string
@@ -1974,7 +1974,7 @@ mutate accessRequest rejectAccessRequest {
 //   sessionId      (string)            - Session node ID
 //   subject        (string)            - JWT sub (preserved)
 //   tokenHash      (string)            - SHA-256 hex (preserved)
-//   source         (string)            - "bff_exchange" | "oidc_cookie" (preserved)
+//   source         (string)            - "bff_exchange" | "oidc_cookie" | "device_code" (preserved)
 //   expiresAt      (string)            - ISO 8601 (preserved)
 //   revokedReason  (string)            - "user_action" | "all_sessions" | "admin" | "reuse_detected"
 //   userId         (string, optional)  - Owning user (preserved across the version bump)
