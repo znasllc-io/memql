@@ -186,7 +186,7 @@ func TestPortalControlVocabulary(t *testing.T) {
 		// Rule 1: controls live in ui/.
 		if !inUI {
 			if _, exempt := rawControlExemptions[rel]; !exempt {
-				for _, line := range matchingLines(body, func(s string) bool { return rawControl.MatchString(s) }) {
+				for _, line := range matchingLines(body, rawControl.MatchString) {
 					violations = append(violations, fmt.Sprintf(
 						"%s:%d builds a control element directly.\n"+
 							"    Compose the kit instead: Button / TextInput / Select / Textarea /\n"+
@@ -195,7 +195,7 @@ func TestPortalControlVocabulary(t *testing.T) {
 							"    treatment, which is what lets two of them share a row.\n"+
 							"    If this control genuinely is not a form control -- shell chrome, a\n"+
 							"    link-styled text button, a card that is one click target -- add it to\n"+
-							"    rawControlExemptions WITH ITS REASON.", rel, line.n, // line.text intentionally unused
+							"    rawControlExemptions WITH ITS REASON.", rel, line,
 					))
 				}
 			}
@@ -209,14 +209,14 @@ func TestPortalControlVocabulary(t *testing.T) {
 						"    Use TextInput / Select / Textarea. If the reason for the copy is a\n"+
 						"    prop the kit does not take, add the prop -- that is what happened to\n"+
 						"    `list` and `ariaLabel` in memql#4504, which is how the last copy of\n"+
-						"    this string left the tree.", rel, line.n,
+						"    this string left the tree.", rel, line,
 				))
 			}
 		}
 
 		// Rule 3: form rows align at the top.
 		if _, exempt := itemsEndExemptions[rel]; !exempt {
-			for _, line := range matchingLines(body, func(s string) bool { return itemsEnd.MatchString(s) }) {
+			for _, line := range matchingLines(body, itemsEnd.MatchString) {
 				violations = append(violations, fmt.Sprintf(
 					"%s:%d uses items-end.\n"+
 						"    In a form row this is the memql#4502 defect: the tallest child decides\n"+
@@ -224,7 +224,7 @@ func TestPortalControlVocabulary(t *testing.T) {
 						"    pushes its hint-less neighbour's control off the line. Use <FormRow>\n"+
 						"    (items-start) with <FormActions> for the trailing buttons.\n"+
 						"    If this is a right-aligned page-HEADER column rather than a form row,\n"+
-						"    add it to itemsEndExemptions WITH ITS REASON.", rel, line.n,
+						"    add it to itemsEndExemptions WITH ITS REASON.", rel, line,
 				))
 			}
 		}
@@ -280,16 +280,15 @@ func TestPortalControlVocabularyExemptionsAreLive(t *testing.T) {
 	check("insetExemptions", insetExemptions, func(b string) bool { return strings.Contains(b, insetRecipe) })
 }
 
-type hit struct {
-	n    int
-	text string
-}
-
-func matchingLines(body string, pred func(string) bool) []hit {
-	var out []hit
+// matchingLines returns the 1-based line numbers whose text satisfies pred.
+// Numbers rather than lines: every caller reports file:line and none of them
+// echoes the source, because the offending line is one keystroke away in the
+// reader's editor and quoting it here would just make the failure longer.
+func matchingLines(body string, pred func(string) bool) []int {
+	var out []int
 	for i, line := range strings.Split(body, "\n") {
 		if pred(line) {
-			out = append(out, hit{n: i + 1, text: line})
+			out = append(out, i+1)
 		}
 	}
 	return out
