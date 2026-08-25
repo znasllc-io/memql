@@ -24,6 +24,9 @@ import {
 import {
   Connection,
   ModulesClient,
+  disposeLiveStoreFor,
+  liveStoreFor,
+  type LiveStore,
   type QueryClient,
   type SubscriptionManager,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -130,6 +133,15 @@ export interface ClusterState {
   // The connection-scoped typed clients (see ClusterClients above). null
   // exactly when `query` is null.
   clients: ClusterClients | null;
+  // The live-data store for this connection (memql#4538): every list a person
+  // watches rides a collection here, and the store OUTLIVES the components
+  // that mount against it, which is what makes navigation instant.
+  //
+  // Built from the Connection itself, so it hears the reconnect cycle and the
+  // status transitions first-hand -- a store handed a synthetic host would be
+  // deaf to exactly the two signals it exists to act on. Reach it through
+  // useLive / useLiveValue rather than directly.
+  store: LiveStore | null;
   // Server identity from the ServerHello, for the rail profile. Empty until
   // connected.
   nodeId: string;
@@ -185,6 +197,7 @@ export function ClusterProvider({
   const [query, setQuery] = useState<QueryClient | null>(null);
   const [subscriptions, setSubscriptions] = useState<SubscriptionManager | null>(null);
   const [clients, setClients] = useState<ClusterClients | null>(null);
+  const [store, setStore] = useState<LiveStore | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
   const [engineVersion, setEngineVersion] = useState("");
@@ -219,6 +232,7 @@ export function ClusterProvider({
       setQuery(null);
       setSubscriptions(null);
       setClients(null);
+      setStore(null);
       setStatus("idle");
       setError("");
       setReconnectAttempt(0);
@@ -278,6 +292,9 @@ export function ClusterProvider({
                 suggest: (domain, payload, opts) => aiSuggest(transport, domain, payload, opts),
               },
         );
+        // liveStoreFor is memoized on the connection inside the SDK, so this
+        // is the ONE store for this stream however many times it is asked for.
+        setStore(conn.subscriptions ? liveStoreFor(conn) : null);
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setEngineVersion(conn.engineVersion ?? "");
@@ -329,6 +346,8 @@ export function ClusterProvider({
           setQuery(null);
           setSubscriptions(null);
           setClients(null);
+          setStore(null);
+          disposeLiveStoreFor(conn);
           setStatus("closed");
         });
       } catch (err) {
@@ -336,6 +355,7 @@ export function ClusterProvider({
         setQuery(null);
         setSubscriptions(null);
         setClients(null);
+        setStore(null);
         setStatus("error");
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -344,6 +364,10 @@ export function ClusterProvider({
     return () => {
       cancelled = true;
       if (connectionRef.current === connection) connectionRef.current = null;
+      // Dispose BEFORE close: the store's teardown unregisters its stream
+      // observer and every collection's subscription, and doing it after the
+      // socket is gone leaves those registrations on a dead dispatcher.
+      if (connection) disposeLiveStoreFor(connection);
       connection?.close();
     };
   }, [auth, dial, attempt, enabled]);
@@ -366,6 +390,7 @@ export function ClusterProvider({
       query,
       subscriptions,
       clients,
+      store,
       nodeId,
       serverVersion,
       engineVersion,
@@ -379,6 +404,7 @@ export function ClusterProvider({
       query,
       subscriptions,
       clients,
+      store,
       nodeId,
       serverVersion,
       engineVersion,

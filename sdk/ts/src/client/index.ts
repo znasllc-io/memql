@@ -41,6 +41,21 @@ export {
   type ConceptBrowseOptions,
 } from "./conceptBrowser.js";
 export {
+  LiveCollection,
+  LiveStore,
+  LiveValue,
+  disposeLiveStoreFor,
+  liveStoreFor,
+  type LiveCollectionSpec,
+  type LiveHandle,
+  type LiveSnapshot,
+  type LiveState,
+  type LiveStoreHost,
+  type LiveStoreOptions,
+  type LiveValueSnapshot,
+  type SeedPage,
+} from "./liveCollection.js";
+export {
   SubscriptionManager,
   type EventHandler,
   type GraphSubscribeOptions,

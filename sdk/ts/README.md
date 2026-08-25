@@ -130,6 +130,105 @@ Ignoring the flag is safe but useless: you get a row whose fields are all
 leaking anything. It is always `false` on an ordinary event (the wire omits
 a false bool; the SDK normalises it).
 
+#### `seq` and `gapBefore` — continuity
+
+Every event carries `seq` (its position in **this connection's** delivery
+sequence, from 1) and `gapBefore` (deliveries were dropped between the
+previous notification and this one). The engine's per-stream event channel
+is bounded and the forwarder drops on full rather than stalling a write, so
+overload is real — what was missing until memql#4536 was any way for you to
+find out.
+
+**The answer to a gap is to RE-SEED**: re-run the read that produced your
+current rows and fold subsequent events onto the fresh answer. There is no
+replay to ask for, and deliberately so — a best-effort replay buffer is
+worse than none, because it teaches clients to skip the re-seed path that is
+the only correct answer when the buffer misses.
+
+Two things to get right if you fold rows by hand:
+
+- **A reconnect is a gap.** A new stream starts a new `seq` space at 1, so
+  treat stream establishment as an implicit gap rather than comparing
+  numbers across connections. `seq === 0` means "this server does not number
+  its deliveries" (it predates the field), not "the first event".
+- **Continuity is a property of the STREAM, not of your subscription.**
+  `seq` numbers every notification on the socket, and `gapBefore` lands on
+  whichever delivery happens to come first after a drop. So a handler
+  watching only its own subscription sees holes that belong to its
+  neighbours, and may never see the flag for the events it actually lost.
+  Use `conn.subscriptions.onDelivery(...)`, which observes every delivery on
+  the stream, and re-seed everything when it reports a break.
+
+`LiveCollection` below does all of this for you.
+
+### Auto-reconnect
+
+Opt in at dial time and the SDK owns the drop: exponential backoff with full
+jitter, every subscription replayed on the new stream with its original id,
+and a status a UI can render.
+
+```ts
+const conn = await Connection.dial({
+  endpoint: "wss://api.example.com/memql/ws",
+  auth: { bearer, onTokenExpired },       // the bearer is re-resolved per redial
+  reconnect: { enabled: true },           // 1s -> 30s, forever, by default
+});
+
+conn.onStatusChange(({ status, attempt }) => render(status, attempt));
+conn.onConnectionCycle(() => reseedEverything());  // fires AFTER the replay
+```
+
+- `close()` **never** reconnects, and `done()` resolves only on a FINAL
+  close — a drop the SDK recovers from is not the end of the connection.
+- `retryNow()` collapses the current backoff. A "Retry" button should call
+  it: the SDK is already retrying, so the button means *sooner*, not
+  *instead*.
+- Backoff resets once a stream has SURVIVED `stableAfterMs` (10s), not when
+  a dial succeeds — a server that accepts streams and drops them immediately
+  looks like success every time.
+- Without the option nothing changes: one dial, `done()` on any close.
+
+### LiveCollection — a list that stays current
+
+`LiveCollection` is the machine every live surface was hand-rolling: read a
+list, subscribe, fold events by id, re-read `payloadOmitted` rows, drop what
+the read refuses, re-apply the read's own scope, notice a gap, and re-seed.
+
+```ts
+const store = liveStoreFor(conn);                 // one store per connection
+const machines = store.collection<Row>("myMachines", {
+  concept: "v1:worker:registration",
+  seed: (cursor, signal) => readPage(cursor, signal),
+  reread: (id, signal) => getRowByConceptAndId(conn.query, concept, id, { signal }),
+  inScope: (row) => row.ownerUserId === me,       // the READ's scope, re-applied
+});
+
+machines.value.subscribe(() => paint(machines.value.snapshot));
+// ... when this caller is done:
+machines.release();
+```
+
+What it guarantees, and why each one is there:
+
+- **Subscribe, THEN seed.** The engine registers a subscription
+  synchronously and runs a read on a goroutine, so this order cannot miss a
+  row; the reverse can miss one forever.
+- **`seeding | live | degraded | disconnected`.** Render it. `degraded` is
+  the state that did not exist before: rows on screen that are known to be
+  behind, with a re-seed in flight. Rows are KEPT on a disconnect — an
+  operator wants the last known answer labelled stale, not a blank.
+- **Reference counted, keyed by (query + args + connection).** Two callers
+  asking for the same key share one subscription and one seed, and the last
+  release LINGERS before teardown — which is what makes navigating away and
+  back issue zero new reads.
+- **In-memory only.** A full page reload starts clean by construction.
+- **`LiveValue`** is the single-read counterpart with in-flight dedupe: N
+  callers in the same tick produce one round trip.
+
+The store is framework-free on purpose. A React binding is ~40 lines over
+`subscribe()` + `snapshot`; `clients/portal/src/cluster/useLive.ts` is the
+worked example.
+
 ### Voice
 
 ```ts
@@ -351,11 +450,13 @@ const unregister = registerClientToolHandler(conn.dispatcher, async (call, signa
 ## Exports
 
 - `.` -- `Connection`, `Dispatcher`, `QueryClient`,
-  `SubscriptionManager`, `Result` + row accessors
+  `SubscriptionManager`, `LiveStore` / `LiveCollection` / `LiveValue` +
+  `liveStoreFor` / `disposeLiveStoreFor`, `Result` + row accessors
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
-  `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
-  re-exports `identity`, `realtime`, `ai`, `tools`, and `voice` as
+  `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`,
+  `LiveState`, `LiveSnapshot`, `ConnectionStatus`, `ReconnectOptions`).
+  Also re-exports `identity`, `realtime`, `ai`, `tools`, and `voice` as
   namespace objects.
 - `./client` -- the same client surface.
 - `./identity` -- the 10 identity & access methods listed above.

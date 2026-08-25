@@ -71,6 +71,7 @@ interface SubscriptionRecord {
 export class SubscriptionManager {
   private readonly dispatcher: Dispatcher;
   private readonly subs = new Map<string, SubscriptionRecord>();
+  private readonly deliveryObservers = new Set<EventHandler>();
   private readonly eventUnregister: Unregister;
   private stopped = false;
 
@@ -79,16 +80,45 @@ export class SubscriptionManager {
     this.eventUnregister = dispatcher.addEventListener((msg) => {
       const payload = readServerPayload(msg);
       if (payload?.kind !== "event") return;
-      const record = this.subs.get(payload.value.subscriptionId);
+      const event = eventFromWire(payload.value);
+      // Stream-wide observers FIRST, and unconditionally -- see onDelivery.
+      for (const observe of [...this.deliveryObservers]) {
+        try {
+          observe(event);
+        } catch {
+          // Isolated for the same reason consumer handlers are.
+        }
+      }
+      const record = this.subs.get(event.subscriptionId);
       if (!record) return;
       try {
-        record.handler(eventFromWire(payload.value));
+        record.handler(event);
       } catch {
         // Consumer handlers are isolated -- a thrown error is the
         // consumer's bug, not ours. Drop silently to avoid breaking
         // unrelated subscriptions.
       }
     });
+  }
+
+  // onDelivery observes EVERY notification on the stream, matched to a
+  // subscription or not, acks included (memql#4538).
+  //
+  // It exists because CONTINUITY IS A PROPERTY OF THE STREAM, not of one
+  // subscription. `seq` numbers every notification the server writes on the
+  // socket and `gap_before` lands on whichever notification happens to be
+  // delivered first after a drop -- so a per-subscription reader sees a
+  // sequence full of holes that are not its own, and a consumer whose events
+  // were the ones dropped may never see the flag at all. Both mistakes point
+  // the same way: they make a correct client either re-seed constantly or not
+  // at all.
+  //
+  // One observer per stream, watching every delivery, is the only vantage
+  // point from which those two fields say what they mean. LiveStore is that
+  // observer; a consumer folding rows by hand wants this too.
+  onDelivery(handler: EventHandler): Unregister {
+    this.deliveryObservers.add(handler);
+    return () => this.deliveryObservers.delete(handler);
   }
 
   // replay re-sends every live subscription on a freshly redialed stream
@@ -185,5 +215,6 @@ export class SubscriptionManager {
     this.stopped = true;
     this.eventUnregister();
     this.subs.clear();
+    this.deliveryObservers.clear();
   }
 }
