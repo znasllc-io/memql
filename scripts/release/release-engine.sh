@@ -84,6 +84,9 @@ RELEASE_CREATED="false"
 RUN_ID=""
 RUN_URL=""
 RELEASE_STATE=""
+PUBLISHED_AT=""
+RUN_STATUS=""
+RUN_CONCLUSION=""
 NOTES_OUT=""
 
 function note() {
@@ -133,12 +136,13 @@ function resolve_existing_release() {
     #   absent     -> create it
     RELEASE_STATE="absent"
     local json
-    if ! json="$(gh release view "$TAG" --repo "$REPO" --json isDraft,url 2>/dev/null)"; then
+    if ! json="$(gh release view "$TAG" --repo "$REPO" --json isDraft,url,publishedAt 2>/dev/null)"; then
         return 0
     fi
     local is_draft
     is_draft="$(printf '%s' "$json" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("isDraft", False)).lower())' 2>/dev/null || echo "false")"
     RELEASE_URL="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))' 2>/dev/null || echo "")"
+    PUBLISHED_AT="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("publishedAt","") or "")' 2>/dev/null || echo "")"
     if [[ "$is_draft" == "true" ]]; then
         RELEASE_STATE="draft"
         return 0
@@ -181,47 +185,93 @@ function publish_release() {
     fi
     RELEASE_CREATED="true"
     cap_changed
+    # Re-read, for publishedAt: the poll below uses it as the lower bound on
+    # which runs count as evidence, and GitHub's timestamp is the one both
+    # sides agree on. A locally-computed `date -u` would be this machine's
+    # clock, compared against GitHub's.
+    resolve_existing_release
     note "published ${TAG}: ${RELEASE_URL}"
     return 0
 }
 
+# await_dispatched_build waits for a build-engine-images run that POSTDATES this
+# release, and reports what it finds.
+#
+# WHAT THIS CAN AND CANNOT PROVE, stated because the repository already reasoned
+# about it: release-cutting.md §9 records "the Actions API does not expose a
+# run's dispatch inputs, so matching a run to a version is a guess". That is
+# correct and still true -- `gh run list` gives displayTitle
+# "build-engine-images" for every run, with no version anywhere.
+#
+# So this does NOT claim the run it finds is building this exact version. It
+# claims something weaker and checkable: A BUILD WAS DISPATCHED AFTER THIS
+# RELEASE WAS PUBLISHED. The release bridge fires within seconds of the publish
+# event, so on the failure being prevented -- the bridge not firing at all --
+# that window stays empty and this fails. An older run cannot satisfy it,
+# which is the part a "newest workflow_dispatch run" check gets wrong: with no
+# lower bound, a manual dispatch from yesterday reads as today's success.
+#
+# The registry remains the authority on whether a version is actually
+# deployable (§6's Check images, and §9's reasoning). This is the dispatch
+# half, which is the half that fails silently.
+#
+# THE RUN'S CONCLUSION IS REPORTED, NOT ASSERTED. A build can be dispatched and
+# then fail -- the most recent 0.19.x run on this repository did exactly that --
+# and that is a different problem from the one here, with a different fix. It is
+# surfaced rather than swallowed, and rather than being turned into this
+# capability's failure.
 function await_dispatched_build() {
     if [[ "$DRY_RUN" == "true" ]]; then
         note "--dryRun: not waiting for a build that was never triggered"
         return 0
     fi
+    if [[ -z "$PUBLISHED_AT" ]]; then
+        cap_fail 5 "the release exists but GitHub reported no publishedAt for ${TAG}, so there is no lower bound to judge a build run against. Without one, any older manual dispatch would read as this release's build."
+    fi
 
     local deadline=$(( SECONDS + POLL_SECONDS ))
-    cap_step "waiting up to ${POLL_SECONDS}s for build-engine-images to be dispatched for ${BARE}"
+    cap_step "waiting up to ${POLL_SECONDS}s for a build-engine-images run dispatched after ${PUBLISHED_AT}"
 
-    while (( SECONDS < deadline )); do
+    while :; do
         local json hit
         json="$(gh run list --repo "$REPO" --workflow=build-engine-images.yml \
-                    --limit 20 --json databaseId,url,event,status,createdAt 2>/dev/null || echo '[]')"
-        hit="$(printf '%s' "$json" | python3 -c '
-import json, sys
+                    --limit 30 --json databaseId,url,event,status,conclusion,createdAt 2>/dev/null || echo '[]')"
+        hit="$(printf '%s' "$json" | PUBLISHED_AT="$PUBLISHED_AT" python3 -c '
+import json, os, sys
+since = os.environ.get("PUBLISHED_AT", "")
 try:
     runs = json.load(sys.stdin)
 except Exception:
     runs = []
 # The bridge dispatches on the default branch, so the run arrives as a
-# workflow_dispatch. Anything else on this workflow is not evidence that this
-# release triggered a build.
+# workflow_dispatch. createdAt is the lower bound: an ISO-8601 Z timestamp
+# compares correctly as a string, both sides coming from GitHub.
 for r in runs:
-    if r.get("event") == "workflow_dispatch":
-        print("\t".join([str(r.get("databaseId","")), str(r.get("url","")), str(r.get("status",""))]))
-        break
+    if r.get("event") != "workflow_dispatch":
+        continue
+    created = str(r.get("createdAt", ""))
+    if not created or not since or created < since:
+        continue
+    print("\t".join([str(r.get("databaseId","")), str(r.get("url","")),
+                     str(r.get("status","")), str(r.get("conclusion") or "")]))
+    break
 ' 2>/dev/null || true)"
         if [[ -n "$hit" ]]; then
             RUN_ID="$(printf '%s' "$hit" | cut -f1)"
             RUN_URL="$(printf '%s' "$hit" | cut -f2)"
-            note "build-engine-images dispatched: run ${RUN_ID} (${RUN_URL})"
+            RUN_STATUS="$(printf '%s' "$hit" | cut -f3)"
+            RUN_CONCLUSION="$(printf '%s' "$hit" | cut -f4)"
+            note "build-engine-images dispatched after the release: run ${RUN_ID} (${RUN_URL}), status=${RUN_STATUS}${RUN_CONCLUSION:+ conclusion=${RUN_CONCLUSION}}"
+            if [[ "$RUN_CONCLUSION" == "failure" || "$RUN_CONCLUSION" == "cancelled" ]]; then
+                cap_warn "that run finished ${RUN_CONCLUSION}. The bridge fired, so THIS capability's check passed -- but the images are not published. Read the run, fix it, and re-dispatch build-engine-images with version=${BARE}."
+            fi
             return 0
         fi
+        (( SECONDS < deadline )) || break
         sleep 10
     done
 
-    cap_fail 5 "no build-engine-images run appeared within ${POLL_SECONDS}s of publishing ${TAG}. The release exists and its images do not. THIS IS THE FAILURE THIS CAPABILITY EXISTS TO CATCH: dispatch-engine-images-on-release.yml is an event handler, and one that silently does not fire looks exactly like one that has not fired yet -- until the version is deployed and every pod lands in ImagePullBackOff. Check the workflow's run history and Actions permissions, then dispatch build-engine-images manually with version=${BARE}."
+    cap_fail 5 "no build-engine-images run dispatched after ${PUBLISHED_AT} appeared within ${POLL_SECONDS}s of publishing ${TAG}. The release exists and its images do not. THIS IS THE FAILURE THIS CAPABILITY EXISTS TO CATCH: dispatch-engine-images-on-release.yml is an event handler, and one that silently does not fire looks exactly like one that has not fired yet -- until the version is deployed and every pod lands in ImagePullBackOff. Check the workflow's run history and Actions permissions, then dispatch build-engine-images manually with version=${BARE}."
 }
 
 function collect_result() {
@@ -232,6 +282,12 @@ function collect_result() {
     cap_result_set_raw "releaseCreated" "$RELEASE_CREATED"
     cap_result_set     "buildRunId"     "$RUN_ID"
     cap_result_set     "buildRunUrl"    "$RUN_URL"
+    cap_result_set     "buildRunStatus" "$RUN_STATUS"
+    # Reported, never asserted: a dispatched build that FAILED is a different
+    # problem from a bridge that did not fire, and swallowing it here would hide
+    # the one this capability cannot fix behind the one it can.
+    cap_result_set     "buildRunConclusion" "$RUN_CONCLUSION"
+    cap_result_set     "releasePublishedAt" "$PUBLISHED_AT"
     # The tenant-independent half of the build's output. An instance lifecycle
     # pulls from here by digest and imports into its own registry, rather than
     # assuming access to whichever ACR the build workflow targets.
