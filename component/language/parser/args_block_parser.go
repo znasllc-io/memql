@@ -9,6 +9,7 @@ import (
 //
 //	<name> <type> [@required] [@enum("a", "b", ...)]
 //	               [@maxLength(N)] [@pattern("re")]
+//	               [@minimum(N)] [@maximum(N)]
 //
 // (`@default` is NOT a valid args-field annotation -- it was never applied
 // and is rejected; apply defaults in the body via `args.X ?? <v>`.
@@ -232,8 +233,37 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 				return nil, newParseErrorf(&p.current, "expected `)` after @pattern value on args field %q", name)
 			}
 			p.advance()
+		case "minimum", "maximum":
+			// @minimum(N) / @maximum(N) -- INCLUSIVE numeric bounds.
+			//
+			// Every layer below this one already carried them: ast.ArgsField
+			// has the fields, function_loader copies them onto
+			// FunctionArgsField, validateArgsField enforces them, and both the
+			// tool JSON-schema emitter and the MCP promoter publish them. The
+			// legacy schema-style args form set them from a `minimum:` key.
+			// The modern `args { }` block was the ONE surface that could not,
+			// so an author who wanted a bound had to write a Go seam or go
+			// without -- which is how memql#4522 arrived needing cursorTweenMs
+			// held to 250-2500 with no way to say so.
+			//
+			// A discrete numeric set deliberately does NOT get the same
+			// treatment through @enum: valueInEnum compares with
+			// reflect.DeepEqual, so an enum member parsed here would be
+			// compared against the float64 a JSON caller sends and never match
+			// -- the field would refuse EVERY value, fail-closed and silent
+			// about why. The bounds path normalises through numericValue
+			// instead, which is what makes it safe to open up and @enum not.
+			bound, boundErr := p.parseNumericArgsAnnotation(ann, name)
+			if boundErr != nil {
+				return nil, boundErr
+			}
+			if ann == "minimum" {
+				field.Minimum = &bound
+			} else {
+				field.Maximum = &bound
+			}
 		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern; an arg description is a `///` doc comment above the field, not @description -- memql#3336)", ann, name)
+			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern, @minimum, @maximum; an arg description is a `///` doc comment above the field, not @description -- memql#3336)", ann, name)
 		}
 	}
 	return field, nil
@@ -243,4 +273,38 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 // not shadow (the argument-resolution contract, docs + CLAUDE.md).
 var reservedArgsNames = map[string]bool{
 	"now": true, "actor": true, "partition": true, "config": true, "trace": true,
+}
+
+// parseNumericArgsAnnotation reads the `( <number> )` group shared by
+// @minimum and @maximum and returns the bound.
+//
+// A leading `-` is consumed separately because the lexer scans a number from
+// its first DIGIT (scanNumber): a negative bound therefore arrives as the
+// operator token followed by the magnitude, and reading only TokenNumber would
+// reject `@minimum(-1)` with an error naming the wrong thing.
+func (p *Parser) parseNumericArgsAnnotation(ann, name string) (float64, error) {
+	if err := p.expect(TokenParenOpen); err != nil {
+		return 0, err
+	}
+	negative := false
+	if p.current.Literal == "-" {
+		negative = true
+		p.advance()
+	}
+	if !p.check(TokenNumber) {
+		return 0, newParseErrorf(&p.current, "expected number literal inside @%s(...) on args field %q", ann, name)
+	}
+	value, convErr := strconv.ParseFloat(p.current.Literal, 64)
+	if convErr != nil {
+		return 0, newParseErrorf(&p.current, "invalid @%s value %q on args field %q: %v", ann, p.current.Literal, name, convErr)
+	}
+	if negative {
+		value = -value
+	}
+	p.advance()
+	if !p.check(TokenParenClose) {
+		return 0, newParseErrorf(&p.current, "expected `)` after @%s value on args field %q", ann, name)
+	}
+	p.advance()
+	return value, nil
 }

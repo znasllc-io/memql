@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
 import { ME_ROOT } from "../me/urls";
-import { Avatar, Badge, Skeleton } from "../ui";
+import { Avatar, Skeleton } from "../ui";
 import { navClass } from "./navRow";
 
 // Who you are, at the top of the rail, linking to the page about you
@@ -24,11 +24,22 @@ import { navClass } from "./navRow";
 //
 // # The identity comes from the stream, not the token
 //
-// useMyAccess asks the cluster who it resolved for THIS connection
-// (userId / primaryEmail / clusterRole / displayName). The portal does not
-// decode its own bearer, and the difference is the whole point: a rotated
-// token, a revoked session or a role changed since the token was minted
-// should show what the cluster is acting on, not what the browser believes.
+// useMyAccess asks the cluster who it resolved for THIS connection. The portal
+// does not decode its own bearer, and the difference is the whole point: a
+// rotated token or a revoked session should show who the cluster is acting as,
+// not who the browser believes it is.
+//
+// # Identity, not access (memql#4521)
+//
+// The row is avatar + name + email. It does not render the cluster role, and
+// it does not READ `clusterRole` at all -- which is the deliberate part. Role
+// is an access fact with two homes already: the /me page header and the People
+// view. A third rendering, on every page, in the chrome, is noise.
+//
+// Reading the field and then choosing not to show it would leave the tooltip,
+// the accessible name and the visible column free to disagree the next time
+// somebody edits one of them. Not reading it means they cannot. Anyone who
+// needs the role has useMyAccess.
 //
 // # It must never take the shell down
 //
@@ -50,7 +61,7 @@ import { navClass } from "./navRow";
 //                  There is no person to link to on a cluster that admits
 //                  every dial as the synthetic local-dev owner, so a profile
 //                  row would be a link to a fiction.
-//   resolved       avatar, display name over email, role Badge.
+//   resolved       avatar, display name over email.
 
 // text is the one guard the row needs: a string field, trimmed, or "".
 function text(value: unknown): string {
@@ -96,14 +107,15 @@ export function RailProfileLink({ collapsed }: { collapsed: boolean }): ReactNod
   // a few lines away in AppShell.
   const displayName = text(access.displayName);
   const email = text(access.primaryEmail);
-  const role = text(access.clusterRole);
   // The name if there is one, the email if there is not. Never the userId:
   // a canonical row id in the place a person's name goes reads as a bug.
   const primary = displayName === "" ? email : displayName;
-  // Collapsed there is room for the avatar and nothing else, so all three
-  // facts go to the tooltip AND the accessible name -- the second is what a
-  // screen reader gets, and it must not be poorer than the hover.
-  const facts = [primary, displayName === "" ? "" : email, role].filter(Boolean).join(" · ");
+  // Collapsed there is room for the avatar and nothing else, so both facts go
+  // to the tooltip AND the accessible name -- the second is what a screen
+  // reader gets, and it must not be poorer than the hover. Both say exactly
+  // what the expanded row says, which is the point of the row reading only
+  // what it renders.
+  const facts = [primary, displayName === "" ? "" : email].filter(Boolean).join(" · ");
 
   return (
     <NavLink
@@ -118,11 +130,6 @@ export function RailProfileLink({ collapsed }: { collapsed: boolean }): ReactNod
           <span className="truncate text-sm">{primary}</span>
           {displayName === "" || email === "" ? null : (
             <span className="truncate text-xs text-subtle">{email}</span>
-          )}
-          {role === "" ? null : (
-            <span className="mt-0.5">
-              <Badge>{role}</Badge>
-            </span>
           )}
         </span>
       )}

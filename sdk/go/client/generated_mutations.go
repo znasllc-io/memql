@@ -14975,6 +14975,128 @@ func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) 
 	return b.String()
 }
 
+// UpdateMyPreferences -- Update the CALLER's own v1:identity:user.preferences. Partial: an omitted field keeps its stored value. The target row is stamped from actor.userId, so there is no caller-supplied target and no admin override. It cannot reach preferences.computerUseEnabled (the computer-use kill switch, owned by toggleComputerUseEnabled) or preferences.activeAssistantId (an app-managed pointer): neither is a key this mutation writes, and @mergeFields("preferences") preserves the stored value of every key a call does not carry.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyPreferences"] in generated_concepts.go).
+type UpdateMyPreferencesArgs struct {
+	// BCP 47 language tag (e.g. en-US). Empty clears it.
+	Language string
+	// Whether to receive notifications.
+	Notifications    bool
+	NotificationsSet bool // set true to send notifications; required because zero-value bool is ambiguous
+	// Server-side theme preference, which serves product SPAs. The portal's own theme is a per-browser header toggle and is deliberately not this field.
+	// Enum: light | dark | system
+	Theme string
+	// IANA timezone name (e.g. America/Los_Angeles). Empty falls back to UTC.
+	Timezone string
+	// How long an archived space lives before the purge sweep hard-deletes it. 30 or 60.
+	ArchiveRetentionDays int
+	// Whether the daily-space automation provisions a per-day space for this user.
+	DailySpaceEnabled    bool
+	DailySpaceEnabledSet bool // set true to send dailySpaceEnabled; required because zero-value bool is ambiguous
+	// What happens to yesterday's daily space when the rollover cron fires.
+	// Enum: archive | save
+	DailySpaceRolloverAction string
+	// Standard Mode cursor tween duration in milliseconds.
+	CursorTweenMs int
+	// Standard Mode visual appearance during an agent UI-control takeover.
+	// Enum: clean | dim
+	TakeoverMode string
+	// Interactive Mode pace preset.
+	// Enum: quick | steady | deliberate
+	InteractivePace string
+	// Per-user mic mode preference for Polyphon rooms.
+	// Enum: toggle | continuous
+	VoiceMode string
+}
+
+// UpdateMyPreferences calls the engine mutation updateMyPreferences.
+func (qc *QueryClient) UpdateMyPreferences(ctx context.Context, args UpdateMyPreferencesArgs) (*Result, error) {
+	call := UpdateMyPreferencesBuild(args)
+	return qc.executeNamed(ctx, "updateMyPreferences", call)
+}
+
+func UpdateMyPreferencesBuild(args UpdateMyPreferencesArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateMyPreferences(")
+	if args.Language != "" {
+		b.WriteString("language: ")
+		b.WriteString(quoteMemQL(args.Language))
+	}
+	if args.NotificationsSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notifications: ")
+		b.WriteString(fmt.Sprintf("%v", args.Notifications))
+	}
+	if args.Theme != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("theme: ")
+		b.WriteString(quoteMemQL(args.Theme))
+	}
+	if args.Timezone != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timezone: ")
+		b.WriteString(quoteMemQL(args.Timezone))
+	}
+	if args.ArchiveRetentionDays != 0 {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("archiveRetentionDays: ")
+		b.WriteString(fmt.Sprintf("%v", args.ArchiveRetentionDays))
+	}
+	if args.DailySpaceEnabledSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dailySpaceEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.DailySpaceEnabled))
+	}
+	if args.DailySpaceRolloverAction != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dailySpaceRolloverAction: ")
+		b.WriteString(quoteMemQL(args.DailySpaceRolloverAction))
+	}
+	if args.CursorTweenMs != 0 {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursorTweenMs: ")
+		b.WriteString(fmt.Sprintf("%v", args.CursorTweenMs))
+	}
+	if args.TakeoverMode != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("takeoverMode: ")
+		b.WriteString(quoteMemQL(args.TakeoverMode))
+	}
+	if args.InteractivePace != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("interactivePace: ")
+		b.WriteString(quoteMemQL(args.InteractivePace))
+	}
+	if args.VoiceMode != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("voiceMode: ")
+		b.WriteString(quoteMemQL(args.VoiceMode))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition).
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.go).

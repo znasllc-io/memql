@@ -1,4 +1,5 @@
-// The profile surface: /me, /me/sessions, /me/security (memql#4318, #4319).
+// The profile surface: /me, /me/settings, /me/sessions, /me/security
+// (memql#4318, #4319, #4523).
 //
 // Two fake boundaries, and the split is the same one the app has. The READS
 // are named queries, so they are stubbed at executeNamed -- which means the
@@ -38,6 +39,23 @@ function userRow(overrides: Record<string, unknown> = {}) {
     lastSeenAt: "2026-08-22T09:30:00Z",
     sharedMailbox: false,
     signInPolicy: "any",
+    // The preferences bag rides currentUser's `userFull` shape (memql#4523).
+    // Deliberately PARTIAL: `notifications`, `takeoverMode` and `voiceMode` are
+    // absent, so the tests below also cover the absent-reads-as-its-documented
+    // default rule -- which matters because two of the defaults are TRUE and a
+    // falsy read would render them as off.
+    preferences: {
+      language: "en-GB",
+      theme: "dark",
+      timezone: "Europe/London",
+      archiveRetentionDays: 60,
+      dailySpaceEnabled: true,
+      dailySpaceRolloverAction: "save",
+      cursorTweenMs: 1500,
+      interactivePace: "quick",
+      computerUseEnabled: true,
+      activeAssistantId: "v1:agents:agent:pointer",
+    },
     ...overrides,
   };
 }
@@ -86,6 +104,14 @@ interface Fixture {
   failPasskeys?: boolean;
   replies?: Record<string, unknown>;
   sent?: Array<Record<string, unknown>>;
+  // Every executeNamed call, as (name, composed MemQL text). The fake is
+  // re-parented onto the real QueryClient.prototype, so the REAL generated
+  // builder runs above the stub -- which is what lets a test assert on the
+  // call string the portal actually puts on the wire rather than on a
+  // hand-typed copy of it.
+  calls?: Array<[string, string]>;
+  // Overrides the runtime config, for the identity-origin cases.
+  config?: Record<string, unknown>;
 }
 
 function fakeConnection(fx: Fixture): Connection {
@@ -98,8 +124,12 @@ function fakeConnection(fx: Fixture): Connection {
       displayName: "Ada Lovelace",
       sessionId: fx.sessionId ?? CURRENT_SESSION,
     })),
-    executeNamed: vi.fn(async (name: string) => {
+    executeNamed: vi.fn(async (name: string, text?: string) => {
+      fx.calls?.push([name, text ?? ""]);
       if (fx.failReads) throw new Error("stream refused the read");
+      if (name === "updateMyPreferences" || name === "toggleComputerUseEnabled") {
+        return result([]);
+      }
       if (name === "currentUser") return result([fx.user ?? userRow()]);
       if (name === "passkeysForSelf") {
         if (fx.failPasskeys) throw new Error("stream refused the passkey read");
@@ -134,7 +164,7 @@ function renderMe(path: string, fx: Fixture = {}) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AuthProvider
-        config={AUTH_ENABLED_CLUSTER}
+        config={{ ...AUTH_ENABLED_CLUSTER, ...(fx.config ?? {}) }}
         fetchImpl={async () =>
           ({
             ok: true,
@@ -159,12 +189,15 @@ function tabs(): HTMLElement {
 }
 
 describe("/me -- the page frame (memql#4318)", () => {
-  it("renders the three tabs, each a real address", async () => {
+  it("renders the four tabs, each a real address", async () => {
     renderMe("/me");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Ada Lovelace" })).toBeTruthy());
 
+    // Order is load-bearing (memql#4523): Settings sits beside the account
+    // facts, and Sessions/Security stay adjacent as the pair they read as.
     for (const [label, href] of [
       ["Account", "/me"],
+      ["Settings", "/me/settings"],
       ["Sessions", "/me/sessions"],
       ["Security", "/me/security"],
     ]) {
@@ -197,11 +230,11 @@ describe("/me -- Account (memql#4318, #4319)", () => {
     }
   });
 
-  it("links out to identity at the CONFIGURED origin, never a hardcoded host", async () => {
-    renderMe("/me");
-    const link = await waitFor(() => screen.getByRole("link", { name: /Edit on identity/ }));
-    expect(link.getAttribute("href")).toBe("https://identity.example.com/me/settings");
-  });
+  // The "Edit on identity" link that lived here MOVED to /me/settings
+  // (memql#4523, one door per destination). The claim it carried -- the origin
+  // is the CONFIGURED one, never a hardcoded host -- moved with it and is
+  // asserted in the /me/settings block below, along with the assertion that
+  // this tab no longer carries it.
 
   it("shows the shared-mailbox note only when the account is flagged", async () => {
     renderMe("/me");
@@ -476,5 +509,147 @@ describe("/me/security (memql#4318, #4319)", () => {
     // will do and the Badge says what is true now; aria-pressed on top of a
     // changing label announces "Turn sign-in links back on, pressed".
     expect(button.hasAttribute("aria-pressed")).toBe(false);
+  });
+});
+
+describe("/me/settings -- the user settings surface (memql#4523)", () => {
+  // A save's composed call string, for the group whose Save was pressed.
+  function saveCall(calls: Array<[string, string]>): string {
+    const write = calls.filter(([name]) => name === "updateMyPreferences");
+    expect(write.length).toBe(1);
+    return write[0]?.[1] ?? "";
+  }
+
+  // Field renders label, control and hint inside ONE <label>, so a control's
+  // accessible name is "<label> <hint>" -- which is why these match on the
+  // prefix rather than exactly. That is the wrapper every form in the portal
+  // uses; the hint belongs in the accessible name.
+  it("renders the stored values, and absent keys as their documented default", async () => {
+    renderMe("/me/settings");
+    await waitFor(() => expect(screen.getByText("Locale")).toBeTruthy());
+
+    // Stored.
+    expect((screen.getByLabelText(/^Language/) as HTMLInputElement).value).toBe("en-GB");
+    expect((screen.getByLabelText(/^Timezone/) as HTMLInputElement).value).toBe("Europe/London");
+    expect((screen.getByLabelText(/^Pace/) as HTMLSelectElement).value).toBe("quick");
+    expect((screen.getByLabelText(/^Cursor travel time/) as HTMLInputElement).value).toBe("1500");
+
+    // Absent from the fixture bag. A concept @default is never applied on
+    // write, so these keys genuinely are not on the row -- and the form must
+    // show what the cluster ACTS on, which is the documented default. Both of
+    // the first two default to TRUE, which is exactly where a falsy read would
+    // render "off" and quietly lie.
+    expect((screen.getByRole("checkbox", { name: /Send me notifications/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByLabelText(/^During a takeover/) as HTMLSelectElement).value).toBe("clean");
+    expect((screen.getByLabelText(/^Microphone/) as HTMLSelectElement).value).toBe("toggle");
+  });
+
+  it("saves ONE group, and cannot spell either protected key", async () => {
+    const calls: Array<[string, string]> = [];
+    renderMe("/me/settings", { calls });
+    await waitFor(() => expect(screen.getByText("Locale")).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^Timezone/), {
+      target: { value: "America/Denver" },
+    });
+    const locale = screen.getByText("Locale").closest("section") ?? document.body;
+    fireEvent.click(within(locale).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(calls.some(([name]) => name === "updateMyPreferences")).toBe(true),
+    );
+    const text = saveCall(calls);
+
+    // Its own group's fields, and nothing else. A save that shipped the whole
+    // bag would let this tab clobber an edit made in another one.
+    expect(text).toContain('timezone: "America/Denver"');
+    expect(text).toContain('language: "en-GB"');
+    expect(text).not.toContain("cursorTweenMs");
+    expect(text).not.toContain("dailySpaceEnabled");
+
+    // The headline claim of memql#4522, asserted on the wire text: the general
+    // preferences write has no way to name either protected key, so no
+    // sequence of clicks on this page can produce a call that carries one.
+    expect(text).not.toContain("computerUseEnabled");
+    expect(text).not.toContain("activeAssistantId");
+  });
+
+  it("routes the kill switch through its own mutation, behind a confirm", async () => {
+    const calls: Array<[string, string]> = [];
+    renderMe("/me/settings", { calls });
+    await waitFor(() => expect(screen.getByText("Computer use")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn computer use off" }));
+
+    // Nothing is written until the consequence has been read. Disabling
+    // suspends running plans, so an immediate write on the first click would
+    // be a side effect the person never agreed to.
+    expect(calls.some(([name]) => name === "toggleComputerUseEnabled")).toBe(false);
+    expect(screen.getByText(/kill_switch_engaged/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn it off" }));
+    await waitFor(() =>
+      expect(calls.some(([name]) => name === "toggleComputerUseEnabled")).toBe(true),
+    );
+
+    const toggle = calls.find(([name]) => name === "toggleComputerUseEnabled");
+    expect(toggle?.[1]).toContain("enabled: false");
+    // And it did NOT go through the general write -- which could not have
+    // carried it anyway, and that is the point of it being a separate control.
+    expect(calls.some(([name]) => name === "updateMyPreferences")).toBe(false);
+  });
+
+  it("cancelling the confirm writes nothing", async () => {
+    const calls: Array<[string, string]> = [];
+    renderMe("/me/settings", { calls });
+    await waitFor(() => expect(screen.getByText("Computer use")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn computer use off" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(calls.some(([name]) => name === "toggleComputerUseEnabled")).toBe(false);
+  });
+
+  // The origin is the CONFIGURED one, never a hardcoded host: a literal here
+  // would send an operator to somebody else's cluster to manage their own
+  // account. This is the assertion that moved off the Account tab.
+  it("names identity's own pages when an origin is configured", async () => {
+    renderMe("/me/settings");
+    await waitFor(() => expect(screen.getByText("Identity and data")).toBeTruthy());
+
+    const email = screen.getByRole("link", { name: /Email and account deletion/ });
+    expect(email.getAttribute("href")).toBe("https://identity.example.com/me/settings");
+    const exported = screen.getByRole("link", { name: /Export your data/ });
+    expect(exported.getAttribute("href")).toBe("https://identity.example.com/me/export");
+  });
+
+  // A link to nowhere is worse than an absent one: the reader concludes the
+  // capability is broken rather than that this cluster does not have it.
+  it("renders no identity link-outs when no origin is configured", async () => {
+    // authEnabled:false is what "no identity origin" actually looks like. An
+    // empty identityUrl with auth ON is `misconfigured` -- the portal refuses
+    // to render at all rather than showing a console nobody can sign into --
+    // so that fixture would prove nothing about this band.
+    renderMe("/me/settings", { config: { identityUrl: "", authEnabled: false } });
+    await waitFor(() => expect(screen.getByText("Locale")).toBeTruthy());
+    expect(screen.queryByText("Identity and data")).toBeNull();
+  });
+
+  // The link MOVED; it did not disappear. Both halves are asserted, because
+  // "removed from Account" alone would pass if it had been dropped outright.
+  it("moved the identity link off the Account tab", async () => {
+    renderMe("/me");
+    await waitFor(() => expect(screen.getByText("Member since")).toBeTruthy());
+    expect(screen.queryByRole("link", { name: /Edit on identity/ })).toBeNull();
+  });
+
+  it("does not render the app-managed assistant pointer", async () => {
+    renderMe("/me/settings");
+    await waitFor(() => expect(screen.getByText("Locale")).toBeTruthy());
+    // It is on the row (the fixture sets it) and it is deliberately not a
+    // control: a value with no meaning to a person, which they would break by
+    // editing (memql#406).
+    expect(screen.queryByText(/pointer/)).toBeNull();
   });
 });

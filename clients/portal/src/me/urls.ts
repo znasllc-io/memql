@@ -20,8 +20,12 @@ export interface MeFacet {
   readonly label: string;
 }
 
+// Settings sits beside the account facts, and the two security-ish tabs stay
+// adjacent -- Sessions ("what is signed in") and Security ("how it can be
+// entered") answer the same question from two sides and read as a pair.
 export const ME_FACETS: readonly MeFacet[] = [
   { id: "", label: "Account" },
+  { id: "settings", label: "Settings" },
   { id: "sessions", label: "Sessions" },
   { id: "security", label: "Security" },
 ];
@@ -53,6 +57,14 @@ export function identityPath(identityUrl: string, path: string): string {
 // The self-service destinations identity owns. Named here so the pages that
 // link to them cannot spell one differently, and so this list reads as what
 // it is: the documented split (docs/public/operate/portal.md), enumerated.
+//
+// NOTE THE COLLISION IN THE NAMES, because it is the thing a reader gets wrong
+// here: IDENTITY_SETTINGS is `/me/settings` on the IDENTITY service, and the
+// portal now has a `/me/settings` of its own. They are different pages with
+// different jobs -- the portal's holds cluster preferences, identity's holds
+// email, export and deletion -- and the portal's Settings tab is what links to
+// identity's (memql#4523). Both halves are named in
+// docs/public/operate/portal.md.
 export const IDENTITY_SETTINGS = "/me/settings";
 export const IDENTITY_DEVICES = "/me/devices";
 export const IDENTITY_TOKENS = "/me/tokens";

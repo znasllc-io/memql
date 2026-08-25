@@ -506,7 +506,7 @@ describe("the rail's profile row (memql#4317)", () => {
     globalThis.localStorage?.removeItem("memql-portal-rail");
   });
 
-  it("links to /me and shows the name, the email and the role", async () => {
+  it("links to /me and shows the name and the email -- and not the role", async () => {
     const dial = vi.fn(async () =>
       fakeConnection({ engineVersion: "v0.19.5" }),
     ) as unknown as typeof Connection.dial;
@@ -514,15 +514,53 @@ describe("the rail's profile row (memql#4317)", () => {
 
     await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
     expect(within(rail()).getByText("op@example.test")).toBeTruthy();
-    expect(within(rail()).getByText("admin")).toBeTruthy();
+
+    // memql#4521: the role chip is gone. Role is an ACCESS fact and it has two
+    // homes already -- the /me page header and the People view -- so a third
+    // rendering in the chrome, on every page, is noise. The fixture's access
+    // summary still carries clusterRole: "admin"; the row simply never reads
+    // it, which is what makes this assertion about the component rather than
+    // about the fixture.
+    expect(within(rail()).queryByText("admin")).toBeNull();
 
     const row = document.querySelector("[data-profile-row]");
     expect(row?.getAttribute("href")).toBe("/me");
 
-    // The three facts belong to the PERSON, so none of them is in the header.
-    for (const stray of ["Ada Lovelace", "op@example.test", "admin"]) {
+    // Both facts belong to the PERSON, so neither is in the header.
+    for (const stray of ["Ada Lovelace", "op@example.test"]) {
       expect(within(header()).queryByText(stray)).toBeNull();
     }
+  });
+
+  // The rail reads header / scroll region / footer, and until memql#4521 only
+  // the footer said so: RailStatus separates itself with `border-t` (its own
+  // comment calls that "the change that makes it a footer") while the profile
+  // block had nothing, so scrolling nav rows slid straight under it.
+  //
+  // jsdom can see the class and not the pixels, so this pins the SYMMETRY --
+  // the two dividers use one token and one inner pad -- rather than claiming
+  // anything about how it looks. The rendered result is a screenshot question.
+  it("separates the profile header from the scroll region, symmetrically with the footer", async () => {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+
+    const headerBlock = document.querySelector("[data-profile-row]")?.parentElement;
+    const footer = document.querySelector("[data-rail-status]");
+    expect(headerBlock?.className).toMatch(/border-b/);
+    expect(headerBlock?.className).toMatch(/border-line/);
+    expect(footer?.className).toMatch(/border-t/);
+    expect(footer?.className).toMatch(/border-line/);
+
+    // Collapsed too -- the divider is a property of the rail's structure, not
+    // of its width, and the collapsed rail is where a missing boundary reads
+    // worst because the rows below are bare icons.
+    fireEvent.click(within(rail()).getByRole("button", { name: "Collapse the navigation rail" }));
+    expect(document.querySelector("[data-profile-row]")?.parentElement?.className).toMatch(/border-b/);
+    expect(document.querySelector("[data-rail-status]")?.className).toMatch(/border-t/);
   });
 
   it("shows the avatar alone when collapsed, with the facts in the tooltip", async () => {
@@ -541,8 +579,10 @@ describe("the rail's profile row (memql#4317)", () => {
     // Both, and they must agree: the tooltip is what a pointer gets and the
     // accessible name is what a screen reader gets, and the second must not
     // be the poorer of the two.
-    expect(row?.getAttribute("title")).toBe("Ada Lovelace · op@example.test · admin");
-    expect(row?.getAttribute("aria-label")).toBe("Ada Lovelace · op@example.test · admin");
+    // Two facts now, not three (memql#4521): the row stopped reading the role,
+    // so hover, screen reader and the expanded column cannot disagree about it.
+    expect(row?.getAttribute("title")).toBe("Ada Lovelace · op@example.test");
+    expect(row?.getAttribute("aria-label")).toBe("Ada Lovelace · op@example.test");
     // The initials are the first and family name, and they are hidden from
     // the accessible tree because the link already carries the name.
     const avatar = row?.querySelector("[data-avatar]");

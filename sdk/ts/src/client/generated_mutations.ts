@@ -8570,6 +8570,64 @@ QueryClient.prototype.updateMissingCapabilityStatus = function (this: QueryClien
   return this.executeNamed("updateMissingCapabilityStatus", buildUpdateMissingCapabilityStatus(args), opts);
 };
 
+/** Update the CALLER's own v1:identity:user.preferences. Partial: an omitted field keeps its stored value. The target row is stamped from actor.userId, so there is no caller-supplied target and no admin override. It cannot reach preferences.computerUseEnabled (the computer-use kill switch, owned by toggleComputerUseEnabled) or preferences.activeAssistantId (an app-managed pointer): neither is a key this mutation writes, and @mergeFields("preferences") preserves the stored value of every key a call does not carry. */
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyPreferences"] in generated_concepts.ts).
+export interface UpdateMyPreferencesArgs {
+  /** BCP 47 language tag (e.g. en-US). Empty clears it. */
+  language?: string;
+  /** Whether to receive notifications. */
+  notifications?: boolean;
+  /** Server-side theme preference, which serves product SPAs. The portal's own theme is a per-browser header toggle and is deliberately not this field. */
+  // Enum: light | dark | system
+  theme?: string;
+  /** IANA timezone name (e.g. America/Los_Angeles). Empty falls back to UTC. */
+  timezone?: string;
+  /** How long an archived space lives before the purge sweep hard-deletes it. 30 or 60. */
+  archiveRetentionDays?: number;
+  /** Whether the daily-space automation provisions a per-day space for this user. */
+  dailySpaceEnabled?: boolean;
+  /** What happens to yesterday's daily space when the rollover cron fires. */
+  // Enum: archive | save
+  dailySpaceRolloverAction?: string;
+  /** Standard Mode cursor tween duration in milliseconds. */
+  cursorTweenMs?: number;
+  /** Standard Mode visual appearance during an agent UI-control takeover. */
+  // Enum: clean | dim
+  takeoverMode?: string;
+  /** Interactive Mode pace preset. */
+  // Enum: quick | steady | deliberate
+  interactivePace?: string;
+  /** Per-user mic mode preference for Polyphon rooms. */
+  // Enum: toggle | continuous
+  voiceMode?: string;
+}
+
+export function buildUpdateMyPreferences(args: UpdateMyPreferencesArgs): string {
+  const parts: string[] = [];
+  if (args.language !== undefined) parts.push("language: " + renderMemQLValue(args.language));
+  if (args.notifications !== undefined) parts.push("notifications: " + renderMemQLValue(args.notifications));
+  if (args.theme !== undefined) parts.push("theme: " + renderMemQLValue(args.theme));
+  if (args.timezone !== undefined) parts.push("timezone: " + renderMemQLValue(args.timezone));
+  if (args.archiveRetentionDays !== undefined) parts.push("archiveRetentionDays: " + renderMemQLValue(args.archiveRetentionDays));
+  if (args.dailySpaceEnabled !== undefined) parts.push("dailySpaceEnabled: " + renderMemQLValue(args.dailySpaceEnabled));
+  if (args.dailySpaceRolloverAction !== undefined) parts.push("dailySpaceRolloverAction: " + renderMemQLValue(args.dailySpaceRolloverAction));
+  if (args.cursorTweenMs !== undefined) parts.push("cursorTweenMs: " + renderMemQLValue(args.cursorTweenMs));
+  if (args.takeoverMode !== undefined) parts.push("takeoverMode: " + renderMemQLValue(args.takeoverMode));
+  if (args.interactivePace !== undefined) parts.push("interactivePace: " + renderMemQLValue(args.interactivePace));
+  if (args.voiceMode !== undefined) parts.push("voiceMode: " + renderMemQLValue(args.voiceMode));
+  return "mutation updateMyPreferences(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateMyPreferences(args: UpdateMyPreferencesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateMyPreferences = function (this: QueryClient, args: UpdateMyPreferencesArgs = {} as UpdateMyPreferencesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateMyPreferences", buildUpdateMyPreferences(args), opts);
+};
+
 /** Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition). */
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.ts).
 export interface UpdateNodeHealthArgs {

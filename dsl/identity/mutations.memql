@@ -2598,6 +2598,113 @@ mutate user updateUser {
   }
 }
 
+// updateMyPreferences
+// ===================
+//
+// The general self-scoped preferences write (memql#4522). Before it, the tree
+// had NO client-reachable way to change v1:identity:user.preferences at all:
+// updateUser above is @serverOnly (caller-supplied target, and a payload that
+// can carry `role`), and the one live self-scoped preference write was the
+// computer-use kill switch in dsl/worker/mutations.memql. The portal's /me
+// Settings tab is the caller.
+//
+// # The row is the caller's, and nothing else is spellable
+//
+// `id: actor.userId` is the memql#2840 pattern. There is no caller-supplied
+// target argument, so pointing this at another user is not a permission the
+// mutation refuses -- it is a call that cannot be written. Same reasoning as
+// toggleComputerUseEnabled, and the same deliberate absence of an admin
+// override: the administrative path is updateUser, which says so in its name
+// and is gated in Go.
+//
+// # @mergeFields("preferences") is what puts two keys out of reach
+//
+// update() replaces a top-level field WHOLESALE, and an absent optional arg
+// OMITS its leaf rather than writing a null (memql#3617). Without merge
+// semantics this write would therefore replace the whole preferences object
+// with whatever subset the caller sent -- and an engaged kill switch
+// (computerUseEnabled: false) would come back ABSENT, which downstream Go
+// reads as the @default("true") that is never applied on write. A stale client
+// bag would silently re-enable computer use for the user who had turned it off.
+//
+// @mergeFields("preferences") makes the write a recursive deep merge
+// (mergePayloadFields -> deepMergeObjects), so a stored key the partial does
+// not carry survives. computerUseEnabled and activeAssistantId are not keys in
+// this template and no argument reaches them, so they survive EVERY call by
+// construction. That is memql#4520 D3's requirement met by the mutation
+// grammar rather than by a Go seam: the two keys are unreachable because they
+// are UNSPELLABLE here, not because something inspects the payload for them.
+//
+// Delete the annotation and the guarantee leaves with it, silently and with
+// every test that only checks the happy path still green. What stands in the
+// way is TestUpdateMyPreferencesLeavesProtectedKeysAlone in component/memql --
+// it engages the kill switch, writes an unrelated preference, and asserts the
+// switch is still present and still false.
+//
+// # Why the two numeric bounds are annotations and the 30/60 choice is a range
+//
+// cursorTweenMs carries the concept's documented 250-2500 through @minimum /
+// @maximum. archiveRetentionDays gets @minimum(30) @maximum(60) rather than a
+// two-member set: an args @enum takes STRING literals, and opening it to
+// numbers would compare a parsed member against the float64 a JSON caller
+// sends under reflect.DeepEqual and refuse every value. The two documented
+// choices are made the only ones a person can send by the SELECT in the
+// Settings tab; what this bound guarantees is that nothing outside the
+// documented window is stored. Both refuse rather than clamp -- a preference
+// silently coerced to a value the user did not pick is worse than an error.
+
+/// Update the CALLER's own v1:identity:user.preferences. Partial: an omitted field keeps its
+/// stored value. The target row is stamped from actor.userId, so there is no caller-supplied
+/// target and no admin override. It cannot reach preferences.computerUseEnabled (the computer-use
+/// kill switch, owned by toggleComputerUseEnabled) or preferences.activeAssistantId (an
+/// app-managed pointer): neither is a key this mutation writes, and @mergeFields("preferences")
+/// preserves the stored value of every key a call does not carry.
+@actor
+@mergeFields("preferences")
+mutate user updateMyPreferences {
+  args {
+    /// BCP 47 language tag (e.g. en-US). Empty clears it.
+    language                  string  @pattern("^$|^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
+    /// Whether to receive notifications.
+    notifications             bool
+    /// Server-side theme preference, which serves product SPAs. The portal's own theme is a
+    /// per-browser header toggle and is deliberately not this field.
+    theme                     enum("light", "dark", "system")
+    /// IANA timezone name (e.g. America/Los_Angeles). Empty falls back to UTC.
+    timezone                  string  @pattern("^$|^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$")
+    /// How long an archived space lives before the purge sweep hard-deletes it. 30 or 60.
+    archiveRetentionDays      int     @minimum(30) @maximum(60)
+    /// Whether the daily-space automation provisions a per-day space for this user.
+    dailySpaceEnabled         bool
+    /// What happens to yesterday's daily space when the rollover cron fires.
+    dailySpaceRolloverAction  enum("archive", "save")
+    /// Standard Mode cursor tween duration in milliseconds.
+    cursorTweenMs             int     @minimum(250) @maximum(2500)
+    /// Standard Mode visual appearance during an agent UI-control takeover.
+    takeoverMode              enum("clean", "dim")
+    /// Interactive Mode pace preset.
+    interactivePace           enum("quick", "steady", "deliberate")
+    /// Per-user mic mode preference for Polyphon rooms.
+    voiceMode                 enum("toggle", "continuous")
+  }
+  update {
+    id: actor.userId
+    preferences: {
+        language: args.language,
+        notifications: args.notifications,
+        theme: args.theme,
+        timezone: args.timezone,
+        archiveRetentionDays: args.archiveRetentionDays,
+        dailySpaceEnabled: args.dailySpaceEnabled,
+        dailySpaceRolloverAction: args.dailySpaceRolloverAction,
+        cursorTweenMs: args.cursorTweenMs,
+        takeoverMode: args.takeoverMode,
+        interactivePace: args.interactivePace,
+        voiceMode: args.voiceMode
+      }
+  }
+}
+
 // setAccountEntitlement
 // =============================
 //

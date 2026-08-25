@@ -905,6 +905,7 @@ var BoundConcepts = map[string]string{
 	"updateIdentity":                                   "v1:identity:identity",
 	"updateInboundRequestStatus":                       "v1:platform:inboundRequest",
 	"updateMissingCapabilityStatus":                    "v1:platform:missingCapability",
+	"updateMyPreferences":                              "v1:identity:user",
 	"updateNodeHealth":                                 "v1:cluster:node",
 	"updateNote":                                       "v1:notes:note",
 	"updateNumberStatus":                               "v1:telephony:number",

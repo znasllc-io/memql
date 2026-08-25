@@ -560,7 +560,12 @@ describe("the chrome", () => {
     // local token -- the whole reason useMyAccess exists.
     await waitFor(() => expect(screen.getByText("Ops Person")).toBeTruthy());
     expect(screen.getByText("ops@example.com")).toBeTruthy();
-    expect(screen.getByText("owner")).toBeTruthy();
+    // The ROLE is deliberately absent from the chrome (memql#4521). It is an
+    // access fact, and it renders on /me and on People; a third copy in the
+    // rail is noise on every page. The access summary this test drives still
+    // carries clusterRole -- the row just stopped reading it, which is what
+    // keeps hover, screen reader and visible column from disagreeing.
+    expect(screen.queryByText("owner")).toBeNull();
     // The replica serving this stream, in the footer.
     expect(screen.getByTitle(/bff-1/)).toBeTruthy();
     // The CLUSTER HOST is deliberately gone (memql#4316): it was

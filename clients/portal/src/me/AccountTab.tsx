@@ -1,24 +1,26 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { useAuth } from "../auth/AuthProvider";
-import { Band, ButtonLink, Callout, DataText, Panel, Skeleton } from "../ui";
-import { ExternalLink } from "../ui/icons";
+import { Band, Callout, DataText, Panel, Skeleton } from "../ui";
 import { formatDay, formatMoment } from "./MeLayout";
-import { IDENTITY_SETTINGS, identityPath, mePath } from "./urls";
+import { mePath } from "./urls";
 import type { MeState } from "./useMe";
 
 // /me -- the facts about the account (memql#4318), plus the shared-mailbox
 // note (memql#4319).
 //
-// # It renders; it does not edit
+// # It renders; it does not edit, and it no longer links either
 //
 // Changing a display name or an email is identity's job and stays there
-// (docs/public/operate/portal.md). The portal shows what the cluster resolved
-// and links to the page that changes it. That is the documented split, and
-// the link is composed from the CONFIGURED identity origin -- never a literal
-// host, which would send an operator to somebody else's cluster to edit their
-// own name.
+// (docs/public/operate/portal.md). This tab shows what the cluster resolved.
+//
+// The "Edit on identity" link that used to sit at the bottom of this tab has
+// MOVED to /me/settings, into its "Identity and data" band (memql#4523, one
+// door per destination -- memql#4264). It was here because this was the only
+// facet with anywhere to put it; now that a settings surface exists, an
+// identity link-out belongs beside the other settings rather than under the
+// facts. Nothing was removed: the same destination is one tab away, named
+// together with the export and deletion links that share its origin.
 //
 // # The shared-mailbox note
 //
@@ -31,9 +33,6 @@ import type { MeState } from "./useMe";
 // sign-in links can be turned off.
 
 export function AccountTab({ me }: { me: MeState }): ReactNode {
-  const { config } = useAuth();
-  const settingsUrl = identityPath(config.identityUrl, IDENTITY_SETTINGS);
-
   if (me.error !== "") {
     return (
       <Callout tone="danger" title="We could not read your account">
@@ -73,19 +72,6 @@ export function AccountTab({ me }: { me: MeState }): ReactNode {
           <Fact label="Last seen" value={formatMoment(account.lastSeenAt)} kind="time" />
         </dl>
       </Band>
-
-      {settingsUrl === "" ? null : (
-        <div>
-          <ButtonLink href={settingsUrl} target="_blank" rel="noreferrer noopener">
-            Edit on identity
-            <ExternalLink size={14} aria-hidden="true" />
-          </ButtonLink>
-          <p className="mt-2 max-w-prose text-sm text-muted">
-            Your name and email are changed on the identity service, which owns them. This console
-            reads them.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
