@@ -89,6 +89,15 @@ a value that is not among its options), the queue-jumping does not.
 `main` stops meaning the skew and starts meaning what the owner wants: a
 developer lane that runs main's ENGINE, built locally.
 
+> **Owner clarification (2026-08-24), from hitting the current behavior:**
+> selecting main today brings up the newest RELEASE's images (v0.19.6 at the
+> time) -- exactly the skew this section deletes. The intent, verbatim: main
+> is for a developer to "develop on, troubleshoot and test on"; OTHER SESSIONS
+> PUSH INTO MAIN CONTINUOUSLY, so the lane must run the latest main, freshly
+> pulled, with images built locally by Docker from that checkout -- never a
+> tag-cut version, and never the release images. The three bullets below and
+> the freshness rule are amended accordingly.
+
 - Label: `main -- build from source (for MemQL developers)`. The skew label and
   `imageTagForVersion`'s main -> latest-release-images mapping are DELETED
   (sweep memql#3901's prose in `stackPin.ts` and `installScreens.ts`).
@@ -99,6 +108,23 @@ developer lane that runs main's ENGINE, built locally.
   the rebuild flow runs it, so the cluster comes up on `memql-<node>:local`
   images built at main's commit. No GHCR release image is pulled for engine
   nodes on this lane.
+- **The checkout lives where every install's checkout already lives:**
+  `~/.memql/src` (`clone-stack.sh`'s `DEFAULT_DEST`, the same directory a tag
+  install detaches into -- the owner's "~/.memql/source or something" is this
+  path, kept as-is rather than renamed). A main install checks `main` out
+  there in place of a tag; the receipt records the branch + built commit the
+  way it records a tag today.
+- **Fresh on every run, by rule.** A main install -- and every rebuild of a
+  main-lane cluster -- FETCHES and hard-resets the checkout to `origin/main`
+  before building, then records the commit it built. Other sessions land PRs
+  on main continuously; a stale local main silently tests last week's engine,
+  which is the exact failure the lane exists to avoid. (A tag-lane install
+  keeps today's semantics: a tag is immutable and needs no refresh. A
+  developer's own uncommitted edits in `~/.memql/src` are the ONE exception:
+  the rebuild path already narrates dirty checkouts via `rebuiltMessage`'s
+  dirty count, and a dirty tree is NOT reset -- the step refuses with "commit,
+  stash, or discard" naming the files, because silently discarding a
+  developer's edits is worse than a stale build.)
 - Preflight says what it costs: the collect screen's main hint states that this
   clones and BUILDS (docker required, several minutes); the `detect` step's
   docker check is already in the graph and `dockerAccess` already gates it.
