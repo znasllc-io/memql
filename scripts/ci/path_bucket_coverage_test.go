@@ -176,6 +176,13 @@ var coverageAllowList = map[string]exemption{
 				"its worked example of a runtime reference that is not a gate. Recorded here " +
 				"rather than reworded away: phrasing a comment to dodge the check would be " +
 				"the first step to the check meaning nothing",
+			"deploy/k8s/overlays/internal_tls_test.go": "PROSE. That gate is about the " +
+				"cert-manager chain components/internal-tls ships for the CLOUD (memql#4484), " +
+				"and it names gen-internal-ca.sh to say what the LOCAL path does instead -- " +
+				"which is the whole reason the component is not composed by the local overlay. " +
+				"It reads the rendered overlay, never this script. If a future gate does READ " +
+				"it, this entry must go and the path must be ROUTED, per the instruction this " +
+				"check prints",
 		},
 	},
 

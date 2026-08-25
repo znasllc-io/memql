@@ -1,7 +1,7 @@
 ---
 title: What a real first bring-up needed that the lifecycle automations do not model
 audience: internal
-status: shipped
+status: historical
 area: planning
 sinceVersion: 0.20.0
 owner: platform
@@ -17,7 +17,7 @@ subscription to a running mesh, driven by shell only.
 [azure-entry-install.md](../../public/operate/azure-entry-install.md) ·
 memql#4463, memql#4464
 
-## Status: shipped (epic memql#4490)
+## Status: historical -- every finding here has shipped (epic memql#4490)
 
 Every finding below has landed. Kept rather than deleted because the FINDINGS
 are the record -- each one is a fact about the system that existed nowhere a
