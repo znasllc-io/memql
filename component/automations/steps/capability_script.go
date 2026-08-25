@@ -75,6 +75,23 @@ var capabilityScriptAllowlist = map[string]string{
 	"deploy.gate":        "scripts/deploy/deploy-gate.sh",
 	"deploy.notify":      "scripts/deploy/notify.sh",
 	"overlay.pinDigests": "scripts/deploy/pin-overlay-digests.sh",
+
+	// Azure substrate provisioning (memql#4464, epic memql#4463). The deploy
+	// pack's actions place WORKLOADS onto a cluster; this one creates the
+	// cluster they land on -- resource group, registry, key vault, backup
+	// storage, AKS, workload identities and their federated credentials.
+	//
+	// It exists because the first cloud instance was built by hand and could
+	// not be recreated from source: when its ArgoCD Application pinned a git
+	// revision that later vanished, the cluster itself was the only remaining
+	// record of the installation.
+	//
+	// Registration here is what makes it REACHABLE from the in-engine action
+	// path -- this map is the security boundary, so an unregistered script is
+	// silently inert on that path while running fine from a human shell.
+	"deploy.azureProvision": "scripts/deploy/azure-provision.sh",
+	"deploy.azureScale":     "scripts/deploy/azure-scale.sh",
+	"deploy.azureTeardown":  "scripts/deploy/azure-teardown.sh",
 	"overlay.revert":     "scripts/deploy/revert-overlay.sh",
 	"argocd.sync":        "scripts/deploy/argo-sync.sh",
 

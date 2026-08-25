@@ -44,7 +44,23 @@ var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-
 //
 // Both regexes anchor at `^[ \t]*automation`, so a `//` line-commented
 // automation can never match them; line comments need no masking.
-var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
+//
+// THE TRAILER IS WHAT SEPARATES A DECLARATION FROM A CALL (memql#4463). A
+// sub-automation step is authored `automation <name>( ... )` -- the same
+// kind-prefixed invocation shape as `logic <name>( ... )`, and `automation` has
+// been a legal kind prefix in the rewriter all along. Without the trailer this
+// pattern matched that CALL SITE, reported the callee as a header whose `{` was
+// missing, and -- since an unextractable header refuses boot (#2830) -- a
+// correctly-authored composition took the node down. The callee's real
+// declaration elsewhere in the file loaded fine, which made the failure read as
+// a brace bug in a block whose braces balance.
+//
+// So the loose form requires the name to be followed by `{` or end-of-line: a
+// declaration is `automation NAME {` (strict) or `automation NAME` with the
+// brace on the next line (the case this regex exists for), while a call is
+// always `automation NAME(`. Comments are blanked before matching, so a
+// trailing comment leaves whitespace and still satisfies `$`.
+var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\{|$)`)
 
 // LoadFromUnifiedTree walks dsl.Tree() looking for
 // `<domain>/automations.memql` files, extracts every

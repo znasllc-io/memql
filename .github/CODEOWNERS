@@ -1,31 +1,55 @@
 # CODEOWNERS for znasllc-io/memql
 #
-# Branch-protection on `main` requires code-owner review on every PR
-# that touches a path covered here. Patterns are evaluated last-match-
-# wins; keep the catch-all at the top and the security-sensitive
-# overrides at the bottom.
+# Branch-protection on `main` requires code-owner review on every PR that
+# touches a path covered here. Patterns are evaluated last-match-wins; keep the
+# catch-all at the top and the security-sensitive overrides at the bottom.
+#
+# TEAMS, NOT INDIVIDUALS (memql#4463). These entries named a single account.
+# GitHub does not let an author approve their own pull request, so a
+# single-account owner makes that person unable to land a change to their own
+# paths -- the protection becomes a block precisely when the owner is the one
+# working, and the usual escape is an admin bypass, which is the protection not
+# running at all. A team absorbs that: another member reviews. It also survives
+# the org growing, which a list of usernames does not.
 
 # Default owner for everything else.
-*                       @znas-io
+*                        @znasllc-io/human-developers
 
 # CI / workflows / supply-chain
-/.github/                @znas-io
-/.gitleaks.toml          @znas-io
+/.github/                @znasllc-io/human-lead-developers
+/.gitleaks.toml          @znasllc-io/human-lead-developers
 
 # Auth + transport (security-critical)
-/app/                    @znas-io
-/component/identity/     @znas-io
-/component/grpc/         @znas-io
-/component/server/       @znas-io
-/component/auth/         @znas-io
-/component/worker/       @znas-io
+/app/                    @znasllc-io/human-lead-developers
+/component/identity/     @znasllc-io/human-lead-developers
+/component/grpc/         @znasllc-io/human-lead-developers
+/component/server/       @znasllc-io/human-lead-developers
+/component/auth/         @znasllc-io/human-lead-developers
+/component/worker/       @znasllc-io/human-lead-developers
 
 # Build + deploy
-/Dockerfile              @znas-io
-/deploy/k8s/             @znas-io
-/scripts/deploy/         @znas-io
-/docker/                 @znas-io
+/Dockerfile              @znasllc-io/human-lead-developers
+/deploy/k8s/             @znasllc-io/human-lead-developers
+/scripts/deploy/         @znasllc-io/human-lead-developers
+/scripts/install/        @znasllc-io/human-lead-developers
+/docker/                 @znasllc-io/human-lead-developers
+
+# The shared capability-script runtime, and the allowlist that is the security
+# boundary for the action path: a DSL action may only run a script registered
+# there, so an addition widens what an automation can execute on the runner
+# (memql#2221, memql#4463).
+/scripts/lib/capability.sh                         @znasllc-io/human-lead-developers
+/component/automations/steps/capability_script.go  @znasllc-io/human-lead-developers
+
+# The operator-name ban list. Editing it is how a client-specific name would
+# legitimately enter a company-agnostic repository -- which is to say, it should
+# not happen quietly (memql#3593, memql#4217).
+/core/vendorname/        @znasllc-io/human-lead-developers
 
 # Auth-related docs
-/docs/auth/              @znas-io
-/SECURITY.md             @znas-io
+/docs/auth/              @znasllc-io/human-lead-developers
+/docs/public/operate/auth/                         @znasllc-io/human-lead-developers
+/SECURITY.md             @znasllc-io/human-lead-developers
+
+# The instructions every agent session loads before doing anything.
+/CLAUDE.md               @znasllc-io/human-lead-developers
