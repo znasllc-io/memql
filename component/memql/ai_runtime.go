@@ -36,7 +36,7 @@ func newAIRuntime(logger *slog.Logger, prompts *PromptRegistry, providers *Provi
 		logger:    logger,
 		prompts:   prompts,
 		providers: providers,
-		cache:     newAIResponseCache(cfg.MaxEntries),
+		cache:     aiResponseCacheWithMetrics(cfg.MaxEntries),
 		cacheCfg:  cfg,
 	}
 }

@@ -254,6 +254,13 @@ The heart of the system - executes all MemQL queries.
 - **Concept Cache** - Cache concept schemas
 - **Function Compilation** - Compile functions once
 - **Query Planning** - Optimize execution plans
+- **Result Cache** - Pure reads are cached BY DEFAULT for 60s
+  (`result_cache_policy.go`); `@cache(N)` overrides, `@nocache` opts out,
+  `v1:identity:` is denylisted from the default path. Freshness is
+  event-driven: a write evicts its concept's dependent entries on the
+  writing node synchronously and broadcasts `cache.invalidate.<concept>`
+  to the rest of the mesh. The TTL is a backstop, not the mechanism. See
+  Performance Monitoring below for how to tell whether it is working.
 
 ---
 
@@ -379,12 +386,43 @@ kubectl logs -n memql deploy/bff -f | grep "eventBus"
 ```
 
 ### Performance Monitoring
+
+**Cache hit rates: ask `/metrics`, not the logs** (memql#4532). The log
+grep this recipe used to open with (`grep "cache.*hit"`) finds only the
+5-minute aggregate Info line each cache emits, so it cannot answer the
+question anyone actually has -- *which* query, and is invalidation
+firing. Prometheus counters answer both. `/metrics` is in-cluster-only
+by design (`servedButNotExternallyRouted`); port-forward to read it.
+
 ```bash
-# Cache hit rates
-kubectl logs -n memql deploy/bff | grep "cache.*hit"
+kubectl port-forward -n memql deploy/bff 9090:8085 &
+
+# The engine result cache: hits, misses, sets, evictions.
+curl -s localhost:9090/metrics | grep memql_result_cache
+
+# Is invalidation reaching THIS replica? The events series moves on every
+# cache.invalidate the node acts on, local writes and mesh-forwarded
+# remote writes alike -- so a flat line here while writes are happening
+# is the broadcast rule failing, NOT an idle cache. The evictions series
+# is the subset of those events that actually dropped a cached result.
+curl -s localhost:9090/metrics | grep memql_result_cache_invalidation
+
+# One query's hit ratio. The label is the registered construct's name.
+curl -s localhost:9090/metrics | grep 'query_reads_total{query="spaceParticipants"'
+
+# The two AI caches (exact-match and semantic).
+curl -s localhost:9090/metrics | grep memql_ai_cache
 
 # Query performance
 kubectl logs -n memql deploy/bff | grep "query.*ms"
+```
+
+The 5-minute log emitters are still there and still useful as the
+no-metrics fallback -- a shell on a node with no scrape target, or a
+post-mortem over retained logs:
+
+```bash
+kubectl logs -n memql deploy/bff | grep "resultCache: stats"
 ```
 
 ---
