@@ -196,10 +196,12 @@ func (s *Server) handleDevicePost(w http.ResponseWriter, r *http.Request) {
 
 	approved := action == "approve"
 
-	// THE ROLE FLOOR (memql#4516), and the second of the two places a
-	// signed-in person is known at the moment a credential would be minted.
-	// The same identity.CheckClientRoleFloor the code flow consults -- one
-	// rule, so the device fallback can never be the way around it.
+	// THE ROLE FLOOR (memql#4516). The same identity.CheckClientRoleFloor the
+	// three code-flow mint paths consult (the list is in
+	// magiclink/verifier.go) -- one rule, so the device fallback can never be
+	// the way around it. That is the whole reason this call is here: the
+	// fallback exists precisely for the hosts where the code flow cannot run,
+	// so a floor applied only to the code flow would be optional in practice.
 	//
 	// A refusal DENIES the grant rather than leaving it pending. The device
 	// is polling; leaving the row approvable would have it poll until the

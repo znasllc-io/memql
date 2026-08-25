@@ -396,10 +396,18 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		}
 	}
 
-	// THE ROLE FLOOR (memql#4516). This is one of exactly two places a
-	// signed-in person is known AND a credential is about to be minted for a
-	// relying party, so it is one of the call sites of
-	// identity.CheckClientRoleFloor -- the single definition of the rule.
+	// THE ROLE FLOOR (memql#4516). One of FOUR places a signed-in person is
+	// known at the moment a credential would be minted, all calling the one
+	// rule, identity.CheckClientRoleFloor:
+	//
+	//   this file                                    magic-link sign-in
+	//   http/webauthn_login.go                       a passkey assertion
+	//   web/redirect_authenticated.go                the /authorize SSO fast path
+	//   web/device.go                                the RFC 8628 approval
+	//
+	// The first three are all the CODE flow -- it can reach an auth code three
+	// different ways, and a floor on one factor is not a floor. If you are
+	// adding a fifth way to mint, it belongs on this list.
 	//
 	// It runs AFTER the user row exists (being refused the editor is not a
 	// reason to refuse someone an account -- they may sign into the portal a
