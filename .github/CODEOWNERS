@@ -1,31 +1,51 @@
-# CODEOWNERS for znasllc-io/memql
+# CODEOWNERS -- who must review a change before it can merge.
 #
-# Branch-protection on `main` requires code-owner review on every PR
-# that touches a path covered here. Patterns are evaluated last-match-
-# wins; keep the catch-all at the top and the security-sensitive
-# overrides at the bottom.
+# WHY THIS FILE EXISTS. Every ruleset on this repository already sets
+# `require_code_owner_review: true`. Without a CODEOWNERS file that rule matches
+# no path and therefore requires nothing: the protection reads as enabled in the
+# settings UI and enforces nothing on any pull request. A rule that is on and
+# inert is worse than one that is off, because it is believed.
+#
+# TEAMS, NEVER INDIVIDUALS. GitHub does not let an author approve their own pull
+# request, so naming one person as the owner of a path makes that person unable
+# to land a change to it alone -- the protection turns into a block precisely
+# when the owner is the one working. A team can absorb that: another member
+# reviews. It also survives the org growing, which a list of usernames does not.
+#
+# Ownership is deliberately coarse. A per-directory map that nobody maintains
+# routes reviews to the wrong people as the tree moves, and a stale owner is a
+# review that does not happen.
 
-# Default owner for everything else.
-*                       @znas-io
+# Default owner for everything not matched below.
+*                                   @znasllc-io/human-developers
 
-# CI / workflows / supply-chain
-/.github/                @znas-io
-/.gitleaks.toml          @znas-io
+# ---------------------------------------------------------------------------
+# Paths where a mistake is not caught by a unit test.
+# ---------------------------------------------------------------------------
 
-# Auth + transport (security-critical)
-/app/                    @znas-io
-/component/identity/     @znas-io
-/component/grpc/         @znas-io
-/component/server/       @znas-io
-/component/auth/         @znas-io
-/component/worker/       @znas-io
+# The deploy substrate: the manifests ArgoCD reconciles, the capability scripts
+# behind the deployment actions, and the CI that gates them. A defect here
+# surfaces as an outage, not a red test.
+/deploy/                            @znasllc-io/human-lead-developers
+/scripts/deploy/                    @znasllc-io/human-lead-developers
+/scripts/install/                   @znasllc-io/human-lead-developers
+/scripts/lib/capability.sh          @znasllc-io/human-lead-developers
+/.github/workflows/                 @znasllc-io/human-lead-developers
+/.github/CODEOWNERS                 @znasllc-io/human-lead-developers
 
-# Build + deploy
-/Dockerfile              @znas-io
-/deploy/k8s/             @znas-io
-/scripts/deploy/         @znas-io
-/docker/                 @znas-io
+# The security boundary for the action path. A DSL action may only run a script
+# registered in this allowlist, so an addition here widens what an automation is
+# able to execute on the runner.
+/component/automations/steps/capability_script.go  @znasllc-io/human-lead-developers
 
-# Auth-related docs
-/docs/auth/              @znas-io
-/SECURITY.md             @znas-io
+# Identity, authorization, and the row-authz gates.
+/component/identity/                @znasllc-io/human-lead-developers
+/component/auth/                    @znasllc-io/human-lead-developers
+
+# The operator-name ban list. Editing it is how a client-specific name would
+# legitimately enter a company-agnostic repository -- which is to say, it should
+# not happen quietly (memql#3593, memql#4217).
+/core/vendorname/                   @znasllc-io/human-lead-developers
+
+# The instructions every agent session loads before doing anything.
+/CLAUDE.md                          @znasllc-io/human-lead-developers

@@ -91,6 +91,7 @@ var capabilityScriptAllowlist = map[string]string{
 	// silently inert on that path while running fine from a human shell.
 	"deploy.azureProvision": "scripts/deploy/azure-provision.sh",
 	"deploy.azureScale":     "scripts/deploy/azure-scale.sh",
+	"deploy.azureTeardown":  "scripts/deploy/azure-teardown.sh",
 	"overlay.revert":     "scripts/deploy/revert-overlay.sh",
 	"argocd.sync":        "scripts/deploy/argo-sync.sh",
 

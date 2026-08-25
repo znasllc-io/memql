@@ -355,3 +355,37 @@ automation bringUpInstance {
     )
   }
 }
+
+@trigger(event="instance.deprovisionRequested")
+automation deprovisionInstance {
+  args {
+    instanceId           string!
+    subscriptionId       string!
+    resourceGroup        string!
+    confirm              string!
+    clusterName          string
+    keyVaultName         string
+    backupStorageAccount string
+    deleteStores         boolean
+    purgeKeyVault        boolean
+    dryRun               boolean
+  }
+
+  // The confirmation rides all the way through as a value rather than being
+  // reconstructed here. An orchestrator that could derive its own confirmation
+  // from the resource group would be confirming to itself, which is not a
+  // safety interlock -- it is a comment.
+  step teardown {
+    action deprovisionAzureInfrastructure(
+      subscriptionId,
+      resourceGroup,
+      confirm,
+      clusterName,
+      keyVaultName,
+      backupStorageAccount,
+      deleteStores,
+      purgeKeyVault,
+      dryRun
+    )
+  }
+}

@@ -75,8 +75,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // data-origins sync runtime's two drivers (epic memql#4378);
 // 37 -> 41 when deployment gained the instance lifecycle verbs -- provisionInstance,
 // installInstance, repairInstance and the bringUpInstance composition over the first
-// two (epic memql#4463).
-const shippedAutomationCount = 41
+// two (epic memql#4463); 41 -> 42 with deprovisionInstance, the lifecycle's
+// destructive verb (memql#4469).
+const shippedAutomationCount = 42
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

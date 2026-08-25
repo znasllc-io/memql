@@ -218,6 +218,26 @@ action scaleInstance {
   capability script(script: "deploy.azureScale", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, nodePool: args.nodePool, nodeCount: args.nodeCount, replicas: args.replicas, namespace: args.namespace, dryRun: args.dryRun)
 }
 
+// Backend: scripts/deploy/azure-teardown.sh.
+/// Delete the Azure substrate of an instance. Destructive, so the confirmation is a PARAMETER that
+/// must equal the resource group being deleted -- an automation cannot stop and ask, and a caller
+/// that cannot name the target has not decided to delete it. Credential and backup stores are
+/// preserved unless deleteStores says otherwise.
+action deprovisionAzureInfrastructure {
+  args {
+    subscriptionId       string!
+    resourceGroup        string!
+    confirm              string!
+    clusterName          string
+    keyVaultName         string
+    backupStorageAccount string
+    deleteStores         boolean
+    purgeKeyVault        boolean
+    dryRun               boolean
+  }
+  capability script(script: "deploy.azureTeardown", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, confirm: args.confirm, clusterName: args.clusterName, keyVaultName: args.keyVaultName, backupStorageAccount: args.backupStorageAccount, deleteStores: args.deleteStores, purgeKeyVault: args.purgeKeyVault, dryRun: args.dryRun)
+}
+
 // =============================================================================
 //   Integration-backed deploy action (capability integration.*)
 // =============================================================================
