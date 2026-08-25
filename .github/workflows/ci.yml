@@ -510,6 +510,11 @@ jobs:
               # change is a portal change even with nothing under clients/
               # touched (memql#4266).
               - 'brand/**'
+              # And the Dockerfile, because its `portal-build` stage is the
+              # thing the isolation step above tests -- a COPY dropped from
+              # that stage is a portal break with nothing under clients/
+              # touched, which is exactly how memql#4458 reached a release.
+              - 'Dockerfile'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -1177,6 +1182,25 @@ jobs:
       # exactly this command.
       - name: build
         run: make portal-build
+
+      # THE SAME BUILD, IN THE ISOLATION THE IMAGE GIVES IT (memql#4458).
+      #
+      # `make portal-build` above runs in a full checkout, where every path the
+      # portal reaches for obviously exists. The Dockerfile's `portal-build`
+      # stage COPYs a hand-maintained subset -- and when memql#4266 made the
+      # portal import `../../../../brand/*.css`, that subset silently stopped
+      # covering it. The step above stayed green for three days. What finally
+      # ran the stage was the v0.19.7 release cut, which failed at the `edge`
+      # image with eight of nine images already pushed.
+      #
+      # `--target portal-build` rather than the whole edge image: this is the
+      # stage that broke and it is a fraction of the cost (no Go build), so the
+      # lane pays about a minute for a class of failure that otherwise surfaces
+      # at a release. `dockerfile_portal_stage_test.go` is the cheap static half
+      # and catches a missing ROOT path specifically; this catches the rest --
+      # a dropped `sdk/ts` COPY, a build script that reads something new.
+      - name: build the portal the way the image does (stage isolation)
+        run: docker build --target portal-build .
 
   # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
   # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),

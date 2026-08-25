@@ -138,7 +138,7 @@ cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart De
 cap_spec_param "node"            "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
 cap_spec_param "repo-root"       "the MemQL checkout to build from (default: this script's own repository)"
 cap_spec_param "app-name"        "ArgoCD Application name (default: \$MEMQL_K3D_APP_NAME or memql-local)"
-cap_spec_param "image-source"    "checkout: point the Application's node images at the locally built :local images, keeping the database operand override (default: leave the overrides as they are)" ""
+cap_spec_param "image-source"    "checkout: point the Application's node images at the locally built :local images, leaving the database operand override alone -- the operand image itself is still ensured, see ensure_db_image (default: leave the overrides as they are)" ""
 cap_spec_param "pull-infra"      "pull + import infra images (flag)"                                 ""
 cap_spec_param "cluster"         "k3d cluster name"
 cap_spec_param "namespace"       "k8s namespace"
@@ -389,12 +389,23 @@ function build_engine_node() {
         warn "If the build fails with 'opus.h not found', see docs/public/build/build-tags.md."
     fi
 
+    # `|| cap_fail`, NOT `set -e` (memql#4458, secondary A).
+    #
+    # A bare failing `docker build` here aborts the script before any envelope
+    # is written, and the capability contract's EXIT trap can only report the
+    # catch-all: the wizard showed
+    # `exit 1: capability 'k3d.dev' aborted (exit 1) without an explicit result`
+    # for what was in fact ONE named node failing to compile. The operator was
+    # told the installer broke; what had actually happened was that `edge` could
+    # not build. Naming the node is the difference between a bug report and a
+    # shrug, and exit 5 is what the contract asks for on an operation failure.
     docker build \
         "${ENGINE_BUILD_ARGS[@]}" \
         --target "${ENGINE_BUILD_TARGET}" \
         --tag "${image}" \
         --file "${REPO_ROOT}/Dockerfile" \
-        "${REPO_ROOT}" >&2
+        "${REPO_ROOT}" >&2 \
+        || cap_fail 5 "building the ${node} image (${image}) failed -- the docker build output above is the account of it"
 
     info "Built ${image}."
 }
@@ -423,7 +434,8 @@ function build_carrier_node() {
         --build-arg CGO_ENABLED=0 \
         --tag "${image}" \
         --file "${CARRIER_REPO}/Dockerfile" \
-        "${CARRIER_CONTEXT}" >&2
+        "${CARRIER_CONTEXT}" >&2 \
+        || cap_fail 5 "building the ${node} carrier image (${image}) from ${CARRIER_REPO} failed"
 
     info "Built ${image}."
 }
@@ -436,7 +448,8 @@ function import_image() {
     local image="$1"
 
     info "Importing ${image} into k3d cluster '${CLUSTER_NAME}'..."
-    k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2
+    k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2 \
+        || cap_fail 5 "importing ${image} into k3d cluster '${CLUSTER_NAME}' failed -- the image was built, so this is the cluster or the import, not the build"
     info "Imported ${image}."
 }
 
@@ -499,9 +512,11 @@ function pull_and_import_infra() {
 
     for image in "${INFRA_IMAGES[@]}"; do
         info "Pulling ${image}..."
-        docker pull "${image}" >&2
+        docker pull "${image}" >&2 \
+            || cap_fail 5 "pulling the infra image ${image} failed"
         info "Importing ${image} into k3d..."
-        k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2
+        k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2 \
+            || cap_fail 5 "importing the infra image ${image} into k3d failed"
         info "Done: ${image}"
     done
 
@@ -529,14 +544,34 @@ function cluster_holds_db_image() {
         | grep -q "${DB_IMAGE}"
 }
 
+#
+# THE SKIP IS "IS IT THERE", NEVER "WHICH LANE IS THIS" (memql#4458, defect 2).
+#
+# This function used to return early on `--image-source=checkout`, saying the
+# lane "leaves the operand override in place (the database is not a node)".
+# Both halves of that sentence are true and the conclusion does not follow: the
+# override being left alone is exactly WHY the image has to exist, because what
+# the overlay then names is `memql-db:16-dev`, which exists in no registry.
+#
+# It read as correct because of where it was exercised. `make up` reaches this
+# through bringup.sh WITHOUT `--image-source=checkout`, so the inner loop built
+# the image on every developer machine and the skip never fired there. The
+# wizard's from-source lane passes the flag -- and on a machine whose earlier
+# installs used release images, `memql-db:16-dev` was never built. The CNPG pod
+# sat in ImagePullBackOff for the whole run, every engine node crashlooped
+# behind it with no database to reach, and the only thing in the log about it
+# was a line that read as fine.
+#
+# The call site below already states the invariant this restores: unconditional,
+# because a cluster without this image cannot fall back to pulling. A function
+# whose first line contradicts its own call site is the shape of this bug.
 function ensure_db_image() {
-    if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
-        info "Skipping the database operand image: --image-source=checkout leaves the operand override in place (the database is not a node)."
-        return 0
-    fi
-
     section "Ensuring the database operand image (${DB_IMAGE})"
 
+    # PRESENT IS PRESENT, whichever lane asked. This is the check the old
+    # early return was reaching for -- it keeps the inner loop free (the
+    # image is already in the cluster) while a fresh machine builds it, and
+    # unlike the flag it VERIFIES the assumption instead of asserting it.
     if [[ "$PULL_INFRA" != "true" ]] && cluster_holds_db_image; then
         info "${DB_IMAGE} already present in cluster '${CLUSTER_NAME}' -- skipping."
         info "  refresh it with: make dev PULL_INFRA=1   (or: make db-image IMPORT=1)"
@@ -546,8 +581,21 @@ function ensure_db_image() {
     # Smoke test skipped here: it takes ~40s and belongs to the build lane
     # (`make db-image`, and the CI push gate), not to an inner-loop rebuild.
     info "Building ${DB_IMAGE}..."
-    bash "${SCRIPT_DIR}/../db-image/build.sh" --tag=16-dev --smokeTest=false >/dev/null \
-        || cap_fail 5 "building ${DB_IMAGE} failed"
+    # ${REPO_ROOT}, NOT ${SCRIPT_DIR} (memql#4458).
+    #
+    # The two are the same directory for `make dev` and are NOT the same when
+    # the install wizard runs this: the extension executes the STAGED copy of
+    # this script out of the VSIX, and the staged set is the capability scripts
+    # plus `scripts/lib/*.sh`, the graph documents and the tool pins --
+    # `scripts/db-image/` is not in it and has no reason to be, at ~500MB of
+    # build context. `--repo-root` is the MemQL checkout this run builds FROM
+    # (validated above as a real one: Dockerfile, local overlay, git tree), so
+    # it is where the db-image builder actually lives on that path.
+    #
+    # This line was unreachable from the wizard until memql#4458 removed the
+    # lane skip above it, so the difference had never had a chance to bite.
+    bash "${REPO_ROOT}/scripts/db-image/build.sh" --tag=16-dev --smokeTest=false >/dev/null \
+        || cap_fail 5 "building ${DB_IMAGE} from ${REPO_ROOT} failed"
 
     info "Importing ${DB_IMAGE} into k3d..."
     k3d image import "${DB_IMAGE}" --cluster "${CLUSTER_NAME}" >&2 \
