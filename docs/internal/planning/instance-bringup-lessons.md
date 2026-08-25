@@ -367,5 +367,74 @@ which bounds a leaked secret to one instance and makes the wrong reset flag
 cost nothing. See
 [azure-entry-install.md](../../public/operate/azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
 
+## 12. GitOps health that is always red is a disabled alarm
+
+Two independent defects, one class, and the class is the finding. Each made an
+ArgoCD Application report `Degraded` or `OutOfSync` **permanently, by design,
+on a correctly installed cluster** — and neither is about the red status. The
+cost is that **an operator who learns the red is normal will not see a real
+one.** In one case the permanent red had been written into this very runbook
+as expected noise, which converts a fixable configuration gap into a
+permanently disabled alarm and makes the alarm's silence worthless in both
+directions.
+
+**`cloud-entry` shipped voice's ExternalSecrets while holding voice off.**
+The overlay puts `voice`, `voice-agent`, `livekit`, `livekit-sip`,
+`livekit-redis` and `mcp` at replicas 0 and holds the LiveKit Services at
+ClusterIP (§9, memql#4225) — but `base`'s `externalsecret-livekit.yaml` and
+`externalsecret-telephony.yaml` were never removed from the render. They
+resolve five Key Vault entries a voice-off install **deliberately does not
+have**, so ESO reported `SecretSyncedError` on both and the Application was
+`Degraded` on every entry install ever made. **Fixed in memql#4487:** the
+overlay `$patch: delete`s both objects beside the replica-0 and ClusterIP
+patches, and `azure-entry-install.md` no longer describes the red as expected.
+
+**ESO's metadata inheritance made Argo claim Secrets that are in no
+repository.** External Secrets copies an ExternalSecret's labels and
+annotations onto the target Secret it writes; Argo identifies its resources by
+`app.kubernetes.io/instance`. So the moment Argo tracks an ExternalSecret, the
+Secret it generates inherits the tracking label, and Argo reports an object
+that exists in no repository as `OutOfSync` — forever, with nothing to sync and
+nothing to fix. Observed live: `Secret/memql-secrets` carrying
+`app.kubernetes.io/instance: memql`. **Fixed in memql#4489**, using the trap
+against itself: `argocd.argoproj.io/compare-options: IgnoreExtraneous` on the
+**ExternalSecret**, which inheritance then delivers onto the generated Secret,
+where it tells Argo the omission is deliberate.
+
+**The rule both are instances of**, and it belongs in the lifecycle model
+rather than in either overlay:
+
+> **Enablement must be a fact about the DESIRED state, not a tolerated failure
+> of the live state.** The render includes a module's infrastructure objects
+> **iff** the module is enabled.
+
+Two consequences worth carrying into §8's backlog. Enabling a module is
+therefore precisely a render change with declared prerequisites, which is what
+memql#4483's render-diff gate is for — and until health carried a signal, that
+gate protected something already being ignored. And the general form of the
+first defect — module enablement reaching node-type infrastructure rather than
+one hand-written hold per module — is memql#4488; memql#4487 is one module's
+hold, written by hand, and the third such hold in `cloud-entry` alone.
+
+## 13. Two orderings that only work one way round
+
+A smaller finding that falls out of §12 and is easy to get backwards in a
+runbook, because both halves look symmetric and are not.
+
+**Enabling voice on an entry install: seed the Key Vault entries, THEN drop
+the delete patches.** The other order re-creates exactly the `Degraded`
+memql#4487 removed, for however long the seeding takes — and it re-creates it
+on a cluster whose operator has just been told that red means something.
+
+**A delete patch's `apiVersion` is not load-bearing until it is.** kustomize
+selects on the patch's `target:`, so the patch body's group/version is not
+consulted, and `overlays/local` carried `external-secrets.io/v1beta1` against a
+base of `v1` for its whole life without symptom. A delete patch that stops
+matching does not fail — it silently renders the object it was supposed to
+remove, which is the same permanent-red class as everything above. Corrected
+and gated with the rest in memql#4487.
+
 > Numbering note: memql#4477 and memql#4478 cite these as §10 and §12 of an
-> earlier draft of this write-up. They are §10 and §11 here.
+> earlier draft of this write-up; they are §10 and §11 here. memql#4487 and
+> memql#4489 cite §25 and §26 of the same draft; both are folded into §12
+> here, with the ordering traps in §13.
