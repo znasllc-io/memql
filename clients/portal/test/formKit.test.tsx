@@ -356,7 +356,10 @@ describe("RadioGroup", () => {
         name="bump"
         value="patch"
         onChange={() => {}}
-        options={[OPTIONS[0], { ...OPTIONS[1], disabled: true }]}
+        options={[
+          { value: "patch", label: "Patch" },
+          { value: "minor", label: "Minor", disabled: true },
+        ]}
       />,
     );
     expect((screen.getByLabelText("Patch") as HTMLInputElement).disabled).toBe(false);

@@ -1,7 +1,17 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Button, Callout, Select, TextInput } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  Callout,
+  Field,
+  FormActions,
+  FormRow,
+  Select,
+  TextInput,
+} from "../ui";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { surfaceById } from "./urls";
 import { useAdminAccess } from "./useAdminConsole";
@@ -305,11 +315,9 @@ function FederationForm({
       </p>
       <div className="grid gap-3 lg:grid-cols-2">
         {[...FEDERATION_FIELDS, WORKSPACE_FIELD].map((field) => (
-          <label key={field.id} className="flex flex-col gap-1 text-xs text-muted">
-            {field.label}
+          <Field key={field.id} label={field.label} hint={field.hint}>
             <TextInput value={draft[field.id] ?? ""} onChange={(next) => set(field.id, next)} />
-            <span className="text-subtle">{field.hint}</span>
-          </label>
+          </Field>
         ))}
       </div>
       <div className="mt-4">
@@ -351,9 +359,8 @@ function KeyForm({
   return (
     <form onSubmit={submit} className="rounded-lg border border-line bg-surface p-4">
       <p className="mb-3 max-w-2xl text-sm text-muted">{lede}</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Vendor
+      <FormRow>
+        <Field label="Vendor">
           <Select ariaLabel={`Vendor for the ${vendor} key`} value={chosen} onChange={setChosen}>
             {Object.entries(VENDOR_LABELS).map(([id, label]) => (
               <option key={id} value={id}>
@@ -361,23 +368,25 @@ function KeyForm({
               </option>
             ))}
           </Select>
-        </label>
-        <label className="flex min-w-[20rem] flex-1 flex-col gap-1 text-xs text-muted">
-          API key
+        </Field>
+        <Field
+          label="API key"
+          hint="Stored sealed. This page shows a fingerprint afterwards, never the value."
+          grow
+        >
           {/* type=password so a key does not sit legible on a screen an
               operator is sharing. It is not a security control -- the value is
               in the DOM either way -- and the real protections are that the
               field is cleared on submit and that nothing ever reads a key
               back. */}
           <TextInput type="password" value={value} onChange={setValue} />
-          <span className="text-subtle">
-            Stored sealed. This page shows a fingerprint afterwards, never the value.
-          </span>
-        </label>
-        <Button type="submit" disabled={busy || value.trim() === ""}>
-          Save key
-        </Button>
-      </div>
+        </Field>
+        <FormActions>
+          <Button type="submit" disabled={busy || value.trim() === ""}>
+            Save key
+          </Button>
+        </FormActions>
+      </FormRow>
     </form>
   );
 }

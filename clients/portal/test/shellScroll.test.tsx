@@ -117,8 +117,8 @@ async function renderShell(): Promise<HTMLElement> {
   return container;
 }
 
-function tokensOf(el: Element | null): Set<string> {
-  const raw = el === null ? "" : el.getAttribute("class") ?? "";
+function tokensOf(el: Element | null | undefined): Set<string> {
+  const raw = el === null || el === undefined ? "" : el.getAttribute("class") ?? "";
   return new Set(raw.split(/\s+/).filter((t) => t !== ""));
 }
 

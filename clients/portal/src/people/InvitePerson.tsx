@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, ConfirmDialog, DataText, Field as UiField, Select, TextInput } from "../ui";
+import { Button, ConfirmDialog, DataText, Field, Select, TextInput } from "../ui";
 import { useAdminWrites, useClusterSettings, type WriteState } from "../admin/useAdminConsole";
 
 // Inviting somebody into the cluster (memql#4270, memql#4272).
@@ -114,15 +114,15 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
       >
         <p>{modeStatement(mode, domains)}</p>
         <div className="mt-3 flex flex-col gap-3">
-          <UiField label="Email address">
+          <Field label="Email address">
             <TextInput
               type="email"
               value={email}
               onChange={setEmail}
               placeholder="person@example.com"
             />
-          </UiField>
-          <UiField
+          </Field>
+          <Field
             label="Role on arrival"
             hint="Empty takes the cluster's default. You cannot invite somebody above your own role."
           >
@@ -134,8 +134,8 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
                 </option>
               ))}
             </Select>
-          </UiField>
-          <UiField label="Valid for">
+          </Field>
+          <Field label="Valid for">
             <Select
               ariaLabel="Invitation lifetime"
               value={String(seconds)}
@@ -147,7 +147,7 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
                 </option>
               ))}
             </Select>
-          </UiField>
+          </Field>
         </div>
       </ConfirmDialog>
 

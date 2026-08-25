@@ -6,7 +6,7 @@ import type { ClusterSettingsEdit } from "@znasllc-io/memql-sdk-core/identityadm
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Select, TextInput } from "../ui";
+import { Band, Button, Field, Select, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { brandAssetSummary, settingRows, SETTING_CONCEPT } from "./rows";
@@ -173,8 +173,7 @@ function SettingsForm({
         <legend className="text-xs font-semibold tracking-wide text-muted uppercase">
           Who gets in
         </legend>
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Registration mode
+        <Field label="Registration mode">
           <Select ariaLabel="Registration mode" value={draft.registrationMode} onChange={(next) => set({ registrationMode: next })}>
             {["open", "domain_restricted", "invite_only", "waitlist"].map((mode) => (
               <option key={mode} value={mode}>
@@ -182,11 +181,14 @@ function SettingsForm({
               </option>
             ))}
           </Select>
-        </label>
-        <Text label="Allowed email domains" value={draft.registrationDomains} onChange={(v) => set({ registrationDomains: v })} />
-        <Text label="Internal email domains" value={draft.internalDomains} onChange={(v) => set({ internalDomains: v })} />
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Role granted to internal users
+        </Field>
+        <Field label="Allowed email domains">
+          <TextInput value={draft.registrationDomains} onChange={(v) => set({ registrationDomains: v })} />
+        </Field>
+        <Field label="Internal email domains">
+          <TextInput value={draft.internalDomains} onChange={(v) => set({ internalDomains: v })} />
+        </Field>
+        <Field label="Role granted to internal users">
           <Select ariaLabel="Role granted to internal users" value={draft.internalDefaultRole} onChange={(next) => set({ internalDefaultRole: next })}>
             {["owner", "admin", "developer", "writer", "reader"].map((r) => (
               <option key={r} value={r}>
@@ -194,12 +196,10 @@ function SettingsForm({
               </option>
             ))}
           </Select>
-        </label>
-        <Text
-          label="Waitlist notifications go to"
-          value={draft.accessRequestNotifyEmails}
-          onChange={(v) => set({ accessRequestNotifyEmails: v })}
-        />
+        </Field>
+        <Field label="Waitlist notifications go to">
+          <TextInput value={draft.accessRequestNotifyEmails} onChange={(v) => set({ accessRequestNotifyEmails: v })} />
+        </Field>
       </fieldset>
 
       <fieldset className="flex flex-col gap-3">
@@ -211,18 +211,25 @@ function SettingsForm({
           cluster rejects a value outside its bounds rather than clamping it, so
           an out-of-range save comes back saying so.
         </p>
-        <Text label="Access token (minutes)" value={draft.accessTokenMinutes} onChange={(v) => set({ accessTokenMinutes: v })} />
-        <Text label="Refresh token (days)" value={draft.refreshTokenDays} onChange={(v) => set({ refreshTokenDays: v })} />
-        <Text label="Magic link (minutes)" value={draft.magicLinkMinutes} onChange={(v) => set({ magicLinkMinutes: v })} />
-        <Text label="Invitation (days)" value={draft.invitationDays} onChange={(v) => set({ invitationDays: v })} />
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Refresh cookie SameSite
+        <Field label="Access token (minutes)">
+          <TextInput value={draft.accessTokenMinutes} onChange={(v) => set({ accessTokenMinutes: v })} />
+        </Field>
+        <Field label="Refresh token (days)">
+          <TextInput value={draft.refreshTokenDays} onChange={(v) => set({ refreshTokenDays: v })} />
+        </Field>
+        <Field label="Magic link (minutes)">
+          <TextInput value={draft.magicLinkMinutes} onChange={(v) => set({ magicLinkMinutes: v })} />
+        </Field>
+        <Field label="Invitation (days)">
+          <TextInput value={draft.invitationDays} onChange={(v) => set({ invitationDays: v })} />
+        </Field>
+        <Field label="Refresh cookie SameSite">
           <Select ariaLabel="Refresh cookie SameSite" value={draft.refreshCookieSameSite} onChange={(next) => set({ refreshCookieSameSite: next })}>
             <option value="">the node default</option>
             <option value="lax">lax</option>
             <option value="none">none</option>
           </Select>
-        </label>
+        </Field>
       </fieldset>
 
       <fieldset className="flex flex-col gap-3 lg:col-span-2">
@@ -230,18 +237,20 @@ function SettingsForm({
           How the cluster presents itself
         </legend>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="Brand name" value={draft.brandName} onChange={(v) => set({ brandName: v })} />
-          <Text label="Brand colour" value={draft.brandPrimaryColor} onChange={(v) => set({ brandPrimaryColor: v })} />
+          <Field label="Brand name">
+          <TextInput value={draft.brandName} onChange={(v) => set({ brandName: v })} />
+        </Field>
+          <Field label="Brand colour">
+          <TextInput value={draft.brandPrimaryColor} onChange={(v) => set({ brandPrimaryColor: v })} />
+        </Field>
         </div>
-        <Text
-          label="Registered OAuth clients (JSON)"
-          value={draft.registeredClientsJson}
-          onChange={(v) => set({ registeredClientsJson: v })}
-        />
+        <Field label="Registered OAuth clients (JSON)">
+          <TextInput value={draft.registeredClientsJson} onChange={(v) => set({ registeredClientsJson: v })} />
+        </Field>
       </fieldset>
 
       <div className="lg:col-span-2">
-        <Button type="submit" size="xs" busyLabel="Working…" busy={writes.busy}>Save the settings</Button>
+        <Button type="submit" busyLabel="Working…" busy={writes.busy}>Save the settings</Button>
       </div>
     </form>
   );
@@ -319,19 +328,3 @@ function toEdit(d: Draft): ClusterSettingsEdit {
   };
 }
 
-function Text({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-}): ReactNode {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-muted">
-      {label}
-      <TextInput value={value} onChange={onChange} />
-    </label>
-  );
-}

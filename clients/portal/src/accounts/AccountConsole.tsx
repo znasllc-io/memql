@@ -4,7 +4,15 @@ import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { Button, ConfirmDialog, DataText, TextInput } from "../ui";
+import {
+  Button,
+  ConfirmDialog,
+  DataText,
+  Field,
+  FormActions,
+  FormRow,
+  TextInput,
+} from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { ACCOUNT_TOKEN_CONCEPT, accountTokenRows } from "./rows";
 import {
@@ -202,22 +210,22 @@ function TokenPanel({
         </p>
       </div>
 
-      <form
-        className="flex flex-wrap items-end gap-2"
+      <FormRow
         onSubmit={(event: FormEvent) => {
           event.preventDefault();
           state.mint(label.trim());
           setLabel("");
         }}
       >
-        <label className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-xs font-medium text-muted">Label</span>
+        <Field label="Label" grow>
           <TextInput value={label} onChange={setLabel} placeholder="Nightly export job" />
-        </label>
-        <Button type="submit" disabled={state.busy} busy={state.busy} busyLabel="Working…">
-          Issue credential
-        </Button>
-      </form>
+        </Field>
+        <FormActions>
+          <Button type="submit" disabled={state.busy} busy={state.busy} busyLabel="Working…">
+            Issue credential
+          </Button>
+        </FormActions>
+      </FormRow>
 
       {state.tokensError ? (
         <p className="text-sm text-fg">Could not read credentials: {state.tokensError}</p>
@@ -267,21 +275,21 @@ function RevokeControl({ state }: { state: AccountConsoleState }): ReactNode {
   }
 
   return (
-    <form
-      className="flex flex-wrap items-end gap-2"
+    <FormRow
       onSubmit={(event: FormEvent) => {
         event.preventDefault();
         if (identityId.trim() === "") return;
         setConfirming(true);
       }}
     >
-      <label className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-xs font-medium text-muted">Revoke by credential id</span>
+      <Field label="Revoke by credential id" grow>
         <TextInput value={identityId} onChange={setIdentityId} placeholder="paste an id from the list above" />
-      </label>
-      <Button type="submit" tone="danger" disabled={state.busy || identityId.trim() === ""}>
-        Revoke
-      </Button>
+      </Field>
+      <FormActions>
+        <Button type="submit" tone="danger" disabled={state.busy || identityId.trim() === ""}>
+          Revoke
+        </Button>
+      </FormActions>
       <ConfirmDialog
         open={confirming}
         title="Revoke this credential?"
@@ -299,7 +307,7 @@ function RevokeControl({ state }: { state: AccountConsoleState }): ReactNode {
         immediately. The row stays in the list for audit; re-issuing is a new credential with a
         new value.
       </ConfirmDialog>
-    </form>
+    </FormRow>
   );
 }
 
@@ -389,7 +397,7 @@ function AccountForm({
     >
       <h3 className="text-sm font-semibold">{heading}</h3>
 
-      <Field label="Name" required>
+      <Field label="Name (required)">
         <TextInput value={draft.name} onChange={(next) => field("name", next)} placeholder="Northwind Trading" />
       </Field>
       <Field label="What you do for them">
@@ -422,22 +430,3 @@ function AccountForm({
   );
 }
 
-function Field({
-  label,
-  required = false,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted">
-        {label}
-        {required ? <span className="text-subtle"> (required)</span> : null}
-      </span>
-      {children}
-    </label>
-  );
-}
