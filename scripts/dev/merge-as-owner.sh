@@ -145,6 +145,7 @@ function report_pr() {
         || { log_error "cannot read ${REPO}#${PR}"; exit 5; }
 
     PR_STATE="$(printf '%s' "$j" | jq -r .state)"
+    MERGE_STATE="$(printf '%s' "$j" | jq -r .mergeStateStatus)"
 
     printf '%s\n' "$j" | jq -r '
       "  title    : \(.title)",
@@ -177,17 +178,32 @@ function guard_readiness() {
         log_error "refusing: ${PENDING} check(s) still running. Re-run when CI has settled."
         exit 3
     fi
-    if [[ "${HAS_BYPASS:-no}" == "no" ]]; then
-        log_error "refusing: this ruleset grants no admin bypass, so --admin would fail. Add one deliberately, or have a second code owner review."
+    # A bypass is only NEEDED when something is actually blocking. A CLEAN pull
+    # request merges through the ordinary path, and demanding a bypass for it
+    # would refuse a merge that requires no special powers at all -- which is
+    # how a safety check turns into an obstacle.
+    if [[ "$MERGE_STATE" == "BLOCKED" && "${HAS_BYPASS:-no}" == "no" ]]; then
+        log_error "refusing: this pull request is BLOCKED and the ruleset grants no admin bypass, so --admin would fail. Add one deliberately, or have a second code owner review."
         exit 3
     fi
 }
 
 function merge_pr() {
     log_step "Merging ${REPO}#${PR} (strategy: ${STRATEGY})"
-    log_info "using the admin bypass; code-owner review remains required for everyone else"
 
-    if gh pr merge "$PR" --repo "$REPO" --admin "--${STRATEGY}" 2>&1; then
+    # Reach for the bypass only when the pull request is blocked. Passing
+    # --admin to a mergeable PR would work, but it would also record every
+    # ordinary merge as an override, which makes the genuine overrides
+    # unfindable later.
+    local -a extra=()
+    if [[ "$MERGE_STATE" == "BLOCKED" ]]; then
+        extra+=(--admin)
+        log_info "pull request is BLOCKED; using the admin bypass. Code-owner review remains required for everyone else."
+    else
+        log_info "pull request is ${MERGE_STATE}; merging through the ordinary path, no bypass needed"
+    fi
+
+    if gh pr merge "$PR" --repo "$REPO" "${extra[@]+"${extra[@]}"}" "--${STRATEGY}" 2>&1; then
         log_info "merge command accepted"
     else
         log_error "merge failed -- see the output above"
