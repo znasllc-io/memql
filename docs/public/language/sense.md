@@ -254,7 +254,9 @@ until the classifier computes its label, which is what this closes:
 | `shape { }` | The bound concept's fields. |
 
 The editor teaches the POST-epoch surface deliberately: offering the
-retired long forms (`@required`, `string @enum(...)`, `@cache(ttl=)`)
+superseded long forms (`@required`, `string @enum(...)`, `@cache(ttl=)`
+-- the last of which still parses, but `@cache(N)` is the form the corpus
+uses)
 here would undo the grammar-epoch migration, and a conformance test
 asserts no completion item's insert text carries one. A second gate
 requires every declared NextRule label to be either computed by the
