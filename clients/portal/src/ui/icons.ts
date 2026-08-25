@@ -9,6 +9,11 @@ export {
   Bot,
   Boxes,
   Building2,
+  // The Select's own arrow. A native <select> paints one per platform and
+  // sizes itself around it, so ui/Field.tsx removes the appearance entirely
+  // and draws this back -- as an element, so it inherits currentColor and is
+  // correct in both themes.
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
   Download,

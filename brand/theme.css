@@ -55,6 +55,15 @@
 
   --radius-DEFAULT: var(--memql-radius);
   --radius-lg: var(--memql-radius-lg);
+
+  /* The control metrics reach Tailwind through the SPACING namespace, which is
+     what makes `h-control` exist -- and, for free, `min-h-control`, `w-control`
+     and `gap-control` for the rarer cases (a segmented control matching the
+     line beside it, an icon button that must stay square). Naming them under
+     --height-* would have bought only `h-`, and the segmented control in
+     modules/ObservabilitySection.tsx already needs the min-h form. */
+  --spacing-control: var(--memql-control-h);
+  --spacing-control-sm: var(--memql-control-h-sm);
 }
 
 /*
@@ -77,5 +86,61 @@
   :focus-visible {
     outline: 2px solid var(--memql-accent);
     outline-offset: 2px;
+  }
+
+  /* Scrollbars, both surfaces, both engines.
+   *
+   * An operations console is mostly scroll regions -- the nav rail, the main
+   * pane, every wide table -- and until memql#4503 every one of them wore the
+   * OS default. On Linux Chromium that is a wide dark bar, which inside the
+   * light `--memql-surface` rail is the highest-contrast object on the screen
+   * and is pointing at nothing.
+   *
+   * TWO ENGINES, TWO UNRELATED MECHANISMS, and both are needed: Firefox
+   * implements the standard `scrollbar-width` / `scrollbar-color` pair and
+   * ignores the pseudo-elements; Chromium and Safari implement
+   * ::-webkit-scrollbar and (in Chromium) also the standard properties. They
+   * are declared together rather than behind @supports because each is inert
+   * where it is not understood.
+   *
+   * The `*` selector is deliberate. Scroll containers are created all over
+   * both surfaces by utility classes (`overflow-auto`, `overflow-y-auto`,
+   * `overflow-x-auto`), so there is no element list to write down -- and a
+   * container that got missed would be the one wearing the OS bar, which is
+   * the defect being removed.
+   *
+   * The transparent border plus background-clip is what makes the thumb read
+   * as a thin bar with breathing room inside a wider hit target: the gutter
+   * stays ~10px so it is still easy to grab, while the painted thumb is ~6px.
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--memql-scrollbar-thumb) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--memql-scrollbar-thumb);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--memql-scrollbar-thumb-hover);
+  }
+
+  /* Where a horizontal and a vertical bar meet. Left as the OS default it is
+     a small opaque square in the corner of every table. */
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
