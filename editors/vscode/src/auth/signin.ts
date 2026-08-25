@@ -276,7 +276,7 @@ function adviceFor(kind: AuthFlowErrorKind): string {
     case "bindFailed":
       return "This is a local machine problem -- a firewall or sandbox preventing a loopback listener -- not a problem with the cluster.";
     case "timeout":
-      return 'Run "MemQL: Sign In" again and finish the page in your browser.';
+      return 'Run "MemQL: Sign In" again and finish the page in your browser. If the page can never reach this machine -- a remote or firewalled host -- run "MemQL: Sign In with Code" instead.';
     case "browserUnavailable":
       return "This host cannot open a browser. Sign in on a machine that can and put the resulting `token` (and `refresh_token`) into clusters.yaml.";
     case "authorizationDenied":

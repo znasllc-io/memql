@@ -3732,12 +3732,32 @@ async function signInToCluster(
       // Read by the code notification at every step, so a flow that finished or
       // was cancelled while the notification sat open does not re-summon it.
       let settled = false;
+      // True once a device code owns the progress line; the quiet-wait hint
+      // below must never overwrite it.
+      let deviceCodeShown = false;
+      // The browser wait can legitimately run for minutes -- the magic-link
+      // round trip is enter-email, wait for the mail, click, approve -- and a
+      // spinner that says nothing for that long reads as hung (memql#4594,
+      // which replaced the old answer: silently switching to a device code
+      // under the person's live tab). One update, after a quiet minute,
+      // naming both exits.
+      const quietHint =
+        flow === 'deviceCode'
+          ? undefined
+          : setTimeout(() => {
+              if (settled || deviceCodeShown) return;
+              progress.report({
+                message:
+                  'still waiting for the browser sign-in -- magic-link emails can take a minute. Cancel and run "MemQL: Sign In with Code" if the page cannot reach this machine.',
+              });
+            }, 60_000);
       // Both grants report the user code the same way, and the device code is
       // the one thing a person has to READ off the screen and carry to another
       // one -- so it goes on the progress line (undismissable, lives exactly as
       // long as the polling) and into a message with the two actions a
       // progress line cannot render.
       const onUserCode = (authorization: DeviceAuthorization): void => {
+        deviceCodeShown = true;
         progress.report({ message: deviceCodeProgressLine(authorization) });
         showDeviceCodeActions(authorization, () => settled);
       };
@@ -3787,6 +3807,7 @@ async function signInToCluster(
         // Before the dispose, so a code notification still open when the flow
         // resolves stops re-summoning itself rather than outliving the sign-in.
         settled = true;
+        if (quietHint !== undefined) clearTimeout(quietHint);
         cancelSubscription.dispose();
       }
 

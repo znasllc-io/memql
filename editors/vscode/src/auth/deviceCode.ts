@@ -32,17 +32,19 @@
 //   clear "no browser here" and gets an error message instead of the flow built
 //   for precisely that host.
 //
-// So the trigger set is the ENVIRONMENT LIMITATIONS, named by `kind` and never
-// by message text (errors.ts exists so this branch can be exact):
+// So the trigger set is the ENVIRONMENT LIMITATIONS THAT ARE KNOWABLE BEFORE
+// OR AT BROWSER-OPEN, named by `kind` and never by message text (errors.ts
+// exists so this branch can be exact):
 //
 //   bindFailed          The loopback listener could not bind. Nothing was
 //                       opened, no code exists, and the machine will refuse the
 //                       next attempt identically.
-//   timeout             The listener bound and the browser was opened, but
-//                       nothing came back within the deadline. On a remote or
-//                       firewalled host that is what "the browser could not
-//                       reach 127.0.0.1" looks like from in here.
 //   browserUnavailable  This host cannot open a browser at all.
+//
+// That boundary buys an INVARIANT the whole sign-in UX leans on (memql#4594):
+// the device flow never starts while a browser tab may still complete. Both
+// triggers fire before any page could have opened, so switching cannot orphan
+// a live sign-in.
 //
 // browserUnavailable IS a trigger, deliberately. It was split out of
 // `cancelled` by memql#3402 for this exact decision: nobody declined anything,
@@ -51,8 +53,23 @@
 // headless user the fallback exists for -- and the taxonomy's own header says
 // so ("This kind is a FALLBACK TRIGGER").
 //
-// And the non-triggers, which are errors rather than limitations:
+// And the non-triggers, which are errors (or live attempts) rather than
+// pre-open limitations:
 //
+//   timeout             WAS a trigger until memql#4594, and the field failure
+//                       is why it stopped: the listener bound, the browser
+//                       opened, and the deadline fired while a person was mid
+//                       magic-link round trip -- enter email, wait for the
+//                       mail, click, approve -- which routinely outlives any
+//                       reasonable deadline. The auto-switch closed the
+//                       listener their tab was about to redirect to (a dead
+//                       port dressed as "go back"), stacked a second flow's
+//                       notifications over the first, and had them sign in
+//                       twice. A timeout now propagates as the warning it is;
+//                       the advice names `MemQL: Sign In with Code` for the
+//                       host that genuinely cannot receive the callback, and
+//                       the deadline itself is sized for the magic-link round
+//                       trip (loopback.ts).
 //   cancelled           The user stopped it. Starting a second flow they did
 //                       not ask for is the opposite of honouring that.
 //   stateMismatch       A security refusal. Retrying it through another channel
@@ -144,10 +161,14 @@ export const MAX_POLL_INTERVAL_SECONDS = 60;
  */
 export const MAX_CONSECUTIVE_POLL_TRANSPORT_FAILURES = 3;
 
-/** The kinds that mean "this environment cannot do loopback". See the header. */
+/**
+ * The kinds that mean "this environment cannot do loopback", all knowable
+ * before or at browser-open. `timeout` is deliberately absent: a browser was
+ * opened, so a live tab may still complete, and switching under it is the
+ * memql#4594 failure. See the header.
+ */
 const FALLBACK_TRIGGER_KINDS: ReadonlySet<AuthFlowErrorKind> = new Set<AuthFlowErrorKind>([
   "bindFailed",
-  "timeout",
   "browserUnavailable",
 ]);
 

@@ -225,6 +225,13 @@ test("describeSignInFailure reports a timeout as a warning, not an error", () =>
   const report = describeSignInFailure("local", new AuthFlowError("timeout", "no callback"));
   assert.equal(report.level, "warning");
   assert.equal(report.retryable, true);
+  // Since timeout stopped triggering the device fallback (memql#4594), the
+  // advice is the only remaining route to the device grant for a host that
+  // cannot receive the callback -- so it must NAME the command.
+  assert.ok(
+    report.message.includes("MemQL: Sign In with Code"),
+    `the timeout advice must name the device-code command; got: ${report.message}`,
+  );
 });
 
 test("describeSignInFailure refuses to mark a security refusal retryable", () => {

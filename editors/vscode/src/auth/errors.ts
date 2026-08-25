@@ -44,7 +44,13 @@
 //   timeout             The listener bound and the browser was opened, but no
 //                       request reached the callback path within the deadline.
 //                       The usual cause is a person who never finished (or
-//                       never saw) the sign-in page. Retryable.
+//                       never saw) the sign-in page. Retryable. NOT a fallback
+//                       trigger (memql#4594): a browser was opened, so a live
+//                       tab may still complete, and auto-switching to a device
+//                       code under it closes the listener that tab is about to
+//                       redirect to. The advice names `MemQL: Sign In with
+//                       Code` for the host that truly cannot receive the
+//                       callback.
 //
 //   cancelled           The caller aborted -- an AbortSignal fired, or the
 //                       listener was closed while still waiting. Deliberate;

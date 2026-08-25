@@ -302,20 +302,29 @@ through the callback deadline first only to be told so.
 
 **MemQL: Sign In** reaches the same grant by itself when the browser round trip
 proves impossible (memql#3515) -- both commands run through one sign-in shell
-that differs only in which flow it starts. Which one ran is announced rather
-than silently substituted: the progress notification says it is switching, and
-an information message names the reason. The rule for when it switches is worth
-knowing because it says which failures are environment limitations and which are
-refusals. It triggers on **environment limitations only**, branching on the
-failure's `kind` and never on message text:
+that differs only in which flow it starts. The rule for when it switches is
+worth knowing because it says which failures are environment limitations and
+which are refusals. It triggers on **environment limitations that are knowable
+before or at browser-open**, branching on the failure's `kind` and never on
+message text:
 
 - `bindFailed` -- the one-shot loopback listener could not bind `127.0.0.1:0`.
-- `timeout` -- the listener bound and the browser was opened, but nothing came
-  back. On a remote or firewalled host that is what "the browser could not reach
-  `127.0.0.1`" looks like from inside the extension.
 - `browserUnavailable` -- this host cannot open a browser at all.
 
-It deliberately does **not** trigger on `cancelled` (the user stopped it),
+Both fire before any page could have opened, which buys the invariant the whole
+flow leans on (memql#4594): **the device flow never starts while a browser tab
+may still complete.** `timeout` was a trigger until memql#4594 and is
+deliberately no longer one: the browser sign-in's primary human factor is a
+magic-link round trip (enter email, wait for the mail, click, approve), which
+routinely outlives any deadline -- and the auto-switch fired under a live tab,
+closed the listener that tab was about to redirect to, and stacked a second
+flow's notifications over the first. The callback deadline is now ten minutes
+(the magic-link TTL scale), the progress notification stays cancellable the
+whole time and explains itself after a quiet minute, and a timeout is reported
+as a warning whose advice names `MemQL: Sign In with Code` for the host that
+genuinely cannot receive the callback.
+
+It also deliberately does **not** trigger on `cancelled` (the user stopped it),
 `stateMismatch` (a security refusal -- retrying it through a second channel is
 the bug the rule exists to prevent), `exchangeRejected`, `authorizationDenied`,
 `invalidCallback`, `misconfigured` or `registrationFailed`.

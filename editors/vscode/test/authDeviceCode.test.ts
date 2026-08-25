@@ -190,7 +190,7 @@ async function rejection(promise: Promise<unknown>): Promise<AuthFlowError> {
 // -----------------------------------------------------------------------------
 
 test("the fallback triggers on exactly the environment limitations", () => {
-  for (const kind of ["bindFailed", "timeout", "browserUnavailable"] as const) {
+  for (const kind of ["bindFailed", "browserUnavailable"] as const) {
     assert.equal(
       shouldFallBackToDeviceCode(new AuthFlowError(kind, "x")),
       true,
@@ -198,6 +198,13 @@ test("the fallback triggers on exactly the environment limitations", () => {
     );
   }
   for (const kind of [
+    // timeout is deliberately NOT a trigger (memql#4594). Both remaining
+    // triggers are knowable before or at browser-open, so no live tab can
+    // exist when the device flow starts. A timeout means a browser WAS
+    // opened and nothing came back -- overwhelmingly a person still mid
+    // magic-link round trip, and switching flows under them closes the
+    // listener their tab is about to redirect to.
+    "timeout",
     "cancelled",
     "stateMismatch",
     "exchangeRejected",
@@ -247,18 +254,26 @@ test("a loopback listener that cannot bind falls back to the device code", async
   assert.equal(fallbacks[0]?.kind, "bindFailed", "the switch is announced, not silent");
 });
 
-test("a callback that never arrives falls back to the device code", async () => {
+test("a callback that never arrives does NOT fall back -- the browser attempt was live", async () => {
+  // The 2026-08-25 field failure (memql#4594): a magic-link round trip took
+  // longer than the deadline, the fallback fired under a live browser tab,
+  // the tab's redirect then hit a closed port, and the person signed in a
+  // second time on /device. A timeout now propagates instead; the advice
+  // (signin.ts) names `MemQL: Sign In with Code` for the host that truly
+  // cannot receive the callback.
   const fake = identity();
 
-  const tokens = await signInWithDeviceCodeFallback(cluster(), {
-    ...loopbackDeps(fake, {
-      startListener: listenerThatFails(new AuthFlowError("timeout", "nothing arrived")),
+  const err = await rejection(
+    signInWithDeviceCodeFallback(cluster(), {
+      ...loopbackDeps(fake, {
+        startListener: listenerThatFails(new AuthFlowError("timeout", "nothing arrived")),
+      }),
+      sleep: recordingSleep().sleep,
     }),
-    sleep: recordingSleep().sleep,
-  });
+  );
 
-  assert.equal(tokens.accessToken, "ACCESS");
-  assert.equal(fake.deviceRequests().length, 1);
+  assert.equal(err.kind, "timeout");
+  assert.deepEqual(fake.deviceRequests(), [], "no device authorization may be requested");
 });
 
 test("a host that cannot open a browser at all falls back to the device code", async () => {
