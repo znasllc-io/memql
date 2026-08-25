@@ -59,6 +59,21 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.created.v1:cognition:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:cognition:*", TargetType: ""},
+		// Cognition DELETES (memql#4542). Creates and updates have crossed
+		// since the mesh existed; deletes never did, so a row removed on
+		// one replica stayed on the screen of every browser attached to
+		// another until the tab reloaded. The asymmetry is worse than a
+		// uniformly dark concept: the surface demonstrably updates -- new
+		// utterances and participants arrive live -- which is exactly what
+		// makes a row that will not go away read as a rendering bug rather
+		// than as an event that never arrived.
+		//
+		// Deletes are rarer than the creates already crossing here, so the
+		// added volume is strictly below a rule that has been in place for
+		// the mesh's whole life. No automation in the tree triggers on a
+		// DELETED event (checked across dsl/), so there is no consumer to
+		// double-fire.
+		{Pattern: "graph.node.deleted.v1:cognition:*", TargetType: ""},
 		// Per-user provisioning fan-out: v1:identity:user rows are written
 		// by the identity node, but their consumers live on OTHER node
 		// types -- the seed materializer's per-user runtime hook
@@ -155,6 +170,21 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:worker:routingPolicy", TargetType: ""},
 		{Pattern: "graph.node.created.v1:workbench:workspace", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:workbench:workspace", TargetType: ""},
+		// DELETES, added by memql#4542. The three rules above were written
+		// for the Fleet's create/update flow and stopped there, which left
+		// a remove invisible on every replica but the writer's: the list is
+		// correct on load, gains rows live, and never loses one. That is
+		// the same "looks like it is working" failure the block above
+		// describes, in the one direction it did not cover. Revocation and
+		// workspace teardown are both low-volume by nature -- a machine is
+		// revoked once, a workspace released once per plan -- so these cost
+		// the mesh nothing measurable. No automation in the tree triggers
+		// on a DELETED event at all (checked across dsl/: every
+		// @trigger(event="node.*") names created or updated), so there is
+		// no consumer to double-fire.
+		{Pattern: "graph.node.deleted.v1:worker:registration", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:worker:routingPolicy", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:workbench:workspace", TargetType: ""},
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
@@ -176,6 +206,134 @@ func defaultRoutingRules() []RoutingRule {
 		// the consumer.
 		{Pattern: "graph.node.created.v1:platform:site", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:site", TargetType: ""},
+		// ---- The browser-facing completion (memql#4542) -------------------
+		//
+		// Everything from here to the end of this block was added by ONE
+		// sweep with ONE method: enumerate every concept a portal surface
+		// subscribes to, ask whether its events cross the mesh, and add a
+		// reasoned rule or record a reasoned exclusion for each. The sweep
+		// is not a document that can drift out of date -- it is the gate in
+		// portal_subscription_routing_test.go (memql#4543), which reads the
+		// portal source and THIS table on every run.
+		//
+		// Two replicas per mesh node is the default topology, so "written
+		// on the node that served the write, read on the node that serves
+		// the browser" is the ordinary case rather than the exotic one.
+		// Each rule below names who writes the row and who reads it, in the
+		// memql#4349 comment shape.
+		//
+		// Saved views (memql#4542). A view is written through whichever bff
+		// replica the front door picked and read by the rail on a browser
+		// attached to EITHER replica. With two bff replicas -- the default
+		// -- a view saved in one tab never appeared in another until a
+		// reload, and the rail's own subscription made that look like a
+		// bug in the rail. This is the marquee case for this sweep: the
+		// concept is portal-only, so nothing but the portal ever noticed.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:portalviews:*.
+		{Pattern: "graph.node.created.v1:portalviews:view", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:portalviews:view", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:portalviews:view", TargetType: ""},
+		// Agents (memql#4542). Agent rows are written on agent and
+		// cognition nodes -- specialist creation is the planner's, and a
+		// capability edit is the bff's -- and read by the Agents view and
+		// by Nexus, both served by the bff. Every one of those writers is a
+		// different node type from the reader, so default-deny left the
+		// agents surface frozen for its entire life in the mesh.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:agents:*. The header of the
+		// cache.invalidate.* rule above cites reRouteNeedsAgentOnAgentCreate
+		// as the double-fire hazard this class carries; that automation is
+		// no longer in the tree (it survives only in those comments and in
+		// a provenance example string), and the check was re-run over dsl/
+		// rather than inherited from the citation.
+		{Pattern: "graph.node.created.v1:agents:*", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:agents:*", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:agents:*", TargetType: ""},
+		// The Library's two row-bearing concepts (memql#4542). An artifact
+		// index row is written wherever the thing it indexes was produced
+		// -- an agent node promoting a deliverable, a planner node's
+		// generated output, the bff's own upload handler -- and read by the
+		// Artifacts page and by Nexus's artifact slot. v1:library:file is
+		// the backing row for kind=file and moves on the same paths.
+		// Deletes cross too, because Nexus subscribes to them: an artifact
+		// removed elsewhere would otherwise stay on the map forever.
+		//
+		// BROADCAST WITH A CONSUMER TO CHECK, and it was checked. Unlike
+		// every other rule in this sweep, these two topics DO have
+		// automation subscribers, so the multi-fire question is live:
+		//
+		//   - graph.node.created.v1:library:file fires indexFileOnCreate
+		//     (dsl/library/automations.memql), which promotes the file to
+		//     an artifact index row at a DERIVED id -- "a re-run version[s]
+		//     the same row rather than add a second one", in its own doc
+		//     comment. Multi-fire safe by construction.
+		//   - graph.node.updated.v1:library:artifact fires
+		//     archiveFileOnArtifactArchive, which writes archived=true onto
+		//     the backing file. "Idempotent: archiving an already-archived
+		//     file writes the same value", again in its own doc comment.
+		//
+		// So both are multi-fire safe BY CONTRACT, which is the same
+		// standard the graph.node.created.v1:identity:user rule above is
+		// held to ("every consumer is content-addressed / create-only").
+		// component/automations' ClusterExecutionGuard (#561) collapses the
+		// duplicates on top of that, but it is the SECOND line of defence
+		// and not the argument: it fails open under a bounded window when
+		// the database is unreachable, so a rule that needed it would be a
+		// rule that double-fires during an outage.
+		{Pattern: "graph.node.created.v1:library:artifact", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:artifact", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:library:artifact", TargetType: ""},
+		{Pattern: "graph.node.created.v1:library:file", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:file", TargetType: ""},
+		// Authoring rows behind Nexus's Constructs page (memql#4542). A
+		// bundle, its constructs and the dependency edges between them are
+		// written by whichever node ran the authoring promote -- an agent
+		// or planner node, in the flow Nexus exists to show -- and read by
+		// the bff serving the page. The authoring.promote.* /
+		// authoring.demote.* rules above forward the REGISTRY signal, which
+		// is what makes a promoted construct callable on every replica;
+		// they say nothing about the graph rows, which is what the page
+		// draws. Two different things, and only one of them crossed.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:authoring:*.
+		{Pattern: "graph.node.created.v1:authoring:*", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:authoring:*", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:authoring:*", TargetType: ""},
+		// Pending invitations on the People page (memql#4542). An
+		// invitation is written by the identity node and read by the bff;
+		// its whole point is that somebody is waiting for it to change
+		// state. Low volume by nature -- an invitation is a human action.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:identity:invitation. Note the narrowness:
+		// this is a per-CONCEPT rule, not v1:identity:*, so auth sessions,
+		// magic links and audit mechanics stay local exactly as the
+		// v1:identity:user rule above intends.
+		{Pattern: "graph.node.created.v1:identity:invitation", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:identity:invitation", TargetType: ""},
+		// The two Home tiles that count identity rows (memql#4542). The
+		// tiles subscribe to CREATED only -- they show a count and the most
+		// recent few -- so only created is forwarded. An account is created
+		// by the identity node; an auditEvent by whichever node made the
+		// decision it records, which is precisely why the tile is dark
+		// today.
+		//
+		// v1:identity:auditEvent is the DECISIONS log, not the mechanics
+		// one: memql#4328 split the routine per-request churn out to
+		// v1:identity:authActivity ("two orders of magnitude more
+		// numerous") specifically so the decisions log stays small enough
+		// to read. That split is what makes this rule affordable, and it is
+		// why authActivity is a recorded exclusion rather than a sibling
+		// rule -- see RoutingExclusions.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on either concept.
+		{Pattern: "graph.node.created.v1:identity:account", TargetType: ""},
+		{Pattern: "graph.node.created.v1:identity:auditEvent", TargetType: ""},
 		// Self-healing precondition-miss signal (Epic 4 / memql#2139). A
 		// first-class automation precondition that evaluates false emits
 		// healing.precondition.missed; the LLM repair loop (E4.4) subscribes.
