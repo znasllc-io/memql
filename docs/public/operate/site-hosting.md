@@ -764,6 +764,84 @@ or the reverse.
 
 ---
 
+## Caching: what the edge does, and putting a CDN in front of it
+
+Three layers cache a hosted site's bytes, and they compose because each one
+answers a different question.
+
+### 1. The browser
+
+| Response | `Cache-Control` | Validator |
+|---|---|---|
+| Hashed assets (`assets/app.abc123.js`) | `public, max-age=31536000, immutable` | strong `ETag` |
+| `index.html` and any `.html` fallback | `no-cache, no-store, must-revalidate` | strong `ETag` |
+| `runtime-config.json` | `no-store` | none |
+| A 404 | `no-cache, no-store, must-revalidate` | none |
+
+`no-cache` does not mean "do not store" -- it means "revalidate before
+use". So a returning visitor asks about `index.html` on every load, and the
+`ETag` is what turns that from a full re-transfer into a 304. That single
+request is the most common one a live site serves.
+
+### 2. The edge's own memory
+
+Two caches, deliberately separate:
+
+- **Host to site row** (`MEMQL_EDGE_SITE_CACHE_TTL_SECONDS`, default 30s).
+  Time-bounded because a site row is mutable -- an operator can flip a
+  status or roll a bundle back -- and the TTL is the backstop behind the
+  change-feed invalidation that normally beats it. It caches MISSES too, so
+  a scanner walking random hostnames against the wildcard cannot turn each
+  request into a database query.
+- **Bundle bytes** (`MEMQL_EDGE_BUNDLE_CACHE_MB`, default 64, `blob://`
+  only). Size-bounded LRU keyed by (content-addressed version prefix,
+  path), with concurrent cold requests for one asset collapsed into a
+  single download. **It has no TTL and no invalidation, by construction**: a
+  republish lands under a NEW prefix, so it is a new key and old entries
+  simply age out. Set to `0` to disable it. The `file://` path is not
+  cached -- that is the tree the image shipped, on local disk, and the cost
+  being avoided here is a network round-trip to object storage.
+
+### 3. A CDN in front of the edge
+
+**Fronting the edge with a CDN is safe, and needs no purge integration.**
+That is a property of the layout rather than a promise:
+
+- Every cacheable asset is **immutable and content-addressed**. A build
+  emits `app.abc123.js`; a rebuild emits a different name. A CDN holding
+  the old one forever is correct, because the old one is still the correct
+  answer for the old name.
+- The three mutable things are **never cacheable**: `index.html` and any
+  `.html` fallback are `no-cache`, `runtime-config.json` is `no-store`, and
+  site resolution happens inside the edge on every request. So there is
+  nothing a CDN can hold that a deploy needs it to forget.
+
+**Key on the request URI as usual, and add nothing.** The edge sets no
+`Vary`, and that is a decision rather than an omission: the two things that
+change a response are the request's host (which selects the site) and its
+scheme, both of which are already components of every cache key. A blanket
+`Vary` added "to be safe" fragments entries that would otherwise be shared
+and quietly destroys the hit ratio the immutable policy exists to earn.
+
+**Do not put the identity service behind the same CDN.** Its JWKS endpoint
+sends `Cache-Control: public, max-age=300`, so a cache in that path serves
+the pre-rotation keyset for up to five minutes after a signing-key swap --
+which presents as roughly half of all sign-ins failing, for five minutes,
+with every manifest correct. See the rotation section in
+[identity-service.md](auth/identity-service.md).
+
+**What is NOT cached, so nobody is surprised:** a bundle-path MISS. The
+resolution ladder tries up to three names per request (the exact file,
+`<path>/index.html`, `<path>.html`), and an SPA deep link legitimately
+misses all three before falling back to `index.html`. Negative caching was
+considered and left out: the key space is attacker-chosen (every path under
+every hostname the wildcard routes), and near-zero-byte entries would never
+be evicted by a byte cap, so it needs its own entry cap and is a separate
+decision. Prerendering the routes that matter removes the cost entirely --
+see [The prerender budget](#the-prerender-budget).
+
+---
+
 ## Limits
 
 **One domain per cluster.** `*.<domain>` plus the apex, one wildcard

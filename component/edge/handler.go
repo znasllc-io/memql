@@ -116,7 +116,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", policyForSite(r, site, os.Getenv))
 
 	if name, ok := resolveAsset(fsys, r.URL.Path); ok {
-		h.serveFile(w, r, fsys, name)
+		h.serveFile(w, r, fsys, name, site.BundleRef)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (/products/x, /cart) 404s on a hard reload.
 	if site.Kind == "spa" || site.Kind == storefrontKind {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
-			h.serveFile(w, r, fsys, "index.html")
+			h.serveFile(w, r, fsys, "index.html", site.BundleRef)
 			return
 		}
 	}
@@ -161,23 +161,55 @@ func resolveAsset(fsys fs.FS, urlPath string) (string, bool) {
 	return "", false
 }
 
-func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name string) {
-	f, err := fsys.Open(name)
-	if err != nil {
-		noCache(w)
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
+func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name string, bundleRef string) {
+	// THE VALIDATOR IS COMPUTED BEFORE THE FILE IS OPENED (memql#4545), and
+	// on the blob path that ordering is the entire point: a bundle's
+	// version prefix is a content hash, so (prefix, path) names the bytes
+	// without reading them, and a conditional request is answered 304 with
+	// ZERO downloads. Opening first would make every 304 cost exactly what
+	// a 200 costs, which is most of what this was worth.
+	//
+	// The file:// path has no content hash and falls back to a Stat -- size
+	// and mtime, which the filesystem already knows. A Stat on local disk is
+	// not the cost anyone is avoiding.
+	etag, hasETag := assetETagFor(fsys, name, bundleRef)
 
 	// index.html is NEVER cached: it is how a deploy reaches a returning
 	// visitor. Everything else is content-addressed by the build, so it may
 	// be cached hard.
+	//
+	// The headers are set BEFORE the 304 branch because a 304 must repeat
+	// them: a conditional response that omitted Cache-Control would leave
+	// the client's freshness policy to a default, which for the immutable
+	// assets is the difference between one request a year and one per load.
 	if name == "index.html" || strings.HasSuffix(name, "/index.html") {
 		noCache(w)
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
+	if hasETag {
+		w.Header().Set("ETag", etag)
+		// index.html carries a validator TOO, and that is where 304 pays
+		// daily. `no-cache` does not mean "do not store" -- it means
+		// "revalidate before use" -- so a returning visitor asks every time,
+		// and before this the answer was always the whole document again.
+		if etagMatches(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+
+	f, err := fsys.Open(name)
+	if err != nil {
+		// Clear the cache headers set above: they describe a body that is
+		// not being sent, and `immutable` on a 404 is a browser caching the
+		// absence of a file for a year.
+		w.Header().Del("ETag")
+		noCache(w)
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
 
 	if rs, ok := f.(interface {
 		Read([]byte) (int, error)

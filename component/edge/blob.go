@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
@@ -28,14 +29,30 @@ type BlobClient interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 }
 
-type blobOpener struct{ client BlobClient }
+type blobOpener struct {
+	client BlobClient
+	// cache is shared across every blobFS this opener produces, because a
+	// bundle is opened afresh on EVERY request (handler.go calls
+	// opener.Open per request). A cache owned by the blobFS would therefore
+	// live for one request and hit for nothing.
+	cache *bundleCache
+	// sf collapses concurrent cold-cache downloads for the SAME (prefix,
+	// path) into one, the same shape resolve.go uses for the host->site
+	// lookup and for the same reason: without it, N concurrent
+	// first-requests for an uncached asset each drive their own download
+	// before any of them can populate the cache. A burst is exactly how
+	// somebody would exercise it.
+	sf singleflight.Group
+}
 
 // NewBlobOpener handles blob:// -- an uploaded bundle under a versioned
 // prefix. Versions coexist, which is what makes rollback a single row write
 // pointing back at bytes that are still there.
-func NewBlobOpener(c BlobClient) BundleOpener { return blobOpener{client: c} }
+func NewBlobOpener(c BlobClient) BundleOpener {
+	return &blobOpener{client: c, cache: newBundleCache(bundleCacheBytes())}
+}
 
-func (b blobOpener) Open(ref string) (fs.FS, error) {
+func (b *blobOpener) Open(ref string) (fs.FS, error) {
 	const scheme = "blob://"
 	if !strings.HasPrefix(ref, scheme) {
 		return nil, fmt.Errorf("edge: bundleRef %q is not a blob:// reference", ref)
@@ -47,7 +64,7 @@ func (b blobOpener) Open(ref string) (fs.FS, error) {
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
-	return &blobFS{client: b.client, prefix: prefix}, nil
+	return &blobFS{client: b.client, prefix: prefix, cache: b.cache, sf: &b.sf}, nil
 }
 
 // blobFS presents one bundle prefix as a filesystem.
@@ -61,19 +78,72 @@ func (b blobOpener) Open(ref string) (fs.FS, error) {
 type blobFS struct {
 	client BlobClient
 	prefix string
+	cache  *bundleCache
+	sf     *singleflight.Group
 }
+
+// blobFS can name a file's validator without reading it, because the prefix
+// is a content hash of the whole bundle (publish.go's version()). That is
+// what makes a 304 on this path cost ZERO downloads -- see assetcache.go.
+var _ assetValidator = (*blobFS)(nil)
+
+func (b *blobFS) ETagFor(name string) (string, bool) {
+	if b == nil || !fs.ValidPath(name) || name == "." {
+		return "", false
+	}
+	return strongETag(b.prefix, name), true
+}
+
+// cacheKey is the (version prefix, path) pair. NO invalidation is needed
+// or wanted: a republish lands under a new prefix, so it is a new key, and
+// old entries age out by LRU. See assetcache.go.
+func (b *blobFS) cacheKey(name string) string { return b.prefix + name }
 
 func (b *blobFS) Open(name string) (fs.File, error) {
 	if !fs.ValidPath(name) || name == "." {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
-	data, err := b.client.Get(context.Background(), b.prefix+name)
+	key := b.cacheKey(name)
+	if data, ok := b.cache.Get(key); ok {
+		return &blobFile{name: name, data: data}, nil
+	}
+
+	// A MISS IS NOT CACHED HERE, and this is a DECISION rather than an
+	// omission -- resolve.go caches its host->site misses deliberately, so
+	// the two need distinguishing.
+	//
+	// The reason is the KEY SPACE. A site-resolution key is a hostname, and
+	// a cached miss there is what stops a scanner turning the wildcard into
+	// one database query per request. A bundle-path key is a URL PATH: the
+	// wildcard routes every hostname here, and under each one the path is
+	// whatever the internet asks for. Negative entries are ~zero bytes, so
+	// the byte cap this cache is bounded by would never evict them -- a
+	// scanner could grow the map without bound while `used` stayed near
+	// zero. A negative cache here needs its own ENTRY cap, which is a
+	// different structure and a different decision.
+	//
+	// The cost of not having one, stated so it is not rediscovered as a
+	// surprise: resolveAsset tries up to three names per request (the exact
+	// file, <path>/index.html, <path>.html) and an SPA deep link legitimately
+	// misses on all three before falling back to index.html -- so a
+	// client-side route costs three failed Gets plus one cache hit. That is
+	// unchanged from before this cache existed, and prerendering the routes
+	// that matter removes it (see the prerender budget in site-hosting.md).
+	fetched, err, _ := b.sf.Do(key, func() (any, error) {
+		data, err := b.client.Get(context.Background(), key)
+		if err != nil {
+			return nil, err
+		}
+		b.cache.Put(key, data)
+		return data, nil
+	})
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 		}
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
+	data, _ := fetched.([]byte)
 	return &blobFile{name: name, data: data}, nil
 }
 
