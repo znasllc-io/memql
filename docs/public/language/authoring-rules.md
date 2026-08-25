@@ -2055,7 +2055,7 @@ memql#1970)** and pinned as gone by
 `TestEvaluateRouting_PerConceptCacheRulesRetired`
 (`component/node/routing_test.go:183`). Every graph write now also
 publishes a dedicated `cache.invalidate.<concept>` event
-(`MemQLEngine.publishCacheInvalidate`), and ONE broadcast routing rule
+(`MemQLEngine.InvalidateCacheForConcept`), and ONE broadcast routing rule
 (`{Pattern: "cache.invalidate.*", TargetType: ""}` in
 `component/node/routing.go`) forwards that channel to every node type --
 pinned by `TestEvaluateRouting_CacheInvalidateBroadcast`. So `@cache` now
