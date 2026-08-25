@@ -3977,8 +3977,44 @@ type EventNotification struct {
 	// concept's live feed die without a trace. A client that ignores this
 	// flag sees an event whose payload carries only those four keys.
 	PayloadOmitted bool `protobuf:"varint,5,opt,name=payload_omitted,json=payloadOmitted,proto3" json:"payload_omitted,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// seq numbers EVERY EventNotification the server writes on THIS stream,
+	// monotonically, starting at 1 (memql#4536). It is PER-STREAM rather than
+	// per-subscription on purpose: the stream has exactly one writer -- the
+	// send path serialises under one mutex -- so a single counter assigned
+	// there is monotonic in WIRE ORDER for free. A per-subscription counter
+	// would need its own lock on the delivery path, and would still not answer
+	// the question a client actually has ("did I miss anything on this
+	// socket?") without N counters to track.
+	//
+	// A client keeps the last seq it saw. A delivery whose seq is not
+	// last + 1 means one or more notifications for this stream never arrived.
+	//
+	// RECONNECT STARTS A NEW SEQ SPACE. A new stream is a new counter starting
+	// at 1, so a client MUST treat stream establishment as an implicit gap and
+	// re-seed rather than comparing across streams.
+	Seq uint64 `protobuf:"varint,6,opt,name=seq,proto3" json:"seq,omitempty"`
+	// gap_before is true when one or more deliveries for this stream were
+	// DROPPED between the previously delivered notification and this one
+	// (memql#4536).
+	//
+	// The per-stream event channel is bounded, and the bus forwarder drops on
+	// full rather than blocking the publisher -- correct, because a slow
+	// consumer must not stall the engine's write path. What was missing is the
+	// client's half: the drop had a server-side WARN and nothing else, so a
+	// splice-folding consumer diverged permanently from the store with every
+	// surface still rendering as live.
+	//
+	// The response to a gap is RE-SEED: re-run the read that seeded the
+	// collection and fold subsequent events onto the fresh answer. That is the
+	// whole catch-up mechanism, deliberately (design D2, 2026-08-25). There is
+	// no `since` field on SubscribeMsg and no durable replay: retaining events
+	// per stream for replay is a durable substrate this system does not have,
+	// and half of one -- a best-effort buffer that usually replays -- is worse
+	// than none, because it teaches clients to skip the re-seed path that is
+	// the only correct answer when the buffer misses.
+	GapBefore     bool `protobuf:"varint,7,opt,name=gap_before,json=gapBefore,proto3" json:"gap_before,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EventNotification) Reset() {
@@ -4042,6 +4078,20 @@ func (x *EventNotification) GetPayload() *structpb.Struct {
 func (x *EventNotification) GetPayloadOmitted() bool {
 	if x != nil {
 		return x.PayloadOmitted
+	}
+	return false
+}
+
+func (x *EventNotification) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *EventNotification) GetGapBefore() bool {
+	if x != nil {
+		return x.GapBefore
 	}
 	return false
 }
@@ -20800,13 +20850,16 @@ const file_memql_proto_rawDesc = "" +
 	"\aconcept\x18\x05 \x01(\tR\aconcept\x12;\n" +
 	"\aactions\x18\x06 \x03(\x0e2!.znasllc.memql.v1.GraphNodeActionR\aactions\"9\n" +
 	"\x0eUnsubscribeMsg\x12'\n" +
-	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"\xf5\x01\n" +
+	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"\xa6\x02\n" +
 	"\x11EventNotification\x12'\n" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\x12/\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1b.znasllc.memql.v1.EventKindR\x04kind\x12*\n" +
 	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x121\n" +
 	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x12'\n" +
-	"\x0fpayload_omitted\x18\x05 \x01(\bR\x0epayloadOmitted\"\xac\x02\n" +
+	"\x0fpayload_omitted\x18\x05 \x01(\bR\x0epayloadOmitted\x12\x10\n" +
+	"\x03seq\x18\x06 \x01(\x04R\x03seq\x12\x1d\n" +
+	"\n" +
+	"gap_before\x18\a \x01(\bR\tgapBefore\"\xac\x02\n" +
 	"\rAiStreamChunk\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x1d\n" +

@@ -730,6 +730,44 @@ message EventNotification {
   // concept's live feed die without a trace. A client that ignores this
   // flag sees an event whose payload carries only those four keys.
   bool payload_omitted = 5;
+
+  // seq numbers EVERY EventNotification the server writes on THIS stream,
+  // monotonically, starting at 1 (memql#4536). It is PER-STREAM rather than
+  // per-subscription on purpose: the stream has exactly one writer -- the
+  // send path serialises under one mutex -- so a single counter assigned
+  // there is monotonic in WIRE ORDER for free. A per-subscription counter
+  // would need its own lock on the delivery path, and would still not answer
+  // the question a client actually has ("did I miss anything on this
+  // socket?") without N counters to track.
+  //
+  // A client keeps the last seq it saw. A delivery whose seq is not
+  // last + 1 means one or more notifications for this stream never arrived.
+  //
+  // RECONNECT STARTS A NEW SEQ SPACE. A new stream is a new counter starting
+  // at 1, so a client MUST treat stream establishment as an implicit gap and
+  // re-seed rather than comparing across streams.
+  uint64 seq = 6;
+
+  // gap_before is true when one or more deliveries for this stream were
+  // DROPPED between the previously delivered notification and this one
+  // (memql#4536).
+  //
+  // The per-stream event channel is bounded, and the bus forwarder drops on
+  // full rather than blocking the publisher -- correct, because a slow
+  // consumer must not stall the engine's write path. What was missing is the
+  // client's half: the drop had a server-side WARN and nothing else, so a
+  // splice-folding consumer diverged permanently from the store with every
+  // surface still rendering as live.
+  //
+  // The response to a gap is RE-SEED: re-run the read that seeded the
+  // collection and fold subsequent events onto the fresh answer. That is the
+  // whole catch-up mechanism, deliberately (design D2, 2026-08-25). There is
+  // no `since` field on SubscribeMsg and no durable replay: retaining events
+  // per stream for replay is a durable substrate this system does not have,
+  // and half of one -- a best-effort buffer that usually replays -- is worse
+  // than none, because it teaches clients to skip the re-seed path that is
+  // the only correct answer when the buffer misses.
+  bool gap_before = 7;
 }
 
 enum EventKind {

@@ -178,6 +178,27 @@ type Event struct {
 	// it degrades to rendering nothing rather than to leaking anything.
 	// False on every ordinary event.
 	PayloadOmitted bool
+
+	// Seq is this notification's position in the CONNECTION's delivery
+	// sequence, from 1 (memql#4536). The server numbers every notification
+	// it writes on the stream, so a delivery whose Seq is not the previous
+	// one plus one means something never arrived.
+	//
+	// 0 against a server that predates the field: read that as "this
+	// connection carries no sequence", not as "the first event".
+	//
+	// PER STREAM. A reconnect starts a new counter at 1, so stream
+	// establishment is an implicit gap rather than a comparison across
+	// connections.
+	Seq uint64
+
+	// GapBefore is true when one or more deliveries were DROPPED between
+	// the previous notification on this stream and this one -- the engine's
+	// per-stream event channel overflowed (memql#4536).
+	//
+	// The correct response is to RE-SEED: re-run the read that produced the
+	// current state. There is no replay to ask for.
+	GapBefore bool
 }
 
 // eventFromProto translates memqlv1.EventNotification -> Event.
@@ -191,6 +212,8 @@ func eventFromProto(ev *memqlv1.EventNotification) (Event, error) {
 		SubscriptionId: ev.GetSubscriptionId(),
 		Kind:           eventKindString(ev.GetKind()),
 		PayloadOmitted: ev.GetPayloadOmitted(),
+		Seq:            ev.GetSeq(),
+		GapBefore:      ev.GetGapBefore(),
 	}
 	if ts := ev.GetTs(); ts != nil {
 		out.Timestamp = ts.AsTime()
