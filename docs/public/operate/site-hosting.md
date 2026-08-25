@@ -74,10 +74,24 @@ scheduled automation for pull -- and the browser reads it same-origin
 through `/_memql/*` ([below](#apiproxy-same-origin-access-to-your-data)).
 
 The concrete win this buys: because the browser talks to your OWN cluster
-for data rather than to a third-party API directly, no third-party
-credential (a Shopify Storefront token, a CMS API key) ever has to ship to
-the browser at all -- a conventional headless setup calling the vendor
-directly cannot make that claim.
+for data rather than to a third-party API directly, no **privileged**
+third-party credential -- a Shopify Admin API token, a CMS write key --
+ever has to exist in the browser's reach. Those live in a MemQL
+integration, server-side, and the browser reads the results out of the
+graph.
+
+**Said precisely, because the loose version of this claim is wrong.** It is
+not that no third-party credential ever reaches the browser. A
+`shopify_storefront` site is served a **public Storefront API token**, at
+serve time, in its `runtime-config.json`
+(`component/edge/runtimeconfig.go`) -- and that is correct and deliberate.
+A Storefront access token is a public credential by Shopify's own design:
+scoped to unauthenticated storefront operations, rate-limited per buyer IP,
+and embedded in shipped client code by Shopify's own SDKs and by Hydrogen.
+It cannot read orders, cannot read customers and cannot mutate the store.
+The claim worth making is about the credentials where the distinction
+matters, and it survives intact: **the Admin API token is never on the
+serve path and never in a browser.**
 
 ---
 
@@ -592,22 +606,77 @@ regardless of how its first byte was produced, so the moment a page has
 hydrated, the static and SSR paths are identical -- the more reactive an
 application is, the less SSR actually buys it.
 
-**The caveat that has to be said plainly, because it changes what you can
-promise a client:** subscriptions are AUTHENTICATED. An anonymous read
-fails closed by design -- `refuseRowAuthzWithoutActor`
-(`component/memql/rowauthz_enforce.go`) refuses a query with no actor
-rather than comparing it against an empty one. So:
+**Reads are AUTHENTICATED by default, and that is what you promise a
+client.** A logged-in view gets live updates for free. A page nobody has
+signed into is a different promise, and it takes two deliberate steps.
 
-- **Logged-in views** -- live updates are effortless, the default, no
-  extra design needed.
-- **Anonymous public pages** (a stock counter on a page a logged-out
-  storefront visitor is looking at) -- this needs a DELIBERATE decision: a
-  concept genuinely marked `@rowAuthz(public)`, or the guest-token path.
-  It is not something that falls out of turning `apiProxy` on.
+- **Logged-in views** -- effortless, the default, no extra design needed.
+- **Anonymous public pages** (a stock counter a logged-out storefront
+  visitor is looking at) -- the public tier, below. Two decisions, one by
+  the operator and one by the author, and neither falls out of turning
+  `apiProxy` on.
 
-Say this to a client before they hear it from a bug report. "Live
-updates" and "live updates on a page nobody has signed into" are different
-promises, and the difference is a design decision, not a checkbox.
+### Serving a page to a visitor who has not signed in
+
+Two independent steps, in this order. Doing only the first publishes
+nothing; doing only the second serves nothing.
+
+**1. The operator opts the cluster in.** Set
+`MEMQL_PUBLIC_READS_ENABLED=true`. Default is false, which is why every
+existing cluster is unaffected: with it off, a WebSocket dial carrying no
+credential is refused exactly as it always has been.
+
+Turning it on does not publish anything by itself. It opens a door into a
+graph where no concept declares the public tier, so every read through it
+refuses until step 2. The node logs a WARN at boot saying so.
+
+**2. The author declares the tier on the concepts that hold the content.**
+
+```memql fragment
+@rowAuthz(public)
+concept productPage { ... }
+```
+
+Declare it in your PRODUCT BUNDLE, on your own content concepts. Nothing
+in the engine tree declares it and a conformance gate keeps it that way --
+so an operator who enables the flag to serve one bundle's content is not
+silently publishing anything else.
+
+**What an anonymous session can and cannot do.** The rules are enforced,
+not conventions:
+
+| | |
+|---|---|
+| Read a concept declaring `@rowAuthz(public)` | yes |
+| Subscribe to its graph events | yes, admitted per row by the same function the read uses |
+| Read a concept declaring any other tier | refused |
+| Read a concept declaring NOTHING | **refused** |
+| Write anything, anywhere | refused -- there is no anonymous write |
+| Reach the AI, tool, identity or admin messages | refused at the stream |
+
+The undeclared row is the one worth reading twice. Most concepts in a
+tree declare no tier at all, and for a signed-in caller those admit
+everyone. An anonymous caller does **not** inherit that: undeclared means
+nobody has classified the concept, which is not the same as deciding it is
+publishable. So the tier is something you opt a concept INTO, never
+something a concept falls into by omission.
+
+`@rowAuthz(public)` is a READ tier. It declares who may see a row and says
+nothing about who may create one; an anonymous write is refused at the
+engine's write chokepoint regardless of what the concept declares.
+
+**Two things this is not.** It is not a way to let visitors submit
+anything -- that is `POST /inbound/{source}`
+([inbound-delivery.md](inbound-delivery.md)) or the guest-token path, both
+of which authenticate. And it is not per-visitor: every anonymous reader is
+the same actor, which is deliberate -- it is what lets one cached result
+serve every visitor, and it means no filter can branch on which stranger is
+asking.
+
+**Caching.** Anonymous reads carry no caller dimension, so they are the
+best-cached data in the system: one computation, served to everyone. That
+is a reason to prefer the public tier over a per-visitor guest token for
+genuinely public content, not merely a side effect.
 
 ---
 
@@ -706,6 +775,84 @@ compiled into the bundle. What you keep is everything else -- the same
 generated client, the same queries, the same subscriptions, the same auth
 flow. Nobody has to unpick a Connected integration to host it here later,
 or the reverse.
+
+---
+
+## Caching: what the edge does, and putting a CDN in front of it
+
+Three layers cache a hosted site's bytes, and they compose because each one
+answers a different question.
+
+### 1. The browser
+
+| Response | `Cache-Control` | Validator |
+|---|---|---|
+| Hashed assets (`assets/app.abc123.js`) | `public, max-age=31536000, immutable` | strong `ETag` |
+| `index.html` and any `.html` fallback | `no-cache, no-store, must-revalidate` | strong `ETag` |
+| `runtime-config.json` | `no-store` | none |
+| A 404 | `no-cache, no-store, must-revalidate` | none |
+
+`no-cache` does not mean "do not store" -- it means "revalidate before
+use". So a returning visitor asks about `index.html` on every load, and the
+`ETag` is what turns that from a full re-transfer into a 304. That single
+request is the most common one a live site serves.
+
+### 2. The edge's own memory
+
+Two caches, deliberately separate:
+
+- **Host to site row** (`MEMQL_EDGE_SITE_CACHE_TTL_SECONDS`, default 30s).
+  Time-bounded because a site row is mutable -- an operator can flip a
+  status or roll a bundle back -- and the TTL is the backstop behind the
+  change-feed invalidation that normally beats it. It caches MISSES too, so
+  a scanner walking random hostnames against the wildcard cannot turn each
+  request into a database query.
+- **Bundle bytes** (`MEMQL_EDGE_BUNDLE_CACHE_MB`, default 64, `blob://`
+  only). Size-bounded LRU keyed by (content-addressed version prefix,
+  path), with concurrent cold requests for one asset collapsed into a
+  single download. **It has no TTL and no invalidation, by construction**: a
+  republish lands under a NEW prefix, so it is a new key and old entries
+  simply age out. Set to `0` to disable it. The `file://` path is not
+  cached -- that is the tree the image shipped, on local disk, and the cost
+  being avoided here is a network round-trip to object storage.
+
+### 3. A CDN in front of the edge
+
+**Fronting the edge with a CDN is safe, and needs no purge integration.**
+That is a property of the layout rather than a promise:
+
+- Every cacheable asset is **immutable and content-addressed**. A build
+  emits `app.abc123.js`; a rebuild emits a different name. A CDN holding
+  the old one forever is correct, because the old one is still the correct
+  answer for the old name.
+- The three mutable things are **never cacheable**: `index.html` and any
+  `.html` fallback are `no-cache`, `runtime-config.json` is `no-store`, and
+  site resolution happens inside the edge on every request. So there is
+  nothing a CDN can hold that a deploy needs it to forget.
+
+**Key on the request URI as usual, and add nothing.** The edge sets no
+`Vary`, and that is a decision rather than an omission: the two things that
+change a response are the request's host (which selects the site) and its
+scheme, both of which are already components of every cache key. A blanket
+`Vary` added "to be safe" fragments entries that would otherwise be shared
+and quietly destroys the hit ratio the immutable policy exists to earn.
+
+**Do not put the identity service behind the same CDN.** Its JWKS endpoint
+sends `Cache-Control: public, max-age=300`, so a cache in that path serves
+the pre-rotation keyset for up to five minutes after a signing-key swap --
+which presents as roughly half of all sign-ins failing, for five minutes,
+with every manifest correct. See the rotation section in
+[identity-service.md](auth/identity-service.md).
+
+**What is NOT cached, so nobody is surprised:** a bundle-path MISS. The
+resolution ladder tries up to three names per request (the exact file,
+`<path>/index.html`, `<path>.html`), and an SPA deep link legitimately
+misses all three before falling back to `index.html`. Negative caching was
+considered and left out: the key space is attacker-chosen (every path under
+every hostname the wildcard routes), and near-zero-byte entries would never
+be evicted by a byte cap, so it needs its own entry cap and is a separate
+decision. Prerendering the routes that matter removes the cost entirely --
+see [The prerender budget](#the-prerender-budget).
 
 ---
 

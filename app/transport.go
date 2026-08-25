@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/adminops"
@@ -198,12 +199,28 @@ func (a *App) transportBase() {
 		// run its authenticated query. See component/grpc/
 		// service_account_stream_interceptor.go.
 		serviceAccountChecked := memqlgrpc.NewServiceAccountStreamInterceptor(voiceAgentChecked, a.identityVerifier, a.Logger)
+		// Anonymous: a stream carrying NO credential at all, on a cluster
+		// whose operator opted into having an anonymous surface (epic
+		// memql#4541, D4). Default OFF, and off it is a pass-through --
+		// a credential-less dial is refused by the same code as before.
+		//
+		// OUTERMOST of the auth chain, and that is the point: it has to
+		// decide before the verifier refuses. Everything inside it still
+		// sees exactly what it saw, because a stream carrying any
+		// credential is handed straight down.
+		publicReads := auth.PublicReadsEnabled()
+		if publicReads {
+			a.Logger.Warn("PUBLIC READS ENABLED: this cluster accepts unauthenticated sessions, pinned to public-tier reads and graph subscriptions",
+				"env", auth.PublicReadsEnabledEnv,
+				"note", "no concept in the engine tree declares @rowAuthz(public), so this publishes nothing until a bundle declares the tier")
+		}
+		anonymousChecked := memqlgrpc.NewAnonymousStreamInterceptor(serviceAccountChecked, publicReads, a.Logger)
 		// Panic recovery wraps the entire chain. A panic anywhere
 		// downstream is caught here, logged with stack + error id,
 		// and surfaced to the client as codes.Internal with the
 		// safe message "internal server error [ERR-...]" -- never
 		// the raw panic value.
-		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(serviceAccountChecked, a.Logger)
+		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(anonymousChecked, a.Logger)
 		a.grpcServer.SetStreamInterceptor(recovered)
 		// Hand the verifier to the gRPC server so the in-stream
 		// rotation handler (RotateAuthMsg) can re-verify a refreshed

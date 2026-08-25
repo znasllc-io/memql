@@ -49,6 +49,25 @@ type AccessContext struct {
 	// -- the concept's own declaration -- rather than restated per
 	// construct.
 	ConnectorName string
+
+	// IsAnonymous is set ONLY on the anonymous actor (D4,
+	// anonymous_actor.go): the caller with no identity that a
+	// public-reads-enabled bridge admits, and that row admission lets
+	// through to @rowAuthz(public) concepts and to nothing else.
+	//
+	// It is a distinct FLAG rather than a role comparison because both
+	// halves have to agree for the actor to count as anonymous -- a
+	// malformed one must deny, and a single field cannot express that.
+	// AnonymousActor is the only constructor, and no request shape sets it:
+	// a missing or malformed credential is REFUSED, never degraded into
+	// this.
+	//
+	// Like ConnectorName it is a Go field and NOT part of the DSL actor
+	// envelope. The envelope's field set is closed and is an authoring
+	// surface; a filter that branched on "is the caller anonymous" would be
+	// restating, per construct, the rule the concept's own @rowAuthz(public)
+	// declaration already makes once.
+	IsAnonymous bool
 }
 
 // AccessContextKey is the context key for AccessContext values.

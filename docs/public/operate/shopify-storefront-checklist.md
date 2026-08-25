@@ -89,6 +89,40 @@ The connector's side is [the Shopify connector](shopify-connector.md).
       cache keyed without the buyer context will serve one company's prices
       to another, and it will do it intermittently.
 
+### What the storefront MAY cache
+
+The prohibition above is the important half, and stated alone it reads as
+"do not cache", which is not the policy and costs a storefront real
+latency. The line is **buyer context**, not freshness.
+
+**May cache, client-side, with a short TTL:** catalog, collection, search
+and metaobject responses -- the reads that are the same for every visitor.
+Key them on the query and its variables **and nothing else**: no customer
+access token, no `companyLocationId`, no country or language from
+`@inContext`.
+
+**Never cache:** anything issued under a `customerAccessToken`, anything
+carrying `@inContext(buyer:)`, cart state, and any response whose price
+could differ per buyer. When in doubt about a field, the test is not "is
+this sensitive" but "could two visitors legitimately get different
+answers" -- if yes, it is buyer-contextual whatever it is called.
+
+**Drop the cache on any identity change:** sign-in, sign-out, and a
+location change on a B2B account. A cache that survives a sign-in shows
+retail prices to a buyer who has just proved they get wholesale ones --
+which reads as a pricing bug rather than as a stale cache, and is the exact
+failure the prohibition above describes arriving through the front door.
+
+**Add no server-side tier.** Shopify's own CDN does the server-side half
+already, and a storefront reads the Storefront API directly by design (the
+mirror is `clusterOwner`-tier and buyer requests must not read it -- see
+[shopify-connector.md](shopify-connector.md)). A second server-side cache
+in the storefront's path would be a place for buyer context to leak into a
+shared key, with no freshness left to win.
+
+No new machinery: this is a policy about the fetch layer the storefront
+already has, not a component to build.
+
 ## 5. Platform plumbing
 
 - [ ] `checkout.<domain>` points at Shopify, so the checkout hand-off stays

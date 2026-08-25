@@ -177,25 +177,41 @@ func TestEvaluateRouting_PreconditionMissBroadcast(t *testing.T) {
 // v1:agents:agent, memql#1396).
 //
 // NOTE: v1:cognition:* create/update stays forwarded by the PRE-EXISTING broad
-// cognition rules (cognition's own delivery, not cache) -- so we assert only on
-// the agents/router cache concepts and the cognition utterance DELETE (whose
-// forward existed ONLY for the cache and is now retired).
+// cognition rules (cognition's own delivery, not cache).
+//
+// # What memql#4542 changed here, and what it deliberately did not
+//
+// This test originally asserted its invariant through a PROXY: it listed the
+// topics the retired rules used to forward and required all of them to be
+// dark. That was sound while nothing else wanted them -- and it stopped being
+// sound the moment something did. memql#4542 added browser-reach rules for
+// v1:agents:* (the Agents view and Nexus) and for cognition DELETES (rows that
+// vanished everywhere except the screen), so several of those topics now
+// forward again for a reason that has nothing to do with caching.
+//
+// THE INVARIANT IS UNCHANGED and is still worth a gate: cache eviction must
+// not ride per-concept graph-write forwarding. What changed is how it is
+// measured. v1:router:budget is now the witness -- the one concept in the
+// retired set that no surface subscribes to and no other rule covers -- so a
+// resurrected per-concept cache rule still fails here, while a reasoned reach
+// rule does not. The positive half of the eviction invariant lives in
+// TestEvaluateRouting_CacheInvalidateBroadcast, which pins the channel that
+// replaced them.
+//
+// Deleting this test instead would have been the tempting repair and the wrong
+// one: it would leave "eviction does not ride graph forwarding" asserted
+// nowhere, and the next person to add a per-concept rule for cache reasons
+// would get a green suite.
 func TestEvaluateRouting_PerConceptCacheRulesRetired(t *testing.T) {
 	rules := defaultRoutingRules()
 
-	// These graph.node.* topics had a 5.5 cache forward rule that is now
-	// retired. None may be forwarded as a graph write any longer.
+	// The witness. These had a 5.5 cache forward rule, they are not
+	// subscribed by any surface, and nothing else has a reason to carry
+	// them -- so a forward here can only mean a retired rule came back.
 	retired := []string{
-		"graph.node.created.v1:agents:agentRole",
-		"graph.node.updated.v1:agents:agentRole",
-		"graph.node.deleted.v1:agents:agentRole",
-		"graph.node.created.v1:agents:skill",
-		"graph.node.updated.v1:agents:skill",
-		"graph.node.deleted.v1:agents:skill",
 		"graph.node.created.v1:router:budget",
 		"graph.node.updated.v1:router:budget",
 		"graph.node.deleted.v1:router:budget",
-		"graph.node.deleted.v1:cognition:utterance", // cache-only forward, retired
 	}
 	for _, topic := range retired {
 		if d := evaluateRouting(rules, topic); d.Forward {
@@ -203,13 +219,18 @@ func TestEvaluateRouting_PerConceptCacheRulesRetired(t *testing.T) {
 		}
 	}
 
-	// Sanity: the non-cache sibling concepts that were never forwarded stay so.
+	// The reachable positive, in the same test, so the assertion above can
+	// never quietly become vacuous: the topics that LEFT this list forward
+	// today, and they forward because memql#4542 gave them a stated reason
+	// in routing.go. If these ever go dark again, the Agents view and Nexus
+	// are frozen in the mesh and this is where it is written down.
 	for _, topic := range []string{
-		"graph.node.created.v1:agents:agent",              // the over-firing automation's trigger
-		"graph.node.created.v1:agents:agentAuthorization", // trust grants
+		"graph.node.created.v1:agents:agent",
+		"graph.node.updated.v1:agents:agentAuthorization",
+		"graph.node.deleted.v1:cognition:utterance",
 	} {
-		if d := evaluateRouting(rules, topic); d.Forward {
-			t.Errorf("topic %q must NOT be forwarded (no cache rule, no default forward)", topic)
+		if d := evaluateRouting(rules, topic); !d.Forward {
+			t.Errorf("topic %q must be forwarded -- memql#4542 added a reasoned browser-reach rule for it; losing that rule freezes the surface that subscribes to it", topic)
 		}
 	}
 }

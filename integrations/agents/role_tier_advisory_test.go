@@ -111,6 +111,14 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		"rowauthz_enforce.go":      true,
 		"rowauthz_write_guard.go":  true,
 		"rowauthz_insert_stamp.go": true,
+		// rowauthz_anonymous.go joined in memql#4544, which made the
+		// `public` row-authz tier reachable by an unauthenticated caller.
+		// Its one read is `decl.Tier == langparser.RowAuthzPublic` --
+		// a CONCEPT's declaration about who may see its rows, checked at
+		// the point of adding it, exactly like the four above. It does not
+		// read agentRole.tier, so dsl/agents/concepts.memql's "advisory,
+		// nothing branches on it" description stays true.
+		"rowauthz_anonymous.go": true,
 	}
 
 	var unknown []string

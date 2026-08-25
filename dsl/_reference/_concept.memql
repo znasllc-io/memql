@@ -54,6 +54,30 @@ use identity.concepts.{ user }
 //   @rowAuthz(public)            Globally readable by intent. Spelled
 //                                explicitly -- "no annotation" and "declared
 //                                public" are different states.
+//
+//                                THE ONE TIER AN ANONYMOUS CALLER CAN
+//                                REACH (epic memql#4541). On a cluster with
+//                                MEMQL_PUBLIC_READS_ENABLED=true, a visitor
+//                                who has not signed in reads concepts
+//                                declaring this and NOTHING else --
+//                                undeclared concepts refuse them, because
+//                                undeclared means unmeasured rather than
+//                                publishable. So this declaration is
+//                                publication: assume the internet reads
+//                                every row of it, forever.
+//
+//                                It is a READ tier. There is no anonymous
+//                                write, whatever else the concept declares.
+//                                It may not carry @pii fields (a
+//                                conformance gate refuses the combination);
+//                                if some fields are publishable and some
+//                                are not, that is two concepts.
+//
+//                                Declare it in a PRODUCT BUNDLE, on your own
+//                                content. The engine tree declares it
+//                                nowhere and a gate keeps it that way, so
+//                                enabling the flag for one bundle's content
+//                                never publishes anything else.
 //   @rowAuthz(clusterOwner)      Administrative rows.
 //   @rowAuthz(owner="<field>")   Rows belong to a user; <field> must be a
 //                                field this concept declares, and it is

@@ -900,6 +900,17 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
+	// ANONYMOUS READS (epic memql#4541, D4). The row gate is what makes the
+	// public tier correct -- it denies every row a non-public read could
+	// return, including the undeclared concepts that admit everyone else.
+	// This is the plan-level half, and it exists so a refused anonymous read
+	// is an ERROR rather than a query that runs, scans and comes back empty:
+	// empty is indistinguishable from "there is nothing here", and it would
+	// make an unauthenticated visitor a free way to drive arbitrary reads.
+	if err := refuseNonPublicReadForAnonymous(ctx, plan); err != nil {
+		return nil, err
+	}
+
 	// Record HOW this read resolved its concept, for the row gate
 	// downstream (memql#3350). A plan with no declared binding is a raw
 	// client-supplied query string -- the generic concept browse -- and

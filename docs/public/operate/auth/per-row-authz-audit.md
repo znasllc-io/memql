@@ -188,6 +188,39 @@ Rules:
 - **`public` is spelled explicitly.** "No annotation" and "declared
   public" are different states — making absence stop being silently
   permissive is the entire point.
+
+  Since epic memql#4541 that distinction is load-bearing rather than
+  stylistic, because `public` now has a caller that no other tier does: an
+  ANONYMOUS one. On a cluster with `MEMQL_PUBLIC_READS_ENABLED=true` the
+  WebSocket bridge admits a session carrying no credential, pinned to
+  query execution and graph subscriptions, and row admission lets that
+  actor reach `@rowAuthz(public)` concepts **and nothing else — undeclared
+  included**.
+
+  That last clause is the rule to remember. `rowAuthzAdmits` admits an
+  undeclared concept for every other caller, which is what makes the ~88
+  undeclared concepts in the tree readable at all. An anonymous caller
+  does not inherit it: undeclared is *unmeasured*, and a public tier that
+  read it as *publishable* would publish most of the graph the day it
+  shipped, silently, with every gate reporting exactly what it was asked.
+  `component/memql/rowauthz_anonymous.go` answers before the tier switch
+  runs and never falls through, the same shape the connector actor uses
+  and for the same reason.
+
+  Three further properties, each enforced rather than conventional:
+  `public` is a READ tier (there is no anonymous write — refused at
+  `executeWrite`, the single write chokepoint, whatever the concept
+  declares); subscription admission inherits the read rule unchanged
+  (memql#4309's property, so the live feed cannot be looser than the
+  query); and every anonymous visitor is ONE actor, which is what lets a
+  public result be cached once and served to everyone.
+
+  The tier ships **enforced and empty**: nothing in the engine tree
+  declares it, `TestTheEngineTreeDeclaresNoPublicConcepts` keeps it that
+  way, and `TestPublicTierConceptsCarryNoPII` refuses the combination of
+  `public` with `@pii` fields. Product bundles declare it on their own
+  content concepts. Operator instructions:
+  [site-hosting.md](../site-hosting.md).
 - The parameterised tiers use `=` and a quoted value, matching every
   other keyword-arg annotation (`@relationship(field="x")`,
   `@displayCard(primary="name")`).

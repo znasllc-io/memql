@@ -1077,7 +1077,23 @@ variables:
   # (runtime-config.json) these variables used to configure -- see
   # clients/portal/src/cluster/config.ts's file-level comment.
 
+  # --- public reads ---
+
+  - name: MEMQL_PUBLIC_READS_ENABLED
+    component: engine
+    scope: node
+    optional: true
+    default: "false"
+    description: "Whether this cluster has an ANONYMOUS read surface at all (epic memql#4541, D4). Default FALSE, which is zero behaviour change: the WebSocket bridge refuses a session with no credential exactly as it always has. Turned on, the bridge admits an unauthenticated session as the anonymous actor, pinned to query execution and graph subscriptions -- every mutation, every non-graph subscription kind and every admin message refuse. It does NOT publish anything by itself: an anonymous actor reaches concepts declaring @rowAuthz(public) and nothing else, an UNDECLARED concept refuses it (undeclared is unmeasured, not public), and no concept in the engine tree declares the tier. A product bundle declares it on its own content concepts when it means to serve a hosted site to visitors who have not signed in."
+
   # --- edge ---
+
+  - name: MEMQL_EDGE_BUNDLE_CACHE_MB
+    component: edge
+    scope: node
+    optional: true
+    default: "64"
+    description: "In-memory size cap, in MB, for the edge's LRU over blob:// bundle bytes (memql#4545). Before it, every blob-backed asset was a fresh storage download per request per file, for bytes that are immutable by construction. Keyed by (content-addressed version prefix, path), so NO invalidation exists or is needed: a republish lands under a new prefix and old entries age out. The file:// path is deliberately uncached -- local disk is not the cost being avoided. 0 or an unparseable value DISABLES the cache rather than meaning unlimited: the worst outcome of off is the pre-memql#4545 behaviour, and the worst outcome of unlimited is an OOM-killed replica."
 
   - name: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS
     component: edge

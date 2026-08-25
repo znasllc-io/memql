@@ -1290,6 +1290,35 @@ func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	}
 	s.accessLoaded = true
 
+	// AN ANONYMOUS STREAM'S ACTOR IS ALREADY RESOLVED (epic memql#4541, D4),
+	// and it must survive this function.
+	//
+	// Everything below resolves an actor from CLAIMS. An anonymous stream has
+	// none -- that is what makes it anonymous -- so it would fall through to
+	// FallbackFromClaims and come back as an EMPTY actor: blank user id, blank
+	// role, and crucially `IsAnonymous` false. Since handleExecuteQuery stamps
+	// the result back onto the request context, that empty actor would REPLACE
+	// the anonymous one the interceptor built, and row admission would then
+	// take the ordinary path -- where an UNDECLARED concept admits every
+	// caller. The one rule the public tier exists to enforce would be bypassed
+	// on the only read path an anonymous caller has.
+	//
+	// It fails in the admitting direction and leaves no trace: the read
+	// succeeds, the rows are returned, and every gate reports exactly what it
+	// was asked. Caught by a security review of memql#4544, not by a test --
+	// the row-gate tests build their own context and never cross this seam,
+	// which is why the regression test for it lives beside this function
+	// rather than beside the rule.
+	//
+	// Reading it back off the context is safe because the interceptor is the
+	// ONLY thing that can produce an anonymous actor: no claim, header, token
+	// class or role value yields one, so this cannot be reached by a caller
+	// who presented a credential the chain rejected.
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac.IsAnonymousActor() {
+		s.access = ac
+		return s.access
+	}
+
 	resolver := s.service.identityResolver
 	claims, _ := auth.ClaimsFromContext(ctx)
 
@@ -2133,8 +2162,32 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	// The fan-out gate deliberately does the opposite: handleBusEvent runs
 	// on the event pump, where a resolve would put a database round trip
 	// and a lock acquisition on the delivery path of every event.
+	// RESOLVE THE ACTOR FOR EVERY KIND, not just the non-graph ones (epic
+	// memql#4541, D4). It was resolved inside the branch below, which was
+	// enough while the only thing needing it here was the owner/admin check.
+	//
+	// It is not enough now. handleBusEvent admits each delivered graph event
+	// with currentAccess(), which returns the CACHED actor and deliberately
+	// does not resolve -- a resolve on the event pump would put a lock and a
+	// database round trip on the delivery path of every event. So a stream
+	// whose first message is a GRAPH_EVENTS subscribe reached fan-out with a
+	// nil actor, and rowAuthzAdmits treats nil as an empty actor: for a
+	// concept that declares no tier, that ADMITS.
+	//
+	// For an authenticated caller that is the standing undeclared behaviour
+	// and fails toward fewer rows on the declared tiers. For an ANONYMOUS
+	// caller it fails the other way -- it is precisely the "undeclared
+	// refuses anonymous" rule, bypassed on the live path, which would have
+	// made the subscription looser than the read it is supposed to mirror.
+	//
+	// Resolving here is cheap and correct: this is the request path, the
+	// result is cached for the life of the stream, and for an anonymous
+	// stream ensureAccess returns the interceptor's actor without touching
+	// the database at all.
+	access := s.ensureAccess(s.stream.Context())
+
 	if msg.GetKind() != memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS {
-		if !isOwnerOrAdmin(s.ensureAccess(s.stream.Context())) {
+		if !isOwnerOrAdmin(access) {
 			if s.logger != nil {
 				s.logger.Info("subscription rejected: non-graph kind requires owner or admin",
 					"kind", msg.GetKind().String(),

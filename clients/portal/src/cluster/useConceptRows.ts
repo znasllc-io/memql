@@ -19,6 +19,24 @@
 // Nothing reads "current" walk state out of a ref at settle time. That shape
 // -- the obvious one -- silently drops a good page whenever a state update
 // has been scheduled but not yet committed.
+//
+// THE LIVE BAND IS BEST-EFFORT HERE, and uniquely so (memql#4543). Every
+// other live surface in the portal subscribes to a NAMED concept, and the
+// routing conformance gate proves each one crosses the mesh. This pane's
+// concept comes from the route, so it subscribes to whatever the operator
+// navigated to -- including concepts with no cross-node forward rule, whose
+// events therefore never leave the replica that wrote them. On such a
+// concept the band shows what this replica happens to see and Refresh is the
+// answer; on a routed concept it is live like anything else.
+//
+// That is a deliberate trade rather than an oversight, and it is recorded as
+// one: portal_subscription_routing_test.go's `unboundSubscriptions` carries
+// the reason. Routing every concept in the registry would put the
+// invocation-class volumes (v1:observability:invocation,
+// v1:worker:invocation) on the wire, which is what the exclusions in
+// component/node/routing_reach.go exist to prevent. An operator surface that
+// MUST be live belongs in the forward table by name, the way the Fleet and
+// Nexus pages are.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {

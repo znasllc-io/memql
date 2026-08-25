@@ -2053,7 +2053,21 @@ register a `node.RegisterRoutingRule` forwarding that concept's
 stayed local. **That per-concept rule is retired (issue 5.6,
 memql#1970)** and pinned as gone by
 `TestEvaluateRouting_PerConceptCacheRulesRetired`
-(`component/node/routing_test.go:183`). Every graph write now also
+(`component/node/routing_test.go`).
+
+> **How that test measures it changed in memql#4542, and the change is
+> worth knowing about if you read it.** It used to assert the invariant
+> through a proxy -- it listed the topics the retired rules forwarded and
+> required all of them to be dark -- which was sound only while nothing
+> else wanted them. memql#4542 added browser-reach rules for `v1:agents:*`
+> and for cognition deletes, so several of those topics forward again for
+> a reason that has nothing to do with caching. The invariant is unchanged;
+> `v1:router:budget` is now the witness, being the one concept in the
+> retired set that no surface subscribes to. **A forward rule for a
+> concept is no longer evidence that somebody is caching it** -- do not
+> read one that way.
+
+Every graph write now also
 publishes a dedicated `cache.invalidate.<concept>` event
 (`MemQLEngine.InvalidateCacheForConcept`), and ONE broadcast routing rule
 (`{Pattern: "cache.invalidate.*", TargetType: ""}` in
