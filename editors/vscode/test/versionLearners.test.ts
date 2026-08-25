@@ -133,6 +133,24 @@ test("a handshake reporting `dev` never overwrites a recorded release", () => {
   assert.equal(d.write, false);
 });
 
+test("nor does one reporting `dev+<commit>`, which is the shape it states now", () => {
+  // memql#4575 gave an uncut build a revision to state, and it states it INSIDE
+  // this value because clusters.yaml has nowhere else to carry it. The rule
+  // that protects a recorded release therefore now has to hold against a
+  // string that reads much more like a version than the bare word did -- and it
+  // does, for the same reason and with no code change, because `dev+...` still
+  // parses as no release.
+  for (const value of ["dev+a1b2c3d4e5f6", "dev+a1b2c3d4e5f6-dirty"]) {
+    assert.equal(decideVersionWrite("v0.18.0", [{ source: "handshake", value }]).write, false);
+  }
+  // And it is still WRITTEN when there is nothing better: a cluster with no
+  // recorded version learns which build it is running, which is the whole
+  // point of the revision being in there.
+  const fresh = decideVersionWrite("", [{ source: "handshake", value: "dev+a1b2c3d4e5f6" }]);
+  assert.equal(fresh.write, true);
+  assert.equal(fresh.value, "dev+a1b2c3d4e5f6");
+});
+
 test("a cluster whose engine predates the field contributes no candidate at all", () => {
   // Every cluster installed before memql#3998 reports "", which is dropped
   // before ranking -- so the four original sources answer for it exactly as

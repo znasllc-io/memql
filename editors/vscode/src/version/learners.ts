@@ -47,8 +47,13 @@
 //
 // Its two non-answers need no special case, which is why adding it changed
 // nothing else in this file. An engine predating memql#3998 states "", dropped
-// before ranking; a binary not cut from a release states "dev", which is not
-// release-shaped and so cannot land on a recorded release under rule 3.
+// before ranking; a binary not cut from a release states "dev" -- or, since
+// memql#4575, "dev+<12 hex>", the same word carrying the revision it was built
+// from. NEITHER is release-shaped, so neither can land on a recorded release
+// under rule 3, and the new form needed no code change here for exactly that
+// reason. It is worth writing down anyway: the form that would break this is
+// one that PARSES, and `dev+...` reads enough like a version string to invite
+// somebody to make it one.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 

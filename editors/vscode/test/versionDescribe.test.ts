@@ -130,6 +130,19 @@ test("the build stamp is notComparable, and the sentence says why that is not up
   assert.match(d.sentence, /0\.15\.0-1737072000/);
 });
 
+test("an uncut build's revision reaches the row, which is why it is in the value", () => {
+  // THE SURFACE memql#4575 IS ABOUT. `dev` alone told an operator nothing: a
+  // cluster rebuilt an hour ago and one installed last week rendered
+  // identically. The revision rides the recorded value precisely so that this
+  // function -- which shows `recorded` verbatim in this state -- carries it to
+  // every row and page without any of them learning a second field.
+  const d = describeVersion({ recorded: "dev+a1b2c3d4e5f6", listing: KNOWN });
+  assert.equal(d.state, "notComparable");
+  assert.equal(d.upgradeAvailable, false);
+  assert.equal(d.short, "dev+a1b2c3d4e5f6");
+  assert.match(d.sentence, /dev\+a1b2c3d4e5f6/);
+});
+
 // --- The rule that outranks every other assertion here ----------------------
 
 test("NO state other than current ever reads as up to date", () => {
@@ -143,6 +156,9 @@ test("NO state other than current ever reads as up to date", () => {
     { recorded: "main", listing: KNOWN },
     { recorded: "0.15.0-1737072000", listing: KNOWN },
     { recorded: "a256ab11", listing: KNOWN },
+    { recorded: "dev", listing: KNOWN },
+    { recorded: "dev+a1b2c3d4e5f6", listing: KNOWN },
+    { recorded: "dev+a1b2c3d4e5f6-dirty", listing: KNOWN },
     { recorded: "v1", listing: KNOWN },
   ];
   for (const input of cases) {

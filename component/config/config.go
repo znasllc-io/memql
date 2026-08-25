@@ -117,7 +117,8 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		// Runtime-mutable
 		DemoMode: envBool("MEMQL_DEMO_MODE"),
 
-		// Version -- the release this binary was cut from, or "dev". It comes
+		// Version -- the release this binary was cut from, or "dev+<commit>"
+		// when it was not cut from one (memql#4575). It comes
 		// from the link-time stamp and never from the environment (memql#3998):
 		// this used to read a `VERSION` env var, which let a deployment tell a
 		// node to claim a release it was not built from. There is one answer to
