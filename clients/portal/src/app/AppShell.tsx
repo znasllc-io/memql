@@ -387,8 +387,32 @@ export function AppShell(): ReactNode {
         </nav>
 
         {/* min-h-0 on both axes so a long row list scrolls inside the main
-            pane instead of stretching the page and losing the header. */}
-        <main className="min-w-0 flex-1 overflow-auto p-6">
+            pane instead of stretching the page and losing the header.
+
+            `relative` IS THE SECOND SCROLLBAR FIX (memql#4505), and it is not
+            cosmetic. An absolutely-positioned element is laid out against its
+            nearest POSITIONED ancestor, and if it has none, against the
+            viewport -- in which case `overflow: auto` here does not clip it,
+            because main is not on its containing-block chain. It escapes the
+            scroll region and extends the DOCUMENT instead, which is the
+            reported symptom exactly: a second bar at the right edge running up
+            past the header.
+
+            The element that did it is a `sr-only` label deep inside
+            ui/LabelChips (Tailwind's sr-only is `position: absolute`), on
+            /fleet/machines -- one of the two pages screenshotted. Every
+            ancestor between it and here was static, so its containing block
+            was the viewport and its static position was 1186px down inside
+            main's scrolled content. Measured: document scrollHeight 1187
+            against a 1020 viewport; with this one declaration, 1020.
+
+            Fixing it HERE rather than on that label is deliberate. There is
+            nothing special about LabelChips: any sr-only span, any absolutely
+            positioned decoration a page adds later, has the same escape unless
+            something on its chain is positioned. This makes the page's own
+            scroll region the containing block for the page's own out-of-flow
+            content, which is what it should always have been. */}
+        <main className="relative min-w-0 flex-1 overflow-auto p-6">
           <Outlet />
         </main>
       </div>

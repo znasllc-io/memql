@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 
-import { Button, Callout, Field, LabelChips, Panel, Select, Skeleton } from "../ui";
+import { Button, Callout, Field, FormRow, LabelChips, Panel, Select, Skeleton } from "../ui";
 import { chipsFromMap, mapFromChips, parseLabelChip } from "./labels";
 import {
   FALLBACK_BLURB,
@@ -118,7 +118,7 @@ export function RoutingPolicyEditor(): ReactNode {
           </Callout>
         ) : null}
 
-        <div className="flex flex-wrap items-start gap-4">
+        <FormRow>
           <Field label="Strategy" hint={STRATEGY_BLURB[strategy as RoutingStrategy] ?? ""}>
             <Select value={strategy} onChange={setStrategy} ariaLabel="Strategy">
               {ROUTING_STRATEGIES.map((one) => (
@@ -140,7 +140,7 @@ export function RoutingPolicyEditor(): ReactNode {
               ))}
             </Select>
           </Field>
-        </div>
+        </FormRow>
 
         {chipError === "" ? null : (
           <p role="alert" className="text-xs text-danger">

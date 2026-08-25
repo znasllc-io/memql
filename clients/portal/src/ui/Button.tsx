@@ -2,6 +2,8 @@ import type { MouseEventHandler, ReactNode } from "react";
 
 // The button. One component, three tones, two sizes -- replacing the six
 // distinct padding recipes and ~40 ad-hoc class strings the survey found.
+// The sizes are the shared control metrics, so a button is never the odd
+// height out in a row of fields (see SIZE below).
 //
 //   primary  the one commitment on a screen (save, sign in). Accent-filled;
 //            most screens have zero or one.
@@ -25,9 +27,18 @@ const TONE: Record<ButtonTone, string> = {
   danger: "border-danger bg-danger-subtle text-fg hover:bg-danger hover:text-accent-fg",
 };
 
+// The two sizes are FIXED HEIGHTS, not padding that happens to add up
+// (memql#4504). `sm` is the control line -- the height every input, select and
+// field-adjacent button shares -- so a submit button beside a text field lines
+// up with it exactly rather than sitting 4px short of it, which is what the
+// operator's screenshot showed. `xs` is the compact line, for buttons living
+// inside dense data: table cells and band headers.
+//
+// Both grew by ~2px in the change that introduced them. That is the cost of
+// having one number instead of three, and it was taken deliberately.
 const SIZE: Record<ButtonSize, string> = {
-  sm: "px-3 py-1.5 text-sm",
-  xs: "px-2.5 py-1 text-xs",
+  sm: "h-control px-3 text-sm",
+  xs: "h-control-sm px-2.5 text-xs",
 };
 
 // Shared by Button and ButtonLink so the two cannot drift: a <button> and an
@@ -35,7 +46,7 @@ const SIZE: Record<ButtonSize, string> = {
 // not two copies someone edits out of sync.
 function classesFor(tone: ButtonTone, size: ButtonSize): string {
   return (
-    "inline-flex items-center gap-1.5 rounded border font-medium " +
+    "inline-flex shrink-0 items-center justify-center gap-1.5 rounded border font-medium " +
     `disabled:cursor-not-allowed disabled:opacity-40 ${SIZE[size]} ${TONE[tone]}`
   );
 }

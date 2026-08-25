@@ -13,6 +13,8 @@ import {
   Container,
   DataText,
   Field,
+  FormActions,
+  FormRow,
   PageHeader,
   Select,
   Skeleton,
@@ -171,24 +173,29 @@ export function DeployableDetailPage(): ReactNode {
         <Band title="Point at a bundle reference" meta="for a bundle CI published, or one baked into the edge image">
           {/* Capped on the form, not the page: the bundle field is one input,
               and the bands below want the full width. */}
-          <form onSubmit={submitBundle} className="flex max-w-3xl flex-wrap items-end gap-2">
-            <Field
-              label="Bundle"
-              grow
-              hint="A bundleRef VALUE this cluster already has -- 'blob://sites/<id>/<version>/' for a bundle in storage, or a file:// path baked into the edge image. This only points the row at a version that exists; it uploads nothing."
-            >
-              <TextInput value={bundleRef} onChange={setBundleRef} placeholder={currentBundleRef} />
-            </Field>
-            <Button
-              type="submit"
-              size="xs"
-              busyLabel="Working…"
-              busy={detail.busy}
-              disabled={bundleRef.trim() === ""}
-            >
-              Publish
-            </Button>
-          </form>
+          {/* The width cap moves to a wrapper: FormRow owns the row's
+              alignment and takes no class of its own. */}
+          <div className="max-w-3xl">
+            <FormRow onSubmit={submitBundle}>
+              <Field
+                label="Bundle"
+                grow
+                hint="A bundleRef VALUE this cluster already has -- 'blob://sites/<id>/<version>/' for a bundle in storage, or a file:// path baked into the edge image. This only points the row at a version that exists; it uploads nothing."
+              >
+                <TextInput value={bundleRef} onChange={setBundleRef} placeholder={currentBundleRef} />
+              </Field>
+              <FormActions>
+                <Button
+                  type="submit"
+                  busyLabel="Working…"
+                  busy={detail.busy}
+                  disabled={bundleRef.trim() === ""}
+                >
+                  Publish
+                </Button>
+              </FormActions>
+            </FormRow>
+          </div>
           <p className="mt-1 text-xs text-subtle">
             Currently serving {currentBundleRef || "(none set)"}.
           </p>
@@ -335,34 +342,37 @@ function DeployFromLibrary({
   }
 
   return (
-    <div className="flex max-w-3xl flex-wrap items-end gap-2">
-      <Field
-        label="Bundle"
-        grow
-        hint="The cluster reads the bytes from its own storage, checks the zip, and writes a new version before pointing this deployable at it. Nothing is uploaded from this browser."
-      >
-        <Select value={value} onChange={onChange} ariaLabel="Bundle">
-          <option value="">Choose a bundle…</option>
-          {artifacts.map((row) => {
-            const id = rowString(row, "id");
-            return (
-              <option key={id} value={id}>
-                {rowString(row, "title") || id}
-              </option>
-            );
-          })}
-        </Select>
-      </Field>
-      <Button
-        size="xs"
-        tone="primary"
-        busy={busy}
-        busyLabel="Deploying…"
-        disabled={value === ""}
-        onClick={onDeploy}
-      >
-        Deploy
-      </Button>
+    <div className="max-w-3xl">
+      <FormRow>
+        <Field
+          label="Bundle"
+          grow
+          hint="The cluster reads the bytes from its own storage, checks the zip, and writes a new version before pointing this deployable at it. Nothing is uploaded from this browser."
+        >
+          <Select value={value} onChange={onChange} ariaLabel="Bundle">
+            <option value="">Choose a bundle…</option>
+            {artifacts.map((row) => {
+              const id = rowString(row, "id");
+              return (
+                <option key={id} value={id}>
+                  {rowString(row, "title") || id}
+                </option>
+              );
+            })}
+          </Select>
+        </Field>
+        <FormActions>
+          <Button
+            tone="primary"
+            busy={busy}
+            busyLabel="Deploying…"
+            disabled={value === ""}
+            onClick={onDeploy}
+          >
+            Deploy
+          </Button>
+        </FormActions>
+      </FormRow>
     </div>
   );
 }

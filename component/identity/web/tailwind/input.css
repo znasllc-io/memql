@@ -60,18 +60,38 @@
      the portal's Field/TextInput so a person crossing from the sign-in page
      to the console does not feel two products.
 
-     `select` carries the same padding, but native macOS / Chromium selects
-     ignore content padding when their built-in chrome is visible. appearance:
-     none plus a painted chevron is what makes the height actually match the
-     text inputs beside it. */
+     THE HEIGHT IS THE SHARED TOKEN (memql#4503). It used to be `py-2`, which
+     landed near 38px while the portal's Button sm landed near 34px: the same
+     brand, the same page furniture, two heights. `h-control` is the same
+     --memql-control-h the portal's TextInput and Button read, so the sign-in
+     form and the console form are now the same object.
+
+     The padding that remains is horizontal only. Give a line control `py-*`
+     back and it stops matching `.btn` beside it -- that is the whole defect
+     returning, in the one file where it is easiest to reintroduce because
+     these are element selectors rather than a component.
+
+     `select` needs more than matching padding: native macOS / Chromium selects
+     ignore content padding when their built-in chrome is visible, so
+     appearance: none plus a painted chevron is what makes the height actually
+     match the text inputs beside it. */
   input[type="text"],
   input[type="email"],
   input[type="url"],
   input[type="password"],
   input[type="number"],
   input[type="search"],
-  textarea,
   select {
+    @apply h-control w-full rounded border border-line bg-surface px-3 text-sm text-fg
+      placeholder:text-subtle
+      focus:border-accent focus:outline-none
+      disabled:cursor-not-allowed disabled:bg-raised disabled:text-subtle;
+  }
+
+  /* A textarea's height is its content, so it is the deliberate exception: it
+     wears the same inset look and keeps the vertical padding the line controls
+     traded for a fixed height. */
+  textarea {
     @apply w-full rounded border border-line bg-surface px-3 py-2 text-sm text-fg
       placeholder:text-subtle
       focus:border-accent focus:outline-none
@@ -81,22 +101,35 @@
   select {
     appearance: none;
     -webkit-appearance: none;
-    /* The chevron is painted rather than themed: a data: URI cannot read a CSS
-       variable, so it uses currentColor's neutral mid-tone, which reads
-       correctly on both grounds. */
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%237c847b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    /* The chevron is painted, and a data: URI is a separate document that
+       cannot read a CSS variable -- so the colour is literal and there have to
+       be two of them. These pages have no theme chooser (they follow the OS,
+       see the header), which is exactly why one media query is the whole
+       switch here where the portal needed an element that inherits
+       currentColor. Both values are --memql-fg-muted, matching the portal's
+       text-muted chevron. */
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23586159' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.625rem center;
     background-size: 1.125rem 1.125rem;
     padding-right: 2.25rem;
   }
 
+  @media (prefers-color-scheme: dark) {
+    select {
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca395' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    }
+  }
+
   textarea {
     @apply min-h-[100px] resize-y;
   }
 
+  /* A colour swatch is a line control too -- it sits in a row beside a text
+     input on the branding form. The 38px it carried was the old emergent
+     input height, written down as a literal. */
   input[type="color"] {
-    @apply h-[38px] w-12 cursor-pointer rounded border border-line bg-surface p-1
+    @apply h-control w-12 cursor-pointer rounded border border-line bg-surface p-1
       focus:border-accent focus:outline-none;
   }
 
@@ -180,8 +213,11 @@
   .help {
     @apply block text-xs text-muted;
   }
+  /* items-START, for the reason the portal's FormRow states at length: under
+     bottom-alignment a control carrying a `.help` line pushes its hint-less
+     neighbour down by the height of a hint it does not have. */
   .form-row.inline {
-    @apply flex flex-wrap items-end gap-2 space-y-0;
+    @apply flex flex-wrap items-start gap-2 space-y-0;
   }
   .form-row.inline > input,
   .form-row.inline > select {
@@ -209,8 +245,8 @@
      Three tones, matching the portal's Button: primary / secondary(quiet) /
      danger. At most one primary per screen. */
   .btn {
-    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded border
-      px-4 py-2 text-sm font-medium transition
+    @apply inline-flex h-control cursor-pointer items-center justify-center gap-2 rounded
+      border px-4 text-sm font-medium transition
       focus:outline-none
       disabled:cursor-not-allowed disabled:opacity-50;
   }
@@ -227,7 +263,7 @@
     @apply border-transparent bg-transparent text-muted hover:bg-raised hover:text-fg;
   }
   .btn-small {
-    @apply px-2.5 py-1 text-xs;
+    @apply h-control-sm px-2.5 text-xs;
   }
   .btn-block {
     @apply w-full;

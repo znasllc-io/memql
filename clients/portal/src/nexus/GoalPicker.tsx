@@ -65,7 +65,7 @@ export function RecentGoals({
         <Link
           key={goal.id}
           to={nexusPath(goal.id)}
-          className="rounded border border-line bg-surface px-2 py-1 text-xs hover:bg-raised"
+          className="flex h-control-sm items-center rounded border border-line bg-surface px-2 text-xs hover:bg-raised"
         >
           <span className="max-w-64 truncate align-middle">{goal.goal === "" ? goal.id : goal.goal}</span>
           {goal.running ? (

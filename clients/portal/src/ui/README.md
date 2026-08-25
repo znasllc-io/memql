@@ -16,6 +16,24 @@ copied layout primitives.
 | data | `font-mono` via `DataText` (number/string tints, id, time) | graph values only, never chrome |
 | display | `font-display text-display` | Squada One: wordmark + big-number moments only |
 
+## The control metrics
+
+| Token | Utility | Value | Wears it |
+|---|---|---|---|
+| `--memql-control-h` | `h-control` | 2.25rem (36px) | `TextInput`, `Select`, `Button size="sm"` -- anything on a form line |
+| `--memql-control-h-sm` | `h-control-sm` | 1.75rem (28px) | `Button size="xs"`, chips and segmented controls inside dense data |
+
+Both live in `brand/tokens.css`, shared with the identity pages, because a
+control height that differs between the sign-in page and the console is the
+same defect as a palette that differs between them. **A control never states a
+vertical padding.** Its height is the token; padding is horizontal only. Give a
+line control `py-*` back and it stops matching the button beside it, which is
+exactly the bug memql#4502 removed.
+
+`Textarea` is the deliberate exception: its height is its content, so it keeps
+vertical padding and carries no control token.
+
+
 ## The page frame
 
 **Every routed page renders its body inside `<Container>`.** There is one
@@ -44,6 +62,14 @@ between sections: Concepts and Integrations at `max-w-5xl`, campaign editing at
 a reasonable local choice. `portal_page_frame_test.go` at the repo root now
 fails the build on a width token in a page root.
 
+`portal_control_vocabulary_test.go` sits beside it and enforces this
+directory's own rule the same way: a raw `<input>` / `<select>` / `<textarea>`
+/ `<button>` outside `src/ui/`, a copy of the inset recipe, or `items-end` in
+anything but the three allowlisted header layouts fails the build. Every
+allowlist entry carries its reason. The rule was already written in this file
+before that gate existed, and the drift accumulated anyway -- which is the
+argument for the gate rather than for restating the rule.
+
 ## Composition rules
 
 - Buttons: `Button` -- tones primary / quiet / danger, sizes sm / xs. One
@@ -54,6 +80,25 @@ fails the build on a width token in a page root.
   and copy-link all need.
 - Forms: `Field` wraps label/hint/error; `TextInput` / `Select` /
   `Textarea` share one inset style.
+- **Controls in a row go inside `FormRow`, and the buttons that end that row go
+  inside `FormActions`.** `FormRow` is `items-start`; `FormActions` reproduces
+  the height of `Field`'s label line so its buttons top-align with the controls
+  beside them. Buttons in a form row are size `sm` -- `sm` IS the control line.
+- **`items-end` is banned in a form row.** Bottom-alignment makes the tallest
+  child decide where everyone else's bottom edge lands, so a field carrying a
+  hint pushes its hint-less neighbour's control off the line and a bare button
+  parks on the hint's baseline. Nothing is wrong with any single control; the
+  row is wrong. Top-alignment inverts it: everything starts at the same y and
+  what hangs below is free to differ. The three surviving `items-end` uses are
+  right-aligned page HEADER columns (`PageHeader`, `ComposeLayout`,
+  `ComposerPage`), which are not form rows, and they are allowlisted by name.
+- **A checkbox or a radio is `Checkbox` / `RadioGroup`, never a raw native.**
+  Both keep a native `<input>` underneath -- `accent-color` recolours it and
+  the keyboard, indeterminate state and form participation come free -- and
+  both align the box to the FIRST line of the label, because these labels carry
+  sentences and a centred box floats into the middle of a paragraph.
+- A combo box is `TextInput list={...}`, not a page's own copy of the inset
+  recipe.
 - Secondary nav is always `Tabs` (routed underline strip).
 - Sections are `Band` horizons; bare surfaces are `Panel`.
 - Loading is a shaped `Skeleton`, never a spinner; empty is `EmptyState`

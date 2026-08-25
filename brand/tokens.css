@@ -19,7 +19,9 @@
  * two palettes.
  *
  * WHAT LIVES HERE: the semantic roles (surface / fg / muted / border / accent /
- * danger), the type scale, the radius rhythm. Semantic names, never colour
+ * danger), the type scale, the radius rhythm, and the control metrics -- the
+ * one height a form control is built on, which is shared for the same reason
+ * the palette is: two surfaces that disagree about it are two products. Semantic names, never colour
  * names: "mint-300" is a value that cannot survive a theme flip, "--memql-fg"
  * is a role that can. View-kit's --vk-* contract is NOT here -- view-kit is a
  * portal concern and its bridge stays in clients/portal/src/styles/viewkit.css.
@@ -132,6 +134,43 @@
 
   --memql-radius: 0.375rem;
   --memql-radius-lg: 0.625rem;
+
+  /* --- control metrics -------------------------------------------------
+   * THE HEIGHT OF A CONTROL IS A TOKEN, not an emergent property of padding.
+   *
+   * Before memql#4503 nothing in either surface stated a control height, so
+   * every kind of control arrived at its own by accident: text inputs and
+   * selects ~38px from `px-3 py-2 text-sm`, the portal's Button sm ~34px, its
+   * Button xs ~26px, the identity pages' `.btn` ~38px again. Put any two of
+   * them in the same row and they disagree -- which is exactly what a form
+   * row is. And a native <select> is worse than merely different: it adds
+   * per-platform chrome on top of whatever padding it was given, so the same
+   * class string measures differently on Linux and macOS.
+   *
+   * Two steps, because an operations console needs exactly two: the line a
+   * form is built on, and a compact line for table cells and band headers.
+   * A control anywhere near a form field wears `control`; `control-sm` is for
+   * controls that sit inside dense data, where a 36px row would be the loudest
+   * thing on the screen.
+   *
+   * These are METRICS, not colours, so they carry no light-dark() pair -- the
+   * theme flip must never move a box.
+   */
+  --memql-control-h: 2.25rem;    /* 36px -- inputs, selects, buttons in a form row */
+  --memql-control-h-sm: 1.75rem; /* 28px -- table cells, band headers, chips */
+
+  /* --- scrollbars ------------------------------------------------------
+   * The thumb is the border family, one step stronger than a resting line:
+   * a scrollbar is chrome that should be findable when looked for and silent
+   * otherwise. The track stays transparent (declared at the rule, not here --
+   * there is no value to name) so a bar inside the rail does not paint a
+   * second surface colour over `--memql-surface`.
+   *
+   * Hover is one step stronger again, which is the whole affordance: the bar
+   * is draggable and nothing else on the page darkens under the pointer.
+   */
+  --memql-scrollbar-thumb: light-dark(#c2cabf, #213029);
+  --memql-scrollbar-thumb-hover: light-dark(#a4aea1, #33473c);
 }
 
 /* The explicit choice, written by src/app/theme.ts. Pinning color-scheme is

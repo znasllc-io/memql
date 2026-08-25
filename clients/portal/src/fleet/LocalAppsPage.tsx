@@ -7,6 +7,7 @@ import {
   Band,
   Button,
   Callout,
+  Checkbox,
   Container,
   EmptyState,
   Field,
@@ -153,34 +154,22 @@ function DelegationPolicyEditor({
         </Callout>
       )}
 
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.preferSubscriptionApps}
-          onChange={(e) => setDraft({ ...draft, preferSubscriptionApps: e.target.checked })}
-        />
-        <span>
-          <span className="font-medium text-fg">Delegate eligible tasks to my local apps</span>
-          <span className="mt-0.5 block text-xs text-fg-muted">
-            The master switch. With it off, nothing below applies. With it on,
-            a task is delegated only when a machine with an allowed, signed-in
-            app is online right now -- otherwise it runs in the cluster. A plan
-            never waits for a laptop to wake up.
-          </span>
-        </span>
-      </label>
+      <Checkbox
+        checked={draft.preferSubscriptionApps}
+        onChange={(next) => setDraft({ ...draft, preferSubscriptionApps: next })}
+        label={<span className="font-medium text-fg">Delegate eligible tasks to my local apps</span>}
+        hint="The master switch. With it off, nothing below applies. With it on, a task is delegated only when a machine with an allowed, signed-in app is online right now -- otherwise it runs in the cluster. A plan never waits for a laptop to wake up."
+      />
 
       <Field label="Apps, in the order to try them">
         <div className="flex flex-wrap gap-3 text-sm">
           {SELECTABLE_APPS.map((appId) => (
-            <label key={appId} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={draft.appOrder.includes(appId)}
-                onChange={() => setDraft({ ...draft, appOrder: toggleIn(draft.appOrder, appId) })}
-              />
-              <span>{appLabel(appId)}</span>
-            </label>
+            <Checkbox
+              key={appId}
+              checked={draft.appOrder.includes(appId)}
+              onChange={() => setDraft({ ...draft, appOrder: toggleIn(draft.appOrder, appId) })}
+              label={appLabel(appId)}
+            />
           ))}
         </div>
         <p className="mt-1 text-xs text-fg-muted">
@@ -193,16 +182,14 @@ function DelegationPolicyEditor({
       <Field label="Task kinds that may be delegated">
         <div className="flex flex-wrap gap-3 text-sm">
           {DELEGATABLE_KINDS.map((kind) => (
-            <label key={kind} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={draft.eligibleKinds.includes(kind)}
-                onChange={() =>
-                  setDraft({ ...draft, eligibleKinds: toggleIn(draft.eligibleKinds, kind) })
-                }
-              />
-              <span>{kind}</span>
-            </label>
+            <Checkbox
+              key={kind}
+              checked={draft.eligibleKinds.includes(kind)}
+              onChange={() =>
+                setDraft({ ...draft, eligibleKinds: toggleIn(draft.eligibleKinds, kind) })
+              }
+              label={kind}
+            />
           ))}
         </div>
         <p className="mt-1 text-xs text-fg-muted">

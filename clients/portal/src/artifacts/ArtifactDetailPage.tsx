@@ -13,9 +13,12 @@ import {
   Container,
   DataText,
   Field,
+  FormActions,
+  FormRow,
   LabelChips,
   PageHeader,
   Skeleton,
+  TextInput,
 } from "../ui";
 import { Download, GraduationCap } from "../ui/icons";
 import { artifactContentUrl } from "./transport";
@@ -289,25 +292,19 @@ function TrainControl({ detail }: { detail: ReturnType<typeof useArtifactDetail>
         )}
       </p>
       {detail.trainError ? <ErrorMessage>{detail.trainError}</ErrorMessage> : null}
-      <div className="flex flex-wrap items-end gap-2">
+      <FormRow>
         <Field
           label="Train into a knowledge domain"
           grow
           hint="The cluster decides whether you may write to it; a domain you have used before is suggested."
         >
-          {/* A plain <input list=...> rather than ui/TextInput: the list
-              attribute is what makes it a combo box, and TextInput takes no
-              arbitrary props by design. The class string is TextInput's own
-              inset recipe, kept identical on purpose. */}
-          <input
-            type="text"
+          <TextInput
             list={listId}
             value={domain}
             disabled={detail.trainBusy}
-            onChange={(event) => setDomain(event.target.value)}
+            onChange={setDomain}
             placeholder="finance-policies"
-            aria-label="Knowledge domain"
-            className="w-full rounded border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-subtle disabled:cursor-not-allowed disabled:opacity-40"
+            ariaLabel="Knowledge domain"
           />
           <datalist id={listId}>
             {detail.knownDomains.map((one) => (
@@ -315,17 +312,18 @@ function TrainControl({ detail }: { detail: ReturnType<typeof useArtifactDetail>
             ))}
           </datalist>
         </Field>
-        <Button
-          type="submit"
-          size="xs"
-          busy={detail.trainBusy}
-          busyLabel="Training…"
-          disabled={domain.trim() === ""}
-        >
-          <GraduationCap size={14} aria-hidden="true" />
-          Train
-        </Button>
-      </div>
+        <FormActions>
+          <Button
+            type="submit"
+            busy={detail.trainBusy}
+            busyLabel="Training…"
+            disabled={domain.trim() === ""}
+          >
+            <GraduationCap size={14} aria-hidden="true" />
+            Train
+          </Button>
+        </FormActions>
+      </FormRow>
     </form>
   );
 }

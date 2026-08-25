@@ -1,7 +1,17 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Band, Button, ConfirmDialog, DataText, Field as UiField, Select, TextInput } from "../ui";
+import {
+  Band,
+  Button,
+  ConfirmDialog,
+  DataText,
+  Field,
+  FormActions,
+  FormRow,
+  Select,
+  TextInput,
+} from "../ui";
 import { useAdminWrites, type WriteState } from "../admin/useAdminConsole";
 import { WriteOutcome } from "../admin/WriteOutcome";
 
@@ -141,16 +151,30 @@ function ProfileForm({
         write is a shallow merge, so a blank box means blank, not “leave it”.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Field label="Display name" value={draft.displayName} onChange={(v) => setDraft({ ...draft, displayName: v })} />
-        <Field label="First name" value={draft.firstName} onChange={(v) => setDraft({ ...draft, firstName: v })} />
-        <Field label="Last name" value={draft.lastName} onChange={(v) => setDraft({ ...draft, lastName: v })} />
-        <Field label="Phone" value={draft.phone} onChange={(v) => setDraft({ ...draft, phone: v })} />
-        <Field label="Job title" value={draft.primaryRole} onChange={(v) => setDraft({ ...draft, primaryRole: v })} />
-        <Field label="Gender" value={draft.gender} onChange={(v) => setDraft({ ...draft, gender: v })} />
-        <Field label="Birthdate" value={draft.birthdate} onChange={(v) => setDraft({ ...draft, birthdate: v })} />
+        <Field label="Display name">
+          <TextInput value={draft.displayName} onChange={(v) => setDraft({ ...draft, displayName: v })} />
+        </Field>
+        <Field label="First name">
+          <TextInput value={draft.firstName} onChange={(v) => setDraft({ ...draft, firstName: v })} />
+        </Field>
+        <Field label="Last name">
+          <TextInput value={draft.lastName} onChange={(v) => setDraft({ ...draft, lastName: v })} />
+        </Field>
+        <Field label="Phone">
+          <TextInput value={draft.phone} onChange={(v) => setDraft({ ...draft, phone: v })} />
+        </Field>
+        <Field label="Job title">
+          <TextInput value={draft.primaryRole} onChange={(v) => setDraft({ ...draft, primaryRole: v })} />
+        </Field>
+        <Field label="Gender">
+          <TextInput value={draft.gender} onChange={(v) => setDraft({ ...draft, gender: v })} />
+        </Field>
+        <Field label="Birthdate">
+          <TextInput value={draft.birthdate} onChange={(v) => setDraft({ ...draft, birthdate: v })} />
+        </Field>
       </div>
       <div className="mt-4">
-        <FormSubmit busy={writes.busy}>Save the profile</FormSubmit>
+        <Button type="submit" busy={writes.busy} busyLabel="Working…">Save the profile</Button>
       </div>
     </form>
   );
@@ -208,17 +232,23 @@ function RoleForm({
         What this person may do everywhere. Owner and admin can reach this
         console; owner alone can roll a deployment back.
       </p>
-      <div className="mt-3 flex flex-wrap items-end gap-2">
-        <UiField label="Role">
-          <Select ariaLabel="Cluster role" value={role} onChange={setRole}>
-            {ROLES.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </Select>
-        </UiField>
-        <FormSubmit busy={writes.busy || role === current}>Apply the role</FormSubmit>
+      <div className="mt-3">
+        <FormRow>
+          <Field label="Role">
+            <Select ariaLabel="Cluster role" value={role} onChange={setRole}>
+              {ROLES.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <FormActions>
+            <Button type="submit" busy={writes.busy || role === current} busyLabel="Working…">
+              Apply the role
+            </Button>
+          </FormActions>
+        </FormRow>
       </div>
     </form>
   );
@@ -260,7 +290,7 @@ function SuspensionForm({
             This account is suspended{reasonSuffix(person)}. It cannot sign in.
           </p>
           <div className="mt-3">
-            <FormSubmit busy={writes.busy}>Reinstate the account</FormSubmit>
+            <Button type="submit" busy={writes.busy} busyLabel="Working…">Reinstate the account</Button>
           </div>
         </>
       ) : (
@@ -269,11 +299,17 @@ function SuspensionForm({
             Suspending stops this person signing in. Existing tokens are a
             separate matter — revoke them under Tokens.
           </p>
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <Field label="Reason" value={reason} onChange={setReason} />
-            <FormSubmit busy={writes.busy} tone="danger">
-              Suspend the account
-            </FormSubmit>
+          <div className="mt-3">
+            <FormRow>
+              <Field label="Reason" grow>
+                <TextInput value={reason} onChange={setReason} />
+              </Field>
+              <FormActions>
+                <Button type="submit" tone="danger" busy={writes.busy} busyLabel="Working…">
+                  Suspend the account
+                </Button>
+              </FormActions>
+            </FormRow>
           </div>
         </>
       )}
@@ -352,21 +388,27 @@ function EnrolmentForm({ person, writes }: { person: Row; writes: WriteState }):
         needed. It authorizes that one action and nothing else, and it is spent
         the moment the passkey is created.
       </p>
-      <div className="mt-3 flex flex-wrap items-end gap-2">
-        <UiField label="Valid for">
-          <Select
-            ariaLabel="Enrolment link lifetime"
-            value={String(seconds)}
-            onChange={(next) => setSeconds(Number(next))}
-          >
-            {ENROLMENT_TTLS.map((option) => (
-              <option key={option.seconds} value={String(option.seconds)}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </UiField>
-        <FormSubmit busy={writes.busy}>Issue a link</FormSubmit>
+      <div className="mt-3">
+        <FormRow>
+          <Field label="Valid for">
+            <Select
+              ariaLabel="Enrolment link lifetime"
+              value={String(seconds)}
+              onChange={(next) => setSeconds(Number(next))}
+            >
+              {ENROLMENT_TTLS.map((option) => (
+                <option key={option.seconds} value={String(option.seconds)}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <FormActions>
+            <Button type="submit" busy={writes.busy} busyLabel="Working…">
+              Issue a link
+            </Button>
+          </FormActions>
+        </FormRow>
       </div>
       {minted === "" ? null : <MintedEnrolmentLink url={minted} onDismiss={() => setMinted("")} />}
     </form>
@@ -445,7 +487,7 @@ function RecoveryKeyForm({ person, writes }: { person: Row; writes: WriteState }
         you a new one.
       </p>
       <div className="mt-3">
-        <FormSubmit busy={writes.busy}>Rotate the key</FormSubmit>
+        <Button type="submit" busy={writes.busy} busyLabel="Working…">Rotate the key</Button>
       </div>
       {minted === "" ? null : <MintedRecoveryKey value={minted} onDismiss={() => setMinted("")} />}
     </form>
@@ -477,37 +519,3 @@ function reasonSuffix(person: Row): string {
   return reason === "" ? "" : `: ${reason}`;
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-}): ReactNode {
-  return (
-    <UiField label={label}>
-      <TextInput value={value} onChange={onChange} />
-    </UiField>
-  );
-}
-
-// A submit button in the toolbar idiom, local to these forms: type="submit"
-// so Enter works, busy label spelled once. The exported naming is retired --
-// SettingsPage composes ui/Button directly now (memql#4181).
-function FormSubmit({
-  busy,
-  tone = "quiet",
-  children,
-}: {
-  busy: boolean;
-  tone?: "quiet" | "danger";
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <Button type="submit" size="xs" tone={tone} busy={busy} busyLabel="Working…">
-      {children}
-    </Button>
-  );
-}
