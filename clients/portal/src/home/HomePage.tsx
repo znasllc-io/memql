@@ -6,6 +6,7 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { Band, Container, DataText, PageHeader, Skeleton } from "../ui";
 import { payloadOf, useConceptTile, type HomeTileState } from "./useHomeTiles";
+import { viewPath } from "../views/urls";
 
 // The console (memql#4182, memql#4263): "is my cluster healthy and what
 // changed", answerable in five seconds. It is a ROUTER, not a
@@ -14,10 +15,9 @@ import { payloadOf, useConceptTile, type HomeTileState } from "./useHomeTiles";
 // data), and there is no charting here beyond what the surfaces themselves
 // already render.
 //
-// The tiles are one per POPULATION the rail offers -- people, agents,
-// customers, deployables -- plus the two that TICK: deployments and the audit
-// trail.
-// Customers was missing while being one of the five predefined views, which is
+// The tiles are one per POPULATION the rail offers -- users, agents, accounts,
+// deployables -- plus the two that TICK: deployments and the audit trail.
+// Accounts was missing while being one of the five predefined views, which is
 // exactly the kind of gap a console exists to close.
 //
 // Deploy facts (engine version, sync) come from the deploy console and are
@@ -30,9 +30,9 @@ export function HomePage(): ReactNode {
   const { status } = useCluster();
   const deploy = useDeployConsole();
 
-  const people = useConceptTile("v1:identity:user", false, 0);
+  const users = useConceptTile("v1:identity:user", false, 0);
   const agents = useConceptTile("v1:agents:agent", false, 0);
-  const customers = useConceptTile("v1:identity:account", false, 0);
+  const accounts = useConceptTile("v1:identity:account", false, 0);
   const deployables = useConceptTile("v1:platform:site", false, 0);
   const deployments = useConceptTile("v1:cluster:deployment", true, 3);
   // The audit trail is the tile that TICKS: security-relevant events land
@@ -61,18 +61,18 @@ export function HomePage(): ReactNode {
         />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <NumberTile label="people" to="/views/people" tile={people} />
-          <NumberTile label="agents" to="/views/agents" tile={agents} />
-          <NumberTile label="customers" to="/views/customers" tile={customers} />
+          <NumberTile label="users" to={viewPath("users")} tile={users} />
+          <NumberTile label="agents" to={viewPath("agents")} tile={agents} />
+          <NumberTile label="accounts" to={viewPath("accounts")} tile={accounts} />
           <NumberTile label="deployables" to="/deployables" tile={deployables} />
-          <NumberTile label="deployments" to="/views/deployments" tile={deployments} />
-          <NumberTile label="audit events" to="/views/audit" tile={audit} live />
+          <NumberTile label="deployments" to={viewPath("deployments")} tile={deployments} />
+          <NumberTile label="audit events" to={viewPath("audit")} tile={audit} live />
         </div>
 
         <Band title="Recent deployments" meta="live">
           <RecentList
             tile={deployments}
-            to="/views/deployments"
+            to={viewPath("deployments")}
             renderRow={(row) => {
               const p = payloadOf(row);
               return (
@@ -90,7 +90,7 @@ export function HomePage(): ReactNode {
         <Band title="Recent audit events" meta="live">
           <RecentList
             tile={audit}
-            to="/views/audit"
+            to={viewPath("audit")}
             renderRow={(row) => {
               const p = payloadOf(row);
               return (

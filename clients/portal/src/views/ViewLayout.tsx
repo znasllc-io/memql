@@ -37,7 +37,7 @@ import { viewPath } from "./urls";
 // than tidy: ViewPage owns the keyset walk so the frame's header can state
 // how much of it is loaded, and so opening a row re-renders the body without
 // restarting paging. Same reason ConceptPage owns the browser's walk. A view
-// that needs a SECOND population (People's sessions, Agents' grants) fetches
+// that needs a SECOND population (Users' sessions, Agents' grants) fetches
 // that one itself -- it is the view's own composition choice, and no shared
 // chrome reports on it.
 export interface ViewProps {

@@ -782,11 +782,11 @@ rather than 404 -- an operator with either bookmarked did nothing wrong:
   readings it carried that the console does not -- which key is signing, when
   it last rotated, the registration policy -- are on Signing keys and Cluster
   settings, where they were already rendered.
-- **`/admin/people`** was the CHANGE surface for one person, beside a People
-  *view* listing the same population. The list was always the view's job, so
-  the four things an owner or admin does to a person -- profile, cluster role,
-  suspension, enrolment link -- moved onto that view's row detail, and
-  `/admin/people` sends you to `/views/people`.
+- **`/admin/people`** was the CHANGE surface for one person, beside a *view*
+  listing the same population (People then, **Users** since memql#4526). The
+  list was always the view's job, so the four things an owner or admin does to
+  a person -- profile, cluster role, suspension, enrolment link -- moved onto
+  that view's row detail, and `/admin/people` sends you to `/views/users`.
 
 Putting those verbs on the view does not break the contract that makes the
 predefined views work for a concept nobody designed for: the view BODY still
@@ -846,7 +846,7 @@ version already running.
 
 ### Inviting somebody
 
-An owner or admin invites a person from the **People view's** header, not from a
+An owner or admin invites a person from the **Users view's** header, not from a
 separate screen (memql#4272). The dialog states what an invitation MEANS on this
 cluster, because that depends on the registration mode and an operator who does
 not know which case they are in will misread the result:

@@ -82,9 +82,9 @@ interface NavItem {
 }
 
 const VIEW_ICONS: Record<string, NavItem["icon"]> = {
-  people: Users,
+  users: Users,
   agents: Bot,
-  customers: Building2,
+  accounts: Building2,
   deployments: Rocket,
   audit: ScrollText,
 };
@@ -108,10 +108,10 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
 //
 // What this replaced was Operate / Explore / Administer, and it was wrong in a
 // specific way: "Administer" is where a person goes looking to ADD someone, so
-// People appeared twice -- once as the population under Operate and again as
-// the change surface under Administer -- with the "By role" band rendering in
-// both, and a third time on the admin overview. Two doors to one thing is a
-// question an operator has to answer before they can work.
+// the user population appeared twice -- once as the population under Operate
+// and again as the change surface under Administer -- with the "By role" band
+// rendering in both, and a third time on the admin overview. Two doors to one
+// thing is a question an operator has to answer before they can work.
 //
 // "Views" is also the composer's own word (it saves v1:portalviews:view rows
 // and calls them saved views), so the rail, the composer and the concept now
@@ -190,9 +190,9 @@ const LIBRARY: readonly NavItem[] = [
 // five destinations bought nothing except a landing page that duplicated the
 // console.
 const CLUSTER: readonly NavItem[] = [{ to: "/integrations", label: "Integrations", icon: Plug }];
-// People is NOT here. It is one of the views, and the verbs an admin needs
-// live on the row detail there (memql#4264) -- which is what removed the
-// second door.
+// The user population is NOT here. It is one of the views, and the verbs an
+// admin needs live on the row detail there (memql#4264) -- which is what
+// removed the second door.
 const CLUSTER_ADMIN: readonly NavItem[] = [
   // What this cluster owns, mirrors and pushes out (epic memql#4378). In the
   // ADMIN half of Cluster because every read and every action behind it is

@@ -11,7 +11,7 @@ import type { DeployConsoleState } from "./useDeployConsole";
 // It renders inside the Deployments view's Ship band, but it cannot live in
 // src/views/: portal_view_composition_test.go forbids iteration there and the
 // guard is right to. This module is the same shape src/people/PersonActions.tsx
-// took for the People view's verbs -- the view supplies the slot, the verbs
+// took for the Users view's verbs -- the view supplies the slot, the verbs
 // live outside it.
 //
 // # What consolidating actually fixed

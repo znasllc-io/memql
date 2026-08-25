@@ -278,16 +278,16 @@ describe("the nav rail", () => {
   // The rail's groups (memql#4264, a fourth added by memql#4343). The names
   // are the decision: the DATA as screens, the SUBSTRATE those screens are
   // made of, the operator's own MATERIAL, and the CLUSTER itself. What #4264
-  // replaced -- Operate / Explore / Administer -- put People in two groups at
-  // once, which is the shape being asserted against here.
+  // replaced -- Operate / Explore / Administer -- put the user population in
+  // two groups at once, which is the shape being asserted against here.
   it("groups the views, the substrate, the library, and the cluster", async () => {
-    renderView({}, "/views/people");
+    renderView({}, "/views/users");
     const nav = screen.getByRole("navigation", { name: "Portal sections" });
     await waitFor(() => expect(within(nav).getByText("Views")).toBeTruthy());
     for (const group of ["Custom", "Build", "Library", "Cluster"]) {
       expect(within(nav).getByText(group)).toBeTruthy();
     }
-    for (const label of ["People", "Agents", "Customers", "Deployments", "Audit"]) {
+    for (const label of ["Users", "Agents", "Accounts", "Deployments", "Audit"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
     }
     expect(within(nav).getByRole("link", { name: "Concepts" })).toBeTruthy();
@@ -296,9 +296,9 @@ describe("the nav rail", () => {
     // no saved views still has somewhere to start.
     expect(within(nav).getByRole("link", { name: "New view" })).toBeTruthy();
 
-    // People appears ONCE. The duplicate was the whole reason for this change:
+    // Users appears ONCE. The duplicate was the whole reason for this change:
     // the population under one group and the change surface under another.
-    expect(within(nav).getAllByRole("link", { name: "People" })).toHaveLength(1);
+    expect(within(nav).getAllByRole("link", { name: "Users" })).toHaveLength(1);
 
     // Artifacts MOVED out of Cluster into Library rather than being listed in
     // both -- the same duplicate-door failure, one group over (memql#4343).
@@ -313,9 +313,9 @@ describe("the nav rail", () => {
   });
 });
 
-describe("the People view", () => {
+describe("the Users view", () => {
   it("opens on a count, divides by role, and rolls out as a table", async () => {
-    const { container } = renderView({}, "/views/people");
+    const { container } = renderView({}, "/views/users");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
 
     // The eyebrow names the concept the page is about -- the one thing that
@@ -330,7 +330,7 @@ describe("the People view", () => {
     // Band order is the grammar: reading, then shape, then roll.
     // Band order is the grammar: reading, then shape, then roll. "Invited" is
     // an administrative addendum (memql#4272) and sits AFTER all three -- the
-    // operator came to look at people, not at who is on their way in.
+    // operator came to look at users, not at who is on their way in.
     expect(bandTitles()).toEqual(["By role", "Everyone", "Open sessions", "Invited"]);
 
     // The rail divides on role, which is what this view designed for -- not
@@ -340,7 +340,7 @@ describe("the People view", () => {
   });
 
   it("shows the row count and never a summed revocation epoch", async () => {
-    renderView({}, "/views/people");
+    renderView({}, "/views/users");
     await waitFor(() => expect(screen.getByText("user rows")).toBeTruthy());
     // The stat strip declines the measure slot: the only number on a user row
     // is revocationEpoch, and its total is a true, meaningless figure.
@@ -348,13 +348,54 @@ describe("the People view", () => {
   });
 
   it("opens a row's detail in a dialog, from the URL", async () => {
-    renderView({}, "/views/people/rows/user-1");
+    renderView({}, "/views/users/rows/user-1");
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
     // The dialog preserves the wire's nesting, exactly as the concept
     // browser's pane does -- it is literally the same RowDetail.
     await waitFor(() => expect(within(screen.getByRole("dialog")).getByText("payload")).toBeTruthy());
     expect(screen.getByRole("dialog").className).toContain("max-w-2xl");
     expect(screen.queryByRole("complementary")).toBeNull();
+  });
+});
+
+// The addresses these two views used to have (memql#4526). people -> users and
+// customers -> accounts, tail included.
+//
+// These are worth their own tests rather than a glance at the route table for
+// one specific reason, spelled out in RetiredViewRedirect's header: React
+// Router scores a static segment above a dynamic one but PENALISES a splat, so
+// the obvious `views/people/*` spelling loses to `views/:viewId/rows/:rowId`
+// and a bookmarked ROW lands on "No such view" while the diff looks correct.
+// The row cases below are the ones that would catch it.
+describe("the retired view slugs", () => {
+  it("sends /views/people to the Users view", async () => {
+    renderView({}, "/views/people");
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
+    expect(screen.getByText(USER)).toBeTruthy();
+    expect(screen.queryByText(/has no view called/)).toBeNull();
+  });
+
+  it("sends /views/customers to the Accounts view", async () => {
+    renderView({}, "/views/customers");
+    await waitFor(() => expect(screen.getByText("Northwind Trading")).toBeTruthy());
+    expect(screen.getByText(ACCOUNT)).toBeTruthy();
+    expect(screen.queryByText(/has no view called/)).toBeNull();
+  });
+
+  it("carries the row segment, so a deep bookmark still opens its row", async () => {
+    renderView({}, "/views/people/rows/user-1");
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByText("payload")).toBeTruthy(),
+    );
+  });
+
+  it("carries it on the accounts slug too", async () => {
+    renderView({}, "/views/customers/rows/account-1");
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByText("payload")).toBeTruthy(),
+    );
   });
 });
 
@@ -393,9 +434,9 @@ describe("the Agents view", () => {
   });
 });
 
-describe("the Customers view", () => {
+describe("the Accounts view", () => {
   it("divides on the lifecycle the concept itself declares", async () => {
-    renderView({}, "/views/customers");
+    renderView({}, "/views/accounts");
     await waitFor(() => expect(screen.getByText("Northwind Trading")).toBeTruthy());
     // No binding names `status` in the view: the concept declares it as its
     // display-card status slot and the rail prefers whatever that is.
@@ -404,7 +445,7 @@ describe("the Customers view", () => {
   });
 
   it("says which concept is missing rather than showing an empty ledger", async () => {
-    renderView({ without: ACCOUNT }, "/views/customers");
+    renderView({ without: ACCOUNT }, "/views/accounts");
     await waitFor(() =>
       expect(screen.getByText(/publishes no concept called/)).toBeTruthy(),
     );
@@ -539,7 +580,7 @@ describe("light and dark", () => {
   it("stamps the operator's chosen theme onto the chart palette", async () => {
     document.documentElement.setAttribute("data-theme", "dark");
     try {
-      const { container } = renderView({}, "/views/people");
+      const { container } = renderView({}, "/views/users");
       await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
       const figure = container.querySelector(".vk-chart-figure");
       expect(figure?.getAttribute("data-vk-theme")).toBe("dark");
@@ -551,7 +592,7 @@ describe("light and dark", () => {
   it("stamps light when that is what is on screen", async () => {
     document.documentElement.setAttribute("data-theme", "light");
     try {
-      const { container } = renderView({}, "/views/people");
+      const { container } = renderView({}, "/views/users");
       await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
       const figure = container.querySelector(".vk-chart-figure");
       expect(figure?.getAttribute("data-vk-theme")).toBe("light");

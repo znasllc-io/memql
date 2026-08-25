@@ -13,11 +13,11 @@ import { TokensPage } from "./TokensPage";
 // The absorbed /admin/* surfaces (memql#3324).
 //
 // The server-rendered templ console carried seven screens. Audit and
-// deployments are predefined views already (memql#3319), and so is the People
+// deployments are predefined views already (memql#3319), and so is the USER
 // POPULATION -- what lands here is the remainder plus the CHANGE surface for a
 // person: the overview, people, sessions and tokens, the signing keys, and the
-// cluster settings. (Why an admin People surface exists beside the People
-// view: see the note at the top of PeoplePage.tsx.)
+// cluster settings. (Why an admin people surface existed beside the Users
+// view: see the note at the top of src/people/PersonActions.tsx.)
 //
 // Mounted from the route table as a SPLAT (`admin/*`), so these arrive as
 // sub-routes of this module without touching the shared table again. Adding a
@@ -48,7 +48,11 @@ export function AdminRoutes(): ReactNode {
           Not Found would read as "the capability is gone" when it moved.
           `replace` so Back does not bounce them straight here again. */}
       <Route index element={<Navigate to="/" replace />} />
-      <Route path="people" element={<Navigate to={viewPath("people")} replace />} />
+      {/* /admin/people predates memql#4526, when the view it points at was
+          still called People. The OLD address is kept and RETARGETED rather
+          than renamed: the bookmark somebody holds says /admin/people, and it
+          should land on the population wherever the population now lives. */}
+      <Route path="people" element={<Navigate to={viewPath("users")} replace />} />
       <Route path="tokens" element={<TokensPage />} />
       <Route path="keys" element={<KeysPage />} />
       <Route path="settings" element={<SettingsPage />} />

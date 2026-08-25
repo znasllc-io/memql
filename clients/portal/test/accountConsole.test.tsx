@@ -154,7 +154,7 @@ function renderConsole(opts: { mintFails?: boolean } = {}) {
   ) as unknown as typeof Connection.dial;
 
   const utils = render(
-    <MemoryRouter initialEntries={["/views/customers/rows/acct-1"]}>
+    <MemoryRouter initialEntries={["/views/accounts/rows/acct-1"]}>
       <AuthProvider
         config={AUTH_DISABLED_CLUSTER}
         fetchImpl={async () => {
@@ -342,7 +342,7 @@ describe("the account console", () => {
     ) as unknown as typeof Connection.dial;
 
     render(
-      <MemoryRouter initialEntries={["/views/customers"]}>
+      <MemoryRouter initialEntries={["/views/accounts"]}>
         <AuthProvider
           config={AUTH_DISABLED_CLUSTER}
           fetchImpl={async () => {
@@ -359,7 +359,7 @@ describe("the account console", () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText(/can read customers but not change them/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/can read accounts but not change them/)).toBeTruthy());
     expect(screen.queryByRole("button", { name: "New customer" })).toBeNull();
   });
 });

@@ -28,7 +28,14 @@ import {
   CONCEPT_ROW_CHILD_PATTERN,
   CONCEPT_SCHEMA_CHILD_PATTERN,
 } from "../concepts/urls";
-import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN, viewPath } from "../views/urls";
+import { RetiredViewRedirect } from "../views/RetiredViewRedirect";
+import {
+  RETIRED_VIEW_IDS,
+  VIEWS_ROUTE_SEGMENT,
+  VIEW_ROUTE_PATTERN,
+  VIEW_ROW_CHILD_PATTERN,
+  viewPath,
+} from "../views/urls";
 import { DATA_ORIGINS_ROUTE_PATTERN } from "../dataorigins/urls";
 
 // The route table.
@@ -122,6 +129,24 @@ export function AppRoutes(): ReactNode {
           <Route index element={<HomePage />} />
           <Route path={VIEW_ROUTE_PATTERN} element={<ViewPage />} />
           <Route path={`${VIEW_ROUTE_PATTERN}/${VIEW_ROW_CHILD_PATTERN}`} element={<ViewPage />} />
+          {/* Renamed in memql#4526: the two directory views took their
+              concepts' names, so /views/people and /views/customers point at
+              /views/users and /views/accounts. Declared per DEPTH rather than
+              as a splat -- RetiredViewRedirect's header has the router-ranking
+              reason, and it is the kind of thing that looks right in a diff
+              and sends a bookmarked row to "No such view". */}
+          {Object.entries(RETIRED_VIEW_IDS).flatMap(([from, to]) => [
+            <Route
+              key={from}
+              path={`${VIEWS_ROUTE_SEGMENT}/${from}`}
+              element={<RetiredViewRedirect to={to} />}
+            />,
+            <Route
+              key={`${from}/rows`}
+              path={`${VIEWS_ROUTE_SEGMENT}/${from}/${VIEW_ROW_CHILD_PATTERN}`}
+              element={<RetiredViewRedirect to={to} />}
+            />,
+          ])}
           <Route path={CONCEPTS_ROUTE_PATTERN} element={<ConceptsPage />} />
           <Route path={CONCEPT_ROUTE_PATTERN} element={<ConceptPage />}>
             <Route index element={<ConceptRowsPane />} />

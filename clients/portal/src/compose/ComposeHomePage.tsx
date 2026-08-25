@@ -16,7 +16,7 @@ import { useSavedViews } from "./useSavedViews";
 // THE PICKER LISTS EVERY CONCEPT THE CLUSTER PUBLISHES, and it does not filter
 // out the five that have a designed view -- it MARKS them. "No predefined
 // view" is the case the issue is about, but it is not a prohibition: somebody
-// who wants their own arrangement of the people list should have it, and a
+// who wants their own arrangement of the user list should have it, and a
 // picker that silently omitted five concepts would be lying about what the
 // cluster carries. The predefined set is read from the view registry rather
 // than restated here, so the mark cannot go stale.

@@ -123,7 +123,7 @@ Three things, all of them real:
 | Writes | `mutation createAccountTokenIdentity` / `revokeAccountTokenIdentity` |
 | Wire | `CreateAccountTokenMsg` / `RevokeAccountTokenMsg` on `MemqlService.Stream` |
 | Handlers | `component/grpc/account_token_handlers.go` |
-| UI | the portal's Customers view (`clients/portal/src/accounts/`) |
+| UI | the portal's Accounts view (`clients/portal/src/accounts/`) |
 
 ### 5.1 Why the mint is a gRPC envelope and the rest is not
 
@@ -195,9 +195,9 @@ Neither the plaintext nor the digest ever appears in an audit event.
 
 ## 8. Operator recipes
 
-**Issue a credential.** Customers view -> select the customer -> *Issue token*.
+**Issue a credential.** Accounts view -> select the account -> *Issue token*.
 Name it after the thing that will hold it ("Acme nightly export"), not after the
-customer -- the list is already grouped by customer, and a list of four
+account -- the list is already grouped by account, and a list of four
 credentials all called "Acme" cannot be revoked with confidence.
 
 **Copy it now.** The plaintext is shown once. There is no "show again": the

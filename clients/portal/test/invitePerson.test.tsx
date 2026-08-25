@@ -1,4 +1,4 @@
-// Inviting somebody into the cluster, from the People view (memql#4270,
+// Inviting somebody into the cluster, from the Users view (memql#4270,
 // memql#4272).
 //
 // The behaviour that matters here is the COPY: "invite" means four different

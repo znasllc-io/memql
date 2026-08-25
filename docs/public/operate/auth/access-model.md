@@ -405,7 +405,7 @@ folded.
 
 **It gates nothing.** It drives copy: a warning on `/me` and `/me/settings`,
 a note on `/login` when a matching address is typed, and a field the
-portal's People view renders like any other. The user or an admin can set
+portal's Users view renders like any other. The user or an admin can set
 or clear it; every change is audited `shared_mailbox_changed{by, from, to}`.
 
 The heuristic is a guess, and both directions of correction matter: `info@`

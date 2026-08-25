@@ -7,7 +7,7 @@
 // Every concept in the tree already renders, generically, in the concept
 // browser -- that is memql#3316 + #3317 + #3318, and it is the property the
 // whole epic protects. These five are the ones an OPERATOR LIVES IN: the
-// people in their organisation, the agents doing work, the customers they
+// users in their organisation, the agents doing work, the accounts they
 // serve, what is deployed, and what happened. A generic rendering is the
 // correct answer for a concept nobody has thought about; it is the wrong
 // answer for the five screens that decide what the product feels like.
@@ -47,7 +47,7 @@
 //
 // This module is DATA ONLY -- ids, addresses, titles and prose. Each view's
 // composition lives in its own module, because the five genuinely differ:
-// People carries two populations, Deployments carries a control panel and row
+// Users carries two populations, Deployments carries a control panel and row
 // sets that are not concept rows at all, Audit is an append-only log.
 
 // A view's group in the nav rail. Two groups, not one flat list: the
@@ -59,12 +59,30 @@ export type ViewGroup = "operate";
 export interface ViewDefinition {
   // The URL slug. Short, lower-case, and chosen here -- never a concept id.
   readonly id: string;
-  // The nav label. What the operator calls the population, not what the
-  // schema calls it: "People", not "user".
+  // The nav label. IT NAMES THE CONCEPT (owner decision, 2026-08-25).
+  //
+  // This REVERSES the rule that stood here before -- "what the operator calls
+  // the population, not what the schema calls it: 'People', not 'user'" -- and
+  // the old argument is deleted rather than left standing beside its
+  // replacement, because a reversed decision whose case is still written down
+  // reads as the live one to the next person.
+  //
+  // What the reversal buys: one noun per population across the whole product.
+  // A console whose rail says "People", whose concept browser says
+  // `v1:identity:user` and whose audit rows say `user` asks the reader to
+  // carry a translation table between three surfaces of one product, and the
+  // table is invisible -- so the first time it matters is the moment somebody
+  // cannot find the population they are already looking at. The label is the
+  // concept's own noun, pluralised: Users, Accounts.
+  //
+  // What it does NOT license is renaming a CONCEPT to suit a label, or
+  // dropping the prose that explains a concept whose name is not
+  // self-evident: the Accounts blurb still has to say what an account is,
+  // because the word alone does not.
   readonly label: string;
   readonly group: ViewGroup;
   // The concept whose rows this view is primarily about. A view may read
-  // OTHER concepts too (People also reads sessions); this is the one its
+  // OTHER concepts too (Users also reads sessions); this is the one its
   // header, its walk and its row-detail address are keyed on.
   readonly conceptId: string;
   // The page heading. Usually the label; separate because a heading can
@@ -79,11 +97,11 @@ export interface ViewDefinition {
 
 export const VIEWS: readonly ViewDefinition[] = [
   {
-    id: "people",
-    label: "People",
+    id: "users",
+    label: "Users",
     group: "operate",
     conceptId: "v1:identity:user",
-    title: "People",
+    title: "Users",
     blurb:
       "Everyone who can sign in to this cluster, the role each of them holds, " +
       "and the sessions currently open in their name.",
@@ -99,11 +117,11 @@ export const VIEWS: readonly ViewDefinition[] = [
       "authorizations people have granted them.",
   },
   {
-    id: "customers",
-    label: "Customers",
+    id: "accounts",
+    label: "Accounts",
     group: "operate",
     conceptId: "v1:identity:account",
-    title: "Customers",
+    title: "Accounts",
     blurb:
       "The businesses you run MemQL for. An account is your record of a " +
       "customer -- it holds no credential and nothing signs in as one.",

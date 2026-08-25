@@ -22,13 +22,13 @@ import {
   type AccountConsoleState,
 } from "./useAccountConsole";
 
-// Managing the customers an operator serves (memql#3322): create, edit,
+// Managing the accounts an operator serves (memql#3322): create, edit,
 // archive, and issue or revoke their credentials.
 //
 // ===========================================================================
 // WHY THIS LIVES IN src/accounts/ AND NOT IN src/views/
 // ===========================================================================
-// The Customers VIEW (memql#3319) reads a population and lays it out, and
+// The Accounts VIEW (memql#3319) reads a population and lays it out, and
 // portal_view_composition_test.go holds it to that: no row markup, no
 // iteration. Management is a different job -- forms, a confirmation, a
 // one-time secret -- and pretending otherwise would either bend the guard or
@@ -66,7 +66,7 @@ export function AccountConsole({
     return (
       <p className="text-sm text-muted">
         Your role is <span className="font-medium text-fg">{console.role || "unknown"}</span>, which
-        can read customers but not change them. Managing customers needs writer, admin or owner.
+        can read accounts but not change them. Managing accounts needs writer, admin or owner.
       </p>
     );
   }
@@ -84,8 +84,8 @@ export function AccountConsole({
 
       {creating ? (
         <AccountForm
-          heading="New customer"
-          submitLabel="Create customer"
+          heading="New account"
+          submitLabel="Create account"
           initial={EMPTY_DRAFT}
           busy={console.busy}
           onSubmit={(draft) => {
@@ -97,24 +97,24 @@ export function AccountConsole({
       ) : (
         <div>
           <Button onClick={() => setCreating(true)} disabled={console.busy}>
-            New customer
+            New account
           </Button>
         </div>
       )}
 
       {console.selected ? (
-        <SelectedCustomer selected={console.selected} state={console} concept={concept} />
+        <SelectedAccount selected={console.selected} state={console} concept={concept} />
       ) : (
         <p className="text-sm text-muted">
-          Select a customer above to edit it, archive it, or manage its credentials.
+          Select an account above to edit it, archive it, or manage its credentials.
         </p>
       )}
     </div>
   );
 }
 
-// The selected customer's edit form, archive control and credential panel.
-function SelectedCustomer({
+// The selected account's edit form, archive control and credential panel.
+function SelectedAccount({
   selected,
   state,
   concept,
@@ -125,7 +125,7 @@ function SelectedCustomer({
 }): ReactNode {
   const [editing, setEditing] = useState(false);
 
-  // Leave edit mode when the operator picks a different customer. Without
+  // Leave edit mode when the operator picks a different account. Without
   // this, an open form silently re-points at the new selection and the next
   // save writes edits to a row the operator was not looking at.
   useEffect(() => {
@@ -154,7 +154,7 @@ function SelectedCustomer({
             <Button
               onClick={() => state.archive()}
               disabled={state.busy || archived}
-              title={archived ? "Already archived" : "Archive this customer"}
+              title={archived ? "Already archived" : "Archive this account"}
             >
               {archived ? "Archived" : "Archive"}
             </Button>
@@ -164,7 +164,7 @@ function SelectedCustomer({
 
       {editing ? (
         <AccountForm
-          heading="Edit customer"
+          heading="Edit account"
           submitLabel="Save changes"
           initial={{
             name: selected.name,
@@ -204,8 +204,8 @@ function TokenPanel({
       <div>
         <h4 className="text-sm font-semibold">Credentials</h4>
         <p className="mt-1 text-xs text-muted">
-          Issued to you, on behalf of this customer. Nothing signs in as a customer — the
-          credential’s subject is your own user, and the customer is a binding on it. Revoked
+          Issued to you, on behalf of this account. Nothing signs in as an account — the
+          credential’s subject is your own user, and the account is a binding on it. Revoked
           credentials are kept in the list rather than removed, so an audit can see they existed.
         </p>
       </div>
@@ -269,7 +269,7 @@ function RevokeControl({ state }: { state: AccountConsoleState }): ReactNode {
   if (live === 0) {
     return (
       <p className="text-xs text-muted">
-        No live credentials for this customer.
+        No live credentials for this account.
       </p>
     );
   }
@@ -338,7 +338,7 @@ function MintedToken({
       </code>
       <p className="text-xs text-muted">
         Authenticates as <DataText kind="id">{subjectUserId}</DataText> — your user, bound to
-        this customer.
+        this account.
       </p>
       <div>
         <Button onClick={onDismiss}>I have copied it</Button>
