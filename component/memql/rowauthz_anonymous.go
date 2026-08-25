@@ -58,6 +58,26 @@ import (
 //     caller who was refused, and it makes an unauthenticated visitor a
 //     free way to run arbitrary reads against the database for their side
 //     effects on load. The plan refusal makes it an error before the read.
+//
+// # It must run BEFORE the result cache, and it does
+//
+// Checked against the cache that landed default-on in epic memql#4530, not
+// assumed: `Execute` calls this at engine.go's row-authz block, and
+// `planCacheSignature` / `cacheKey` are ~60 lines further down. The order
+// matters because a plan over an UNDECLARED concept references no actor, so
+// `planReferencesActor` is false and its result is cached under a key with
+// NO actor dimension -- shared across every caller by design, which is
+// correct for the authenticated callers that key was built for. If the
+// lookup ran first, an anonymous caller would be handed an authenticated
+// caller's cached rows for a concept they may not read, with the row gate
+// never consulted because no rows were fetched.
+//
+// The public tier itself is safe to share: `rowAuthzAdmits` admits every
+// caller to a public concept, so one cached result is the right answer for
+// anonymous and authenticated readers alike. That is the property that
+// makes public content the best-cached data in the system rather than a
+// hazard -- but it holds only for the tier, which is why the refusal above
+// is what keeps everything else out of reach.
 
 // anonymousAdmission decides a row for an ANONYMOUS actor, and reports
 // whether the caller is anonymous at all.
