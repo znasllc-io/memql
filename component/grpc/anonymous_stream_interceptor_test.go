@@ -76,7 +76,7 @@ func TestAnonymousInterceptorIsInertWhenDisabled(t *testing.T) {
 	}
 
 	in := NewAnonymousStreamInterceptor(base, false, nil)
-	err := in(nil, &fakeAnonStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/m/Stream"}, nil)
+	err := in(nil, &fakeAnonStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: memqlv1.MemqlService_Stream_FullMethodName}, nil)
 
 	assert.NoError(t, err)
 	assert.True(t, reached, "the base chain was not reached -- with public reads off this interceptor must be a pass-through")
@@ -103,7 +103,7 @@ func TestAnonymousInterceptorIgnoresStreamsCarryingACredential(t *testing.T) {
 		}
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 		in := NewAnonymousStreamInterceptor(base, true, nil)
-		if err := in(nil, &fakeAnonStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: "/m/Stream"}, nil); err != nil {
+		if err := in(nil, &fakeAnonStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: memqlv1.MemqlService_Stream_FullMethodName}, nil); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		assert.Truef(t, reachedBase, "%s: the base chain was not reached", name)
@@ -126,7 +126,7 @@ func TestAnonymousInterceptorAdmitsACredentiallessStreamWhenEnabled(t *testing.T
 	}
 
 	in := NewAnonymousStreamInterceptor(base, true, nil)
-	err := in(nil, &fakeAnonStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/m/Stream"}, handler)
+	err := in(nil, &fakeAnonStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: memqlv1.MemqlService_Stream_FullMethodName}, handler)
 
 	assert.NoError(t, err)
 	assert.False(t, reachedBase, "a credential-less stream was handed to the auth chain, which would refuse it")
@@ -150,3 +150,55 @@ type fakeAnonStream struct {
 }
 
 func (f *fakeAnonStream) Context() context.Context { return f.ctx }
+
+// TestAnonymousAdmissionIsScopedToTheMemqlStream is the gate for the hole
+// this interceptor's SHAPE invites.
+//
+// This gRPC server carries WorkerService (agent nodes) and
+// DeployControlService (the identity node) alongside MemqlService, so every
+// interceptor in the chain sees their streams. The surface pin cannot help
+// there: it inspects a *MemqlClientMessage and passes anything else through
+// untouched, which is correct for the voice-agent interceptor it copies --
+// admission there needs a valid signed JWT -- and wrong here, where the
+// premise is admitting a caller who presented nothing.
+//
+// Downstream handlers have their own owner/role gates and RoleAnonymous
+// would fail them. That is not the standard: an interceptor that opens a
+// door to the internet must not rely on somebody else's gate to close it.
+func TestAnonymousAdmissionIsScopedToTheMemqlStream(t *testing.T) {
+	for _, method := range []string{
+		"/znasllc.memql.v1.WorkerService/Stream",
+		"/znasllc.memql.v1.DeployControlService/RequestDeploy",
+		"/znasllc.memql.v1.NodeService/Stream",
+		"/some.other.Service/Method",
+	} {
+		var reachedBase, sawAnonymous bool
+		base := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+			reachedBase = true
+			sawAnonymous = auth.IsAnonymousActor(ss.Context())
+			return nil
+		}
+		in := NewAnonymousStreamInterceptor(base, true, nil)
+		if err := in(nil, &fakeAnonStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: method}, nil); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		assert.Truef(t, reachedBase, "%s: was not handed to the auth chain -- an anonymous caller reached a service this interceptor was not designed for", method)
+		assert.Falsef(t, sawAnonymous, "%s: an anonymous actor was stamped on a non-MemqlService stream", method)
+	}
+
+	// The reachable positive: the one method it IS for still admits, so the
+	// assertions above cannot pass by the feature being switched off.
+	var handlerSawAnonymous bool
+	handler := func(srv any, stream grpc.ServerStream) error {
+		handlerSawAnonymous = auth.IsAnonymousActor(stream.Context())
+		return nil
+	}
+	in := NewAnonymousStreamInterceptor(
+		func(any, grpc.ServerStream, *grpc.StreamServerInfo, grpc.StreamHandler) error { return nil },
+		true, nil)
+	if err := in(nil, &fakeAnonStream{ctx: context.Background()},
+		&grpc.StreamServerInfo{FullMethod: memqlv1.MemqlService_Stream_FullMethodName}, handler); err != nil {
+		t.Fatal(err)
+	}
+	assert.True(t, handlerSawAnonymous, "the MemqlService stream stopped admitting anonymous callers")
+}

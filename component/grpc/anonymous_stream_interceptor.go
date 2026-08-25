@@ -78,7 +78,30 @@ func NewAnonymousStreamInterceptor(base grpc.StreamServerInterceptor, enabled bo
 		if base == nil {
 			return status.Error(codes.Internal, "auth not configured")
 		}
-		if !enabled || streamCarriesCredential(ss.Context()) {
+		// SCOPED TO ONE METHOD, and this is a gate rather than a tidy-up.
+		//
+		// This gRPC server carries more than MemqlService. An agent node
+		// registers WorkerService on it (app/integrations_worker_agent.go)
+		// and the identity node registers DeployControlService
+		// (app/integrations_deploy_control.go), so every interceptor in
+		// this chain sees their streams too.
+		//
+		// The surface pin below cannot help there. It inspects a
+		// *MemqlClientMessage and passes anything else through untouched --
+		// correct for the voice-agent interceptor it is modelled on, whose
+		// admission requires a valid signed JWT, and WRONG here, because
+		// this interceptor's whole premise is admitting a caller who
+		// presented nothing at all. Without this check, a public-reads
+		// cluster would hand an anonymous actor to WorkerService and
+		// DeployControlService handlers with their payloads unexamined.
+		//
+		// So anonymous admission is scoped to the exact method it was
+		// designed for. Everything else goes to `base` and is refused for
+		// having no credential, exactly as it is today. Downstream handlers
+		// have their own owner/role gates and an anonymous actor would fail
+		// them -- but "some later gate would probably catch it" is not the
+		// standard for a door that opens to the internet.
+		if !enabled || info.FullMethod != memqlv1.MemqlService_Stream_FullMethodName || streamCarriesCredential(ss.Context()) {
 			return base(srv, ss, info, handler)
 		}
 
