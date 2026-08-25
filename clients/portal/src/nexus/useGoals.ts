@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, rowString, sameEntityId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useLive } from "../cluster/useLive";
@@ -116,7 +116,8 @@ export function useGoals(): GoalsState {
       // unresolved window safe: v1:planner:plan declares no row-authz tier
       // (memql#4366), so this feed carries other people's plans.
       inScope: (row) =>
-        userIdRef.current !== "" && rowString(row, "requestedBy") === userIdRef.current,
+        // Bare row field against a canonical MyAccess id -- see memql#4581.
+        sameEntityId(rowString(row, "requestedBy"), userIdRef.current),
     }),
   );
 

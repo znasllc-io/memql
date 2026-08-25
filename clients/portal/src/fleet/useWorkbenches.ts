@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, sameEntityId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useLive } from "../cluster/useLive";
@@ -207,7 +207,8 @@ export function useWorkbenches(): WorkbenchesState {
       // scoped server-side on actor.userId.
       inScope: (row) =>
         effectiveScope !== "mine" ||
-        (userIdRef.current !== "" && workspaceFromRow(row).ownerUserId === userIdRef.current),
+        // Bare/canonical split -- memql#4581. Still refuses an empty id.
+        sameEntityId(workspaceFromRow(row).ownerUserId, userIdRef.current),
     }),
   );
 

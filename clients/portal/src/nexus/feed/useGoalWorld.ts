@@ -41,6 +41,8 @@ import { getRowByConceptAndId, type Event, type Row } from "@znasllc-io/memql-sd
 
 import { bumpActivity } from "../../cluster/activity";
 import { useCluster } from "../../cluster/ClusterProvider";
+import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
+
 import { useMyAccess } from "../../cluster/useMyAccess";
 import { eventRowId } from "../../concepts/liveBand";
 import {
@@ -189,7 +191,13 @@ export function useGoalWorld(planId: string): GoalWorldState {
           return;
         }
         const requestedBy = typeof plan["requestedBy"] === "string" ? plan["requestedBy"] : "";
-        if (requestedBy !== myUserId) {
+        // sameEntityId, NOT `!==`. The row's requestedBy arrives BARE (query
+        // data is bare-ified on egress) while MyAccess.userId arrives
+        // CANONICAL (a proto scalar the bare-ifier never walks), so a raw
+        // compare is always unequal and every goal you own reads as someone
+        // else's -- memql#4581, seen in production on a goal created seconds
+        // earlier.
+        if (!sameEntityId(requestedBy, myUserId)) {
           setFeed(EMPTY_FEED);
           setRefused(
             "This goal belongs to someone else. Nexus draws your own goals; " +

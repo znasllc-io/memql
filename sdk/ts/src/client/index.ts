@@ -78,7 +78,7 @@ export {
   type Row,
   type SubscriptionKind,
 } from "./types.js";
-export { newShortId } from "./id.js";
+export { newShortId, bareShortId, sameEntityId } from "./id.js";
 export { renderMemQLValue } from "./memqlValue.js";
 export { deepStripNulls } from "./payload.js";
 export { displayDomainIds, isSyntheticDomainId } from "./domainIds.js";
