@@ -209,13 +209,6 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
-          - path: /artifacts/
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
           - path: /auth/login
             pathType: Prefix
             backend:
