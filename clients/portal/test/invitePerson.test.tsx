@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { modeStatement } from "../src/people/InvitePerson";
+import { deliveryHeading, deliveryStatement, modeStatement } from "../src/people/InvitePerson";
 
 describe("what an invitation MEANS under each registration mode", () => {
   it("says the link is the only way in, under invite_only", () => {
@@ -45,5 +45,60 @@ describe("what an invitation MEANS under each registration mode", () => {
     // who may register is not.
     expect(modeStatement("", "")).toBe("");
     expect(modeStatement("something_new", "")).toBe("");
+  });
+});
+
+// memql#4584 / memql#4585. Issuing an invitation used to mint a link and send
+// nothing, while the button said "Send the invitation" -- so an operator
+// believed a message had gone, never delivered the link, and the invitee
+// waited for an email that did not exist. Now a send happens, and the panel
+// has to say which of three things actually did.
+describe("what the panel says happened to the invitation email", () => {
+  it("names the recipient when the email went, so the operator can stop", () => {
+    expect(deliveryHeading(true, "invitee@example.test")).toBe("Invitation sent to invitee@example.test");
+    const s = deliveryStatement(true, "", "invitee@example.test");
+    expect(s).toMatch(/went to them by email/i);
+    expect(s).toMatch(/do not need to send it yourself/i);
+  });
+
+  it("still says sent when the address is unknown, rather than inventing one", () => {
+    expect(deliveryHeading(true, "")).toBe("Invitation sent");
+  });
+
+  it("says nothing was emailed when no mail is wired, and asks for delivery", () => {
+    const s = deliveryStatement(false, "", "invitee@example.test");
+    expect(s).toMatch(/no mail configured/i);
+    expect(s).toMatch(/send it to them yourself/i);
+    // A configuration statement, NOT an incident: it must not read as a fault.
+    expect(s).not.toMatch(/could not be delivered|failed/i);
+  });
+
+  it("distinguishes a FAILED send from an unconfigured one", () => {
+    const failed = deliveryStatement(false, "graph: 503 unavailable", "invitee@example.test");
+    expect(failed).toMatch(/could not be delivered/i);
+    expect(failed).toMatch(/has not been told/i);
+    // The two must not read alike -- one is "this cluster does not send mail",
+    // the other is "mail is broken right now", and they send an operator to
+    // different places.
+    expect(failed).not.toBe(deliveryStatement(false, "", "invitee@example.test"));
+  });
+
+  it("heads both undelivered cases the same way: copy the link", () => {
+    // Whatever the reason, the operator's next action is identical.
+    expect(deliveryHeading(false, "invitee@example.test")).toMatch(/copy this link now/i);
+    expect(deliveryHeading(false, "")).toMatch(/nothing was emailed/i);
+  });
+
+  it("never claims the invitation failed -- it did not", () => {
+    // The row is written and the link admits somebody in every one of these
+    // states. A panel that said "invitation failed" over a mail fault would
+    // invite the operator to reissue and strand a live credential.
+    for (const s of [
+      deliveryStatement(true, "", "a@b.io"),
+      deliveryStatement(false, "", "a@b.io"),
+      deliveryStatement(false, "graph: 503", "a@b.io"),
+    ]) {
+      expect(s).not.toMatch(/invitation failed|not issued|could not be issued/i);
+    }
   });
 });
