@@ -272,6 +272,72 @@ label under the domain. Certificates are a separate matter from routing: an
 HTTP-01 issuer cannot issue for the wildcard, so without a DNS-01 issuer the
 certificate names exact hosts only. See [front-door.md](front-door.md).
 
+## Resetting an instance
+
+"Start fresh" reads as "rebuild everything". For an **ownership reset** -- you
+are re-testing the take-ownership flow, or handing the instance to a different
+first owner -- it means one thing only:
+
+> **Wipe the database. Leave everything else exactly where it is.**
+
+Ownership lives in `v1:identity:user` rows and the credentials that point at
+them. Dropping the database is what un-claims the instance. Nothing above the
+database records who owns it.
+
+### What an ownership reset must NOT rebuild
+
+| Resource | Why leaving it alone is correct |
+|---|---|
+| The front-door **certificate** | Re-issuing walks into a Let's Encrypt rate limit -- see below. This is the one that bites. |
+| The Azure **substrate** | Resource group, AKS, node pools and identities carry no ownership state. `azure-provision.sh` is idempotent, so re-running it is a slow no-op at best. |
+| The container **registry** | Images are addressed by digest and are not owner-scoped. |
+| The **key vault** | The master key, operator key and signing key are the instance's identity, not the owner's. Rotating them on a reset also invalidates every value already encrypted under the old master key. |
+| **DNS** | The records point at the ingress controller's public IP, which the reset does not move. |
+
+Rebuilding any of these is pure churn. Rebuilding the certificate is worse than
+churn.
+
+### The certificate is rate-limited, and the limit is not visible from here
+
+Let's Encrypt enforces a **duplicate-certificate limit of 5 per exact set of
+names per week**. Every front-door reissue for the same host list spends one.
+A handful of reinstall loops exhausts it, and the instance is then left with
+**no TLS and a multi-day wait** -- an outcome strictly worse than whatever was
+being re-tested.
+
+The trap is that the reinstall loop *feels* cheap and reversible, and for every
+other resource on this page it is. This one resource breaks the pattern in both
+halves: the counter is enforced on Let's Encrypt's side where the operator
+cannot read it, and once exhausted **no action on the operator's side shortens
+the wait**. There is nothing to retry, restart, or escalate.
+
+So: an ownership reset does not touch cert-manager, does not delete the
+`Certificate` or its Secret, and does not delete the namespace those live in.
+If a certificate must genuinely be replaced, change the name set (which starts
+a fresh bucket) rather than reissuing the same one.
+
+### Doing the reset
+
+```bash
+# 1. Scale the mesh down so nothing reconnects mid-wipe.
+kubectl scale deploy -n memql --all --replicas=0
+
+# 2. Drop and recreate the application database. The CNPG Cluster, its PVCs,
+#    and memql-db-app-creds all stay -- only the contents go.
+kubectl exec -n memql memql-db-1 -- psql -U postgres -c \
+  'DROP DATABASE memql WITH (FORCE);'
+kubectl exec -n memql memql-db-1 -- psql -U postgres -c \
+  'CREATE DATABASE memql OWNER memql;'
+
+# 3. Scale back up. Migrations run on startup and the instance comes up
+#    unclaimed, ready for the first owner to take it.
+kubectl scale deploy -n memql --all --replicas=1
+```
+
+Then mint an enrolment or recovery credential for the new first owner exactly as
+on a first install -- the instance is in the same state a fresh one is, because
+the database is the only thing that recorded otherwise.
+
 ## Tearing down
 
 ```bash

@@ -213,6 +213,11 @@ func ScanFiles(files []SourceFile, opts Options) []Violation {
 	// reference crosses a boundary depends on where the referenced name is
 	// declared, which one file cannot answer (memql#3803).
 	out = append(out, scanCrossNamespaceImports(files)...)
+	// The sub-automation gate is corpus-level for the same reason and one more:
+	// whether a callee resolves depends on what is declared ANYWHERE, and
+	// resolving per file would make A-calls-B succeed or fail on directory
+	// order (memql#4471).
+	out = append(out, scanSubAutomationCalls(files)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
