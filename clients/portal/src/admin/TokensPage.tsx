@@ -85,7 +85,7 @@ export function TokensPage(): ReactNode {
             sub="each one signs in as its owner"
           />
           <Reading
-            label="People checked"
+            label="Users checked"
             value={console_.loading ? "…" : String(console_.scanned)}
             sub={
               console_.capped
@@ -129,7 +129,7 @@ export function TokensPage(): ReactNode {
           <p className="p-3 text-sm text-subtle">
             {console_.loading
               ? "Reading tokens…"
-              : "Nothing to show. A person mints one of these from the CLI."}
+              : "Nothing to show. A user mints one of these from the CLI."}
           </p>
         ) : (
           <ViewElement
