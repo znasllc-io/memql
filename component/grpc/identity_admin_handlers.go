@@ -166,6 +166,14 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 	// (memql#4270).
 	out.InvitationUrl = res.InvitationURL
 	out.RegistrationMode = res.RegistrationMode
+	// Whether the invitation email actually left the process, and why not when
+	// it did not (memql#4584). Both set by IssueUserInvitation alone. Passed
+	// through rather than folded into error_message because the call
+	// SUCCEEDED: the invitation is valid and invitation_url admits somebody,
+	// so reporting a delivery fault as a call failure would tell a console the
+	// opposite of what happened.
+	out.InvitationEmailSent = res.InvitationEmailSent
+	out.InvitationEmailError = res.InvitationEmailError
 	// Set by RotateRecoveryKey alone; empty everywhere else. The one place it
 	// rides a NON-ok reply is a rotation that minted and revealed the
 	// replacement but failed to retire a predecessor -- see the field comment

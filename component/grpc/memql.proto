@@ -3819,6 +3819,30 @@ message IdentityAdminResult {
   // and telling an operator that is the difference between a link they
   // understand and one they think is a gate.
   string registration_mode = 10;
+  // Whether the invitation email actually left the process, set by
+  // issue_user_invitation ONLY (memql#4584).
+  //
+  // NOT redundant with `ok`. `ok` says the invitation was ISSUED -- the row
+  // exists and invitation_url admits somebody. This says whether the recipient
+  // was TOLD. The two are deliberately separable: a delivery fault does not
+  // fail the issue, because the link is what actually admits and discarding a
+  // minted credential over a transient mail outage would be the worse loss.
+  //
+  // False with an empty invitation_email_error means no send was attempted
+  // (the node has no mail wired). False WITH an error means one was tried and
+  // failed. A console must be able to tell those apart -- the first is a
+  // configuration statement, the second is an incident.
+  bool invitation_email_sent = 11;
+  // Why invitation delivery failed; empty when it did not fail (memql#4584).
+  //
+  // Present so the failure is retrievable by the caller rather than buried in
+  // a log line on a node nobody is tailing. The defect this closes was an
+  // invitation that looked sent and never was; one that looks sent, fails, and
+  // says so only to slog is the same defect wearing a different hat.
+  //
+  // Never carries the link. It is the sender's own error text, which names
+  // transport and configuration faults only.
+  string invitation_email_error = 12;
 }
 
 // IssueUserInvitationRequest mints a user-targeted invitation (memql#4270).

@@ -44,6 +44,7 @@ package adminops
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -185,16 +186,115 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 	}
 	detail["invitationId"] = invitationID
 
+	link := invitationURL(base, plain)
+
+	// ===================================================================
+	// DELIVERY (memql#4584)
+	// ===================================================================
+	// Until this block existed, issuing an invitation sent nothing. The row
+	// was correct, the link was correct, the portal said "Send the
+	// invitation" and the recipient waited for an email that no code path
+	// could ever have produced.
+	//
+	// THE SEND RUNS AFTER THE ROW IS COMMITTED, AND ITS FAILURE IS NOT THE
+	// OPERATION'S FAILURE. Both halves of that are deliberate:
+	//
+	// After, because an invitation that was emailed but not persisted is a
+	// link that cannot be redeemed -- the redeem path looks the token up by
+	// hash, so a message promising access the database has never heard of is
+	// worse than no message.
+	//
+	// Not fatal, because the LINK is what actually admits somebody, and it is
+	// already in hand by the time we get here. Failing the call over a
+	// transient Graph outage would discard a minted credential the caller can
+	// never fetch again -- there is no second request that returns it, only
+	// its digest was stored -- and force the operator to issue a second
+	// invitation to replace one that was perfectly good. The row would be left
+	// behind too, pending and unusable, and the person waiting would still be
+	// waiting. So a delivery fault degrades the outcome by exactly one notch:
+	// the operator is told to deliver the link themselves.
+	//
+	// WHAT GOES IN THE TRAIL, AND WHAT DOES NOT. The delivery verdict does:
+	// this event is what an operator greps when somebody says an invitation
+	// never arrived, and the whole lesson of memql#4477 is that a trail which
+	// reports mail as sent when nothing left the process sends them to a spam
+	// folder instead of to the configuration that is wrong. The LINK does not,
+	// and must never: it is a bearer credential, v1:identity:auditEvent is
+	// append-only, and a credential written there cannot be redacted later.
+	// The comment above IssueUserInvitation states this rule; this block is
+	// the one place with an opportunity to break it, so it says so again.
+	//
+	// The audit OUTCOME stays success even when delivery fails, which is where
+	// this deliberately parts company with magiclink.Issuer. There, delivery
+	// IS the operation -- an undelivered magic link reaches nobody, because
+	// the link is returned to no one. Here the link is returned to the caller
+	// on this very Result, so an invitation whose email bounced is still an
+	// invitation that was successfully issued. Stamping it failure would make
+	// the trail contradict pendingUserInvitations, which will list the row
+	// either way. The detail fields below carry the delivery verdict instead,
+	// where it can be read without lying about what happened.
+	emailSent := false
+	emailErr := ""
+	if s.SendInvitationEmail == nil {
+		// No mail seam on this node. Not a failure -- nobody asked for a send
+		// -- but it is recorded, because "we never tried" and "we tried and it
+		// broke" send an operator to two different places.
+		detail["emailAttempted"] = false
+	} else {
+		detail["emailAttempted"] = true
+		sendErr := s.SendInvitationEmail(ctx, InvitationEmail{
+			To:          email,
+			InviterName: act.email,
+			Role:        role,
+			LinkURL:     link,
+			ExpiresAt:   expiresAt,
+			// Mode travels so the message can be honest under `open`, where an
+			// invitation is a convenience rather than a gate.
+			RegistrationMode: mode,
+		})
+		if sendErr != nil {
+			emailErr = sendErr.Error()
+			detail["emailDelivered"] = false
+			// The provider's own text, not a fixed token: an operator
+			// diagnosing this needs to know whether Graph refused the
+			// credential, refused the sender, or was simply unreachable, and a
+			// token like "delivery_failed" collapses all three.
+			detail["emailError"] = emailErr
+			if s.Logger != nil {
+				s.Logger.Warn("identity admin: invitation issued but its email could not be delivered",
+					slog.String("invitationId", invitationID),
+					slog.String("to", email),
+					slog.String("error", emailErr))
+			}
+		} else {
+			emailSent = true
+			detail["emailDelivered"] = true
+		}
+	}
+
 	message := "Invitation issued. Copy the link now -- it is not shown again."
 	if mode == string(identity.RegistrationModeOpen) {
 		message = "Invitation issued. Note that this cluster allows open sign-up, " +
 			"so this link is a convenience rather than a gate."
 	}
+	switch {
+	case emailErr != "":
+		// Said in the status line as well as on the structured fields, because
+		// this is the sentence that stops an operator from walking away
+		// believing the recipient has been told.
+		message = "Invitation issued, but the email could not be delivered (" + emailErr +
+			"). The invitation itself is valid -- copy the link and send it yourself."
+	case emailSent:
+		message = "Invitation issued and emailed to " + email +
+			". The link is also shown here once, in case you need to send it yourself."
+	}
 
 	res := s.finish(ctx, identity.AuditCategoryAdmin, "user_invitation_issued", act, "", email,
 		detail, message, nil)
-	res.InvitationURL = invitationURL(base, plain)
+	res.InvitationURL = link
 	res.RegistrationMode = mode
+	res.InvitationEmailSent = emailSent
+	res.InvitationEmailError = emailErr
 	return res
 }
 

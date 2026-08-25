@@ -129,6 +129,34 @@ type Result struct {
 	// refusal, and a surface showing it must show it ONCE.
 	InvitationURL string
 
+	// InvitationEmailSent reports whether the invitation email actually left
+	// the process, set by IssueUserInvitation (memql#4584).
+	//
+	// NOT a credential, and not redundant with OK. OK says the invitation was
+	// ISSUED -- the row is written and the link in InvitationURL admits
+	// somebody. This says whether the recipient was told. The two are
+	// deliberately separable: a send failure must not fail the issue, because
+	// the link is the thing that actually admits and discarding it over a
+	// transient Graph outage would be the worse loss.
+	//
+	// False with an empty InvitationEmailError means no send was attempted --
+	// the node has no mail seam wired. False WITH an error means one was tried
+	// and failed. A surface must be able to tell those apart: the first is a
+	// configuration statement, the second is an incident.
+	InvitationEmailSent bool
+
+	// InvitationEmailError is why delivery failed, empty when it did not fail.
+	//
+	// Present so the failure is RETRIEVABLE rather than buried in a log line
+	// on a node the operator is not tailing. The whole defect this fixes
+	// (memql#4584) was an invitation that looked sent and never was; replacing
+	// it with an invitation that looks sent, fails to send, and says so only
+	// to slog would be the same defect wearing a different hat.
+	//
+	// Safe to show an operator -- it is the sender's own error text, which
+	// names transport and configuration faults and never the link.
+	InvitationEmailError string
+
 	// RegistrationMode is what the cluster's policy MEANT for the call that
 	// just ran, set by IssueUserInvitation. Not a credential -- it is here so a
 	// console can say something true about what the link is for without
@@ -203,6 +231,49 @@ type Service struct {
 	// invite_only here would refuse invitations on a cluster that never asked
 	// for it.
 	RegistrationPolicy func(ctx context.Context) (mode string, domains []string)
+
+	// SendInvitationEmail delivers the invitation email an issued invitation is
+	// useless without (memql#4584).
+	//
+	// A seam for the reason the two above are seams, plus one specific to mail:
+	// this package cannot reach a Sender. Engine here is
+	// identity.EngineExecutor -- a narrow interface over Execute -- and the
+	// email integration hangs off *memqlengine.MemQLEngine's integration
+	// registry. Widening Engine to the concrete type would hand the entire admin
+	// surface every integration on the node in order to send one message. The
+	// wiring layer points this at
+	// emailsender.EngineEmailSender.SendUserInvitation, which is the SAME
+	// plug-in SendMagicLink resolves, so the cluster keeps exactly one mail path.
+	//
+	// Optional. Unset means no email is attempted and the caller is told so on
+	// the Result -- the state every install was in before memql#4584, and still
+	// the right one for a node with no mail wired. It is NOT reported as a
+	// delivery failure, because nothing failed: nobody asked for a send.
+	SendInvitationEmail func(ctx context.Context, in InvitationEmail) error
+}
+
+// InvitationEmail is what SendInvitationEmail needs to compose the message.
+//
+// LinkURL is a credential, and this struct is the only place it travels
+// outside IssueUserInvitation's own stack frame. It is not logged here, not
+// audited here, and not stored -- see the delivery block in
+// IssueUserInvitation.
+type InvitationEmail struct {
+	// To is the invitee address, already lowercased and validated.
+	To string
+	// InviterName is the display name or address of whoever issued it, taken
+	// off the resolved actor rather than from caller input.
+	InviterName string
+	// Role is the cluster role the invitation grants. Empty means the cluster's
+	// default.
+	Role string
+	// LinkURL is the redemption link. Shown once, stored nowhere.
+	LinkURL string
+	// ExpiresAt is when the link stops working.
+	ExpiresAt time.Time
+	// RegistrationMode is the policy in force, so a sender can word the message
+	// honestly under `open` if it ever wants to.
+	RegistrationMode string
 }
 
 // New validates dependencies and returns a ready Service.
