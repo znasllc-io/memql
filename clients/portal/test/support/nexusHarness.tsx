@@ -98,7 +98,13 @@ export interface NexusHarnessOptions {
 export function nexusHarness(options: NexusHarnessOptions = {}): NexusHarness {
   const world = options.world ?? springCatalogGoal();
   const calls: string[] = [];
-  const handlers = new Map<string, (event: Event) => void>();
+  // A SET per concept, not one handler (memql#4528). The real
+  // SubscriptionManager fans one concept's feed out to every subscriber, and
+  // two hooks legitimately watch v1:planner:plan now -- useGoalWorld follows
+  // the open goal, useGoals keeps the picker live. A single-handler map made
+  // whichever mounted second silently replace the first, which is a fake
+  // limitation that would have read as a product bug.
+  const handlers = new Map<string, Set<(event: Event) => void>>();
   const empty = new Result({ bundle: { nodes: [] } });
 
   const planRow = world.plan === null ? null : asRow({ ...world.plan, requestedBy: OWNER_ID });
@@ -164,8 +170,13 @@ export function nexusHarness(options: NexusHarnessOptions = {}): NexusHarness {
   const subscriptions = {
     subscribeGraph: (fn: (event: Event) => void, opts?: { concept?: string }) => {
       const concept = opts?.concept ?? "";
-      handlers.set(concept, fn);
-      return () => handlers.delete(concept);
+      const set = handlers.get(concept) ?? new Set<(event: Event) => void>();
+      set.add(fn);
+      handlers.set(concept, set);
+      return () => {
+        set.delete(fn);
+        if (set.size === 0) handlers.delete(concept);
+      };
     },
   };
 
@@ -176,7 +187,7 @@ export function nexusHarness(options: NexusHarnessOptions = {}): NexusHarness {
     subscribed: () => handlers.size > 0,
     emit: (concept, event) => {
       act(() => {
-        handlers.get(concept)?.(event);
+        for (const fn of handlers.get(concept) ?? []) fn(event);
       });
     },
   };

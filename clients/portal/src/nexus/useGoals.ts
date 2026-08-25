@@ -65,7 +65,7 @@ function toGoal(row: Row): Goal {
 }
 
 export function useGoals(): GoalsState {
-  const { query } = useCluster();
+  const { query, subscriptions, status } = useCluster();
   const [rows, setRows] = useState<Row[]>([]);
   // True from mount for the reason every other read surface in this portal
   // starts true: a read is effectively in flight, and `false` would claim
@@ -106,6 +106,34 @@ export function useGoals(): GoalsState {
     });
     return list;
   }, [rows]);
+
+  // LIVE (memql#4528). The picker and the index list these, and a goal
+  // started from the console appearing only after a reload is the kind of
+  // staleness that makes an operator doubt the button worked. Same shape as
+  // the rail's saved views and the console's tiles: a CDC arrival bumps the
+  // epoch and the owner-scoped read above runs again -- no poll, and no
+  // splicing of a partial row into a list the read owns.
+  //
+  // The re-read is what makes this safe to subscribe to at all.
+  // `v1:planner:plan` declares no row-authz tier yet (memql#4366), so this
+  // feed can carry an event for somebody else's plan; the handler reads
+  // nothing off the event and `plansForUser` is gated on
+  // requestedBy==actor.userId server-side, so the worst such an event costs
+  // is one redundant read.
+  useEffect(() => {
+    if (subscriptions === null || status !== "connected") return;
+    try {
+      return subscriptions.subscribeGraph(() => setEpoch((n) => n + 1), {
+        concept: "v1:planner:plan",
+        actions: ["created", "updated"],
+      });
+    } catch {
+      // A cluster whose subscription surface refuses is still perfectly usable
+      // here -- the list is correct, it just stops being live. Failing the
+      // whole hook over the live half would be worse than losing it.
+      return;
+    }
+  }, [subscriptions, status]);
 
   return {
     goals,

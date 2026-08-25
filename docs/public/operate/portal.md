@@ -641,10 +641,25 @@ above the road and what it produced and authored below it. Three pages under
 one goal -- **Map**, **Constructs**, **Replay** -- reached from the **Nexus**
 rail group.
 
-A goal is a `v1:planner:plan`. Nothing in this console creates one: plans come
-from asking an agent to do something, and the portal reads them. `/nexus`
-opens your most recent goal (the running one first); the picker in the header
-moves between them, and a "recent goals" strip sits under the map.
+A goal is a `v1:planner:plan`. **New goal** starts one from here (memql#4528)
+-- in the goal chrome beside the picker, and from the empty state when you
+have none. Plans still arrive the other way too, from asking an agent to do
+something. `/nexus` opens your most recent goal (the running one first); the
+picker in the header moves between them, and a "recent goals" strip sits under
+the map.
+
+**The button starts the planning lifecycle, not spend.** It writes the plan
+through `createPlan` and nothing else -- no `startPlan`. The planner claims the
+row off its `graph.node.created.v1:planner:plan` subscription and SIZES the
+goal; the estimate, approval and budget gates
+([llm-cost-control.md](../ai/llm-cost-control.md)) then decide whether anything
+is spent, and a goal past the threshold comes back to `awaitingFeedback` to ask
+you first.
+
+The console is not a chat space, so a goal started here is filed under the
+synthetic `system:portal-console` partition -- the same sentinel convention the
+other space-less callers use. `requestedBy` is you, and `triggerSource` keeps
+its `user.explicit` default, so the provenance stays honest.
 
 ### What becomes a node, and what becomes motion
 

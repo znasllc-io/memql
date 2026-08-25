@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Badge, Callout, Container, PageHeader, Skeleton, Tabs } from "../ui";
 import { useGoalWorld } from "./feed/useGoalWorld";
 import { GoalPicker } from "./GoalPicker";
+import { NewGoalAction } from "./NewGoalDialog";
 import { useGoals, type Goal } from "./useGoals";
 import { NEXUS_SURFACES, surfacePath } from "./urls";
 import type { GoalWorld } from "./scene/world";
@@ -71,7 +72,21 @@ export function GoalLayout(): ReactNode {
           }
           title={plan === null ? (loading ? "Loading the goal" : "Goal") : plan.goal || planId}
           blurb="A goal's world, as the system works on it."
-          actions={<GoalPicker goals={goals} currentId={planId} />}
+          // The picker is the LIST; this is the VERB. Both in the header
+          // because that is where a person already goes to change which goal
+          // they are looking at, and "start another" is the same gesture one
+          // step further (memql#4528).
+          actions={
+            <>
+              <GoalPicker goals={goals} currentId={planId} />
+              {/* self-end so the button's bottom edge lines up with the
+                  picker's SELECT rather than centring against the whole
+                  field, whose label adds a line above it. */}
+              <div className="self-end">
+                <NewGoalAction />
+              </div>
+            </>
+          }
           meta={status === "" ? undefined : <Badge tone={toneForStatus(status)}>{status}</Badge>}
         />
 

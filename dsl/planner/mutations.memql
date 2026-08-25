@@ -154,14 +154,28 @@ mutate task completeToolInvocation {
 // -----------------------------------------------------------------------------
 
 // createPlan -- single write path for Plan creation.
-// Status defaults to 'queued' so the routePlanOnQueue automation
-// fires immediately. Optional fields accept the full v1 surface
-// (parentPlanId for sub-plans, triggerSource for tiered trust,
-// chatAnchorMessageId for chat completion lines, tokenBudget +
-// pauseExtendsDeadline for budget/deadline overrides).
+//
+// STATUS LANDS 'planning', AND THE PICKUP IS AN EVENT SUBSCRIPTION rather
+// than an automation. This comment used to say the stamp was 'queued' "so the
+// routePlanOnQueue automation fires immediately", and both halves were wrong:
+// the stamp below writes "planning", and no construct called routePlanOnQueue
+// exists anywhere in the tree (memql#4528 -- the stamp was left alone, because
+// the stamp is the half that works).
+//
+// What actually claims a new Plan is the planner integration's subscription to
+// `graph.node.created.v1:planner:plan` -> PlannerAgentLoop.HandlePlanCreated
+// (integrations/planner/agent_loop.go), which accepts status "planning" OR
+// "queued" and returns early only for the kinds another dispatcher owns:
+// trainSpecialist, embedDomainItems, adHocAction, scopeElevation,
+// agentInvocation. The userGoal lifecycle stamps "planning" here and moves to
+// "queued" once the planner agent has decomposed and emitted its tasks.
+//
+// Optional fields accept the full v1 surface (parentPlanId for sub-plans,
+// triggerSource for tiered trust, chatAnchorMessageId for chat completion
+// lines, tokenBudget + pauseExtendsDeadline for budget/deadline overrides).
 
-/// Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all
-/// trigger sources.
+/// Insert a v1:planner:plan row in status='planning'. Single write path for Plan creation across
+/// all trigger sources; the planner claims it off the node-created event.
 mutate plan createPlan {
   args {
     planId                string
@@ -216,7 +230,7 @@ mutate plan startPlan {
 // =================================
 //
 // Single write path for scope-elevation Plan creation. Distinct
-// from createPlan (which writes status='queued' for the
+// from createPlan (which writes status='planning' for the
 // normal planner pickup path) -- this mutation lands the Plan
 // directly in awaitingFeedback / scope_elevation_required so the
 // emitScopeElevationCanvasCard automation fires and the card

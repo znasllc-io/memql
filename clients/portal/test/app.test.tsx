@@ -33,7 +33,16 @@ const CONCEPTS: Concept[] = [
 // Cast at the boundary rather than implementing the whole class: widening the
 // fake every time an unrelated method is added to Connection would make this
 // test a maintenance tax with no extra coverage.
-function fakeConnection(overrides: Partial<Connection> = {}): Connection {
+function fakeConnection(
+  overrides: Partial<Connection> = {},
+  // Extra stubs merged into the QUERY rather than onto the connection. The
+  // rail reads composed views on every shell render, and asQueryClient
+  // deliberately defaults that call to an empty list (see
+  // support/queryFake.ts) -- so a test about the Custom sub-section has to
+  // supply its own rows here, not through `overrides`, which lands on the
+  // Connection and never reaches the client.
+  queryStub: Record<string, unknown> = {},
+): Connection {
   const query = asQueryClient({
     listConcepts: vi.fn(async () => CONCEPTS),
     // The shell reads the caller's access to decide what the rail offers
@@ -44,6 +53,7 @@ function fakeConnection(overrides: Partial<Connection> = {}): Connection {
       clusterRole: "admin",
       displayName: "Ada Lovelace",
     })),
+    ...queryStub,
   });
   return {
     nodeId: "bff-test",
@@ -420,6 +430,49 @@ describe("the Views sub-sections (memql#4527)", () => {
     await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
     expect(disclosure("Custom").getAttribute("aria-expanded")).toBe("false");
     expect(within(rail()).queryByRole("link", { name: "Compose" })).toBeNull();
+  });
+
+  it("lists the operator's saved views inside Custom, above Compose", async () => {
+    // The regression this guards is the restructure quietly dropping the
+    // composer's output: Custom used to be a top-level group with its own
+    // derivation, and it is now a sub-section fed by the same useSavedViews
+    // hook. A rail that lost the saved views would still look correct.
+    const dial = vi.fn(async () =>
+      fakeConnection(
+        { engineVersion: "v0.19.5" },
+        {
+          composedViews: async () => ({
+            rows: () => [
+              { id: "sv-1", name: "Churn watch", status: "active", conceptIds: [], arrangements: [] },
+              { id: "sv-2", name: "Deploy health", status: "active", conceptIds: [], arrangements: [] },
+            ],
+            rawNodes: () => [],
+            single: () => null,
+            meta: () => null,
+          }),
+        },
+      ),
+    ) as unknown as typeof Connection.dial;
+    renderSignedIn(dial);
+
+    const custom = await waitFor(() => {
+      const button = disclosure("Custom");
+      const list = document.getElementById(button.getAttribute("aria-controls") ?? "");
+      expect(list).toBeTruthy();
+      return list as HTMLElement;
+    });
+    await waitFor(() =>
+      expect(within(custom).getByRole("link", { name: "Churn watch" })).toBeTruthy(),
+    );
+    expect(within(custom).getByRole("link", { name: "Deploy health" })).toBeTruthy();
+
+    // Compose is LAST, always -- the door to making another one, after the
+    // ones already made.
+    const rows = [...custom.querySelectorAll("a")].map((a) => a.textContent);
+    expect(rows).toEqual(["Churn watch", "Deploy health", "Compose"]);
+
+    // And they are under Views, not a caption of their own.
+    expect(within(rail()).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
   });
 
   it("flattens in the collapsed icon rail, closed sub-section and all", async () => {
