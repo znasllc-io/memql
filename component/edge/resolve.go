@@ -70,6 +70,16 @@ type resolver struct {
 	sf singleflight.Group
 }
 
+// TWO CACHE LAYERS, and both are worth knowing about (memql#4534). This
+// per-replica map is the OUTER one; behind it the engine's result cache also
+// holds the siteByHostname read. Both are invalidated on a site write -- this
+// one off graph.node.*.v1:platform:site (invalidation_subscriber.go), the
+// engine's off cache.invalidate.v1:platform:site -- so the TTLs are backstops
+// for a missed invalidation rather than the freshness mechanism. The DSL read
+// carries an explicit @cache(30) so the inner backstop matches this one; see
+// dsl/platform/queries.memql for why a looser inner TTL would make this one's
+// bound an illusion.
+//
 // NewResolver returns a caching Resolver. The TTL bounds staleness after a
 // site row changes on ANOTHER node -- the write lands wherever the portal is
 // served from, and this cache lives on every edge replica, so the TTL is the
