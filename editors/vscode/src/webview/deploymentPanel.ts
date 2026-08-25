@@ -1708,11 +1708,21 @@ ${this.bodyHtml()}
   // The select is the exception: choosing a tag IS the decision, and the
   // forecast beneath it has to follow. (No backticks in here: this script is
   // itself inside a template literal.)
-  document.addEventListener('input', (e) => {
+  //
+  // BOUND TO BOTH EVENTS, as addClusterPanel binds its own sendField
+  // (memql#4578). A select fires input as well as change by the letter of the
+  // spec, so one listener SHOULD be enough -- but the update screen's strategy
+  // is this panel's first data-field select, nothing here has ever exercised
+  // that path, and this script is only ever tested as a STRING. The cost of
+  // both is a duplicate message the host handles idempotently; the cost of the
+  // assumption being wrong is a control that silently never takes effect.
+  const sendField = (e) => {
     const field = e.target.closest('[data-field]');
     if (field) vscode.postMessage({
       type: 'input', value: { field: field.dataset.field, text: field.value } });
-  });
+  };
+  document.addEventListener('input', sendField);
+  document.addEventListener('change', sendField);
   document.addEventListener('change', (e) => {
     const pick = e.target.closest('select[data-act="pickTag"]');
     if (pick) vscode.postMessage({ type: 'pickTag', value: pick.value });
