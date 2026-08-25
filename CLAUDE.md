@@ -1420,7 +1420,7 @@ surface entirely.
 | Query / mutation / logic / automation | `args { ... }` sub-block inside the body |
 | Builtin / tool / prompt | Body fields directly — the body IS the schema |
 
-`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")]`. Omitting
+`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")] [@minimum(N)] [@maximum(N)]`. Omitting
 `@required` makes the field optional. Describe the field with a `///` doc
 comment on the line above it — `@description` and `@default` are both rejected
 at load (memql#3336, #991).
@@ -1718,6 +1718,12 @@ section above: `args.X` for caller-passed args, bare `now` / `actor.X` /
 - `@required` — non-optional
 - `@enum("a", "b", "c")` — restricts to a value set
 - `@maxLength(N)`, `@pattern("re")`
+- `@minimum(N)` / `@maximum(N)` — INCLUSIVE numeric bounds (memql#4522).
+  Note that a discrete numeric SET has no annotation: `@enum` takes string
+  literals only, and opening it to numbers would compare a parsed member
+  against the float64 a JSON caller sends under `reflect.DeepEqual` and refuse
+  every value — fail-closed and silent about why. Express a small numeric set
+  as bounds plus a UI that offers only the members
 - `@description` is **not** valid on an args field (rejected at load). An
   arg description is the `///` doc comment on the line above the field.
   A `tool` / `prompt` / `builtin` field DOES keep its `@description` —

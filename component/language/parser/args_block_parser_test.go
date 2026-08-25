@@ -134,3 +134,78 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// TestParseArgsBlockField_NumericBounds covers @minimum / @maximum (memql#4522).
+//
+// The fields, the runtime check, the tool JSON-schema emitter and the MCP
+// promoter all carried Minimum/Maximum already; the modern `args { }` block was
+// the one surface that could not SET them, so a bound an author wanted had to
+// become a Go seam or go unenforced.
+func TestParseArgsBlockField_NumericBounds(t *testing.T) {
+	t.Run("parses both bounds", func(t *testing.T) {
+		schema := parseArgsForTest(t, `args { cursorTweenMs int @minimum(250) @maximum(2500) }`)
+		f := schema.Fields[0]
+		if f.Minimum == nil || *f.Minimum != 250 {
+			t.Errorf("Minimum = %v, want 250", f.Minimum)
+		}
+		if f.Maximum == nil || *f.Maximum != 2500 {
+			t.Errorf("Maximum = %v, want 2500", f.Maximum)
+		}
+	})
+
+	t.Run("composes with the other annotations", func(t *testing.T) {
+		schema := parseArgsForTest(t, `args { n int @required @minimum(1) @maximum(10) }`)
+		f := schema.Fields[0]
+		if f.Optional {
+			t.Error("@required not applied alongside the bounds")
+		}
+		if f.Minimum == nil || *f.Minimum != 1 || f.Maximum == nil || *f.Maximum != 10 {
+			t.Errorf("bounds = (%v, %v), want (1, 10)", f.Minimum, f.Maximum)
+		}
+	})
+
+	// The lexer scans a number from its first DIGIT, so a negative bound
+	// arrives as an operator token followed by the magnitude. Reading only
+	// TokenNumber would reject this while naming the wrong problem.
+	t.Run("accepts a negative bound", func(t *testing.T) {
+		schema := parseArgsForTest(t, `args { offset int @minimum(-5) }`)
+		f := schema.Fields[0]
+		if f.Minimum == nil || *f.Minimum != -5 {
+			t.Errorf("Minimum = %v, want -5", f.Minimum)
+		}
+	})
+
+	t.Run("accepts a fractional bound", func(t *testing.T) {
+		schema := parseArgsForTest(t, `args { score float @minimum(0.5) @maximum(1.0) }`)
+		f := schema.Fields[0]
+		if f.Minimum == nil || *f.Minimum != 0.5 {
+			t.Errorf("Minimum = %v, want 0.5", f.Minimum)
+		}
+		if f.Maximum == nil || *f.Maximum != 1.0 {
+			t.Errorf("Maximum = %v, want 1.0", f.Maximum)
+		}
+	})
+
+	t.Run("rejects missing parens", func(t *testing.T) {
+		if _, err := parseArgsSafe(`args { n int @minimum 5 }`); err == nil {
+			t.Error("expected error for @minimum without parens, got nil")
+		}
+	})
+
+	t.Run("rejects a non-numeric bound", func(t *testing.T) {
+		if _, err := parseArgsSafe(`args { n int @maximum("ten") }`); err == nil {
+			t.Error("expected error for a string @maximum, got nil")
+		}
+	})
+
+	// Absent annotations must leave the bounds NIL rather than zero: a zero
+	// minimum is a real constraint, and defaulting to it would silently refuse
+	// every negative value on fields that never asked for a bound.
+	t.Run("absent bounds stay nil", func(t *testing.T) {
+		schema := parseArgsForTest(t, `args { n int }`)
+		f := schema.Fields[0]
+		if f.Minimum != nil || f.Maximum != nil {
+			t.Errorf("bounds = (%v, %v), want (nil, nil)", f.Minimum, f.Maximum)
+		}
+	})
+}
