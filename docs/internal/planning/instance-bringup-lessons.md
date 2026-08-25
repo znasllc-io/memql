@@ -9,6 +9,8 @@ owner: platform
 
 # What a real first bring-up needed that the lifecycle automations do not model
 
+> Historical: shipped in 0.20.0 (epic memql#4490); kept for the findings.
+
 **Source:** the ZNAS LLC instance bring-up, 2026-08-25 -- a genuinely empty Azure
 subscription to a running mesh, driven by shell only.
 **Audience:** whoever is building out `dsl/deployment/` (`provisionInstance`,
