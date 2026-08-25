@@ -250,3 +250,42 @@ func TestEnsureAccessPreservesTheAnonymousActor(t *testing.T) {
 		t.Error("a stream with no anonymous actor resolved AS anonymous -- the branch is matching more than it should")
 	}
 }
+
+// TestSubscribeResolvesTheActorForGraphKindsToo is the second half of the
+// same class as TestEnsureAccessPreservesTheAnonymousActor: the actor was
+// correct, and the live path could not see it.
+//
+// handleBusEvent admits each delivered graph event with currentAccess(),
+// which returns the CACHED actor and deliberately does not resolve -- a
+// resolve on the event pump would put a lock and a database round trip on
+// the delivery path of every event. handleSubscribe resolved the actor only
+// inside its non-graph branch, so a stream whose first message was a
+// GRAPH_EVENTS subscribe reached fan-out with a NIL actor, which
+// rowAuthzAdmits treats as an empty one -- and an undeclared concept admits
+// an empty actor.
+//
+// For an authenticated caller that is the standing undeclared behaviour and
+// errs toward fewer rows on the declared tiers. For an anonymous caller it
+// errs the other way: the live feed would have been looser than the read it
+// mirrors, which is the exact property memql#4309's design D2 exists to
+// prevent.
+func TestSubscribeResolvesTheActorForGraphKindsToo(t *testing.T) {
+	s := &streamSession{service: &service{}}
+
+	// Nothing has resolved yet -- the state a stream is in when its FIRST
+	// message is a subscribe.
+	if s.currentAccess() != nil {
+		t.Fatal("currentAccess() was already populated; this fixture needs an unresolved session")
+	}
+
+	// What handleSubscribe now does for every kind.
+	s.ensureAccess(auth.ContextWithAnonymousActor(context.Background()))
+
+	got := s.currentAccess()
+	if got == nil {
+		t.Fatal("currentAccess() is still nil after subscribe resolved the actor -- every delivered event would be admitted against an empty actor, and an undeclared concept admits one")
+	}
+	if !got.IsAnonymousActor() {
+		t.Fatalf("currentAccess() = %+v, want the anonymous actor -- the fan-out gate would not know the subscriber is anonymous", got)
+	}
+}
