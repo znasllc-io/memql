@@ -395,7 +395,7 @@ type AuthSessionInsert struct {
 	IdentityId  string
 	Subject     string
 	TokenHash   string
-	Source      string // "bff_exchange" | "oidc_cookie"
+	Source      string // "bff_exchange" | "oidc_cookie" | "device_code"
 	ClientLabel string
 	ExpiresAt   time.Time
 }
