@@ -53,7 +53,7 @@ export function modeStatement(mode: string, domains: string): string {
         ? "This cluster only admits addresses at an allowed domain."
         : `This cluster only admits addresses at ${domains}. An invitation for any other address is refused.`;
     case "waitlist":
-      return "People can request access to this cluster. An invitation admits somebody directly, without waiting.";
+      return "Users can request access to this cluster. An invitation admits somebody directly, without waiting.";
     case "open":
       return "Anyone with an email can register on this cluster, so an invitation here is a convenience rather than a gate.";
     default:
@@ -85,12 +85,12 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
   return (
     <>
       <Button size="xs" onClick={() => setOpen(true)}>
-        Invite a person
+        Invite a user
       </Button>
 
       <ConfirmDialog
         open={open}
-        title="Invite a person"
+        title="Invite a user"
         confirmLabel="Send the invitation"
         busy={writes.busy}
         confirmDisabled={email.trim() === ""}
@@ -119,7 +119,7 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
               type="email"
               value={email}
               onChange={setEmail}
-              placeholder="person@example.com"
+              placeholder="user@example.com"
             />
           </Field>
           <Field

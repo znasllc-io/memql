@@ -78,7 +78,7 @@ export function SettingsPage(): ReactNode {
           <Reading
             label="Registration"
             value={settings.loading ? "…" : mode === "" ? "unknown" : mode}
-            sub="how a new person gets an account"
+            sub="how a new user gets an account"
           />
           <Reading
             label="Brand images"
