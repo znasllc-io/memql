@@ -88,6 +88,44 @@ serving the domain at all.
    class of configuration, CORS and mis-pointing bugs.
 5. **One bucket, one lane, and the bucket lists the `file:` deps.** See rule 3
    of the portal's wiring above.
+6. **Every list a person watches rides a collection; every one-shot read
+   renders its staleness honestly.** See Freshness below.
+
+## Freshness: what is stale, and who is responsible for it
+
+Three layers sit between a row in the store and a row on somebody's screen, and
+a client that does not know all three ships a surface that looks current and is
+not.
+
+**The engine caches your reads by default.** A hint-free pure read gets a 60s
+in-process backstop per node, keyed on the plan signature plus the resolved
+actor whenever the plan depends on the caller. Invalidation is event-driven, so
+a read whose answer can only change through a write to a concept it depends on
+is fresh the moment that write lands, whatever the TTL says. The reads that
+need thinking about are the ones whose answer can change with NO write --
+anything filtering on `now`, and anything over rows that reach the store by raw
+SQL and therefore publish no invalidation. Those are only as fresh as their
+TTL. See [the language doc's caching
+attributes](../docs/public/language/memql.md) and the design record for the
+reviewed adoption table.
+
+**The socket keeps a list current, and says when it could not.** Pull once,
+subscribe, fold by id; a drop, an overflow or a reconnect is a GAP the client
+can see, and the answer to a gap is to re-run the read. `sdk/ts`'s
+`LiveCollection` is that machine -- subscribe-then-seed, the authorized re-read
+for id-only events, the scope re-filter, reference counting so navigating away
+and back issues no new read, and a `seeding | live | degraded | disconnected`
+state. It is in-memory only: a full page reload starts clean, by construction.
+The rules a hand-rolled fold owes itself are in
+[events.md](../docs/public/concepts/events.md#how-to-consume-events-without-diverging-from-the-store-memql4536-4540).
+
+**Everything else is a one-shot read, and must SAY so.** A surface that reads
+once and renders forever is fine -- an admin console pane, a provider list --
+as long as it offers an explicit Refresh and does not imply it is live. What is
+not fine, and is the specific defect this contract exists to end, is a table
+that keeps rendering after its stream has died: rows an operator has no reason
+to distrust, under a heading that says live. Keep the last known answer, label
+it stale, and let them refresh.
 
 ## Building
 
