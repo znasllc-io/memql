@@ -278,6 +278,63 @@ func TestAFailingSenderStillMintsTheRowAndStillReturnsTheLink(t *testing.T) {
 	}
 }
 
+// A NODE WITH NO MAIL WIRED HAS NOT FAILED TO DELIVER ANYTHING.
+//
+// The seam is optional, and unset is the state every install was in before
+// memql#4584 -- it is a configuration statement, not an incident. Reporting it
+// as a delivery failure would put a red error in front of an operator who
+// never asked for a send, and worse, it would make the one state that IS an
+// incident (a sender that was called and broke) indistinguishable from the one
+// that is not. The two must stay tellable apart, which is exactly why
+// InvitationEmailError is empty here and populated there.
+func TestANilMailSeamIsNotReportedAsADeliveryFailure(t *testing.T) {
+	audit := &capturingAudit{}
+	svc, err := New(&Service{
+		Engine: &issuingEngine{},
+		Audit:  audit,
+		IdentityBaseURL: func(context.Context) string {
+			return "https://identity.example.test"
+		},
+		// SendInvitationEmail deliberately left nil.
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := svc.IssueUserInvitation(ctxAs(auth.RoleOwner), UserInvitation{
+		Email: "invitee@example.test",
+	})
+
+	if !res.OK {
+		t.Fatalf("an unwired mail seam failed the invitation: code=%d %s", res.Code, res.ErrorMessage)
+	}
+	if res.InvitationURL == "" {
+		t.Fatal("no link returned, which is the whole product of the call")
+	}
+	if res.InvitationEmailSent {
+		t.Error("InvitationEmailSent is true when no sender was ever called")
+	}
+	// The load-bearing assertion: empty, NOT a manufactured error string.
+	if res.InvitationEmailError != "" {
+		t.Errorf("InvitationEmailError = %q, want empty -- nothing failed, nobody asked for a send", res.InvitationEmailError)
+	}
+	// And the operator must not be told delivery broke.
+	if strings.Contains(res.Message, "could not be delivered") {
+		t.Errorf("Message = %q, want no delivery-failure claim on a node with no mail wired", res.Message)
+	}
+
+	ev := lastInvitationEvent(t, audit)
+	if ev.Detail["emailAttempted"] != false {
+		t.Errorf("audit detail emailAttempted = %v, want false", ev.Detail["emailAttempted"])
+	}
+	if _, leaked := ev.Detail["emailError"]; leaked {
+		t.Error("audit detail carries an emailError for a send that was never attempted")
+	}
+	if ev.Outcome != identity.AuditOutcomeSuccess {
+		t.Errorf("audit outcome = %v, want success", ev.Outcome)
+	}
+}
+
 // The link is a bearer credential and v1:identity:auditEvent is append-only.
 // Anything written there cannot be redacted later, so the link must never
 // reach it -- not in the detail map, not in the target fields, not in the

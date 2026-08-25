@@ -460,7 +460,7 @@ func (a *App) publicIdentityBaseURL(ctx context.Context) string {
 // every magic link through: it resolves the engine-resident email integration
 // plug-in off the integration registry at call time and hands it a Message.
 // That is the code path a production node is describing when it logs
-// `"msg":"email sent via graph","sender":"noreply@znas.io"`.
+// `"msg":"email sent via graph","sender":"noreply@<domain>"`.
 //
 // Building a second path here -- a Graph client of its own, a second set of
 // MEMQL_EMAIL_* reads, a second place to be misconfigured -- would double the

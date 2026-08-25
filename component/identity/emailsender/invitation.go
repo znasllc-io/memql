@@ -8,7 +8,7 @@ package emailsender
 // engine-resident email integration plug-in, resolved off the integration
 // registry at call time by resolveSender() below. SendMagicLink has used it
 // since the beginning, which is why an operator tailing a production node sees
-// `"msg":"email sent via graph","sender":"noreply@znas.io"` for every sign-in.
+// `"msg":"email sent via graph","sender":"noreply@<domain>"` for every sign-in.
 //
 // An invitation email that reached Graph by any other route -- a second client,
 // a second config surface, a direct integrations/email construction inside
