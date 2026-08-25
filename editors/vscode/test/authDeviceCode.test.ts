@@ -18,6 +18,8 @@ import type { HttpRequestInit, HttpResponseLike } from "../src/connection/creden
 import {
   DEVICE_GRANT_TYPE,
   MAX_POLL_INTERVAL_SECONDS,
+  deviceCodeActionMessage,
+  deviceCodeOpenTarget,
   runDeviceCodeFlow,
   shouldFallBackToDeviceCode,
   signInWithDeviceCodeFallback,
@@ -576,4 +578,62 @@ test("a cluster with no identity service is misconfigured, not device-signable",
     runDeviceCodeFlow({ name: "bare", endpoint: "host:443" }, { fetch: identity().fetch }),
   );
   assert.equal(err.kind, "misconfigured");
+});
+
+// -----------------------------------------------------------------------------
+// The one-notification UX (memql#4595): what the single action message says,
+// and where "open" goes. The vscode-bound half (deviceCodeUi.ts) stays thin --
+// one showing per flow, no re-summon after a click -- and these pure helpers
+// carry everything worth asserting about it.
+// -----------------------------------------------------------------------------
+
+function authorizationFixture(overrides: Partial<DeviceAuthorization> = {}): DeviceAuthorization {
+  return {
+    deviceCode: "mql_dvc_x",
+    userCode: "BCDF-GHJK",
+    verificationUri: "https://identity.example.com/device",
+    verificationUriComplete: "https://identity.example.com/device?user_code=BCDF-GHJK",
+    expiresInSeconds: 600,
+    intervalSeconds: 5,
+    ...overrides,
+  };
+}
+
+test("the open target prefers the pre-filled verification URI", () => {
+  assert.equal(
+    deviceCodeOpenTarget(authorizationFixture()),
+    "https://identity.example.com/device?user_code=BCDF-GHJK",
+  );
+  assert.equal(
+    deviceCodeOpenTarget(authorizationFixture({ verificationUriComplete: "" })),
+    "https://identity.example.com/device",
+    "a server that sent no complete URI still gets the bare page",
+  );
+});
+
+test("the deliberate action message carries the code and page, and no fallback talk", () => {
+  const message = deviceCodeActionMessage(authorizationFixture(), "deliberate");
+  assert.ok(message.includes("BCDF-GHJK"), `code missing: ${message}`);
+  assert.ok(message.includes("https://identity.example.com/device"), `page missing: ${message}`);
+  assert.ok(
+    !message.toLowerCase().includes("browser sign-in"),
+    `a deliberate device flow must not explain a switch nobody made: ${message}`,
+  );
+});
+
+test("the fallback action message explains the switch in the same notification", () => {
+  // ONE notification for the whole fallback (memql#4595): the explanation
+  // that used to be its own toast rides the action message instead, and the
+  // full reason stays in the MemQL Connection output.
+  const message = deviceCodeActionMessage(authorizationFixture(), "fallback");
+  assert.ok(message.includes("BCDF-GHJK"), `code missing: ${message}`);
+  assert.ok(message.includes("https://identity.example.com/device"), `page missing: ${message}`);
+  assert.ok(
+    message.toLowerCase().includes("browser sign-in"),
+    `the switch must be explained where the code is shown: ${message}`,
+  );
+  assert.ok(
+    message.includes("MemQL Connection"),
+    `the message must say where the full reason lives: ${message}`,
+  );
 });

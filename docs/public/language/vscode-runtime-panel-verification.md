@@ -354,17 +354,30 @@ and `refresh_token` keys deliberately blank.
       long-expired `token:` back into `clusters.yaml`) and connect: the tree
       shows the yellow key with `CREDENTIAL EXPIRED:` and the offered recovery is
       Sign In
-- [ ] **MemQL: Sign In With a Device Code** (palette only) shows an
-      `XXXX-XXXX` code and a verification URL, and approving at
-      `https://identity.<domain>/device` completes the sign-in on the editor side
+- [ ] **MemQL: Sign In With a Device Code** (palette only) opens the approval
+      page with the `XXXX-XXXX` code pre-filled, keeps the code and
+      verification URL on the progress line, and shows exactly ONE action
+      message (Copy Code / Open Approval Page) that does NOT reappear after a
+      button is clicked (memql#4595). Approving at
+      `https://identity.<domain>/device` completes the sign-in on the editor
+      side
 - [ ] **MemQL: Sign In** falls back to a device code on a host that cannot do
-      loopback (memql#3515). The cheapest arrangement is a Remote-SSH window
-      onto a box with no browser; a firewall that refuses the loopback bind
-      works too. The switch is **announced** -- a progress line reading
-      `switching to a device code...` and an information message naming the
-      loopback failure -- and then the same `XXXX-XXXX` code appears. A host
-      that *can* do loopback must still open a browser: the fallback firing
-      unconditionally would be its own defect
+      loopback (memql#3515). The trigger set is the pre-browser-open
+      limitations only -- a refused loopback bind, or no browser at all
+      (memql#4594); a firewall that refuses the bind is the cheapest
+      arrangement. The switch shows on the progress line
+      (`switching to a device code...`) and the ONE action message explains it
+      (memql#4595) -- there is no separate "falling back" toast -- and then the
+      same `XXXX-XXXX` code appears. A host that *can* do loopback must still
+      open a browser: the fallback firing unconditionally would be its own
+      defect
+- [ ] **A slow browser sign-in is NOT abandoned** (memql#4594): start
+      **MemQL: Sign In** and leave the browser page unfinished past the old
+      two-minute mark -- the progress notification stays (after a quiet minute
+      it names the cancel + `MemQL: Sign In with Code` exits), NO device code
+      appears, and completing the page at minute nine still signs the editor
+      in. Only past ten minutes does it end, as a warning naming
+      `MemQL: Sign In with Code`
 - [ ] Renaming a signed-in cluster (**MemQL: Edit Cluster**, change the name)
       leaves it signed in (memql#3515). Rename it, then reconnect: no
       credential prompt. The stranded half is invisible by construction --

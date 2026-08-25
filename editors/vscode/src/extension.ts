@@ -3756,10 +3756,18 @@ async function signInToCluster(
       // one -- so it goes on the progress line (undismissable, lives exactly as
       // long as the polling) and into a message with the two actions a
       // progress line cannot render.
+      // Whether the auto-fallback fired: the one action message explains the
+      // switch exactly when there was one (deviceCodeActionMessage).
+      let fallbackFired = false;
       const onUserCode = (authorization: DeviceAuthorization): void => {
         deviceCodeShown = true;
         progress.report({ message: deviceCodeProgressLine(authorization) });
-        showDeviceCodeActions(authorization, () => settled);
+        showDeviceCodeActions(
+          authorization,
+          () => settled,
+          fallbackFired ? 'fallback' : 'deliberate',
+          sinkFor(connectionOutput)
+        );
       };
       // asExternalUri is not decoration: under Remote-SSH, Codespaces or a dev
       // container the browser runs on a different machine from this extension
@@ -3786,8 +3794,10 @@ async function signInToCluster(
                 onUserCode,
                 resolveExternalUri,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
-                onFallback: (reason) =>
-                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput)),
+                onFallback: (reason) => {
+                  fallbackFired = true;
+                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));
+                },
               }),
             deviceCode: (target, signal) => runDeviceCodeFlow(target, { signal, onUserCode }),
           }),

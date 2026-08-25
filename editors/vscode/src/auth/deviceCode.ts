@@ -213,6 +213,45 @@ export interface DeviceCodeDeps {
 }
 
 /**
+ * How a device-code flow came to run: the operator asked for it
+ * (`MemQL: Sign In with Code`), or the auto-fallback fired because this host
+ * cannot do loopback at all. The single action message reads differently --
+ * a deliberate flow has no switch to explain.
+ */
+export type DeviceCodeVia = "deliberate" | "fallback";
+
+/**
+ * deviceCodeOpenTarget is where "open the approval page" goes: the pre-filled
+ * form when the server offered one (the /device page reads `?user_code=`), so
+ * nobody transcribes a code a URL already carries; the bare page otherwise.
+ */
+export function deviceCodeOpenTarget(authorization: DeviceAuthorization): string {
+  return authorization.verificationUriComplete || authorization.verificationUri;
+}
+
+/**
+ * deviceCodeActionMessage is the ONE notification a device-code flow shows
+ * (memql#4595). It always carries the code and the bare verification URL --
+ * the second-device path types those into a phone -- and, when the flow got
+ * here by fallback, the explanation that used to be a separate toast. The
+ * full failure detail stays in the MemQL Connection output; this is the
+ * sentence, not the record.
+ */
+export function deviceCodeActionMessage(
+  authorization: DeviceAuthorization,
+  via: DeviceCodeVia,
+): string {
+  const finish = `enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in`;
+  if (via === "fallback") {
+    return (
+      `MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). ` +
+      `Finish with a device code instead: ${finish} -- on another device if this one cannot open the page.`
+    );
+  }
+  return `MemQL: ${finish}. The approval page should have opened with the code pre-filled -- use the buttons if it did not.`;
+}
+
+/**
  * shouldFallBackToDeviceCode decides whether a failed loopback sign-in should
  * be retried through the device grant.
  *
