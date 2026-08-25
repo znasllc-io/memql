@@ -170,7 +170,15 @@ interface Harness {
 const MINTED_TOKEN = "mql_wkr_" + "a".repeat(43);
 
 function harness(
-  overrides: { role?: Role; policies?: Row[]; machines?: Row[] } = {},
+  overrides: {
+    role?: Role;
+    policies?: Row[];
+    machines?: Row[];
+    // Delay the MyAccess reply past the first machines read. It is what CI's
+    // slower machine does by accident, and what memql#4539's collection key
+    // turned into a visible defect -- see the regression test below.
+    accessGate?: Promise<void>;
+  } = {},
 ): Harness {
   const calls: string[] = [];
   const handlers = new Map<string, (event: Event) => void>();
@@ -205,7 +213,10 @@ function harness(
 
   const query = asQueryClient({
     listConcepts: vi.fn(async () => []),
-    getMyAccess: vi.fn(async () => access),
+    getMyAccess: vi.fn(async () => {
+      if (overrides.accessGate) await overrides.accessGate;
+      return access;
+    }),
     executeNamed,
   });
 
@@ -430,6 +441,45 @@ describe("the all-machines view", () => {
 });
 
 describe("the machine verbs", () => {
+  it("keeps an open editor when MyAccess resolves after the first read", async () => {
+    // THE FLAKE THAT WAS A BUG. The machines collection is keyed in part on
+    // the caller's own user id, which arrives on its own round trip. When it
+    // landed AFTER the first seed the key changed, the new collection started
+    // empty, the page's `loading && machines.length === 0` gate swapped the
+    // list for a skeleton, and the card UNMOUNTED -- taking any open editor,
+    // and anything typed into it, with it.
+    //
+    // Whether that happened came down to which read settled first, which is
+    // why it passed locally and failed on CI. The fix keeps the id out of the
+    // key and reads it through a ref at fold time, so there is one collection
+    // and one seed however late access is.
+    let openTheGate!: () => void;
+    const accessGate = new Promise<void>((resolve) => {
+      openTheGate = resolve;
+    });
+    const h = harness({ accessGate });
+    renderFleet(h);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "jose-mac-mini" })).toBeTruthy());
+
+    fireEvent.click(within(cardFor("jose-mac-mini")).getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByPlaceholderText("jose-mac-mini"), {
+      target: { value: "Studio Mac" },
+    });
+
+    await act(async () => {
+      openTheGate();
+      await accessGate;
+    });
+
+    // Still open, still holding what was typed.
+    expect((screen.getByPlaceholderText("jose-mac-mini") as HTMLInputElement).value).toBe(
+      "Studio Mac",
+    );
+    // And ONE read, not two: a key that churned on the caller's id re-seeded
+    // every list on this page the moment access landed.
+    expect(h.callsNamed("myWorkersWithStatus").length).toBe(1);
+  });
+
   it("renames through renameWorker", async () => {
     const h = harness();
     renderFleet(h);
