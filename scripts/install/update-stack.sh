@@ -229,7 +229,11 @@ function overlapping_paths() {
         printf ''
         return 0
     fi
-    comm -12 <(printf '%s\n' "$mine") <(printf '%s\n' "$theirs")
+    # `|| true` because this runs inside a command substitution under `set -e`:
+    # a non-zero here would abort the script BEFORE any envelope is written, and
+    # the contract's EXIT trap can only report the catch-all -- an honest exit
+    # code carrying a useless message (the memql#4458 failure, in a new place).
+    comm -12 <(printf '%s\n' "$mine") <(printf '%s\n' "$theirs") || true
 }
 
 # join_paths -- a space-separated list for the result envelope, capped so a
@@ -251,6 +255,23 @@ function join_paths() {
         printf '%s' "${all[*]}"
     else
         printf '%s and %d more' "${all[*]:0:8}" "$(( n - 8 ))"
+    fi
+}
+
+# count_commits <range> -- how many commits are in a range, as a NUMBER.
+#
+# The digit check is not defensiveness about git, which always prints one. It is
+# about what these values are used for: they go onto the envelope through
+# `cap_result_set_raw`, which writes them UNQUOTED, so anything that is not a
+# number produces malformed JSON -- and a malformed envelope fails at the
+# runner's parser with a message about JSON rather than about the checkout.
+function count_commits() {
+    local n
+    n="$(git_in rev-list --count "$1" 2>/dev/null || true)"
+    if [[ "$n" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$n"
+    else
+        printf '0'
     fi
 }
 
@@ -400,8 +421,8 @@ function main() {
     cap_result_set target "$TARGET"
 
     local behind ahead
-    behind="$(git_in rev-list --count "HEAD..${TARGET}" 2>/dev/null || echo 0)"
-    ahead="$(git_in rev-list --count "${TARGET}..HEAD" 2>/dev/null || echo 0)"
+    behind="$(count_commits "HEAD..${TARGET}")"
+    ahead="$(count_commits "${TARGET}..HEAD")"
     cap_result_set_raw behind "$behind"
     cap_result_set_raw ahead  "$ahead"
 
