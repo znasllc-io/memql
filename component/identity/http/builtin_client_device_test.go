@@ -74,3 +74,37 @@ func TestDeviceCode_StillRefusesAnUnregisteredClient(t *testing.T) {
 		t.Errorf("body = %s, want invalid_client", rec.Body.String())
 	}
 }
+
+func TestDCROff_RegisterIsStillRefusedWhileTheBuiltinWorks(t *testing.T) {
+	// memql#3719's decision is UNTOUCHED, and the two halves of that claim are
+	// worth asserting together: on one cluster configuration, POST /register
+	// still answers 403 registration_disabled AND the editor still gets a
+	// device authorization. Asserting either alone leaves the other free to
+	// drift -- and the failure mode of drifting the first is reopening an
+	// unauthenticated write.
+	s := newBareDeviceServer(t)
+	if s.Cfg.OAuthDCREnabled {
+		t.Fatal("this test is meaningless with DCR enabled")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/register",
+		strings.NewReader(`{"client_name":"anything","redirect_uris":["http://127.0.0.1/callback"],`+
+			`"grant_types":["authorization_code"],"response_types":["code"],`+
+			`"token_endpoint_auth_method":"none"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRegister(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /register status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "registration_disabled") {
+		t.Errorf("body = %s, want registration_disabled", rec.Body.String())
+	}
+
+	// ...and the editor is served anyway, which is the whole point.
+	if code := postDeviceCode(t, s, identity.BuiltinClientVSCode); code.Code != http.StatusOK {
+		t.Fatalf("the editor could not get a device authorization on the same cluster: %d %s",
+			code.Code, code.Body.String())
+	}
+}
