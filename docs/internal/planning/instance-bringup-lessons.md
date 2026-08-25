@@ -1,7 +1,7 @@
 ---
 title: What a real first bring-up needed that the lifecycle automations do not model
 audience: internal
-status: active
+status: draft
 area: planning
 sinceVersion: 0.20.0
 owner: platform
