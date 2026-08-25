@@ -27,7 +27,7 @@
 #       patch: |
 #         - op: replace
 #           path: /spec/configuration/destinationPath
-#           value: "azure://<account>.blob.core.windows.net/memql-db-backups/"
+#           value: "https://<account>.blob.core.windows.net/memql-db-backups/"
 #
 #   images:
 #     - name: memql-db

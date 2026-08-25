@@ -31,7 +31,7 @@ patches:
     patch: |
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://<account>.blob.core.windows.net/memql-db-backups/"
+        value: "https://<account>.blob.core.windows.net/memql-db-backups/"
 
 images:
   - name: memql-db
@@ -50,16 +50,20 @@ not error — it **archives nowhere**, while the Cluster reports Ready and the
 pods look healthy. `TestNoOverlayShipsThePlaceholderBackupDestination` refuses
 that.
 
-The form differs between a real account and an emulator, and that is a property
-of the *emulator*, not of the environment:
+The grammar is **host first** in both forms — the account rides the hostname on
+the real service and the first path segment on the emulator, with the container
+as the path segment after that (memql#4496):
 
 | Target | `destinationPath` |
 |---|---|
-| Azure Blob | `azure://<container>/` |
+| Azure Blob | `https://<account>.blob.core.windows.net/<container>/` |
 | Azurite (local) | `http://azurite:10000/<account>/<container>` |
 
-barman rejects the `azure://` form against an emulator as *"malformed"*, and the
-only symptom is `ContinuousArchivingFailing` on a healthy-looking Cluster.
+A container-only `azure://<container>/` value puts the container where the host
+belongs: under `inheritFromAzureAD` the SDK is left with no account endpoint and
+fails as *"connection string … emulated storage"*, and a host with no container
+segment fails as *"Please specify a container name"*. The only symptom either
+way is `ContinuousArchivingFailing` on a healthy-looking Cluster.
 
 **2. The image.** The component names `memql-db` with **no tag**, so an overlay
 that forgets its `images:` entry fails to pull rather than silently running some

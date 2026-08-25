@@ -7,35 +7,38 @@
 # would not error; it would archive nowhere while the Cluster reported Ready,
 # which is the failure mode this whole layer exists to prevent.
 #
-# THE DESTINATION MUST NAME THE STORAGE ACCOUNT, and this is the single most
-# expensive line in this file to get wrong (memql#4460).
+# HOST FIRST, IN BOTH FORMS (memql#4496 / memql#4460). The account rides the
+# hostname on the real service and the first path segment on the emulator; the
+# container is the path segment after that:
 #
-#   real Azure Blob   azure://<account>.blob.core.windows.net/<container>/
+#   real Azure Blob   https://<account>.blob.core.windows.net/<container>/
 #   Azurite (local)   http://azurite:10000/<account>/<container>
 #
-# BOTH FORMS CARRY THE ACCOUNT. The container-only form `azure://<container>/`
-# looks like the obvious spelling and is the one this file used to recommend;
-# it is not a shorter way to say the same thing, it selects a DIFFERENT CODE
-# PATH. barman branches on the URL host alone, before it looks at any
-# credential (barman/cloud_providers/azure_blob_storage.py):
+# THIS IS NOT A SPELLING PREFERENCE, IT SELECTS A CODE PATH. barman branches on
+# the URL host alone, before it looks at any credential
+# (barman/cloud_providers/azure_blob_storage.py):
 #
 #   if parsed_url.netloc.endswith("blob.core.windows.net"):
 #       ... real Azure; authenticate with the supplied credential
 #   else:
 #       ... EMULATED STORAGE; requires AZURE_STORAGE_CONNECTION_STRING
 #
-# So a host that is a bare container name is read as an emulator. Against a
-# real account under `inheritFromAzureAD` there is no connection string to
-# find, and the sidecar fails every archive and every retention pass with
+# So a container-only "azure://<container>/" puts the container where the host
+# belongs, and a real account is read as an emulator. Under inheritFromAzureAD
+# there is no connection string to find, and the sidecar fails every archive
+# and every retention pass with
 #
 #   Barman cloud backup delete exception:
 #   A connection string must be provided when using emulated storage
 #
-# NOTHING UPSTREAM OF THAT REPORTS IT. The Cluster stays Ready, the pods stay
-# healthy, and the failure surfaces only as WAL that is never recycled -- which
-# fills the WAL volume until CNPG's free-space guard refuses to start Postgres
-# (memql#4459). One live instance ran its entire life this way with an empty
-# backup container (memql#4468).
+# The opposite error is the other half of the same trap: a host with no
+# container segment fails as "Please specify a container name".
+#
+# NOTHING UPSTREAM OF EITHER REPORTS IT. The Cluster stays Ready, the pods stay
+# healthy, and the only symptom is ContinuousArchivingFailing plus WAL that is
+# never recycled -- which fills the WAL volume until CNPG's free-space guard
+# refuses to start Postgres (memql#4459). One live instance ran its entire life
+# this way with an empty backup container (memql#4468).
 #
 # `azureCredentials.storageAccount` DOES NOT RESCUE THIS. It exists on the CRD
 # and looks like the right place to name the account, but barman decides the

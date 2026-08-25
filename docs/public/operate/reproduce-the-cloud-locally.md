@@ -488,10 +488,12 @@ Add `bootstrap.recovery.recoveryTarget.targetTime: "<RFC3339>"` to restore to a
 point in time rather than to the latest backup.
 
 > **Two local-only settings make this work, and both look like noise.** The
-> `ObjectStore`'s `destinationPath` is a full HTTP URL including the account
-> (`http://azurite:10000/devstoreaccount1/...`) rather than the `azure://`
-> form the cloud uses — barman rejects the scheme form against an emulator as
-> *"malformed"*. And the azurite Deployment passes `--skipApiVersionCheck`,
+> `ObjectStore`'s `destinationPath` carries the account as the first path
+> segment (`http://azurite:10000/devstoreaccount1/...`), where the cloud form
+> carries it in the hostname
+> (`https://<account>.blob.core.windows.net/<container>/`) — host first in
+> both, never a container-only `azure://<container>/` shape (memql#4496).
+> And the azurite Deployment passes `--skipApiVersionCheck`,
 > because Azurite refuses the `x-ms-version` barman's SDK sends. Without either
 > one there are simply no backups, and **the Cluster still reports Ready** —
 > which is why `TestLocalBackupsCanActuallyReachAzurite` asserts both.

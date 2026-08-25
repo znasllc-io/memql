@@ -46,7 +46,7 @@ None of this can live in a manifest, and each item is load-bearing.
 
 **Put the account name into the overlay's `destinationPath`, in the HOST.** Both
 cloud overlays ship
-`azure://REPLACE-WITH-BACKUP-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/`;
+`https://REPLACE-WITH-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/`;
 substitute the account you created above. This is not cosmetic and it is not
 optional — barman decides which code path a destination takes from the host
 alone, before it reads any credential, and a host that is a bare container name

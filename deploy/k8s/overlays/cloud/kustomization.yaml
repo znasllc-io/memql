@@ -183,19 +183,41 @@ patches:
               # on the backup account and NOT granted delete/purge -- see the
               # ObjectStore note below.
               azure.workload.identity/client-id: "REPLACE-WITH-DB-IDENTITY-CLIENT-ID"
+      # THE POD LABEL, WITHOUT WHICH THE BLOCK ABOVE IS INERT (memql#4460).
+      # The Azure workload-identity webhook selects on POD labels; the label
+      # on the ServiceAccountTemplate gates nothing, and the SA's one job is
+      # to carry the client-id annotation the webhook reads once it fires.
+      # With the pod unlabelled the webhook never mutates it -- no projected
+      # token volume, no AZURE_* env -- and `inheritFromAzureAD` below has
+      # nothing to inherit: the first instance logged 618 consecutive
+      # WAL-archive failures and archived zero segments this way. CNPG stamps
+      # pod labels through spec.inheritedMetadata. The webhook mutates at pod
+      # CREATION only, so landing this on a running cluster needs a pod roll.
+      - op: add
+        path: /spec/inheritedMetadata
+        value:
+          labels:
+            azure.workload.identity/use: "true"
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
-      # THE HOST MUST BE THE STORAGE ACCOUNT'S BLOB ENDPOINT, not the bare
-      # container (memql#4460). barman branches on this host alone, before it
-      # reads any credential: anything not ending in `blob.core.windows.net` is
-      # treated as an EMULATOR and then requires a connection string, which
-      # `inheritFromAzureAD` deliberately does not provide. The failure is
-      # silent -- Ready Cluster, healthy pods, WAL that is never recycled.
-      # See deploy/k8s/components/cnpg-db/objectstore.yaml for the branch.
+      # HOST FIRST (memql#4496 / memql#4460): barman-cloud's Azure grammar is
+      #   https://<account>.blob.core.windows.net/<container>/
+      # -- account in the hostname, container as the leading path segment.
+      #
+      # THE HOST IS NOT COSMETIC, IT SELECTS A CODE PATH. barman branches on
+      # this host alone, before it reads any credential: anything not ending in
+      # `blob.core.windows.net` is treated as an EMULATOR and then requires a
+      # connection string, which `inheritFromAzureAD` deliberately does not
+      # provide. So the old container-only "azure://memql-db-backups/" failed
+      # as "connection string ... emulated storage"; a host with no container
+      # segment fails as "Please specify a container name". Either way the
+      # failure is silent -- Ready Cluster, healthy pods, WAL never recycled.
+      # See deploy/k8s/components/cnpg-db/objectstore.yaml for the branch, and
+      # TestBackupDestinationSurvivesBarmansEmulatorBranch for the gate.
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://REPLACE-WITH-BACKUP-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/"
+        value: "https://REPLACE-WITH-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/"
       # inheritFromAzureAD replaces the connection string entirely: the sidecar
       # uses the pod's federated identity. This is what "no storage keys
       # in-cluster" means concretely.
