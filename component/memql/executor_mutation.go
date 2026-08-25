@@ -1101,8 +1101,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, err
 	}
 
-	e.invalidateCache()
-
 	// Observation embedding write-path (#585): when a
 	// v1:harness:observation lands, embed its `content` into
 	// node_vectors keyed by the observation id (vector_field='content',
@@ -1199,7 +1197,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	//   - The channel is safe BECAUSE it carries no side effects. That property
 	//     is what makes graph.node.created dangerous and this one not; reading
 	//     the two as one rule inverts it.
-	e.publishCacheInvalidate(conceptMeta.Name)
+	//
+	// SYNCHRONOUS LOCALLY (memql#4531). This call site used to be preceded,
+	// ~100 lines up, by an e.invalidateCache() that did cache.Clear() plus a
+	// full dependency-index wipe -- so on the writing node every write nuked
+	// the ENTIRE result cache and the surgical per-concept eviction only ever
+	// earned its keep for writes arriving from other replicas. That full clear
+	// is gone; InvalidateCacheForConcept evicts exactly this concept's
+	// dependent entries inline, before this function returns, and then
+	// publishes for the siblings. The inline half is load-bearing: Publish
+	// delivers to subscribers in separate goroutines, so relying on the local
+	// subscriber alone would have raced a client's read-your-writes.
+	e.InvalidateCacheForConcept(conceptMeta.Name)
 
 	bundle := &memqlv1.GraphBundle{
 		Nodes:   []*memqlv1.MemoryNode{apiNode},

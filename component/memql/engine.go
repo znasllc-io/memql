@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
@@ -215,6 +216,25 @@ func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
 	base, err := component.New(ComponentName, args...)
 	if err != nil {
 		return nil, err
+	}
+
+	// Export the result cache's counters on /metrics (memql#4532). The
+	// cache owns the numbers (Ristretto's own Metrics); this hands the
+	// scrape a way to READ them rather than a second place that counts
+	// them. Registered here rather than in newResultCache so a nil cache
+	// (CacheSize <= 0) registers nothing and contributes no series.
+	if cache != nil {
+		metrics.RegisterResultCacheStatsSource(func() metrics.CacheStats {
+			s := cache.Stats()
+			return metrics.CacheStats{
+				Hits:        s.Hits,
+				Misses:      s.Misses,
+				KeysAdded:   s.KeysAdded,
+				KeysEvicted: s.KeysEvicted,
+				CostAdded:   s.CostAdded,
+				CostEvicted: s.CostEvicted,
+			}
+		})
 	}
 
 	memql := &MemQLEngine{
@@ -482,19 +502,63 @@ func (e *MemQLEngine) publishEventWithActor(topic string, kind events.Kind, payl
 	e.eventBus.Publish(event)
 }
 
-// publishCacheInvalidate emits the dedicated cache-invalidation event
-// (epic 5, issue 5.6 / memql#1970) for a written concept on the
-// separate cache.invalidate.<concept> channel. ONLY the result-cache
-// evictor subscribes to this channel, and a single broadcast routing
-// rule (cache.invalidate.*) forwards it to every node -- so cross-node
-// eviction is decoupled from per-concept graph-write forwarding and
-// carries zero side effects (no automations, no other consumers). The
-// payload is just the concept; eviction is index-keyed off it.
-func (e *MemQLEngine) publishCacheInvalidate(concept string) {
+// InvalidateCacheForConcept is the write path's ONE cache-invalidation
+// seam (memql#4531): it evicts this node's dependent entries
+// SYNCHRONOUSLY and then emits the dedicated cache-invalidation event
+// (epic 5, issue 5.6 / memql#1970) on the separate
+// cache.invalidate.<concept> channel for every OTHER replica. ONLY the
+// result-cache evictor subscribes to that channel, and a single
+// broadcast routing rule (cache.invalidate.*) forwards it to every node
+// -- so cross-node eviction is decoupled from per-concept graph-write
+// forwarding and carries zero side effects (no automations, no other
+// consumers). The payload is just the concept; eviction is index-keyed
+// off it.
+//
+// THE LOCAL EVICTION IS SYNCHRONOUS, AND THAT IS THE WHOLE POINT.
+// events.Bus.Publish delivers to each subscriber in its OWN GOROUTINE
+// (`go b.deliverEvent(...)`, component/events/bus.go), so the local
+// subscriber's eviction is a RACE against the client's next read.
+// Before memql#4531 that race was invisible because executeWrite also
+// called a full cache.Clear() inline; removing the sledgehammer without
+// replacing its synchrony would have introduced a read-your-writes
+// regression on the writing node -- a client re-reading immediately
+// after its own write could be served the pre-write result. Evicting
+// here, inline, before executeWrite returns, closes that window: by the
+// time the write's response is observable the dependent entries are
+// already gone. The local subscriber still fires a moment later and
+// finds nothing to do, which is a harmless no-op (evictConcept on an
+// already-dropped index entry returns 0).
+//
+// Exported because the cross-replica invalidation gate lives in
+// component/node (the only package that can reach BOTH this seam and
+// the real routing rule it must prove), not because a test needs a back
+// door: this is the same "invalidate the cache for a concept" capability
+// executeWrite itself uses, called through the same function.
+func (e *MemQLEngine) InvalidateCacheForConcept(concept string) {
 	concept = strings.TrimSpace(concept)
 	if concept == "" {
 		return
 	}
+
+	// Local, synchronous, surgical. Index-keyed off the concept, so a
+	// cached read of an UNRELATED concept survives the write -- which is
+	// exactly what the removed full clear destroyed.
+	if e.cache != nil {
+		if evicted := e.cache.evictConcept(concept); evicted > 0 {
+			metrics.ResultCacheInvalidationEviction(evicted)
+			// e.Component != nil guards the deref: Logger is PROMOTED from
+			// the embedded *Component, so reading it on an engine built
+			// without one panics rather than yielding nil. Same guard the
+			// invalidation subscriber carries, for the same reason.
+			if e.Component != nil && e.Logger != nil {
+				e.Logger.Debug("resultCache: evicted on local write",
+					"concept", concept,
+					"keysEvicted", evicted,
+				)
+			}
+		}
+	}
+
 	e.publishEvent(
 		events.TopicCacheInvalidateForConcept(concept),
 		events.KindCacheInvalidate,
@@ -924,10 +988,18 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 			cursorKey = strings.TrimSpace(*plan.After)
 		}
 		cacheKey = e.cacheKey(signature, effectiveTimestamp, limit, depth, sorter.signatureValue(), fieldSignature, shapeSignature, cursorKey)
+		// Per-query hit/miss (memql#4532). Recorded HERE, on both
+		// branches of the same lookup, so the two series can never
+		// disagree about what counted as a cacheable read -- the
+		// question an operator asks ("what is THIS query's hit ratio")
+		// is only answerable if the denominator is the reads that were
+		// actually eligible for the cache.
 		if cached, ok := e.cache.get(cacheKey); ok {
+			metrics.ResultCacheQueryRead(plan.SourceFunction, true)
 			e.emitQueryExecutedEvent(startTime, cached, true)
 			return cached, nil
 		}
+		metrics.ResultCacheQueryRead(plan.SourceFunction, false)
 	}
 
 	nodes, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, sorter)
@@ -1728,21 +1800,6 @@ func (e *MemQLEngine) onStop() {
 		e.cache.close()
 	}
 	e.Logger.Info("memory engine stopped")
-}
-
-func (e *MemQLEngine) invalidateCache() {
-	if e.cache == nil || e.cache.cache == nil {
-		return
-	}
-
-	e.cache.mu.Lock()
-	e.cache.cache.Clear()
-	e.cache.mu.Unlock()
-
-	// Drop the dependency index too -- the keys it points at are gone.
-	e.cache.depMu.Lock()
-	e.cache.depIndex = make(map[string]map[string]struct{})
-	e.cache.depMu.Unlock()
 }
 
 // SetDatabaseGetter configures a function that returns the current DB handle.
