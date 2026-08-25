@@ -63,6 +63,20 @@ type QueryPlan struct {
 	// silently means "not enforced".
 	BoundConcept string
 
+	// SourceFunction is the NAME of the top-level query construct this
+	// plan was expanded from ("spaceParticipants"), or "" when the plan
+	// did not resolve to one (an ad-hoc filter expression).
+	//
+	// Stamped from the same place and for the same reason as
+	// BoundConcept, one line below it in the validator: after expansion
+	// the plan root IS the function's body and there is no name left to
+	// read. It exists for the per-query cache-hit series (memql#4532) --
+	// "name a query, get its hit ratio" needs a name, and this is the
+	// only bounded one available. Deliberately NOT the query text: a
+	// registered construct name is a closed corpus, query text is
+	// unbounded and can carry a user id.
+	SourceFunction string
+
 	// RowAuthzInjected records that enforcement ANDed a declared tier's
 	// predicate into Root. It exists so the result-cache key folds the
 	// caller identity in whether or not the injected node happens to sit
