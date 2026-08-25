@@ -35,6 +35,7 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
+import { SingleFlight } from './async/singleFlight.js';
 import {
   runDeviceCodeFlow,
   signInWithDeviceCodeFallback,
@@ -3712,7 +3713,27 @@ async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute
 // until a human dismissed a notification, which makes the command unusable from
 // any automated caller (the host smoke lane included) and buys nothing -- the
 // message offers no choice to read back.
+// One sign-in flow per cluster at a time (memql#4596). Four surfaces reach
+// this -- the dial-failure toast's "Sign in" action, the palette command, the
+// ownership walk, "Sign In with Code" -- and nothing used to stop two of them
+// running at once: two listeners, two browser tabs or code notifications, two
+// progress notifications. A second request now JOINS the in-flight attempt
+// and observes its outcome (joining, not cancel-and-restart: the person
+// asking again is usually the person mid-way through the first flow's browser
+// page, and a `flow` argument on a joined call is deliberately not honoured
+// -- one flow at a time is the point). Keyed by cluster name; different
+// clusters stay independent.
+const signInFlights = new SingleFlight<boolean>();
+
 async function signInToCluster(
+  cluster: ClusterConfig,
+  deps: SignInDeps,
+  flow: SignInFlow = 'auto'
+): Promise<boolean> {
+  return signInFlights.run(cluster.name, () => runSignInToCluster(cluster, deps, flow));
+}
+
+async function runSignInToCluster(
   cluster: ClusterConfig,
   deps: SignInDeps,
   flow: SignInFlow = 'auto'
