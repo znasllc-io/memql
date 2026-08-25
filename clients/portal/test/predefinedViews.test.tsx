@@ -275,28 +275,83 @@ function bandTitles(): (string | null)[] {
 }
 
 describe("the nav rail", () => {
-  // The rail's groups (memql#4264, a fourth added by memql#4343). The names
-  // are the decision: the DATA as screens, the SUBSTRATE those screens are
-  // made of, the operator's own MATERIAL, and the CLUSTER itself. What #4264
+  // The rail's captions (memql#4264, restructured in memql#4527). What #4264
   // replaced -- Operate / Explore / Administer -- put the user population in
   // two groups at once, which is the shape being asserted against here.
-  it("groups the views, the substrate, the library, and the cluster", async () => {
+  //
+  // What #4527 changed: Views is ONE caption with two SUB-SECTIONS, Built-in
+  // and Custom, because the split between what ships with the product and what
+  // an operator composed is provenance rather than category -- and it used to
+  // cost a top-level caption to say so. Agents moved under Nexus, derived from
+  // its registry row rather than hard-coded here.
+  afterEach(() => {
+    globalThis.localStorage?.removeItem("memql-portal-rail-section-built-in");
+    globalThis.localStorage?.removeItem("memql-portal-rail-section-custom");
+  });
+
+  function railOf(): HTMLElement {
+    return screen.getByRole("navigation", { name: "Portal sections" });
+  }
+
+  // The rows a captioned group owns, found through its own heading rather than
+  // by position: a test that counts children breaks when a group gains one.
+  function groupNamed(name: string): HTMLElement {
+    const heading = within(railOf()).getByRole("heading", { name, level: 2 });
+    const parent = heading.parentElement;
+    expect(parent).toBeTruthy();
+    return parent as HTMLElement;
+  }
+
+  // The rows a SUB-section owns, found through the disclosure's own
+  // aria-controls -- which is also the assertion that the control names the
+  // thing it governs rather than pointing at nothing.
+  function sectionNamed(name: string): HTMLElement {
+    const button = within(railOf()).getByRole("button", { name });
+    const id = button.getAttribute("aria-controls") ?? "";
+    const list = document.getElementById(id);
+    expect(list).toBeTruthy();
+    return list as HTMLElement;
+  }
+
+  it("captions the sections and files each view under the right one", async () => {
     renderView({}, "/views/users");
-    const nav = screen.getByRole("navigation", { name: "Portal sections" });
-    await waitFor(() => expect(within(nav).getByText("Views")).toBeTruthy());
-    for (const group of ["Custom", "Build", "Library", "Cluster"]) {
-      expect(within(nav).getByText(group)).toBeTruthy();
+    const nav = railOf();
+    await waitFor(() =>
+      expect(within(nav).getByRole("heading", { name: "Views", level: 2 })).toBeTruthy(),
+    );
+    for (const group of ["Nexus", "Views", "Build", "Fleet", "Library", "Cluster"]) {
+      expect(within(nav).getByRole("heading", { name: group, level: 2 })).toBeTruthy();
     }
-    for (const label of ["Users", "Agents", "Accounts", "Deployments", "Audit"]) {
-      expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
+
+    // Custom is no longer a top-level caption. It is a disclosure inside
+    // Views, which is the whole of this restructure.
+    expect(within(nav).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
+
+    // Built-in carries the four registry views in the operate group, and NOT
+    // Agents -- which is the derivation working rather than a hard-coded list.
+    const builtIn = sectionNamed("Built-in");
+    for (const label of ["Users", "Accounts", "Deployments", "Audit"]) {
+      expect(within(builtIn).getByRole("link", { name: label })).toBeTruthy();
     }
+    expect(within(builtIn).queryByRole("link", { name: "Agents" })).toBeNull();
+
+    // Agents renders under Nexus, beside Goals. Its ROUTE is untouched:
+    // rail placement is not URL shape.
+    const nexus = groupNamed("Nexus");
+    expect(within(nexus).getByRole("link", { name: "Goals" })).toBeTruthy();
+    const agents = within(nexus).getByRole("link", { name: "Agents" });
+    expect(agents.getAttribute("href")).toContain("/views/agents");
+
+    // The composer's door is the last Custom row, so an operator with no saved
+    // views still has somewhere to start -- and it reads Compose, the
+    // composer's own noun, not "New view".
+    const custom = sectionNamed("Custom");
+    expect(within(custom).getByRole("link", { name: "Compose" })).toBeTruthy();
+    expect(within(nav).queryByRole("link", { name: "New view" })).toBeNull();
+
     expect(within(nav).getByRole("link", { name: "Concepts" })).toBeTruthy();
 
-    // The composer's door is always the last Custom entry, so an operator with
-    // no saved views still has somewhere to start.
-    expect(within(nav).getByRole("link", { name: "New view" })).toBeTruthy();
-
-    // Users appears ONCE. The duplicate was the whole reason for this change:
+    // Users appears ONCE. The duplicate was the whole reason for memql#4264:
     // the population under one group and the change surface under another.
     expect(within(nav).getAllByRole("link", { name: "Users" })).toHaveLength(1);
 
@@ -310,6 +365,13 @@ describe("the nav rail", () => {
     // deployable is a person's own material. Once, and under Library.
     expect(within(nav).getAllByRole("link", { name: "Deployables" })).toHaveLength(1);
     expect(within(nav).queryByRole("link", { name: "Sites" })).toBeNull();
+  });
+
+  it("keeps the active row lit when its sub-section is the one holding it", async () => {
+    renderView({}, "/views/users");
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
+    const users = within(sectionNamed("Built-in")).getByRole("link", { name: "Users" });
+    expect(users.getAttribute("aria-current")).toBe("page");
   });
 });
 

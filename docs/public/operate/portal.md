@@ -347,6 +347,39 @@ memql#4317). Three of them are in the rail, which reads top to bottom as
   person the position they just learned. The preference persists in
   `memql-portal-rail`, beside the theme key.
 
+### The rail's sections
+
+Top to bottom: **Console**, then **Nexus** (Goals, Agents), **Views**,
+**Build**, **Fleet**, **Library**, **Cluster**.
+
+**Views is one caption with two sub-sections** (memql#4527) --
+**Built-in** (Users, Accounts, Deployments, Audit: the views that ship with
+the product) and **Custom** (the views this operator composed, then
+**Compose**, the door to composing another). Custom used to be a caption of
+its own, which spent a top-level slot to say something that is provenance
+rather than category: both halves are screens over this cluster's data.
+
+Each sub-caption is a disclosure -- click it, or Tab to it and press Enter,
+to fold that half away. The choice persists per sub-section beside the rail's
+own key, in `memql-portal-rail-section-built-in` and
+`memql-portal-rail-section-custom`; both default to open, and so does a
+browser that refuses storage.
+
+**Collapsed, the rail flattens.** In the 56px icon rail there are no captions
+and no disclosures -- every icon renders in order, a folded sub-section
+included. An icon column has no room to caption, and hiding rows there would
+read as a bug rather than as a fold, since nothing on screen would say why
+they went.
+
+**Agents sits under Nexus**, not beside Users and Accounts: an agent is not a
+population an operator administers, it is what works on a goal. Its address is
+unchanged (`/views/agents`) -- rail placement is not URL shape, the same way
+Library's entries live at `/artifacts`.
+
+Two directory views were renamed in memql#4526 -- **Users** (was People) and
+**Accounts** (was Customers), taking their concepts' names. `/views/people`
+and `/views/customers` redirect, row segment included.
+
 ---
 
 ## Authorization is server-side

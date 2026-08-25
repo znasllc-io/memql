@@ -50,11 +50,17 @@
 // Users carries two populations, Deployments carries a control panel and row
 // sets that are not concept rows at all, Audit is an append-only log.
 
-// A view's group in the nav rail. Two groups, not one flat list: the
-// predefined views are SURFACES an operator works in, the concept browser is
-// the SUBSTRATE underneath them, and collapsing that distinction is how a nav
-// becomes nine undifferentiated tabs.
-export type ViewGroup = "operate";
+// A view's group in the nav rail.
+//
+// "operate" is the DATA an operator works in; the rail renders that set as the
+// Views group's BUILT-IN sub-section. "nexus" is a surface about ONE GOAL of
+// yours rather than a population, which is a different kind of thing and files
+// under its own caption -- see the NEXUS constant in app/AppShell.tsx.
+//
+// A group is a rail PLACEMENT, not a URL. Every view here is addressed at
+// /views/:id whichever caption it renders under, so moving a row between
+// groups breaks no link and no bookmark.
+export type ViewGroup = "operate" | "nexus";
 
 export interface ViewDefinition {
   // The URL slug. Short, lower-case, and chosen here -- never a concept id.
@@ -109,7 +115,7 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "agents",
     label: "Agents",
-    group: "operate",
+    group: "nexus",
     conceptId: "v1:agents:agent",
     title: "Agents",
     blurb:

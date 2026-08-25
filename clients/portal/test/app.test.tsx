@@ -327,6 +327,127 @@ describe("the shell chrome (memql#4240, restructured in memql#4316)", () => {
   });
 });
 
+// The Views group's two sub-sections (memql#4527): Built-in and Custom, each
+// a disclosure inside ONE Views caption.
+//
+// What these own is the part a source read cannot settle: that the control is
+// a real disclosure (focusable, Enter/Space, aria-expanded), that closing one
+// hides ONLY its own rows, that the choice survives a reload, and that the
+// COLLAPSED icon rail throws the whole structure away rather than rendering
+// sub-captions an icon column has no room for.
+describe("the Views sub-sections (memql#4527)", () => {
+  const SECTION_KEYS = [
+    "memql-portal-rail-section-built-in",
+    "memql-portal-rail-section-custom",
+  ];
+
+  afterEach(() => {
+    globalThis.localStorage?.removeItem("memql-portal-rail");
+    for (const key of SECTION_KEYS) globalThis.localStorage?.removeItem(key);
+  });
+
+  function signedIn() {
+    const dial = vi.fn(async () =>
+      fakeConnection({ engineVersion: "v0.19.5" }),
+    ) as unknown as typeof Connection.dial;
+    return renderSignedIn(dial);
+  }
+
+  function disclosure(name: string): HTMLElement {
+    return within(rail()).getByRole("button", { name });
+  }
+
+  it("opens expanded, and each disclosure governs the list it names", async () => {
+    signedIn();
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+
+    // ONE Views caption. The Custom group that used to sit beside it is gone.
+    expect(within(rail()).getByRole("heading", { name: "Views", level: 2 })).toBeTruthy();
+    expect(within(rail()).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
+
+    for (const name of ["Built-in", "Custom"]) {
+      const button = disclosure(name);
+      // Default expanded: a person who has never touched the control gets the
+      // whole rail.
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      // A native <button>, which is the whole keyboard story -- focusable in
+      // source order, Enter and Space activate it. A <div> with a click
+      // handler would look identical here and be unreachable.
+      expect(button.tagName).toBe("BUTTON");
+      expect(button.getAttribute("type")).toBe("button");
+      const id = button.getAttribute("aria-controls") ?? "";
+      expect(document.getElementById(id)).toBeTruthy();
+    }
+  });
+
+  it("closes one sub-section without touching the other, and persists it", async () => {
+    signedIn();
+    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
+    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
+
+    fireEvent.click(disclosure("Built-in"));
+
+    // Its own rows leave the accessibility tree; Custom's stay. `hidden` is
+    // what makes getByRole stop finding them, which is the same reason a
+    // screen reader and the Tab order stop finding them.
+    expect(disclosure("Built-in").getAttribute("aria-expanded")).toBe("false");
+    await waitFor(() =>
+      expect(within(rail()).queryByRole("link", { name: "Users" })).toBeNull(),
+    );
+    expect(within(rail()).queryByRole("link", { name: "Audit" })).toBeNull();
+    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
+    expect(disclosure("Custom").getAttribute("aria-expanded")).toBe("true");
+
+    // Beside the rail's own key, one key per section -- so a half-written
+    // value takes down the section it belongs to and not the other.
+    expect(globalThis.localStorage.getItem("memql-portal-rail-section-built-in")).toBe(
+      "collapsed",
+    );
+    expect(globalThis.localStorage.getItem("memql-portal-rail-section-custom")).toBeNull();
+
+    // Re-open, and the stored value follows the control rather than sticking
+    // at whatever the first click wrote.
+    fireEvent.click(disclosure("Built-in"));
+    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
+    expect(globalThis.localStorage.getItem("memql-portal-rail-section-built-in")).toBe(
+      "expanded",
+    );
+  });
+
+  it("reopens closed, because the choice is read back at mount", async () => {
+    globalThis.localStorage.setItem("memql-portal-rail-section-custom", "collapsed");
+    signedIn();
+    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
+    expect(disclosure("Custom").getAttribute("aria-expanded")).toBe("false");
+    expect(within(rail()).queryByRole("link", { name: "Compose" })).toBeNull();
+  });
+
+  it("flattens in the collapsed icon rail, closed sub-section and all", async () => {
+    // Closed in the WIDE rail, and still rendered in the icon rail: an icon
+    // column has no caption to explain why four destinations vanished, so
+    // hiding them there would read as a bug rather than as a fold.
+    globalThis.localStorage.setItem("memql-portal-rail-section-built-in", "collapsed");
+    globalThis.localStorage.setItem("memql-portal-rail", "collapsed");
+    signedIn();
+
+    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
+    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
+
+    // No captions and no disclosure controls -- the rule the group captions
+    // already follow.
+    expect(within(rail()).queryByRole("heading", { name: "Views", level: 2 })).toBeNull();
+    for (const name of ["Built-in", "Custom"]) {
+      expect(within(rail()).queryByRole("button", { name })).toBeNull();
+    }
+
+    // The rows keep their accessible names, which is what a collapsed row has
+    // instead of a label.
+    expect(within(rail()).getByRole("link", { name: "Users" }).getAttribute("title")).toBe(
+      "Users",
+    );
+  });
+});
+
 describe("the rail's profile row (memql#4317)", () => {
   afterEach(() => {
     globalThis.localStorage?.removeItem("memql-portal-rail");
