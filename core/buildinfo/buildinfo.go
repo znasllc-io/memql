@@ -1,5 +1,5 @@
-// Package buildinfo carries the one thing a running binary cannot rediscover
-// about itself: which release it was built from.
+// Package buildinfo carries what a running binary cannot rediscover about
+// itself: which release it was built from, and which commit.
 //
 // # Why this exists (memql#3998)
 //
@@ -34,6 +34,12 @@
 // at runtime is not a version source, it is a rumour. The image build wires the
 // flag from the release tag it was dispatched with (Dockerfile's MEMQL_RELEASE
 // build arg, fed by .github/workflows/build-engine-images.yml).
+//
+// commit is stamped by the same build and follows the same rule; its own
+// comment below states the one difference, which is that the Go toolchain can
+// supply it for a developer build where there is no release to stamp
+// (memql#4486). That fallback reads a table the LINKER wrote, so it is not a
+// value a running process can be told either.
 //
 // release is EMPTY in a bare `go build .`, in `make dev`, and in any image
 // built off a branch. The emptiness is the point: a binary that was not cut
