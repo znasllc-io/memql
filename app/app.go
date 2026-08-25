@@ -220,7 +220,7 @@ type App struct {
 	identityService any
 
 	// workerService is the WorkerService gRPC implementation + the
-	// in-memory registry of connected memql-cockpit workers. Set on
+	// in-memory registry of connected Cockpit worker machines. Set on
 	// the agent build only; stored as `any` to avoid importing
 	// component/worker in non-agent binaries. The agent-tagged helper
 	// in integrations_worker_agent.go reads it back via type

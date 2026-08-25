@@ -6,7 +6,7 @@
 # takes a Postgres advisory lock + marks-applied-on-success, so re-running
 # (or identity's retained boot-migration fallback) is a no-op when current.
 #
-# `make deploy` / `make deploy-aks` apply this Job and wait for completion
+# The deploy applies this Job and waits for completion
 # before rolling the Deployments. A bare `kubectl apply -k deploy/k8s` does
 # NOT run it (Jobs don't belong in the kustomization -- they're one-shot);
 # precede a raw apply with `kubectl apply -f deploy/k8s/migrate-job.yaml`.

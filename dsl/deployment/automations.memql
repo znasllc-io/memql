@@ -29,25 +29,37 @@
 //              field semantics are documented as @description annotations
 //              on the args fields themselves.
 //
-// WHO EMITS IT. The event is raised on the cockpit/runner control surface, NOT
-// from inside the target cluster:
-//   - cockpit `deploy --env=<env>` (I15, memql-cockpit) -- the primary path.
-//     `make {up,deploy}` delegate to the cockpit, which loads the pinned
-//     deployment bundle and emits deploy.requested with the payload above, then
-//     the embedded runtime runs THIS automation.
-//   - CI -- a release pipeline can emit the same event on a tag to drive a
-//     staging/production GitOps deploy from the build server.
-//   - schedule -- a future cron emitter (e.g. nightly staging refresh) raises
-//     the identical event; the automation is emitter-agnostic.
+// WHO EMITS IT -- NOBODY, AS OF memql#4550. Read this before concluding
+// either that the topic is live or that it is safe to delete.
 //
-//     The emitter is OUT OF THIS REPO, so a whole-repo grep for the topic finds
-//     only this subscriber and reads as a dead topic. It is not: the in-repo
-//     proof is scripts/deploy/cockpit.sh (make deploy shells into the cockpit,
-//     which embeds this runtime), component/automations/args_binding.go's
-//     []string accommodation made FOR the cockpit's engineNodeTypes default
-//     (memql#2380, the first live deploy), and
-//     docs/public/operate/deploy-bundle-runbook.md. Recorded here because
-//     memql#3614's orphan-topic audit landed on this line (memql#3614 item 2).
+// The primary emitter was the cockpit's `deploy --env=<env>` (I15): `make
+// deploy` shelled into it, and its embedded engine runtime loaded the pinned
+// deployment bundle, emitted deploy.requested, and ran THIS automation. That
+// whole family -- the subcommand, the embedded runtime, scripts/deploy/
+// cockpit.sh and the make target -- was removed with the Cockpit's TUI. The
+// two other emitters this comment used to name were always prospective: a CI
+// release pipeline "can" emit it, and a cron emitter was "future". Neither
+// exists.
+//
+// So this subscriber currently has NO emitter, in this repo or out of it.
+// That is a change from what this comment said before, and the change is why
+// it is restated rather than trimmed: memql#3614's orphan-topic audit landed
+// on this line and was answered with in-repo proof that the topic was live --
+// scripts/deploy/cockpit.sh chief among it. Deleting that file made the
+// answer false, and a stale "it is not dead, here is why" is worse for the
+// next audit than no comment at all.
+//
+// WHAT IS STILL TRUE. The automation is emitter-agnostic and its phase model
+// (authorize / record / clone / build / place / gate / outcome / finalize /
+// rollback) is how a deploy is modelled in the graph; the
+// `v1:cluster:deployment` timeline is still the record of evidence, and
+// component/automations/args_binding.go's []string accommodation -- made FOR
+// the cockpit's engineNodeTypes default during the first live deploy
+// (memql#2380) -- is still load-bearing for anything that emits this. The DSL
+// lifecycle automations (memql#4490) are what decide this bundle's fate; until
+// they do, treat it as retained-on-purpose rather than orphaned-by-accident.
+// docs/public/operate/deploy-bundle-runbook.md carries the same note, at
+// `status: historical`.
 //
 // TOPIC SHAPE. `deploy.requested` is a RAW application topic, not graph CDC, so
 // it carries no concept segment. This trigger used to read

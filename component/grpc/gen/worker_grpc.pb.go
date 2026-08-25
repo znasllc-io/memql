@@ -26,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// WorkerService is the bidi-stream surface a memql-cockpit-worker
+// WorkerService is the bidi-stream surface a Cockpit worker
 // process opens against the agent node. Per-user routing: the worker's
 // token authenticates as a worker:<id> principal owned by exactly one
 // human user; only agents acting in sessions owned by that user can
@@ -60,7 +60,7 @@ type WorkerService_StreamClient = grpc.BidiStreamingClient[WorkerClientMessage, 
 // All implementations must embed UnimplementedWorkerServiceServer
 // for forward compatibility.
 //
-// WorkerService is the bidi-stream surface a memql-cockpit-worker
+// WorkerService is the bidi-stream surface a Cockpit worker
 // process opens against the agent node. Per-user routing: the worker's
 // token authenticates as a worker:<id> principal owned by exactly one
 // human user; only agents acting in sessions owned by that user can

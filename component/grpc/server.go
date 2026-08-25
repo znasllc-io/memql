@@ -334,7 +334,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// stream ended; will reconnect" and to the agent as
 	// errorCode=worker_disconnected). Bump to 32 MiB on both
 	// directions; the cockpit's gRPC client has a matching bump in
-	// cmd/memql-cockpit/internal/worker/connect.go. 32 MiB covers a
+	// memql-cockpit's internal/worker/connect.go. 32 MiB covers a
 	// 6K screen capture (~28 MiB base64) with headroom for envelope
 	// metadata.
 	const maxWorkerMessageSize = 32 * 1024 * 1024

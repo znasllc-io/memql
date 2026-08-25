@@ -162,8 +162,14 @@ without one is normal.
 
 **Tooling:** **MemQL Cockpit** -- the fleet worker runtime + cluster CLI,
 installed as the `memql` command on operator machines (the TUI it once
-carried is retired). Lives in its own repo at
+carried is retired; the portal and the VS Code extension own every
+interactive surface it had). Lives in its own repo at
 `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md.
+
+> **This repo also builds a `bin/memql`, and the collision is deliberate.**
+> The engine's binary ships only inside container images and runs in pods; the
+> Cockpit's is installed on an operator's machine. They never share a PATH, so
+> the names do not collide in practice -- do not "fix" it by renaming either.
 
 ---
 
@@ -1064,9 +1070,11 @@ sandboxed first-choice surface for headless work is the Workbench, below.
 - **Token mint:** server-side via `CreateWorkerTokenMsg` / `RevokeWorkerTokenMsg`
   on `MemqlService.Stream`. The plain token comes back in the reply ONCE; only
   the SHA-256 hash persists (`component/identity/workertoken/`).
-- **Worker side:** `memql worker run`, a run mode of the Cockpit binary
-  built from the `memql-cockpit` repo. macOS TCC / Linux X11 pre-flight via
-  `memql worker setup` (computeruse build).
+- **Worker side:** `memql worker run`, a run mode of the `memql` command the
+  `memql-cockpit` repo builds. macOS TCC / Linux X11 pre-flight via `memql
+  worker setup` (`--non-interactive` for scripted installs). Both build
+  variants -- headless and computer-use -- install under that one command
+  name.
 - **Per-user routing, and NO machine id.** Every worker is owned by exactly one
   `v1:identity:user`; only agents in that user's sessions reach it. The dispatch
   builtins take `requireLabels` / `preferLabels` and **no `workerId`** (design

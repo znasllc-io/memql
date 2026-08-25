@@ -432,7 +432,7 @@ type Register struct {
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Capabilities advertised. "HEADLESS" must always be present;
 	// "COMPUTERUSE" is an optional addition declared only by
-	// memql-cockpit-computeruse builds with TCC / X11 confirmed available.
+	// computer-use builds of memql with TCC / X11 confirmed available.
 	Capabilities []string          `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	Labels       map[string]string `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Per-capability concurrency caps. e.g. {"HEADLESS": 8, "COMPUTERUSE": 1}.

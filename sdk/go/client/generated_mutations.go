@@ -7380,7 +7380,7 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 	return b.String()
 }
 
-// CreateWorkerTokenIdentity -- Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
+// CreateWorkerTokenIdentity -- Create a worker_token identity (machine credential for a Cockpit worker machine). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createWorkerTokenIdentity"] in generated_concepts.go).
 type CreateWorkerTokenIdentityArgs struct {

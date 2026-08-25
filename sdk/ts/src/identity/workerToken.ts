@@ -1,5 +1,5 @@
 // Worker tokens are bearer credentials issued to a user-owned
-// machine running memql-cockpit-worker. The plain token is
+// machine running `memql worker run`. The plain token is
 // returned ONCE in the create reply (shown in the AddWorkerModal)
 // and never persisted server-side -- only the SHA-256 hash lands
 // on a v1:identity:identity row of identityType="worker_token".

@@ -44,7 +44,7 @@
 //	2  invalid usage / filesystem error
 //
 // History: this command used to live in memql-cockpit
-// (`memql-cockpit lint`) and shelled the same dslimports.Load
+// (`memql lint`) and shelled the same dslimports.Load
 // pipeline that lives here. memql#278 moved the surface into memql
 // so the dsl-lint CI gate doesn't need a cross-repo cockpit install.
 // memql-cockpit's `lint` subcommand stays as a thin alias for

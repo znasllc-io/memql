@@ -2719,7 +2719,7 @@ message SetSignInPolicyResult {
 // -----------------------------------------------------------------------------
 //
 // Worker tokens are bearer credentials issued to a user-owned
-// machine running memql-cockpit-worker. The plain token is shown
+// machine running `memql worker run`. The plain token is shown
 // once in the AddWorkerModal and never persisted server-side --
 // only the SHA-256 hash lands on a v1:identity:identity row of
 // identityType="worker_token".

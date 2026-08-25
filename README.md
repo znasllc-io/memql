@@ -252,7 +252,6 @@ MemQL/
 | **Run Go test suite** | `make test` |
 | **Run tests with coverage** | `make test-cover` |
 | **DSL lint** | `make dsl-lint` |
-| **Break-glass deploy** | `make deploy VERSION=X` |
 | **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
 
@@ -349,9 +348,10 @@ MemQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
 `deploy/k8s/overlays/cloud`. The blessed deploy is a GIT MERGE: bump the
 `{engine version, bundle digest, client digest}` in that overlay and merge.
 
-`make deploy VERSION=X` is the break-glass path for when ArgoCD is
-unavailable — it delegates to the MemQL Cockpit's pinned, role-gated,
-audited `deployEngineCluster` automation. It is not the normal path.
+There is no imperative alternative. The break-glass `deploy` make target
+delegated to the MemQL Cockpit's `deployEngineCluster` automation, and both
+were removed in memql#4550 -- the Cockpit is the machine-side worker runtime
+now and does not deploy clusters.
 
 See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
 for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration

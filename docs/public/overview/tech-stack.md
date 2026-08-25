@@ -104,10 +104,9 @@ them.
 
 **Commands:**
 ```bash
-# The blessed deploy is a GIT MERGE: bump the digests in
+# The deploy IS a GIT MERGE: bump the digests in
 # deploy/k8s/overlays/cloud and merge -> ArgoCD reconciles.
-# `make deploy` is break-glass only, for when ArgoCD is unavailable.
-make deploy VERSION=X
+# There is no imperative deploy command (memql#4550).
 
 # View logs
 kubectl logs -n memql deployment/cognition -f
@@ -286,8 +285,10 @@ psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL she
 make test                        # Run the Go test suite -- NOT `go test ./...`,
                                   # which misses the engine's own modules (memql#4032)
 
-# Deployment (Azure AKS) -- see docs/public/operate/deploy-bundle-runbook.md
-make deploy VERSION=X            # Break-glass deploy (cockpit, scripts/deploy/cockpit.sh)
+# Deployment (Azure AKS) -- GitOps only; see docs/public/operate/deploy-bundle-runbook.md
+#   Pin {engine version, bundle digest, client digest} in ONE overlay and merge;
+#   ArgoCD reconciles. There is no imperative deploy target (memql#4550 removed
+#   the cockpit `deploy` subcommand the old break-glass path shelled into).
 
 # Dev secrets workflow
 make secrets                                     # Seed/re-seed the k8s Secrets the local

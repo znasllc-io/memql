@@ -44,7 +44,7 @@ import {
 // WHY THIS AND NOT identity's POST /pair/codes
 // ===========================================================================
 // The pairing-code flow exists and is the right shape for a worker that can
-// run `memql-cockpit worker pair` interactively -- the code is short, it is
+// run `memql worker pair` interactively -- the code is short, it is
 // redeemed by the MACHINE, and the token never crosses the operator's screen.
 // The portal cannot start it: /pair/codes authenticates with
 // `Authorization: Bearer <access token>`, and this application deliberately has
@@ -206,9 +206,9 @@ export function AddMachine({
             ) : null}
             <p className="mt-1 text-xs text-subtle">
               The installer and the worker binary ship from the memql-cockpit repository -- the
-              worker is a run mode of the Cockpit binary, not something this engine builds. The
-              full walkthrough, including the macOS permission prompts, is in the workers
-              runbook.
+              worker is a run mode of the <code>memql</code> command that repo builds, not
+              something this engine builds. The full walkthrough, including the macOS permission
+              prompts, is in the workers runbook.
             </p>
           </div>
 

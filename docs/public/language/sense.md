@@ -13,18 +13,23 @@ MemQL Sense is the language-intelligence service for `.memql` files:
 tokenize (syntax highlighting), complete (context-aware
 autocompletion), diagnose (errors and warnings), hover (symbol info),
 signature help, and go-to-definition. It is what colors and assists the source you read
-in the Cockpit [Editor](../cockpit/editor.md).
+in the memQL [VS Code extension](vscode.md).
 
-Sense has **two consumers** today, both driving the same brain:
+Sense has **one consumer** today and **two delivery paths** into it:
 
-1. The Cockpit [Editor](../cockpit/editor.md), over gRPC
-   (`MemqlService.Stream`).
-2. The **VS Code extension** (see [MemQL in VS Code](./vscode.md)), over an
+1. The **VS Code extension** (see [MemQL in VS Code](./vscode.md)), over an
    offline language server (`cmd/memql-lsp`) that embeds this package and reads
-   `.memql` from disk with no cluster and no auth.
+   `.memql` from disk with no cluster and no auth. This is the normal path.
+2. The gRPC surface on `MemqlService.Stream`, which serves the same brain to a
+   client holding a live cluster connection.
 
-Adding VS Code changed no wire contract -- it is a new delivery mechanism on
-top of the existing Sense package, not a fork of the brain.
+Both drive the same package -- a delivery mechanism is not a fork of the brain,
+and neither path changed a wire contract.
+
+> The Cockpit Editor was the second consumer until the Cockpit's TUI was
+> removed (memql#4550). The gRPC surface stayed: it is the contract, not the
+> caller, and removing it because its only caller went away would delete the
+> path a future one would need.
 
 This document covers two things and how they relate:
 
@@ -423,8 +428,6 @@ check the contract version without parsing the document.
 
 ## See also
 
-- [The Cockpit Editor](../cockpit/editor.md) -- the read-only pack
-  browser that Sense colors.
 - [MemQL Authoring Rules & Gotchas](authoring-rules.md) -- the
   human-and-agent rule list Sense diagnostics surface at edit time.
 - [MemQL Language](memql.md) -- the DSL reference.

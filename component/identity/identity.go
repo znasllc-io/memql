@@ -155,7 +155,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.Handle("GET /.well-known/jwks.json", JWKSHandler(s.keys))
-	// Discovery document for `memql-cockpit authorize <url>`. Tells
+	// Discovery document for `memql cluster add <url>`. Tells
 	// the cockpit which gRPC endpoint to dial + which OAuth
 	// client_id to use, so the user only has to paste the URL.
 	mux.Handle("GET /.well-known/memql-config.json", DiscoveryHandler(s.cfg, os.Getenv))

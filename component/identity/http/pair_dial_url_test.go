@@ -11,7 +11,7 @@ import (
 //
 // The defect: the resolver returned a bare `host:port`, and the consumer --
 // sdk/go/worker.ParseClusterURL, which the cockpit calls with exactly this
-// string (cmd/memql-cockpit/internal/worker/connect.go) -- documents a bare
+// string (memql-cockpit's internal/worker/connect.go) -- documents a bare
 // value as useTLS=false. So a reply of "api.local.example.com:443" told the
 // worker to dial a TLS port IN PLAINTEXT, putting its `mql_wkr_` bearer token
 // on the wire in the clear before the handshake failed.

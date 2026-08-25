@@ -96,7 +96,7 @@ type Connection struct {
 // stream metadata, and starts the WorkerService bidi stream. The
 // caller is responsible for sending the initial Register message
 // against the returned stream -- the SDK does not assume the worker
-// protocol's lifecycle. See cmd/memql-cockpit/internal/worker/
+// protocol's lifecycle. See memql-cockpit's internal/worker/
 // connect.go for the reference register / heartbeat / tool-result
 // loop.
 //

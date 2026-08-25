@@ -103,7 +103,7 @@ func ParseSemver(s string) (SemverVersion, error) {
 // Returns nil if all three are well-formed.
 //
 // Used at concept-registration time (engine startup) and at lint time
-// (memql-cockpit lint).
+// (memql lint).
 func ValidateAssemblyInputs(version SemverVersion, namespace, name string) error {
 	if version.Major < 1 {
 		return fmt.Errorf("@version major must be >= 1, got %d", version.Major)

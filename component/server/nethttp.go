@@ -723,7 +723,7 @@ func JWKSPaths() []string {
 // IdentityDiscoveryPaths returns the identity service's public discovery
 // documents. Both are mounted by identity's Service.RegisterRoutes and both
 // MUST be reachable without auth to do their job: the memql-config document is
-// what `memql-cockpit authorize <url>` reads to learn which gRPC endpoint and
+// what `memql cluster add <url>` reads to learn which gRPC endpoint and
 // client_id to use, and the RFC 8414 metadata is how an OAuth client discovers
 // the authorize/token/registration endpoints before it holds any credential.
 // Neither carries user data.
