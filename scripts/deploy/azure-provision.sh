@@ -67,6 +67,7 @@ cap_spec_param "backupStorageAccount"     "storage account for database backups 
 cap_spec_param "backupResourceGroup"      "resource group for the backup storage account (defaults to resourceGroup)"
 cap_spec_param "location"                 "Azure region (default eastus)"
 cap_spec_param "kubernetesVersion"        "AKS Kubernetes version (default: the region's default)"
+cap_spec_param "zones"                    "availability zone(s) for both node pools, space-separated (default 1). EMPTY means non-zonal, which Premium SSD v2 cannot attach to -- see the note in ensure_cluster"
 cap_spec_param "meshNodeCount"            "node count for the mesh (system) pool (default 2)"
 cap_spec_param "meshNodeSize"             "VM size for the mesh pool (default Standard_D2as_v4)"
 cap_spec_param "dbNodeCount"              "node count for the database (user) pool (default 1)"
@@ -93,6 +94,11 @@ BACKUP_STORAGE="$(cap_param backupStorageAccount "")"
 BACKUP_RG="$(cap_param backupResourceGroup "")"
 LOCATION="$(cap_param location "eastus")"
 K8S_VERSION="$(cap_param kubernetesVersion "")"
+# Default ZONAL, because the overlay this script exists to serve
+# (deploy/k8s/overlays/cloud-entry) pins storageClass managed-csi-premium-v2,
+# and Premium SSD v2 attaches ONLY to a VM in an availability zone. A non-zonal
+# default means the script's own substrate cannot run the overlay it is for.
+ZONES="$(cap_param zones "1")"
 MESH_NODE_COUNT="$(cap_param meshNodeCount "2")"
 MESH_NODE_SIZE="$(cap_param meshNodeSize "Standard_D2as_v4")"
 DB_NODE_COUNT="$(cap_param dbNodeCount "1")"
@@ -132,6 +138,50 @@ function check_prerequisites() {
         az account set --subscription "$SUBSCRIPTION_ID" 2>/dev/null \
             || cap_fail 3 "cannot select subscription ${SUBSCRIPTION_ID} -- the signed-in identity may not have access to it"
     fi
+}
+
+# preflight_vm_sizes resolves each requested VM size against what the REGION
+# actually offers, before anything is created.
+#
+# WHY THIS IS NOT OPTIONAL. --dryRun cannot catch an unavailable SKU: it reports
+# "would create AKS cluster" and the real failure arrives about four minutes
+# later, AFTER the resource group, registry, key vault and storage account are
+# already real. So a plan-only run gave a false all-clear and the operator was
+# left half-provisioned. Newer subscriptions frequently carry v5/v7 and ARM
+# families while offering no v4 at all, which is exactly the case that hit.
+#
+# Checked: the size exists in this region, it carries no restrictions for this
+# subscription, and it is x64 -- an ARM SKU schedules fine and then fails to run
+# amd64 engine images, which surfaces as ImagePullBackOff naming a manifest
+# rather than an architecture.
+function preflight_vm_sizes() {
+    local size seen=""
+    for size in "$MESH_NODE_SIZE" "$DB_NODE_SIZE"; do
+        case " $seen " in *" $size "*) continue ;; esac
+        seen="$seen $size"
+
+        local json
+        json="$(az vm list-skus --location "$LOCATION" --size "$size" --resource-type virtualMachines -o json 2>/dev/null || true)"
+
+        if [[ -z "$json" || "$json" == "[]" ]]; then
+            cap_fail 3 "VM size ${size} is not offered in ${LOCATION} -- newer subscriptions often carry v5/v7 and ARM families with no v4 at all; run 'az vm list-skus --location ${LOCATION} --resource-type virtualMachines -o table' to see what is available"
+        fi
+
+        local restriction arch
+        restriction="$(printf '%s' "$json" | jq -r '[.[] | select(.name=="'"$size"'")] | .[0].restrictions | length' 2>/dev/null || echo 0)"
+        if [[ "${restriction:-0}" != "0" ]]; then
+            local reason
+            reason="$(printf '%s' "$json" | jq -r '[.[] | select(.name=="'"$size"'")] | .[0].restrictions[0].reasonCode // "unknown"' 2>/dev/null || echo unknown)"
+            cap_fail 3 "VM size ${size} is restricted in ${LOCATION} for this subscription (${reason}) -- it cannot be created here even though it is listed"
+        fi
+
+        arch="$(printf '%s' "$json" | jq -r '[.[] | select(.name=="'"$size"'")] | .[0].capabilities[]? | select(.name=="CpuArchitectureType") | .value' 2>/dev/null | head -1)"
+        if [[ -n "$arch" && "$arch" != "x64" ]]; then
+            cap_fail 3 "VM size ${size} is ${arch}, not x64 -- the engine images are amd64, and an ARM node schedules pods that then fail to start with an error naming a manifest rather than an architecture"
+        fi
+
+        cap_info "VM size ${size} is available in ${LOCATION} (${arch:-x64}, unrestricted)"
+    done
 }
 
 function validate_arguments() {
@@ -265,6 +315,8 @@ function ensure_cluster() {
         -o none
     )
     [[ -n "$K8S_VERSION" ]] && args+=(--kubernetes-version "$K8S_VERSION")
+    # shellcheck disable=SC2206
+    [[ -n "$ZONES" ]] && args+=(--zones $ZONES)
 
     az aks create "${args[@]}" \
         || cap_fail 5 "failed to create AKS cluster ${CLUSTER_NAME}"
@@ -284,7 +336,8 @@ function ensure_database_pool() {
     az aks nodepool add --cluster-name "$CLUSTER_NAME" --resource-group "$RESOURCE_GROUP" \
         --name "$DB_POOL_NAME" --mode User \
         --node-count "$DB_NODE_COUNT" --node-vm-size "$DB_NODE_SIZE" --node-osdisk-size 32 \
-        --labels "$DB_NODE_LABEL" --node-taints "$DB_NODE_TAINT" -o none \
+        --labels "$DB_NODE_LABEL" --node-taints "$DB_NODE_TAINT" \
+        ${ZONES:+--zones $ZONES} -o none \
         || cap_fail 5 "failed to add database node pool ${DB_POOL_NAME}"
     cap_changed
 }
@@ -404,6 +457,7 @@ function collect_result() {
     cap_result_set "registry"        "${REGISTRY_NAME}.azurecr.io"
     cap_result_set "keyVault"        "$KEY_VAULT_NAME"
     cap_result_set "oidcIssuer"      "$OIDC_ISSUER"
+    cap_result_set "zones"           "$ZONES"
     cap_result_set "dryRun"          "$DRY_RUN"
 
     [[ -n "$BACKUP_STORAGE" ]] && cap_result_set "backupStorageAccount" "$BACKUP_STORAGE"
@@ -424,9 +478,17 @@ function collect_result() {
 function main() {
     validate_arguments
     check_prerequisites
+    # After check_prerequisites: this needs an authenticated az. It runs on a
+    # dry run too -- catching an unavailable SKU is most of what makes --dryRun
+    # worth running at all.
+    preflight_vm_sizes
 
     cap_info "provisioning MemQL substrate in ${SUBSCRIPTION_ID} (${LOCATION})"
     [[ "$DRY_RUN" == "true" ]] && cap_info "DRY RUN -- no Azure resource will be created or modified"
+
+    if [[ -z "$ZONES" ]]; then
+        cap_warn "--zones is empty, so both node pools will be NON-ZONAL. Premium SSD v2 (managed-csi-premium-v2, which deploy/k8s/overlays/cloud-entry pins) attaches only to a VM in an availability zone, so a database pod will stay Pending with an attach error naming the disk type. A PVC-bind probe does NOT detect this -- the PV provisions fine and only the attach fails."
+    fi
 
     ensure_resource_group "$RESOURCE_GROUP"
     [[ "$REGISTRY_RG" != "$RESOURCE_GROUP" ]] && ensure_resource_group "$REGISTRY_RG"
