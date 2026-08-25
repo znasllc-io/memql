@@ -233,8 +233,16 @@ function resolve_db_password() {
         dsn="$(vault_get "memory-nodes-database-dsn")"
         # postgres://user:pass@host:port/db?params -- the password is between
         # the first ':' after the scheme and the LAST '@' before the host.
+        #
+        # `%@*` (shortest suffix) and NOT `%%@*` (longest), because a password
+        # is allowed to contain '@' and a HOST is not. Splitting at the first
+        # '@' would silently truncate such a password, and the CNPG credential
+        # would then be written from a value that is not the one the live
+        # database has -- which is precisely the healthy-and-cannot-log-in
+        # failure this whole function exists to prevent. Values generated here
+        # are hex and never contain '@'; a DSN written by hand may.
         creds="${dsn#*://}"
-        creds="${creds%%@*}"
+        creds="${creds%@*}"
         DB_PASSWORD="${creds#*:}"
         if [[ -z "$DB_PASSWORD" || "$DB_PASSWORD" == "$creds" ]]; then
             cap_fail 5 "memory-nodes-database-dsn exists but carries no password, so the CNPG credential cannot be made to agree with it. Resolve by hand rather than letting this script generate a second password: the running database already has one."
