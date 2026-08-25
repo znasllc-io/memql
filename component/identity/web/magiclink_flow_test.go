@@ -670,6 +670,53 @@ func TestCheckEmailRendersAWorkingPoller(t *testing.T) {
 	}
 }
 
+// TestCheckEmailPollerConcludesAfterBindingLoss pins the poller's terminal
+// state for a 404 that follows a 200.
+//
+// A 200 from /auth/magic-link/status means this browser held the matching
+// binding cookie ON THAT POLL. When a later poll answers 404, the binding
+// was SPENT -- finishSignIn cleared memql_ml browser-wide when the link
+// completed same-device in the email-link tab, or the cookie aged out at the
+// row's own expiry -- and no amount of further polling changes the answer.
+// The script used to route that 404 through the same silent path as the
+// never-had-a-cookie case and re-arm: in the incident that motivated this,
+// both requesting tabs were still polling a row consumed at 06:39 past
+// 06:51, telling a signed-in person "waiting" forever.
+//
+// Go cannot execute the script, so this pins the three tokens a revert or a
+// well-meaning simplification would remove, in the file the real mount
+// serves. A 404 on the FIRST poll must stay what it was -- no cookie, wrong
+// browser, nothing to invent success from -- which is why what is pinned is
+// the discriminator, not any blanket 404 handling.
+func TestCheckEmailPollerConcludesAfterBindingLoss(t *testing.T) {
+	fx := newFlowFixture(t)
+	mux := http.NewServeMux()
+	fx.server.Mount(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/check-email.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /static/check-email.js status = %d, want 200", rec.Code)
+	}
+	js := rec.Body.String()
+
+	for _, token := range []string{
+		// The discriminator: a 404 is terminal only AFTER a readable answer.
+		"sawState",
+		// The conclusion actually stops the poll instead of re-arming.
+		"finished || terminal",
+		// And it says so; a silent stop reads as "still waiting".
+		"This sign-in was finished in another tab",
+	} {
+		if !strings.Contains(js, token) {
+			t.Errorf("check-email.js no longer carries %q.\n\n"+
+				"A 404 after a 200 means the binding cookie was spent (same-device completion "+
+				"clears memql_ml browser-wide); the requesting tab must conclude and say so, "+
+				"not re-poll a dead row until the deadline.", token)
+		}
+	}
+}
+
 // TestRevokedSessionIsRejectedOnMePages is memql#4303's acceptance clause
 // "after revoke the memql_admin bearer is rejected by the middleware".
 //
