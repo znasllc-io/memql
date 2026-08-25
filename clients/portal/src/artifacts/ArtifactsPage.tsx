@@ -14,6 +14,8 @@ import {
   DataText,
   EmptyState,
   Field,
+  FormActions,
+  FormRow,
   PageHeader,
   Skeleton,
   Textarea,
@@ -376,7 +378,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (next: string
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <FormRow onSubmit={submit}>
       <Field
         label="Ask the Library"
         grow
@@ -384,14 +386,13 @@ function SearchBox({ value, onChange }: { value: string; onChange: (next: string
       >
         <TextInput value={draft} onChange={setDraft} placeholder="the quarterly hiring plan" />
       </Field>
-      <div className="flex gap-2">
-        <Button type="submit" size="xs">
+      <FormActions>
+        <Button type="submit">
           <Search size={14} aria-hidden="true" />
           Search
         </Button>
         {value === "" ? null : (
           <Button
-            size="xs"
             onClick={() => {
               setDraft("");
               onChange("");
@@ -400,8 +401,8 @@ function SearchBox({ value, onChange }: { value: string; onChange: (next: string
             Clear
           </Button>
         )}
-      </div>
-    </form>
+      </FormActions>
+    </FormRow>
   );
 }
 
@@ -531,19 +532,19 @@ function NewArtifactForm({
           {message}
         </p>
       ) : null}
-      <div className="flex flex-wrap items-end gap-2">
+      <FormRow>
         <Field label="Title" grow>
           <TextInput value={title} onChange={setTitle} placeholder="Ten most beautiful birds" />
         </Field>
         <Field label="Summary" grow hint="Optional. Shown on the list row.">
           <TextInput value={summary} onChange={setSummary} placeholder="A short description" />
         </Field>
-      </div>
+      </FormRow>
       <Field label="Body" grow hint="Optional. Markdown, rendered in the artifact's viewer.">
         <Textarea value={body} onChange={setBody} rows={4} placeholder="# Ten most beautiful birds…" />
       </Field>
       <div>
-        <Button type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={title.trim() === ""}>
+        <Button type="submit" busy={busy} busyLabel="Working…" disabled={title.trim() === ""}>
           Create artifact
         </Button>
       </div>

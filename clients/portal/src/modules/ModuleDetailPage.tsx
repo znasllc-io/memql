@@ -12,6 +12,8 @@ import {
   Container,
   DataText,
   Field,
+  FormActions,
+  FormRow,
   PageHeader,
   Skeleton,
   StatusDot,
@@ -226,19 +228,20 @@ function PackToggle({
           </p>
         ) : null}
         {isOwner ? (
-          <div className="flex flex-wrap items-end gap-2">
+          <FormRow>
             <Field label="Reason" hint="Recorded with the flip; shown here and in the audit trail.">
               <TextInput value={reason} onChange={setReason} placeholder="Why the change" />
             </Field>
-            <Button
-              size="xs"
-              tone={nextEnabled ? "primary" : "danger"}
-              onClick={() => setConfirming(true)}
-              disabled={flip.busy}
-            >
-              {nextEnabled ? "Enable this pack" : "Disable this pack"}
-            </Button>
-          </div>
+            <FormActions>
+              <Button
+                tone={nextEnabled ? "primary" : "danger"}
+                onClick={() => setConfirming(true)}
+                disabled={flip.busy}
+              >
+                {nextEnabled ? "Enable this pack" : "Disable this pack"}
+              </Button>
+            </FormActions>
+          </FormRow>
         ) : (
           <p className="text-xs text-subtle">Flipping a pack is an owner-only action.</p>
         )}

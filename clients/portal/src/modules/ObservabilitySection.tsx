@@ -146,7 +146,17 @@ function BucketSwitch({
   onChange: (next: Bucket) => void;
 }): ReactNode {
   return (
-    <span role="group" aria-label="Aggregate window" className="flex overflow-hidden rounded border border-line">
+    // h-control-sm, not padding: this sits beside xs Buttons in a band header,
+    // and a segmented control two pixels off the line beside it is exactly the
+    // drift memql#4502 removed everywhere else. The control stays local --
+    // ui/README's rule is that a primitive earns its place on the SECOND
+    // caller and there is only one -- so it is allowlisted by name in
+    // portal_control_vocabulary_test.go rather than moved into ui/.
+    <span
+      role="group"
+      aria-label="Aggregate window"
+      className="flex h-control-sm overflow-hidden rounded border border-line"
+    >
       {(["1m", "1h"] as const).map((option) => (
         <button
           key={option}
@@ -154,7 +164,7 @@ function BucketSwitch({
           aria-pressed={bucket === option}
           onClick={() => onChange(option)}
           className={
-            "px-2 py-0.5 text-xs " +
+            "flex items-center px-2 text-xs " +
             (bucket === option ? "bg-accent-subtle text-fg" : "bg-surface text-muted hover:bg-raised")
           }
         >

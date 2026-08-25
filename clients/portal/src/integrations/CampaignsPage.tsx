@@ -3,7 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { STAT_TILE_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Container, Field, PageHeader, Skeleton, Textarea, TextInput } from "../ui";
+import {
+  Band,
+  Button,
+  Container,
+  Field,
+  FormActions,
+  FormRow,
+  PageHeader,
+  Skeleton,
+  Textarea,
+  TextInput,
+} from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useCampaigns } from "./useCampaigns";
 import {
@@ -169,7 +180,7 @@ function NewAudienceForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <FormRow onSubmit={submit}>
       <Field label="Audience name">
         <TextInput value={name} onChange={setName} placeholder="Beta waitlist" />
       </Field>
@@ -180,10 +191,12 @@ function NewAudienceForm({
           placeholder="How someone lands in this audience"
         />
       </Field>
-      <Button type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={name.trim() === ""}>
-        Add audience
-      </Button>
-    </form>
+      <FormActions>
+        <Button type="submit" busy={busy} busyLabel="Working…" disabled={name.trim() === ""}>
+          Add audience
+        </Button>
+      </FormActions>
+    </FormRow>
   );
 }
 
@@ -225,14 +238,14 @@ function NewTemplateForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-end gap-2">
+      <FormRow>
         <Field label="Template name">
           <TextInput value={name} onChange={setName} placeholder="August product update" />
         </Field>
         <Field label="Subject line" grow>
           <TextInput value={subject} onChange={setSubject} placeholder="What lands in the inbox" />
         </Field>
-      </div>
+      </FormRow>
       <Field label="Plain-text body" grow>
         <Textarea
           value={textBody}
@@ -242,7 +255,7 @@ function NewTemplateForm({
         />
       </Field>
       <div>
-        <Button type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={incomplete}>
+        <Button type="submit" busy={busy} busyLabel="Working…" disabled={incomplete}>
           Add template
         </Button>
       </div>

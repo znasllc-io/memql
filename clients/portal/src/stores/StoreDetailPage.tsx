@@ -122,7 +122,7 @@ export function StoreDetailPage(): ReactNode {
             </Band>
 
             <Band title="Ingestion" panel>
-              <div className="mb-3 flex flex-wrap items-end gap-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
                 <Button
                   size="xs"
                   onClick={() => actions.setStatus(store.storeId, store.status === "paused" ? "live" : "paused")}
