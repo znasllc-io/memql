@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, sameEntityId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
@@ -171,7 +171,9 @@ export function useMachines(): MachinesState {
     // the id: myWorkersWithStatus is scoped server-side on actor.userId.
     inScope: (row) =>
       effectiveScope !== "mine" ||
-      (userIdRef.current !== "" && machineFromRow(row).ownerUserId === userIdRef.current),
+      // sameEntityId tolerates the bare/canonical split described in
+      // memql#4581; it also keeps the "" refusal, since it never matches empty.
+      sameEntityId(machineFromRow(row).ownerUserId, userIdRef.current),
   }));
 
   const machines = useMemo(

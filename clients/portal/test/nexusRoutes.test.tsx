@@ -11,7 +11,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { emptyGoal } from "../src/nexus/scene/fixtures";
-import { OWNER_ID, callsNamed, nexusHarness, renderNexus } from "./support/nexusHarness";
+import { ACCESS, OWNER_ID, callsNamed, nexusHarness, renderNexus } from "./support/nexusHarness";
 
 function goalRow(id: string, goal: string, status: string, createdAt: string): Row {
   return { id, goal, status, requestedBy: OWNER_ID, createdAt, kind: "userGoal" };
@@ -157,6 +157,44 @@ describe("the Nexus section", () => {
     await waitFor(() => expect(screen.getByText(/belongs to someone else/i)).toBeTruthy());
     // The map is not drawn, and the goal's text is not leaked into the page.
     expect(screen.queryByText(/someone else's goal/i)).toBeNull();
+  });
+
+  // memql#4581. THE FIXTURES ABOVE ARE WHY THIS SHIPPED: every one of them
+  // uses a BARE id on both sides, so the ownership check has never once been
+  // asked the question production actually asks it.
+  //
+  // In production the two sides arrive in DIFFERENT shapes. A row's
+  // requestedBy is bare-ified on egress (WireBareifyData, query data), while
+  // MyAccess.userId is a proto scalar the bare-ifier never walks and stays
+  // canonical. A raw `!==` between them is always true, so a goal the caller
+  // had created seconds earlier reported "belongs to someone else".
+  it("draws a goal when the caller's id is canonical and the row's is bare", async () => {
+    const h = nexusHarness();
+    (h.query as { getMyAccess: ReturnType<typeof vi.fn> }).getMyAccess = vi.fn(async () => ({
+      ...ACCESS,
+      userId: `v1:identity:user:${OWNER_ID}`,
+    }));
+    renderNexus(h, "/nexus/plan-spring");
+
+    // The goal is drawn: same owner, spelled two ways.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /build a spring catalog/i })).toBeTruthy(),
+    );
+    expect(screen.queryByText(/belongs to someone else/i)).toBeNull();
+  });
+
+  // The other half of the same seam: a genuinely different owner must STILL be
+  // refused when the shapes differ, or the fix would have turned an
+  // over-refusal into a leak.
+  it("still refuses a goal owned by someone else when the shapes differ", async () => {
+    const h = nexusHarness();
+    (h.query as { getMyAccess: ReturnType<typeof vi.fn> }).getMyAccess = vi.fn(async () => ({
+      ...ACCESS,
+      userId: "v1:identity:user:someone-else",
+    }));
+    renderNexus(h, "/nexus/plan-spring");
+    await waitFor(() => expect(screen.getByText(/belongs to someone else/i)).toBeTruthy());
+    expect(screen.queryByRole("heading", { name: /build a spring catalog/i })).toBeNull();
   });
 
   it("says a goal that does not exist does not exist", async () => {
