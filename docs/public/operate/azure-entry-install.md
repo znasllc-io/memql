@@ -682,6 +682,12 @@ cluster: its SecretStore uses a workload-identity federated credential
 issued for ANOTHER cluster's OIDC issuer, and the vault it names holds that
 retired cluster's values. That is why `memql-secrets` is hand-seeded here.
 
+The `wireExternalSecrets` install step renders the SecretStore and its
+workload-identity ServiceAccount from THIS instance's vault and client id
+rather than applying the committed literals, so a new install does not
+inherit that problem
+([azure-instance-bringup.md](azure-instance-bringup.md)).
+
 **The two base ExternalSecrets are no longer part of that caveat.**
 `livekit` and `telephony` used to be described here as expected to stay
 unhealthy and part of the OutOfSync / Degraded noise; since memql#4487

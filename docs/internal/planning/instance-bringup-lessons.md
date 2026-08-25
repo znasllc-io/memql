@@ -1,7 +1,7 @@
 ---
 title: What a real first bring-up needed that the lifecycle automations do not model
 audience: internal
-status: draft
+status: shipped
 area: planning
 sinceVersion: 0.20.0
 owner: platform
@@ -16,6 +16,34 @@ subscription to a running mesh, driven by shell only.
 **Related:** [azure-instance-bringup.md](../../public/operate/azure-instance-bringup.md) ·
 [azure-entry-install.md](../../public/operate/azure-entry-install.md) ·
 memql#4463, memql#4464
+
+## Status: shipped (epic memql#4490)
+
+Every finding below has landed. Kept rather than deleted because the FINDINGS
+are the record -- each one is a fact about the system that existed nowhere a
+person could read it, and most of them reported success. What closed each:
+
+| § | Finding | Closed by |
+|---|---|---|
+| 1 | the eleven-step gap | #4472 -- `installInstance` owns 1-11, `argoSync` last |
+| 2 | generation, not migration | #4474 -- `scripts/deploy/seed-instance-secrets.sh` |
+| 3 | six silent dependencies | #4473 -- `install-cluster-operators.sh` + the existence checklist |
+| 3.2 | `memql-ca` / `identity-tls` | #4484 -- `deploy/k8s/components/internal-tls` |
+| 4 | the `creationPolicy: Merge` shell | #4474 -- part of the seeder |
+| 5 | substrate/overlay coupling | #4497 -- `--zones`, the SKU pre-flight, and a gate tying the storage class to the pool |
+| 6 | the GitOps credential step | #4472 -- `register-gitops-repo.sh` |
+| 8.8 | the post-sync settle | #4475 -- `settle-after-sync.sh` |
+| 9 | the voice-off Service defect | fixed upstream; #4488 removed the ExternalSecrets that stayed Degraded |
+
+Two findings this write-up did NOT contain were raised against it afterwards and
+are also closed: the version-bump render diff (#4483) and the ownership-reset
+certificate rate limit (#4479).
+
+One thing here is now WRONG and is left in place with this correction rather
+than edited, because the correction is the more useful record: §3 item 2 says
+`make secrets` mints the internal CA "from mkcert". It does not -- mkcert mints
+the front-door pair; the internal chain is openssl, in
+`deploy/k8s/base/tls/gen-internal-ca.sh`. The cloud chain is cert-manager.
 
 ## The one-sentence finding
 

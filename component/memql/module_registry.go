@@ -586,16 +586,68 @@ func (e *MemQLEngine) nodeTypeModuleRows(ctx context.Context, manifest *envregis
 		}
 
 		rows = append(rows, ModuleRow{
-			Kind:          ModuleKindNodeType,
-			Name:          name,
-			Description:   payloadString(t.Payload, "description"),
-			State:         state,
-			StateDetail:   strings.Join(detail, "; "),
-			Scope:         ModuleScopeCluster,
+			Kind:        ModuleKindNodeType,
+			Name:        name,
+			Description: payloadString(t.Payload, "description"),
+			State:       state,
+			StateDetail: strings.Join(detail, "; "),
+			Scope:       ModuleScopeCluster,
+			// A node type HAS an environment surface, and until memql#4488
+			// this field was left empty -- so moduleEnvSurface returned nil
+			// immediately and the portal's detail page for `voice` showed ZERO
+			// environment variables, while manifest.yaml carried
+			// MEMQL_POLYPHON_LIVEKIT_API_KEY and _SECRET under component:
+			// voice, both required for it. The page reported "no configuration"
+			// about the module whose missing configuration was the reason it
+			// was off.
+			EnvComponents: envComponentsForNodeType(manifest, name),
 			CodeReference: payloadString(t.Payload, "codeReference"),
 		})
 	}
 	return rows, nil
+}
+
+// envComponentsForNodeType lists the manifest components that carry an entry
+// naming this node type EXPLICITLY, plus a component sharing its name.
+//
+// THE "all" SENTINEL IS EXCLUDED, deliberately. An entry required for every
+// node type belongs to the engine, not to any one module, and folding those in
+// would make every node type's detail page show the same ~200 shared variables
+// with its own handful buried in them. What a reader wants on a module's page
+// is the configuration THAT MODULE needs -- which is exactly the set that names
+// it.
+//
+// The same-name component is included because that is how the manifest models
+// a node type's own subsystem (component: voice for the voice node type), and
+// an entry that is merely OPTIONAL for it would otherwise be invisible even
+// though it is the module's own knob.
+func envComponentsForNodeType(manifest *envregistry.Manifest, nodeType string) []string {
+	if manifest == nil || nodeType == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, entry := range manifest.AllEntries() {
+		comp := strings.TrimSpace(entry.Component)
+		if comp == "" {
+			continue
+		}
+		if comp == nodeType {
+			seen[comp] = struct{}{}
+			continue
+		}
+		for _, nt := range entry.Required {
+			if nt == nodeType { // not "all": see the note above
+				seen[comp] = struct{}{}
+				break
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for c := range seen {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // missingRequiredEnvForNodeType lists manifest entries required for the
