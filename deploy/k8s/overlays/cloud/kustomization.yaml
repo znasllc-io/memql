@@ -340,5 +340,11 @@ components:
   # THE DATABASE (epic memql#3842 / #3847 / #3850), with the `top` preset's
   # numbers: 3 instances across 3 zones, 4 vCPU / 16 GiB, 256 + 64 GiB. The
   # SHAPE comes from the component; the preset supplies only sizes.
+  # INTERNAL TLS (memql#4484) -- the memql-ca / identity-tls chain every mesh
+  # node mounts and NOTHING used to create. Before this the pods sat in
+  # ContainerCreating forever with no log line, because the container never
+  # started. Composed before cnpg-db only for readability; it patches nothing,
+  # so its position carries no meaning.
+  - ../../components/internal-tls
   - ../../components/cnpg-db
   - ../../components/cnpg-db/presets/top

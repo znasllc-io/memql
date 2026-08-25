@@ -1,0 +1,119 @@
+# INTERNAL TLS -- the CA every mesh node trusts, and identity's serving cert.
+#
+# WHAT THIS FIXES (memql#4484). Every mesh Deployment mounts `memql-ca`;
+# identity mounts `identity-tls`; every node dials https://identity:8085 and
+# verifies against /etc/memql/cacerts/ca.crt. NOTHING IN base, components OR
+# EITHER CLOUD OVERLAY CREATED EITHER SECRET. Locally `make secrets` mints them
+# with openssl. On the retired cloud cluster they had been HAND-SEEDED, which
+# is memql#4463's "the cluster is its own source of truth" in a second place
+# nobody had looked -- and the first bring-up on a genuinely empty subscription
+# is what exposed it, because there was no hand-seeded copy to inherit.
+#
+# HOW IT FAILED, AND WHY THAT IS THE WHOLE ARGUMENT FOR SHIPPING IT. A missing
+# Secret named by a volume does not error. The pod sits in ContainerCreating
+# FOREVER:
+#
+#   MountVolume.SetUp failed for volume "memql-ca" : secret "memql-ca" not found
+#
+# Seven mesh Deployments hung together for seventeen minutes with NO container
+# started -- so no log line, no CrashLoopBackOff, and nothing anywhere naming
+# TLS. cert-manager itself was exactly this shape and was fixed upstream in
+# memql#3845; this is the same treatment for the manifest the engine should
+# have been shipping all along.
+#
+# THE CHAIN, and why it is four objects rather than two:
+#
+#   memql-internal-selfsigned (Issuer, selfSigned)
+#     -> memql-internal-ca (Certificate, isCA)  --> Secret `memql-ca`
+#          -> memql-internal-ca (Issuer, ca:)
+#               -> identity-tls (Certificate)   --> Secret `identity-tls`
+#
+# The two Issuers are NAMESPACED, not ClusterIssuers, deliberately: this CA is
+# an internal trust root for one instance's mesh and has no business being
+# offerable to any other namespace on the cluster. It is also why the AppProject
+# needs no widening -- namespaced Issuers and Certificates are already inside
+# `namespaceResourceWhitelist`, unlike a ClusterIssuer.
+#
+# THE PRIVATE KEY PROBLEM, and the mount change that goes with this file. A
+# cert-manager Certificate produces a kubernetes.io/tls Secret carrying tls.crt,
+# tls.key AND ca.crt. `memql-ca` is mounted by TEN workloads, and a volume with
+# no `items:` selector projects EVERY key -- so shipping this chain naively
+# would put THE CA'S PRIVATE KEY inside every mesh pod, and SSL_CERT_DIR would
+# scan it. Every one of those ten mounts therefore selects `ca.crt` explicitly.
+# The openssl path produces a generic Secret with ca.crt alone, so the same
+# selector is correct there and the two paths stay interchangeable.
+#
+# NOT USED LOCALLY. k3d gets the openssl chain from `make secrets`, which skips
+# when the Secrets already exist -- so this component and that script must never
+# both run against one cluster. They do not: local composes neither.
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: memql-internal-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: memql-internal-ca
+spec:
+  # The Secret name IS the contract -- ten Deployments name it.
+  secretName: memql-ca
+  isCA: true
+  commonName: memql-internal-ca
+  subject:
+    organizations:
+      - MemQL
+  # Ten years, matching CA_DAYS in deploy/k8s/base/tls/gen-internal-ca.sh. A CA
+  # rotation invalidates every leaf under it at once, so it is an operation to
+  # schedule rather than one to have arrive.
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: RSA
+    size: 4096
+    # Rotate the key whenever the certificate is reissued. The alternative,
+    # reusing a key across issuances, means a key compromise survives renewal.
+    rotationPolicy: Always
+  issuerRef:
+    name: memql-internal-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: memql-internal-ca
+spec:
+  ca:
+    secretName: memql-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: identity-tls
+spec:
+  secretName: identity-tls
+  commonName: identity
+  # THE SHORT NAME ONLY, and that is a rule this repo already enforces.
+  # Every node dials `https://identity:8085` -- the bare Service name, resolved
+  # by the pod's own search path. Adding identity.memql.svc.cluster.local would
+  # bake THE NAMESPACE into a committed manifest, which pins the mesh to one
+  # namespace and makes a name resolve ACROSS an install boundary rather than
+  # failing; TestNothingFullyQualifiesAClusterDNSName refuses it, and it is
+  # right to. Nothing in the tree dials identity by a qualified name.
+  dnsNames:
+    - identity
+  usages:
+    - server auth
+  # 825 days, matching CERT_DAYS in gen-internal-ca.sh.
+  duration: 19800h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    name: memql-internal-ca
+    kind: Issuer

@@ -24,6 +24,7 @@ package cnpg
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -252,6 +253,25 @@ func TestOperatorInstallsArePinnedToExactVersions(t *testing.T) {
 		"deploy/cert-manager/install/kustomization.yaml": {
 			"/cert-manager/releases/download/v1.21.1/cert-manager.yaml",
 		},
+		// The two the install phase added (epic memql#4490). Both were
+		// dependencies that existed on no manifest in either repository, and
+		// both failed silently: the ESO CONTROLLER crashloops without its CRDs
+		// while the WEBHOOK stays Running, and an Ingress naming an absent
+		// IngressClass is a valid object nothing acts on, with ADDRESS empty
+		// forever.
+		//
+		// THE ESO CRD PIN IS COUPLED TO THE CHART, not independent of it. A CRD
+		// set older than the controller serves a schema missing fields the
+		// controller writes; newer, and the controller ignores fields the
+		// operator can now express. v2.5.0 here must equal the
+		// helm.sh/chart / app.kubernetes.io/version in
+		// deploy/external-secrets/install/external-secrets.yaml.
+		"deploy/external-secrets/crds/kustomization.yaml": {
+			"/external-secrets/releases/download/v2.5.0/crds.yaml",
+		},
+		"deploy/ingress-nginx/install/kustomization.yaml": {
+			"/ingress-nginx/releases/download/controller-v1.13.2/deploy.yaml",
+		},
 	}
 
 	for file, wantRefs := range installs {
@@ -294,5 +314,36 @@ func TestOperatorInstallsArePinnedToExactVersions(t *testing.T) {
 					"surfaces as a webhook that never answers rather than as an apply error.", file, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// TestExternalSecretsCRDsMatchTheRenderedChart makes the coupling a MEASUREMENT
+// rather than a comment (epic memql#4490).
+//
+// The ESO controller is a Helm render committed at one version; its CRDs are a
+// separate pinned apply, because the chart sets installCRDs: false (re-applying
+// the very large CRDs client-side trips kubectl's last-applied-configuration
+// annotation size limit). Two pins, one version -- and if they drift, the
+// failure is not an error. A CRD set older than the controller serves a schema
+// missing fields the controller writes; newer, and the controller silently
+// ignores fields the operator can now express. Both look like a working
+// install.
+func TestExternalSecretsCRDsMatchTheRenderedChart(t *testing.T) {
+	chart := string(cnpgRead(t, "deploy/external-secrets/install/external-secrets.yaml"))
+	crds := string(cnpgRead(t, "deploy/external-secrets/crds/kustomization.yaml"))
+
+	version := regexp.MustCompile(`app\.kubernetes\.io/version:\s*"?(v[0-9]+\.[0-9]+\.[0-9]+)"?`).
+		FindStringSubmatch(chart)
+	if version == nil {
+		t.Fatal("could not read app.kubernetes.io/version out of the rendered ESO chart -- " +
+			"either the render changed shape or this gate stopped matching, and either way it " +
+			"is no longer watching the coupling")
+	}
+	want := "/external-secrets/releases/download/" + version[1] + "/crds.yaml"
+	if !strings.Contains(crds, want) {
+		t.Errorf("the rendered ESO chart is %s but deploy/external-secrets/crds pins a different "+
+			"tag. They are ONE version: pin %s, or re-render the chart at the version the CRDs "+
+			"are pinned to. A mismatch does not error -- it serves a schema that disagrees with "+
+			"the controller, in whichever direction the drift went.", version[1], want)
 	}
 }
