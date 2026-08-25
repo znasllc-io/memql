@@ -93,6 +93,30 @@ Three things to know before adding or editing one:
 `deploy/` and fails the build on one without the annotation. It is text-level,
 so it cannot skip for want of a renderer.
 
+**Confirm the inheritance on a live cluster** — the gate proves the annotation
+is on the ExternalSecret; only the cluster proves ESO carried it across:
+
+```bash
+# 1. the annotation is where we put it
+kubectl -n memql get externalsecret memql-secrets \
+  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/compare-options}{"\n"}'
+
+# 2. force a reconcile, then check it landed on the SECRET
+kubectl -n memql annotate externalsecret memql-secrets force-sync=$(date +%s) --overwrite
+kubectl -n memql get secret memql-secrets \
+  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/compare-options}{"\n"}'
+
+# 3. and that Argo has stopped claiming it
+argocd app get memql --refresh          # no OutOfSync entry for Secret/memql-secrets
+```
+
+Step 2 returning empty while step 1 returns `IgnoreExtraneous` is the one
+outcome that would mean this mechanism does not hold on your ESO version. The
+repair is then explicit rather than inherited — declare the annotation under
+`spec.target.template.metadata.annotations`, which ESO applies to the generated
+Secret directly. Do not reach for that first: a `template` block interacts with
+`creationPolicy: Merge`, and the inherited form is what is verified here.
+
 ## Files
 
 | Path | What |
