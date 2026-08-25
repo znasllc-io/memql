@@ -974,7 +974,9 @@ session); `/admin/` answers `410 Gone` and points here.
 
 The identity service also serves `/me/dashboard`, `/me/devices`, `/me/export`,
 `/me/settings` and `/me/tokens`. Those are **not** moving into the portal, and
-the reason is who they are for rather than what they do.
+the reason is who they are for rather than what they do. (The portal has a
+`/me/settings` of its own, which is a DIFFERENT page holding cluster
+preferences -- both are tabulated below.)
 
 The portal is an operator's console: it is reached with an operator's
 credential, it assumes you are looking after a cluster, and every surface under
@@ -999,16 +1001,46 @@ waiting on a seam.
 
 The portal has a `/me` of its own (memql#4318), reached from the rail's profile
 row, and it does not contradict the paragraph above. It renders self-scoped
-data and links to identity for every change identity owns. Three routed tabs:
+data and links to identity for every change identity owns. Four routed tabs:
 
 | Tab | What it renders | What it links to |
 |---|---|---|
-| Account (`/me`) | display name, email, cluster role, member since, last seen -- read through `currentUser`, which takes no argument and resolves its row from `actor.userId`. Plus the shared-mailbox note when the account is flagged, pointing at the Security tab. | **Edit on identity** -> `/me/settings` |
+| Account (`/me`) | display name, email, cluster role, member since, last seen -- read through `currentUser`, which takes no argument and resolves its row from `actor.userId`. Plus the shared-mailbox note when the account is flagged, pointing at the Security tab. | -- |
+| Settings (`/me/settings`) | the caller's `v1:identity:user.preferences`, grouped as Locale, Notifications, Daily space, and Sessions and voice, each with its own explicit Save. Plus the computer-use kill switch, which is immediate and confirmed rather than saved with a group. Read off the same `currentUser` row (the bag is already on its `userFull` shape); written through `updateMyPreferences` and `toggleComputerUseEnabled`, both of which take the target from `actor.userId` and neither of which accepts a target argument. | **Email and account deletion** -> `/me/settings`; **Export your data** -> `/me/export` |
 | Sessions (`/me/sessions`) | the caller's live sessions (`authSessionsForSelf`) -- device, source, signed in, last active -- with **this device** marked from `MyAccessResult.session_id`. Per-row **Revoke** and **Sign out everywhere**, both confirmed. | -- |
 | Security (`/me/security`) | enrolled passkeys (`passkeysForSelf`) with the backup posture that says whether losing the device loses the credential, and the passkey-only switch (`user.signInPolicy`). | **Manage passkeys** -> `/me/devices`; **Personal access tokens** -> `/me/tokens`; **Export your data** -> `/me/export`; **Account settings and deletion** -> `/me/settings` |
 
 **Sign out** is the page header's one primary action, confirmed. It left the
 rail footer with the rest of the person-facing block.
+
+##### Two different pages are called `/me/settings`
+
+This is the one thing to get straight before reading either, because the paths
+are identical and the owners are not (memql#4523):
+
+| Page | Owner | What lives there |
+|---|---|---|
+| `portal.<domain>/me/settings` | the portal | cluster user preferences: language, timezone, product-app theme, notifications, the daily-space trio, the session and voice settings, and the computer-use kill switch |
+| `identity.<domain>/me/settings` | the identity service | changing your email address, exporting your data, deleting the account, and the sign-in-security card |
+
+The split is the same audience rule as the section above, applied one level
+down: the portal writes what the CLUSTER stores about how you like to work,
+and identity owns your CREDENTIAL and your account's existence. The portal's
+Settings tab therefore ends in an "Identity and data" band that names identity's
+page rather than duplicating it -- one door per destination (memql#4264), so a
+reader learns the capability moved instead of concluding it is gone.
+
+Two preference keys are deliberately absent from the portal's page:
+
+- **The portal's own theme** is the header toggle, and it is per-browser BY
+  DESIGN -- a console read on a laptop and on a wall display should not have to
+  agree about dark mode. The `preferences.theme` the Settings tab writes is the
+  server-side one that PRODUCT apps read, which is why changing it there does
+  not repaint the console. The control says so.
+- **`activeAssistantId`** is an app-managed pointer (memql#406) that product
+  SPAs stamp when somebody picks an assistant. It is not rendered at all: it
+  means nothing to a person reading a settings page, and editing it would only
+  break the pointer.
 
 Three properties are worth stating because each is a rule rather than a
 detail:

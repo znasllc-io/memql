@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { rowBool, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { rowBool, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { SignInPolicy } from "@znasllc-io/memql-sdk-core/identity";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -23,6 +23,22 @@ import { useCluster } from "../cluster/ClusterProvider";
 // than an empty facts list. The same rule identity's own /me/devices follows:
 // silence reads as "nothing", and "nothing" is the reassuring answer.
 //
+// # The preferences bag rides THIS read (memql#4523)
+//
+// The Settings tab needs `preferences`, and `userFull` -- the shape currentUser
+// already projects -- carries it. So there is nothing to extend and, more to
+// the point, nothing to extend in the WRONG place: `userDisplayCard` is the
+// client-callable half of the memql#2800 split and every field added there is a
+// PII leak on a query anyone can point at any user id. The settings read rides
+// the self-scoped query that already returns the bag.
+//
+// ABSENT KEYS READ AS THEIR DOCUMENTED DEFAULT, and that is a real decision
+// rather than tidiness. A concept-field @default is NEVER applied on write, so
+// a row that has never had a preference set simply lacks the key -- exactly as
+// the server's own Go readers see it. Rendering absent as an empty select would
+// tell a person their pace was unset when the system is treating it as
+// "steady"; the form must show what the cluster acts on.
+//
 // # Passkeys are counted here because the SWITCH depends on them
 //
 // The passkey-only control is disabled with zero enrolled, and the server
@@ -33,6 +49,84 @@ import { useCluster } from "../cluster/ClusterProvider";
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// The writable half of v1:identity:user.preferences, plus the two keys the
+// Settings tab shows but does not write through the general mutation.
+//
+// Defaults mirror the concept block (dsl/identity/concepts.memql). They are
+// spelled out here rather than left to `||` at each call site because two of
+// them are FALSY-VALID: `notifications` and `dailySpaceEnabled` default to
+// TRUE, so `rowBool(...) || true` is always true and `rowBool(...)` alone reads
+// an unset row as off. Absent and false are different facts and only an
+// explicit presence check tells them apart.
+export interface MePreferences {
+  language: string;
+  notifications: boolean;
+  theme: string;
+  timezone: string;
+  archiveRetentionDays: number;
+  dailySpaceEnabled: boolean;
+  dailySpaceRolloverAction: string;
+  cursorTweenMs: number;
+  takeoverMode: string;
+  interactivePace: string;
+  voiceMode: string;
+  // Read-only here: written ONLY through toggleComputerUseEnabled, never
+  // through updateMyPreferences, which cannot reach it (memql#2840 / #4522).
+  computerUseEnabled: boolean;
+}
+
+export const PREFERENCE_DEFAULTS: MePreferences = {
+  language: "",
+  notifications: true,
+  theme: "system",
+  timezone: "",
+  archiveRetentionDays: 30,
+  dailySpaceEnabled: true,
+  dailySpaceRolloverAction: "archive",
+  cursorTweenMs: 1000,
+  takeoverMode: "clean",
+  interactivePace: "steady",
+  voiceMode: "toggle",
+  computerUseEnabled: true,
+};
+
+// preferencesFrom reads the bag defensively. It is a WIRE payload: a node that
+// predates a key sends nothing, and every value arrives as `unknown`.
+export function preferencesFrom(bag: Record<string, unknown> | null): MePreferences {
+  const str = (key: string, fallback: string): string => {
+    const v = bag?.[key];
+    return typeof v === "string" && v.trim() !== "" ? v : fallback;
+  };
+  const bool = (key: string, fallback: boolean): boolean => {
+    const v = bag?.[key];
+    return typeof v === "boolean" ? v : fallback;
+  };
+  const num = (key: string, fallback: number): number => {
+    const v = bag?.[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  };
+  return {
+    // language and timezone default to "", so an empty stored value is not a
+    // fallback case -- str() would otherwise turn a deliberate clear into the
+    // default, which for these two IS the empty string anyway.
+    language: str("language", PREFERENCE_DEFAULTS.language),
+    notifications: bool("notifications", PREFERENCE_DEFAULTS.notifications),
+    theme: str("theme", PREFERENCE_DEFAULTS.theme),
+    timezone: str("timezone", PREFERENCE_DEFAULTS.timezone),
+    archiveRetentionDays: num("archiveRetentionDays", PREFERENCE_DEFAULTS.archiveRetentionDays),
+    dailySpaceEnabled: bool("dailySpaceEnabled", PREFERENCE_DEFAULTS.dailySpaceEnabled),
+    dailySpaceRolloverAction: str(
+      "dailySpaceRolloverAction",
+      PREFERENCE_DEFAULTS.dailySpaceRolloverAction,
+    ),
+    cursorTweenMs: num("cursorTweenMs", PREFERENCE_DEFAULTS.cursorTweenMs),
+    takeoverMode: str("takeoverMode", PREFERENCE_DEFAULTS.takeoverMode),
+    interactivePace: str("interactivePace", PREFERENCE_DEFAULTS.interactivePace),
+    voiceMode: str("voiceMode", PREFERENCE_DEFAULTS.voiceMode),
+    computerUseEnabled: bool("computerUseEnabled", PREFERENCE_DEFAULTS.computerUseEnabled),
+  };
 }
 
 export interface MeAccount {
@@ -48,6 +142,7 @@ export interface MeAccount {
   // the field existed carry nothing and the alternative would render every
   // legacy account as locked down.
   signInPolicy: SignInPolicy;
+  preferences: MePreferences;
 }
 
 export interface MePasskey {
@@ -90,6 +185,7 @@ function accountFromRow(row: Row | null): MeAccount | null {
     lastSeenAt: rowString(row, "lastSeenAt"),
     sharedMailbox: rowBool(row, "sharedMailbox"),
     signInPolicy: normalizePolicy(rowString(row, "signInPolicy")),
+    preferences: preferencesFrom(rowObject(row, "preferences")),
   };
 }
 
