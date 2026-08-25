@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+#
+# merge-as-owner.sh
+# =================
+#
+# Merge a pull request you authored, on a repository whose ruleset requires a
+# CODE OWNER review -- keeping that requirement in force for everyone else.
+#
+# THE CONSTRAINT THIS EXISTS TO WORK WITH, stated once because it is the whole
+# reason the script is not a settings change:
+#
+#   GitHub does not allow a pull request's AUTHOR to approve it. There is no
+#   toggle for this at repository, ruleset, organisation or enterprise level --
+#   on your own pull request the Approve control is simply not rendered.
+#
+# So "require the owner's approval, and let the owner approve their own work"
+# cannot be expressed as two settings. It is expressed as ONE setting plus a
+# bypass:
+#
+#   require_code_owner_review: true      <- the requirement, kept
+#   bypass_actors: admin, mode=pull_request  <- the owner proceeding on their own
+#
+# That is not a loophole. It is GitHub's supported way to say "this rule binds
+# the team; the owner may proceed on their own judgement" -- which is exactly
+# the policy asked for. Every other actor still needs a real code-owner review.
+#
+# WHAT THIS SCRIPT WILL NOT DO. It never weakens the ruleset. It does not touch
+# require_code_owner_review, the required status checks, or the merge queue. If
+# the bypass is missing it says so and stops, rather than adding permissions on
+# your behalf -- granting a bypass is a decision, not a step.
+#
+# Exit codes: 0 ok | 2 bad param | 3 refused | 4 prerequisite missing | 5 failed
+
+set -euo pipefail
+
+#=============================================================================
+# CONFIGURATION
+#=============================================================================
+
+DEFAULT_REPO="znasllc-io/memql"
+
+#=============================================================================
+# FUNCTIONS
+#=============================================================================
+
+function show_help() {
+    cat <<EOF
+Usage: $0 --pr=<number> [options]
+
+Merge a pull request you authored on a repo that requires code-owner review,
+using the admin bypass the ruleset already grants you.
+
+Options:
+    --pr=N            pull request number (required)
+    --repo=OWNER/NAME repository (default: $DEFAULT_REPO)
+    --check           report policy and PR readiness, merge nothing
+    --strategy=S      merge | squash | rebase (default: merge)
+    --help            this message
+
+Examples:
+    $0 --pr=4476
+    $0 --pr=4476 --check
+    $0 --pr=4476 --repo=znasllc-io/memql-znas --strategy=squash
+
+Why the bypass and not a settings change:
+    GitHub never lets an author approve their own pull request, at any
+    configuration level. The bypass is the supported way to express
+    "the requirement stands, and the owner may proceed on their own work".
+EOF
+}
+
+function log_info()  { printf 'INFO:  %s\n'  "$*" >&2; }
+function log_warn()  { printf 'WARN:  %s\n'  "$*" >&2; }
+function log_error() { printf 'ERROR: %s\n'  "$*" >&2; }
+function log_step()  { printf '\n==> %s\n'   "$*" >&2; }
+
+function check_prerequisites() {
+    command -v gh >/dev/null 2>&1 || { log_error "gh CLI is not installed"; exit 4; }
+    command -v jq >/dev/null 2>&1 || { log_error "jq is not installed"; exit 4; }
+    gh auth status >/dev/null 2>&1 || { log_error "gh is not authenticated -- run 'gh auth login'"; exit 4; }
+}
+
+function parse_arguments() {
+    PR=""
+    REPO="$DEFAULT_REPO"
+    CHECK_ONLY=false
+    STRATEGY="merge"
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --pr=*)       PR="${1#*=}"; shift ;;
+            --repo=*)     REPO="${1#*=}"; shift ;;
+            --strategy=*) STRATEGY="${1#*=}"; shift ;;
+            --check)      CHECK_ONLY=true; shift ;;
+            --help|-h)    show_help; exit 0 ;;
+            *)            log_error "unknown option: $1"; show_help; exit 2 ;;
+        esac
+    done
+
+    [[ -n "$PR" ]] || { log_error "--pr is required"; show_help; exit 2; }
+    [[ "$PR" =~ ^[0-9]+$ ]] || { log_error "--pr must be a number, got $PR"; exit 2; }
+    case "$STRATEGY" in
+        merge|squash|rebase) ;;
+        *) log_error "--strategy must be merge, squash or rebase"; exit 2 ;;
+    esac
+}
+
+# report_policy prints what the ruleset actually requires, so the bypass is used
+# with the requirement visible rather than assumed.
+function report_policy() {
+    log_step "Ruleset policy on ${REPO}"
+
+    local rs
+    rs="$(gh api "repos/${REPO}/rulesets" --jq '[.[]|select(.enforcement=="active")][0].id' 2>/dev/null || true)"
+    if [[ -z "$rs" || "$rs" == "null" ]]; then
+        log_warn "no active ruleset found -- nothing is being bypassed"
+        HAS_BYPASS="unknown"
+        return 0
+    fi
+
+    local full
+    full="$(gh api "repos/${REPO}/rulesets/${rs}" 2>/dev/null)"
+
+    printf '%s\n' "$full" | jq -r '
+      "  code-owner review required : \((.rules[]|select(.type=="pull_request")|.parameters.require_code_owner_review) // false)",
+      "  approvals required         : \((.rules[]|select(.type=="pull_request")|.parameters.required_approving_review_count) // 0)",
+      "  required checks            : \([.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(", "))",
+      "  merge queue                : \(if any(.rules[]; .type=="merge_queue") then "yes" else "no" end)"
+    ' 2>/dev/null || log_warn "could not summarise the ruleset"
+
+    if printf '%s\n' "$full" | jq -e '[.bypass_actors[]?|select(.actor_type=="RepositoryRole")]|length > 0' >/dev/null 2>&1; then
+        HAS_BYPASS=yes
+        log_info "admin bypass IS configured -- the owner may proceed on their own pull request"
+    else
+        HAS_BYPASS=no
+        log_warn "no admin bypass is configured on this ruleset"
+    fi
+}
+
+function report_pr() {
+    log_step "Pull request ${REPO}#${PR}"
+
+    local j
+    j="$(gh pr view "$PR" --repo "$REPO" --json state,title,author,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup 2>/dev/null)" \
+        || { log_error "cannot read ${REPO}#${PR}"; exit 5; }
+
+    PR_STATE="$(printf '%s' "$j" | jq -r .state)"
+
+    printf '%s\n' "$j" | jq -r '
+      "  title    : \(.title)",
+      "  author   : \(.author.login)",
+      "  state    : \(.state)",
+      "  mergeable: \(.mergeable)  (\(.mergeStateStatus))",
+      "  review   : \(.reviewDecision // "none")",
+      "  checks   : \([.statusCheckRollup[]?|select(.conclusion=="SUCCESS")]|length) passed, \([.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length) failed, \([.statusCheckRollup[]?|select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")]|length) pending"
+    '
+
+    FAILED="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length')"
+    PENDING="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")]|length')"
+
+    if [[ "${FAILED:-0}" -gt 0 ]]; then
+        printf '%s\n' "$j" | jq -r '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")|"    FAILED: \(.name//.context)"]|.[]'
+    fi
+}
+
+# guard_readiness refuses on the two conditions a bypass must never paper over.
+# The bypass exists to skip a review that cannot be given; it is not a way past
+# a red build.
+function guard_readiness() {
+    [[ "$PR_STATE" == "OPEN" ]] || { log_error "pull request is ${PR_STATE}, not OPEN"; exit 3; }
+
+    if [[ "${FAILED:-0}" -gt 0 ]]; then
+        log_error "refusing: ${FAILED} check(s) FAILED. The bypass skips a review, never a red build."
+        exit 3
+    fi
+    if [[ "${PENDING:-0}" -gt 0 ]]; then
+        log_error "refusing: ${PENDING} check(s) still running. Re-run when CI has settled."
+        exit 3
+    fi
+    if [[ "${HAS_BYPASS:-no}" == "no" ]]; then
+        log_error "refusing: this ruleset grants no admin bypass, so --admin would fail. Add one deliberately, or have a second code owner review."
+        exit 3
+    fi
+}
+
+function merge_pr() {
+    log_step "Merging ${REPO}#${PR} (strategy: ${STRATEGY})"
+    log_info "using the admin bypass; code-owner review remains required for everyone else"
+
+    if gh pr merge "$PR" --repo "$REPO" --admin "--${STRATEGY}" 2>&1; then
+        log_info "merge command accepted"
+    else
+        log_error "merge failed -- see the output above"
+        exit 5
+    fi
+
+    local state merged
+    state="$(gh pr view "$PR" --repo "$REPO" --json state -q .state 2>/dev/null || echo unknown)"
+    merged="$(gh pr view "$PR" --repo "$REPO" --json mergedAt -q '.mergedAt // "not merged"' 2>/dev/null || echo unknown)"
+    log_step "Result"
+    printf '  state : %s\n  merged: %s\n' "$state" "$merged"
+    [[ "$state" == "MERGED" ]] || { log_warn "not merged yet -- if a merge queue is enabled it may still be enqueued"; exit 0; }
+}
+
+function main() {
+    parse_arguments "$@"
+    check_prerequisites
+    report_policy
+    report_pr
+
+    if [[ "$CHECK_ONLY" == true ]]; then
+        log_step "--check given; nothing merged"
+        exit 0
+    fi
+
+    guard_readiness
+    merge_pr
+}
+
+#=============================================================================
+# ENTRY POINT
+#=============================================================================
+
+main "$@"

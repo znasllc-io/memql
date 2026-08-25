@@ -298,11 +298,38 @@ DSL all live here.
    itself; rebase on `origin/main` and force-push. The failure is silent in a
    specific way: a watcher looking only for merged / failed / clean cannot see
    `DIRTY` at all, and its silence is indistinguishable from "still queued".
-2. **Pre-release -- no backwards-compat shims or deprecation windows.** When a
+2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
+   The ruleset requires a **code-owner review**, and that requirement stays on.
+   It cannot be combined with self-approval, because **GitHub never lets a pull
+   request's author approve it** -- there is no toggle for that at repository,
+   ruleset, organisation or enterprise level, and on your own PR the Approve
+   control is simply not rendered. So the policy "the owner's approval is
+   required, and the owner may proceed on their own work" is expressed as one
+   setting plus one bypass:
+
+   ```
+   require_code_owner_review: true                     <- the requirement, kept
+   bypass_actors: RepositoryRole(admin), pull_request  <- the owner, on their own PR
+   ```
+
+   Use the script, which reports the policy it is bypassing before it acts and
+   refuses on a red or unfinished build -- the bypass skips a REVIEW that cannot
+   be given, never a failing check:
+
+   ```bash
+   scripts/dev/merge-as-owner.sh --pr=<n> --check   # policy + readiness, merges nothing
+   scripts/dev/merge-as-owner.sh --pr=<n>           # merge
+   ```
+
+   **Do not "fix" this by lowering `require_code_owner_review`.** That removes
+   the requirement for everyone, which is a different policy from the one
+   intended, and it is the change a future reader will reach for first.
+
+3. **Pre-release -- no backwards-compat shims or deprecation windows.** When a
    contract changes, fix both MemQL and the consumer at once and delete what is
    no longer needed. No legacy adapters, fallback paths, or "keep working while
    we migrate" layers.
-3. **Stage files by explicit path** (`git add <file>`) -- never `git add -A` or
+4. **Stage files by explicit path** (`git add <file>`) -- never `git add -A` or
    `git add .`. The repo owner runs multiple Claude sessions against this
    working tree, and untracked files from another session must not get swept
    into your commit.
