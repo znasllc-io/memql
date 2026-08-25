@@ -28,7 +28,7 @@ import (
 // only module that requires both component/identity and sdk/go -- the same
 // reason discovery_endpoint_deploy_test.go lives here.
 //
-// The cockpit is NOT patched for this: cmd/memql-cockpit/internal/worker/
+// The cockpit is NOT patched for this: memql-cockpit's internal/worker/
 // connect.go already feeds the reply straight to ParseClusterURL and uses the
 // returned flag, so a scheme-carrying value flows through unchanged.
 

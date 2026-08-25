@@ -238,7 +238,7 @@ db:
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
 ##@ Local cluster (k3d + ArgoCD -- the blessed local topology, #2061)
-##> This IS the GitOps deploy path (same manifests as the cloud); `make deploy` is break-glass only.
+##> This IS the deploy path (same manifests as the cloud) -- there is no imperative alternative.
 .PHONY: up up-refresh down secrets dev status scale
 
 ## Fresh k3d bring-up: cluster + ArgoCD + secrets + images, wait healthy (SERVERS=2 AGENTS=1 for multi-node)
@@ -247,10 +247,8 @@ db:
 ## for the mesh to become Available. Idempotent -- safe on an existing cluster.
 ##
 ## This is the GitOps path: the local engine "deploy" IS the ArgoCD sync of the
-## local overlay (the primary deploy path, same as the cloud). It is NOT the
-## cockpit break-glass path -- `make deploy` is the imperative cockpit-delegated
-## path (I16, #2227). `make up` stays a cluster-bootstrap launcher so the local
-## inner loop never depends on the owner-gated cockpit deploy.
+## local overlay -- the same path as the cloud, and since memql#4550 the only
+## one. `make up` stays a cluster-bootstrap launcher, not a deploy.
 ## Downstream product stacks reuse this target with their own overrides
 ## (see docs/public/operate/downstream-stacks.md). In the common case a
 ## product runs on the product-agnostic engine images and DELIVERS ITS
@@ -896,53 +894,24 @@ verify-agents:
 conn-headroom-check:
 	@bash scripts/deploy/conn-headroom-check.sh
 
-# ===========================================================================
-# BREAK-GLASS -- imperative deploy. ArgoCD OWNS the cluster (deploys = merges;
-# selfHeal reverts out-of-band kubectl applies), so this target is the escape
-# hatch for when Argo is unavailable (#2207).
+##@ Deploy
 #
-# THE BLESSED DEPLOY IS A GIT MERGE, NOT `make deploy`:
-#   bump the image digest in deploy/k8s/overlays/cloud + merge to main
-#   -> ArgoCD reconciles. Rollback = `git revert` the overlay. See
-#   docs/public/operate/deployment-strategy.md.
-# ===========================================================================
-
-##@ Deploy (break-glass -- ArgoCD owns the cluster; use only when Argo is unavailable)
-.PHONY: deploy
-
-## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
-## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
-## `memql-cockpit deploy`, which embeds the engine automation runtime, loads the
-## deployment bundle, and runs the PINNED `deployEngineCluster` automation
-## (role-gated + audited + version-pinned) from OUTSIDE the target cluster.
-## See DEVOPS_DSL_BUNDLE_HANDOFF.md "Execution model".
-##
-## NOT the normal path -- the normal path is GitOps (digest bump in
-## overlays/cloud + merge -> ArgoCD syncs). Use this break-glass path only when
-## ArgoCD is unavailable (#2207).
-##
-## OWNER-GATED (honest, not a silent failure): the cockpit's in-process engine
-## carries no database yet, so DB-backed deployment steps cannot complete until
-## the I13 runner surface + a live engine DB are wired (memql#2220/#2228). A real
-## deploy reports `BLOCKED (owner-gated): ...` cleanly; a DRY_RUN is a clean
-## no-op resolve. The cockpit binary is resolved by scripts/deploy/cockpit.sh
-## (COCKPIT_BIN > PATH > built from the sibling ../memql-cockpit via `make
-## cockpit`). There is NO fallback to the old script path.
-##
-## Forwarded knobs: VERSION->--ref, DRY_RUN->--dry-run, plus the role gate
-## (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->--actor for
-## the audit trail. ARGS passes extra cockpit flags through.
-##   make deploy VERSION=0.9.6 ROLE=developer            # imperative roll-out
-##   make deploy VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
-##   make deploy COCKPIT_BIN=/path/to/memql-cockpit      # pin the binary
-deploy:
-	@COCKPIT_BIN="$${COCKPIT_BIN:-}" bash scripts/deploy/cockpit.sh deploy \
-		$${VERSION:+--ref=$$VERSION} \
-		$${ROLE:+--role=$$ROLE} \
-		$${ACTOR:+--actor=$$ACTOR} \
-		$${DRY_RUN:+--dry-run} \
-		$${APPLY:+--apply} \
-		$(ARGS)
+# THERE IS NO `make deploy`. It shelled into `memql-cockpit deploy`, which
+# embedded the engine automation runtime on an operator machine -- and that
+# whole family (deploy / run / cut / rollback) was removed with the Cockpit's
+# TUI (memql#4550). The Cockpit is the machine-side worker runtime now; it does
+# not deploy clusters.
+#
+# The normal path was always GitOps and is now the only path: build the engine
+# images on the build server, pin {engine version, bundle digest, client
+# digest} in ONE overlay (deploy/k8s/overlays/<env>), merge -> ArgoCD
+# reconciles. Rollback is `git revert` on the overlay. See
+# docs/public/operate/deploy-bundle-runbook.md and
+# docs/public/operate/deployment-strategy.md.
+#
+# The break-glass path it replaced could never complete a real deploy anyway:
+# the cockpit's in-process engine carried no database, so every DB-backed step
+# reported BLOCKED (owner-gated). Removing it deletes a path, not a capability.
 
 # ---------------------------------------------------------------------------
 # Utility targets

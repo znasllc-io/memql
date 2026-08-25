@@ -3892,7 +3892,7 @@ QueryClient.prototype.createWorkerRegistration = function (this: QueryClient, ar
   return this.executeNamed("createWorkerRegistration", buildCreateWorkerRegistration(args), opts);
 };
 
-/** Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display. */
+/** Create a worker_token identity (machine credential for a Cockpit worker machine). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createWorkerTokenIdentity"] in generated_concepts.ts).
 export interface CreateWorkerTokenIdentityArgs {
   identityId: string;

@@ -151,7 +151,7 @@ Seed list (task 0 refines it):
   `EvaluatePolicy` / decision-policy tier. Exemption: `dsl/_reference/`
   keeps retired forms deliberately as don't-do-this skeletons.
 - Superseded deploy paths: `az acr build`, `make release`, hand-pushed release
-  images, `make deploy VERSION=X` (verify whether the target still exists).
+  images, the `deploy VERSION=X` make target (verify whether it still exists).
 - macOS/Apple Silicon as the standardized dev hardware (verify current
   reality; the root CLAUDE.md may be the stale surface here).
 - `MEMQL_MASTER_KEY` used as an authentication credential (#3519 split it

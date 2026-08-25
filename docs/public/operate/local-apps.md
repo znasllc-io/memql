@@ -34,7 +34,7 @@ The engine drives exactly two apps today — **Claude Code** (`claude-code`) and
         │
         │  AppSessionStart {credential, mcpEndpoint, workspace, prompt}
         ▼
-   WorkerService.Stream  ═══════════════════════►  memql (cockpit)
+   WorkerService.Stream  ═══════════════════════►  memql (the Cockpit)
         │                                              │
         │  ◄══ AppSessionChunk (stdout/stderr/event) ══ │ runs `claude -p`
         │  ═══ AppSessionControl (cancel / renew) ════► │
@@ -49,6 +49,10 @@ The engine drives exactly two apps today — **Claude Code** (`claude-code`) and
 **The engine cannot dial the machine.** It is behind NAT. The stream the
 cockpit opened *outward* is the only channel, so it is the transport, and MCP
 is the back-channel the app uses to reach back in.
+
+> The cockpit installs as the **`memql`** command (memql#4553). The engine
+> builds a `bin/memql` too, but that one only ever runs inside a pod; these
+> two never share a PATH.
 
 ---
 

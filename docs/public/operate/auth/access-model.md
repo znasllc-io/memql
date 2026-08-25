@@ -83,7 +83,7 @@ A credential set owned by a user. One user can have many identities:
   authenticate with `mql_pat_<...>`
 - A service account (`identityType: "service_account"`) -- reserved
 - A worker token (`identityType: "worker_token"`) -- used by
-  memql-cockpit-worker processes; admitted only on
+  Cockpit worker processes (`memql worker run`); admitted only on
   `WorkerService.Stream`
 
 Key fields:

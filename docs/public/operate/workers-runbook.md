@@ -32,9 +32,9 @@ see workers owned by the user whose session they're acting in.
 ## 2. Install
 
 Pick the installer for your OS. `install-mac.sh` and `install-linux.sh` ship
-from the `memql` repo (the worker is a run mode of the Cockpit
-binary), not from this engine repo's `scripts/install/` -- that directory
-carries the cluster-bring-up installers (`mkcert-setup.sh`,
+from the `memql-cockpit` repo (the worker is a run mode of the `memql`
+command that repo builds), not from this engine repo's `scripts/install/`
+-- that directory carries the cluster-bring-up installers (`mkcert-setup.sh`,
 `hosts-entries.sh`, `install-binary.sh`, ...) and has no `install-mac.sh` /
 `install-linux.sh` of its own.
 
@@ -51,7 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scrip
 The install script:
 
 1. Downloads the appropriate binary
-   (`memql-darwin-arm64` or `memql-computeruse-darwin-arm64`).
+   (`memql-darwin-arm64`, or `memql-computeruse-darwin-arm64` with
+   `--computeruse`) and installs it as **`memql`** -- one installed command
+   for both build variants.
 2. Writes `~/.memql/worker.yaml` with the token + cluster URL.
 3. Drops a LaunchAgent at
    `~/Library/LaunchAgents/com.znasllc.memql-worker.plist`
@@ -75,11 +77,13 @@ TCC status, run:
 memql worker setup
 ```
 
-The setup flow is plain sequential terminal output (the cockpit's
-TUI is retired): it probes each permission, pauses for approval where
-a grant is missing, and re-probes. Pass `--non-interactive` for
-scripted installs -- it reports what is missing with honest exit
-codes and never prompts.
+The setup flow is plain sequential terminal output (the cockpit's TUI is
+retired): it probes each permission, pauses for approval where a grant is
+missing, and re-probes. Pass `--non-interactive` for scripted installs -- it
+reports what is missing and never prompts, exiting **4** when a permission has
+not been granted and **5** when a probe itself failed. An installer reading
+`$?` can act on the difference; a prompt blocking in a pipe reads as a hung
+install rather than as a missing grant.
 
 ### Linux
 
@@ -523,7 +527,8 @@ UI: `/fleet/machines` in the portal -> Revoke, per machine. The owner can
 also rename it (`displayName`) and edit its `operatorLabels` from the same
 card; see section 5.
 
-SDK / VS Code extension -- run the mutation:
+SDK / VS Code extension -- run the mutation (the `memql` command does **not**
+run mutations; it never carried a runner and the TUI that did is gone):
 
 ```memql fragment
 revokeWorker(
@@ -637,7 +642,7 @@ All seven phases shipped:
     `MemqlService.Stream`; the AddWorkerModal calls these directly,
     so the plain token never lives outside the gRPC reply).
   - macOS TCC + Linux X11 pre-flight wizard
-    (`memql-computeruse worker setup`).
+    (`memql worker setup`, on the computer-use build).
   - Prometheus metrics on `127.0.0.1:9100/metrics`.
   - Per-call rlimits (`RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NOFILE`)
     and optional setuid drop via

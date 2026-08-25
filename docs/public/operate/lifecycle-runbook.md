@@ -16,9 +16,9 @@ maintenance trigger, the coordinated/ordered rollout driver, and the
 green-before-deploy parity gate that gates every roll.
 
 This is the *lifecycle* companion to the cluster/secrets/promotion reference in
-[`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, `make deploy`,
-secret seeding, the digest bump). Read that for *what* deploys; read
-this for *how a node enters and leaves rotation cleanly* during one.
+[`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, secret
+seeding, the digest bump). Read that for *what* deploys; read this for *how a
+node enters and leaves rotation cleanly* during one.
 
 ---
 
@@ -240,7 +240,7 @@ PR (secrets + a live deploy):
    red parity gate blocks the roll. Keep it **off** the PR-merge-queue
    required set.
 4. **Final coherent roll** — cut + deploy the whole-epic release per
-   [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (`make deploy
-   VERSION=X`, deep smoke, pin the overlay's `{engine, bundle, client}` digests,
-   then deploy), and verify the resilient-mesh stack on the cluster (no drop / no
+   [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (deep smoke, pin the
+   overlay's `{engine, bundle, client}` digests, then merge), and verify the
+   resilient-mesh stack on the cluster (no drop / no
    dup across replicas; clean drains on the roll).

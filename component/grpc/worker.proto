@@ -7,7 +7,7 @@ option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 
-// WorkerService is the bidi-stream surface a memql-cockpit-worker
+// WorkerService is the bidi-stream surface a Cockpit worker
 // process opens against the agent node. Per-user routing: the worker's
 // token authenticates as a worker:<id> principal owned by exactly one
 // human user; only agents acting in sessions owned by that user can
@@ -62,7 +62,7 @@ message Register {
   string name = 1;
   // Capabilities advertised. "HEADLESS" must always be present;
   // "COMPUTERUSE" is an optional addition declared only by
-  // memql-cockpit-computeruse builds with TCC / X11 confirmed available.
+  // computer-use builds of memql with TCC / X11 confirmed available.
   repeated string capabilities = 2;
   map<string, string> labels = 3;
   // Per-capability concurrency caps. e.g. {"HEADLESS": 8, "COMPUTERUSE": 1}.

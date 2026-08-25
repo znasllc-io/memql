@@ -196,9 +196,9 @@ Before the `memql` app can sync:
 Until those are done the app **fails closed**, which is the intended
 not-yet-configured state.
 
-The imperative `make deploy` path stays available as a documented **break-glass**
-escape hatch (its full demotion is tracked by #2205) until a couple of clean
-GitOps deploys have happened.
+The imperative `deploy` make target was the documented **break-glass** escape
+hatch. It is gone (memql#4550, with the Cockpit subcommand it delegated to), so
+GitOps is the only path -- which is what #2205 was tracking anyway.
 
 ## Break-glass (incident procedure)
 

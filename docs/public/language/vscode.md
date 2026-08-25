@@ -11,8 +11,8 @@ owner: znas
 
 The MemQL VS Code extension gives `.memql` authors first-class editing --
 syntax highlighting, live diagnostics, context-aware completion, hover, and
-signature help -- powered by the **same MemQL Sense brain** the Cockpit
-[Editor](../cockpit/editor.md) uses. It works **fully offline against local
+signature help -- powered by the **same MemQL Sense brain** the engine serves
+over gRPC. It works **fully offline against local
 files**: no running cluster, no auth. Open a folder of `.memql` files and
 iterate on the syntax itself.
 

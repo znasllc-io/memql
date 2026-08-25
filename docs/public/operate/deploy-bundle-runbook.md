@@ -1,31 +1,44 @@
 ---
-title: Deploy-bundle runbook -- make deploy via deployEngineCluster
+title: Deploy-bundle runbook -- the retired imperative deploy path
 audience: public
-status: stable
+status: historical
 area: operate
 sinceVersion: 0.12.0
 owner: znas
 ---
 
-# Deploy-Bundle Runbook -- `make deploy` via deployEngineCluster
+# Deploy-Bundle Runbook -- the retired imperative deploy path
 
-> **RETIRED INVOCATION (2026-08-25).** The cockpit's `deploy` / `run`
-> subcommands (and its embedded engine runtime) were removed in the
-> memql-cockpit 0.10.0 slim-down (epic:cockpit-revival, memql#4550), so
-> the `memql-cockpit deploy` commands below no longer exist to run.
-> The supported deploy path is the one in CLAUDE.md: build-server
-> images, pin {engine version, bundle digest, client digest} in the
-> instance overlay, merge, ArgoCD reconciles. This runbook is kept as
-> the record of the deploy-as-a-pack design until the DSL lifecycle
-> automations (memql#4490) replace it.
+> Historical: retired in memql#4550; kept for rationale.
 
-How to run a deployment of the PURE ENGINE mesh through the DSL deploy
-bundle (`deployEngineCluster`, dsl/deployment/) from the cockpit, end to
-end. This is the deploy-as-a-pack path proven live on 2026-07-04
-(memql#2380): every phase -- authorize, record, clone, build, place,
-gate, outcome, finalize, rollback -- runs as automation steps, and the
-`v1:cluster:deployment` timeline in the target database is the record
-of evidence.
+**The path this runbook describes no longer exists.** It ran a deployment of
+the engine mesh through the DSL deploy bundle (`deployEngineCluster`,
+dsl/deployment/) from the Cockpit, and the Cockpit's `deploy` subcommand was
+deleted along with its TUI and embedded runtime. The `deploy` make target and
+`scripts/deploy/cockpit.sh` went with it.
+
+**What to do instead.** The deploy is a git merge, and always was: build the
+engine images on the build server, pin `{engine version, bundle digest, client
+digest}` in ONE overlay under `deploy/k8s/overlays/<instance>`, and merge --
+ArgoCD reconciles. Rollback is `git revert` on that overlay. Locally, `make up`
+brings up k3d + ArgoCD against `deploy/k8s/overlays/local`.
+
+**Why removing it cost nothing.** This path could never complete a real
+deploy: the Cockpit's in-process engine carried no database, so every DB-backed
+step reported `BLOCKED (owner-gated)`. It was proven live once, on 2026-07-04
+(memql#2380), and owner-gated back to dry-run afterwards.
+
+The rest of this document is kept because the bundle it drove --
+`deployEngineCluster` and its phases -- still describes how a deploy is
+modelled in the graph, and the `v1:cluster:deployment` timeline is still the
+record of evidence. Read it for that; do not read it for commands to run. The
+DSL lifecycle automations (memql#4490) are what replace the design.
+
+## What the bundle did
+
+Every phase -- authorize, record, clone, build, place, gate, outcome, finalize,
+rollback -- ran as automation steps, and the `v1:cluster:deployment` timeline
+in the target database was the record of evidence.
 
 Scope: engine mesh ONLY (identity / cognition / voice / agent / planner /
 workbench / mcp / voice-agent). A downstream product stack (carrier bff +
@@ -34,7 +47,8 @@ SPA) deploys from its own repo's release track -- see
 
 ## Prerequisites
 
-1. **A cockpit binary** built from memql-cockpit main (`go build ./cmd/memql-cockpit/`).
+1. **A cockpit binary** with a `deploy` subcommand -- no such build exists any
+   more (memql#4550).
 2. **The target database DSN** in `MEMQL_DATABASE_DSN` -- the deploy
    runtime boots DB-backed and persists the deployment timeline there.
    For development this is the k3d postgres
@@ -86,43 +100,42 @@ IMPORTANT: pass `version=local` -- the local overlay pins
 so images built under any other tag import fine but never get pulled.
 The gate catching exactly this mismatch is what it is for.
 
-```bash
-# one-time workdir
-git clone /path/to/memql /tmp/deploy-workdir
+> **REMOVED (memql#4550).** This invocation is kept as a record of what the
+> imperative path was; **the command no longer exists.** `memql-cockpit
+> deploy` was deleted with the Cockpit's TUI and embedded runtime, and
+> the `deploy` make target and `scripts/deploy/cockpit.sh` went with it. Nothing
+> replaces it, because nothing needed to: this path could never complete a
+> real deploy -- the cockpit's in-process engine carried no database, so
+> every DB-backed step reported `BLOCKED (owner-gated)`.
+>
+> The local deploy is `make up` (k3d + ArgoCD applying
+> `deploy/k8s/overlays/local`); the cloud deploy is a digest bump in one
+> overlay plus a merge.
 
+```bash
+# NO LONGER RUNNABLE -- recorded for reference only.
 MEMQL_DEPLOY_REPO_ROOT=/path/to/memql \
 MEMQL_DATABASE_DSN="postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable" \
 memql-cockpit deploy --ref main --role owner --actor "$USER" \
   --apply --input '{"workdir":"/tmp/deploy-workdir","version":"local","provider":"docker-local"}'
 ```
 
-Or through make (quoting of --input JSON does not survive make ARGS, so the
-provider has to come from the environment instead -- `MEMQL_DEPLOY_PROVIDER`
-is read server-side as the default when the payload does not name one):
+## Azure (cloud) deploy target
 
-```bash
-MEMQL_DEPLOY_PROVIDER=docker-local make deploy VERSION=main APPLY=1
-```
-
-## Azure (cloud) deploy target (dry-run today; live is owner-gated)
-
-```bash
-memql-cockpit deploy --ref 0.11.2 --role owner --actor "$USER" \
-  --input '{"workdir":"/tmp/deploy-workdir","provider":"azure"}'
-```
-
-The emitter resolves real image digests from ACR (printed as INFO
-lines), defaults `overlayPath=deploy/k8s/overlays/cloud`, and the
-bundle's GitOps branch (pinOverlayDigests + argoSync + post-deploy
-gate) runs -- in dry-run reporting mode by default. A LIVE `azure`
-deploy through this path is owner-gated; see memql#2381 for the ACR
-digest-resolution decision it depends on.
-
-An entry instance is `cloud-entry`, not `cloud`. Later rolls
-against that cluster must pass
-`overlayPath=deploy/k8s/overlays/cloud-entry`. First bring-up is Argo
-on that overlay, not this cockpit path -- see
-[azure-entry-install.md](azure-entry-install.md).
+> **The cockpit path here is REMOVED too (memql#4550)**, and its removal
+> costs nothing: the cloud deploy was always the GitOps one. Build the engine
+> images on the build server, pin `{engine version, bundle digest, client
+> digest}` in ONE overlay, merge -- ArgoCD reconciles. Rollback is `git
+> revert` on the overlay.
+>
+> An entry instance is `cloud-entry`, not `cloud`: its overlay is
+> `deploy/k8s/overlays/cloud-entry`, and both bring-up and later rolls go
+> through Argo on that overlay -- see
+> [azure-entry-install.md](azure-entry-install.md).
+>
+> What the deleted path did that the GitOps one still needs somewhere is
+> resolving real image digests from ACR (memql#2381). That is a
+> pin-the-overlay step, not a deploy runner.
 
 ## Reading the evidence
 
@@ -144,5 +157,5 @@ The cockpit also emits an AUDIT line per invocation.
   (memql#2416): `make up` / `make secrets` scales them to 0 with a loud
   warning when `LIVEKIT_*` is not exported, and enables them when it is
   -- so a green gate never depends on an unprovisioned voice lane.
-- `make deploy ARGS='--input {...}'` mangles JSON quoting; invoke the
-  cockpit binary directly when passing structured input.
+- The `deploy` make target mangled JSON quoting on `ARGS='--input {...}'`; the
+  workaround was to invoke the cockpit binary directly. Both are gone.

@@ -22,7 +22,7 @@ instance's definition), and `<instance>` (the overlay directory inside
 it).
 
 First bring-up is **Argo in `<aks-name>` reconciling
-`deploy/k8s/overlays/cloud-entry`**. It is not `make deploy`. It is not
+`deploy/k8s/overlays/cloud-entry`**. It is not an imperative deploy. It is not
 `aks-deploy.sh` (that script is gone). Those are digest rolls against an
 already-installed cluster. This page is the sanctioned entry-install
 path.
@@ -409,18 +409,21 @@ precedence to prove for them.
 
 ## Later rolls (not this bring-up)
 
-Cockpit digest rolls stay owner-gated and still default to
-`overlayPath=deploy/k8s/overlays/cloud`. An entry instance must pass
-`cloud-entry` explicitly:
+Roll an entry instance the way every other instance rolls: bump the digests in
+**`deploy/k8s/overlays/cloud-entry`** and merge -- ArgoCD reconciles. Rollback
+is `git revert` on that overlay.
 
-```bash
-memql-cockpit deploy --ref main --role owner --actor "$USER" \
-  --input '{"provider":"azure","overlayPath":"deploy/k8s/overlays/cloud-entry"}'
-```
+`cloud-entry`, never `cloud`: they are two instances of the one installation
+shape, with their own domains and their own databases, and pointing a roll at
+the wrong overlay deploys to the wrong cluster.
 
-Live `--apply` stays owner-gated. See
-[deploy-bundle-runbook.md](deploy-bundle-runbook.md). No
-`overlays/cloud`. No `top`. No extra monitoring addon.
+> The imperative `memql-cockpit deploy` path this section used to give was
+> removed in memql#4550 along with the Cockpit's TUI. It defaulted to
+> `overlays/cloud`, which is exactly the mistake above -- an entry instance had
+> to remember to override it. See
+> [deploy-bundle-runbook.md](deploy-bundle-runbook.md).
+
+No `overlays/cloud`. No `top`. No extra monitoring addon.
 
 ## Anthropic: federate instead of seeding a key (optional, after bring-up)
 

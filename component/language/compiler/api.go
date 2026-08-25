@@ -203,7 +203,7 @@ func (t FileType) String() string {
 // don't have to type-assert through parser.Node.
 //
 // This is the entry point new tooling (dslimports.Load, the
-// `memql-cockpit lint` CLI, the engine's Validate(target) API)
+// `memql lint` CLI, the engine's Validate(target) API)
 // should call. It supersedes the partial chain in ParseMemQL,
 // which only normalised a subset of constructs and is kept around
 // for backwards-compatibility with existing single-expression

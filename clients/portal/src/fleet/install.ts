@@ -11,9 +11,13 @@
 // are (a token pasted with a trailing newline, a cluster URL with no scheme).
 //
 // THE INSTALLER SHIPS FROM memql-cockpit, not from this repo. The worker is a
-// run mode of the Cockpit binary, and scripts/install/ here carries the
-// cluster bring-up installers instead. The page says so under the command
-// rather than implying this repo builds it.
+// run mode of the `memql` command that repo builds, and scripts/install/ here
+// carries the cluster bring-up installers instead. The page says so under the
+// command rather than implying this repo builds it.
+//
+// (The engine also builds a `bin/memql`, but that one ships only inside
+// container images and runs in pods -- the two never share a PATH. See
+// memql/CLAUDE.md.)
 
 export type InstallPlatform = "mac" | "linux";
 

@@ -1,5 +1,5 @@
 // Package worker hosts the WorkerService gRPC surface and the
-// in-memory registry of connected memql-cockpit workers. Lives on
+// in-memory registry of connected Cockpit worker machines. Lives on
 // the agent node binary; per-user routing means agents in the same
 // cluster only dispatch to workers owned by their session-owner.
 package worker

@@ -1528,7 +1528,7 @@ mutate workerPairingCode createWorkerPairingCode {
 // ==========================
 //
 // Creates a v1:identity:identity row of identityType="worker_token"
-// for a memql-cockpit-worker registration. Plaintext token is
+// for a Cockpit worker registration. Plaintext token is
 // shown to the user ONCE at generation; only its SHA-256 hex hash
 // lands here.
 //
@@ -1543,7 +1543,7 @@ mutate workerPairingCode createWorkerPairingCode {
 // the id alongside the plain token so audit/log lines can reason
 // about a stable id without knowing the plaintext.
 
-/// Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the
+/// Create a worker_token identity (machine credential for a Cockpit worker machine). Stores only the
 /// SHA-256 hex hash; plaintext lives at the caller for one-time display.
 mutate identity createWorkerTokenIdentity {
   args {

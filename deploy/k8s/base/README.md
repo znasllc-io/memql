@@ -116,9 +116,9 @@ replica story is in [#551](https://github.com/znasllc-io/memql/issues/551).
 
 > **Deploy note:** the `replicas: 2` bump is only safe with an image that
 > contains the guards (≥ the #561 version) and after the
-> `automation_execution_claims` migration. `make deploy VERSION=…` builds +
-> migrates + applies together, so the normal path is consistent; don't
-> `kubectl apply` `replicas: 2` against an older image.
+> `automation_execution_claims` migration. An ArgoCD sync of a pinned overlay
+> applies the image and the migration together, so the normal path is
+> consistent; don't `kubectl apply` `replicas: 2` against an older image.
 
 Remaining (optional, [#561](https://github.com/znasllc-io/memql/issues/561)):
 worker **load distribution** (headless Service + dial-all) so extra replicas
@@ -133,14 +133,14 @@ every other node has it `false`.
 
 ### Gated pre-deploy migration ([#553](https://github.com/znasllc-io/memql/issues/553))
 
-So a schema change never races the worker rollout, `make deploy` applies
+So a schema change never races the worker rollout, the deploy applies
 `migrate-job.yaml` (a one-shot `memql migrate` Job)
 and **wait for it to complete before any Deployment rolls** — a failed
 migration aborts the deploy. The Job is idempotent (bun advisory lock +
 mark-applied), and identity's boot migration is retained as a no-op
 fallback. The Job is **not** in the kustomization (one-shot); a bare
 `kubectl apply -k deploy/k8s` does not run it — precede it with
-`kubectl apply -f deploy/k8s/migrate-job.yaml`, or just use `make deploy`.
+`kubectl apply -f deploy/k8s/migrate-job.yaml`.
 
 **Author migrations expand/contract** so old- and new-version pods can both
 run against the schema during a rollout: additive only (add columns/tables
@@ -244,8 +244,8 @@ kubectl apply -k deploy/k8s/overlays/cloud
 > authority); the base `:tags` are placeholders. Rollback = `git revert` of the
 > overlay (see `scripts/deploy/aks-rollback.sh`), never `kubectl rollout undo`.
 
-Or, from the repo root: `make deploy` (runs the namespace +
-kustomize apply; the Secret step is a one-time prerequisite). `identity`
+Normally ArgoCD does this: it applies the namespace + the kustomization from
+the pinned overlay (the Secret step is a one-time prerequisite). `identity`
 comes up first to run the one-time migration and serve JWKS; the other
 nodes' verifiers retry JWKS non-fatally until it is ready.
 
