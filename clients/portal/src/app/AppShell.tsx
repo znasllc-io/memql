@@ -536,8 +536,18 @@ export function AppShell(): ReactNode {
           <RailHandle collapsed={collapsed} onToggle={toggleRail} />
 
           {/* Who you are, before the places you can go. Absolutely first in
-              the rail, and not a group -- the flat-nav ruling stands. */}
-          <div className="pt-1">
+              the rail, and not a group -- the flat-nav ruling stands.
+
+              The `border-b` is the counterpart to RailStatus's `border-t`
+              (memql#4521). The footer has separated itself since memql#4316 --
+              its own comment calls that border "the change that makes it a
+              footer" -- while the header had none, so the scrolling middle slid
+              nav rows straight under the profile block with no boundary. Same
+              token, same 2-unit pad on the inner face; both borders span the
+              nav's content width, so the rail reads header / scroll region /
+              footer in the collapsed w-14 state and the expanded w-56 one
+              alike. */}
+          <div className="border-b border-line pb-2 pt-1">
             <RailProfileLink collapsed={collapsed} />
           </div>
 
