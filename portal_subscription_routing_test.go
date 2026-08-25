@@ -36,6 +36,11 @@ import (
 // reason. A new subscription against an unrouted concept fails the build and
 // names both ways out.
 //
+// A "subscription" is either a direct `subscribeGraph({concept, actions})` or
+// a `useLive(...)` collection spec declaring the same two fields (memql#4539).
+// The second is now the normal shape: the fold lives in the SDK, and the spec
+// object is exactly what the SDK passes to subscribeGraph.
+//
 // # It queries the real tables, never a copy
 //
 // The evaluation goes through node.ForwardsGraphEvent, which calls the same
@@ -170,14 +175,19 @@ func TestPortalSubscriptionExtractorFindsTheKnownSites(t *testing.T) {
 	}
 
 	for _, want := range []struct{ file, concept string }{
-		// A bare string literal.
+		// A module-level constant declared in the same file, in a useLive spec.
 		{"clients/portal/src/compose/useSavedViews.ts", "v1:portalviews:view"},
-		// A module-level constant, imported from another file.
+		// A constant imported from another file, in a useLive spec.
 		{"clients/portal/src/fleet/useMachines.ts", "v1:worker:registration"},
-		// A local const read out of a Record -- the Nexus feed's slot map.
+		// A local const read out of a Record -- the Nexus feed's slot map,
+		// which is still a direct subscribeGraph (see unboundSubscriptions'
+		// sibling reasoning in clients/portal/test/liveAdoption.test.tsx).
 		{"clients/portal/src/nexus/feed/useGoalWorld.ts", "v1:authoring:construct"},
 		// A hook parameter, resolved at the hook's call sites.
 		{"clients/portal/src/home/useHomeTiles.ts", "v1:identity:auditEvent"},
+		// A second useLive spec, in a different tree -- the extractor is not
+		// keyed on any one file's shape.
+		{"clients/portal/src/people/usePendingInvitations.ts", "v1:identity:invitation"},
 	} {
 		got, ok := found[want.file]
 		if !ok {
@@ -212,10 +222,20 @@ var (
 	// A Record whose entries are concept ids or constants naming them.
 	recordDeclRe   = regexp.MustCompile(`(?s)(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::\s*Record<[^>]*>)?\s*=\s*\{(.*?)\n\}`)
 	localFromMapRe = regexp.MustCompile(`const\s+%s\s*=\s*([A-Za-z_$][\w$]*)\s*\[`)
-	subscribeRe    = regexp.MustCompile(`subscribeGraph\s*\(`)
-	conceptArgRe   = regexp.MustCompile(`(?s)\bconcept\s*:\s*([^,\n}]+)`)
-	actionsArgRe   = regexp.MustCompile(`(?s)\bactions\s*:\s*\[([^\]]*)\]`)
-	stringLitRe    = regexp.MustCompile(`"([a-z]+)"`)
+	// TWO SHAPES, because there are two (memql#4539). A surface either calls
+	// `subscriptions.subscribeGraph({concept, actions})` directly, or -- since
+	// the fold moved into the SDK -- declares the same two fields in a
+	// `useLive(...)` collection spec. The spec object is what the SDK hands to
+	// subscribeGraph, so the concept and the verbs are the same expressions in
+	// the same shape and the resolver below is unchanged.
+	//
+	// The optional `<...>` is the type argument every call site carries
+	// (`useLive<Row>(`). Without it this matched nothing after the sweep and
+	// the coverage test is what said so.
+	subscribeRe  = regexp.MustCompile(`(?:subscribeGraph|useLive)(?:<[^>()]*>)?\s*\(`)
+	conceptArgRe = regexp.MustCompile(`(?s)\bconcept\s*:\s*([^,\n}]+)`)
+	actionsArgRe = regexp.MustCompile(`(?s)\bactions\s*:\s*\[([^\]]*)\]`)
+	stringLitRe  = regexp.MustCompile(`"([a-z]+)"`)
 	// `export function useX(`, `function useX(`, `export const useX = (`,
 	// `const useX = (` -- the four shapes a portal hook is declared in.
 	funcDeclRe = regexp.MustCompile(`(?m)^\s*(?:export\s+)?(?:function\s+([A-Za-z_$][\w$]*)\s*\(|const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?\()`)
