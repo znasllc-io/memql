@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -27,8 +28,36 @@ import (
 //     listen on Unexpected() so a deliberate caller-initiated close
 //     (e.g. switching clusters) doesn't trigger reconnect fallout.
 type Dispatcher struct {
-	stream memqlv1.MemqlService_StreamClient
-	logger *slog.Logger
+	// streamMu guards the stream pointer itself, which a supervised
+	// dispatcher SWAPS on reconnect (memql#4537). Run() snapshots it once
+	// per generation; Send / SendAndWait read it per call.
+	streamMu sync.RWMutex
+	stream   memqlv1.MemqlService_StreamClient
+	logger   *slog.Logger
+
+	// supervised hands TERMINATION SEMANTICS to the owning Connection
+	// (memql#4537). A supervised dispatcher treats a Recv error as the end of
+	// one TRANSPORT rather than the end of itself: pending requests fail,
+	// transportDownCh closes, and stopCh / unexpectedCh / eventCh stay OPEN
+	// because a redial and a Rebind are coming.
+	//
+	// It is what lets the dispatcher's IDENTITY survive a reconnect. Callers
+	// hold the pointer for the process's life -- typed clients are built over
+	// it, and Events() is ranged over -- so swapping it on redial would leave
+	// every one of them talking to a stream nothing is reading.
+	supervised bool
+	// transportDownCh closes when the CURRENT stream dies under supervision,
+	// and is replaced by Rebind. Guarded by streamMu.
+	transportDownCh chan struct{}
+	// runActive counts live Run() generations (0 or 1 in practice). A
+	// supervised Stop() consults it to decide whether it must close eventCh
+	// itself: with no generation running there is no sender, and without this
+	// a `range Events()` consumer would wait forever on a dispatcher that has
+	// given up redialing.
+	runActive atomic.Int32
+	// closeEvents makes the eventCh close happen exactly once, from whichever
+	// of Run()'s exit or a supervised Stop() gets there first.
+	closeEvents sync.Once
 
 	mu           sync.Mutex
 	pending      map[string]chan *memqlv1.MemqlServerMessage
@@ -67,17 +96,68 @@ type Dispatcher struct {
 
 // NewDispatcher creates a dispatcher for the given stream.
 func NewDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger) *Dispatcher {
+	return newDispatcher(stream, logger, false)
+}
+
+// NewSupervisedDispatcher creates a dispatcher whose TERMINATION is owned by a
+// reconnecting Connection (memql#4537). See the `supervised` field.
+func NewSupervisedDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger) *Dispatcher {
+	return newDispatcher(stream, logger, true)
+}
+
+func newDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger, supervised bool) *Dispatcher {
 	return &Dispatcher{
-		stream:       stream,
-		logger:       logger,
-		pending:      make(map[string]chan *memqlv1.MemqlServerMessage),
-		streams:      make(map[string]chan *memqlv1.MemqlServerMessage),
-		eventCh:      make(chan *memqlv1.MemqlServerMessage, 256),
-		stopCh:       make(chan struct{}),
-		unexpectedCh: make(chan struct{}),
-		clientTools:  &clientToolHandlerRegistry{},
-		unrouted:     make(map[string]int),
+		stream:          stream,
+		logger:          logger,
+		supervised:      supervised,
+		transportDownCh: make(chan struct{}),
+		pending:         make(map[string]chan *memqlv1.MemqlServerMessage),
+		streams:         make(map[string]chan *memqlv1.MemqlServerMessage),
+		eventCh:         make(chan *memqlv1.MemqlServerMessage, 256),
+		stopCh:          make(chan struct{}),
+		unexpectedCh:    make(chan struct{}),
+		clientTools:     &clientToolHandlerRegistry{},
+		unrouted:        make(map[string]int),
 	}
+}
+
+// TransportDown returns a channel closed when the CURRENT stream dies under
+// supervision. Rebind replaces it, so a supervisor must re-read it after
+// every reconnect rather than caching one value.
+func (d *Dispatcher) TransportDown() <-chan struct{} {
+	d.streamMu.RLock()
+	defer d.streamMu.RUnlock()
+	return d.transportDownCh
+}
+
+// Rebind points a supervised dispatcher at a fresh stream after a reconnect
+// and arms a new transport-down channel. The caller starts a new Run().
+//
+// Registered listeners -- RegisterStream sessions, the client-tool handler,
+// Events() consumers -- SURVIVE: they belong to the caller, not to the
+// transport. Nothing in flight is replayed; those requests were already
+// failed when the old stream died.
+func (d *Dispatcher) Rebind(stream memqlv1.MemqlService_StreamClient) error {
+	if !d.supervised {
+		return errors.New("rebind: dispatcher is not supervised")
+	}
+	select {
+	case <-d.stopCh:
+		return errors.New("rebind: dispatcher stopped")
+	default:
+	}
+	d.setRecvErr(nil)
+	d.streamMu.Lock()
+	d.stream = stream
+	d.transportDownCh = make(chan struct{})
+	d.streamMu.Unlock()
+	return nil
+}
+
+func (d *Dispatcher) currentStream() memqlv1.MemqlService_StreamClient {
+	d.streamMu.RLock()
+	defer d.streamMu.RUnlock()
+	return d.stream
 }
 
 // Run reads messages from the stream and routes them to pending requests
@@ -92,7 +172,43 @@ func (d *Dispatcher) Run() {
 	// already closed by Stop() when Run() entered the defer, we treat
 	// termination as intentional; if Run() hits a Recv error and we
 	// ourselves close stopCh in the defer, it was unexpected.
+	// SUPERVISED EXIT (memql#4537). A Recv error ends this GENERATION, not
+	// the dispatcher: pending requests fail so no caller hangs, the
+	// generation's transport-down channel closes so the supervisor can
+	// redial, and stopCh / unexpectedCh / eventCh stay open because a Rebind
+	// is coming. Closing eventCh here -- correct for an unsupervised
+	// dispatcher, memql#1842 -- would end every `range Events()` consumer on
+	// a drop the SDK is about to recover from.
+	//
+	// An intentional Stop() still falls through to the ordinary path below,
+	// which is what makes "the caller is finished" distinguishable from "the
+	// node rolled".
+	if d.supervised {
+		defer func() {
+			select {
+			case <-d.stopCh:
+				return // Stop() -- the ordinary teardown below already ran
+			default:
+			}
+			d.failPending()
+			d.streamMu.Lock()
+			select {
+			case <-d.transportDownCh:
+			default:
+				close(d.transportDownCh)
+			}
+			d.streamMu.Unlock()
+		}()
+	}
+
 	defer func() {
+		if d.supervised {
+			select {
+			case <-d.stopCh:
+			default:
+				return // handled by the supervised defer above
+			}
+		}
 		wasIntentional := false
 		select {
 		case <-d.stopCh:
@@ -114,10 +230,21 @@ func (d *Dispatcher) Run() {
 		// runs exactly once (Run() is called once per dispatcher), so
 		// there's no double-close. Receivers see a closed channel:
 		// `range` ends, and `<-ch` returns (zero, false).
-		close(d.eventCh)
+		//
+		// Through a sync.Once since memql#4537: a SUPERVISED dispatcher can
+		// be stopped with no generation running (the supervisor gave up
+		// redialing), and Stop() closes it in that case instead.
+		d.closeEvents.Do(func() { close(d.eventCh) })
 	}()
+	d.runActive.Add(1)
+	defer d.runActive.Add(-1)
+
+	// Snapshot the stream for this generation. Rebind swaps the field for the
+	// NEXT Run(); reading it per iteration would let a redial's stream be
+	// read by a loop that is already exiting.
+	stream := d.currentStream()
 	for {
-		msg, err := d.stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			select {
 			case <-d.stopCh:
@@ -132,13 +259,7 @@ func (d *Dispatcher) Run() {
 			if d.logger != nil {
 				d.logger.Warn("gRPC stream receive error", "error", err)
 			}
-			// Close all pending requests with nil.
-			d.mu.Lock()
-			for id, ch := range d.pending {
-				close(ch)
-				delete(d.pending, id)
-			}
-			d.mu.Unlock()
+			d.failPending()
 			return
 		}
 
@@ -213,7 +334,7 @@ func (d *Dispatcher) Send(msg *memqlv1.MemqlClientMessage) (string, error) {
 		msg.MessageId = id.NewShortId()
 	}
 	d.sendMu.Lock()
-	err := d.stream.Send(msg)
+	err := d.currentStream().Send(msg)
 	d.sendMu.Unlock()
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)
@@ -239,7 +360,7 @@ func (d *Dispatcher) SendAndWait(ctx context.Context, msg *memqlv1.MemqlClientMe
 	}()
 
 	d.sendMu.Lock()
-	err := d.stream.Send(msg)
+	err := d.currentStream().Send(msg)
 	d.sendMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("send: %w", err)
@@ -623,4 +744,36 @@ func (d *Dispatcher) Stop() {
 	default:
 		close(d.stopCh)
 	}
+	// A supervised dispatcher's Run() defers to the supervisor for teardown,
+	// so nothing else closes these on the Stop() path. Unblock every consumer
+	// here instead: a caller ranging Events() or waiting on Unexpected() must
+	// not outlive the dispatcher it is reading.
+	if d.supervised {
+		d.failPending()
+		d.streamMu.Lock()
+		select {
+		case <-d.transportDownCh:
+		default:
+			close(d.transportDownCh)
+		}
+		d.streamMu.Unlock()
+		// With no Run() generation live there is no sender on eventCh and
+		// nothing else will ever close it -- which is the shape a supervisor
+		// that has exhausted its redial budget leaves behind.
+		if d.runActive.Load() == 0 {
+			d.closeEvents.Do(func() { close(d.eventCh) })
+		}
+	}
+}
+
+// failPending closes every waiting SendAndWait channel. Callers observe the
+// closed channel and surface recvErr, so a dropped stream produces the real
+// cause rather than a hang.
+func (d *Dispatcher) failPending() {
+	d.mu.Lock()
+	for id, ch := range d.pending {
+		close(ch)
+		delete(d.pending, id)
+	}
+	d.mu.Unlock()
 }

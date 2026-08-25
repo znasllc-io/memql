@@ -943,6 +943,7 @@ func (s *streamSession) relayForwardedResponses(
 			msg.MessageId = id.NewShortId()
 		}
 		s.sendMu.Lock()
+		s.stampEventContinuityLocked(msg)
 		err := s.stream.Send(msg)
 		s.sendMu.Unlock()
 		if err != nil {

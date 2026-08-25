@@ -75,9 +75,56 @@ export interface ConnectOptions {
   logger?: DispatcherOptions["logger"];
   // Override the handshake timeout (default 5_000 ms).
   handshakeTimeoutMs?: number;
+  // Auto-reconnect (memql#4537). Omitted / disabled keeps the historic
+  // one-shot behaviour exactly.
+  reconnect?: ReconnectOptions;
+}
+
+// ReconnectOptions configures the SDK's auto-reconnect (memql#4537).
+//
+// OPT-IN. A consumer that manages its own lifecycle off done() /
+// unexpectedClose() keeps exactly the behaviour it had; enabling this moves
+// that job into the SDK, once, for every consumer -- portal, product SPAs,
+// site surfaces, Go tools.
+export interface ReconnectOptions {
+  enabled: boolean;
+  // First backoff delay. Default 1s.
+  initialDelayMs?: number;
+  // Backoff ceiling. Default 30s.
+  maxDelayMs?: number;
+  // Give up after this many consecutive failed attempts. Default: never.
+  maxAttempts?: number;
+  // How long a stream must SURVIVE before the backoff resets (default 10s).
+  //
+  // Resetting on "a dial succeeded" instead would be wrong in the case that
+  // matters: a server accepting connections and dropping them immediately
+  // would look like success every time, and the client would hammer it at the
+  // initial delay forever. Resetting on SURVIVAL means a flapping server
+  // converges to the ceiling, and a healthy one that blips comes back at full
+  // speed.
+  stableAfterMs?: number;
+}
+
+// ConnectionStatus is what a UI renders (memql#4537).
+//
+//   connected     -- a live stream
+//   reconnecting  -- the stream is down and the SDK is retrying
+//   disconnected  -- FINAL: close() was called, or the attempt budget is spent
+export type ConnectionStatus = "connected" | "reconnecting" | "disconnected";
+
+export interface ConnectionStatusEvent {
+  status: ConnectionStatus;
+  // Consecutive failed dial attempts since the last live stream. 0 while
+  // connected. What "Reconnecting (attempt 3)..." reads.
+  attempt: number;
+  // The failure that ended (or is preventing) the stream. Empty when healthy.
+  error: string;
 }
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
+const DEFAULT_RECONNECT_INITIAL_MS = 1_000;
+const DEFAULT_RECONNECT_MAX_MS = 30_000;
+const DEFAULT_RECONNECT_STABLE_MS = 10_000;
 
 export class Connection {
   readonly dispatcher: Dispatcher;
@@ -94,7 +141,7 @@ export class Connection {
   // apart from "not a release build".
   engineVersion = "";
 
-  private readonly socket: WebSocket;
+  private socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
   private readonly auth: ConnectionAuth | undefined;
   // The endpoint this connection dialed. Retained so HTTP helpers
@@ -112,24 +159,47 @@ export class Connection {
   // schedule is measured from here (memql#4326).
   private bearerReceivedAtMs = 0;
 
+  // ---- auto-reconnect (memql#4537) ----------------------------------------
+  private readonly opts: ConnectOptions;
+  private readonly reconnectCfg: Required<ReconnectOptions> | null;
+  private statusValue: ConnectionStatus = "connected";
+  private attemptCount = 0;
+  private lastError = "";
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
+  private cycleCount = 0;
+  private readonly statusListeners = new Set<(ev: ConnectionStatusEvent) => void>();
+  private readonly cycleListeners = new Set<(cycle: number) => void>();
+  private readonly finalResolvers: Array<() => void> = [];
+  private finished = false;
+
   private constructor(socket: WebSocket, opts: ConnectOptions) {
     this.socket = socket;
     this.logger = opts.logger ?? null;
     this.auth = opts.auth;
     this.endpoint = opts.endpoint;
+    this.opts = opts;
+    this.reconnectCfg = resolveReconnect(opts.reconnect);
     // Seed the current bearer so HTTP helpers and rotation share one source of
     // truth; rotateAuth advances it on every successful swap.
     this.currentBearer = opts.auth?.bearer;
-    this.dispatcher = new Dispatcher({ socket, logger: this.logger });
+    this.dispatcher = new Dispatcher({
+      socket,
+      logger: this.logger,
+      // Supervision is what keeps `done()` from firing on every node roll:
+      // with reconnect on, only THIS class decides the connection is over.
+      supervised: this.reconnectCfg !== null,
+    });
     this.query = new QueryClient(this.dispatcher);
     this.subscriptions = new SubscriptionManager(this.dispatcher);
+    if (this.reconnectCfg !== null) {
+      this.dispatcher.onTransportClose(() => this.onTransportLost());
+      this.armStableTimer();
+    }
   }
 
   static async dial(opts: ConnectOptions): Promise<Connection> {
-    const url = resolveEndpoint(opts.endpoint, opts.auth);
-    const factory = opts.webSocketFactory ?? defaultWebSocketFactory;
-    const socket = factory(url, wsAuthSubprotocols(opts.auth));
-    await waitForOpen(socket);
+    const socket = await openSocket(opts, opts.auth);
     const conn = new Connection(socket, opts);
     try {
       await conn.handshake(opts);
@@ -139,6 +209,55 @@ export class Connection {
     }
     conn.startAutoRotate();
     return conn;
+  }
+
+  // ---- connection status --------------------------------------------------
+
+  // status is what a UI renders. Without auto-reconnect it is "connected"
+  // until close(), then "disconnected" -- consumers on done() are unaffected.
+  get status(): ConnectionStatus {
+    return this.statusValue;
+  }
+
+  // attempt counts consecutive failed dials since the last live stream.
+  get attempt(): number {
+    return this.attemptCount;
+  }
+
+  // onStatusChange subscribes to connection-state transitions. Fires
+  // immediately with the current state, so a late subscriber does not sit on
+  // a stale render waiting for the next drop.
+  onStatusChange(handler: (ev: ConnectionStatusEvent) => void): () => void {
+    this.statusListeners.add(handler);
+    handler(this.statusEvent());
+    return () => this.statusListeners.delete(handler);
+  }
+
+  // onConnectionCycle fires once per successful RECONNECT, after every
+  // subscription has been replayed on the new stream (memql#4537).
+  //
+  // This is the seam a store re-seeds on. It fires AFTER the replay, never
+  // before, because a re-seed racing its own subscription is exactly the
+  // read-then-subscribe hole the ordering contract closes (memql#4536).
+  //
+  // Not fired for the FIRST connection: a caller that just dialled is about
+  // to seed anyway, and firing here would make every consumer read twice on
+  // startup.
+  onConnectionCycle(handler: (cycle: number) => void): () => void {
+    this.cycleListeners.add(handler);
+    return () => this.cycleListeners.delete(handler);
+  }
+
+  // retryNow collapses the current backoff and dials immediately. It is what
+  // a "Retry" button should call once auto-reconnect is on: the SDK is
+  // already retrying, so the button ACCELERATES rather than being the only
+  // mechanism. No-op unless reconnecting.
+  retryNow(): void {
+    if (this.reconnectCfg === null || this.finished) return;
+    if (this.statusValue !== "reconnecting") return;
+    this.clearReconnectTimer();
+    this.attemptCount = 0;
+    void this.attemptReconnect();
   }
 
   // rotateAuth swaps the bearer on the live stream (mirrors sdk/go's
@@ -196,8 +315,12 @@ export class Connection {
   // bearer (with a decodable exp) AND an onTokenExpired hook are present --
   // guest/worker tokens and exp-less bearers are left alone.
   private startAutoRotate(): void {
-    if (!this.auth?.onTokenExpired || !this.auth.bearer) return;
-    this.scheduleAutoRotate(this.auth.bearer);
+    // currentBearer, not auth.bearer: a reconnect re-resolves the credential,
+    // so re-arming against the ORIGINAL token would schedule the next
+    // rotation off an expiry that has already passed.
+    const bearer = this.currentBearer ?? this.auth?.bearer;
+    if (!this.auth?.onTokenExpired || !bearer) return;
+    this.scheduleAutoRotate(bearer);
   }
 
   private scheduleAutoRotate(bearer: string): void {
@@ -296,10 +419,17 @@ export class Connection {
   }
 
   // close shuts down the stream + subscriptions. Idempotent.
+  //
+  // A DELIBERATE close never reconnects, whatever the reconnect config says.
+  // That distinction is the reason the SDK can own reconnect at all: "the
+  // socket died" and "the app is done with this connection" arrive at the
+  // same listener otherwise.
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.clearRotateTimer();
+    this.clearReconnectTimer();
+    this.clearStableTimer();
     this.subscriptions.stop();
     this.dispatcher.stop();
     try {
@@ -307,11 +437,178 @@ export class Connection {
     } catch {
       // socket may already be closed
     }
+    this.finish("disconnected", "");
   }
 
-  // done resolves on any termination of the underlying stream.
+  // done resolves on FINAL termination.
+  //
+  // Without auto-reconnect that is any close, exactly as before. With it,
+  // done() waits for close() or an exhausted attempt budget -- a transport
+  // drop the SDK is going to recover from is not the end of the connection,
+  // and telling consumers it was is how a self-healing stream still produced
+  // a "disconnected" screen.
   done(): Promise<void> {
-    return this.dispatcher.done();
+    if (this.reconnectCfg === null) return this.dispatcher.done();
+    if (this.finished) return Promise.resolve();
+    return new Promise<void>((resolve) => this.finalResolvers.push(resolve));
+  }
+
+  // ---- the reconnect loop -------------------------------------------------
+
+  private onTransportLost(): void {
+    if (this.closed || this.finished) return;
+    this.clearStableTimer();
+    this.setStatus("reconnecting", this.lastError || "stream closed");
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    const cfg = this.reconnectCfg;
+    if (cfg === null || this.closed || this.finished) return;
+    if (this.attemptCount >= cfg.maxAttempts) {
+      this.finish("disconnected", this.lastError || "reconnect attempts exhausted");
+      return;
+    }
+    const delay = backoffDelayMs(this.attemptCount, cfg.initialDelayMs, cfg.maxDelayMs);
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      void this.attemptReconnect();
+    }, delay);
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    const cfg = this.reconnectCfg;
+    if (cfg === null || this.closed || this.finished) return;
+    this.attemptCount++;
+    this.setStatus("reconnecting", this.lastError);
+
+    let socket: WebSocket | null = null;
+    try {
+      // Re-resolve the bearer through the EXISTING auth seam. A stream that
+      // has been down for a while may be holding a bearer that expired while
+      // it was down, and dialing with it just fails again -- the in-place
+      // rotation contract (memql#4326) covers healthy streams only.
+      const auth = await this.authForDial();
+      socket = await openSocket(this.opts, auth);
+      if (this.closed || this.finished) {
+        socket.close(1000, "connection closed during reconnect");
+        return;
+      }
+      this.socket = socket;
+      this.dispatcher.rebind(socket);
+      await this.handshake(this.opts);
+      if (this.closed || this.finished) return;
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      try {
+        socket?.close();
+      } catch {
+        // already gone
+      }
+      this.scheduleReconnect();
+      return;
+    }
+
+    // Live again. REPLAY FIRST, then tell consumers -- a store that re-seeds
+    // on the cycle notification must already be subscribed when its read goes
+    // out, or the re-seed reintroduces the read-then-subscribe hole the
+    // ordering contract closes (memql#4536).
+    this.subscriptions.replay();
+    this.lastError = "";
+    this.armStableTimer();
+    this.startAutoRotate();
+    this.setStatus("connected", "");
+    this.cycleCount++;
+    for (const handler of [...this.cycleListeners]) {
+      try {
+        handler(this.cycleCount);
+      } catch (err) {
+        this.logger?.warn?.("memql sdk: connection-cycle listener threw", err);
+      }
+    }
+  }
+
+  // authForDial resolves the credential for a FRESH dial. The bearer is
+  // re-read through onTokenExpired when there is one; otherwise the
+  // connection re-presents whatever it currently holds.
+  private async authForDial(): Promise<ConnectionAuth | undefined> {
+    if (!this.auth) return undefined;
+    const hook = this.auth.onTokenExpired;
+    if (!hook || !this.currentBearer) return { ...this.auth, bearer: this.currentBearer };
+    try {
+      const next = (await hook())?.trim();
+      if (next) {
+        this.currentBearer = next;
+        this.bearerReceivedAtMs = Date.now();
+        return { ...this.auth, bearer: next };
+      }
+    } catch (err) {
+      this.logger?.warn?.("memql sdk: onTokenExpired threw before a redial", err);
+    }
+    return { ...this.auth, bearer: this.currentBearer };
+  }
+
+  // armStableTimer resets the backoff once a stream has SURVIVED long enough
+  // to count as healthy. See ReconnectOptions.stableAfterMs for why survival
+  // rather than dial success is the trigger.
+  private armStableTimer(): void {
+    const cfg = this.reconnectCfg;
+    if (cfg === null) return;
+    this.clearStableTimer();
+    this.stableTimer = setTimeout(() => {
+      this.attemptCount = 0;
+    }, cfg.stableAfterMs);
+  }
+
+  private clearStableTimer(): void {
+    if (this.stableTimer != null) {
+      clearTimeout(this.stableTimer);
+      this.stableTimer = null;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer != null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private statusEvent(): ConnectionStatusEvent {
+    return { status: this.statusValue, attempt: this.attemptCount, error: this.lastError };
+  }
+
+  private setStatus(status: ConnectionStatus, error: string): void {
+    this.statusValue = status;
+    this.lastError = error;
+    const ev = this.statusEvent();
+    for (const handler of [...this.statusListeners]) {
+      try {
+        handler(ev);
+      } catch (err) {
+        this.logger?.warn?.("memql sdk: status listener threw", err);
+      }
+    }
+  }
+
+  private finish(status: ConnectionStatus, error: string): void {
+    if (this.finished) return;
+    this.finished = true;
+    this.clearReconnectTimer();
+    this.clearStableTimer();
+    // An EXHAUSTED budget is as terminal as a close(), so tear the transport
+    // down here too. Leaving a supervised dispatcher alive with nothing left
+    // to supervise would park every later request on a socket nothing is
+    // going to revive, which reads to a consumer as a hang rather than a
+    // failure.
+    if (!this.closed) {
+      this.clearRotateTimer();
+      this.subscriptions.stop();
+      this.dispatcher.stop();
+    }
+    this.setStatus(status, error);
+    for (const resolve of this.finalResolvers) resolve();
+    this.finalResolvers.length = 0;
   }
 
   private async handshake(opts: ConnectOptions): Promise<void> {
@@ -458,6 +755,56 @@ function base64UrlDecode(segment: string): string {
   };
   if (g.Buffer) return g.Buffer.from(b64, "base64").toString("utf-8");
   throw new Error("memql sdk: no base64 decoder available (need atob or Buffer)");
+}
+
+// resolveReconnect normalises the opt-in config, or returns null when
+// auto-reconnect is off (the default).
+function resolveReconnect(opts: ReconnectOptions | undefined): Required<ReconnectOptions> | null {
+  if (!opts?.enabled) return null;
+  const positive = (v: number | undefined, fallback: number): number =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+  const initialDelayMs = positive(opts.initialDelayMs, DEFAULT_RECONNECT_INITIAL_MS);
+  return {
+    enabled: true,
+    initialDelayMs,
+    // Never below the initial delay: a ceiling under the floor would make the
+    // backoff run BACKWARDS, retrying faster the longer an outage lasts.
+    maxDelayMs: Math.max(initialDelayMs, positive(opts.maxDelayMs, DEFAULT_RECONNECT_MAX_MS)),
+    maxAttempts: positive(opts.maxAttempts, Number.POSITIVE_INFINITY),
+    stableAfterMs: positive(opts.stableAfterMs, DEFAULT_RECONNECT_STABLE_MS),
+  };
+}
+
+// backoffDelayMs is exponential with FULL JITTER: a uniform draw from
+// [0, capped], not `capped * (0.5 + random/2)`.
+//
+// Full jitter is the shape that actually decorrelates a fleet. A node
+// restarting drops every browser at once, and a tight jitter band leaves them
+// still moving as a herd -- the thundering retry lands on a node that has just
+// come up with nothing warm. Exported for the test that pins the bounds.
+export function backoffDelayMs(
+  attempt: number,
+  initialMs: number,
+  maxMs: number,
+  random: () => number = Math.random,
+): number {
+  const exponential = initialMs * 2 ** Math.max(0, attempt);
+  const capped = Math.min(maxMs, Number.isFinite(exponential) ? exponential : maxMs);
+  return Math.floor(random() * capped);
+}
+
+// openSocket dials and waits for the transport to open. Shared by the first
+// dial and every reconnect, so a redial cannot drift from the original in how
+// it carries the credential.
+async function openSocket(
+  opts: ConnectOptions,
+  auth: ConnectionAuth | undefined,
+): Promise<WebSocket> {
+  const url = resolveEndpoint(opts.endpoint, auth);
+  const factory = opts.webSocketFactory ?? defaultWebSocketFactory;
+  const socket = factory(url, wsAuthSubprotocols(auth));
+  await waitForOpen(socket);
+  return socket;
 }
 
 function defaultWebSocketFactory(url: string, protocols?: string[]): WebSocket {

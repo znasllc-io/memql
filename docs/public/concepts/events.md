@@ -347,6 +347,71 @@ so `ALL` is not a way to reach rows `GRAPH_EVENTS` would be denied.
 
 Full model: [per-row authorization audit](../operate/auth/per-row-authz-audit.md#subscriptions-are-an-egress-memql4309).
 
+### How to CONSUME events without diverging from the store (memql#4536-#4540)
+
+Everything above says what an event IS. This says how to hold a list current
+with them, because the obvious readings of the pieces above are wrong in ways
+that only show up under load.
+
+**Subscribe, THEN read.** The order is load-bearing, not stylistic. The engine
+registers a subscription SYNCHRONOUSLY on the request path and runs a read on
+its own goroutine, so a row written between the two arrives as an event and
+folds onto the seeded answer by id. Read-then-subscribe can miss a row
+FOREVER, and no amount of client care recovers it -- the row simply is not in
+the read and its event was never delivered. Pinned server-side by
+`TestSubscribeRegistersOnTheBusBeforeAcking`, so a refactor that moves
+registration off the request path breaks a test rather than every client.
+
+**A gap is data, and the answer to it is to RE-SEED.** Every notification
+carries `seq` -- its position in this stream's delivery sequence, from 1 --
+and `gap_before`, set when deliveries were dropped between the previous
+notification and this one. The per-stream event channel is bounded and the
+forwarder drops on full rather than stalling a write; before these fields that
+drop was a server-side WARN and nothing else, so a folding consumer diverged
+from the store permanently while every surface still rendered as live.
+
+On either signal, re-run the read that produced your rows and fold subsequent
+events onto the fresh answer. **A reconnect is a gap by construction** -- a new
+stream starts a new `seq` space at 1 -- so treat stream establishment as one
+rather than comparing numbers across connections. `seq == 0` means "this server
+does not number its deliveries" (it predates the field), never "the first
+event".
+
+**Continuity is a property of the STREAM, not of your subscription.** This is
+the reading that is easy to get wrong in both directions at once: `seq`
+numbers every notification on the socket, and `gap_before` lands on whichever
+delivery happens to come first after a drop. A handler watching only its own
+subscription therefore sees holes that belong to its neighbours -- and may
+never see the flag for the events IT lost. Read both once, per connection,
+over every delivery (`SubscriptionManager.onDelivery` in `sdk/ts`), and
+re-seed everything when it reports a break.
+
+**An id-only event is re-read, and a refusal is dropped silently.** The
+`payload_omitted` rule above, restated as a fold: never render the id-only
+payload as a row (every field would be blank); re-read through the authorized
+path; if that read refuses, drop the event without a trace on screen --
+announcing "a row you may not see changed" leaks exactly what the gate
+withheld.
+
+**Re-apply the READ's scope to folded rows.** A subscription is scoped by
+concept; a read is usually scoped by more. The two disagree the moment a
+caller can see rows the list deliberately excludes -- a cluster owner's
+subscription carries every machine while their "my machines" read carries
+theirs -- and folding those in makes rows appear that a refresh then removes.
+
+**The non-goals, and why.** There is no polling heartbeat anywhere: the
+socket, gap detection and re-seed ARE the safety net. There is no durable
+replay and no `since` cursor, deliberately -- retaining events per stream for
+replay is a durable substrate this system does not have, and half of one, a
+best-effort buffer that usually replays, is worse than none: it teaches
+clients to skip the re-seed path that is the only correct answer when the
+buffer misses. If replay is ever genuinely needed, the escalation is a durable
+event log with its own retention contract, not a bigger channel.
+
+`sdk/ts`'s `LiveCollection` implements all of this; a consumer folding by hand
+owes itself every rule above. Design record:
+[2026-08-25 caching and live data](../../superpowers/specs/2026-08-25-caching-and-live-data-architecture-design.md).
+
 ### Concept-registry subscriptions are a SEPARATE stream (memql#4238)
 
 Graph subscriptions above are about ROWS -- a node of some concept being

@@ -4,7 +4,15 @@
 // + prototype augmentation) in the product SDK, e.g.
 // the per-product SDK package, which re-exports this core.
 
-export { Connection, type ConnectOptions, type ConnectionAuth } from "./connection.js";
+export {
+  Connection,
+  backoffDelayMs,
+  type ConnectOptions,
+  type ConnectionAuth,
+  type ConnectionStatus,
+  type ConnectionStatusEvent,
+  type ReconnectOptions,
+} from "./connection.js";
 export {
   uploadAttachment,
   type AttachmentUploadSource,
@@ -32,6 +40,21 @@ export {
   type ConceptPage,
   type ConceptBrowseOptions,
 } from "./conceptBrowser.js";
+export {
+  LiveCollection,
+  LiveStore,
+  LiveValue,
+  disposeLiveStoreFor,
+  liveStoreFor,
+  type LiveCollectionSpec,
+  type LiveHandle,
+  type LiveSnapshot,
+  type LiveState,
+  type LiveStoreHost,
+  type LiveStoreOptions,
+  type LiveValueSnapshot,
+  type SeedPage,
+} from "./liveCollection.js";
 export {
   SubscriptionManager,
   type EventHandler,

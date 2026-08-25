@@ -33,6 +33,8 @@ import (
 // adding it to this list.
 var protoSeamAllowlist = map[string]string{
 	"client.NewDispatcher":             "takes the raw MemqlService_StreamClient it multiplexes; the constructor is where the wire enters the SDK",
+	"client.NewSupervisedDispatcher":   "the same constructor, for a dispatcher whose termination a reconnecting Connection owns (memql#4537)",
+	"client.Dispatcher.Rebind":         "points the multiplexer at a replacement stream after a reconnect -- the stream IS the argument, exactly as in the constructor",
 	"client.Dispatcher.Send":           "sends one wire message on the stream -- the message IS the argument",
 	"client.Dispatcher.SendAndWait":    "sends a wire message and returns the correlated wire reply; the typed packages adapt it",
 	"client.Dispatcher.Events":         "the shared channel of uncorrelated server messages, consumed and adapted by callers",

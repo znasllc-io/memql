@@ -134,24 +134,39 @@ function NumberTile({
       to={to}
       className="group rounded-lg border border-line bg-surface p-4 hover:border-line-strong hover:bg-raised"
     >
+      {/* THE LABEL IS NOT BEHIND THE LOADING GATE (memql#4539). It used to be:
+          the whole tile was a skeleton until its count landed, so a console
+          mid-load was a grid of grey boxes that said nothing about what it was
+          about to show. The label is known before the read -- it is the tile's
+          name -- and only the NUMBER has to wait. */}
       {tile.loading ? (
         <Skeleton variant="stat" />
       ) : (
-        <>
-          <div className="font-display text-display leading-none text-fg">
-            {tile.error !== "" ? "—" : tile.count}
-          </div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-muted">
-            <span className="uppercase tracking-wide">{label}</span>
-            {live ? <span className="text-subtle">live</span> : null}
-          </div>
-          {tile.error !== "" ? (
-            <p className="mt-1 text-xs text-subtle">could not read: {tile.error}</p>
-          ) : null}
-        </>
+        <div className="font-display text-display leading-none text-fg">
+          {tile.error !== "" ? "—" : tile.count}
+        </div>
       )}
+      <div className="mt-1 flex items-center gap-2 text-xs text-muted">
+        <span className="uppercase tracking-wide">{label}</span>
+        {live ? <LivenessChip liveness={tile.liveness} /> : null}
+      </div>
+      {tile.error !== "" ? (
+        <p className="mt-1 text-xs text-subtle">could not read: {tile.error}</p>
+      ) : null}
     </Link>
   );
+}
+
+// The "live" chip has to be able to say NO (memql#4539). It was a constant --
+// rendered whenever the tile was configured as live -- so a console whose
+// stream had dropped kept a number under the word "live" with nothing to
+// suggest it had stopped moving. That is the specific dishonesty this epic is
+// about: a frozen table that looks like a quiet one.
+function LivenessChip({ liveness }: { liveness: HomeTileState["liveness"] }): ReactNode {
+  if (liveness === "live") return <span className="text-subtle">live</span>;
+  if (liveness === "seeding") return <span className="text-subtle">loading</span>;
+  if (liveness === "degraded") return <span className="text-warn">catching up</span>;
+  return <span className="text-warn">not live</span>;
 }
 
 function RecentList({

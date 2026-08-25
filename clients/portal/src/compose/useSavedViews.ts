@@ -1,7 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useLive } from "../cluster/useLive";
 import { parseSavedView, parseSavedViews, savedViewArgs, type SavedView, type SavedViewInput } from "./savedViews";
+
+const SAVED_VIEW_CONCEPT = "v1:portalviews:view";
+
+// A view belongs on the rail only while it is active. The read says so
+// server-side (`status: "active"`); this says the same about an arriving
+// event, which is what makes an archive disappear rather than fold back in.
+function isActiveView(row: Row): boolean {
+  const payload = (row as { payload?: unknown }).payload;
+  const source =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : (row as Record<string, unknown>);
+  const status = String(source["status"] ?? "");
+  return status === "" || status === "active";
+}
 
 // Reading and writing composed views against the cluster.
 //
@@ -21,77 +38,44 @@ export interface SavedViewsState {
 }
 
 export function useSavedViews(): SavedViewsState {
-  const { query, subscriptions, status } = useCluster();
-  const [views, setViews] = useState<SavedView[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [epoch, setEpoch] = useState(0);
+  const { query } = useCluster();
 
-  useEffect(() => {
-    if (query === null) {
-      setViews([]);
-      setLoading(false);
-      setError("");
-      return;
-    }
-    let live = true;
-    setLoading(true);
-    setError("");
+  // LIVE THROUGH THE STORE (memql#4539, carrying memql#4264). The rail lists
+  // these, and a view composed a moment ago appearing only after a reload is
+  // the kind of staleness that makes an operator doubt the save worked. It
+  // used to bump an epoch and re-run the read on every CDC event; the rows
+  // fold now, and an ARCHIVED view leaves the list because the read's own
+  // `status: "active"` narrowing is re-applied to every folded row.
+  //
+  // A read that throws SYNCHRONOUSLY -- a client without the generated method,
+  // an older engine -- is caught rather than left to propagate, because this
+  // hook is on the NAV RAIL's path (memql#4264): losing the rail because a
+  // saved-view list could not be read is wildly out of proportion, and an
+  // empty Custom section is the right degradation.
+  const live = useLive<Row>(query === null ? null : "compose:savedViews", () => ({
+    concept: SAVED_VIEW_CONCEPT,
+    actions: ["created", "updated", "deleted"],
+    paged: false,
+    seed: async (_cursor, signal) => {
+      if (query === null) return { rows: [], nextCursor: "" };
+      const result = await query.composedViews({ status: "active" }, { signal });
+      return { rows: result.rows(), nextCursor: "" };
+    },
+    reread: async (rowId, signal) => {
+      if (query === null) return null;
+      return getRowByConceptAndId(query, SAVED_VIEW_CONCEPT, rowId, { signal });
+    },
+    inScope: isActiveView,
+  }));
 
-    // Wrapped, because this hook is now on the NAV RAIL's path (memql#4264).
-    // A read that throws SYNCHRONOUSLY -- a client without the generated
-    // method, an older engine -- would otherwise take the whole shell down
-    // with it, and losing the rail because a saved-view list could not be read
-    // is wildly out of proportion. An empty Custom section is the right
-    // degradation.
-    let read: Promise<unknown>;
-    try {
-      read = query.composedViews({ status: "active" });
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-      setLoading(false);
-      return;
-    }
+  const views = useMemo(() => parseSavedViews(live.rows), [live.rows]);
 
-    void (read as ReturnType<typeof query.composedViews>)
-      .then((result) => {
-        if (!live) return;
-        setViews(parseSavedViews(result.rows()));
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (!live) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
-      });
-
-    return () => {
-      live = false;
-    };
-  }, [query, epoch]);
-
-  // LIVE (memql#4264). The rail lists these, and a view composed a moment ago
-  // appearing only after a reload is the kind of staleness that makes an
-  // operator doubt the save worked. Same shape as the console's tiles: a CDC
-  // arrival bumps an epoch and the bounded read runs again -- no poll, and no
-  // splicing of a partial row into a list the read owns.
-  useEffect(() => {
-    if (subscriptions === null || status !== "connected") return;
-    try {
-      return subscriptions.subscribeGraph(() => setEpoch((n) => n + 1), {
-        concept: "v1:portalviews:view",
-        actions: ["created", "updated", "deleted"],
-      });
-    } catch {
-      // A cluster whose subscription surface refuses is still perfectly usable
-      // here -- the list is correct, it just stops being live. Failing the
-      // whole hook over the live half would be worse than losing it.
-      return;
-    }
-  }, [subscriptions, status]);
-
-  const refresh = useCallback(() => setEpoch((n) => n + 1), []);
-  return { views, loading, error, refresh };
+  return {
+    views,
+    loading: query !== null && live.state === "seeding",
+    error: live.error,
+    refresh: live.reload,
+  };
 }
 
 export interface SavedViewState {

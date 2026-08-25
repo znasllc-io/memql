@@ -92,6 +92,28 @@ implementations. Every Go method has a TS equivalent; idioms diverge
 only where the host language demands it (`context.Context` ->
 `AbortSignal`, `<-chan` -> `AsyncIterable`, etc.).
 
+#### The one recorded deviation: live data (memql#4538)
+
+**Wire parity yes, store parity deferred.**
+
+The wire and the transport are at parity. `Event` carries `Seq` and
+`GapBefore` (memql#4536), and `ReconnectConfig` on `ConnectConfig` gives the
+Go connection the same auto-reconnect the TS one has -- backoff with full
+jitter, `Subscriptions().Replay()` on the new stream with original ids,
+`OnReconnect` firing after the replay, `Final()` distinguishing a recovered
+drop from the end.
+
+`LiveCollection` -- the fold-and-re-seed store -- exists only in `sdk/ts`.
+That is a DELIBERATE bend of this rule, recorded here rather than left to be
+discovered as an omission: every consumer of the store today is a browser
+surface, and a Go store with no Go consumer would be an untested guess at
+what one would want. **The trigger condition is a Go consumer that folds
+graph events into a list it keeps** -- the cockpit's fleet view is the
+likeliest first. Until then a Go caller folds by hand, and the two fields
+above are what makes that possible to do correctly; note in particular that
+continuity is a STREAM property, so a hand-rolled fold must read `Seq` /
+`GapBefore` across all its subscriptions rather than per subscription.
+
 ---
 
 ## Layout

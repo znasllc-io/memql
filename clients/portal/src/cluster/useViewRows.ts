@@ -23,11 +23,18 @@ import { flattenForList } from "../viewkit/rows";
 //      field names, so the merge has to happen before they see a row. Same
 //      projection the browser's row list uses, from the same module.
 //
-// The live band is deliberately NOT merged in here. A view's readings are
-// computed over the paged window; splicing CDC arrivals into it would change
-// a count under the operator's eyes mid-scan, and the walk's cursor orders by
-// createdAt ascending so a row created now is one paging has not reached --
-// inserting it guarantees a duplicate later (src/concepts/liveBand.ts).
+// THE LIVE BAND IS PASSED THROUGH (memql#4539). It used to stop here: this
+// hook opened the browser's subscription and then discarded every event, so
+// every predefined and composed view was live on the wire and dead on the
+// screen -- an operator watching Users saw nothing arrive, with no way to tell
+// that from a quiet cluster.
+//
+// It is still a BAND rather than a splice, and that part was always right: a
+// view's readings are computed over the paged window, so splicing arrivals in
+// would change a count under the operator's eyes mid-scan, and the walk's
+// cursor orders by createdAt ascending -- a row created now is one paging has
+// not reached, and inserting it guarantees a duplicate later
+// (src/concepts/liveBand.ts).
 
 export interface ViewRowsState {
   // Undefined when this cluster declares no such concept -- a product bundle
@@ -40,13 +47,23 @@ export interface ViewRowsState {
   registryError: string;
   rows: Row[];
   walk: ConceptRowsState["walk"];
+  // The CDC arrivals since this view was opened. Render it with
+  // <LiveBandPanel>; `reload` is what its "Reload the list" control calls.
+  live: ConceptRowsState["live"];
+  // Set when the subscription could not be opened. Kept SEPARATE from the
+  // walk's error: an ordinary read succeeding must not erase a "live updates
+  // are off" notice, or the view looks live moments after going deaf.
+  liveDegraded: string;
   loadMore: () => void;
   retry: () => void;
+  // Restart the walk from the first page and clear the band -- the honest
+  // response to "rows changed since you loaded this".
+  reload: () => void;
 }
 
 export function useViewRows(conceptId: string): ViewRowsState {
   const { concepts, loading, error } = useConcepts();
-  const { walk, loadMore, retry } = useConceptRows(conceptId);
+  const { walk, live, liveDegraded, loadMore, retry, reload } = useConceptRows(conceptId);
 
   const rows = useMemo(() => walk.rows.map(flattenForList), [walk.rows]);
   const concept = concepts.find((candidate) => candidate.id === conceptId);
@@ -57,7 +74,10 @@ export function useViewRows(conceptId: string): ViewRowsState {
     registryError: error,
     rows,
     walk,
+    live,
+    liveDegraded,
     loadMore,
     retry,
+    reload,
   };
 }

@@ -62,6 +62,17 @@ describe("the console home", () => {
             meta: () => ({ count: total }),
           };
         }
+        // The authorized single-row read an id-only notification resolves
+        // through. Answering it with the whole page would let the tile render
+        // the wrong row and still pass.
+        const single = /&& id==(\S+)/.exec(call);
+        if (single) {
+          const n = Number(/evt-(\d+)/.exec(single[1] ?? "")?.[1] ?? "-1");
+          return {
+            rawNodes: () => (n >= 0 ? [auditRow(n)] : []),
+            meta: () => ({ cursor: "" }),
+          };
+        }
         let rows: unknown[] = [];
         if (call.includes("v1:identity:auditEvent")) {
           rows = Array.from({ length: auditCount }, (_, i) => auditRow(i));
@@ -117,30 +128,46 @@ describe("the console home", () => {
     await waitFor(() => expect(screen.getByText("137")).toBeTruthy());
     expect(screen.queryByText("137+")).toBeNull();
 
-    // A CDC arrival on the audit concept re-reads the tile: live, no poll.
+    // A CDC arrival FOLDS IN (memql#4539). It used to re-read the page on
+    // every event, which turned an active audit trail into a read pair per
+    // arrival; the row now lands from the event itself and the count -- which
+    // cannot be folded, being a server-side aggregate -- follows it.
     auditCount = 2;
-    const bump = graphHandlers.get("v1:identity:auditEvent");
+    const bump = graphHandlers.get("v1:identity:auditEvent") as unknown as
+      | ((e: unknown) => void)
+      | undefined;
     expect(bump).toBeTruthy();
     await act(async () => {
-      bump!();
+      bump!({
+        subscriptionId: "s",
+        kind: "NODE_CREATED",
+        timestamp: new Date(),
+        payloadOmitted: false,
+        seq: 1,
+        gapBefore: false,
+        payload: auditRow(1),
+      });
     });
     await waitFor(() => expect(screen.getByText("audit_action_1")).toBeTruthy());
 
-    // ...and an ID-ONLY arrival does the same (memql#4309). This tile FIRES A
-    // REFETCH rather than merging the event's payload, so it needs no change
-    // for the id-only notification -- but "needs no change" is a claim worth
-    // holding down: the refetch goes through the authorized read path, which
-    // is exactly the re-read an id-only event is asking the client to do, so
-    // a future "optimisation" that merged the payload here would silently
-    // start rendering blank rows.
+    // ...and an ID-ONLY arrival resolves through the AUTHORIZED read
+    // (memql#4309). Folding the event's own payload would render a card whose
+    // every field is blank -- which is why the collection re-reads instead,
+    // and why the fixture answers a single-row read with one row rather than
+    // the page.
     auditCount = 3;
     await act(async () => {
-      (bump as unknown as (e: unknown) => void)({
+      bump!({
         subscriptionId: "s",
         kind: "NODE_CREATED",
         timestamp: new Date(),
         payloadOmitted: true,
-        payload: { id: "v1:identity:auditEvent:x", concept: "v1:identity:auditEvent" },
+        seq: 2,
+        gapBefore: false,
+        payload: {
+          id: "v1:identity:auditEvent:evt-2",
+          concept: "v1:identity:auditEvent",
+        },
       });
     });
     await waitFor(() => expect(screen.getByText("audit_action_2")).toBeTruthy());

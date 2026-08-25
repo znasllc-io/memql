@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -16,7 +18,13 @@ type SubscriptionManager struct {
 	dispatcher *Dispatcher
 	mu         sync.Mutex
 	subs       map[string]chan Event // subscription_id -> channel
-	done       chan struct{}
+	// specs retains each live subscription's SubscribeMsg so it can be
+	// REPLAYED on a fresh stream after a reconnect (memql#4537). Retaining
+	// the spec -- not just the channel -- is the whole point: a channel
+	// nobody re-subscribed for is a channel that stays silent forever, and
+	// the caller cannot tell that apart from a quiet cluster.
+	specs map[string]*memqlv1.SubscribeMsg
+	done  chan struct{}
 }
 
 // NewSubscriptionManager creates a subscription manager that reads from
@@ -25,6 +33,7 @@ func NewSubscriptionManager(dispatcher *Dispatcher) *SubscriptionManager {
 	sm := &SubscriptionManager{
 		dispatcher: dispatcher,
 		subs:       make(map[string]chan Event),
+		specs:      make(map[string]*memqlv1.SubscribeMsg),
 		done:       make(chan struct{}),
 	}
 	go sm.demux()
@@ -102,9 +111,53 @@ func (sm *SubscriptionManager) subscribe(ctx context.Context, sub *memqlv1.Subsc
 	ch := make(chan Event, 64)
 	sm.mu.Lock()
 	sm.subs[subId] = ch
+	// Clone: the caller's message is not ours to retain, and a replay must
+	// send what was originally asked for rather than whatever the caller
+	// mutated afterwards.
+	sm.specs[subId] = proto.Clone(sub).(*memqlv1.SubscribeMsg)
 	sm.mu.Unlock()
 
 	return subId, ch, nil
+}
+
+// Replay re-sends every live subscription on a freshly rebound stream
+// (memql#4537). A reconnecting Connection calls it after the handshake and
+// BEFORE it notifies reconnect hooks, so a consumer that re-reads on the hook
+// is already subscribed when its read goes out -- the subscribe-then-read
+// ordering the continuity contract rests on (memql#4536).
+//
+// Subscription IDS ARE REUSED. They are client-minted and scoped to a stream,
+// so the new server session has never seen them, and reusing them keeps every
+// delivery channel valid -- fresh ids would orphan the channel map and leave
+// the caller reading a channel nothing writes to.
+//
+// Returns how many were replayed.
+func (sm *SubscriptionManager) Replay() int {
+	select {
+	case <-sm.done:
+		return 0
+	default:
+	}
+	sm.mu.Lock()
+	pending := make([]*memqlv1.SubscribeMsg, 0, len(sm.specs))
+	for _, spec := range sm.specs {
+		pending = append(pending, proto.Clone(spec).(*memqlv1.SubscribeMsg))
+	}
+	sm.mu.Unlock()
+
+	sent := 0
+	for _, spec := range pending {
+		msg := &memqlv1.MemqlClientMessage{
+			Payload: &memqlv1.MemqlClientMessage_Subscribe{Subscribe: spec},
+		}
+		if _, err := sm.dispatcher.Send(msg); err == nil {
+			sent++
+		}
+		// A send failure means the fresh stream died between the handshake
+		// and here. The supervisor is already watching for that and will
+		// replay this same map on the next generation.
+	}
+	return sent
 }
 
 // Unsubscribe sends an UnsubscribeMsg and closes the event channel.
@@ -113,6 +166,7 @@ func (sm *SubscriptionManager) Unsubscribe(subId string) error {
 	ch, ok := sm.subs[subId]
 	if ok {
 		delete(sm.subs, subId)
+		delete(sm.specs, subId)
 		close(ch)
 	}
 	sm.mu.Unlock()
@@ -144,6 +198,7 @@ func (sm *SubscriptionManager) Stop() {
 	for id, ch := range sm.subs {
 		close(ch)
 		delete(sm.subs, id)
+		delete(sm.specs, id)
 	}
 	sm.mu.Unlock()
 }

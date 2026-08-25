@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useLive } from "../cluster/useLive";
 
 // Who is still outstanding on an invitation (memql#4271).
 //
@@ -11,8 +11,12 @@ import { useCluster } from "../cluster/ClusterProvider";
 // is a courtesy -- it stops the portal issuing a read it knows will come back
 // empty -- and never the authorization.
 //
-// Live, on the same epoch pattern the console's tiles use: an invitation issued
-// or revoked a moment ago should not need a reload to disappear from this list.
+// LIVE THROUGH THE STORE (memql#4539). It used to bump an epoch on every CDC
+// event and re-run the whole read, which is a read per invitation issued
+// anywhere in the cluster; the rows fold now. A pending invitation that gets
+// ACCEPTED leaves the list the same way, because the read's own membership
+// predicate is re-applied to every folded row: `status` is what "pending"
+// means, and an accepted row no longer satisfies it.
 
 export interface PendingInvitationsState {
   rows: Row[];
@@ -21,65 +25,45 @@ export interface PendingInvitationsState {
   reload: () => void;
 }
 
+const INVITATION_CONCEPT = "v1:identity:invitation";
+
+// A row belongs on this list only while it is still outstanding. The read says
+// so server-side; this says the same thing about an arriving event, which is
+// what stops an acceptance from folding straight back in as an update.
+function isPending(row: Row): boolean {
+  const payload = (row as { payload?: unknown }).payload;
+  const source =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : (row as Record<string, unknown>);
+  const status = String(source["status"] ?? "");
+  return status === "" || status === "pending";
+}
+
 export function usePendingInvitations(enabled: boolean): PendingInvitationsState {
-  const { query, subscriptions, status } = useCluster();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [epoch, setEpoch] = useState(0);
+  const { query, status } = useCluster();
+  const connected = query !== null && enabled && status === "connected";
 
-  useEffect(() => {
-    if (query === null || !enabled) {
-      setRows([]);
-      setLoading(false);
-      setError("");
-      return;
-    }
-    let live = true;
-    setLoading(true);
-    setError("");
+  const live = useLive<Row>(connected ? "people:pendingInvitations" : null, () => ({
+    concept: INVITATION_CONCEPT,
+    actions: ["created", "updated"],
+    paged: false,
+    seed: async (_cursor, signal) => {
+      if (query === null) return { rows: [], nextCursor: "" };
+      const result = await query.pendingUserInvitations({}, { signal });
+      return { rows: result.rawNodes(), nextCursor: "" };
+    },
+    reread: async (rowId, signal) => {
+      if (query === null) return null;
+      return getRowByConceptAndId(query, INVITATION_CONCEPT, rowId, { signal });
+    },
+    inScope: isPending,
+  }));
 
-    let read: Promise<{ rawNodes: () => Row[] }>;
-    try {
-      read = query.pendingUserInvitations({});
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-      setLoading(false);
-      return;
-    }
-
-    void read
-      .then((result) => {
-        if (!live) return;
-        setRows(result.rawNodes());
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (!live) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
-      });
-
-    return () => {
-      live = false;
-    };
-  }, [query, enabled, epoch]);
-
-  useEffect(() => {
-    if (!enabled || subscriptions === null || status !== "connected") return;
-    try {
-      return subscriptions.subscribeGraph(() => setEpoch((n) => n + 1), {
-        concept: "v1:identity:invitation",
-        actions: ["created", "updated"],
-      });
-    } catch {
-      // A cluster whose subscription surface refuses is still usable here: the
-      // list is correct, it just stops being live. Losing the whole read over
-      // the live half would be worse.
-      return;
-    }
-  }, [enabled, subscriptions, status]);
-
-  const reload = useCallback(() => setEpoch((n) => n + 1), []);
-  return { rows, loading, error, reload };
+  return {
+    rows: connected ? live.rows : [],
+    loading: connected && live.state === "seeding",
+    error: live.error,
+    reload: live.reload,
+  };
 }

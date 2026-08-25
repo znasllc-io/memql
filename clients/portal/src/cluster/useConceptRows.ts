@@ -20,6 +20,19 @@
 // -- the obvious one -- silently drops a good page whenever a state update
 // has been scheduled but not yet committed.
 //
+// THE BAND IS HAND-ROLLED, AND STAYS THAT WAY (memql#4539). Every other live
+// surface in the portal rides the SDK's LiveCollection; this one does not,
+// because a band is not a row store. It accumulates arrivals ALONGSIDE the
+// paged walk rather than into it -- the walk's keyset cursor orders by
+// createdAt ascending, so a row created now is a row paging has not reached,
+// and folding it in guarantees a duplicate when paging catches up.
+//
+// What it DOES take from the shared machinery is continuity. A gap, an
+// overflow or a reconnect means this pane may have missed an arrival, and
+// useLiveContinuity is the store's one reading of that -- deliberately not
+// `event.gapBefore` read here, which is a per-subscription reading of a
+// per-STREAM fact and is wrong in both directions.
+//
 // THE LIVE BAND IS BEST-EFFORT HERE, and uniquely so (memql#4543). Every
 // other live surface in the portal subscribes to a NAMED concept, and the
 // routing conformance gate proves each one crosses the mesh. This pane's
@@ -60,6 +73,7 @@ import {
 } from "../concepts/rowWalk";
 import { bumpActivity } from "./activity";
 import { useCluster } from "./ClusterProvider";
+import { useLiveContinuity } from "./useLive";
 
 // 100 rather than the SDK's 200 default. This is an interactive pane, not a
 // bulk export: a smaller page paints sooner, and "Load more" is one click.
@@ -92,6 +106,12 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
   // because it has to re-run the EFFECTS (reset, subscribe), and an effect
   // cannot depend on a value it also writes.
   const [epoch, setEpoch] = useState(0);
+  // The STREAM's continuity counter. A gap means an arrival may have been
+  // dropped, so the band and the walk are both suspect and the honest answer
+  // is to start the pane over -- which is exactly what reload() does. Folded
+  // into the epoch rather than watched separately, so there is one restart
+  // path and not two that can disagree.
+  const gaps = useLiveContinuity();
 
   // Every row id currently in the paged window, for the live band's
   // already-on-screen check.
@@ -121,7 +141,7 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
   useEffect(() => {
     dispatch({ kind: "reset" });
     setLive(EMPTY_LIVE_BAND);
-  }, [query, conceptId, epoch]);
+  }, [query, conceptId, epoch, gaps]);
 
   // ---- kick -------------------------------------------------------------
   // "idle" is the machine saying it wants a page and has none outstanding.
@@ -271,7 +291,7 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
       live_ = false;
       unsubscribe?.();
     };
-  }, [subscriptions, conceptId, epoch, query]);
+  }, [subscriptions, conceptId, epoch, gaps, query]);
 
   const loadMore = useCallback(() => {
     if (!canRequest(walk)) return;

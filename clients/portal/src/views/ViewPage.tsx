@@ -6,6 +6,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
+import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { InvitePerson, PendingInvitations } from "../people/InvitePerson";
 import { PersonActions } from "../people/PersonActions";
@@ -134,6 +135,23 @@ export function ViewPage(): ReactNode {
       }
       {...(usersAdmin ? { actions: <InvitePerson onInvited={invitations.reload} /> } : {})}
     >
+      {/* LIVE (memql#4539). This view already held a CDC subscription and
+          discarded every event; the band is what it was for. It sits ABOVE the
+          body deliberately -- an arrival is news, and news at the bottom of a
+          population is news nobody sees. */}
+      {data.liveDegraded !== "" ? (
+        <p className="mb-3 rounded-lg border border-warn bg-warn-subtle/40 px-3 py-1.5 text-xs text-fg">
+          Live updates are off for this view: {data.liveDegraded}. Rows already loaded are
+          still correct; use Reload to see what has changed since.
+        </p>
+      ) : null}
+      <LiveBandPanel
+        band={data.live}
+        concept={data.concept}
+        onSelect={onSelect}
+        onReload={data.reload}
+        selectedRowId={rowId}
+      />
       <Body
         view={view}
         concept={data.concept}

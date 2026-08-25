@@ -28,6 +28,8 @@ function graphEvent(kind: string, id: string, payload: Record<string, unknown> =
     kind,
     timestamp: new Date("2026-08-08T10:00:00Z"),
     payloadOmitted: false,
+    seq: 0,
+    gapBefore: false,
     payload: {
       id,
       nodeId: id,
@@ -105,6 +107,8 @@ describe("the live band", () => {
       kind: "NODE_CREATED",
       timestamp: null,
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: {},
     };
     expect(applyGraphEvent(EMPTY_LIVE_BAND, noId, ctx())).toBe(EMPTY_LIVE_BAND);
@@ -119,6 +123,8 @@ describe("the live band", () => {
       kind: "NODE_CREATED",
       timestamp: null,
       payloadOmitted: false,
+      seq: 0,
+      gapBefore: false,
       payload: { nodeId: "aliased", concept: CONCEPT },
     };
     const band = applyGraphEvent(EMPTY_LIVE_BAND, aliased, ctx());

@@ -6,7 +6,7 @@ import { RowDetail } from "../components/RowDetail";
 import { RowList } from "../components/RowList";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Button, Skeleton } from "../ui";
-import { liveBandIsEmpty } from "../concepts/liveBand";
+import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { CURSOR_LOOP_ERROR } from "../concepts/rowWalk";
 import { conceptPath, conceptRowPath } from "../concepts/urls";
 import { useConceptPane } from "./conceptContext";
@@ -69,7 +69,7 @@ export function ConceptRowsPane(): ReactNode {
           </p>
         ) : null}
 
-        <LiveBand
+        <LiveBandPanel
           band={live}
           concept={concept}
           onSelect={select}
@@ -194,59 +194,6 @@ function FooterButton({
     <Button size="xs" onClick={onClick}>
       {children}
     </Button>
-  );
-}
-
-// LiveBand renders the CDC arrivals. See src/concepts/liveBand.ts for WHY
-// they are a band rather than being spliced into the paged list -- in short,
-// the keyset cursor orders by createdAt ascending, so a row created now is a
-// row the walk has not reached yet, and inserting it guarantees a duplicate
-// when paging catches up.
-function LiveBand({
-  band,
-  concept,
-  onSelect,
-  onReload,
-  selectedRowId,
-}: {
-  band: ReturnType<typeof useConceptPane>["rows"]["live"];
-  concept: ReturnType<typeof useConceptPane>["concept"];
-  onSelect: (rowId: string) => void;
-  onReload: () => void;
-  selectedRowId: string;
-}): ReactNode {
-  if (liveBandIsEmpty(band)) return null;
-
-  return (
-    <div className="mb-3 overflow-hidden rounded-lg border border-accent bg-accent-subtle/40">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-accent/40 px-3 py-1.5">
-        <span className="text-xs font-medium text-fg">
-          New since you opened this
-          {band.created.length > 0 ? ` — ${band.created.length}` : ""}
-          {band.changedIds.length > 0
-            ? `, ${band.changedIds.length} existing ${
-                band.changedIds.length === 1 ? "row" : "rows"
-              } changed`
-            : ""}
-        </span>
-        <Button size="xs" onClick={onReload}>
-          Reload the list
-        </Button>
-      </div>
-      {band.created.length > 0 ? (
-        // Keyed by the arrival count so each new row re-triggers the accent
-        // wash -- a brief background fade that says "this just happened"
-        // without stealing the scroll position or re-fetching anything.
-        <div key={band.created.length} className="row-wash">
-          <RowList
-            rows={[...band.created]}
-            concept={concept}
-            {...(selectedRowId ? { selectedRowId } : {})}
-            onSelect={onSelect}
-          />
-        </div>
-      ) : null}
-    </div>
   );
 }
 

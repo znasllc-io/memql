@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Event, Role, Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { omitBlank } from "../cluster/args";
 import { useCluster } from "../cluster/ClusterProvider";
+import { useLive } from "../cluster/useLive";
 import { useMyAccess } from "../cluster/useMyAccess";
 import * as fleet from "./calls";
 import { WORKER_REGISTRATION_CONCEPT_ID } from "./concepts";
@@ -37,14 +38,31 @@ import type { LabelMap } from "./labels";
 // machineFromRow takes -- and a full re-read is reserved for the two cases a
 // fold cannot answer: an id-only notification, and an explicit reload.
 //
+// THE FOLD IS THE SDK'S NOW (memql#4539). This file used to carry its own --
+// a splice over an array, with the delete branch decided by string-sniffing
+// `event.kind.toLowerCase().includes("deleted")`, one renamed topic away from
+// folding deletes as updates. It is `LiveCollection` underneath: same
+// behaviour, matched on the decoded enum, and shared with every other live
+// surface so the next fix lands once.
+//
 // ===========================================================================
 // SCOPE IS ENFORCED ON THE FOLD TOO
 // ===========================================================================
 // A cluster owner is admitted to every registration row, so their subscription
 // carries events for machines they are not currently looking at. Folding those
 // into a "my machines" list would quietly repopulate it with the whole cluster
-// -- the same leak the scope toggle exists to make deliberate. Hence the
-// ownerUserId check below: the fold applies the same predicate the read did.
+// -- the same leak the scope toggle exists to make deliberate. That predicate
+// is the collection's `inScope` hook, applied to every folded row -- including
+// an UPDATE that moves a row out of scope, which the old splice ignored.
+//
+// ===========================================================================
+// THE WRITE'S ECHO IS NOW GAP-SAFE
+// ===========================================================================
+// None of the writes below refetches: the subscription carries the new value
+// back. That model had one hole -- a dropped event made the operator's own
+// write look ignored, permanently, with the page still rendering as live. The
+// collection re-seeds on any gap or reconnect, so a lost echo costs a re-read
+// rather than a wrong screen.
 
 export type MachineScope = "mine" | "all";
 
@@ -84,26 +102,10 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// eventRow reads a CDC envelope as the row shape machineFromRow takes. Returns
-// null for an id-only notification, which the caller answers with a re-read.
-function eventRow(event: Event): Row | null {
-  if (event.payloadOmitted) return null;
-  return event.payload ?? null;
-}
-
 export function useMachines(): MachinesState {
-  const { query, subscriptions } = useCluster();
+  const { query } = useCluster();
   const { access, loading: accessLoading } = useMyAccess();
   const [scope, setScope] = useState<MachineScope>("mine");
-  const [machines, setMachines] = useState<Machine[]>([]);
-  // Starts true for useArtifacts' reason: a read is effectively in flight from
-  // mount, so "loading" is the honest initial state. "Confirmed empty" is what
-  // false would claim before any read has been attempted, and this page's empty
-  // state reads as "you have no machines", which would be a lie.
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [liveDegraded, setLiveDegraded] = useState("");
-  const [epoch, setEpoch] = useState(0);
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -117,120 +119,61 @@ export function useMachines(): MachinesState {
   // this cluster", which is the wrong sentence for "you may not ask".
   const effectiveScope: MachineScope = isClusterOwner ? scope : "mine";
 
-  // The scope the rows currently on screen were read under. See the read
-  // effect for what it decides.
-  const readScope = useRef<MachineScope>(effectiveScope);
+  // The scope is part of the collection KEY, which is what makes a scope
+  // change a different collection rather than a re-read of this one. Rows on
+  // screen belong to the scope they were read under, so sharing one
+  // collection across the toggle would render another person's machines for a
+  // beat under the heading "Your machines" -- the one thing this toggle must
+  // never do. Two collections, and switching back reuses the first.
+  const key = query === null ? null : `fleet:machines:${effectiveScope}:${userId}`;
 
-  // ---- the read ---------------------------------------------------------
-  useEffect(() => {
-    if (query === null) {
-      // Not connected yet. NOT a definitive "no machines" answer, so `loading`
-      // is left exactly as it is rather than forced false -- see the useState
-      // above.
-      return;
-    }
-    let live = true;
-    setLoading(true);
-    setError("");
-    // A SCOPE change clears the list; a reload does not. The rows on screen
-    // belong to the scope they were read under, so keeping them across a
-    // switch renders another person's machines for a beat under the heading
-    // "Your machines" -- which is the one thing this toggle must never do.
-    // A reload is the same scope, so holding the rows is the honest render
-    // and avoids a flash of empty.
-    if (readScope.current !== effectiveScope) {
-      readScope.current = effectiveScope;
-      setMachines([]);
-    }
+  const live = useLive<Row>(key, () => ({
+    concept: WORKER_REGISTRATION_CONCEPT_ID,
+    actions: ["created", "updated", "deleted"],
+    // One page: both reads are caller-scoped named queries, not a keyset walk.
+    paged: false,
+    seed: async (_cursor, signal) => {
+      if (query === null) return { rows: [], nextCursor: "" };
+      const result =
+        effectiveScope === "all"
+          ? await fleet.allWorkersWithStatus(query, { signal })
+          : await fleet.myWorkersWithStatus(query, { signal });
+      return { rows: result.rows(), nextCursor: "" };
+    },
+    // v1:worker:registration is the OWNED tier, so events arrive with a full
+    // payload and this is unused in practice -- present because the tier is a
+    // declaration that can change, and a collection that cannot answer an
+    // id-only notification loses those rows silently when it does.
+    reread: async (rowId, signal) => {
+      if (query === null) return null;
+      return getRowByConceptAndId(query, WORKER_REGISTRATION_CONCEPT_ID, rowId, { signal });
+    },
+    // The same predicate the read applied. See the header.
+    inScope: (row) =>
+      effectiveScope !== "mine" || machineFromRow(row).ownerUserId === userId,
+  }));
 
-    const read =
-      effectiveScope === "all"
-        ? fleet.allWorkersWithStatus(query)
-        : fleet.myWorkersWithStatus(query);
+  const machines = useMemo(
+    () => live.rows.map(machineFromRow).filter((machine) => machine.id !== ""),
+    [live.rows],
+  );
 
-    void read
-      .then((result) => {
-        if (!live) return;
-        setMachines(result.rows().map(machineFromRow));
-      })
-      .catch((err: unknown) => {
-        if (live) setError(describe(err));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-
-    return () => {
-      live = false;
-    };
-  }, [query, effectiveScope, epoch]);
-
-  // ---- the live fold ----------------------------------------------------
-  // Held in refs rather than passed as effect dependencies: the subscription
-  // must survive a scope change and a write, and re-subscribing on every one
-  // of those is a window during which events are silently missed.
-  const scopeRef = useRef(effectiveScope);
-  scopeRef.current = effectiveScope;
-  const userIdRef = useRef(userId);
-  userIdRef.current = userId;
-
-  useEffect(() => {
-    if (subscriptions === null) {
-      setLiveDegraded("");
-      return;
-    }
-    let live = true;
-    let unsubscribe: (() => void) | null = null;
-
-    try {
-      unsubscribe = subscriptions.subscribeGraph(
-        (event) => {
-          if (!live) return;
-          const row = eventRow(event);
-          if (row === null) {
-            // An id-only notification. The row is not in hand, so the only
-            // honest answer is the authorized read -- the same one this hook
-            // already performs.
-            setEpoch((n) => n + 1);
-            return;
-          }
-          const machine = machineFromRow(row);
-          if (machine.id === "") return;
-          // The same predicate the read applied. See the header.
-          if (scopeRef.current === "mine" && machine.ownerUserId !== userIdRef.current) return;
-
-          setMachines((current) => {
-            if (event.kind.toLowerCase().includes("deleted")) {
-              return current.filter((held) => held.id !== machine.id);
-            }
-            const at = current.findIndex((held) => held.id === machine.id);
-            if (at < 0) return [...current, machine];
-            const next = [...current];
-            next[at] = machine;
-            return next;
-          });
-        },
-        {
-          concept: WORKER_REGISTRATION_CONCEPT_ID,
-          actions: ["created", "updated", "deleted"],
-        },
-      );
-      setLiveDegraded("");
-    } catch (err) {
-      // A failed subscribe does NOT break the page -- ordinary reads still
-      // work on the same connection. It breaks the PROMISE that the list is
-      // live, and that has to be said out loud rather than inferred from a
-      // machine that never comes back online on screen.
-      setLiveDegraded(describe(err));
-    }
-
-    return () => {
-      live = false;
-      unsubscribe?.();
-    };
-  }, [subscriptions]);
-
-  const reload = useCallback(() => setEpoch((n) => n + 1), []);
+  // `loading` starts true for useArtifacts' reason: a read is effectively in
+  // flight from mount, so it is the honest initial state -- "confirmed empty"
+  // is what false would claim before anything was asked, and this page's empty
+  // state reads as "you have no machines".
+  const loading = query === null || live.state === "seeding";
+  // Kept separate from `error` for useConceptRows' reason: a successful read
+  // must not erase a "live updates are off" notice, or the list looks live
+  // moments after going deaf. `degraded` is a gap being re-seeded;
+  // `disconnected` is the stream gone.
+  const liveDegraded =
+    live.state === "disconnected"
+      ? "the connection to the cluster dropped -- these rows are as of the last update"
+      : live.state === "degraded"
+        ? "live updates were interrupted -- refreshing"
+        : "";
+  const { error, reload } = live;
 
   // ---- the writes -------------------------------------------------------
   //

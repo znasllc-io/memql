@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Event, Role, Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useMemo, useState } from "react";
+import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { useLive } from "../cluster/useLive";
 import { useMyAccess } from "../cluster/useMyAccess";
 import * as fleet from "./calls";
 import {
@@ -42,12 +43,18 @@ import {
 // this screen, not one to hide.
 //
 // ===========================================================================
-// TWO SUBSCRIPTIONS, ONE FOLD EACH
+// TWO COLLECTIONS, ONE PER CONCEPT
 // ===========================================================================
-// Workspaces and nodes are different concepts, so they are two subscriptions.
-// Both are folded rather than used as refetch triggers, for the reason
-// useMachines.ts spells out: a heartbeat-driven concept re-read on every event
-// is a read every few seconds on an idle page.
+// Workspaces and nodes are different concepts, so they are two subscriptions
+// and two collections. Both FOLD rather than re-read on every event, for the
+// reason useMachines.ts spells out: a heartbeat-driven concept re-read per
+// event is a read every few seconds on an idle page.
+//
+// The folds themselves are the SDK's since memql#4539 -- this file used to
+// carry two hand-rolled splices, both deciding "is this a delete" by
+// lowercasing the event kind and looking for a substring. The node collapse
+// (latestPerId) and the released-workspace narrowing stay here, because they
+// are this page's reading of the rows rather than anything about folding.
 
 export type WorkspaceScope = "mine" | "all";
 
@@ -85,31 +92,24 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function eventRow(event: Event): Row | null {
-  if (event.payloadOmitted) return null;
-  return event.payload ?? null;
-}
-
-function isDelete(event: Event): boolean {
-  return event.kind.toLowerCase().includes("deleted");
+// liveNotice turns a collection's state into the page's "live updates are
+// off" sentence, or "" when it is live. Kept separate from the read error for
+// useConceptRows' reason: a successful read must not erase the notice, or the
+// list looks live moments after going deaf.
+function liveNotice(state: string): string {
+  if (state === "disconnected") {
+    return "the connection to the cluster dropped -- these rows are as of the last update";
+  }
+  if (state === "degraded") return "live updates were interrupted -- refreshing";
+  return "";
 }
 
 export function useWorkbenches(): WorkbenchesState {
-  const { query, subscriptions } = useCluster();
+  const { query } = useCluster();
   const { access, loading: accessLoading } = useMyAccess();
-
-  const [nodes, setNodes] = useState<WorkbenchNode[]>([]);
-  const [nodesLoading, setNodesLoading] = useState(true);
-  const [nodesError, setNodesError] = useState("");
-
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [workspacesLoading, setWorkspacesLoading] = useState(true);
-  const [workspacesError, setWorkspacesError] = useState("");
 
   const [scope, setScope] = useState<WorkspaceScope>("mine");
   const [showReleased, setShowReleased] = useState(false);
-  const [liveDegraded, setLiveDegraded] = useState("");
-  const [epoch, setEpoch] = useState(0);
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -119,162 +119,112 @@ export function useWorkbenches(): WorkbenchesState {
   const accessResolved = !accessLoading && access !== null;
   const effectiveScope: WorkspaceScope = isClusterOwner ? scope : "mine";
 
-  // The scope the workspaces currently on screen were read under. See the
-  // workspaces effect for what it decides.
-  const readScope = useRef<WorkspaceScope>(effectiveScope);
-
   // ---- the nodes --------------------------------------------------------
-  useEffect(() => {
-    if (query === null) return;
-    let live = true;
-    setNodesLoading(true);
-    setNodesError("");
+  const nodesLive = useLive<Row>(query === null ? null : "fleet:workbench:nodes", () => ({
+    concept: CLUSTER_NODE_CONCEPT_ID,
+    actions: ["created", "updated", "deleted"],
+    paged: false,
+    seed: async (_cursor, signal) => {
+      if (query === null) return { rows: [], nextCursor: "" };
+      const result = await query.clusterNodes({}, { signal });
+      // The nodeType narrowing is CLIENT-side because dsl/cluster declares no
+      // per-nodeType read (see the header) -- so it belongs here, in the seed,
+      // which is where this read's meaning is written. `inScope` says the same
+      // thing about arriving events.
+      return {
+        rows: result.rows().filter((row) => nodeFromRow(row).nodeType === WORKBENCH_NODE_TYPE),
+        nextCursor: "",
+      };
+    },
+    reread: async (rowId, signal) => {
+      if (query === null) return null;
+      return getRowByConceptAndId(query, CLUSTER_NODE_CONCEPT_ID, rowId, { signal });
+    },
+    inScope: (row) => nodeFromRow(row).nodeType === WORKBENCH_NODE_TYPE,
+  }));
 
-    void query
-      .clusterNodes({})
-      .then((result) => {
-        if (!live) return;
-        const all = result.rows().map(nodeFromRow);
-        setNodes(latestPerId(all.filter((node) => node.nodeType === WORKBENCH_NODE_TYPE)));
-      })
-      .catch((err: unknown) => {
-        if (live) setNodesError(describe(err));
-      })
-      .finally(() => {
-        if (live) setNodesLoading(false);
-      });
-
-    return () => {
-      live = false;
-    };
-  }, [query, epoch]);
+  // latestPerId is the append-only collapse the header describes. It runs
+  // over the collection's rows rather than inside it, because it is this
+  // page's reading of a history -- the store's job is which rows exist, not
+  // which version of one to show.
+  const nodes = useMemo(
+    () =>
+      latestPerId(
+        nodesLive.rows
+          .map(nodeFromRow)
+          .filter((node) => node.id !== "" && node.nodeType === WORKBENCH_NODE_TYPE),
+      ),
+    [nodesLive.rows],
+  );
 
   // ---- the workspaces ---------------------------------------------------
-  useEffect(() => {
-    if (query === null) return;
-    let live = true;
-    setWorkspacesLoading(true);
-    setWorkspacesError("");
-    // A SCOPE change clears the list; a reload or a toggle does not. Rows
-    // belong to the scope they were read under, so holding another person's
-    // workspaces across a switch renders them for a beat under the heading
-    // "Your workspaces". The released toggle is exempt because it narrows the
-    // SAME population, and the rows it keeps are the caller's own either way.
-    if (readScope.current !== effectiveScope) {
-      readScope.current = effectiveScope;
-      setWorkspaces([]);
-    }
+  //
+  // The scope is part of the KEY, so switching is a different collection
+  // rather than a re-read of this one: rows belong to the scope they were read
+  // under, and sharing one across the toggle would render another person's
+  // workspaces for a beat under the heading "Your workspaces".
+  //
+  // The RELEASED toggle is in the key too, because for a cluster owner it
+  // changes the READ: allWorkspaces declares a status argument and narrows
+  // server-side, while myWorkspaces does not and narrows below. Keeping the
+  // toggle out of the key would quietly turn the owner's narrowing into a
+  // client-side filter over the whole cluster's history. Toggling back reuses
+  // the first collection.
+  const workspacesLive = useLive<Row>(
+    query === null ? null : `fleet:workspaces:${effectiveScope}:${userId}:${showReleased}`,
+    () => ({
+      concept: WORKBENCH_WORKSPACE_CONCEPT_ID,
+      actions: ["created", "updated", "deleted"],
+      paged: false,
+      seed: async (_cursor, signal) => {
+        if (query === null) return { rows: [], nextCursor: "" };
+        // Owner reads narrow server-side (allWorkspaces declares the argument);
+        // everyone else narrows in `workspaces` below. Same visible result --
+        // the difference is only how much comes over the wire.
+        const result =
+          effectiveScope === "all"
+            ? showReleased
+              ? await fleet.allWorkspaces(query, { signal })
+              : await fleet.allWorkspaces(query, "provisioned", { signal })
+            : await fleet.myWorkspaces(query, { signal });
+        return { rows: result.rows(), nextCursor: "" };
+      },
+      reread: async (rowId, signal) => {
+        if (query === null) return null;
+        return getRowByConceptAndId(query, WORKBENCH_WORKSPACE_CONCEPT_ID, rowId, { signal });
+      },
+      inScope: (row) =>
+        effectiveScope !== "mine" || workspaceFromRow(row).ownerUserId === userId,
+    }),
+  );
 
-    // The status narrowing is server-side for a cluster owner (allWorkspaces
-    // declares the argument) and client-side for everyone else (myWorkspaces
-    // does not). Same visible result; the difference is only how much comes
-    // over the wire.
-    const read =
-      effectiveScope === "all"
-        ? fleet.allWorkspaces(query, showReleased ? undefined : "provisioned")
-        : fleet.myWorkspaces(query);
+  const workspaces = useMemo(() => {
+    const all = workspacesLive.rows.map(workspaceFromRow).filter((one) => one.id !== "");
+    // A release is an UPDATE, not a delete, so a released workspace stays in
+    // the collection and the toggle decides whether it belongs on screen --
+    // rendering one while the toggle is off would show a directory that no
+    // longer exists.
+    const visible = showReleased ? all : all.filter((one) => one.status !== "released");
+    // Newest first, which is what the splice this replaced produced by
+    // prepending. The collection preserves ARRIVAL order, which is the read's
+    // order plus late arrivals at the end -- fine for a set, wrong for a list
+    // an operator scans top-down for "what just happened".
+    return [...visible].sort((a, b) =>
+      a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1,
+    );
+  }, [workspacesLive.rows, showReleased]);
 
-    void read
-      .then((result) => {
-        if (!live) return;
-        const all = result.rows().map(workspaceFromRow);
-        setWorkspaces(showReleased ? all : all.filter((one) => one.status !== "released"));
-      })
-      .catch((err: unknown) => {
-        if (live) setWorkspacesError(describe(err));
-      })
-      .finally(() => {
-        if (live) setWorkspacesLoading(false);
-      });
+  const nodesLoading = query === null || nodesLive.state === "seeding";
+  const workspacesLoading = query === null || workspacesLive.state === "seeding";
+  const nodesError = nodesLive.error;
+  const workspacesError = workspacesLive.error;
+  // One notice for the page: either feed being behind means the screen is.
+  const liveDegraded = liveNotice(nodesLive.state) || liveNotice(workspacesLive.state);
 
-    return () => {
-      live = false;
-    };
-  }, [query, effectiveScope, showReleased, epoch]);
-
-  // ---- the live folds ---------------------------------------------------
-  const scopeRef = useRef(effectiveScope);
-  scopeRef.current = effectiveScope;
-  const userIdRef = useRef(userId);
-  userIdRef.current = userId;
-  const showReleasedRef = useRef(showReleased);
-  showReleasedRef.current = showReleased;
-
-  useEffect(() => {
-    if (subscriptions === null) {
-      setLiveDegraded("");
-      return;
-    }
-    let live = true;
-    const stops: (() => void)[] = [];
-
-    try {
-      stops.push(
-        subscriptions.subscribeGraph(
-          (event) => {
-            if (!live) return;
-            const row = eventRow(event);
-            if (row === null) {
-              setEpoch((n) => n + 1);
-              return;
-            }
-            const workspace = workspaceFromRow(row);
-            if (workspace.id === "") return;
-            if (scopeRef.current === "mine" && workspace.ownerUserId !== userIdRef.current) return;
-
-            setWorkspaces((current) => {
-              const without = current.filter((held) => held.id !== workspace.id);
-              // A release is an UPDATE, not a delete, and while released rows
-              // are hidden the honest fold is to drop it from the list -- the
-              // toggle is what says whether it belongs on screen, and leaving
-              // it there would show a directory that no longer exists.
-              if (isDelete(event)) return without;
-              if (!showReleasedRef.current && workspace.status === "released") return without;
-              return [workspace, ...without];
-            });
-          },
-          {
-            concept: WORKBENCH_WORKSPACE_CONCEPT_ID,
-            actions: ["created", "updated", "deleted"],
-          },
-        ),
-      );
-
-      stops.push(
-        subscriptions.subscribeGraph(
-          (event) => {
-            if (!live) return;
-            const row = eventRow(event);
-            if (row === null) {
-              setEpoch((n) => n + 1);
-              return;
-            }
-            const node = nodeFromRow(row);
-            if (node.id === "" || node.nodeType !== WORKBENCH_NODE_TYPE) return;
-            setNodes((current) =>
-              isDelete(event)
-                ? current.filter((held) => held.id !== node.id)
-                : latestPerId([...current, node]),
-            );
-          },
-          {
-            concept: CLUSTER_NODE_CONCEPT_ID,
-            actions: ["created", "updated", "deleted"],
-          },
-        ),
-      );
-      setLiveDegraded("");
-    } catch (err) {
-      setLiveDegraded(describe(err));
-    }
-
-    return () => {
-      live = false;
-      for (const stop of stops) stop();
-    };
-  }, [subscriptions]);
-
-  const reload = useCallback(() => setEpoch((n) => n + 1), []);
+  const reload = useCallback(() => {
+    nodesLive.reload();
+    workspacesLive.reload();
+  }, [nodesLive, workspacesLive]);
 
   const release = useCallback(
     (workspaceId: string) => {

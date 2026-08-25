@@ -673,6 +673,14 @@ export interface EventPayload {
   // and nothing else. Absent (rather than false) on every ordinary event,
   // because protojson omits a false bool.
   payloadOmitted?: boolean;
+  // seq numbers every notification on THIS stream, from 1 (memql#4536).
+  // A uint64 on the wire, so protojson renders it as a STRING; the bridge
+  // marshals with EmitUnpopulated, so a current server sends "0" rather
+  // than omitting it. Decoded in types.ts.
+  seq?: string | number;
+  // gapBefore marks that deliveries for this stream were dropped between
+  // the previous notification and this one. Absent on an ordinary event.
+  gapBefore?: boolean;
 }
 
 export interface ConceptsListResultPayload {

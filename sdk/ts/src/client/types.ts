@@ -149,6 +149,29 @@ export interface Event {
   // rendering blanks rather than to leaking anything. Always false on an
   // ordinary event.
   payloadOmitted: boolean;
+  // seq is this notification's position in the CONNECTION's delivery
+  // sequence, from 1 (memql#4536). It numbers every notification the server
+  // writes on the stream, so a delivery whose seq is not the previous one
+  // plus one means something never arrived.
+  //
+  // 0 against a server that predates the field, which a consumer must read
+  // as "this connection carries no sequence" rather than as "the first
+  // event" -- LiveCollection treats a zero seq as unnumbered and leans on
+  // gapBefore alone.
+  //
+  // The counter is per STREAM: a reconnect starts a new one at 1, so a
+  // consumer treats stream establishment as an implicit gap rather than
+  // comparing sequences across connections.
+  seq: number;
+  // gapBefore is true when one or more deliveries were DROPPED between the
+  // previous notification on this stream and this one -- the engine's
+  // per-stream event channel overflowed (memql#4536).
+  //
+  // The correct response is to RE-SEED: re-run the read that produced the
+  // current rows and fold subsequent events onto the fresh answer. Ignoring
+  // it leaves a folded list permanently diverged from the store with nothing
+  // on screen to say so, which is the failure this flag exists to end.
+  gapBefore: boolean;
 }
 
 // GraphAction is a CDC verb a structured graph subscription filters on
@@ -391,7 +414,23 @@ export function eventFromWire(ev: EventPayload): Event {
     // wire field is absent on every ordinary event and a consumer reading
     // `ev.payloadOmitted` directly would be reading undefined.
     payloadOmitted: ev.payloadOmitted === true,
+    // uint64 -> protojson string, exactly like ConceptRegistryDelta's
+    // generation. Number() over a decimal string is exact well past any
+    // plausible per-connection event count.
+    seq: decodeSeq(ev.seq),
+    gapBefore: ev.gapBefore === true,
   };
+}
+
+// decodeSeq normalises the wire's uint64 -- a protojson string, a number from
+// a bridge that emits one, or absent from a server predating the field -- to a
+// positive integer, or 0 for "unnumbered". Collapsing every unusable form onto
+// the SAME value an older server produces leaves a consumer one case to handle
+// rather than three.
+function decodeSeq(raw: string | number | undefined): number {
+  if (raw == null) return 0;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 function stripEventKindPrefix(kind: string | undefined): string {

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -966,6 +967,25 @@ type streamSession struct {
 	unsubscribers  sync.Map // subscription_id → unsubscribe func()
 	eventChan      chan events.Event
 	closeChan      chan struct{}
+
+	// eventSeq / eventGapped carry the per-stream live-data continuity
+	// contract (memql#4536).
+	//
+	// eventSeq numbers every EventNotification written on this stream. It is
+	// incremented inside sendServerMessage, under sendMu, so seq order IS
+	// wire order: assigning it at the CALL SITE would let two goroutines take
+	// 5 and 6 and then send 6 first, which a client cannot tell apart from a
+	// dropped delivery.
+	//
+	// eventGapped is set by the bus forwarder when it cannot enqueue and must
+	// drop, and CONSUMED (swapped back to false) by the next notification that
+	// actually reaches the wire -- which is why it is consumed at the send
+	// site and not at the top of handleBusEvent: that function returns early
+	// for a denied row, an unencodable payload, or a topic no subscription
+	// matched, and consuming the flag on any of those paths would swallow the
+	// only signal the client gets.
+	eventSeq    atomic.Uint64
+	eventGapped atomic.Bool
 
 	// access holds the resolved user identity (userId / role /
 	// email) for this stream. Loaded lazily on the first message that
@@ -2240,7 +2260,17 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 			select {
 			case s.eventChan <- event:
 			default:
-				// Channel full, drop event
+				// Channel full: drop the event AND mark the stream gapped
+				// (memql#4536). The drop itself is correct -- a slow consumer
+				// must not block the engine's write path -- but until this
+				// flag existed it was invisible to the only party that could
+				// act on it. The next notification to reach the wire carries
+				// gap_before=true, and a client's answer to that is to
+				// re-seed.
+				//
+				// Set from the BUS's goroutine, consumed from the send path:
+				// an atomic, deliberately, so the drop stays lock-free.
+				s.eventGapped.Store(true)
 				if s.logger != nil {
 					s.logger.Warn("event channel full, dropping event",
 						"subscription_id", subscriptionId,
@@ -3239,7 +3269,43 @@ func (s *streamSession) sendServerMessage(correlate string, msg *memqlv1.MemqlSe
 
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	s.stampEventContinuityLocked(msg)
 	return s.stream.Send(msg)
+}
+
+// stampEventContinuityLocked numbers an outgoing EventNotification with this
+// stream's sequence and flags a preceding drop (memql#4536). CALLED WITH
+// sendMu HELD, by every path that writes to the stream.
+//
+// Assigning inside the send lock is what makes the contract true: seq order
+// IS wire order. Stamping at the call site instead would let two goroutines
+// take 5 and 6 and then send 6 first, which a client cannot tell apart from a
+// dropped delivery -- so it would manufacture the exact false alarm this
+// field exists to make trustworthy.
+//
+// EVERY EventNotification is numbered, control acks included. The contract a
+// client gets is "each notification on this stream is the previous one's
+// number plus one", which is checkable without the client having to know
+// which notifications are subscription deliveries and which are replies.
+//
+// The relay paths (renderToClient, the AI forward relay) stamp through here
+// too, and re-stamping a notification that arrived from another node is
+// correct rather than lossy: seq is a property of the SOCKET THE CLIENT
+// HOLDS, so the only counter that can answer "did I miss anything" is this
+// one.
+func (s *streamSession) stampEventContinuityLocked(msg *memqlv1.MemqlServerMessage) {
+	ev := msg.GetEvent()
+	if ev == nil {
+		return
+	}
+	ev.Seq = s.eventSeq.Add(1)
+	// Swap rather than Load: the FIRST notification after a drop carries the
+	// flag and the ones after it do not, which is what makes gap_before mean
+	// "since the previous delivered notification" rather than "this stream
+	// has dropped something at some point".
+	if s.eventGapped.Swap(false) {
+		ev.GapBefore = true
+	}
 }
 
 func (s *streamSession) normalizeRequestId(envelope *memqlv1.MemqlClientMessage, requestId string) string {
