@@ -1,7 +1,18 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { Button, Callout, DataText, Field, Panel, Select, TextInput } from "../ui";
+import {
+  Button,
+  Callout,
+  Checkbox,
+  DataText,
+  Field,
+  FormActions,
+  FormRow,
+  Panel,
+  Select,
+  TextInput,
+} from "../ui";
 import {
   CLUSTER_URL_PLACEHOLDER,
   INSTALL_PLATFORMS,
@@ -119,7 +130,18 @@ export function AddMachine({
           </Callout>
         )}
 
-        <div className="flex flex-wrap items-end gap-2">
+        {/* The build choice is an INPUT to the mint -- it decides which install
+            command the next screen shows -- so it stays ahead of the button
+            that acts on it. Bringing the button up onto the control line (the
+            alignment this issue is about) would otherwise have left an option
+            sitting after the submit it changes. */}
+        <Checkbox
+          checked={computerUse}
+          onChange={setComputerUse}
+          label="Install the computer-use build (mouse, keyboard, screenshots). It asks for Accessibility and Screen Recording the first time it runs."
+        />
+
+        <FormRow>
           <Field
             label="What is this machine called"
             grow
@@ -140,31 +162,18 @@ export function AddMachine({
               ))}
             </Select>
           </Field>
-        </div>
-
-        <label className="flex items-center gap-2 text-sm text-fg">
-          <input
-            type="checkbox"
-            checked={computerUse}
-            onChange={(event) => setComputerUse(event.target.checked)}
-          />
-          <span>
-            Install the computer-use build (mouse, keyboard, screenshots). It asks for
-            Accessibility and Screen Recording the first time it runs.
-          </span>
-        </label>
-
-        <div>
-          <Button
-            type="submit"
-            tone="primary"
-            busy={busy}
-            busyLabel="Minting…"
-            disabled={clients === null || name.trim() === ""}
-          >
-            Mint a token
-          </Button>
-        </div>
+          <FormActions>
+            <Button
+              type="submit"
+              tone="primary"
+              busy={busy}
+              busyLabel="Minting…"
+              disabled={clients === null || name.trim() === ""}
+            >
+              Mint a token
+            </Button>
+          </FormActions>
+        </FormRow>
       </form>
 
       {token === "" ? null : (

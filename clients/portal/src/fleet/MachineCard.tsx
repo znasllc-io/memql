@@ -5,6 +5,7 @@ import {
   Button,
   ConfirmDialog,
   DataText,
+  Field,
   LabelChips,
   Panel,
   StatusDot,
@@ -313,14 +314,13 @@ export function MachineCard({
           needs a fresh token to come back.
         </p>
         <div className="mt-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Why (optional)</span>
+          <Field label="Why (optional)">
             <TextInput
               value={revokeReason}
               onChange={setRevokeReason}
               placeholder="Laptop returned"
             />
-          </label>
+          </Field>
         </div>
       </ConfirmDialog>
     </Panel>

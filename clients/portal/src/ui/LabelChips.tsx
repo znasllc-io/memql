@@ -90,7 +90,9 @@ export function LabelChips({
             placeholder="Add a label, press Enter"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-48 rounded border border-line bg-surface px-2 py-1 text-xs text-fg placeholder:text-subtle disabled:cursor-not-allowed disabled:opacity-40"
+            // h-control-sm rather than py-1: this input sits IN the chip row, so it
+            // should be the height of a chip, not two pixels off it (memql#4504).
+            className="h-control-sm w-48 rounded border border-line bg-surface px-2 text-xs text-fg placeholder:text-subtle disabled:cursor-not-allowed disabled:opacity-40"
           />
         </label>
       )}

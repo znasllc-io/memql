@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { useConcepts } from "../cluster/useConcepts";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton, TextInput } from "../ui";
+import { Checkbox, Skeleton, TextInput } from "../ui";
 import { filterConcepts } from "../concepts/registry";
 import { VIEWS } from "../views/registry";
 import { ComposeButton } from "./ComposeLayout";
@@ -128,28 +128,31 @@ export function ComposeHomePage(): ReactNode {
         ) : (
           <ul className="flex flex-col divide-y divide-line rounded border border-line bg-surface">
             {matches.map((concept) => (
-              <li key={concept.id} className="flex items-start gap-3 px-3 py-2">
-                <input
-                  type="checkbox"
-                  id={`compose-${concept.id}`}
+              <li key={concept.id} className="px-3 py-2">
+                <Checkbox
                   checked={selected.includes(concept.id)}
                   onChange={() => toggle(concept.id)}
-                  className="mt-1"
+                  label={
+                    <>
+                      <span className="font-mono text-xs break-all text-subtle">
+                        {concept.id}
+                      </span>
+                      {predefined.has(concept.id) ? (
+                        <span className="ml-2 text-xs text-muted">
+                          (has a designed view)
+                        </span>
+                      ) : null}
+                      {/* Block spans, not <p>: a <label> takes PHRASING
+                          content, and Checkbox WRAPS its label rather than
+                          pointing at it with htmlFor -- which is what makes
+                          the whole row clickable. */}
+                      <span className="block text-sm text-fg">{concept.entity}</span>
+                      {concept.description === "" ? null : (
+                        <span className="block text-xs text-muted">{concept.description}</span>
+                      )}
+                    </>
+                  }
                 />
-                <label htmlFor={`compose-${concept.id}`} className="min-w-0 cursor-pointer">
-                  <span className="font-mono text-xs break-all text-subtle">
-                    {concept.id}
-                  </span>
-                  {predefined.has(concept.id) ? (
-                    <span className="ml-2 text-xs text-muted">
-                      (has a designed view)
-                    </span>
-                  ) : null}
-                  <p className="text-sm text-fg">{concept.entity}</p>
-                  {concept.description === "" ? null : (
-                    <p className="text-xs text-muted">{concept.description}</p>
-                  )}
-                </label>
               </li>
             ))}
           </ul>

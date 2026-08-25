@@ -1,6 +1,16 @@
 import { useState, type ReactNode } from "react";
 
-import { Button, ConfirmDialog, DataText, Field, Textarea, TextInput } from "../../ui";
+import {
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  DataText,
+  Field,
+  FormRow,
+  RadioGroup,
+  Textarea,
+  TextInput,
+} from "../../ui";
 import { ErrorMessage } from "../../components/StatusMessage";
 import type { CheckResult, ReleaseRow, ReleasesState } from "./useReleases";
 
@@ -85,29 +95,30 @@ export function ReleasesCard({ state }: { state: ReleasesState }): ReactNode {
 
       <Headline state={state} />
 
-      <div className="mt-3 flex flex-wrap items-end gap-3">
-        <BumpChoice value={bump} onChange={setBump} />
-        <Field label="Notes (optional)" grow>
-          <Textarea
-            value={notes}
-            onChange={setNotes}
-            rows={2}
-            placeholder="Prepended to GitHub's generated release notes."
-          />
-        </Field>
+      <div className="mt-3">
+        <FormRow>
+          <BumpChoice value={bump} onChange={setBump} />
+          <Field label="Notes (optional)" grow>
+            <Textarea
+              value={notes}
+              onChange={setNotes}
+              rows={2}
+              placeholder="Prepended to GitHub's generated release notes."
+            />
+          </Field>
+        </FormRow>
       </div>
 
-      <label className="mt-2 flex items-center gap-2 text-sm text-muted">
-        <input
-          type="checkbox"
+      <div className="mt-2">
+        <Checkbox
           checked={bumpPin}
-          onChange={(event) => setBumpPin(event.target.checked)}
+          onChange={setBumpPin}
+          label="Also open a pull request bumping the VS Code extension’s pinned release"
         />
-        Also open a pull request bumping the VS Code extension&rsquo;s pinned release
-      </label>
+      </div>
 
       <div className="mt-3">
-        <Button size="xs" tone="danger" onClick={() => setConfirming(true)} disabled={state.busy}>
+        <Button tone="danger" onClick={() => setConfirming(true)} disabled={state.busy}>
           Cut a release
         </Button>
       </div>
@@ -174,24 +185,17 @@ function BumpChoice({
     { key: "major", says: "a break" },
   ];
   return (
-    <fieldset className="flex flex-col gap-1">
-      <legend className="text-xs font-medium text-muted">Bump</legend>
-      <div className="flex flex-wrap gap-3">
-        {options.map((option) => (
-          <label key={option.key} className="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="release-bump"
-              value={option.key}
-              checked={value === option.key}
-              onChange={() => onChange(option.key)}
-            />
-            <span>{option.key}</span>
-            <span className="text-xs text-subtle">{option.says}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
+    <RadioGroup
+      name="release-bump"
+      legend="Bump"
+      value={value}
+      onChange={(next) => onChange(next as "patch" | "minor" | "major")}
+      options={options.map((option) => ({
+        value: option.key,
+        label: option.key,
+        hint: option.says,
+      }))}
+    />
   );
 }
 

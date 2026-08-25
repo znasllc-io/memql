@@ -190,7 +190,7 @@ function DomainChip({
       onClick={onSelect}
       aria-pressed={active}
       className={
-        "shrink-0 rounded-full border px-2.5 py-1 text-xs whitespace-nowrap " +
+        "flex h-control-sm shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs whitespace-nowrap " +
         (active
           ? "border-accent bg-accent-subtle font-medium text-fg"
           : "border-line bg-surface text-muted hover:bg-raised hover:text-fg")
