@@ -592,22 +592,77 @@ regardless of how its first byte was produced, so the moment a page has
 hydrated, the static and SSR paths are identical -- the more reactive an
 application is, the less SSR actually buys it.
 
-**The caveat that has to be said plainly, because it changes what you can
-promise a client:** subscriptions are AUTHENTICATED. An anonymous read
-fails closed by design -- `refuseRowAuthzWithoutActor`
-(`component/memql/rowauthz_enforce.go`) refuses a query with no actor
-rather than comparing it against an empty one. So:
+**Reads are AUTHENTICATED by default, and that is what you promise a
+client.** A logged-in view gets live updates for free. A page nobody has
+signed into is a different promise, and it takes two deliberate steps.
 
-- **Logged-in views** -- live updates are effortless, the default, no
-  extra design needed.
-- **Anonymous public pages** (a stock counter on a page a logged-out
-  storefront visitor is looking at) -- this needs a DELIBERATE decision: a
-  concept genuinely marked `@rowAuthz(public)`, or the guest-token path.
-  It is not something that falls out of turning `apiProxy` on.
+- **Logged-in views** -- effortless, the default, no extra design needed.
+- **Anonymous public pages** (a stock counter a logged-out storefront
+  visitor is looking at) -- the public tier, below. Two decisions, one by
+  the operator and one by the author, and neither falls out of turning
+  `apiProxy` on.
 
-Say this to a client before they hear it from a bug report. "Live
-updates" and "live updates on a page nobody has signed into" are different
-promises, and the difference is a design decision, not a checkbox.
+### Serving a page to a visitor who has not signed in
+
+Two independent steps, in this order. Doing only the first publishes
+nothing; doing only the second serves nothing.
+
+**1. The operator opts the cluster in.** Set
+`MEMQL_PUBLIC_READS_ENABLED=true`. Default is false, which is why every
+existing cluster is unaffected: with it off, a WebSocket dial carrying no
+credential is refused exactly as it always has been.
+
+Turning it on does not publish anything by itself. It opens a door into a
+graph where no concept declares the public tier, so every read through it
+refuses until step 2. The node logs a WARN at boot saying so.
+
+**2. The author declares the tier on the concepts that hold the content.**
+
+```memql fragment
+@rowAuthz(public)
+concept productPage { ... }
+```
+
+Declare it in your PRODUCT BUNDLE, on your own content concepts. Nothing
+in the engine tree declares it and a conformance gate keeps it that way --
+so an operator who enables the flag to serve one bundle's content is not
+silently publishing anything else.
+
+**What an anonymous session can and cannot do.** The rules are enforced,
+not conventions:
+
+| | |
+|---|---|
+| Read a concept declaring `@rowAuthz(public)` | yes |
+| Subscribe to its graph events | yes, admitted per row by the same function the read uses |
+| Read a concept declaring any other tier | refused |
+| Read a concept declaring NOTHING | **refused** |
+| Write anything, anywhere | refused -- there is no anonymous write |
+| Reach the AI, tool, identity or admin messages | refused at the stream |
+
+The undeclared row is the one worth reading twice. Most concepts in a
+tree declare no tier at all, and for a signed-in caller those admit
+everyone. An anonymous caller does **not** inherit that: undeclared means
+nobody has classified the concept, which is not the same as deciding it is
+publishable. So the tier is something you opt a concept INTO, never
+something a concept falls into by omission.
+
+`@rowAuthz(public)` is a READ tier. It declares who may see a row and says
+nothing about who may create one; an anonymous write is refused at the
+engine's write chokepoint regardless of what the concept declares.
+
+**Two things this is not.** It is not a way to let visitors submit
+anything -- that is `POST /inbound/{source}`
+([inbound-delivery.md](inbound-delivery.md)) or the guest-token path, both
+of which authenticate. And it is not per-visitor: every anonymous reader is
+the same actor, which is deliberate -- it is what lets one cached result
+serve every visitor, and it means no filter can branch on which stranger is
+asking.
+
+**Caching.** Anonymous reads carry no caller dimension, so they are the
+best-cached data in the system: one computation, served to everyone. That
+is a reason to prefer the public tier over a per-visitor guest token for
+genuinely public content, not merely a side effect.
 
 ---
 

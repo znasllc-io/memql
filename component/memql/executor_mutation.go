@@ -11,6 +11,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -517,6 +518,36 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	conceptName := strings.TrimSpace(mutation.Concept)
 	if conceptName == "" {
 		return nil, meta, fmt.Errorf("mutation must specify a concept")
+	}
+
+	// THERE IS NO ANONYMOUS WRITE, EVER (epic memql#4541, D4).
+	//
+	// Placed first -- before the concept is even resolved -- because
+	// unlike the retired and mirror checks below this is a property of
+	// the CALLER, not of the concept, so nothing about the target can
+	// change the answer.
+	//
+	// It has to be here rather than in the row-authz write guard, and
+	// that is the whole reason for a separate check. That guard returns
+	// nil for the public tier ("a public tier is a statement that the
+	// rows are not owned, so there is no owner to compare a writer
+	// against") and for an undeclared concept -- both correct for the
+	// callers it was written for, and both an open door for a stranger.
+	// `public` is a READ tier: it says who may SEE a row and nothing
+	// whatever about who may create one.
+	//
+	// executeWrite is the single write chokepoint (memql#1709), so one
+	// check covers mutations, raw inserts, tool handlers and staged
+	// writes. The bridge's surface pin refuses the payloads that would
+	// reach a write in the first place; this is the second of the two
+	// independent gates, because this is the one direction where a
+	// mistake cannot be taken back.
+	if auth.IsAnonymousActor(ctx) {
+		return nil, meta, fmt.Errorf(
+			"row-authz: write to %s refused -- this call carries no identity, and there is no "+
+				"anonymous write in MemQL. @rowAuthz(public) is a READ tier: it declares who may "+
+				"see a row, never who may create one (epic memql#4541, D4)",
+			conceptName)
 	}
 
 	conceptMeta, err := e.concepts.Get(conceptName)

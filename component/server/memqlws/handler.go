@@ -114,9 +114,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, err := auth.UserIdentityFromContext(r.Context())
 	if err != nil {
-		h.logWarn("memql websocket identity missing", "remote", remoteAddr(r))
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		return
+		// PUBLIC READS (epic memql#4541, D4). The 401 below is what makes a
+		// hosted site unable to serve a visitor who has not signed in --
+		// site-hosting.md recorded it as the gap. With the cluster opted in,
+		// the upgrade proceeds and the stream is admitted as the anonymous
+		// actor, pinned to public-tier reads and graph subscriptions.
+		//
+		// THE ADMISSION DECISION IS NOT MADE HERE. This only stops refusing;
+		// the gRPC stream interceptor decides, on the same rule, for every
+		// caller -- because this bridge is not the only way to reach that
+		// stream, and a bridge that told the stream "this one is anonymous"
+		// would have to say so over metadata a direct dialler can forge.
+		//
+		// With the flag off this branch is unreachable and the refusal is
+		// byte-for-byte what it has always been.
+		if !auth.PublicReadsEnabled() {
+			h.logWarn("memql websocket identity missing", "remote", remoteAddr(r))
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		identity = anonymousWebsocketIdentity()
 	}
 	// Allow any authenticated user (role check removed to support frontend client apps)
 
@@ -989,4 +1006,27 @@ func firstPositiveInt64(input, fallback int64) int64 {
 		return fallback
 	}
 	return input
+}
+
+// anonymousWebsocketIdentity is the placeholder UserIdentity a
+// public-reads session carries THROUGH THIS HANDLER, for its log lines and
+// nothing else (epic memql#4541, D4).
+//
+// It authorizes nothing. This handler's own use of `identity` is entirely
+// observational -- three log calls naming the subject -- and every decision
+// that matters happens on the gRPC stream, where the interceptor builds the
+// real auth.AnonymousActor from the ABSENCE of a credential rather than
+// from anything the bridge passed along. That separation is the point: if
+// this value were the input to an authorization decision, the bridge would
+// be minting an actor, and a direct gRPC dialler would want the same
+// treatment via a header it controls.
+//
+// The subject is the actor's own constant so a log line joins up with the
+// engine's `createdBy` vocabulary rather than inventing a second word for
+// the same caller.
+func anonymousWebsocketIdentity() auth.UserIdentity {
+	return auth.UserIdentity{
+		Subject: auth.AnonymousUserId,
+		Role:    string(auth.RoleAnonymous),
+	}
 }

@@ -313,6 +313,25 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 		return rowAuthzDeny
 	}
 
+	// ANONYMOUS ACTOR (epic memql#4541, D4). Answered SECOND and, like the
+	// connector above, never falls through in either direction.
+	//
+	// The reason it must not fall through is the `decl == nil` branch
+	// immediately below: an undeclared concept admits unconditionally, which
+	// is right for the callers that branch was written for and catastrophic
+	// for a stranger. Undeclared is UNMEASURED, not public. See
+	// rowauthz_anonymous.go.
+	//
+	// Order against the connector branch does not matter -- no actor is both
+	// -- but connector stays first because it is the older rule and moving
+	// it would look like a decision.
+	if admitted, isAnonymous := anonymousAdmission(ctx, conceptName); isAnonymous {
+		if admitted {
+			return rowAuthzAdmit
+		}
+		return rowAuthzDeny
+	}
+
 	decl := rowAuthzDeclFor(conceptName)
 	if decl == nil {
 		// UNDECLARED. Not "safe" and not "unchanged" -- unmeasured, in the
