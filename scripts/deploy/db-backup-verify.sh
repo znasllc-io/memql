@@ -68,11 +68,16 @@ function newest_blob_epoch() {
   [[ "$auth" == "login" ]] && authflags=(--auth-mode login)
 
   local newest
+  # ${a[@]+"${a[@]}"} rather than "${a[@]}": under `set -u` bash 3.2 -- which is
+  # what macOS still ships -- treats an EMPTY array expansion as an unbound
+  # variable and aborts. And not "${a[@]:-}" either, which is the form
+  # capability.sh uses: that is right in a for-loop and wrong here, because it
+  # expands to one EMPTY ARGUMENT, which az rejects.
   newest="$(az storage blob list \
       --account-name "$account" \
       --container-name "$container" \
       --prefix "$prefix" \
-      "${authflags[@]}" \
+      ${authflags[@]+"${authflags[@]}"} \
       --query 'max_by([], &properties.lastModified).properties.lastModified' \
       --output tsv 2>/dev/null || true)"
 
@@ -105,6 +110,15 @@ function main() {
     local active
     active="$(az account show --query id --output tsv 2>/dev/null || true)"
     [[ -n "$active" ]] || cap_fail 4 "not logged in to Azure -- run 'az login --tenant <tenant>' first, or pass --auth=connection-string"
+  else
+    # FAIL FAST RATHER THAN HANG. Without this the missing env var is not an
+    # error at all: az silently falls back to resolving the account key through
+    # the control plane, which against a wrong or unreachable account retries
+    # for MINUTES and then reports something about the account rather than
+    # about the credential. A capability script that hangs on a typo is worse
+    # than one that refuses.
+    [[ -n "${AZURE_STORAGE_CONNECTION_STRING:-}" ]] \
+      || cap_fail 4 "--auth=connection-string needs AZURE_STORAGE_CONNECTION_STRING in the environment; it is unset"
   fi
 
   cap_step "Listing backups in ${account}/${container} (server ${server})"
@@ -117,8 +131,11 @@ function main() {
   cap_result_set account   "$account"
   cap_result_set container "$container"
 
+  local -a authflags=()
+  [[ "$auth" == "login" ]] && authflags=(--auth-mode login)
+
   if ! az storage blob list --account-name "$account" --container-name "$container" \
-        $([[ "$auth" == "login" ]] && echo "--auth-mode login") \
+        ${authflags[@]+"${authflags[@]}"} \
         --num-results 1 --output tsv >/dev/null 2>&1; then
 
     # Separate the two causes using the CONTROL plane, which a subscription
@@ -130,7 +147,7 @@ function main() {
     # than a missing container -- and the error Azure returns names five roles
     # without saying which plane it means.
     if az storage container list --account-name "$account" \
-         $([[ "$auth" == "login" ]] && echo "--auth-mode login") \
+         ${authflags[@]+"${authflags[@]}"} \
          --query "[?name=='${container}'] | [0].name" --output tsv 2>/dev/null | grep -qx "$container"; then
       cap_result_set_raw containerExists true
       cap_fail 3 "the container ${account}/${container} EXISTS but this identity cannot read its blobs. Azure storage RBAC is data-plane: subscription Owner does not grant it. Assign 'Storage Blob Data Reader' on the account, then re-run. NOTHING HERE IS EVIDENCE ABOUT BACKUPS."
