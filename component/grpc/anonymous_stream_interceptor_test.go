@@ -202,3 +202,51 @@ func TestAnonymousAdmissionIsScopedToTheMemqlStream(t *testing.T) {
 	}
 	assert.True(t, handlerSawAnonymous, "the MemqlService stream stopped admitting anonymous callers")
 }
+
+// TestEnsureAccessPreservesTheAnonymousActor is the regression test for a
+// bypass that every other test in this epic was blind to.
+//
+// handleExecuteQuery stamps `auth.ContextWithAccess(ctx, s.ensureAccess(ctx))`
+// onto the request context before calling the engine. ensureAccess resolves an
+// actor from CLAIMS, and an anonymous stream has none -- so it fell through to
+// FallbackFromClaims and returned an EMPTY actor whose IsAnonymous is false.
+// That empty actor REPLACED the interceptor's anonymous one, and row admission
+// then took the ordinary path, where an UNDECLARED concept admits every
+// caller.
+//
+// So the load-bearing rule of the public tier -- "an anonymous caller reaches
+// public-tier concepts and nothing else, undeclared included" -- was bypassed
+// on ExecuteQuery, which is the ONLY read path an anonymous caller has. It
+// failed in the admitting direction, silently, with every gate reporting
+// exactly what it was asked.
+//
+// The row-gate tests could not catch it: they build a context directly and
+// never cross this seam. That is why this test lives here, beside the
+// function, rather than beside the rule it protects.
+func TestEnsureAccessPreservesTheAnonymousActor(t *testing.T) {
+	s := &streamSession{service: &service{}}
+
+	ctx := auth.ContextWithAnonymousActor(context.Background())
+	got := s.ensureAccess(ctx)
+
+	if got == nil {
+		t.Fatal("ensureAccess returned nil for an anonymous stream")
+	}
+	if !got.IsAnonymousActor() {
+		t.Fatalf("ensureAccess replaced the anonymous actor with %+v.\n"+
+			"Everything downstream reads the actor it returns, so row admission would take the ordinary "+
+			"path -- and an UNDECLARED concept admits every caller there. That is the one rule the public "+
+			"tier exists to enforce, bypassed on the only read path an anonymous caller has.", got)
+	}
+	if got.UserId != auth.AnonymousUserId {
+		t.Errorf("UserId = %q, want %q -- the result-cache key folds this in, so a changed value also un-shares every public read", got.UserId, auth.AnonymousUserId)
+	}
+
+	// The reachable positive: an ordinary stream still resolves from claims
+	// and does NOT come back anonymous, so the branch above cannot have been
+	// written so broadly that it swallows everyone.
+	plain := &streamSession{service: &service{}}
+	if ac := plain.ensureAccess(context.Background()); ac != nil && ac.IsAnonymousActor() {
+		t.Error("a stream with no anonymous actor resolved AS anonymous -- the branch is matching more than it should")
+	}
+}

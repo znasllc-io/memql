@@ -1290,6 +1290,35 @@ func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	}
 	s.accessLoaded = true
 
+	// AN ANONYMOUS STREAM'S ACTOR IS ALREADY RESOLVED (epic memql#4541, D4),
+	// and it must survive this function.
+	//
+	// Everything below resolves an actor from CLAIMS. An anonymous stream has
+	// none -- that is what makes it anonymous -- so it would fall through to
+	// FallbackFromClaims and come back as an EMPTY actor: blank user id, blank
+	// role, and crucially `IsAnonymous` false. Since handleExecuteQuery stamps
+	// the result back onto the request context, that empty actor would REPLACE
+	// the anonymous one the interceptor built, and row admission would then
+	// take the ordinary path -- where an UNDECLARED concept admits every
+	// caller. The one rule the public tier exists to enforce would be bypassed
+	// on the only read path an anonymous caller has.
+	//
+	// It fails in the admitting direction and leaves no trace: the read
+	// succeeds, the rows are returned, and every gate reports exactly what it
+	// was asked. Caught by a security review of memql#4544, not by a test --
+	// the row-gate tests build their own context and never cross this seam,
+	// which is why the regression test for it lives beside this function
+	// rather than beside the rule.
+	//
+	// Reading it back off the context is safe because the interceptor is the
+	// ONLY thing that can produce an anonymous actor: no claim, header, token
+	// class or role value yields one, so this cannot be reached by a caller
+	// who presented a credential the chain rejected.
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac.IsAnonymousActor() {
+		s.access = ac
+		return s.access
+	}
+
 	resolver := s.service.identityResolver
 	claims, _ := auth.ClaimsFromContext(ctx)
 
