@@ -333,6 +333,32 @@ func collect() []string {
 		}
 	}
 
+	// COLLAPSE TRAILING-SLASH PAIRS. A declaration may legitimately return both
+	// `/x` and `/x/` -- ArtifactPaths does, because Go's ServeMux treats the
+	// exact path and the subtree as different patterns and traefik's
+	// PathPrefix(`/x/`) does not match `/x`. That distinction is real in a mux
+	// and MEANINGLESS here: render() emits every entry as `pathType: Prefix`,
+	// under which `/x` already matches `/x` and `/x/...`.
+	//
+	// Emitting both is not merely redundant, it produces an INVALID front door.
+	// nginx normalises the two into one location and refuses the whole config:
+	//
+	//	[emerg] duplicate location "/artifacts/" in /tmp/nginx/nginx-cfg...
+	//
+	// and the blast radius is the entire front door rather than one route:
+	// ingress-nginx keeps serving its last good config and silently ignores
+	// every later Ingress change, which presents as a TLS handshake that
+	// succeeds followed by every request hanging. Nothing in that names the
+	// path, the generator, or nginx. It took down a live instance on upgrade.
+	//
+	// So the pair is collapsed onto the base form, which is the one that
+	// subsumes the other.
+	for p := range seen {
+		if strings.HasSuffix(p, "/") && len(p) > 1 && seen[strings.TrimSuffix(p, "/")] {
+			delete(seen, p)
+		}
+	}
+
 	out := make([]string, 0, len(seen))
 	for p := range seen {
 		out = append(out, p)

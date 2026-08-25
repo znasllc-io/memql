@@ -413,3 +413,57 @@ func returnsOneStringSlice(sig *ast.FuncType) bool {
 	ident, ok := slice.Elt.(*ast.Ident)
 	return ok && ident.Name == "string"
 }
+
+// TestCollectEmitsNoDuplicateNginxLocation is the general form of the defect
+// that took a live instance's front door down on an engine upgrade.
+//
+// render() emits every path as `pathType: Prefix`. nginx turns each into a
+// `location` and NORMALISES a trailing slash away, so `/x` and `/x/` become the
+// same location and the whole config is refused:
+//
+//	[emerg] duplicate location "/artifacts/" in /tmp/nginx/nginx-cfg...
+//
+// What makes it worth a test rather than a one-line fix is the failure mode.
+// ingress-nginx does not drop the bad route -- it keeps serving its last good
+// config and silently ignores every subsequent Ingress change, so the symptom
+// is a TLS handshake that succeeds followed by every request hanging, with all
+// pods Running and nothing anywhere naming the path or the generator.
+//
+// A declaration returning both forms is LEGITIMATE (ArtifactPaths does it:
+// Go's ServeMux separates the exact path from the subtree). collect() is what
+// must collapse them, so this asserts the property rather than the pair.
+func TestCollectEmitsNoDuplicateNginxLocation(t *testing.T) {
+	byLocation := map[string][]string{}
+	for _, p := range collect() {
+		loc := p
+		if len(loc) > 1 {
+			loc = strings.TrimSuffix(loc, "/")
+		}
+		byLocation[loc] = append(byLocation[loc], p)
+	}
+	for loc, paths := range byLocation {
+		if len(paths) > 1 {
+			t.Errorf("paths %q all normalise to the nginx location %q -- nginx refuses the "+
+				"WHOLE front-door config with `duplicate location`, and ingress-nginx then "+
+				"serves its last good config while ignoring every later Ingress change. "+
+				"collect() must collapse trailing-slash pairs onto the base form.", paths, loc)
+		}
+	}
+}
+
+// TestCollectKeepsABareTrailingSlashPathWithoutABase guards the collapse from
+// over-reaching: `/inbound/` has no `/inbound` sibling and must survive, or the
+// front door loses a route it is the only declaration for.
+func TestCollectKeepsABareTrailingSlashPathWithoutABase(t *testing.T) {
+	got := collect()
+	var haveInbound bool
+	for _, p := range got {
+		if p == "/inbound/" {
+			haveInbound = true
+		}
+	}
+	if !haveInbound {
+		t.Errorf("/inbound/ was dropped; the trailing-slash collapse must only fire when the "+
+			"base form is ALSO present. got=%v", got)
+	}
+}
