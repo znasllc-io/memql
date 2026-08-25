@@ -255,3 +255,157 @@ action tagRelease {
   }
   capability tagRelease(repo: args.repo, tag: args.version)
 }
+
+// =============================================================================
+//   Install-phase actions (capability shell.script) -- epic memql#4490
+// =============================================================================
+//
+// `provisionAzureInfrastructure` above builds the substrate. `argoSync` further
+// up reconciles an Application. EVERYTHING BETWEEN THOSE TWO POINTS was
+// unmodelled, and a real first bring-up found eleven ordered steps living in
+// that gap -- six of them dependencies that exist on no manifest in either
+// repository (memql#4472, memql#4473).
+//
+// The actions below own those eleven, and they exist as SEPARATE actions rather
+// than one because they fail for different reasons and are re-run for different
+// reasons: an operator repairing an instance runs the verifier, an operator
+// bumping a version runs the render diff, and neither should have to run
+// secret generation to get there.
+//
+// WHAT MAKES THIS CLASS WORTH SCRIPTING AT ALL is that every one of the six
+// undeclared dependencies FAILS SILENTLY. A missing Secret named by a volume
+// does not error -- the pod sits in ContainerCreating forever with no log line,
+// because the container never starts. An Ingress naming an absent IngressClass
+// is a VALID object nothing acts on. A missing ClusterIssuer means the site
+// LOADS, with a browser warning. None of them name themselves, and a runbook
+// step that a person performs by hand is a step that is skipped exactly once.
+
+// Backend: scripts/deploy/install-cluster-operators.sh.
+/// Install the cluster operators and cluster-scoped objects every committed manifest assumes are
+/// already present -- cert-manager, CloudNativePG, the External Secrets CRDs and controller,
+/// ingress-nginx, and the ACME ClusterIssuer -- from the versions pinned in the repository.
+/// Idempotent and verify-first: a converged cluster makes no call that changes anything.
+action installClusterOperators {
+  args {
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    repoRoot       string
+    acmeEmail      string
+    ingressClass   string
+    timeoutSeconds string
+    dryRun         boolean
+  }
+  capability script(script: "deploy.installClusterOperators", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, repoRoot: args.repoRoot, acmeEmail: args.acmeEmail, ingressClass: args.ingressClass, timeoutSeconds: args.timeoutSeconds, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/seed-instance-secrets.sh.
+/// GENERATE a fresh instance's credentials into its own Key Vault, and create the empty
+/// memql-secrets shell the ExternalSecrets merge into. Generation, never migration: a retired
+/// vault's entries are another cluster's master key. Create-if-absent, so a redelivered event
+/// cannot rotate a live cluster's credentials out from under it; and the DSN and the CNPG
+/// bootstrap credential carry ONE password, because two would come up healthy and unable to log in.
+action seedInstanceSecrets {
+  args {
+    keyVaultName   string!
+    subscriptionId string
+    namespace      string
+    dbHost         string
+    dbName         string
+    dbUser         string
+    dbSslMode      string
+    skipCluster    boolean
+    dryRun         boolean
+  }
+  capability script(script: "deploy.seedInstanceSecrets", keyVaultName: args.keyVaultName, subscriptionId: args.subscriptionId, namespace: args.namespace, dbHost: args.dbHost, dbName: args.dbName, dbUser: args.dbUser, dbSslMode: args.dbSslMode, skipCluster: args.skipCluster, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/wire-external-secrets.sh.
+/// Point this instance's External Secrets at THIS instance's vault, authenticating as THIS
+/// instance's managed identity -- rendered from provisioning's own esoClientId rather than applied
+/// from a committed file carrying another install's literals.
+action wireExternalSecrets {
+  args {
+    keyVaultName   string!
+    tenantId       string!
+    esoClientId    string!
+    namespace      string
+    serviceAccount string
+    repoRoot       string
+    dryRun         boolean
+  }
+  capability script(script: "deploy.wireExternalSecrets", keyVaultName: args.keyVaultName, tenantId: args.tenantId, esoClientId: args.esoClientId, namespace: args.namespace, serviceAccount: args.serviceAccount, repoRoot: args.repoRoot, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/register-gitops-repo.sh.
+/// Register an instance's git repository with ArgoCD: the credential Secret whose url must match
+/// the Application's repoURL byte for byte, and the AppProject sourceRepos entry without which the
+/// Application is refused as "repo not permitted in project" -- a refusal that stops reconciliation
+/// while looking harmless. The credential transport is an INPUT, because deploy keys being disabled
+/// org-wide is a policy fact a lifecycle step cannot hardcode its way around.
+action registerGitOpsRepo {
+  args {
+    repoUrl       string!
+    transport     string!
+    project       string
+    argoNamespace string
+    username      string
+    tokenFile     string
+    sshKeyFile    string
+    secretName    string
+    dryRun        boolean
+  }
+  capability script(script: "deploy.registerGitOpsRepo", repoUrl: args.repoUrl, transport: args.transport, project: args.project, argoNamespace: args.argoNamespace, username: args.username, tokenFile: args.tokenFile, sshKeyFile: args.sshKeyFile, secretName: args.secretName, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/verify-install-dependencies.sh.
+/// Check BY EXISTENCE that an instance's undeclared install dependencies are present, and report
+/// which are not. Existence rather than health is the whole point: the objects were never created,
+/// so nothing is unhealthy and ArgoCD has no opinion about a CRD nobody installed. Returns a
+/// structured result carrying `passed` and the list of what is missing.
+action verifyInstallDependencies {
+  args {
+    namespace     string
+    ingressClass  string
+    clusterIssuer string
+    requireIssuer boolean
+  }
+  capability script(script: "deploy.verifyInstallDependencies", namespace: args.namespace, ingressClass: args.ingressClass, clusterIssuer: args.clusterIssuer, requireIssuer: args.requireIssuer)
+}
+
+// Backend: scripts/deploy/settle-after-sync.sh.
+/// Wait for the database, restart the mesh to clear accumulated CrashLoopBackOff, and only THEN
+/// report sync health. The first sync legitimately fails while the database initialises, so a step
+/// that reads the first Degraded as failure is wrong on almost every successful bring-up -- and
+/// retrying the sync does not help, because what is needed is time plus a restart.
+action settleAfterSync {
+  args {
+    namespace              string
+    dbCluster              string
+    argoNamespace          string
+    app                    string
+    deployments            string
+    dbTimeoutSeconds       string
+    rolloutTimeoutSeconds  string
+    dryRun                 boolean
+  }
+  capability script(script: "deploy.settleAfterSync", namespace: args.namespace, dbCluster: args.dbCluster, argoNamespace: args.argoNamespace, app: args.app, deployments: args.deployments, dbTimeoutSeconds: args.dbTimeoutSeconds, rolloutTimeoutSeconds: args.rolloutTimeoutSeconds, dryRun: args.dryRun)
+}
+
+// Backend: scripts/deploy/render-diff.sh.
+/// Render an instance overlay at two engine refs and report the object-set difference BEFORE
+/// applying either. A version bump is a migration: one `?ref=` line has cost three retired
+/// workarounds, a new object needing a host patch, and a new certificate regime needing real
+/// substrate -- none of it discoverable from release notes, all of it discoverable by rendering.
+/// Flags NEW objects as well as broken patches, because a new object nobody patches renders with
+/// the engine's placeholder and builds cleanly, which is the silent half.
+action renderDiff {
+  args {
+    overlayPath string!
+    toRef       string!
+    fromRef     string
+    acceptKinds string
+    outputDir   string
+  }
+  capability script(script: "deploy.renderDiff", overlayPath: args.overlayPath, toRef: args.toRef, fromRef: args.fromRef, acceptKinds: args.acceptKinds, outputDir: args.outputDir)
+}

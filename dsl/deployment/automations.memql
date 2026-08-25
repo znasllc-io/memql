@@ -283,40 +283,213 @@ automation provisionInstance {
   }
 }
 
+// installInstance OWNS THE ELEVEN STEPS between a provisioned substrate and an
+// argoSync that means something (memql#4472). It used to be a one-step alias
+// for argoSync -- and argoSync against a freshly provisioned cluster syncs
+// NOTHING, because on that cluster there is no ArgoCD, no cert-manager, no
+// CNPG, no External Secrets, no ingress controller, no ClusterIssuer, no
+// namespace, no credentials and no repository registration.
+//
+//   1  kubeconfig                       )
+//   2  cert-manager                     )
+//   3  CNPG operator + Barman plugin    )  installClusterOperators
+//   4  ESO CRDs                         )
+//   5  External Secrets                 )
+//   6  ingress-nginx + IngressClass     )
+//   7  letsencrypt-prod ClusterIssuer   )
+//   8  namespace + the memql-secrets shell  )  seedInstanceSecrets
+//   9  Key Vault secret GENERATION          )
+//  10  SecretStore + ExternalSecrets, on THIS instance's identity  ) wireExternalSecrets
+//  11  ArgoCD repo credential + AppProject sourceRepos             ) registerGitOpsRepo
+//
+// and only THEN argoSync, followed by the settle the first sync needs.
+//
+// THE ORDER IS EXPRESSED AS ONE SWITCH CASE, not as sibling steps, and that is
+// deliberate. The scheduler runs steps in dependency topo-sort order, and
+// sibling steps that all read only the event payload sit at the same depth
+// where the sort preserves authored order -- which is how deployEngineCluster's
+// phases stay in sequence. Here the render-diff gate MUST run first and the
+// install MUST depend on its verdict, and that data edge would reorder any
+// sibling step that lacked one. Putting the whole install inside the gated
+// case makes the sequence structural instead of incidental: there is one
+// ordering, and it is the one written down.
+//
+// THE GATE IS THE HIGHEST-VALUE ITEM HERE (memql#4483). `revision` is not a
+// scalar to swap. One ?ref= line has cost three retired workarounds, a new
+// object needing a host patch, and a new certificate regime needing real Azure
+// substrate -- none of it discoverable from the release notes, all of it
+// discoverable in about fifteen minutes by rendering both refs. It is OFF for
+// a first install (there is no previous ref to diff against) and ON for an
+// update, which is what `requireRenderDiff` states.
+//
+// THE ESO CLIENT ID AND TENANT ARE ARGS, not read out of provisioning's step
+// result, because provisionInstance is a SEPARATE VERB by design: an operator
+// installing onto substrate that already exists must not have to re-run
+// provisioning to obtain them. provisionAzureInfrastructure reports both in its
+// result envelope; whoever raises the event carries them across.
 @trigger(event="instance.installRequested")
 automation installInstance {
   args {
-    instanceId    string!
-    clusterName   string!
-    resourceGroup string!
-    overlayPath   string!
-    revision      string!
-    dryRun        boolean
+    instanceId        string!
+    subscriptionId    string!
+    clusterName       string!
+    resourceGroup     string!
+    overlayPath       string!
+    revision          string!
+    keyVaultName      string
+    tenantId          string
+    esoClientId       string
+    repoUrl           string
+    repoTransport     string
+    repoTokenFile     string
+    repoProject       string
+    acmeEmail         string
+    namespace         string
+    repoRoot          string
+    fromRevision      string
+    acceptKinds       string
+    requireRenderDiff boolean
+    dryRun            boolean
   }
 
-  step adopt {
-    action argoSync(app: "memql", revision: revision, dryRun)
+  // BEFORE anything is applied.
+  step gate {
+    action renderDiff(
+      overlayPath,
+      toRef:   revision,
+      fromRef: fromRevision,
+      acceptKinds
+    )
+  }
+  step verdict {
+    logic renderDiffVerdict (
+      passed:   steps.gate.result.result.result.passed,
+      required: requireRenderDiff
+    )
+  }
+  step install {
+    switch steps.verdict.result {
+      // The gate was required and did not pass. Nothing is applied, and the
+      // run record carries the diff -- which is the whole product of this
+      // step, since what it found is not discoverable any other way.
+      case "blocked" { }
+      default {
+        action installClusterOperators(
+          subscriptionId,
+          resourceGroup,
+          clusterName,
+          repoRoot,
+          acmeEmail,
+          dryRun
+        )
+        action seedInstanceSecrets(
+          keyVaultName,
+          subscriptionId,
+          namespace,
+          dryRun
+        )
+        action wireExternalSecrets(
+          keyVaultName,
+          tenantId,
+          esoClientId,
+          namespace,
+          repoRoot,
+          dryRun
+        )
+        action registerGitOpsRepo(
+          repoUrl,
+          transport: repoTransport,
+          project:   repoProject,
+          tokenFile: repoTokenFile,
+          dryRun
+        )
+        action argoSync(app: "memql", revision: revision, dryRun)
+        // The first sync legitimately fails while the database initialises,
+        // and the mesh then needs a RESTART rather than a retry (memql#4475).
+        action settleAfterSync(
+          namespace,
+          app: "memql",
+          dryRun
+        )
+        // Existence, not health. The whole undeclared-dependency class is
+        // invisible to a health check, because the objects were never created.
+        action verifyInstallDependencies( namespace )
+      }
+    }
   }
 }
 
+// repairInstance is a CHECK and then a re-sync (memql#4473).
+//
+// The re-sync is still right for DRIFT: ArgoCD reconciling git IS the
+// desired-state engine, so "make the cluster match source again" is the whole
+// verb, and anything more -- editing live objects to match an expectation held
+// somewhere else -- would reintroduce the second source of truth this epic
+// exists to remove.
+//
+// But an entire class of failure is INVISIBLE to that. The six undeclared
+// dependencies were never created, so nothing is unhealthy; Argo reports what
+// it applied and has no opinion at all about a CRD nobody installed. A repair
+// that only re-syncs therefore DECLARES SUCCESS on a cluster that cannot work,
+// which is worse than failing.
+//
+// So the check comes first, by EXISTENCE, and a missing dependency does NOT
+// proceed to the sync. That refusal is the point: syncing cannot create a CRD
+// nobody installed, so a sync here would change nothing and report Healthy.
+// The run record names what is absent, and installInstance -- which is
+// idempotent and safe to re-run -- is what installs it.
 @trigger(event="instance.repairRequested")
 automation repairInstance {
   args {
-    instanceId string!
-    revision   string!
-    dryRun     boolean
+    instanceId    string!
+    revision      string!
+    namespace     string
+    ingressClass  string
+    clusterIssuer string
+    requireIssuer boolean
+    dryRun        boolean
   }
 
-  // Repair is a re-sync, deliberately: ArgoCD reconciling git IS the
-  // desired-state engine, so "make the cluster match source again" is the
-  // whole verb. Anything more -- editing live objects to match an expectation
-  // held somewhere else -- would reintroduce the second source of truth this
-  // epic exists to remove.
+  step verify {
+    action verifyInstallDependencies(
+      namespace,
+      ingressClass,
+      clusterIssuer,
+      requireIssuer
+    )
+  }
+  step verdict {
+    logic installDependencyVerdict ( passed: steps.verify.result.result.result.passed )
+  }
   step resync {
-    action argoSync(app: "memql", revision: revision, dryRun)
+    switch steps.verdict.result {
+      // Deliberately empty. See the header: a sync cannot create what was
+      // never installed, and running one anyway is how a broken cluster comes
+      // back Healthy.
+      case "missing" { }
+      default {
+        action argoSync(app: "memql", revision: revision, dryRun)
+      }
+    }
   }
 }
 
+// bringUpInstance is provisionInstance then installInstance, and now that
+// installInstance means something it is genuinely end to end rather than
+// substrate-plus-a-wish (memql#4472).
+//
+// THE HANDOFF VALUES RIDE THROUGH AS ARGS. tenantId and esoClientId are what
+// the instance overlay binds its service accounts to;
+// provisionAzureInfrastructure reports esoClientId in its result envelope. They
+// are threaded as arguments rather than read out of the substrate step's result
+// because each verb has to stay independently runnable -- an operator
+// installing onto substrate that already exists must not have to re-run
+// provisioning to obtain a value they can read off the vault.
+//
+// requireRenderDiff is deliberately absent from the pass-through and defaults
+// off: a bring-up is a FIRST install, and there is no previous ref to diff
+// against. A version bump raises instance.installRequested directly, with the
+// gate on.
 @trigger(event="instance.bringUpRequested")
 automation bringUpInstance {
   args {
@@ -328,6 +501,15 @@ automation bringUpInstance {
     keyVaultName   string!
     overlayPath    string!
     revision       string!
+    tenantId       string
+    esoClientId    string
+    repoUrl        string
+    repoTransport  string
+    repoTokenFile  string
+    repoProject    string
+    acmeEmail      string
+    namespace      string
+    repoRoot       string
     location       string
     dryRun         boolean
   }
@@ -347,10 +529,21 @@ automation bringUpInstance {
   step workloads {
     automation installInstance(
       instanceId,
+      subscriptionId,
       clusterName,
       resourceGroup,
       overlayPath,
       revision,
+      keyVaultName,
+      tenantId,
+      esoClientId,
+      repoUrl,
+      repoTransport,
+      repoTokenFile,
+      repoProject,
+      acmeEmail,
+      namespace,
+      repoRoot,
       dryRun
     )
   }

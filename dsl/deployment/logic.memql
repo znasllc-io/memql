@@ -162,3 +162,54 @@ logic deployOutcomeLabel {
     return outcome
   }
 }
+
+// ---- install-phase verdicts (epic memql#4490) ----
+
+// installDependencyVerdict maps the existence-checklist result to the label
+// repairInstance switches on.
+//
+// FAIL-CLOSED, and here that means "missing", mirroring deployGateGreen. A
+// garbled or absent verifier result must not read as "everything is present" --
+// that is the exact failure this verb exists to stop, one layer up: a repair
+// that re-syncs and declares success on a cluster whose CRDs were never
+// installed. Nothing is unhealthy, so nothing objects.
+/// Map the install-dependency existence check to a label: "ok" when everything the manifests assume
+/// is present, else "missing". Fail-closed -- a blank result reads as "missing", never as "ok".
+logic installDependencyVerdict {
+  args {
+    passed any
+  }
+  body {
+    ok := args.passed ?? false
+    verdict := cond(ok == true, "ok", "missing")
+    return verdict
+  }
+}
+
+// renderDiffVerdict maps the render-diff result to the label installInstance
+// switches on, and it is deliberately NOT fail-closed in the same direction.
+//
+// WHY `required` IS AN INPUT RATHER THAN AN ASSUMPTION. On a FIRST install
+// there is no previous ref to diff against, so the gate has nothing to say and
+// a fail-closed reading would refuse every fresh bring-up. On an UPDATE the
+// caller sets required, and then a gate that could not run is a gate that must
+// block -- because the whole point is that none of what a version bump changes
+// is discoverable from the release notes.
+//
+// So: the caller states whether this install is a migration, and the fail
+// direction follows from that one fact rather than from a guess made here.
+/// Map the render-diff result to a label installInstance switches on: "blocked" when the diff was
+/// REQUIRED and did not pass, else "clear". A first install passes required=false, because there is
+/// no previous ref to diff against.
+logic renderDiffVerdict {
+  args {
+    passed   any
+    required any
+  }
+  body {
+    gateRequired := args.required ?? false
+    clear := args.passed ?? false
+    verdict := cond(gateRequired == true, cond(clear == true, "clear", "blocked"), "clear")
+    return verdict
+  }
+}

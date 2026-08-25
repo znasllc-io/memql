@@ -1,0 +1,34 @@
+# External Secrets CustomResourceDefinitions -- a SEPARATE pinned apply
+# (memql#4473, epic memql#4490).
+#
+# WHY THIS DIRECTORY EXISTS AT ALL. ../install/eso-values.yaml sets
+# `installCRDs: false` with the comment "CRDs are managed out-of-band (already
+# installed on the cluster)". On the retired cluster they were. On a genuinely
+# empty subscription they are not, and the failure does not name itself: the
+# ESO CONTROLLER CrashLoopBackOffs while the WEBHOOK stays happily Running, so
+# `kubectl get pods -n external-secrets` shows one healthy pod beside one
+# restarting one and nothing anywhere says "CRD".
+#
+# "Managed out-of-band" was a true statement about a cluster, not a plan. This
+# file turns it into one: the CRDs are managed HERE, at the tag that matches
+# the chart ../install/external-secrets.yaml was rendered from.
+#
+# WHY NOT JUST SET installCRDs: true. Recorded in eso-values.yaml and still
+# true: re-applying the (very large) CRDs through `kubectl apply` trips the
+# last-applied-configuration annotation size limit. A separate apply with
+# --server-side does not, which is how scripts/deploy/install-cluster-operators.sh
+# applies this.
+#
+# THE PIN IS COUPLED TO THE CHART, not independent. A CRD set older than the
+# controller serves a schema missing fields the controller writes; newer, and
+# the controller silently ignores fields the operator can now express. Both are
+# gated by deploy/cnpg/operator_stack_test.go, which holds the exact-version
+# registry for every operator install in this tree.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # External Secrets v2.5.0 CRD bundle -- the same tag as the chart rendered
+  # into ../install/external-secrets.yaml (helm.sh/chart: external-secrets-2.5.0,
+  # app.kubernetes.io/version: v2.5.0).
+  - https://github.com/external-secrets/external-secrets/releases/download/v2.5.0/crds.yaml
