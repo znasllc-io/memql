@@ -70,6 +70,12 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
   const [seconds, setSeconds] = useState(0);
   const [minted, setMinted] = useState("");
   const [mintedMode, setMintedMode] = useState("");
+  // The delivery verdict, kept beside the link because the operator's next
+  // action depends on it: an emailed invitation needs nothing more, an
+  // undelivered one needs them to send the link themselves. memql#4584.
+  const [mintedTo, setMintedTo] = useState("");
+  const [mintedSent, setMintedSent] = useState(false);
+  const [mintedError, setMintedError] = useState("");
 
   const row = settings.data;
   const mode = text(row, "registrationMode") || "open";
@@ -100,8 +106,11 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
           writes.run(
             async (client) => {
               const result = await client.issueUserInvitation(address, role, seconds);
-              setMinted(result.url);
+                setMinted(result.url);
               setMintedMode(result.registrationMode);
+              setMintedTo(address);
+              setMintedSent(result.emailSent);
+              setMintedError(result.emailError);
               return result;
             },
             () => {
@@ -155,13 +164,63 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
         <MintedInvitation
           url={minted}
           mode={mintedMode}
+          to={mintedTo}
+          emailSent={mintedSent}
+          emailError={mintedError}
           onDismiss={() => {
             setMinted("");
             setMintedMode("");
+            setMintedTo("");
+            setMintedSent(false);
+            setMintedError("");
           }}
         />
       )}
     </>
+  );
+}
+
+// THREE STATES, AND THEY ASK THE OPERATOR FOR DIFFERENT THINGS (memql#4584,
+// memql#4585). Exported and pure for the reason modeStatement is: the copy IS
+// the behaviour here, and it is worth testing without a DOM.
+//
+// Before invitations could be emailed at all, this panel said "Copy this link
+// now" unconditionally while the button above it said "Send the invitation".
+// An operator read the button, believed a message had gone, and never
+// delivered the link -- so the invitee waited for an email nobody had sent.
+// Saying which of the three actually happened is the whole fix.
+//
+//   sent                     delivered; the operator need do nothing more
+//   not sent, no error       no mail wired -- a CONFIGURATION statement
+//   not sent, with an error  a send was attempted and failed -- an INCIDENT
+//
+// The last two must not read alike. One is "this cluster does not send mail",
+// the other is "mail is broken right now", and they send an operator to
+// different places.
+
+/** The panel heading for a freshly issued invitation. */
+export function deliveryHeading(emailSent: boolean, to: string): string {
+  if (!emailSent) return "Copy this link now -- nothing was emailed";
+  return to === "" ? "Invitation sent" : `Invitation sent to ${to}`;
+}
+
+/** What happened to the email, in words the next action follows from. */
+export function deliveryStatement(emailSent: boolean, emailError: string, to: string): string {
+  if (emailSent) {
+    return (
+      "The link below went to them by email. You do not need to send it yourself. " +
+      "Copy it anyway if you would rather deliver it another way -- you will not see it again."
+    );
+  }
+  if (emailError === "") {
+    return (
+      "This cluster has no mail configured, so no email was attempted. The link below is the " +
+      `only way in${to === "" ? "" : ` for ${to}`} -- send it to them yourself.`
+    );
+  }
+  return (
+    "The invitation is valid, but the email could not be delivered, so the recipient has not " +
+    "been told. Send the link below to them yourself. The reason given was:"
   );
 }
 
@@ -170,18 +229,39 @@ export function InvitePerson({ onInvited }: { onInvited?: () => void }): ReactNo
 function MintedInvitation({
   url,
   mode,
+  to,
+  emailSent,
+  emailError,
   onDismiss,
 }: {
   url: string;
   mode: string;
+  to: string;
+  emailSent: boolean;
+  emailError: string;
   onDismiss: () => void;
 }): ReactNode {
+  // THREE STATES, AND THEY ASK FOR DIFFERENT THINGS (memql#4584 / memql#4585).
+  // Before invitations could be emailed at all, this panel said "Copy this
+  // link now" unconditionally and the button above it said "Send the
+  // invitation" -- so an operator read the button, believed an email had gone,
+  // and never delivered the link. The invitee waited for a message nobody had
+  // sent. Saying which of the three actually happened is the whole fix.
   return (
     <div className="mt-3 flex flex-col gap-2 rounded border border-accent bg-accent-subtle p-3">
-      <h4 className="text-sm font-semibold">Copy this link now</h4>
+      <h4 className="text-sm font-semibold">{deliveryHeading(emailSent, to)}</h4>
       <p className="text-xs">
-        You will not see it again. Only its hash was stored, so it cannot be shown a second time —
-        if you lose it, issue another. Anyone holding it can register the address it names.
+        {deliveryStatement(emailSent, emailError, to)}
+        {emailError === "" ? null : (
+          <>
+            {" "}
+            <span className="font-mono break-all">{emailError}</span>
+          </>
+        )}
+      </p>
+      <p className="text-xs">
+        You will not see this link again. Only its hash was stored, so it cannot be shown a second
+        time — if you lose it, issue another. Anyone holding it can register the address it names.
       </p>
       {mode !== "open" ? null : (
         <p className="text-xs">

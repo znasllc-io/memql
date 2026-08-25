@@ -131,6 +131,24 @@ export interface RecoveryKeyResult extends AdminWriteResult {
 export interface UserInvitationResult extends AdminWriteResult {
   url: string;
   registrationMode: string;
+  /**
+   * Whether the invitation email reached the mail provider (memql#4584).
+   *
+   * Read WITH `emailError`, never alone. The three states a surface must be
+   * able to tell apart:
+   *
+   *   emailSent true                    delivered
+   *   false, emailError empty           no mail wired on this cluster; the
+   *                                     link is the only delivery mechanism
+   *   false, emailError set             a send was attempted and failed
+   *
+   * The middle one is a configuration statement and the last is an incident.
+   * Showing both as "not sent" is what let an invitation look delivered when
+   * nothing had been sent at all.
+   */
+  emailSent: boolean;
+  /** Why delivery failed; empty when it did not fail. See `emailSent`. */
+  emailError: string;
 }
 
 export interface IdentityAdminCallOptions {
@@ -317,7 +335,13 @@ export class IdentityAdminClient {
         result.auditEventId,
       );
     }
-    return { ...result, url, registrationMode: raw.registrationMode ?? "" };
+    return {
+      ...result,
+      url,
+      registrationMode: raw.registrationMode ?? "",
+      emailSent: raw.invitationEmailSent ?? false,
+      emailError: raw.invitationEmailError ?? "",
+    };
   }
 
   /**

@@ -1089,6 +1089,21 @@ export interface IdentityAdminResultPayload {
   // sign-up, so the link is a convenience") without re-reading cluster
   // settings and racing them.
   registrationMode?: string;
+  // Whether the invitation email actually left the server (memql#4584). NOT
+  // redundant with the call's own success: `ok` says the invitation was
+  // ISSUED -- the row exists and invitationUrl admits somebody -- while this
+  // says whether the recipient was TOLD. A delivery fault deliberately does
+  // not fail the issue, because the link is what admits and it is returned
+  // exactly once.
+  invitationEmailSent?: boolean;
+  // Why delivery failed; empty when it did not fail (memql#4584).
+  //
+  // Read the two together. `invitationEmailSent === false` with an EMPTY error
+  // means no send was attempted -- the node has no mail wired, a configuration
+  // statement. False WITH an error means one was tried and failed -- an
+  // incident. A console that collapses them sends an operator to the wrong
+  // place.
+  invitationEmailError?: string;
   // Set by rotateRecoveryKey ONLY (memql#3970) -- the SECOND field on this
   // reply that carries a credential, for the same reason as enrolmentUrl
   // above. Empty on every other operation.
