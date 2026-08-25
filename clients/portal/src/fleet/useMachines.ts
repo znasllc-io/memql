@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { omitBlank } from "../cluster/args";
@@ -125,7 +125,22 @@ export function useMachines(): MachinesState {
   // collection across the toggle would render another person's machines for a
   // beat under the heading "Your machines" -- the one thing this toggle must
   // never do. Two collections, and switching back reuses the first.
-  const key = query === null ? null : `fleet:machines:${effectiveScope}:${userId}`;
+  //
+  // THE CALLER'S OWN ID IS DELIBERATELY *NOT* IN THE KEY. It arrives on its
+  // own round trip (useMyAccess), so putting it there makes the key CHANGE
+  // when that lands -- a second collection, seeded from empty, which the
+  // page's `loading && machines.length === 0` gate renders as a skeleton. The
+  // list is replaced, every card unmounts, and an operator part-way through
+  // renaming a machine loses the editor and what they typed. Whether it
+  // happened at all came down to which read settled first, so it passed
+  // locally and failed on CI.
+  //
+  // The id is only needed by the FOLD, and the fold reads it through the ref
+  // below -- the latest committed value at event time, which is the same
+  // reasoning useConceptRows states for its paged-id set.
+  const key = query === null ? null : `fleet:machines:${effectiveScope}`;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   const live = useLive<Row>(key, () => ({
     concept: WORKER_REGISTRATION_CONCEPT_ID,
@@ -149,8 +164,14 @@ export function useMachines(): MachinesState {
       return getRowByConceptAndId(query, WORKER_REGISTRATION_CONCEPT_ID, rowId, { signal });
     },
     // The same predicate the read applied. See the header.
+    //
+    // Through the REF, so a fold that arrives before access resolves is
+    // refused (the id is still "") rather than admitted, and one that arrives
+    // after is decided correctly with no re-seed. The seed itself never needed
+    // the id: myWorkersWithStatus is scoped server-side on actor.userId.
     inScope: (row) =>
-      effectiveScope !== "mine" || machineFromRow(row).ownerUserId === userId,
+      effectiveScope !== "mine" ||
+      (userIdRef.current !== "" && machineFromRow(row).ownerUserId === userIdRef.current),
   }));
 
   const machines = useMemo(

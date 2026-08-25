@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -88,14 +88,17 @@ export function useGoals(): GoalsState {
   // put somebody else's goal straight into this list. That is exactly the
   // difference between a re-read trigger, which was safe by accident, and a
   // fold, which has to be safe on purpose.
-  // The key carries the caller's id, so the collection is re-created when
-  // access resolves -- but the READ is not gated on it. Waiting for the id
-  // would hold the picker in "loading" for a caller whose access never
-  // resolves at all (a PAT with no user row), and the seed does not need it:
-  // plansForUser is owner-scoped server-side. `inScope` refusing every fold
-  // until the id is known is what keeps the unresolved window safe.
+  // THE CALLER'S ID IS NOT IN THE KEY, for the reason useMachines.ts spells
+  // out: it arrives on its own round trip, so keying on it restarts the
+  // collection from empty when it lands -- a second read, and a surface that
+  // was showing goals flashing back to a skeleton. The seed never needed it
+  // (plansForUser is owner-scoped server-side); only the FOLD does, and that
+  // reads the ref below at event time.
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+
   const live = useLive<Row>(
-    connected ? `nexus:goals:${userId}` : null,
+    connected ? "nexus:goals" : null,
     () => ({
       concept: PLAN_CONCEPT,
       actions: ["created", "updated"],
@@ -109,7 +112,11 @@ export function useGoals(): GoalsState {
         if (query === null) return null;
         return getRowByConceptAndId(query, PLAN_CONCEPT, rowId, { signal });
       },
-      inScope: (row) => userId !== "" && rowString(row, "requestedBy") === userId,
+      // Refuses every fold until the id is known, which is what keeps the
+      // unresolved window safe: v1:planner:plan declares no row-authz tier
+      // (memql#4366), so this feed carries other people's plans.
+      inScope: (row) =>
+        userIdRef.current !== "" && rowString(row, "requestedBy") === userIdRef.current,
     }),
   );
 

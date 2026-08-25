@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { getRowByConceptAndId, type Role, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -118,6 +118,8 @@ export function useWorkbenches(): WorkbenchesState {
   const isClusterOwner = role === "owner";
   const accessResolved = !accessLoading && access !== null;
   const effectiveScope: WorkspaceScope = isClusterOwner ? scope : "mine";
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   // ---- the nodes --------------------------------------------------------
   const nodesLive = useLive<Row>(query === null ? null : "fleet:workbench:nodes", () => ({
@@ -170,8 +172,14 @@ export function useWorkbenches(): WorkbenchesState {
   // toggle out of the key would quietly turn the owner's narrowing into a
   // client-side filter over the whole cluster's history. Toggling back reuses
   // the first collection.
+  //
+  // The caller's own id is NOT in the key, for the reason useMachines.ts
+  // spells out at length: it arrives on its own round trip, so keying on it
+  // makes the collection restart from empty when it lands -- which this page
+  // renders as a skeleton, unmounting whatever the operator had open. The
+  // fold reads it through the ref below instead.
   const workspacesLive = useLive<Row>(
-    query === null ? null : `fleet:workspaces:${effectiveScope}:${userId}:${showReleased}`,
+    query === null ? null : `fleet:workspaces:${effectiveScope}:${showReleased}`,
     () => ({
       concept: WORKBENCH_WORKSPACE_CONCEPT_ID,
       actions: ["created", "updated", "deleted"],
@@ -193,8 +201,13 @@ export function useWorkbenches(): WorkbenchesState {
         if (query === null) return null;
         return getRowByConceptAndId(query, WORKBENCH_WORKSPACE_CONCEPT_ID, rowId, { signal });
       },
+      // Through the REF: a fold arriving before access resolves is refused
+      // rather than admitted, and one arriving after is decided correctly
+      // with no re-seed. The seed never needed the id -- myWorkspaces is
+      // scoped server-side on actor.userId.
       inScope: (row) =>
-        effectiveScope !== "mine" || workspaceFromRow(row).ownerUserId === userId,
+        effectiveScope !== "mine" ||
+        (userIdRef.current !== "" && workspaceFromRow(row).ownerUserId === userIdRef.current),
     }),
   );
 
