@@ -508,7 +508,35 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // workloadsReady=false on a machine that was fine. This is a
           // ceiling, not a sleep: a fast machine still finishes the moment
           // the workloads are Available.
-          "workload-timeout": "900",
+          //
+          // AND A FRESH `main` INSTALL GETS A SHORT ONE, because there the wait
+          // is not a budget -- it is guaranteed dead time (memql#4458,
+          // secondary B). That run passes no registry, so the overlay's own
+          // `memql-<node>:local` names stand, and those images DO NOT EXIST
+          // YET: `buildImages` is the next step and is what creates them. The
+          // workloads this wait waits for therefore cannot become Available,
+          // by construction, and a 900s ceiling means fifteen minutes of
+          // watching a CrashLoopBackOff the run itself made inevitable. The
+          // owner's failed install spent exactly that.
+          //
+          // It is not zero: ArgoCD still has to register the Application and
+          // the pullable infra still settles, and the loop reports what it sees
+          // on the way. Nothing downstream reads the outcome either -- the
+          // from-source graph verifies `result.argocdReady` rather than
+          // `result.workloadsReady`, precisely because it "proves what it can
+          // prove when no image exists yet" (install-main.json's delta 1) --
+          // and `buildImages`' own restart-and-wait is the real gate.
+          //
+          // THE PREDICATE IS THE FRESH INSTALL, NOT `imagesFromSource`, and the
+          // difference is a repair. A repair of a from-source cluster carries
+          // `imagesFromSource` READ BACK OFF THE RECEIPT while its version is
+          // empty -- so `isMainBranchChoice("")` is false, the panel loads
+          // install.json rather than install-main.json, and that graph's
+          // clusterUp verifies `result.workloadsReady`. Keying on the lane
+          // would hand that repair a 60s ceiling for a check it has to pass,
+          // on a cluster whose pods are restarting. Its `:local` images DO
+          // already exist, so its wait is a real budget and keeps the real one.
+          "workload-timeout": isMainBranchChoice(opts.tag ?? "") ? "60" : "900",
           // THE REGISTRY FLAGS, AND THE LANE THAT HAS NONE (memql#4430).
           //
           // A from-source install passes NEITHER, and omitting them is what

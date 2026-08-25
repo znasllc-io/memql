@@ -952,6 +952,76 @@ test("clusterUp gets a fresh-pull budget, not the dev default (memql#4073)", asy
   );
 });
 
+test("the from-source lane gets a SHORT workload wait, because that one is dead time", () => {
+  // memql#4458, secondary B. The 900s ceiling above is a fresh-PULL budget and
+  // it is right on the release lane. On the from-source lane it is guaranteed
+  // dead time: no registry is passed, so the overlay's own `:local` names stand
+  // and those images do not exist yet -- `buildImages`, the NEXT step, is what
+  // creates them. The workloads cannot become Available, so the ceiling buys
+  // nothing and costs fifteen minutes of watching a CrashLoopBackOff the run
+  // itself made inevitable. The owner's failed install spent exactly that.
+  const plan = installPlan({ ...options(), tag: "main" });
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  assert.equal(
+    decision.params["workload-timeout"],
+    "60",
+    "a from-source install is waiting for workloads whose images the NEXT step " +
+      "builds; a fresh-pull budget here is fifteen minutes of guaranteed waiting",
+  );
+  // And it is still the from-source lane: no registry, no tag.
+  assert.equal(decision.params["image-registry"], undefined);
+  assert.equal(decision.params["image-tag"], undefined);
+});
+
+test("a REPAIR of a from-source cluster keeps the full budget, because its images exist", () => {
+  // THE TRAP IN THE LINE ABOVE, and the reason it is keyed on the fresh install
+  // rather than on `imagesFromSource`. A repair carries `imagesFromSource` read
+  // back off the receipt, while its VERSION is empty -- a from-source install
+  // records a commit and no tag. So `isMainBranchChoice("")` is false, the
+  // panel loads install.json rather than install-main.json, and THAT graph's
+  // clusterUp verifies `result.workloadsReady`.
+  //
+  // Keying the short wait on the lane would therefore hand this repair a 60s
+  // ceiling for a check it actually has to pass, on a cluster whose pods are
+  // restarting -- turning a working repair into a failing one. Its `:local`
+  // images already exist, so its wait is a real budget.
+  const plan = installPlan({ ...options(), tag: "", commit: "a".repeat(40), imagesFromSource: true });
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  assert.equal(
+    decision.params["workload-timeout"],
+    "900",
+    "a repair of a from-source cluster verifies workloadsReady and its images already " +
+      "exist -- it needs the fresh-pull budget, not the fresh-install shortcut",
+  );
+  // Still the from-source lane, so still no registry: the two decisions are
+  // independent and this asserts they stayed that way.
+  assert.equal(decision.params["image-registry"], undefined);
+});
+
 test("clusterUp is told to pull published images, not locally built ones", async () => {
   // The local overlay renames every node image to `memql-<node>:local`, which
   // exists only after a developer has built and imported it. An install has
