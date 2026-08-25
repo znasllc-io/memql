@@ -639,10 +639,37 @@ test("the open target prefers the pre-filled verification URI", () => {
   );
 });
 
+// WHY THE TWO CASES BELOW COMPARE THE WHOLE SENTENCE
+//
+// The obvious assertion -- `message.includes("https://identity.example.com/
+// device")` -- is a shape CodeQL rejects, and it is right to in general: a
+// substring test whose needle is a URL is nearly always a trust decision ("is
+// this link one of ours?"), and a substring can sit anywhere, so an
+// attacker-controlled host may precede or follow it and still pass
+// (js/incomplete-url-substring-sanitization). Rewriting it as an unanchored
+// regex only trades that alert for js/regex/missing-regexp-anchor, which the
+// same reasoning earns; both were raised against this file in turn.
+//
+// Nothing here is authorising anything -- the haystack is a notification
+// sentence and the result decides nothing -- so both alerts were noise about
+// test wording. But the fix belongs in the test rather than in the scanner's
+// dismissal list: a dismissal lives in GitHub, teaches nobody, and the next
+// person asserting on a toast writes the flagged shape again and re-argues it
+// from scratch. An equality compare is CodeQL's own recommended remediation,
+// trips neither query, and is the stronger assertion anyway -- a reworded
+// sentence fails loudly here instead of passing on a coincidental substring.
+//
+// The narrower `assert.ok`s are kept beside it on purpose. They are the
+// INVARIANTS, not the wording: whoever updates an expected string above must
+// still leave a deliberate flow explaining no switch, and a fallback naming
+// both the switch and where the full reason lives.
 test("the deliberate action message carries the code and page, and no fallback talk", () => {
   const message = deviceCodeActionMessage(authorizationFixture(), "deliberate");
-  assert.ok(message.includes("BCDF-GHJK"), `code missing: ${message}`);
-  assert.ok(message.includes("https://identity.example.com/device"), `page missing: ${message}`);
+  assert.equal(
+    message,
+    "MemQL: enter code BCDF-GHJK at https://identity.example.com/device to finish signing in. " +
+      "The approval page should have opened with the code pre-filled -- use the buttons if it did not.",
+  );
   assert.ok(
     !message.toLowerCase().includes("browser sign-in"),
     `a deliberate device flow must not explain a switch nobody made: ${message}`,
@@ -654,8 +681,13 @@ test("the fallback action message explains the switch in the same notification",
   // that used to be its own toast rides the action message instead, and the
   // full reason stays in the MemQL Connection output.
   const message = deviceCodeActionMessage(authorizationFixture(), "fallback");
-  assert.ok(message.includes("BCDF-GHJK"), `code missing: ${message}`);
-  assert.ok(message.includes("https://identity.example.com/device"), `page missing: ${message}`);
+  assert.equal(
+    message,
+    "MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). " +
+      "Finish with a device code instead: enter code BCDF-GHJK at " +
+      "https://identity.example.com/device to finish signing in -- on another device if this one " +
+      "cannot open the page.",
+  );
   assert.ok(
     message.toLowerCase().includes("browser sign-in"),
     `the switch must be explained where the code is shown: ${message}`,
