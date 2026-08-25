@@ -458,7 +458,7 @@ patches:
       # an emulator and a real account:
       #
       #   Azurite (here)    http://azurite:10000/<account>/<container>
-      #   real Azure Blob   azure://<account>.blob.core.windows.net/<container>/
+      #   real Azure Blob   https://<account>.blob.core.windows.net/<container>/
       #
       # This comment used to describe `azure://<container>/` as "the form
       # staging uses against real Blob". IT IS NOT A VALID FORM ANYWHERE, and
