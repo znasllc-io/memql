@@ -1077,6 +1077,31 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if txErr != nil {
 			return nil, meta, txErr
 		}
+		// THE OUTBOX ENTRIES ARE A SECOND WRITE, TO A SECOND CONCEPT, AND
+		// NOTHING ELSE ANNOUNCES THEM (memql#4531). appendOutboxEntries
+		// writes through the transaction's store directly -- it never goes
+		// back through executeWrite -- so the invalidation published at the
+		// bottom of this function names the ORIGIN concept and says nothing
+		// about the queue. A cached read of the queue therefore survives a
+		// write that just added to it.
+		//
+		// This is the gap the task told us to look for, and it was real: the
+		// full clear removed above was covering it by accident, because
+		// wiping everything also wipes the queue's cached reads. The fix is
+		// to publish the event that was missing rather than to keep the
+		// sledgehammer that hid its absence.
+		//
+		// AFTER the transaction commits, deliberately. Evicting earlier
+		// would open a window in which a concurrent read repopulates the
+		// cache from pre-commit state, and would evict for a write that a
+		// rollback then discarded.
+		//
+		// It generalises: ANY row reaching the store outside executeWrite
+		// is invisible to invalidation. This is the only such path inside
+		// the engine today; the observability rollups are the other family,
+		// and they are documented as TTL-only rather than fixed here
+		// because nothing in their loop is a MemQL write at all.
+		e.InvalidateCacheForConcept(OutboxEntryConcept)
 	} else {
 		store := newBunStore(e.database())
 		created, createErr := conceptMeta.Create(ctx, store, createParams)
@@ -1100,8 +1125,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if err != nil {
 		return nil, meta, err
 	}
-
-	e.invalidateCache()
 
 	// Observation embedding write-path (#585): when a
 	// v1:harness:observation lands, embed its `content` into
@@ -1199,7 +1222,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	//   - The channel is safe BECAUSE it carries no side effects. That property
 	//     is what makes graph.node.created dangerous and this one not; reading
 	//     the two as one rule inverts it.
-	e.publishCacheInvalidate(conceptMeta.Name)
+	//
+	// SYNCHRONOUS LOCALLY (memql#4531). This call site used to be preceded,
+	// ~100 lines up, by an e.invalidateCache() that did cache.Clear() plus a
+	// full dependency-index wipe -- so on the writing node every write nuked
+	// the ENTIRE result cache and the surgical per-concept eviction only ever
+	// earned its keep for writes arriving from other replicas. That full clear
+	// is gone; InvalidateCacheForConcept evicts exactly this concept's
+	// dependent entries inline, before this function returns, and then
+	// publishes for the siblings. The inline half is load-bearing: Publish
+	// delivers to subscribers in separate goroutines, so relying on the local
+	// subscriber alone would have raced a client's read-your-writes.
+	e.InvalidateCacheForConcept(conceptMeta.Name)
 
 	bundle := &memqlv1.GraphBundle{
 		Nodes:   []*memqlv1.MemoryNode{apiNode},

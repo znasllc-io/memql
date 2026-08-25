@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/common"
+
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 func (e *MemQLEngine) Integrations() *IntegrationRegistry {
@@ -108,6 +110,17 @@ func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter f
 		ttl = 24 * time.Hour
 	}
 	cache := newSemanticAICache(embedder, store, e.Logger, ttl, namespaces)
+	// Export the semantic cache's counters on /metrics (memql#4532); see
+	// aiResponseCacheWithMetrics for why this is a snapshot read rather
+	// than a second set of counters.
+	metrics.RegisterAICacheStatsSource(metrics.AICacheSemantic, func() metrics.CacheStats {
+		s := cache.Stats()
+		return metrics.CacheStats{
+			Hits:      uint64(max64(s.Hits, 0)),
+			Misses:    uint64(max64(s.Misses, 0)),
+			KeysAdded: uint64(max64(s.Sets, 0)),
+		}
+	})
 	e.aiRuntime.SetSemanticCache(cache)
 
 	enabledCount := 0

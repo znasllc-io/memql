@@ -1992,16 +1992,23 @@ the author think about the bound up front.
 
 ---
 
-## Result caching: `@cache(ttl="N")` on hot reads
+## Result caching: `@cache(N)` on hot reads
 
-A query can opt into the engine's result cache with `@cache(ttl="N")` on
-the query declaration. `N` is a **whole number of SECONDS, string-valued**
-(`@cache(ttl="300")`, not `@cache(ttl=300)` and not `@cache(ttl="5m")` —
-the bare-number and duration forms do not parse). `@cache(ttl="0")` is the
-explicit "never cache" escape.
+**Caching is ON by default, and an annotation changes the number rather
+than switching the feature on.** A pure read carrying no annotation is
+cached for 60 seconds (memql#1970). Write `@cache(N)` to choose a
+different TTL and `@nocache` to opt out.
+
+`N` is a **whole number of SECONDS**, written positionally:
+`@cache(300)`. That is the preferred form since memql#2618 and the form
+every live call site in this repository uses. The older keyword spelling
+`@cache(ttl="300")` still parses -- the parser reads the `ttl` argument
+first, then a bare string, then a positional number -- so an old diff
+showing it is not broken; it is simply not what to write. A duration
+string (`@cache("5m")`) is not a supported form.
 
 ```memql
-@cache(ttl="300")
+@cache(300)
 query agentRole activeAgentRoles {
   filter  isActiveRecord
   shape   agentRoleFull
@@ -2012,6 +2019,25 @@ query agentRole activeAgentRoles {
 rarely: bounded catalogs / registries (role / skill catalogs, router
 budgets) get long TTLs; hot append-only streams (the per-space utterance
 list) get short ones and lean on invalidation.
+
+**When to reach for `@nocache`.** Rarely, and never on a hunch. Because
+every write publishes an invalidation for the concept it wrote, the
+common worry -- "this read must not go stale" -- is usually already
+answered. Reach for it when the read's answer can change with **no write
+to a concept the read depends on**, because that is the one case
+invalidation structurally cannot cover. Two shapes qualify:
+
+- **Time-boundary reads.** A filter like `timeoutAt < now` admits new
+  rows as the clock advances, with nothing written. The TTL is then the
+  only freshness mechanism there is.
+- **Rows that arrive without an engine write.** Anything written by raw
+  SQL rather than through a mutation publishes no invalidation event --
+  the observability rollups are the standing example.
+
+Every `@nocache` carries a one-line reason comment saying which of these
+applies. "It felt risky" is not one: a `@nocache` on a hot read is a
+permanent cost paid on every call, and the reason is what a later reader
+needs in order to remove it safely.
 
 **Correctness — invalidation (5.4).** A write to a cached query's read
 concept evicts the dependent cached results, so a cached read never
@@ -2029,7 +2055,7 @@ memql#1970)** and pinned as gone by
 `TestEvaluateRouting_PerConceptCacheRulesRetired`
 (`component/node/routing_test.go:183`). Every graph write now also
 publishes a dedicated `cache.invalidate.<concept>` event
-(`MemQLEngine.publishCacheInvalidate`), and ONE broadcast routing rule
+(`MemQLEngine.InvalidateCacheForConcept`), and ONE broadcast routing rule
 (`{Pattern: "cache.invalidate.*", TargetType: ""}` in
 `component/node/routing.go`) forwards that channel to every node type --
 pinned by `TestEvaluateRouting_CacheInvalidateBroadcast`. So `@cache` now
@@ -2039,12 +2065,33 @@ replica. A single-node green test still would not have caught the old
 per-concept gap, which is why both the retirement and the broadcast
 replacement are gated by name rather than left to review.
 
+**Correctness — the writing node.** A write evicts its concept's
+dependent entries on the node that handled it SYNCHRONOUSLY, before the
+write's response is observable, so a client that re-reads immediately
+after its own write is never served the pre-write result (memql#4531).
+The eviction is surgical: a cached read of a different concept survives
+the write. It used to be a full `cache.Clear()`, which made the writing
+node's cache useless and hid the read-your-writes question entirely.
+
 **Keyset cursors.** The cache key includes the paginated query's cursor
 (`engine.go` `cacheKey`), so distinct continuation pages of a `@cache`'d
 query key independently — page 2 never collides with the cached page 1.
 
+**Actor identity.** When a plan depends on the caller — an owned read,
+a role-gated read, or any read row-authz enforcement has narrowed — the
+resolved actor is folded into the cache key. Two users can never share
+one entry for a query that answers differently for each of them.
+
+**Is it working?** `curl :PORT/metrics | grep memql_result_cache` gives
+hits, misses, evictions, and whether invalidation is reaching this
+replica; `query_reads_total{query="..."}` gives one query's hit ratio
+(memql#4532). `/metrics` is in-cluster-only by design.
+
 See `component/memql/result_cache.go` and `result_cache_policy.go` for the
-cache's shape and instrumentation.
+cache's shape and instrumentation, and
+[caching-and-live-data-architecture-design.md](../../superpowers/specs/2026-08-25-caching-and-live-data-architecture-design.md)
+for the reviewed adoption table -- which reads carry an explicit TTL
+today and why the rest ride the default.
 
 ---
 

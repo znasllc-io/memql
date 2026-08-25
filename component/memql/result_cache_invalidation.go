@@ -6,6 +6,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // StartCacheInvalidationSubscriber subscribes the result cache to the
@@ -59,6 +60,11 @@ func (e *MemQLEngine) StartCacheInvalidationSubscriber(ctx context.Context) {
 				return
 			}
 			evicted := e.cache.evictConcept(concept)
+			// Counted for EVERY event, evictions or not (memql#4532): a
+			// flat events series while writes are happening is how an
+			// operator sees that invalidation is not reaching this
+			// replica, and an evictions-only counter cannot show that.
+			metrics.ResultCacheInvalidationEviction(evicted)
 			if evicted > 0 && e.Component != nil && e.Logger != nil {
 				e.Logger.Debug("resultCache: evicted on cache.invalidate",
 					"concept", concept,

@@ -1722,13 +1722,50 @@ Returns the engine's language/version metadata. (The legacy `concept==memql:vers
 
 ## Cache Behavior
 
-Query-result caching is **opt-in per query**: a query with no cache hint is not cached. The engine clamps every resolved TTL by the global ceiling and skips writes entirely when the resolved TTL is `0`.
+Query-result caching is **on by default**. A pure read that carries no
+cache annotation is cached for **60 seconds** (memql#1970); it is not
+opt-in, and it has not been since that epic landed. An author reaches
+for an annotation to change that number, not to switch caching on.
+
+| Form | Effect |
+|---|---|
+| *(no annotation)* | Cached for 60s -- the default backstop for any pure read |
+| `@cache(N)` | Cached for `N` seconds. The preferred, positional form (memql#2618) |
+| `@cache(ttl="N")` | The older keyword spelling. Still parses; not the form the corpus uses |
+| `@nocache` | Never cached. The readable alias for `@cache(0)` |
+| `@cache(0)` | Never cached |
+
+Three guards bound what the default will do on its own:
+
+- **A result whose dependencies cannot be named is never cached.** The
+  engine caches only when it can name at least one concept the result
+  reads, because an entry it cannot name is an entry it could never
+  evict.
+- **`v1:identity:` is denylisted from the default path.** Authentication
+  and authorization state must read live: a revoked session or a
+  downgraded role cannot be served from a 60-second-old answer. An
+  explicit `@cache(N)` still wins -- the denylist governs what the engine
+  will do *for* you, not what an author may choose.
+- **`MEMQL_CACHE_MAX_TTL` clamps every resolved TTL** when it is set.
+
+**Freshness is event-driven; the TTL is a backstop, not the mechanism.**
+Every write publishes `cache.invalidate.<concept>`. On the writing node
+the dependent entries are dropped synchronously, before the write's
+response is observable, so a client that re-reads immediately after its
+own write never sees the pre-write result. For the rest of the mesh a
+single broadcast routing rule carries the event to every node, and each
+one evicts through its own dependency index. The 60s TTL is what bounds
+staleness if an invalidation is ever missed.
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `MEMQL_CACHE_MAX_TTL` | Maximum cache TTL in seconds. Legacy name `CACHE_MAX_TTL` still accepted (memql#3831). | `300` |
+| `MEMQL_CACHE_MAX_TTL` | Ceiling in seconds on any resolved result-cache TTL. **`0` means NO CLAMP** -- it does not disable caching, and a hint-free read still caches for 60s. Legacy name `CACHE_MAX_TTL` still accepted (memql#3831). | `0` |
 | `MEMQL_SI_CACHE_DEFAULT_ENABLED` | Enable AI response caching | `false` |
 | `MEMQL_SI_CACHE_MAX_SECONDS` | Maximum AI cache TTL | `300` |
+
+To turn the default off for one read, annotate it `@nocache`. There is
+no global switch that disables result caching, and `MEMQL_CACHE_MAX_TTL=0`
+is not one -- setting it that way is the default and clamps nothing.
 
 Cache keys are computed from the normalized query expression (cache hints fold into the canonical form, so two queries that differ only by hint value never share or overwrite cache entries).
 

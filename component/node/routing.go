@@ -74,7 +74,7 @@ func defaultRoutingRules() []RoutingRule {
 		// memql#1970). ONE broadcast rule forwards the dedicated
 		// cache-invalidation channel to every node type. Every graph write
 		// emits cache.invalidate.<concept> on this separate topic (see
-		// MemQLEngine.publishCacheInvalidate); ONLY the result-cache evictor
+		// MemQLEngine.InvalidateCacheForConcept); ONLY the result-cache evictor
 		// subscribes to it (no automations, no other consumers), so
 		// forwarding it everywhere has ZERO side effects. This SUPERSEDES the
 		// per-concept graph-write cache rules 5.5 added (the

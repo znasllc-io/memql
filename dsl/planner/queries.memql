@@ -47,6 +47,13 @@ query plan allPlans {
 
 /// Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs
 /// feedbackTimeoutAutoPause.
+// @nocache REASON (memql#4534): a TIME-BOUNDARY read. `timeoutAt < now` admits
+// new rows as the clock advances, with NOTHING written -- so the cache.invalidate
+// path, which fires on writes to v1:planner:plan, cannot see the change. The 60s
+// default would therefore be the ONLY freshness mechanism here, and this is a
+// sweep whose whole job is to notice that a deadline passed. A sweep that keeps
+// re-reading a cached "nothing is overdue yet" is a sweep that does not run.
+@nocache
 @unbounded("feedback-timeout auto-pause cron sweep -- an internal sweep that must see all")
 query plan awaitingFeedbackPlansPastTimeout {
   filter  status=="awaitingFeedback" && feedbackRequest.timeoutAt < now

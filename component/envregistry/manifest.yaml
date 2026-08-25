@@ -727,7 +727,7 @@ variables:
     component: engine
     scope: node
     optional: true
-    description: "Ceiling in SECONDS on any engine query result-cache entry's TTL; 0 is accepted and disables caching. Distinct from MEMQL_SI_CACHE_MAX_SECONDS, which bounds AI-call result caching. Legacy alias: CACHE_MAX_TTL (memql#3831)."
+    description: "Ceiling in SECONDS on any engine query result-cache entry's TTL. 0 -- the default -- means NO CLAMP, not 'caching off': a hint-free pure read still caches for the engine's 60s default (memql#1970), so an operator setting 0 to disable caching gets the opposite of what they intended. Opt a single read out with @nocache. Distinct from MEMQL_SI_CACHE_MAX_SECONDS, which bounds AI-call result caching. Legacy alias: CACHE_MAX_TTL (memql#3831)."
 
   - name: MEMQL_AUTHORING_CAPTURE_ENABLED
     component: engine

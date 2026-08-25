@@ -1427,6 +1427,7 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 	// reason: afterwards the plan root is the function's body and there is
 	// no name left to look the concept up by.
 	plan.BoundConcept = boundConceptForPlanRoot(plan.Root, functions)
+	plan.SourceFunction = queryFunctionNameForPlanRoot(plan.Root, functions)
 
 	resolved, err := validator.expandExpression(plan.Root)
 	if err != nil {
@@ -1479,6 +1480,58 @@ func boundConceptForPlanRoot(expr ExpressionNode, functions *FunctionRegistry) s
 		return boundConceptForPlanRoot(node.Target, functions)
 	case *CountExpression:
 		return boundConceptForPlanRoot(node.Target, functions)
+	default:
+		return ""
+	}
+}
+
+// queryFunctionNameForPlanRoot returns the NAME of the top-level query
+// construct the plan was expanded from, or "" when the root is not a
+// single named query call.
+//
+// Deliberately a sibling of boundConceptForPlanRoot rather than a
+// generalisation of it: the two answer different questions (which
+// concept does this construct DECLARE it reads / what is this construct
+// CALLED) and only coincide today. Folding them into one walk that
+// returned a pair would make a future divergence -- a wrapper that
+// changes one and not the other -- a change to both callers.
+//
+// It walks the same directive wrappers, and returns a name ONLY for a
+// query-kind function, so a mutation or logic call contributes no
+// per-query cache series (they are not cacheable reads).
+func queryFunctionNameForPlanRoot(expr ExpressionNode, functions *FunctionRegistry) string {
+	if functions == nil || expr == nil {
+		return ""
+	}
+	switch node := expr.(type) {
+	case *FunctionCallExpression:
+		if node == nil {
+			return ""
+		}
+		fn, err := functions.Get(node.Name)
+		if err != nil || fn == nil {
+			return ""
+		}
+		switch strings.ToLower(strings.TrimSpace(fn.FunctionKind)) {
+		case "", "query":
+		default:
+			return ""
+		}
+		return strings.TrimSpace(node.Name)
+	case *ShapeExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *SortExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *PaginateExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *SelectExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *TimestampExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *DepthExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *CountExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
 	default:
 		return ""
 	}

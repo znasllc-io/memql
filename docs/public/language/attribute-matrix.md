@@ -727,6 +727,6 @@ named by the `shape <Concept> <name>` signature; `@caller` -- use
 | Enabled state | **Enabled** | Use `@disabled` to deactivate; `@enabled` is an accepted no-op |
 | Visibility | Public | Always discoverable (`@internal` retired, #2708) |
 | Timeout | 30s | Platform default |
-| Cache | None | No caching by default |
+| Cache | **60s** | Pure reads cache by default (memql#1970). `@cache(N)` overrides, `@nocache` opts out, `v1:identity:` is denylisted from the default path |
 | Audit | Off | Must explicitly enable |
 | Retry | 0 | No retries by default |

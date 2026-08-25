@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // aiResponseCache memoises LLM call results so repeated invocations
@@ -302,4 +304,42 @@ func (c *aiResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Lo
 func buildAICacheKey(templateId, provider, prompt string) string {
 	input := strings.TrimSpace(templateId) + "|" + strings.TrimSpace(provider) + "|" + prompt
 	return string(cacheIdEngine.FromString(input))
+}
+
+// aiResponseCacheWithMetrics is newAIResponseCache plus the /metrics
+// registration (memql#4532). The two AI caches export through the same
+// snapshot seam as the result cache -- they already tracked these
+// numbers for their log emitters, so the scrape reads them rather than
+// counting a second time. Split from the constructor so a test can
+// build a cache without touching the process-wide registry.
+//
+// Ristretto's KeysAdded has no AI-cache analogue beyond Sets, and
+// neither AI cache tracks an admission COST at all, so cost_added_total
+// / cost_evicted_total stay at zero for them. That is honest: a zero on
+// a series the cache genuinely does not measure is better than
+// inventing a number, and the hit/miss series -- the ones an operator
+// actually asks about -- are real.
+func aiResponseCacheWithMetrics(maxEntries int) *aiResponseCache {
+	c := newAIResponseCache(maxEntries)
+	metrics.RegisterAICacheStatsSource(metrics.AICacheResponse, func() metrics.CacheStats {
+		s := c.Stats()
+		return metrics.CacheStats{
+			Hits:        uint64(max64(s.Hits, 0)),
+			Misses:      uint64(max64(s.Misses, 0)),
+			KeysAdded:   uint64(max64(s.Sets, 0)),
+			KeysEvicted: uint64(max64(s.SweptExpired+s.EvictedAtCap, 0)),
+		}
+	})
+	return c
+}
+
+// max64 clamps a counter to >= 0 before the uint64 conversion. The
+// atomic counters are only ever incremented, so this cannot fire in
+// practice; it exists so a future negative can never wrap into a
+// nonsense 1.8e19 on a dashboard.
+func max64(v, floor int64) int64 {
+	if v < floor {
+		return floor
+	}
+	return v
 }

@@ -217,6 +217,19 @@ query inboundRequest inboundRequestByDedupeKey {
 /// OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's
 /// own rows. The edge still reads every site because it calls this under a synthetic cluster-owner
 /// actor (component/edge's systemEdgeActor), which the second branch admits.
+// @cache(30) REASON (memql#4534): TWO LAYERS, deliberately aligned. The edge
+// resolver keeps its own per-replica host -> site map in front of this read
+// (component/edge/resolve.go, TTL from MEMQL_EDGE_SITE_CACHE_TTL_SECONDS,
+// default 30s in app/transport_edge.go), so a site row is cached twice on the
+// way to a request. Both layers are event-invalidated on a site write -- the
+// edge's off graph.node.*.v1:platform:site, this one off
+// cache.invalidate.v1:platform:site -- so in normal operation neither goes
+// stale. The TTLs are what remains if an invalidation is ever missed, and the
+// INNER backstop must not be looser than the outer one: at the 60s default,
+// the edge's 30s bound would be an illusion on any miss, because the layer
+// behind it could still hand back a minute-old row. Matching them at 30s makes
+// the composition say what it looks like it says.
+@cache(30)
 @unbounded("site by hostname -- bounded to a single row (hostname is cluster-unique)")
 @actor
 query site siteByHostname {
