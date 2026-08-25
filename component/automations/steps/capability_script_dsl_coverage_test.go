@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // scriptArgPattern matches the `script: "<id>"` argument of a `capability
@@ -44,16 +46,24 @@ func TestEveryDSLScriptIdIsAllowlisted(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// Skip _-prefixed and .-prefixed directories, exactly as the DSL walker
-		// does (soft-disable / hidden -- root CLAUDE.md, MEMQL_DSL_PATH
-		// semantics). dsl/_reference/ holds authoring SKELETONS whose bodies are
-		// deliberately placeholders (`script: "x"`), and several are
-		// don't-do-this examples of retired forms. Holding them to the live
-		// corpus's standard would either fail forever or push somebody to "fix"
-		// the skeletons into looking like real actions, which destroys what they
-		// are for.
 		if d.IsDir() {
 			name := d.Name()
+			// The repo-wide skip list first (memql#3678). Every tree-walking
+			// test shares it, and the reason is not tidiness: a git worktree
+			// under .claude/ is a FULL COPY of the repository, so a walk that
+			// descends into one counts the same dsl/ tree twice and fails only
+			// on the machine that happens to have a worktree open.
+			if repowalk.SkipDir(name) {
+				return fs.SkipDir
+			}
+			// Then _-prefixed and .-prefixed directories, exactly as the DSL
+			// walker does (soft-disable / hidden -- root CLAUDE.md,
+			// MEMQL_DSL_PATH semantics). dsl/_reference/ holds authoring
+			// SKELETONS whose bodies are deliberately placeholders
+			// (`script: "x"`), and several are don't-do-this examples of
+			// retired forms. Holding them to the live corpus's standard would
+			// either fail forever or push somebody to "fix" the skeletons into
+			// looking like real actions, which destroys what they are for.
 			if path != dslDir && (strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".")) {
 				return fs.SkipDir
 			}
