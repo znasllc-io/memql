@@ -14,11 +14,11 @@ import { useAdminAccess, useAdminWrites } from "../admin/useAdminConsole";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Band, Container, EmptyState, PageHeader, Skeleton } from "../ui";
 import { conceptPath, conceptsPath } from "../concepts/urls";
+import { AccountsView } from "./AccountsView";
 import { AgentsView } from "./AgentsView";
 import { AuditView } from "./AuditView";
-import { CustomersView } from "./CustomersView";
 import { DeploymentsView } from "./DeploymentsView";
-import { PeopleView } from "./PeopleView";
+import { UsersView } from "./UsersView";
 import { viewById, type ViewDefinition } from "./registry";
 import { PopulationMeta, ViewFrame, type ViewProps } from "./ViewLayout";
 import { viewPath, viewRowPath } from "./urls";
@@ -37,9 +37,9 @@ import { viewPath, viewRowPath } from "./urls";
 // registry.ts and one row here, and so a slug with no body fails loudly
 // instead of rendering an empty frame.
 const BODIES: Readonly<Record<string, (props: ViewProps) => ReactNode>> = {
-  people: PeopleView,
+  users: UsersView,
   agents: AgentsView,
-  customers: CustomersView,
+  accounts: AccountsView,
   deployments: DeploymentsView,
   audit: AuditView,
 };
@@ -47,11 +47,11 @@ const BODIES: Readonly<Record<string, (props: ViewProps) => ReactNode>> = {
 export function ViewPage(): ReactNode {
   const { canAdminister } = useAdminAccess();
   const { viewId = "", rowId = "" } = useParams<{ viewId: string; rowId: string }>();
-  // The People view is where a person is ADDED as well as read (memql#4272).
+  // The Users view is where a person is ADDED as well as read (memql#4272).
   // The verbs live outside src/views/ for the reason PersonActions states; the
   // view supplies the slot.
-  const peopleAdmin = canAdminister && viewId === "people";
-  const invitations = usePendingInvitations(peopleAdmin);
+  const usersAdmin = canAdminister && viewId === "users";
+  const invitations = usePendingInvitations(usersAdmin);
   const inviteWrites = useAdminWrites();
   const { status } = useCluster();
   const navigate = useNavigate();
@@ -132,7 +132,7 @@ export function ViewPage(): ReactNode {
           onRetry={data.retry}
         />
       }
-      {...(peopleAdmin ? { actions: <InvitePerson onInvited={invitations.reload} /> } : {})}
+      {...(usersAdmin ? { actions: <InvitePerson onInvited={invitations.reload} /> } : {})}
     >
       <Body
         view={view}
@@ -145,8 +145,8 @@ export function ViewPage(): ReactNode {
           reading -> shape -> roll, and who is on their way IN is an
           administrative addendum to that population rather than part of its
           grammar -- putting it on top would push the reading below the fold
-          for the operator who came to look at people. */}
-      {peopleAdmin ? (
+          for the operator who came to look at users. */}
+      {usersAdmin ? (
         <Band title="Invited" meta="pending invitations, newest first — live">
           {invitations.error !== "" ? (
             <ErrorMessage>Could not read invitations: {invitations.error}</ErrorMessage>
@@ -168,7 +168,7 @@ export function ViewPage(): ReactNode {
         loading={detail.loading}
         error={detail.error}
         missing={detail.missing}
-        {...(view.id === "people" && canAdminister && detail.row !== null
+        {...(view.id === "users" && canAdminister && detail.row !== null
           ? {
               actions: (
                 <PersonActions person={detail.row as Row} onChanged={data.retry} />
@@ -186,7 +186,7 @@ export function ViewPage(): ReactNode {
 // product bundles it was given, and a portal built against the engine can be
 // pointed at a cluster that publishes a different set. Saying which concept is
 // missing -- and offering the registry, which shows what IS published -- beats
-// an empty page that reads as "you have no customers".
+// an empty page that reads as "you have no accounts".
 function MissingConcept({ view }: { view: ViewDefinition }): ReactNode {
   return (
     <Container>

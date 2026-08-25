@@ -20,13 +20,14 @@ import { WriteOutcome } from "../admin/WriteOutcome";
 // # Why this is not in src/admin/ any more (memql#4264)
 //
 // It used to be the bottom half of an /admin/people page that also listed
-// everyone -- which meant People existed twice in the portal: once as the
+// everyone -- which meant the user population existed twice in the portal: once as the
 // population under "Operate" and again as the change surface under
 // "Administer", with the "By role" band rendering on both (and a third time on
 // the admin overview). An operator looking for a person had two doors and no
 // way to know which one they wanted.
 //
-// The LIST was always the People view's job. What was genuinely only here is
+// The LIST was always the view's job (People then, Users since memql#4526).
+// What was genuinely only here is
 // this: the four things an owner or admin does TO one person. So it moved to
 // where a person is already selected -- the view's row detail -- and the
 // duplicate surface went away.

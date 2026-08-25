@@ -9,9 +9,9 @@ import { AccountConsole } from "../accounts/AccountConsole";
 import { ViewElement } from "./ViewElement";
 import { Band, type ViewProps } from "./ViewLayout";
 
-// Customers: the businesses this operator runs MemQL for.
+// Accounts: the businesses this operator runs MemQL for.
 //
-// LAYOUT RATIONALE. The quietest of the five, on purpose. A customer list is
+// LAYOUT RATIONALE. The quietest of the five, on purpose. An account list is
 // a ledger: an operator opens it to find one row, or to check that the
 // lifecycle column says what they expect. So the reading is a count, the
 // shape is the lifecycle split -- the one number a book of business is judged
@@ -42,7 +42,7 @@ import { Band, type ViewProps } from "./ViewLayout";
 // credential list goes through the shared TABLE element, because a token list
 // is a row set and row sets are what the library is for.
 
-export function CustomersView({
+export function AccountsView({
   concept,
   rows,
   selectedRowId,
@@ -61,7 +61,7 @@ export function CustomersView({
         />
       </Band>
 
-      <Band title="By lifecycle" meta="archived customers are kept, not deleted">
+      <Band title="By lifecycle" meta="archived accounts are kept, not deleted">
         <ViewElement
           element={PROPORTION_BAR_ELEMENT}
           rows={rows}
@@ -74,7 +74,7 @@ export function CustomersView({
         />
       </Band>
 
-      <Band title="Every customer" panel>
+      <Band title="Every account" panel>
         <ViewElement
           element={TABLE_ELEMENT}
           rows={rows}

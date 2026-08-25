@@ -10,7 +10,7 @@ import { useViewRows } from "../cluster/useViewRows";
 import { ViewElement } from "./ViewElement";
 import { Band, type ViewProps } from "./ViewLayout";
 
-// People: the operator's own organisation.
+// Users: the operator's own organisation.
 //
 // LAYOUT RATIONALE. Roles are the thing an operator scans this page for --
 // "who can deploy, who can only read" -- so the shape band is the role split,
@@ -32,7 +32,7 @@ import { Band, type ViewProps } from "./ViewLayout";
 // for presence, not for comparison.
 const SESSION_CONCEPT_ID = "v1:identity:authSession";
 
-export function PeopleView({
+export function UsersView({
   concept,
   rows,
   selectedRowId,

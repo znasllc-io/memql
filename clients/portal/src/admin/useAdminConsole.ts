@@ -132,7 +132,7 @@ const NO_ROWS: Row[] = [];
 // ---------------------------------------------------------------------------
 
 export function usePeople(enabled: boolean): ReadState<Row[]> {
-  return useGatedRead(NO_ROWS, (query, signal) => readPeople(query, signal), enabled, "people");
+  return useGatedRead(NO_ROWS, (query, signal) => readPeople(query, signal), enabled, "users");
 }
 
 // ---------------------------------------------------------------------------

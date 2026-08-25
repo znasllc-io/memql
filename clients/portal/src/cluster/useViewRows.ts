@@ -32,7 +32,7 @@ import { flattenForList } from "../viewkit/rows";
 export interface ViewRowsState {
   // Undefined when this cluster declares no such concept -- a product bundle
   // this node does not mount, or a renamed id. The view says so rather than
-  // rendering an empty population that reads as "you have no customers".
+  // rendering an empty population that reads as "you have no accounts".
   concept: Concept | undefined;
   // True while the registry itself is still loading, which is distinct from
   // "the concept is not here".

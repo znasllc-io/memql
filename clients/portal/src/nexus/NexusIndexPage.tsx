@@ -2,6 +2,7 @@ import { Navigate } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { Callout, Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { NewGoalAction } from "./NewGoalDialog";
 import { useGoals } from "./useGoals";
 import { nexusPath } from "./urls";
 
@@ -12,11 +13,16 @@ import { nexusPath } from "./urls";
 // the same place. `replace` so the back button leaves Nexus rather than
 // bouncing off this route into the goal it just redirected to.
 //
-// The empty state is the honest part. A goal is a v1:planner:plan, and
-// NOTHING IN THIS CONSOLE CREATES ONE -- plans come from asking an agent to
-// do something, in whatever surface this cluster's product puts in front of
-// people. Saying "create your first goal" with no button under it would be
-// worse than saying where goals come from.
+// The empty state is an INVITATION now (memql#4528). This header used to say
+// "NOTHING IN THIS CONSOLE CREATES ONE" and the empty state told the reader
+// that goals come from asking an agent -- true at the time, and the owner has
+// reversed it. Both are rewritten rather than outlived: a superseded argument
+// left standing beside its replacement reads as the live one.
+//
+// What the new copy owes the reader is what happens NEXT, honestly. The button
+// creates the plan and the planner starts SIZING it; whether anything is spent
+// is the estimate / approval / budget gates' decision, and a big goal comes
+// back to ask. See NewGoalDialog for why there is no startPlan call behind it.
 
 export function NexusIndexPage(): ReactNode {
   const { goals, loading, error, mostRecentId } = useGoals();
@@ -54,10 +60,12 @@ export function NexusIndexPage(): ReactNode {
         <EmptyState
           statement={
             goals.length === 0
-              ? "You have no goals yet. A goal is created when you ask an agent to do " +
-                "something -- this console reads them, it does not start them."
+              ? "You have no goals yet. Start one here, or ask an agent to do something " +
+                "-- either way it lands on this map. The planner sizes a goal before it " +
+                "spends anything, and asks you first if it is big."
               : "None of your goals can be opened."
           }
+          action={<NewGoalAction tone="primary" />}
         />
       </section>
     </Container>

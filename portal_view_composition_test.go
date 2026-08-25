@@ -75,9 +75,9 @@ const viewDir = "clients/portal/src/views"
 // (ViewElement), the catalog and the URL builders, none of which compose
 // elements themselves.
 var viewBodyFiles = []string{
-	"PeopleView.tsx",
+	"UsersView.tsx",
 	"AgentsView.tsx",
-	"CustomersView.tsx",
+	"AccountsView.tsx",
 	"DeploymentsView.tsx",
 	"AuditView.tsx",
 }
@@ -341,10 +341,15 @@ func TestPortalViewRegistryCoversTheDesignedConcepts(t *testing.T) {
 	// deliberately: naming a concept is what a PREDEFINED view is, which is
 	// exactly the distinction portal_render_path_test.go draws when it forbids
 	// the same ids on the generic browse path.
+	//
+	// The two directory slugs took their concepts' names in memql#4526
+	// (people -> users, customers -> accounts). A renamed slug is a DELIBERATE
+	// change here, which is the point of pinning it: the diff that renames a
+	// view has to show up in this file as well as in the nav rail.
 	want := map[string]string{
-		"people":      "v1:identity:user",
+		"users":       "v1:identity:user",
 		"agents":      "v1:agents:agent",
-		"customers":   "v1:identity:account",
+		"accounts":    "v1:identity:account",
 		"deployments": "v1:cluster:deployment",
 		"audit":       "v1:identity:auditEvent",
 	}

@@ -9,11 +9,20 @@ export {
   Bot,
   Boxes,
   Building2,
-  // The Select's own arrow. A native <select> paints one per platform and
-  // sizes itself around it, so ui/Field.tsx removes the appearance entirely
-  // and draws this back -- as an element, so it inherits currentColor and is
-  // correct in both themes.
+  // TWO USES, both single chevrons:
+  //
+  //   * The Select's own arrow. A native <select> paints one per platform and
+  //     sizes itself around it, so ui/Field.tsx removes the appearance
+  //     entirely and draws this back -- as an element, so it inherits
+  //     currentColor and is correct in both themes.
+  //   * The rail's sub-section disclosure (memql#4527), Down when open and
+  //     Right when closed.
+  //
+  // ChevronsLeft/Right (the DOUBLE chevrons, below) are the rail's own fold
+  // control and must not be swapped for these -- a person reads the chevron
+  // count as "how much folds".
   ChevronDown,
+  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Download,

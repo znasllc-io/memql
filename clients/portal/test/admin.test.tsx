@@ -385,7 +385,7 @@ describe("the admin console's authorization shape", () => {
   });
 
   it("never reaches a write through the query surface", async () => {
-    for (const path of ["/admin/tokens", "/admin/keys", "/admin/settings", "/views/people"]) {
+    for (const path of ["/admin/tokens", "/admin/keys", "/admin/settings", "/views/users"]) {
       const view = renderAdmin({}, path);
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
       // THE ASSERTION THAT MATTERS ABOUT WRITES. Every write this console
@@ -424,7 +424,7 @@ describe("the admin console's authorization shape", () => {
 //
 // Both were second doors. /admin answered "what is the state of this cluster"
 // with the same tiles and the same "By role" band as the console; /admin/people
-// was the CHANGE surface for a person, beside a People view listing the same
+// was the CHANGE surface for a person, beside a view listing the same
 // population. An operator looking for a person had two doors and no way to know
 // which one they wanted.
 //
@@ -440,7 +440,7 @@ describe("the retired admin surfaces", () => {
     );
   });
 
-  it("sends /admin/people to the People view, where the verbs now live", async () => {
+  it("sends /admin/people to the Users view, where the verbs now live", async () => {
     renderAdmin({}, "/admin/people");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
     // The view's eyebrow, not an admin page's.
@@ -448,22 +448,22 @@ describe("the retired admin surfaces", () => {
   });
 });
 
-// The per-person CHANGE surface, where it lives now (memql#4264): the People
+// The per-person CHANGE surface, where it lives now (memql#4264): the Users
 // view's row detail. Same four decisions, same gated seam, same audit ids --
 // what changed is that an operator reaches them from the person they were
 // already looking at, instead of from a second page listing the same people.
 //
-// The row is addressed in the URL (/views/people/rows/<id>), so these render
+// The row is addressed in the URL (/views/users/rows/<id>), so these render
 // straight at it rather than clicking through a table.
-describe("a person's change surface, on the People view", () => {
+describe("a person's change surface, on the Users view", () => {
   it("offers no controls until a person is picked", async () => {
-    renderAdmin({}, "/views/people");
+    renderAdmin({}, "/views/users");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
   });
 
   it("edits a picked person's profile through the gated seam", async () => {
-    renderAdmin({}, "/views/people/rows/user-grace");
+    renderAdmin({}, "/views/users/rows/user-grace");
     await waitFor(() => expect(screen.getByRole("button", { name: "Save the profile" })).toBeTruthy());
 
     screen.getByRole("button", { name: "Save the profile" }).click();
@@ -476,7 +476,7 @@ describe("a person's change surface, on the People view", () => {
   });
 
   it("changes a role and suspends, as two separate decisions", async () => {
-    renderAdmin({}, "/views/people/rows/user-grace");
+    renderAdmin({}, "/views/users/rows/user-grace");
     await waitFor(() => expect(screen.getByLabelText("Cluster role")).toBeTruthy());
 
     // Two forms, two buttons, two audit actions. A single "Save" would let a
@@ -516,7 +516,7 @@ describe("a person's change surface, on the People view", () => {
   });
 
   it("offers a reader nothing, and issues no write", async () => {
-    renderAdmin({ role: "reader" }, "/views/people/rows/user-grace");
+    renderAdmin({ role: "reader" }, "/views/users/rows/user-grace");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
     // The verbs are not rendered at all below the floor. The engine refuses
     // them anyway -- this is the courtesy half, and it costs nothing.
@@ -703,7 +703,7 @@ describe("the admin sub-nav", () => {
     await waitFor(() => expect(screen.getByText("Sessions and tokens")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: "Administration" });
     // Three surfaces, not five. Overview and People retired in memql#4264 --
-    // the console answers the first and the People view carries the second.
+    // the console answers the first and the Users view carries the second.
     for (const label of ["Tokens", "Signing keys", "Settings"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
     }

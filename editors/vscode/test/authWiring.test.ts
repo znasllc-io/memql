@@ -229,7 +229,7 @@ test("no code or user-facing copy still names the registration endpoint", () => 
     const rel = path.relative(SRC, file);
     for (const [i, line] of fs.readFileSync(file, "utf8").split("\n").entries()) {
       if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
-      if (/["'`][^"'`]*\/register\b/.test(line) || /dynamic client registration/i.test(line)) {
+      if (namesTheRegistrationEndpoint(line)) {
         offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       }
     }
@@ -238,6 +238,51 @@ test("no code or user-facing copy still names the registration endpoint", () => 
     offenders,
     [],
     `registration survives in code or copy:\n${offenders.join("\n")}`,
+  );
+});
+
+// The predicate, named so the test below can drive it directly.
+//
+// THE TRAILING LOOKAHEAD IS THE WHOLE FIX. This was `\/register\b`, and `\b`
+// matches between `r` and `-` -- so the capability map's
+// "scripts/deploy/register-gitops-repo.sh" read as the OAuth registration
+// ENDPOINT and failed this gate on main, for every PR whose diff happened to
+// put the extension lane in scope. A shell script whose name begins "register-"
+// is not a client-registration endpoint, and `(?![\w-])` says so.
+//
+// It is strictly narrower than `\b` in exactly one way: a `-` or `_` after
+// "register" no longer counts. `/registration` never matched under either
+// spelling (`a` is a word character), so nothing this gate used to catch has
+// been let through.
+function namesTheRegistrationEndpoint(line: string): boolean {
+  return /["'`][^"'`]*\/register(?![\w-])/.test(line) || /dynamic client registration/i.test(line);
+}
+
+// The guard's own guard. A regex that stopped matching -- or started matching
+// the wrong thing -- reports a clean tree forever either way, so both
+// directions are pinned to a table rather than inferred from the tree.
+test("the registration-endpoint predicate matches the endpoint and not a filename", () => {
+  const shouldMatch = [
+    'const url = `${base}/register`;',
+    'throw new Error("POST /register was refused");',
+    'await fetch(issuer + "/register?foo=1");',
+    'message: "dynamic client registration is disabled on this cluster",',
+  ];
+  const shouldNotMatch = [
+    '  "deploy.registerGitOpsRepo": "scripts/deploy/register-gitops-repo.sh",',
+    '  "deploy.registerRepo": "scripts/deploy/register_repo.sh",',
+    'const path = "/registration";',
+    'registerCommand("memql.signIn", signIn);',
+  ];
+  assert.deepEqual(
+    shouldMatch.filter((line) => !namesTheRegistrationEndpoint(line)),
+    [],
+    "these name the registration endpoint and the gate must catch them",
+  );
+  assert.deepEqual(
+    shouldNotMatch.filter(namesTheRegistrationEndpoint),
+    [],
+    "these are not the registration endpoint and the gate must let them through",
   );
 });
 

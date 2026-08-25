@@ -5090,7 +5090,7 @@ func CreatePasskeyIdentityBuild(args CreatePasskeyIdentityArgs) string {
 	return b.String()
 }
 
-// CreatePlan -- Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.
+// CreatePlan -- Insert a v1:planner:plan row in status='planning'. Single write path for Plan creation across all trigger sources; the planner claims it off the node-created event.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createPlan"] in generated_concepts.go).
 type CreatePlanArgs struct {

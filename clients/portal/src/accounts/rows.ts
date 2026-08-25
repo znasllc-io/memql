@@ -9,7 +9,7 @@ import type { ConceptLike, RowLike } from "@znasllc-io/memql-view-kit";
 // (accountTokensForAccount) in the accountTokenSummary shape, the concept
 // registry's display card for `identity` describes a generic credential
 // (label / identityType / userId), and none of that is what an operator
-// reading a customer's credential list needs to see.
+// reading an account's credential list needs to see.
 //
 // So the descriptor here names the three facts that matter for THIS list --
 // what the credential is called, which account it is bound to, and whether it
@@ -86,7 +86,7 @@ export function accountTokenRows(tokens: readonly AccountTokenView[]): RowLike[]
   }));
 }
 
-// A customer as the action bar needs it. The Customers view already renders
+// An account as the action bar needs it. The Accounts view already renders
 // the population; this is only what an ACTION has to know about the one row an
 // operator selected.
 export interface SelectedAccount {

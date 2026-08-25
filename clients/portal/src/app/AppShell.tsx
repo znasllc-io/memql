@@ -16,6 +16,8 @@ import {
   Bot,
   Boxes,
   Building2,
+  ChevronDown,
+  ChevronRight,
   Globe,
   Inbox,
   Gauge,
@@ -33,7 +35,7 @@ import {
   Blocks,
 } from "../ui/icons";
 import { fleetPath } from "../fleet/urls";
-import { VIEWS } from "../views/registry";
+import { VIEWS, type ViewGroup } from "../views/registry";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { viewPath } from "../views/urls";
 
@@ -81,22 +83,36 @@ interface NavItem {
   icon: ComponentType<{ size?: number | string; className?: string }>;
 }
 
+// Registry group -> nav rows. ONE derivation, used by both captions that
+// carry registry views, so a new row's placement is decided in registry.ts and
+// nowhere else.
+function navItemsInGroup(group: ViewGroup): readonly NavItem[] {
+  return VIEWS.filter((view) => view.group === group).map((view) => ({
+    to: viewPath(view.id),
+    label: view.label,
+    icon: VIEW_ICONS[view.id] ?? Boxes,
+  }));
+}
+
 const VIEW_ICONS: Record<string, NavItem["icon"]> = {
-  people: Users,
+  users: Users,
   agents: Bot,
-  customers: Building2,
+  accounts: Building2,
   deployments: Rocket,
   audit: ScrollText,
 };
 
 // ============================================================================
-// THE RAIL (memql#4264)
+// THE RAIL (memql#4264, restructured in memql#4527)
 // ============================================================================
 //
-// Four groups, and the names are the decision:
+// The captions are the decision:
 //
-//   VIEWS    the DATA in this cluster, as screens. The five that ship with the
-//            product, then the ones this operator composed.
+//   NEXUS    ONE GOAL OF YOURS, seen whole -- the goal itself, and the agents
+//            working on it.
+//   VIEWS    the DATA in this cluster, as screens, in two sub-sections:
+//            BUILT-IN (the ones that ship with the product) and CUSTOM (the
+//            ones this operator composed, plus the door to composing another).
 //   BUILD    the substrate those screens are made of -- the concept registry
 //            and the modules that declare concepts.
 //   FLEET    WHERE WORK RUNS -- this person's machines, and the cluster's own
@@ -106,24 +122,51 @@ const VIEW_ICONS: Record<string, NavItem["icon"]> = {
 //            cluster made for them (memql#4343).
 //   CLUSTER  the cluster ITSELF rather than the data in it.
 //
-// What this replaced was Operate / Explore / Administer, and it was wrong in a
-// specific way: "Administer" is where a person goes looking to ADD someone, so
-// People appeared twice -- once as the population under Operate and again as
-// the change surface under Administer -- with the "By role" band rendering in
-// both, and a third time on the admin overview. Two doors to one thing is a
-// question an operator has to answer before they can work.
+// What memql#4264 replaced was Operate / Explore / Administer, and it was
+// wrong in a specific way: "Administer" is where a person goes looking to ADD
+// someone, so the user population appeared twice -- once as the population
+// under Operate and again as the change surface under Administer -- with the
+// "By role" band rendering in both, and a third time on the admin overview.
+// Two doors to one thing is a question an operator has to answer before they
+// can work.
 //
 // "Views" is also the composer's own word (it saves v1:portalviews:view rows
-// and calls them saved views), so the rail, the composer and the concept now
-// agree on one noun.
+// and calls them saved views), so the rail, the composer and the concept agree
+// on one noun.
+//
+// ----------------------------------------------------------------------------
+// WHY CUSTOM IS A SUB-SECTION AND NOT A CAPTION (memql#4527)
+// ----------------------------------------------------------------------------
+// It used to be a top-level group, under a comment that conceded the point:
+// the composer's output sat "under the same caption as the views that ship
+// with the product -- because to the person reading the rail they are the same
+// kind of thing", and then took a caption of its own anyway. Two captions for
+// one kind of thing costs a top-level slot and teaches the reader a
+// distinction that is not there. So there is ONE Views caption now, and the
+// built-in / composed split is a sub-section inside it -- which is what the
+// split actually is: provenance, not category.
+//
+// The sub-section is named BUILT-IN rather than:
+//
+//   Native      -- already a data-origin state in this product (Mirror /
+//                  Origin / Native, epic memql#4378), rendered on this
+//                  console's own Data origins page. One word carrying two
+//                  meanings in one product is the drift this restructure
+//                  exists to remove.
+//   Predefined  -- code vocabulary. It is what registry.ts calls them to
+//                  itself, and it is clunky as chrome.
+//
+// ----------------------------------------------------------------------------
+// WHY AGENTS MOVED UNDER NEXUS (memql#4527)
+// ----------------------------------------------------------------------------
+// It is derived, not hard-coded: the row carries `group: "nexus"` in
+// registry.ts and the Nexus caption filters on it exactly as Views filters on
+// "operate", so adding a view stays one registry row plus a body module. Its
+// ROUTE is untouched -- /views/agents, because rail placement is not URL shape
+// (Library's entries live at /artifacts for the same reason).
 
-const PREDEFINED_VIEWS: readonly NavItem[] = VIEWS.filter(
-  (view) => view.group === "operate",
-).map((view) => ({
-  to: viewPath(view.id),
-  label: view.label,
-  icon: VIEW_ICONS[view.id] ?? Boxes,
-}));
+// The built-in views: the ones that ship with the product, in registry order.
+const BUILT_IN_VIEWS: readonly NavItem[] = navItemsInGroup("operate");
 
 // Build is the SUBSTRATE: the whole concept registry, plus the modules that
 // declare what is in it. Modules is owner/admin territory (memql#4191) --
@@ -190,9 +233,9 @@ const LIBRARY: readonly NavItem[] = [
 // five destinations bought nothing except a landing page that duplicated the
 // console.
 const CLUSTER: readonly NavItem[] = [{ to: "/integrations", label: "Integrations", icon: Plug }];
-// People is NOT here. It is one of the views, and the verbs an admin needs
-// live on the row detail there (memql#4264) -- which is what removed the
-// second door.
+// The user population is NOT here. It is one of the views, and the verbs an
+// admin needs live on the row detail there (memql#4264) -- which is what
+// removed the second door.
 const CLUSTER_ADMIN: readonly NavItem[] = [
   // What this cluster owns, mirrors and pushes out (epic memql#4378). In the
   // ADMIN half of Cluster because every read and every action behind it is
@@ -229,11 +272,14 @@ const CONSOLE_ITEM: NavItem = { to: "/", label: "Console", icon: Gauge };
 // single piece of your own work rather than a table or a machine, and filing
 // it under either of those would make it look like something it is not.
 //
-// One item today. The group exists because the section will grow into it
-// (the cluster-wide view the design explicitly leaves out of scope is a
-// second inhabitant), and because a rail caption is how a person learns a
-// section's name.
-const NEXUS: readonly NavItem[] = [{ to: "/nexus", label: "Goals", icon: Orbit }];
+// Goals, then whatever the registry files under "nexus" -- Agents today
+// (memql#4527). Agents belongs here rather than beside Users and Accounts
+// because an agent is not a population an operator administers: it is what
+// works on a goal, which is the question this caption answers.
+const NEXUS: readonly NavItem[] = [
+  { to: "/nexus", label: "Goals", icon: Orbit },
+  ...navItemsInGroup("nexus"),
+];
 
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
@@ -256,45 +302,168 @@ function storeRail(state: "expanded" | "collapsed"): void {
   }
 }
 
+// A sub-section's own key, beside the rail's (memql#4527). ONE KEY PER
+// SECTION rather than one serialized set: a set has to be parsed, and a
+// half-written blob would take every sub-section down at once instead of the
+// one it belongs to. Same try/catch tolerance for the same reason -- a rail
+// preference is not worth failing a render over.
+//
+// DEFAULT EXPANDED, and the default is expressed as "anything that is not the
+// string 'collapsed'". A person who has never touched the control, and a
+// browser that refuses storage, both get the whole rail.
+function sectionKey(id: string): string {
+  return `${RAIL_STORAGE_KEY}-section-${id}`;
+}
+
+function readStoredSection(id: string): boolean {
+  try {
+    return globalThis.localStorage?.getItem(sectionKey(id)) !== "collapsed";
+  } catch {
+    return true;
+  }
+}
+
+function storeSection(id: string, expanded: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(sectionKey(id), expanded ? "expanded" : "collapsed");
+  } catch {
+    // See storeRail.
+  }
+}
+
+// The rows themselves, extracted so a captioned group and a sub-section render
+// the IDENTICAL row -- components/navRow.ts stays the one look for a nav row,
+// and a second copy of this list is how the two drift.
+function NavRows({
+  id,
+  items,
+  collapsed,
+  end = false,
+  hidden = false,
+}: {
+  id?: string;
+  items: readonly NavItem[];
+  collapsed: boolean;
+  // NavLink end-matching, for the one item whose path prefixes every other.
+  end?: boolean;
+  hidden?: boolean;
+}): ReactNode {
+  return (
+    <ul
+      {...(id === undefined ? {} : { id })}
+      // BOTH the attribute and the utility. `hidden` takes the rows out of the
+      // accessibility tree (so a closed sub-section's links are not reachable
+      // by a screen reader or by Tab); `hidden:` -> display:none is the
+      // Tailwind utility that does not depend on a preflight rule surviving.
+      hidden={hidden}
+      className={"space-y-0.5" + (hidden ? " hidden" : "")}
+    >
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <li key={item.to}>
+            <NavLink
+              to={item.to}
+              end={end}
+              className={({ isActive }) => navClass(isActive, collapsed)}
+              {...(collapsed ? { title: item.label, "aria-label": item.label } : {})}
+            >
+              <Icon size={16} className="shrink-0" aria-hidden="true" />
+              {collapsed ? null : <span className="truncate">{item.label}</span>}
+            </NavLink>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function NavGroup({
   label,
   items,
   collapsed,
   end = false,
 }: {
-  // Omitted renders an uncaptioned group -- the Home entry above the three
+  // Omitted renders an uncaptioned group -- the Home entry above the
   // captioned ones.
   label?: string;
   items: readonly NavItem[];
   collapsed: boolean;
-  // NavLink end-matching, for the one item whose path prefixes every other.
   end?: boolean;
 }): ReactNode {
   return (
     <div>
-      {collapsed || label === undefined ? null : (
-        <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
-          {label}
-        </h2>
-      )}
-      <ul className="space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                end={end}
-                className={({ isActive }) => navClass(isActive, collapsed)}
-                {...(collapsed ? { title: item.label, "aria-label": item.label } : {})}
-              >
-                <Icon size={16} className="shrink-0" aria-hidden="true" />
-                {collapsed ? null : <span className="truncate">{item.label}</span>}
-              </NavLink>
-            </li>
-          );
-        })}
-      </ul>
+      {collapsed || label === undefined ? null : <RailCaption>{label}</RailCaption>}
+      <NavRows items={items} collapsed={collapsed} end={end} />
+    </div>
+  );
+}
+
+// The group caption. Its own component because a sub-caption has to be
+// visibly LESS than it and consistently so -- two hand-tuned class strings
+// would answer that question twice.
+function RailCaption({ children }: { children: ReactNode }): ReactNode {
+  return (
+    <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
+      {children}
+    </h2>
+  );
+}
+
+// A sub-section inside a captioned group: a disclosure row and the rows it
+// governs (memql#4527).
+//
+// THE DISCLOSURE IS A <button>, which is the whole of the keyboard story: it
+// is focusable in source order, Enter and Space activate it, and
+// `aria-expanded` says which way it is. Writing that by hand on a <div> is
+// how a rail ends up with a control a keyboard cannot reach.
+//
+// THE COLLAPSED ICON RAIL FLATTENS. No sub-caption, no chevron, no disclosure
+// -- the icons simply render in order, which is the rule the group captions
+// already follow ("an icon column has no room to caption"). It also means a
+// sub-section closed in the wide rail still shows its icons here, and that is
+// deliberate: in an icon column there is no caption to explain why four of a
+// person's destinations vanished, so hiding them would read as a bug rather
+// than as a fold.
+function NavSubGroup({
+  id,
+  label,
+  items,
+  collapsed,
+}: {
+  id: string;
+  label: string;
+  items: readonly NavItem[];
+  collapsed: boolean;
+}): ReactNode {
+  const [expanded, setExpanded] = useState(() => readStoredSection(id));
+
+  if (collapsed) return <NavRows items={items} collapsed />;
+
+  function toggle(): void {
+    const next = !expanded;
+    setExpanded(next);
+    storeSection(id, next);
+  }
+
+  const listId = `rail-section-${id}`;
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={expanded}
+        aria-controls={listId}
+        className={
+          "flex w-full items-center gap-1 rounded px-2 pb-1 text-[11px] font-medium " +
+          "tracking-wide text-subtle uppercase hover:text-fg"
+        }
+      >
+        <Chevron size={12} className="shrink-0" aria-hidden="true" />
+        <span className="truncate">{label}</span>
+      </button>
+      <NavRows id={listId} items={items} collapsed={false} hidden={!expanded} />
     </div>
   );
 }
@@ -311,13 +480,18 @@ export function AppShell(): ReactNode {
   // NAME because that is what the person called them -- the composer stores a
   // free-text name and this is where it earns its keep.
   const saved = useSavedViews();
+  // The composer's door is the last Custom row, always, so an operator with no
+  // saved views still has somewhere to start. It reads COMPOSE (memql#4527):
+  // the composer's own noun, and the one the route has said since it was
+  // built. "New view" named the OUTCOME and then handed the person a surface
+  // that calls the act composing -- one door, two words for it.
   const custom: readonly NavItem[] = [
     ...saved.views.map((view) => ({
       to: composedViewPath(view.id),
       label: view.name,
       icon: LayoutGrid,
     })),
-    { to: "/compose", label: "New view", icon: Plus },
+    { to: "/compose", label: "Compose", icon: Plus },
   ];
 
   function toggleRail(): void {
@@ -370,13 +544,23 @@ export function AppShell(): ReactNode {
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <NavGroup items={[CONSOLE_ITEM]} collapsed={collapsed} end />
             <NavGroup label="Nexus" items={NEXUS} collapsed={collapsed} />
-            <NavGroup label="Views" items={PREDEFINED_VIEWS} collapsed={collapsed} />
-            {/* The composer's own output, under the same caption as the views
-                that ship with the product -- because to the person reading the
-                rail they are the same kind of thing. "Custom" is the only word
-                distinguishing them, and the last entry is always the door to
-                making another one. */}
-            <NavGroup label="Custom" items={custom} collapsed={collapsed} />
+            {/* ONE Views caption, two sub-sections. The built-in / composed
+                split is PROVENANCE rather than category -- both are screens
+                over this cluster's data -- so it reads as a fold inside one
+                group instead of a second top-level caption. The header block
+                above has the full argument. */}
+            <div>
+              {collapsed ? null : <RailCaption>Views</RailCaption>}
+              <div className={collapsed ? "space-y-0.5" : "space-y-2"}>
+                <NavSubGroup
+                  id="built-in"
+                  label="Built-in"
+                  items={BUILT_IN_VIEWS}
+                  collapsed={collapsed}
+                />
+                <NavSubGroup id="custom" label="Custom" items={custom} collapsed={collapsed} />
+              </div>
+            </div>
             <NavGroup label="Build" items={build} collapsed={collapsed} />
             <NavGroup label="Fleet" items={FLEET} collapsed={collapsed} />
             <NavGroup label="Library" items={LIBRARY} collapsed={collapsed} />

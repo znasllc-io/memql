@@ -15,7 +15,7 @@ import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity
 
 import { newAccountId } from "./rows";
 
-// The customer-management console: account CRUD plus the per-account credential
+// The account-management console: account CRUD plus the per-account credential
 // list, wired to the stream.
 //
 // ===========================================================================
@@ -46,7 +46,7 @@ import { newAccountId } from "./rows";
 
 // Roles that may write to the data plane at all. A reader is refused by the
 // coarse capability gate before row-authz is ever consulted, so offering them
-// an "Add customer" button would be offering a guaranteed failure.
+// an "Add account" button would be offering a guaranteed failure.
 const CAN_MANAGE: readonly Role[] = ["owner", "admin", "writer"];
 
 export interface AccountDraft {
@@ -68,9 +68,9 @@ export const EMPTY_DRAFT: AccountDraft = {
 export interface AccountConsoleState {
   role: Role;
   canManage: boolean;
-  // The customer the operator has selected in the ledger, or null.
+  // The account the operator has selected in the ledger, or null.
   selected: SelectedAccount | null;
-  // The selected customer's credentials, revoked ones included.
+  // The selected account's credentials, revoked ones included.
   tokens: AccountTokenView[];
   tokensLoading: boolean;
   tokensError: string;
@@ -88,7 +88,7 @@ export interface AccountConsoleState {
   //
   // ViewPage owns the keyset walk that produced the page's population, and it
   // does not re-run on a write it knows nothing about -- so a freshly created
-  // customer would not appear in the ledger until a reload. Rather than reach
+  // account would not appear in the ledger until a reload. Rather than reach
   // up and invalidate someone else's walk, the console re-reads the first page
   // itself and the view prefers that copy once it exists. The honest cost is
   // stated in the view: the header's "N loaded" describes the original walk.
@@ -132,10 +132,10 @@ export function useAccountConsole(
   );
   const selectedId = selected?.id ?? "";
 
-  // The credential list for the selected customer. A SECOND population, on its
-  // own read, exactly as the People view's sessions and the Agents view's
+  // The credential list for the selected account. A SECOND population, on its
+  // own read, exactly as the Users view's sessions and the Agents view's
   // grants are -- so it settles independently and a failure here does not read
-  // as "the customer list is broken".
+  // as "the account list is broken".
   useEffect(() => {
     if (query === null || selectedId === "") {
       setTokens([]);
@@ -164,9 +164,9 @@ export function useAccountConsole(
     };
   }, [query, selectedId, tokenEpoch]);
 
-  // Re-read the first page of the caller's customers after a write. Deliberately
+  // Re-read the first page of the caller's accounts after a write. Deliberately
   // the SAME named query the page's walk uses, so the two cannot disagree about
-  // what a customer row is; deliberately only the first page, because a write
+  // what an account row is; deliberately only the first page, because a write
   // lands at the top of a createdAt-descending list.
   const refetchAccounts = useCallback(() => {
     if (query === null) return;
@@ -205,7 +205,7 @@ export function useAccountConsole(
       if (query === null) return;
       const name = draft.name.trim();
       if (name === "") {
-        setError("A customer needs a name.");
+        setError("An account needs a name.");
         return;
       }
       const accountId = newAccountId();

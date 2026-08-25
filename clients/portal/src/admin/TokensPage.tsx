@@ -22,7 +22,7 @@ import { WriteOutcome } from "./WriteOutcome";
 // WHAT "SESSIONS" MEANS HERE. The server-rendered console had a /admin/sessions
 // route, and it was a placeholder that rendered a "tracked for a follow-up
 // commit" notice -- there was never a session list to move. Open sessions ARE
-// listed, in the People view, which reads v1:identity:authSession beside the
+// listed, in the Users view, which reads v1:identity:authSession beside the
 // people who own them. This page is the credential half: the long-lived tokens
 // that outlive any session, in two families -- the personal access tokens
 // people mint from the CLI, and the node_token credentials cluster nodes

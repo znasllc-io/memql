@@ -42,7 +42,8 @@ export interface AdminSurface {
 //     the Signing keys and Settings surfaces.
 //
 //   people                 was the CHANGE surface for a person, sitting beside
-//     a People VIEW that listed the same population. The list was always the
+//     a VIEW that listed the same population (People then, Users since
+//     memql#4526). The list was always the
 //     view's job; the verbs moved to the view's row detail
 //     (src/people/PersonActions.tsx), and /admin/people redirects there.
 export const ADMIN_SURFACES: readonly AdminSurface[] = [

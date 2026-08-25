@@ -347,6 +347,39 @@ memql#4317). Three of them are in the rail, which reads top to bottom as
   person the position they just learned. The preference persists in
   `memql-portal-rail`, beside the theme key.
 
+### The rail's sections
+
+Top to bottom: **Console**, then **Nexus** (Goals, Agents), **Views**,
+**Build**, **Fleet**, **Library**, **Cluster**.
+
+**Views is one caption with two sub-sections** (memql#4527) --
+**Built-in** (Users, Accounts, Deployments, Audit: the views that ship with
+the product) and **Custom** (the views this operator composed, then
+**Compose**, the door to composing another). Custom used to be a caption of
+its own, which spent a top-level slot to say something that is provenance
+rather than category: both halves are screens over this cluster's data.
+
+Each sub-caption is a disclosure -- click it, or Tab to it and press Enter,
+to fold that half away. The choice persists per sub-section beside the rail's
+own key, in `memql-portal-rail-section-built-in` and
+`memql-portal-rail-section-custom`; both default to open, and so does a
+browser that refuses storage.
+
+**Collapsed, the rail flattens.** In the 56px icon rail there are no captions
+and no disclosures -- every icon renders in order, a folded sub-section
+included. An icon column has no room to caption, and hiding rows there would
+read as a bug rather than as a fold, since nothing on screen would say why
+they went.
+
+**Agents sits under Nexus**, not beside Users and Accounts: an agent is not a
+population an operator administers, it is what works on a goal. Its address is
+unchanged (`/views/agents`) -- rail placement is not URL shape, the same way
+Library's entries live at `/artifacts`.
+
+Two directory views were renamed in memql#4526 -- **Users** (was People) and
+**Accounts** (was Customers), taking their concepts' names. `/views/people`
+and `/views/customers` redirect, row segment included.
+
 ---
 
 ## Authorization is server-side
@@ -608,10 +641,25 @@ above the road and what it produced and authored below it. Three pages under
 one goal -- **Map**, **Constructs**, **Replay** -- reached from the **Nexus**
 rail group.
 
-A goal is a `v1:planner:plan`. Nothing in this console creates one: plans come
-from asking an agent to do something, and the portal reads them. `/nexus`
-opens your most recent goal (the running one first); the picker in the header
-moves between them, and a "recent goals" strip sits under the map.
+A goal is a `v1:planner:plan`. **New goal** starts one from here (memql#4528)
+-- in the goal chrome beside the picker, and from the empty state when you
+have none. Plans still arrive the other way too, from asking an agent to do
+something. `/nexus` opens your most recent goal (the running one first); the
+picker in the header moves between them, and a "recent goals" strip sits under
+the map.
+
+**The button starts the planning lifecycle, not spend.** It writes the plan
+through `createPlan` and nothing else -- no `startPlan`. The planner claims the
+row off its `graph.node.created.v1:planner:plan` subscription and SIZES the
+goal; the estimate, approval and budget gates
+([llm-cost-control.md](../ai/llm-cost-control.md)) then decide whether anything
+is spent, and a goal past the threshold comes back to `awaitingFeedback` to ask
+you first.
+
+The console is not a chat space, so a goal started here is filed under the
+synthetic `system:portal-console` partition -- the same sentinel convention the
+other space-less callers use. `requestedBy` is you, and `triggerSource` keeps
+its `user.explicit` default, so the provenance stays honest.
 
 ### What becomes a node, and what becomes motion
 
@@ -782,11 +830,11 @@ rather than 404 -- an operator with either bookmarked did nothing wrong:
   readings it carried that the console does not -- which key is signing, when
   it last rotated, the registration policy -- are on Signing keys and Cluster
   settings, where they were already rendered.
-- **`/admin/people`** was the CHANGE surface for one person, beside a People
-  *view* listing the same population. The list was always the view's job, so
-  the four things an owner or admin does to a person -- profile, cluster role,
-  suspension, enrolment link -- moved onto that view's row detail, and
-  `/admin/people` sends you to `/views/people`.
+- **`/admin/people`** was the CHANGE surface for one person, beside a *view*
+  listing the same population (People then, **Users** since memql#4526). The
+  list was always the view's job, so the four things an owner or admin does to
+  a person -- profile, cluster role, suspension, enrolment link -- moved onto
+  that view's row detail, and `/admin/people` sends you to `/views/users`.
 
 Putting those verbs on the view does not break the contract that makes the
 predefined views work for a concept nobody designed for: the view BODY still
@@ -846,7 +894,7 @@ version already running.
 
 ### Inviting somebody
 
-An owner or admin invites a person from the **People view's** header, not from a
+An owner or admin invites a person from the **Users view's** header, not from a
 separate screen (memql#4272). The dialog states what an invitation MEANS on this
 cluster, because that depends on the registration mode and an operator who does
 not know which case they are in will misread the result:
