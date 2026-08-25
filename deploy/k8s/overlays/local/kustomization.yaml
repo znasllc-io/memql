@@ -109,12 +109,24 @@ patches:
   # ExternalSecret resources require External Secrets Operator + Azure Key Vault.
   # Not available locally; the corresponding secrets are created directly via
   # `make secrets` in the local bootstrap (#2065).
+  #
+  # cloud-entry deletes the same two objects for a DIFFERENT reason -- voice-off
+  # means the Key Vault entries deliberately do not exist (memql#4487). Both are
+  # the same rule: the render includes a module's infrastructure objects iff the
+  # module is enabled here.
+  #
+  # The apiVersion below must track the objects in base. It said v1beta1 while
+  # base said v1, which happened to keep working only because `target:` is what
+  # kustomize selects on -- the patch body's GVK is not consulted when a target
+  # is given. A delete patch that stops matching does not fail; it silently
+  # renders the object it was supposed to remove, which locally is an
+  # ExternalSecret pointing at a Key Vault this cluster cannot reach.
   - target:
       kind: ExternalSecret
       name: livekit-secrets
     patch: |
       $patch: delete
-      apiVersion: external-secrets.io/v1beta1
+      apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       metadata:
         name: livekit-secrets
@@ -123,7 +135,7 @@ patches:
       name: telephony-secrets
     patch: |
       $patch: delete
-      apiVersion: external-secrets.io/v1beta1
+      apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       metadata:
         name: telephony-secrets

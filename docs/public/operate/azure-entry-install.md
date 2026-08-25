@@ -89,6 +89,57 @@ kubectl -n memql get svc livekit livekit-rtc livekit-sip   # TYPE ClusterIP, EXT
 Turning voice on for an entry install is a different decision and not
 this overlay: `overlays/cloud` keeps the LoadBalancers and is untouched.
 
+### The voice-off hold on the ExternalSecrets
+
+The third thing voice-off means, and the one that was missing until
+memql#4487. `base` ships `externalsecret-livekit.yaml` and
+`externalsecret-telephony.yaml`, which resolve five Key Vault entries:
+
+```
+livekit-keys   polyphon-livekit-api-key   polyphon-livekit-api-secret
+telnyx-api-key   telnyx-connection-id
+```
+
+On a voice-off install those entries **deliberately do not exist**. ESO
+reported `SecretSyncedError` on both objects and the Application was
+`Degraded` -- permanently, on a correctly installed cluster, and every
+entry install ever made shipped that way.
+
+**This page used to write that down as expected noise, and that was the
+defect.** An operator who learns that `Degraded` is normal will not see a
+real degradation. Health that is always red carries no information, and
+writing the red down converts a fixable configuration gap into a
+permanently disabled alarm.
+
+So `overlays/cloud-entry` removes both objects from the render with a
+`$patch: delete`, beside the replica-0 and ClusterIP patches -- the same
+shape `overlays/local` uses for the same two objects (there because ESO
+and Key Vault do not exist locally, here because the entries deliberately
+do not). Gated by `deploy/k8s/overlays/externalsecrets_test.go`
+(text-level, cannot skip) and `render_cloud_entry_test.go` (rendered).
+Verify:
+
+```bash
+kubectl kustomize deploy/k8s/overlays/cloud-entry | grep -c 'kind: ExternalSecret'   # 0
+kubectl kustomize deploy/k8s/overlays/cloud       | grep -c 'kind: ExternalSecret'   # 2 -- voice on
+argocd app get memql                                                                 # no SecretSyncedError
+```
+
+**Enabling voice on an entry install is the reverse, and the order
+matters:** seed the five Key Vault entries first, *then* drop the two
+delete patches. Doing it the other way round reproduces exactly the
+`Degraded` this removed, for however long the seeding takes.
+
+The rule this is an instance of, which belongs to the lifecycle model
+rather than to this overlay:
+
+> **Enablement must be a fact about the DESIRED state, not a tolerated
+> failure of the live state.** The render includes a module's
+> infrastructure objects **iff** the module is enabled.
+
+Module enablement reaching node-type infrastructure generally -- rather
+than one hand-written hold per module -- is memql#4488.
+
 ## Domain and hosts
 
 The committed default in the overlay is `memql.localhost`. No file
@@ -630,10 +681,24 @@ images:                        # the eight engine digests (identity bff cognitio
 `deploy/external-secrets/` as committed cannot authenticate from this
 cluster: its SecretStore uses a workload-identity federated credential
 issued for ANOTHER cluster's OIDC issuer, and the vault it names holds that
-retired cluster's values. That is why `memql-secrets` is hand-seeded here,
-and why the two base ExternalSecrets (`livekit`, `telephony`) that
-reference `keyvault` are expected to stay unhealthy -- harmless
-under voice-off, and part of the OutOfSync / Degraded noise.
+retired cluster's values. That is why `memql-secrets` is hand-seeded here.
+
+**The two base ExternalSecrets are no longer part of that caveat.**
+`livekit` and `telephony` used to be described here as expected to stay
+unhealthy and part of the OutOfSync / Degraded noise; since memql#4487
+`cloud-entry` does not render them at all, because voice-off means their
+Key Vault entries deliberately do not exist. See [the voice-off hold on
+the ExternalSecrets](#the-voice-off-hold-on-the-externalsecrets) above.
+Nothing about this instance's health is expected to be red.
+
+**Any ExternalSecret that does run here carries
+`argocd.argoproj.io/compare-options: IgnoreExtraneous`** (memql#4489).
+External Secrets copies an ExternalSecret's annotations onto the Secret it
+writes, and Argo's tracking label rides along -- so without it Argo claims
+a Secret that exists in no repository and reports it `OutOfSync` forever,
+with nothing to sync and nothing to fix. If you add an ExternalSecret to
+an instance repo, it needs the same annotation; the engine's are gated by
+`deploy/k8s/overlays/externalsecrets_test.go`.
 
 **Do not "fix" it by repairing the federated credential or pointing the
 SecretStore at the old vault.** Its entries are another cluster's master

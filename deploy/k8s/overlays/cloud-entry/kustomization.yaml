@@ -143,6 +143,52 @@ patches:
       - { op: remove, path: /spec/loadBalancerSourceRanges }
       - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
 
+  # VOICE-OFF, PART THREE: THE VOICE KEY VAULT ENTRIES ARE NOT THERE EITHER
+  # (memql#4487). base ships externalsecret-livekit.yaml and
+  # externalsecret-telephony.yaml, which resolve `livekit-keys`,
+  # `polyphon-livekit-api-key`, `polyphon-livekit-api-secret`,
+  # `telnyx-api-key` and `telnyx-connection-id` out of kv-<install>. On a
+  # voice-off install those entries DELIBERATELY do not exist, so ESO reports
+  # SecretSyncedError on both objects and the Application is `Degraded`
+  # forever -- on a correctly installed cluster, by design.
+  #
+  # THE COST IS NOT THE RED STATUS. azure-entry-install.md used to write this
+  # down as expected noise, which is the actual defect: an operator who learns
+  # that Degraded is normal will not see a real degradation. Health that is
+  # always red carries no information.
+  #
+  # So enablement is a fact about the DESIRED state rather than a tolerated
+  # failure of the live state: the render includes a module's infrastructure
+  # objects IFF the module is enabled. Voice-off already means replicas 0 and
+  # ClusterIP Services; it means these two objects are not rendered either.
+  # Turning voice ON for an entry install is the reverse, in one order: seed
+  # the five Key Vault entries, THEN drop these two patches. Doing it the
+  # other way round reproduces exactly the Degraded this removes.
+  #
+  # A strategic-merge `$patch: delete`, the same shape overlays/local uses for
+  # the same two objects (there because ESO and Key Vault do not exist
+  # locally, here because the entries deliberately do not). Gated by
+  # ../externalsecrets_test.go (text-level, cannot skip) and
+  # ../render_cloud_entry_test.go (rendered).
+  - target:
+      kind: ExternalSecret
+      name: livekit-secrets
+    patch: |
+      $patch: delete
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: livekit-secrets
+  - target:
+      kind: ExternalSecret
+      name: telephony-secrets
+    patch: |
+      $patch: delete
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: telephony-secrets
+
   # The domain is delivered by the components/domain-derive component at the
   # bottom of this file (memql#4281), not by a patch here. It used to be a
   # patch here, and it was HALF the job: it appended the memql-domain ConfigMap

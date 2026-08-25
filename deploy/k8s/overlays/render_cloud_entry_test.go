@@ -329,3 +329,55 @@ func walStorageSize(rendered string) string {
 	}
 	return ""
 }
+
+// externalSecretsByName indexes the ExternalSecrets in a rendered overlay.
+func externalSecretsByName(t *testing.T, rendered string) map[string]resource {
+	t.Helper()
+	out := map[string]resource{}
+	for _, r := range parse(t, rendered) {
+		if r.Kind == "ExternalSecret" {
+			out[r.Metadata.Name] = r
+		}
+	}
+	return out
+}
+
+// TestCloudEntryRendersNoExternalSecrets is the rendered half of the memql#4487
+// hold; externalsecrets_test.go carries the text-level half that cannot skip.
+//
+// The failure it catches is not a broken render -- it is a render that
+// reconciles perfectly and leaves the Application `Degraded` forever, because
+// two of its objects resolve Key Vault entries that a voice-off install
+// deliberately does not have. That red was documented as expected noise, which
+// is the actual defect: health that is always red carries no information, and
+// an operator who learns to ignore it will ignore a real one.
+func TestCloudEntryRendersNoExternalSecrets(t *testing.T) {
+	for name, r := range externalSecretsByName(t, render(t, entryOverlay)) {
+		t.Errorf("cloud-entry renders ExternalSecret %s; with voice off its Key Vault entries do not exist, so ESO reports SecretSyncedError and the Application is Degraded on every entry install (memql#4487). Enabling voice is the reverse, in this order: seed the entries, then drop the delete patch. (rendered as %s)",
+			name, r.APIVersion)
+	}
+}
+
+// TestCloudRendersTheVoiceExternalSecretsWithIgnoreExtraneous is the reachable
+// positive for the gate above AND the rendered half of memql#4489.
+//
+// Voice is ON in overlays/cloud, so the objects belong in its render -- if base
+// simply stopped shipping them, the cloud-entry gate above would pass for a
+// reason that has nothing to do with the hold. And the annotation has to
+// survive the render, not merely sit in base: External Secrets copies it onto
+// the generated Secret, which is the only thing that stops Argo claiming a
+// Secret that exists in no repository.
+func TestCloudRendersTheVoiceExternalSecretsWithIgnoreExtraneous(t *testing.T) {
+	byName := externalSecretsByName(t, render(t, cloudOverlay))
+	for _, name := range []string{"livekit-secrets", "telephony-secrets"} {
+		r, ok := byName[name]
+		if !ok {
+			t.Errorf("overlays/cloud does not render ExternalSecret %s; voice stays on there, and the cloud-entry hold is written against base still shipping it", name)
+			continue
+		}
+		if got := r.Metadata.Annotations[argoCompareOptions]; !hasCompareOption(got, ignoreExtraneous) {
+			t.Errorf("rendered ExternalSecret %s has %s=%q, want it to include %s -- the generated Secret inherits this annotation, and without it Argo reports that Secret OutOfSync forever (memql#4489)",
+				name, argoCompareOptions, got, ignoreExtraneous)
+		}
+	}
+}

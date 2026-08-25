@@ -54,6 +54,45 @@ reconciles it to the cluster on the next refresh.
 > longer exists. What the envelope was genuinely load-bearing for -- getting a
 > locked-out owner back in -- is now the recovery key (memql#3964).
 
+## Every ExternalSecret needs `IgnoreExtraneous` (memql#4489)
+
+ESO copies an ExternalSecret's **labels and annotations onto the target
+Secret it writes**. ArgoCD identifies its own resources by the
+`app.kubernetes.io/instance` label. Put those two facts together and an
+Argo-tracked ExternalSecret hands its tracking label to a Secret that exists
+in **no repository** — so Argo reports that Secret `OutOfSync`, forever, with
+nothing to sync and nothing to fix. Observed live as `Secret/memql-secrets`
+carrying `app.kubernetes.io/instance: memql`.
+
+The fix turns the same inheritance against itself. Put the annotation on the
+**ExternalSecret**:
+
+```yaml
+metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+```
+
+Inheritance delivers it onto the generated Secret, where it tells Argo the
+omission is deliberate. On the ExternalSecret itself it is a no-op — that
+object *is* in the repository.
+
+Three things to know before adding or editing one:
+
+- **It goes on every ExternalSecret, not just the ones that have caused
+  trouble.** Any one without it re-claims its Secret the next time it
+  reconciles.
+- **Where several ExternalSecrets merge into one Secret** — `memql-secrets`
+  has two here and an instance repo may add a third — *all* of them need it.
+  One without is enough to lose the annotation for the Secret they share.
+- **The symptom is a permanently `OutOfSync` Application**, which is the same
+  class of defect as memql#4487: health that is always wrong stops being read,
+  and an operator who learns the red is normal will not see a real one.
+
+`deploy/k8s/overlays/externalsecrets_test.go` walks every ExternalSecret under
+`deploy/` and fails the build on one without the annotation. It is text-level,
+so it cannot skip for want of a renderer.
+
 ## Files
 
 | Path | What |
