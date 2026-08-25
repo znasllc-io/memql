@@ -7,14 +7,19 @@
 # would not error; it would archive nowhere while the Cluster reported Ready,
 # which is the failure mode this whole layer exists to prevent.
 #
-# THE FORM DIFFERS BETWEEN A REAL ACCOUNT AND AN EMULATOR, and that is a
-# property of the emulator rather than of the environment:
+# HOST FIRST, IN BOTH FORMS (memql#4496). The account rides the hostname on
+# the real service and the first path segment on the emulator; the container
+# is the path segment after that:
 #
-#   real Azure Blob   azure://<container>/
+#   real Azure Blob   https://<account>.blob.core.windows.net/<container>/
 #   Azurite (local)   http://azurite:10000/<account>/<container>
 #
-# barman rejects the `azure://` form against an emulator as "malformed", and the
-# only symptom is ContinuousArchivingFailing on a healthy-looking Cluster.
+# A container-only "azure://<container>/" value puts the container where the
+# host belongs: under inheritFromAzureAD the SDK is left with no account
+# endpoint and fails as "connection string ... emulated storage", and a host
+# with no container segment fails as "Please specify a container name". The
+# only symptom either way is ContinuousArchivingFailing on a healthy-looking
+# Cluster.
 #
 # CREDENTIALS are a connection string read from a Secret. The NAME below is the
 # contract; locally `make secrets` writes it, in the cloud ESO syncs it from Key

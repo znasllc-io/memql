@@ -183,12 +183,37 @@ patches:
               # on the backup account and NOT granted delete/purge -- see the
               # ObjectStore note below.
               azure.workload.identity/client-id: "REPLACE-WITH-DB-IDENTITY-CLIENT-ID"
+      # THE POD LABEL, WITHOUT WHICH THE BLOCK ABOVE IS INERT (memql#4460).
+      # The Azure workload-identity webhook selects on POD labels; the label
+      # on the ServiceAccountTemplate gates nothing, and the SA's one job is
+      # to carry the client-id annotation the webhook reads once it fires.
+      # With the pod unlabelled the webhook never mutates it -- no projected
+      # token volume, no AZURE_* env -- and `inheritFromAzureAD` below has
+      # nothing to inherit: the first instance logged 618 consecutive
+      # WAL-archive failures and archived zero segments this way. CNPG stamps
+      # pod labels through spec.inheritedMetadata. The webhook mutates at pod
+      # CREATION only, so landing this on a running cluster needs a pod roll.
+      - op: add
+        path: /spec/inheritedMetadata
+        value:
+          labels:
+            azure.workload.identity/use: "true"
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
+      # HOST FIRST (memql#4496): barman-cloud's Azure grammar is
+      #   https://<account>.blob.core.windows.net/<container>/
+      # -- the account is the HOSTNAME and the container is the leading path
+      # segment. The old container-only "azure://memql-db-backups/" put the
+      # container where the host belongs, leaving the AD credential no account
+      # endpoint: barman failed that as "connection string ... emulated
+      # storage" (the retired cluster's exact error), and a host with no
+      # container segment fails as "Please specify a container name". The
+      # storage account is an install value -- capture it, do not reconstruct
+      # it (docs/public/operate/azure-entry-install.md).
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://memql-db-backups/"
+        value: "https://REPLACE-WITH-STORAGE-ACCOUNT.blob.core.windows.net/memql-db-backups/"
       # inheritFromAzureAD replaces the connection string entirely: the sidecar
       # uses the pod's federated identity. This is what "no storage keys
       # in-cluster" means concretely.

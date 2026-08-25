@@ -486,8 +486,10 @@ repo-credential writes, and the Argo source switch are owner-gated.
   [Argo host-patch](#argo-host-patch), the `memql-domain` ConfigMap's
   `MEMQL_DOMAIN`, the CNPG `serviceAccountTemplate` workload-identity
   client id (`REPLACE-WITH-DB-IDENTITY-CLIENT-ID` in the overlay), and the
-  backup `ObjectStore` `destinationPath` (the storage account is an install
-  value -- capture it, do not reconstruct it).
+  backup `ObjectStore` `destinationPath` (`REPLACE-WITH-STORAGE-ACCOUNT` in
+  the overlay's `https://<account>.blob.core.windows.net/<container>/` value;
+  the storage account is an install value -- capture it, do not reconstruct
+  it).
 - **Out of band -- no engine manifest defines them:** the cluster-scoped
   `ClusterIssuer letsencrypt-prod` (HTTP-01) plus `letsencrypt-dns01`
   (DNS-01, which unlike the first one IS in git -- overlays/cloud-entry
