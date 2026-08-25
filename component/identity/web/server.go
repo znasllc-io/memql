@@ -204,6 +204,13 @@ type Server struct {
 	mlSession  BrowserSessionFunc
 	mlAudit    identity.AuditLogger
 
+	// cspOrigins caches clientFormActionOrigins(Cfg.RegisteredClients) --
+	// the registered OAuth clients' redirect origins that form-action is
+	// extended with (see csp.go's regression note). Boot-static: the env
+	// clients cannot change within a process lifetime.
+	cspOnce    sync.Once
+	cspOrigins []string
+
 	// Abuse is the anti-abuse stack (per-IP velocity, Turnstile,
 	// disposable-domain blocklist, MX validation) wrapped around
 	// POST /login. The SAME instance component/identity/http wraps around
@@ -375,7 +382,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		// CSRF wraps innermost so the cookie minted on a fresh GET
 		// is set BEFORE the security-headers / CSP layer writes
 		// other headers; ordering is otherwise irrelevant.
-		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(CSPHandlerFunc(csrf(h))))
+		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(s.cspHandlerFunc(csrf(h))))
 	}
 
 	// Pre-auth GET surfaces wrap with redirectIfAuthenticated. If
@@ -644,4 +651,20 @@ func parseVersion(body []byte) string {
 		}
 	}
 	return "unknown"
+}
+
+// cspHandlerFunc is CSPHandlerFunc with form-action extended by the
+// registered clients' redirect origins. Every web-UI route mounts through
+// this: the magic-link flow ends in a form POST whose 303 lands on a client
+// origin, and Chrome enforces form-action against the whole redirect chain
+// (csp.go has the full account). The package-level CSPHandlerFunc stays
+// strict for callers outside the web UI.
+func (s *Server) cspHandlerFunc(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.cspOnce.Do(func() {
+			s.cspOrigins = clientFormActionOrigins(s.Cfg.RegisteredClients)
+		})
+		w.Header().Set("Content-Security-Policy", policyForOrigins(r, s.cspOrigins))
+		next(w, r)
+	}
 }
