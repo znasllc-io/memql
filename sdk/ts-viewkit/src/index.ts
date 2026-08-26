@@ -44,7 +44,14 @@ export {
   type RemovalItemKind,
   type RemovalItemView,
 } from "./install.js";
-export type { ConceptLike, DisplayCardHints, RowLike } from "./types.js";
+export type {
+  ConceptFieldLike,
+  ConceptLike,
+  ConceptRelationshipLike,
+  DeclaredFieldKind,
+  DisplayCardHints,
+  RowLike,
+} from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
 
 // Element fitness -- the contract a view system matches elements against.
@@ -90,16 +97,24 @@ export {
   sanitizeArrangement,
   readArrangement,
   arrangementRequest,
+  arrangementLayout,
+  entryRole,
   elementOptions,
   EMPTY_ARRANGEMENT,
   ARRANGEMENT_PROPOSAL_SCHEMA,
+  SECTION_LAYOUTS,
+  ENTRY_ROLES,
+  LAYOUT_DESCRIPTIONS,
   type ArrangedElement,
   type Arrangement,
   type ArrangementFault,
+  type ArrangementOptions,
   type ArrangementProblem,
   type ArrangementProposal,
   type ArrangementRequest,
   type ElementCandidate,
+  type EntryRole,
+  type SectionLayout,
 } from "./arrangement.js";
 
 // The element library.
@@ -108,6 +123,10 @@ export {
   elementById,
   ROW_LIST_ELEMENT,
   DETAIL_ELEMENT,
+  SCENE_ELEMENT,
+  SCENE_ELEMENT_ID,
+  WIDGET_ELEMENT,
+  WIDGET_ELEMENT_ID,
 } from "./elements.js";
 export { renderTable, TABLE_ELEMENT, isLongTableField } from "./table.js";
 export { renderCalendar, CALENDAR_ELEMENT } from "./calendar.js";

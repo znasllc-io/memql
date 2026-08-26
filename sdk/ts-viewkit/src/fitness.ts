@@ -19,16 +19,33 @@
 // element fits, WHICH concrete field satisfied each requirement, and what is
 // missing when it does not.
 //
-// WHY THE ROWS AND NOT A SCHEMA
+// SCHEMA FIRST, ROWS AS ENRICHMENT (epic memql#4661)
 //
-// The wire's ConceptInfo (component/grpc/memql.proto) carries id, entity,
-// description and the display card -- it does NOT carry per-field types.
-// There is therefore no schema to match against at runtime, and inventing a
-// second, client-side copy of the DSL's type table would be a second source
-// of truth that drifts. Fitness is instead computed from a SAMPLE OF ROWS:
-// what the rows actually carry is, for rendering purposes, exactly the
-// question being asked. profileConcept() turns rows into a ConceptProfile;
-// everything downstream reads the profile, never the rows.
+// This module used to say there was no schema to match against, and for two
+// releases that was true: ConceptInfo carried identity, prose and the display
+// card, so fitness was computed from a SAMPLE OF ROWS and nothing else. That
+// answered a subtly different question than the one being asked, and got three
+// things wrong that a composer trips over immediately:
+//
+//   * a declared field that no loaded row carries did not exist. Compose a
+//     view over page one of a walk and half the concept is missing;
+//   * an enum was indistinguishable from free text until enough distinct
+//     values happened to appear, so a grouped board offered itself or not
+//     depending on which rows loaded;
+//   * a relationship was invisible entirely. A foreign key is a string like
+//     any other string, so "this field points at an agent" was not a fact the
+//     rows contained.
+//
+// ConceptInfo now publishes the declared shape, so profileConcept takes the
+// FIELD LIST from the declaration and uses rows for what only rows can answer:
+// how many carry a value, and how many distinct values there are. Where the
+// two disagree the declaration wins on KIND (it is the author's statement) and
+// the rows win on CARDINALITY (they are the observation).
+//
+// The row-only path is not a legacy branch -- it is the answer for a concept
+// whose cluster publishes no shape, and for row sets that are not concept rows
+// at all (an install step, a topology node). Both are live cases, so both are
+// supported and neither is deprecated.
 //
 // This composes with the display-card fallback contract rather than
 // duplicating it: a profile's `card` is resolveDisplayCard()'s answer, and a
@@ -51,7 +68,13 @@
 // See docs/public/concepts/view-elements.md.
 
 import { resolveDisplayCard } from "./displayCard.js";
-import type { ConceptLike, DisplayCardHints, RowLike } from "./types.js";
+import type {
+  ConceptFieldLike,
+  ConceptLike,
+  ConceptRelationshipLike,
+  DisplayCardHints,
+  RowLike,
+} from "./types.js";
 import type { VNode } from "./vnode.js";
 
 // ---------------------------------------------------------------------------
@@ -139,9 +162,41 @@ export interface FieldProfile {
   readonly present: number;
   // Distinct stringified values observed, capped at DISTINCT_SCAN_CAP. A
   // value equal to the cap means "at least this many".
+  //
+  // For a DECLARED ENUM with no rows loaded this is the member count rather
+  // than zero. That is not a guess: the members are declared, so the number of
+  // distinct values the field can hold is known exactly, and reporting zero
+  // would tell a grouped board there is nothing to group by -- which is the
+  // "invisible until enough rows load" failure the schema exists to end.
   readonly distinct: number;
   // Which @displayCard slots (declared or inferred) name this field.
   readonly slots: readonly DisplaySlotName[];
+
+  // -------------------------------------------------------------------------
+  // From the DECLARATION (epic memql#4661). Present for every field whether
+  // declared or not, so a consumer never has to guard -- `declared` is what
+  // says which.
+  // -------------------------------------------------------------------------
+
+  // Whether the concept's published schema declares this field. False for row
+  // intrinsics (id, createdAt, concept) and for anything a row carries that
+  // the schema does not mention, which is a legitimate state rather than an
+  // error: a projection may widen a row.
+  readonly declared: boolean;
+  // Declared `@required` / the `!` sigil. False when undeclared.
+  readonly required: boolean;
+  // The declared kind, verbatim -- "enum" and "integer" survive here even
+  // though `kind` collapses them to text and number. This is what an element
+  // reads to render status pills instead of strings.
+  readonly declaredKind: string;
+  // Declared enum members, in declaration order. Empty for everything else.
+  readonly enumValues: readonly string[];
+  // The field's `///` doc comment. Empty when it has none.
+  readonly description: string;
+  // The relationship this field is the pointer for, when the concept declares
+  // one on it. What makes a lookup column possible: the target concept is
+  // named here, so a renderer knows which rows to resolve the value against.
+  readonly relationship?: ConceptRelationshipLike;
 }
 
 export type DisplaySlotName = "primary" | "secondary" | "tertiary" | "status";
@@ -164,22 +219,50 @@ export interface ConceptProfile {
   readonly fields: readonly FieldProfile[];
 }
 
-// profileConcept turns a concept plus a row sample into the inspectable
-// description everything else matches against.
-export function profileConcept(
-  concept: ConceptLike,
-  rows: readonly RowLike[],
-): ConceptProfile {
-  const card = resolveDisplayCard(concept, rows);
-  const slotsByField = new Map<string, DisplaySlotName[]>();
-  for (const slot of DISPLAY_SLOT_NAMES) {
-    const field = card[slot];
-    if (!field) continue;
-    const list = slotsByField.get(field) ?? [];
-    list.push(slot);
-    slotsByField.set(field, list);
+// declaredKindToFieldKind maps the DSL's vocabulary onto the coarse rendering
+// kinds an element's requirements match against.
+//
+// The two collapses are deliberate and were already the contract before the
+// schema arrived: an `enum` IS a text field whose distinct count is small (see
+// FieldKind's comment and every `distinctMax` requirement), and an `integer` is
+// a number. Preserving the distinction in `kind` would mean every requirement
+// in the library had to list `"enum"` beside `"text"` -- a change to twelve
+// elements to express something `declaredKind` already carries losslessly.
+//
+// An UNRECOGNISED kind maps to text rather than being dropped. A field
+// rendered as a string is a worse outcome than a field that vanished only if
+// you never had to debug the second one.
+function declaredKindToFieldKind(declared: string): FieldKind {
+  switch (declared) {
+    case "boolean":
+      return "boolean";
+    case "integer":
+    case "number":
+      return "number";
+    case "datetime":
+      return "datetime";
+    case "array":
+      return "list";
+    case "object":
+      return "object";
+    case "string":
+    case "enum":
+    default:
+      return "text";
   }
+}
 
+// observedKinds folds a sample into per-field kind counts, presence and capped
+// distinct counts. The OBSERVATION half of a profile, and the only half a row
+// set that is not concept rows at all (an install step, a topology node) has.
+interface Observation {
+  readonly order: readonly string[];
+  readonly kind: ReadonlyMap<string, FieldKind>;
+  readonly present: ReadonlyMap<string, number>;
+  readonly distinct: ReadonlyMap<string, number>;
+}
+
+function observe(rows: readonly RowLike[]): Observation {
   const order: string[] = [];
   const counts = new Map<string, Map<FieldKind, number>>();
   const present = new Map<string, number>();
@@ -198,29 +281,105 @@ export function profileConcept(
       byKind.set(kind, (byKind.get(kind) ?? 0) + 1);
       present.set(field, (present.get(field) ?? 0) + 1);
       const seen = values.get(field)!;
-      if (seen.size < DISTINCT_SCAN_CAP && (kind !== "list" && kind !== "object")) {
+      if (seen.size < DISTINCT_SCAN_CAP && kind !== "list" && kind !== "object") {
         seen.add(String(raw));
       }
     }
   }
 
-  const fields: FieldProfile[] = order.map((field) => {
+  const kind = new Map<string, FieldKind>();
+  const distinct = new Map<string, number>();
+  for (const field of order) {
     const byKind = counts.get(field)!;
     let best: FieldKind = "text";
     let bestCount = -1;
-    for (const kind of KIND_PRECEDENCE) {
-      const n = byKind.get(kind) ?? 0;
+    for (const k of KIND_PRECEDENCE) {
+      const n = byKind.get(k) ?? 0;
       if (n > bestCount) {
-        best = kind;
+        best = k;
         bestCount = n;
       }
     }
+    kind.set(field, best);
+    distinct.set(field, values.get(field)!.size);
+  }
+
+  return { order, kind, present, distinct };
+}
+
+// profileConcept turns a concept plus a row sample into the inspectable
+// description everything else matches against.
+//
+// SCHEMA FIRST (epic memql#4661). The field list is the concept's DECLARED
+// list, in declaration order, followed by anything the rows carry that the
+// schema does not mention -- row intrinsics (id, createdAt, concept) and any
+// widening a projection did. Both halves are real fields of the row set and
+// dropping either would be a lie; the ORDER is what says which is which, and
+// it is also the order a table naturally reads in.
+//
+// WHO WINS WHERE. The declaration owns the KIND: it is the author's statement
+// about what the field holds, and a sample that saw only `""` for a datetime
+// would otherwise demote it to text. The rows own the CARDINALITY: `present`
+// and `distinct` are observations, and a declaration cannot make them up. The
+// one place the declaration contributes a count is a declared enum with
+// nothing loaded, where the member list gives the distinct count exactly --
+// see FieldProfile.distinct.
+export function profileConcept(
+  concept: ConceptLike,
+  rows: readonly RowLike[],
+): ConceptProfile {
+  const card = resolveDisplayCard(concept, rows);
+  const slotsByField = new Map<string, DisplaySlotName[]>();
+  for (const slot of DISPLAY_SLOT_NAMES) {
+    const field = card[slot];
+    if (!field) continue;
+    const list = slotsByField.get(field) ?? [];
+    list.push(slot);
+    slotsByField.set(field, list);
+  }
+
+  const seen = observe(rows);
+  const declared = new Map<string, ConceptFieldLike>();
+  for (const field of concept.fields ?? []) {
+    if (field.name !== "") declared.set(field.name, field);
+  }
+  // A relationship's pointer field, indexed so the field profile can carry the
+  // edge. `field` may be a dotted path into a nested block; the leaf is not
+  // profiled as a top-level field, so such an edge simply finds no home here
+  // and is still reachable through concept.relationships.
+  const edges = new Map<string, ConceptRelationshipLike>();
+  for (const rel of concept.relationships ?? []) {
+    if (rel.field !== "" && !edges.has(rel.field)) edges.set(rel.field, rel);
+  }
+
+  const order: string[] = [
+    ...declared.keys(),
+    ...seen.order.filter((field) => !declared.has(field)),
+  ];
+
+  const fields: FieldProfile[] = order.map((field) => {
+    const decl = declared.get(field);
+    const observedKind = seen.kind.get(field);
+    const kind =
+      decl !== undefined ? declaredKindToFieldKind(decl.kind) : (observedKind ?? "text");
+    const enumValues = decl?.enumValues ?? [];
+    const observedDistinct = seen.distinct.get(field) ?? 0;
+    const rel = edges.get(field);
     return {
       field,
-      kind: best,
-      present: present.get(field) ?? 0,
-      distinct: values.get(field)!.size,
+      kind,
+      present: seen.present.get(field) ?? 0,
+      // A declared enum nobody has loaded a row for still has a known number
+      // of distinct values. Reporting the observed zero would tell a grouped
+      // board there is nothing to group by.
+      distinct: observedDistinct > 0 ? observedDistinct : enumValues.length,
       slots: slotsByField.get(field) ?? [],
+      declared: decl !== undefined,
+      required: decl?.required === true,
+      declaredKind: decl?.kind ?? "",
+      enumValues,
+      description: decl?.description ?? "",
+      ...(rel === undefined ? {} : { relationship: rel }),
     };
   });
 
@@ -314,6 +473,30 @@ export interface ElementSpec {
   // Below this many rows the element has nothing to show (a detail pane needs
   // one row; a chart of one point is a stat tile). Defaults to 1.
   readonly minRows?: number;
+  // Which emphasis roles this element can EXPRESS (epic memql#4661). Omitted
+  // means all three: an element that has not thought about it can be laid out
+  // large or small like anything else, and defaulting the other way would
+  // silently rule out every element written before roles existed.
+  //
+  // It lives here, on the element, for the reason `band` does: a list held by
+  // the layout engine would need editing every time an element is added, and
+  // the element added would be the one nobody remembered to list.
+  readonly roles?: readonly ("hero" | "supporting" | "standard")[];
+  // Whether this element is a DETAIL PANE -- it renders one selected row
+  // rather than the population. What the split layout puts on its right-hand
+  // side, and the reason a split with none of these falls back to stack:
+  // "the list on the left and the list again on the right" is not a split.
+  readonly detail?: boolean;
+  // PLACED, NEVER DISCOVERED. The element is offerable in a picker and
+  // renderable in an arrangement, but the deterministic proposal will not
+  // reach for it -- because it is meaningless without an option naming which
+  // MODULE it is (a scene id, a widget id), and the proposal has no basis for
+  // choosing one.
+  //
+  // Without this, `scene` fits every concept trivially (it requires nothing)
+  // and would auto-propose itself into every view as a black rectangle
+  // nobody asked for.
+  readonly placedOnly?: boolean;
   readonly render: ElementRenderer;
 }
 
