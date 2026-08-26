@@ -147,7 +147,7 @@ export function CampaignEditorPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
+          subtitle={
             <Breadcrumbs
               items={[
                 { label: "Campaigns", to: campaignsPath() },

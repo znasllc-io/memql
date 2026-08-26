@@ -32,6 +32,7 @@ export function StoreDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
+          subtitle="Stores"
           eyebrow={storeId}
           title={store?.domain ?? storeId}
           blurb="Shopify owns this store's data and MemQL holds a generated mirror of it. Webhooks keep the mirror current; reconciliation repairs what they lose, and the drift below is the measurement of how much that is."

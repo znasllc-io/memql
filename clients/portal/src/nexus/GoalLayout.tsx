@@ -65,13 +65,12 @@ export function GoalLayout(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
-            <>
-              nexus
-              <span aria-hidden="true"> · </span>
-              {planId}
-            </>
-          }
+          pageId="nexus"
+          subtitle="Nexus"
+          // The plan id stays in the MONO slot, which is the one case that
+          // slot is for: this is a row's own address, and it is what an
+          // operator pastes into a query or quotes in a thread.
+          eyebrow={planId}
           title={plan === null ? (loading ? "Loading the goal" : "Goal") : plan.goal || planId}
           blurb="A goal's world, as the system works on it."
           // The picker is the LIST; this is the VERB. Both in the header

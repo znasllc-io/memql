@@ -61,16 +61,12 @@ export interface ViewProps {
 
 export function ViewFrame({
   view,
-  conceptId,
   meta,
   actions,
   aside,
   children,
 }: {
   view: ViewDefinition;
-  // The id shown in the eyebrow. Usually the view's own concept; passed in so
-  // a view whose header is about something else does not have to lie.
-  conceptId: string;
   // Right-aligned, small: the honest state of the data behind the page (how
   // much of the population is loaded, and how to load more).
   meta?: ReactNode;
@@ -84,7 +80,15 @@ export function ViewFrame({
     <section className="flex min-h-full flex-col gap-6 pb-8 xl:flex-row xl:items-start xl:gap-8">
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         <PageHeader
-          eyebrow={conceptId}
+          // THE CONCEPT ID LEFT THIS HEADER (memql#4657). It was the most
+          // prominent line above the page's name, in monospace, on five
+          // screens -- the single most useful fact for whoever was about to
+          // go and query the rows, and engine vocabulary for everybody else.
+          // It is in this area's guide now, under Technical details, and the
+          // "Look it up in the registry" link on the missing-concept state is
+          // still the door for anyone who wants the browser.
+          pageId="views"
+          subtitle="Views"
           title={view.title}
           blurb={view.blurb}
           {...(actions === undefined ? {} : { actions })}

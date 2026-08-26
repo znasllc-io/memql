@@ -350,9 +350,10 @@ describe("the Users view", () => {
     const { container } = renderView({}, "/views/users");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
 
-    // The eyebrow names the concept the page is about -- the one thing that
-    // tells an operator which rows these are.
-    expect(screen.getByText(USER)).toBeTruthy();
+    // THE CONCEPT ID LEFT THE HEADER (memql#4657). What is above the title is
+    // the area, in words; the id is in the Views guide under Technical
+    // details, which is where the people who query rows will look.
+    expect(screen.queryByText(USER)).toBeNull();
 
     const classes = viewKitClasses(container);
     expect(classes.has("vk-stat")).toBe(true);
@@ -403,14 +404,16 @@ describe("the retired view slugs", () => {
   it("sends /views/people to the Users view", async () => {
     renderView({}, "/views/people");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
-    expect(screen.getByText(USER)).toBeTruthy();
+    // Landed on the Users view, asserted by its own heading rather than by
+    // the concept id the header no longer carries.
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Users" })).toBeTruthy();
     expect(screen.queryByText(/has no view called/)).toBeNull();
   });
 
   it("sends /views/customers to the Accounts view", async () => {
     renderView({}, "/views/customers");
     await waitFor(() => expect(screen.getByText("Northwind Trading")).toBeTruthy());
-    expect(screen.getByText(ACCOUNT)).toBeTruthy();
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Accounts" })).toBeTruthy();
     expect(screen.queryByText(/has no view called/)).toBeNull();
   });
 

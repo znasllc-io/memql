@@ -43,7 +43,8 @@ export function GoalsPage(): ReactNode {
     <Container>
       <section className="flex flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow="nexus"
+          pageId="nexus"
+          subtitle="Nexus"
           title="Goals"
           blurb="Everything you have asked for -- running first, then newest."
           {...(inviting ? {} : { actions: <NewGoalAction tone="primary" /> })}

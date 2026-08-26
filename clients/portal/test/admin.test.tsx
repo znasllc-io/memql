@@ -448,8 +448,11 @@ describe("the retired admin surfaces", () => {
   it("sends /admin/people to the Users view, where the verbs now live", async () => {
     renderAdmin({}, "/admin/people");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
-    // The view's eyebrow, not an admin page's.
-    expect(screen.getByText("v1:identity:user")).toBeTruthy();
+    // The VIEW, not an admin page. Its heading, and the plain line above it
+    // that replaced the concept-id eyebrow in memql#4657 -- the id itself is
+    // in the area's guide now, where its audience is.
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Users" })).toBeTruthy();
+    expect(screen.queryByText("v1:identity:user")).toBeNull();
   });
 });
 
@@ -637,11 +640,15 @@ describe("signing keys", () => {
   it("says why there is no rotate button anywhere in a real deployment", async () => {
     renderAdmin({}, "/admin/keys");
     await waitFor(() => expect(screen.getByText("Rotating a key")).toBeTruthy());
-    // The retired console's "Rotate now" was inert in every environment that
-    // seals the key into the env envelope -- which is every deployed one. The
-    // page states the actual procedure instead of pointing at a broken button.
-    expect(screen.getByText(/MEMQL_IDENTITY_SIGNING_KEY_B64/)).toBeTruthy();
-    expect(screen.getByText(/re-seal and a rolling restart/)).toBeTruthy();
+    // The retired console's "Rotate now" was inert wherever every replica has
+    // to hold the same key -- which is every deployed cluster. The page states
+    // WHY, in the interface's own voice, instead of pointing at a broken
+    // button. The env var it used to name is in this page's guide since
+    // memql#4657: an operator who can act on it is an owner or admin, and
+    // that is exactly who the disclosure opens for.
+    expect(screen.getByText(/the SAME signing key/)).toBeTruthy();
+    expect(screen.getByText(/followed by a restart, not a click/)).toBeTruthy();
+    expect(screen.queryByText(/MEMQL_IDENTITY_SIGNING_KEY_B64/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Rotate/ })).toBeNull();
   });
 });

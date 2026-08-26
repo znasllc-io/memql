@@ -1,6 +1,16 @@
 import { useRef, useState, type ReactNode } from "react";
 
-import { Button, Callout, Field, FormRow, LabelChips, Panel, Select, Skeleton } from "../ui";
+import {
+  Button,
+  Callout,
+  ErrorNotice,
+  Field,
+  FormRow,
+  LabelChips,
+  Panel,
+  Select,
+  Skeleton,
+} from "../ui";
 import { chipsFromMap, mapFromChips, parseLabelChip } from "./labels";
 import {
   FALLBACK_BLURB,
@@ -98,16 +108,19 @@ export function RoutingPolicyEditor(): ReactNode {
     <Panel>
       <div className="flex flex-col gap-4">
         {state.error === "" ? null : (
-          <Callout tone="danger" title="Could not read your routing policy">
-            {state.error} The router is unaffected by this -- it reads the policy itself, and
-            what is shown below is only this page&rsquo;s copy.
-          </Callout>
+          <ErrorNotice
+            sentence="Could not read your routing policy."
+            next="Your work still routes the way you set it -- this page could not read the setting, not change it."
+            detail={state.error}
+          />
         )}
 
         {state.saveError === "" ? null : (
-          <Callout tone="danger" title="The policy was not saved">
-            {state.saveError}
-          </Callout>
+          <ErrorNotice
+            sentence="The policy was not saved."
+            next="What is on screen is your edit, not what the cluster holds."
+            detail={state.saveError}
+          />
         )}
 
         {policy === null ? (

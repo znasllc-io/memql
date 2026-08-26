@@ -165,14 +165,14 @@ function Composer({
             disabled={!isSavable(draft) || saving}
             title={
               isSavable(draft)
-                ? "Save this view as a row you own"
+                ? "Save this view"
                 : "A view needs a name and at least one element"
             }
           >
             {saving ? "Saving…" : mode === "create" ? "Save view" : "Save changes"}
           </ComposeButton>
           <span className="text-xs text-subtle">
-            Saved as a row in v1:portalviews:view, owned by you.
+            Saved to your own views. Nobody else&rsquo;s list changes.
           </span>
         </div>
       </header>

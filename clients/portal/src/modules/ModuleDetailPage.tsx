@@ -49,7 +49,7 @@ export function ModuleDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
+          subtitle={
             <Breadcrumbs items={[{ label: "Modules", to: MODULES_ROOT }, { label: name }]} />
           }
           title={name}

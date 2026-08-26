@@ -2,7 +2,16 @@ import { useState, type ReactNode } from "react";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { useAuth } from "../auth/AuthProvider";
-import { Badge, Band, Button, Callout, ConfirmDialog, EmptyState, Panel, Skeleton } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  ErrorNotice,
+  Panel,
+  Skeleton,
+} from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { formatMoment } from "./MeLayout";
 import { SESSION_CONCEPT, sessionTableRows } from "./rows";
@@ -71,17 +80,19 @@ export function SessionsTab(): ReactNode {
   return (
     <div className="flex flex-col gap-6">
       {sessions.actionError === "" ? null : (
-        <Callout tone="danger" title="That did not work">
-          {sessions.actionError}
-        </Callout>
+        <ErrorNotice
+          sentence="That did not work."
+          next="Nothing changed; try it again."
+          detail={sessions.actionError}
+        />
       )}
 
       {sessions.error !== "" ? (
-        <Callout tone="danger" title="We could not read your sessions">
-          {sessions.error} Nothing is shown below rather than an empty list -- an empty table here
-          would read as &ldquo;no other device can reach your account&rdquo;, which is exactly the
-          wrong thing to be reassured by.
-        </Callout>
+        <ErrorNotice
+          sentence="Could not read your sessions."
+          next="Nothing is listed below. Do not read that as no other device being signed in -- this read failed, so the answer is unknown."
+          detail={sessions.error}
+        />
       ) : sessions.loading && rows.length === 0 ? (
         <Panel>
           <Skeleton variant="rows" rows={3} />

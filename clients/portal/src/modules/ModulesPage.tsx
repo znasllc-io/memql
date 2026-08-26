@@ -2,15 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Module } from "@znasllc-io/memql-sdk-core/client";
 
-import {
-  Badge,
-  Band,
-  Button,
-  Container,
-  DataText,
-  ErrorNotice,
-  Skeleton,
-} from "../ui";
+import { Badge, Band, Button, Container, DataText, ErrorNotice, Skeleton } from "../ui";
 import { AreaFrame } from "../app/AreaFrame";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "./ModulesRefused";

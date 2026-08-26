@@ -70,7 +70,8 @@ export function CampaignsPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={CAMPAIGN_CONCEPT_ID}
+          pageId="cluster.integrations"
+          subtitle="Integrations"
           title="Email campaigns"
           blurb="Audiences, templates and the campaigns that pair them. Open a campaign to send it — scheduling records an intended time and does not start a send on its own."
           actions={

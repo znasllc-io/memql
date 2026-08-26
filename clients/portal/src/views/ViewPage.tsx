@@ -123,7 +123,6 @@ export function ViewPage(): ReactNode {
   return (
     <ViewFrame
       view={view}
-      conceptId={view.conceptId}
       meta={
         <PopulationMeta
           count={data.rows.length}

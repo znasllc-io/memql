@@ -42,7 +42,7 @@ export function AppSessionPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow="v1:worker:appSession"
+          subtitle="Local apps"
           title={`${appLabel(session.app)} · ${session.kind}`}
           blurb={
             session.workspace === ""

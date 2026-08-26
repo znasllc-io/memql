@@ -63,11 +63,15 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
       <div className="min-w-0">
-        {eyebrow === undefined ? null : (
-          <div className="font-mono text-xs break-all text-subtle">{eyebrow}</div>
-        )}
+        {/* SUBTITLE FIRST, then eyebrow. A page that carries both reads
+            "Nexus" / the goal's id / the goal -- area, then address, then
+            name, which is the order a person narrows in. The other way round
+            put a monospace id above the word that says where you are. */}
         {subtitle === undefined ? null : (
           <div className="text-xs text-muted">{subtitle}</div>
+        )}
+        {eyebrow === undefined ? null : (
+          <div className="font-mono text-xs break-all text-subtle">{eyebrow}</div>
         )}
         <div className="mt-1 flex items-center gap-1.5">
           <h1 className="min-w-0 text-xl font-semibold tracking-tight">{title}</h1>

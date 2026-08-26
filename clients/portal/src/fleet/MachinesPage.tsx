@@ -3,7 +3,16 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
-import { Band, Button, Callout, Container, EmptyState, Select, Skeleton } from "../ui";
+import {
+  Band,
+  Button,
+  Callout,
+  Container,
+  EmptyState,
+  ErrorNotice,
+  Select,
+  Skeleton,
+} from "../ui";
 import { AddMachine } from "./AddMachine";
 import { FleetFrame, LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
@@ -111,10 +120,11 @@ export function MachinesPage(): ReactNode {
           }
         >
           {state.error !== "" ? (
-            <Callout tone="danger" title="Could not read the machines">
-              {state.error} Nothing is listed rather than an empty table -- an empty list here
-              would read as &ldquo;you have no machines&rdquo;, which is not what happened.
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read the machines."
+              next="Nothing is listed below. Do not read that as having no machines -- this read failed, so the answer is unknown."
+              detail={state.error}
+            />
           ) : state.loading && state.machines.length === 0 ? (
             <Skeleton variant="rows" rows={3} />
           ) : empty ? (

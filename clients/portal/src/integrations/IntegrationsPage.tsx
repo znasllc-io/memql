@@ -136,11 +136,11 @@ export function IntegrationsPage(): ReactNode {
 
             <Band title="Email settings" meta="non-secret, and the source decides whether it is changeable">
               <p className="mb-3 max-w-3xl text-sm text-muted">
-                A setting sourced from <code className="font-mono text-xs">globalVariable</code> is a
-                row in the graph, so it can be changed without a redeploy. One sourced from{" "}
-                <code className="font-mono text-xs">env</code> comes from the bootstrap envelope, and
-                the resolver reads the environment first and stops — writing a row for it would have
-                no effect.
+                Some of these you can change here and they take effect straight
+                away. The rest are fixed when the cluster starts, and each one
+                says which it is -- editing a fixed setting from a browser would
+                appear to work and change nothing, so the page does not offer
+                it.
               </p>
               <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
                 <ViewElement
