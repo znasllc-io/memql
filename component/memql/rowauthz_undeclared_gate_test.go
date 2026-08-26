@@ -308,6 +308,30 @@ const undeclared4301MagicLinkByIdReason = "memql#4301 -- device-bound flow's by-
 // concept browse.
 const undeclared4270InvitationReason = "memql#4270 -- owner/admin console read; the concept cannot carry a tier because its redeem lookup is pre-actor (see undeclared3408EnrolmentReason), and this query gates itself with requiresOwnerOrAdmin instead"
 
+// undeclared4612UserInvitationReason covers the kind="user" half of the redeem
+// lookup, split out of invitationByTokenHash by memql#4612.
+//
+// It is the same read as its guest twin, on the same concept, and it takes the
+// same pre-actor argument undeclared4270InvitationReason spells out: the token
+// IS the credential, so at lookup time no authenticated caller exists, an owner
+// tier would compare the row against actor.userId == "" and match nothing, and
+// every redeem would turn into a silent "invalid". Declaring a tier to satisfy
+// this gate would break the flow the gate protects.
+//
+// What memql#4612 changed is which rows come back, not who may ask.
+// invitationByTokenHash filters kind=="guest" -- it predates user invitations --
+// so the shared store method returned nothing for every kind="user" row and
+// user-invitation redemption never once succeeded. The fix is a second door
+// rather than a widened one, because widening a credential lookup so a user
+// invitation can return through the guest path makes every caller responsible
+// for a privilege boundary the filter used to hold.
+//
+// It carries its own constant rather than the grandfather marker because it is
+// NEW. This population only shrinks, and an entry added after the seed has to
+// say why it is here rather than inheriting a reason that means "nobody has
+// looked at this one yet".
+const undeclared4612UserInvitationReason = "memql#4612 -- the kind=\"user\" half of the redeem lookup, split from invitationByTokenHash; pre-actor by construction for the reason undeclared4270InvitationReason records, so a tier on the concept would turn every redeem into a silent invalid"
+
 // undeclared3964RecoveryKeyReason covers the two reads memql#3964 added for the
 // owner recovery key.
 //
@@ -720,6 +744,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"invitationByPreviousTokenHash": {"v1:identity:invitation", undeclaredGrandfatherReason},
 	"invitationByTokenHash":         {"v1:identity:invitation", undeclaredGrandfatherReason},
 	"pendingUserInvitations":        {"v1:identity:invitation", undeclared4270InvitationReason},
+	"userInvitationByTokenHash":     {"v1:identity:invitation", undeclared4612UserInvitationReason},
 
 	// v1:identity:magicLinkRequest
 	"expiredMagicLinkRequests":    {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},
