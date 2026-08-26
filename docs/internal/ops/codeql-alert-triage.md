@@ -10,8 +10,14 @@ owner: znas
 # CodeQL alert triage
 
 The default CodeQL suite runs on every push to `main`. This is the standing
-record of how its open alerts were resolved: **6 were real and are fixed in
-code; 17 were false positives and are dismissed with the reasoning below.**
+record of how its open alerts were resolved. Twenty-six were triaged: the 23
+open on `main`, plus 3 that arrived with the local-models-fleet epic.
+
+**Six were real and are fixed in code. Twenty were false positives.** Five of
+the six fixes cleared the analysis; the sixth is dismissed WITH the fix cited,
+because CodeQL cannot recognise the validator that now stands in front of it
+(see the residual section below). So every alert here is either fixed and
+gone, or dismissed with a reason -- none is merely open.
 
 Dismissals live on the alert itself (GitHub keeps them across re-scans of the
 same finding). This file exists because a dismissal reason is one sentence and
@@ -112,6 +118,13 @@ The query flags SHA-256 reached by a value it has classified as a password.
 | `component/memql/runtime_evaluator.go` | the DSL `hash()` builtin |
 | `component/memql/mutation_templates.go` x2 | the same builtin, in the template evaluator |
 | `component/identity/magiclink/verifier.go` | `(userId, email)` -- a deterministic identity id |
+| `component/memql/ai_guard_fleet.go` x3 | `(model, kind, conversation)` -- the loop-breaker fingerprint |
+
+The last three arrived with the local-models-fleet epic (memql#4694) rather
+than with this pass, and are the same shape as the identical-request breaker
+in `ai_guard.go`: a fingerprint exists so that two identical calls hash the
+same, which is the property a deliberately slow, deliberately salted hash is
+designed to destroy.
 
 **The property that makes them wrong:** every one is a DETERMINISTIC
 IDENTIFIER, not a stored secret. The digest is the lookup key, the row id, or
