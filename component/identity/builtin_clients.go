@@ -113,7 +113,7 @@ type BuiltinClient struct {
 var builtinClients = []BuiltinClient{
 	{
 		Client: RegisteredClient{
-			ClientId:     BuiltinClientVSCode,
+			ClientId: BuiltinClientVSCode,
 			// BOTH redirects, because which one the editor uses is a
 			// property of WHERE it is running, not of the cluster: loopback
 			// on a local editor, the vscode:// URI under Remote-SSH,

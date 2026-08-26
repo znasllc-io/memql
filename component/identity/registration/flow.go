@@ -153,6 +153,27 @@ func Decide(cfg identity.Config, email string, invite *Invitation) (Decision, er
 			Action: ActionCreateAccessRequest,
 			Reason: "waitlist",
 		}, nil
+
+	case identity.RegistrationModeDirectory:
+		// DIRECTORY MEMBERSHIP IS THE INVITATION (memql#4611), and this
+		// function is reached from the EMAIL path -- /auth/magic-link -- so
+		// arriving here means somebody typed an address rather than
+		// authenticating through the provider.
+		//
+		// That is a refusal, and the reason it is a distinct mode rather than
+		// a flag on invite_only is what the refusal has to SAY: under
+		// invite_only the answer is "ask an admin for an invitation", and here
+		// it is "sign in with your organisation account", which is a different
+		// instruction to a person who has one and does not know it applies.
+		//
+		// The IdP path does not come through Decide at all: a verified
+		// upstream identity is admitted by the callback handler, which is the
+		// whole point -- the gate is somebody else's directory, and it cannot
+		// be evaluated from an email address here.
+		return Decision{
+			Action: ActionReject,
+			Reason: "directory_sign_in_required",
+		}, ErrEmailNotAllowed
 	}
 
 	// Defensive: unknown mode falls through to reject.
