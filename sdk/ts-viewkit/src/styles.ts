@@ -935,6 +935,127 @@ const elementStyles = `
 }
 .vk-map-point { stroke: var(--vk-chart-surface, var(--vk-chart-surface-default)); stroke-width: 1; }
 .vk-map-point[data-selected="true"] { stroke: var(--vk-fg, currentColor); stroke-width: 1.5; }
+
+/* ---- arrangement layouts (epic memql#4661) ------------------------------ */
+
+/* The five grids. Defined HERE rather than per host for the reason the row
+   contract is: two hosts deriving "what does a dashboard look like" from a
+   class name is two divergent answers, starting on day one.
+
+   NO COLOURS AND NO TYPE. A layout is a placement, and everything visible
+   inside a slot is the element's own. That is what lets these five rules be
+   theme-neutral without a single token.
+
+   EVERY GRID COLLAPSES TO ONE COLUMN at narrow widths, and none of them lets
+   a slot's content set the track width -- minmax(0, Nfr) throughout, since a
+   bare 1fr means minmax(auto, 1fr) and a wide table inside would push the
+   grid past the viewport. A page that scrolls sideways is the failure this
+   epic's layouts could most easily introduce. */
+
+.vk-arrangement { display: grid; gap: 24px; align-items: start; }
+.vk-slot { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+
+/* stack -- one column, entries in order. Byte-for-byte the behaviour that
+   preceded layouts, because it is what every repair falls back to. */
+.vk-arrangement-stack { grid-template-columns: minmax(0, 1fr); }
+
+/* dashboard -- readings across the top, shapes side by side, roll below. */
+.vk-arrangement-dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vk-arrangement-dashboard > .vk-slot-header { grid-column: 1 / -1; }
+.vk-arrangement-dashboard > .vk-slot-roll { grid-column: 1 / -1; }
+/* The shapes slot is the one that sits side by side, so it lays its OWN
+   children out rather than stacking them: it is the slot whose contents are
+   plural by design. */
+.vk-arrangement-dashboard > .vk-slot-shapes {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* split -- the list left, one row's detail right. */
+.vk-arrangement-split { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.vk-arrangement-split > .vk-slot-header { grid-column: 1 / -1; }
+
+/* focus -- one hero at ~70%, the rest in a column beside it. */
+.vk-arrangement-focus { grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); }
+
+/* gallery -- readings as a strip, then a card grid. The grid itself is the
+   roll element's own (rowList in card mode); this only gives it the width. */
+.vk-arrangement-gallery { grid-template-columns: minmax(0, 1fr); }
+
+/* The slots that are not a grid track of their own.
+
+   flow is the OVERFLOW slot every layout falls back to -- the whole of a
+   stack, and in the other four the home for entries the layout has no
+   natural place for. It always spans the grid, because an entry that landed
+   in the overflow has already lost its intended position and squeezing it
+   into one column of a dashboard would lose its width as well. */
+.vk-slot-flow { grid-column: 1 / -1; }
+
+/* lead and aside are the focus layout's two tracks. They are named rather
+   than positional so a narrow viewport can stack them without either
+   changing meaning: the lead is still what the page is about. */
+.vk-slot-lead { grid-column: 1; }
+.vk-slot-aside { grid-column: 2; }
+@media (max-width: 900px) {
+  .vk-slot-lead,
+  .vk-slot-aside { grid-column: 1 / -1; }
+}
+
+/* The split's right-hand pane. Sticky because it shows the row the LIST is
+   pointing at: scrolling a long list past a detail pane that scrolled away
+   with it means scrolling back up to read what you selected. The top offset
+   is deliberately 0 -- the host owns its own header height and applies its
+   own offset if it has one. */
+.vk-slot-detail { position: sticky; top: 0; align-self: start; }
+@media (max-width: 900px) {
+  .vk-slot-detail { position: static; }
+}
+
+@media (max-width: 900px) {
+  .vk-arrangement-dashboard,
+  .vk-arrangement-split,
+  .vk-arrangement-focus {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vk-arrangement-dashboard > .vk-slot-shapes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- role emphasis ------------------------------------------------------ */
+
+/* Emphasis is a class on ONE element's wrapper, put there by the host from
+   roleClassName(). Nothing here changes an element's markup -- only how much
+   room it gets and how loud it is -- which is what lets a role be ignored
+   safely by an element that cannot express one: no rule matches, and the
+   element renders exactly as it always did. */
+
+/* The BASELINE. Standard is what every element stored before roles existed
+   means, so it must not restyle anything -- it exists so the host can put a
+   role class on every wrapper unconditionally instead of branching, and so
+   that "which class is on this element" answers the question directly when
+   somebody is looking at a page wondering why one thing is large. */
+.vk-role-standard { display: contents; }
+
+/* A hero chart, map or scene gets height it cannot ask for itself: a chart
+   sizes to its container, and in a focus lead that container is the page.
+   One selector covers all three -- the map renders into vk-chart-figure too,
+   deliberately, so the two share a frame. */
+.vk-role-hero .vk-chart-figure { min-height: 320px; }
+
+/* THE ONE SANCTIONED BIG-NUMBER MOMENT PER PAGE. A hero stat strip reads at
+   display scale; everywhere else the numerals stay at their own size, which
+   is what keeps this meaningful. em rather than a fixed size so it scales
+   with whatever the host set around it. */
+.vk-role-hero .vk-stat-value { font-size: 3em; }
+.vk-role-hero .vk-stat { min-width: 10em; }
+
+/* A supporting element compresses: quieter, not smaller in a way that hurts.
+   The type stays at its own size; padding and chart height give way. */
+.vk-role-supporting .vk-chart-figure { min-height: 160px; }
+.vk-role-supporting .vk-stat { padding: 6px 8px; }
+.vk-role-supporting .vk-stat-value { font-size: 1.4em; }
 `;
 
 // One sheet for consumers: the core row/detail contract plus the element

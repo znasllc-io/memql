@@ -9,7 +9,7 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Skeleton } from "../ui";
-import { ArrangementBands } from "./ArrangementBands";
+import { ArrangementLayout } from "./ArrangementLayout";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
 import type { ComposerAction, ComposerDraft } from "./composerState";
 import { useArrangementSuggestion, type ArrangementSuggester } from "./suggest";
@@ -181,7 +181,7 @@ export function ComposerSection({
       {arrangement === undefined ? (
         <Skeleton variant="rows" rows={4} />
       ) : (
-        <ArrangementBands
+        <ArrangementLayout
           arrangement={arrangement}
           concept={concept}
           rows={data.rows}

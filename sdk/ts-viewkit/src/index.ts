@@ -54,6 +54,20 @@ export type {
 } from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
 
+// Where the elements of an arrangement go. A PLAN rather than a renderer:
+// the host wraps each element itself (selection, keyboard, theme), and what
+// it should not re-derive is which slot each entry belongs in.
+export {
+  planLayout,
+  layoutClassName,
+  slotClassName,
+  roleClassName,
+  type LayoutPlan,
+  type LayoutSlotName,
+  type PlannedEntry,
+  type PlannedSlot,
+} from "./layout.js";
+
 // Element fitness -- the contract a view system matches elements against.
 export {
   profileConcept,
