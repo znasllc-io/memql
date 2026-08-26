@@ -13,6 +13,8 @@ import assert from "node:assert/strict";
 import {
   ARRANGEMENT_PROPOSAL_SCHEMA,
   arrangementProblems,
+  ENTRY_ROLES,
+  SECTION_LAYOUTS,
   arrangementRequest,
   elementCandidates,
   elementOptions,
@@ -375,8 +377,14 @@ test("the schema and the parser agree on the shape", () => {
   // what comes back. Two descriptions of one shape, one file apart, so pin
   // that they name the same things.
   const props = ARRANGEMENT_PROPOSAL_SCHEMA.properties;
-  assert.deepEqual(Object.keys(props).sort(), ["elements", "reasoning"]);
+  assert.deepEqual(Object.keys(props).sort(), ["elements", "layout", "reasoning"]);
   const item = props.elements.items.properties;
-  assert.deepEqual(Object.keys(item).sort(), ["band", "bindings", "element", "title"]);
+  assert.deepEqual(Object.keys(item).sort(), ["band", "bindings", "element", "role", "title"]);
   assert.deepEqual([...item.band.enum], [...BAND_ROLES]);
+  // The two dimensions added in epic memql#4661. Their enums are pinned the
+  // same way the band's is: the schema is what a provider enforces, and a
+  // value it can emit that readArrangement cannot parse is a reply that
+  // silently degrades.
+  assert.deepEqual([...props.layout.enum], [...SECTION_LAYOUTS]);
+  assert.deepEqual([...item.role.enum], [...ENTRY_ROLES]);
 });

@@ -11,7 +11,7 @@ import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Empty } from "../components/StatusMessage";
 import { Band, Button, Container, ErrorNotice, Skeleton } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
   CREDENTIAL_CONCEPT,
@@ -114,7 +114,7 @@ export function IntegrationsPage(): ReactNode {
             ) : null}
 
             <Band title="Configured" meta="registration is not configuration">
-              <ViewElement
+              <ElementView
                 element={PROPORTION_BAR_ELEMENT}
                 rows={registry}
                 concept={INTEGRATION_CONCEPT}
@@ -123,7 +123,7 @@ export function IntegrationsPage(): ReactNode {
             </Band>
 
             <Band title="Registered on this node" panel>
-              <ViewElement
+              <ElementView
                 element={TABLE_ELEMENT}
                 rows={registry}
                 concept={INTEGRATION_CONCEPT}
@@ -143,7 +143,7 @@ export function IntegrationsPage(): ReactNode {
                 it.
               </p>
               <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
-                <ViewElement
+                <ElementView
                   element={TABLE_ELEMENT}
                   rows={settings}
                   concept={SETTING_CONCEPT}
@@ -162,14 +162,14 @@ export function IntegrationsPage(): ReactNode {
                 </code>{" "}
                 against the cluster; the exact variable name for each slot is in the table below.
               </p>
-              <ViewElement
+              <ElementView
                 element={CHECKLIST_ELEMENT}
                 rows={credentials}
                 concept={CREDENTIAL_CONCEPT}
                 options={{ bindings: { group: [] } }}
               />
               <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-surface p-1">
-                <ViewElement
+                <ElementView
                   element={TABLE_ELEMENT}
                   rows={credentials}
                   concept={CREDENTIAL_CONCEPT}

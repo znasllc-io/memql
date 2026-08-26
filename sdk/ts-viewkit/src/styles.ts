@@ -935,6 +935,252 @@ const elementStyles = `
 }
 .vk-map-point { stroke: var(--vk-chart-surface, var(--vk-chart-surface-default)); stroke-width: 1; }
 .vk-map-point[data-selected="true"] { stroke: var(--vk-fg, currentColor); stroke-width: 1.5; }
+
+/* ---- cards (epic memql#4661) -------------------------------------------- */
+
+/* The gallery layout's presentation of a row list: the same rows, the same
+   display card, laid out as a grid. Every visible part of a card is a
+   vk-row-* class the list already emits, so a concept's own display identity
+   drives its card with no per-concept code and no second contract. */
+.vk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 8px;
+  min-width: 0;
+}
+.vk-card:hover { background: var(--vk-hover-bg, transparent); }
+.vk-card[data-selected="true"] {
+  background: var(--vk-selected-bg, transparent);
+  color: var(--vk-selected-fg, inherit);
+}
+/* A card's primary is its heading: in a column of rows the primary is
+   distinguished by position, and in a grid of cards it has to be
+   distinguished by weight. */
+.vk-card .vk-row-primary { font-weight: 600; }
+/* ...and the status badge goes to the bottom rather than trailing the line,
+   since a card has vertical room a row does not. */
+.vk-card .vk-row-status { align-self: flex-start; margin-top: 4px; }
+
+/* ---- cell personality (epic memql#4661) --------------------------------- */
+
+/* One rule per value KIND, so a timestamp reads the same in a table, a card
+   and a concept browser. Everything here is theme-neutral or goes through a
+   --vk-* token: a pill that hardcoded a background would be unreadable in one
+   of the two themes, which is the failure mode this whole family risks. */
+
+/* An absent value. Distinct from an empty cell on purpose: blank is ambiguous
+   between "no value" and "the renderer gave up", and only one of those is
+   ever true here. */
+.vk-cell-absent { color: var(--vk-muted-fg, inherit); opacity: 0.6; }
+
+/* Elapsed time. The exact instant is on the title AND the datetime attribute
+   -- title alone is unreachable on a touch device. The dotted underline is
+   the standing convention for "there is more here on hover" and costs nothing
+   where there is no hover. */
+.vk-cell-time {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vk-border, currentColor);
+}
+
+/* Numerals: tabular so a column lines up digit for digit, which is the whole
+   reason a column of numbers is readable at all. The right-alignment is on
+   the CELL rather than here, because it is the cell that has the width. */
+.vk-cell-number { font-variant-numeric: tabular-nums; }
+.vk-table-cell[data-vk-cell="number"] { text-align: right; }
+.vk-table-head[data-vk-cell="number"] { text-align: right; }
+
+/* A boolean as a dot plus its label. The dot carries the state and the label
+   carries the field's meaning -- neither alone is readable, which is why the
+   literal "true" was worth replacing. */
+.vk-cell-bool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.vk-cell-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  /* currentColor at low alpha for false, full for true: one declaration, no
+     palette, correct in both themes. */
+  background: currentColor;
+  opacity: 0.25;
+}
+.vk-cell-bool[data-value="true"] .vk-cell-dot { opacity: 1; }
+
+/* An enum member as a pill: a closed set should look closed. Colour comes
+   from the host via [data-status], which is the same split the row status
+   badge makes -- prose for people, data attributes for stylesheets. */
+.vk-cell-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--vk-border, currentColor);
+  /* A WASH AS WELL AS A BORDER, found in the visual QA sweep (task
+     memql#4675). The border alone is --vk-border, and a host is free to make
+     that very quiet: in the portal's dark theme it resolves to about 1.5:1
+     against the ground, at which point a pill reads as plain text and the
+     "this is one of a closed set" signal is gone.
+
+     Derived from currentColor rather than from a token, so it needs no new
+     variable and is correct in both themes by construction -- 8% of the text
+     colour is a faint lift on a light ground and a faint lift on a dark one.
+     A fixed rgba() would have had to pick a direction and would be wrong in
+     one of them. */
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* A RESOLVED reference: the target row's own label, reading as prose because
+   that is what it is -- a name, not an id. The dotted underline is the same
+   "there is more here" convention the elapsed-time cell uses, and here the
+   more is the id on hover. */
+.vk-cell-ref {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vk-border, currentColor);
+}
+
+/* An id, and the fallback for a reference that could not be resolved. Reads
+   as DATA: monospace, tight, quieter than prose. Never blank -- an id is
+   always better than nothing, which is the rule lookups build on. */
+.vk-cell-data {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+/* ---- arrangement layouts (epic memql#4661) ------------------------------ */
+
+/* The five grids. Defined HERE rather than per host for the reason the row
+   contract is: two hosts deriving "what does a dashboard look like" from a
+   class name is two divergent answers, starting on day one.
+
+   NO COLOURS AND NO TYPE. A layout is a placement, and everything visible
+   inside a slot is the element's own. That is what lets these five rules be
+   theme-neutral without a single token.
+
+   EVERY GRID COLLAPSES TO ONE COLUMN at narrow widths, and none of them lets
+   a slot's content set the track width -- minmax(0, Nfr) throughout, since a
+   bare 1fr means minmax(auto, 1fr) and a wide table inside would push the
+   grid past the viewport. A page that scrolls sideways is the failure this
+   epic's layouts could most easily introduce. */
+
+.vk-arrangement { display: grid; gap: 24px; align-items: start; }
+.vk-slot { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+
+/* stack -- one column, entries in order. Byte-for-byte the behaviour that
+   preceded layouts, because it is what every repair falls back to. */
+.vk-arrangement-stack { grid-template-columns: minmax(0, 1fr); }
+
+/* dashboard -- readings across the top, shapes side by side, roll below. */
+.vk-arrangement-dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vk-arrangement-dashboard > .vk-slot-header { grid-column: 1 / -1; }
+.vk-arrangement-dashboard > .vk-slot-roll { grid-column: 1 / -1; }
+/* The shapes slot is the one that sits side by side, so it lays its OWN
+   children out rather than stacking them: it is the slot whose contents are
+   plural by design. */
+.vk-arrangement-dashboard > .vk-slot-shapes {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* split -- the list left, one row's detail right. */
+.vk-arrangement-split { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.vk-arrangement-split > .vk-slot-header { grid-column: 1 / -1; }
+
+/* focus -- one hero at ~70%, the rest in a column beside it. */
+.vk-arrangement-focus { grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); }
+
+/* gallery -- readings as a strip, then a card grid. The grid itself is the
+   roll element's own (rowList in card mode); this only gives it the width. */
+.vk-arrangement-gallery { grid-template-columns: minmax(0, 1fr); }
+
+/* The slots that are not a grid track of their own.
+
+   flow is the OVERFLOW slot every layout falls back to -- the whole of a
+   stack, and in the other four the home for entries the layout has no
+   natural place for. It always spans the grid, because an entry that landed
+   in the overflow has already lost its intended position and squeezing it
+   into one column of a dashboard would lose its width as well. */
+.vk-slot-flow { grid-column: 1 / -1; }
+
+/* lead and aside are the focus layout's two tracks. They are named rather
+   than positional so a narrow viewport can stack them without either
+   changing meaning: the lead is still what the page is about. */
+.vk-slot-lead { grid-column: 1; }
+.vk-slot-aside { grid-column: 2; }
+@media (max-width: 900px) {
+  .vk-slot-lead,
+  .vk-slot-aside { grid-column: 1 / -1; }
+}
+
+/* The split's right-hand pane. Sticky because it shows the row the LIST is
+   pointing at: scrolling a long list past a detail pane that scrolled away
+   with it means scrolling back up to read what you selected. The top offset
+   is deliberately 0 -- the host owns its own header height and applies its
+   own offset if it has one. */
+.vk-slot-detail { position: sticky; top: 0; align-self: start; }
+@media (max-width: 900px) {
+  .vk-slot-detail { position: static; }
+}
+
+@media (max-width: 900px) {
+  .vk-arrangement-dashboard,
+  .vk-arrangement-split,
+  .vk-arrangement-focus {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vk-arrangement-dashboard > .vk-slot-shapes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- role emphasis ------------------------------------------------------ */
+
+/* Emphasis is a class on ONE element's wrapper, put there by the host from
+   roleClassName(). Nothing here changes an element's markup -- only how much
+   room it gets and how loud it is -- which is what lets a role be ignored
+   safely by an element that cannot express one: no rule matches, and the
+   element renders exactly as it always did. */
+
+/* The BASELINE. Standard is what every element stored before roles existed
+   means, so it must not restyle anything -- it exists so the host can put a
+   role class on every wrapper unconditionally instead of branching, and so
+   that "which class is on this element" answers the question directly when
+   somebody is looking at a page wondering why one thing is large. */
+.vk-role-standard { display: contents; }
+
+/* A hero chart, map or scene gets height it cannot ask for itself: a chart
+   sizes to its container, and in a focus lead that container is the page.
+   One selector covers all three -- the map renders into vk-chart-figure too,
+   deliberately, so the two share a frame. */
+.vk-role-hero .vk-chart-figure { min-height: 320px; }
+
+/* THE ONE SANCTIONED BIG-NUMBER MOMENT PER PAGE. A hero stat strip reads at
+   display scale; everywhere else the numerals stay at their own size, which
+   is what keeps this meaningful. em rather than a fixed size so it scales
+   with whatever the host set around it. */
+.vk-role-hero .vk-stat-value { font-size: 3em; }
+.vk-role-hero .vk-stat { min-width: 10em; }
+
+/* A supporting element compresses: quieter, not smaller in a way that hurts.
+   The type stays at its own size; padding and chart height give way. */
+.vk-role-supporting .vk-chart-figure { min-height: 160px; }
+.vk-role-supporting .vk-stat { padding: 6px 8px; }
+.vk-role-supporting .vk-stat-value { font-size: 1.4em; }
 `;
 
 // One sheet for consumers: the core row/detail contract plus the element

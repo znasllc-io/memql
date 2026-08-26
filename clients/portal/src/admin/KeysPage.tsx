@@ -4,7 +4,7 @@ import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Band, MetaButton } from "../views/ViewLayout";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { AdminFrame, Elsewhere, Reading, Refused } from "./AdminLayout";
 import { signingKeyRows, SIGNING_KEY_CONCEPT } from "./rows";
 import { surfaceById } from "./urls";
@@ -106,7 +106,7 @@ export function KeysPage(): ReactNode {
             {keys.loading ? "Reading the feed…" : "The feed published no keys."}
           </p>
         ) : (
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={rows}
             concept={SIGNING_KEY_CONCEPT}

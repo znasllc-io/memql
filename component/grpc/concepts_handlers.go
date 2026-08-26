@@ -51,6 +51,13 @@ func conceptInfoFromConcept(c *memoryNodes.Concept) *memqlv1.ConceptInfo {
 	info.DataState = string(c.DataState())
 	info.DataOrigin = c.EffectiveOrigin()
 	info.DataMirroredTo = append([]string(nil), c.MirroredTo...)
+	// The declared SHAPE (epic memql#4661): the concept's fields and its
+	// relationships, projected in concept_shape.go. It lands here rather
+	// than in a second projection for the same reason the display card and
+	// the data-origins block do -- this function is the ONE thing both wire
+	// paths call, so the one-shot list and the follow-mode registry delta
+	// cannot disagree about what a client was told.
+	info.Fields, info.Relationships = conceptShape(c)
 	return info
 }
 

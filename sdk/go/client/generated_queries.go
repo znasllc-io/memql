@@ -4353,6 +4353,30 @@ func OverridesForConstructBuild(args OverridesForConstructArgs) string {
 	return b.String()
 }
 
+// PageOverride -- Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
+// A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
+// THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["pageOverride"] in generated_concepts.go).
+type PageOverrideArgs struct {
+	TargetPageId string
+}
+
+// PageOverride calls the engine query pageOverride.
+func (qc *QueryClient) PageOverride(ctx context.Context, args PageOverrideArgs) (*Result, error) {
+	call := PageOverrideBuild(args)
+	return qc.executeNamed(ctx, "pageOverride", call)
+}
+
+func PageOverrideBuild(args PageOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("query pageOverride(")
+	b.WriteString("targetPageId: ")
+	b.WriteString(quoteMemQL(args.TargetPageId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
 //
 // Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["participantByAgentSpace"] in generated_concepts.go).

@@ -53,7 +53,15 @@
 // richer layer. The <svg> itself is role="img" with a summarising aria-label.
 
 import { h, text, type VNode } from "./vnode.js";
-import { formatDate, formatDateTime, formatNumber, instantValue, numberValue, scalarText } from "./format.js";
+import {
+  formatCompact,
+  formatDate,
+  formatDateTime,
+  formatNumber,
+  instantValue,
+  numberValue,
+  scalarText,
+} from "./format.js";
 import { statusText } from "./displayCard.js";
 import {
   CATEGORICAL_MAX_DISTINCT,
@@ -117,21 +125,6 @@ export function axisScale(dataMax: number, tickCount = 4): AxisScale {
     ticks.push(Math.round(v * 1e6) / 1e6);
   }
   return { max, ticks };
-}
-
-// formatCompact keeps an axis tick short. Full precision belongs in the
-// tooltip and the direct label, not on the axis.
-export function formatCompact(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1e9) return `${trim(value / 1e9)}B`;
-  if (abs >= 1e6) return `${trim(value / 1e6)}M`;
-  if (abs >= 1e3) return `${trim(value / 1e3)}k`;
-  return formatNumber(value);
-}
-
-function trim(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  return String(rounded);
 }
 
 function truncate(value: string, max = 16): string {

@@ -1,12 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
 import { Empty } from "../components/StatusMessage";
 import { Checkbox, ErrorNotice, Skeleton, TextInput } from "../ui";
 import { filterConcepts } from "../concepts/registry";
 import { VIEWS } from "../views/registry";
 import { ComposeButton } from "./ComposeLayout";
+import { useDescribeView } from "./describe";
 import { composeNewPath, composedViewPath } from "./urls";
 import { useSavedViews } from "./useSavedViews";
 
@@ -31,6 +33,9 @@ export function ComposeHomePage(): ReactNode {
   const saved = useSavedViews();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<readonly string[]>([]);
+  const [description, setDescription] = useState("");
+  const { clients } = useCluster();
+  const describe = useDescribeView(concepts, clients?.suggest);
 
   const predefined = useMemo(() => new Set(VIEWS.map((view) => view.conceptId)), []);
   const matches = useMemo(
@@ -57,6 +62,70 @@ export function ComposeHomePage(): ReactNode {
           overrule either.
         </p>
       </header>
+
+      {/* DESCRIBE IT (epic memql#4661, task memql#4670). The other entry to a
+          view: a sentence instead of a concept picker. It is FIRST because it
+          is the one somebody who does not know what a concept is can use, and
+          because the picker below is still there when it does not work. */}
+      <section className="min-w-0">
+        <h2 className="mb-3 text-xs font-semibold tracking-wide text-muted uppercase">
+          Describe it
+        </h2>
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            describe.ask(description);
+          }}
+        >
+          <TextInput
+            value={description}
+            onChange={setDescription}
+            placeholder="the agents that failed something this week"
+            ariaLabel="Describe the view you want"
+          />
+          <ComposeButton
+            tone="accent"
+            onClick={() => describe.ask(description)}
+            disabled={describe.status === "asking" || description.trim() === ""}
+          >
+            {describe.status === "asking" ? "Thinking…" : "Draft it"}
+          </ComposeButton>
+        </form>
+        {describe.status === "unavailable" ? (
+          <p className="mt-2 rounded border border-line bg-raised px-3 py-2 text-sm text-muted">
+            {describe.unavailable} Pick the concepts yourself below and the composer will
+            match elements to them.
+          </p>
+        ) : null}
+        {describe.status === "ready" && describe.draft !== undefined ? (
+          <div className="mt-2 rounded border border-accent bg-surface px-3 py-2">
+            <p className="text-sm text-fg">
+              {describe.draft.reasoning === ""
+                ? `A draft over ${describe.draft.conceptIds.join(", ")}.`
+                : describe.draft.reasoning}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <ComposeButton
+                tone="accent"
+                onClick={() =>
+                  navigate(composeNewPath(describe.draft!.conceptIds), {
+                    // The draft rides HISTORY STATE rather than the URL: an
+                    // arrangement is a structure, and a URL carrying one is a
+                    // URL nobody can read or share. The concept ids stay in
+                    // the query string, so a reload without the state opens a
+                    // working composer over the same concepts.
+                    state: { describedDraft: describe.draft },
+                  })
+                }
+              >
+                Open it
+              </ComposeButton>
+              <ComposeButton onClick={describe.dismiss}>Not that</ComposeButton>
+            </div>
+          </div>
+        ) : null}
+      </section>
 
       <section className="min-w-0">
         <h2 className="mb-3 text-xs font-semibold tracking-wide text-muted uppercase">

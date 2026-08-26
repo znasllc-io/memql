@@ -10,10 +10,12 @@ Output ONLY a JSON object -- no markdown fences, no prose outside it:
 ```
 {
   "reasoning": "<one or two sentences, written for the person composing the view>",
+  "layout": "stack" | "dashboard" | "split" | "focus" | "gallery",
   "elements": [
     {
       "element": "<an element id from CANDIDATES, exactly>",
       "band": "reading" | "shape" | "roll",
+      "role": "hero" | "supporting" | "standard",
       "title": "<optional caption, only when the element's own title is not the clearest thing to say>",
       "bindings": { "<slot>": ["<field>", "..."] }
     }
@@ -52,13 +54,56 @@ answers.
 
 You may name ONLY these element ids. Anything else is discarded.
 
+## THE LAYOUTS
+
+{{range .layouts}}- **{{.layout}}** -- {{.description}}
+{{end}}
+
+A layout is HOW the bands are placed, and it is a property of the whole
+section. Omit it, or say `stack`, for a plain column -- which is always a
+correct answer and is what every screen in the product looked like before
+layouts existed.
+
+Two of them have a requirement, and naming one without it gets you a stack:
+
+- **focus** needs one element marked `"role": "hero"` -- the thing the screen
+  is ABOUT, rendered large with everything else in a column beside it. A
+  chart, a map, a calendar or a proportion rail carries a focus well; a table
+  rarely does.
+- **split** needs a list AND a `detail` element. It is "the rows on the left,
+  one row's full shape on the right".
+
+## THE ROLES
+
+`role` is how much of the screen one element carries.
+
+- **hero** -- AT MOST ONE PER SECTION. A screen with two heroes has none.
+- **supporting** -- present, compressed, beside the thing that matters.
+- **standard** -- the default. Omit it.
+
+A role is emphasis, not position: the band still decides which question an
+element answers.
+
 ## THE ARRANGEMENT ALREADY BUILT
 
-{{range .baseline.elements}}- {{.band}}: `{{.element}}`
+{{if .currentLayout}}Layout: {{.currentLayout}}
+{{end}}{{range .baseline.elements}}- {{.band}}: `{{.element}}`{{if .role}} ({{.role}}){{end}}
 {{end}}
 
 This works. Return it unchanged if it is right -- "the obvious arrangement is
 the correct one" is a good answer and costs the person nothing.
+{{if .hint}}
+## WHAT THEY ASKED FOR
+
+The person asked, in their own words:
+
+> {{.hint}}
+
+Honour it where the elements allow. Where they do not -- they asked to lead
+with a chart and no chart fits these rows -- do the nearest thing that works
+and say so in the reasoning rather than naming an element that is not on the
+candidate list.
+{{end}}
 
 ## HOW TO CHOOSE
 
@@ -84,6 +129,15 @@ the correct one" is a good answer and costs the person nothing.
   an epoch).
 - **`title` is for when the element's own name is not what this screen is
   about.** Most of the time leave it out.
+- **A layout is a claim that the screen has a shape.** If the elements do not
+  divide into a lead and a supporting cast, or into a list and a detail, say
+  `stack` and let the bands speak. A dashboard of one tile and one table is a
+  stack with extra CSS.
+- **Never remove what the screen is FOR.** If the arrangement you were given
+  has a list of the rows, yours has one too. Rearranging a screen is not the
+  same as changing what it is about, and an arrangement that dropped the
+  population is repaired before it is stored -- so it costs a round trip and
+  changes nothing.
 
 ## REASONING
 

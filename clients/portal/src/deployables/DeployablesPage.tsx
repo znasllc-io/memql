@@ -2,13 +2,13 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
+import { ArrangedPage } from "../pages/ArrangedPage";
+import { DEPLOYABLES_PAGE, DEPLOYABLES_PAGE_ID } from "./manifest";
 import { RowList } from "../components/RowList";
 import {
   Band,
   Button,
-  Container,
   DataText,
   EmptyState,
   ErrorNotice,
@@ -44,7 +44,25 @@ import { useDeployables, type CreateDeployableInput } from "./useDeployables";
 // that is a fact worth showing. Same shape ArtifactsPage uses for export and
 // archive, and for the same reason: a per-row action without teaching a
 // concept-agnostic component about one concept.
+// The page (epic memql#4661, task memql#4674). An ARRANGEMENT: the header, the
+// version strip and the regenerate control come from ArrangedPage.
+//
+// One widget, because most of this page is a create form plus a list whose
+// rows carry a deploy state no element expresses. The reading the arrangement
+// adds beside it is the count.
 export function DeployablesPage(): ReactNode {
+  return (
+    <ArrangedPage
+      manifest={DEPLOYABLES_PAGE}
+      pageId={DEPLOYABLES_PAGE_ID}
+      selectedRowId=""
+      onSelect={() => {}}
+    />
+  );
+}
+
+// DeployablesBody is what the `deployables` widget renders.
+export function DeployablesBody(): ReactNode {
   const navigate = useNavigate();
   const { concepts, loading: conceptsLoading, error: conceptsError } = useConcepts();
   const {
@@ -71,23 +89,23 @@ export function DeployablesPage(): ReactNode {
   }, [createdId, navigate]);
 
   return (
-    <Container>
-      <AreaFrame
-        area="library"
-        pageId="library.deployables"
-        subtitle="Library"
-        title="Deployables"
-        blurb={
-          isClusterOwner
-            ? "Every hosted surface this cluster's edge answers for, across every user -- the platform's own portal included. You see all of them because you are the cluster owner; everyone else sees their own. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-            : "The things this cluster hosts for you. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-        }
-        actions={
+    <>
+      <section className="flex min-w-0 flex-col gap-6">
+        {/* The cluster-owner sentence stays HERE rather than in the manifest's
+            blurb: it is conditional on who is reading, and a manifest is data
+            that does not know. Saying "across every user" to somebody who is
+            seeing only their own would be a page lying about its own scope. */}
+        {isClusterOwner ? (
+          <p className="text-sm text-muted">
+            You are seeing every user&apos;s deployables because you are the cluster owner;
+            everyone else sees their own.
+          </p>
+        ) : null}
+        <div className="flex justify-end">
           <Button size="xs" onClick={reload}>
             Refresh
           </Button>
-        }
-      >
+        </div>
 
         <Band title="New deployable" meta="created as a draft; deploy a bundle to it from your Library">
           <NewDeployableForm
@@ -120,8 +138,8 @@ export function DeployablesPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </AreaFrame>
-    </Container>
+      </section>
+    </>
   );
 }
 

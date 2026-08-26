@@ -1,3 +1,5 @@
 node_modules/
 dist/
 dist-test/
+# tsc -b writes this beside the config; it is a build cache, not source.
+tsconfig.tsbuildinfo

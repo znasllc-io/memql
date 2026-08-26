@@ -44,8 +44,40 @@ export {
   type RemovalItemKind,
   type RemovalItemView,
 } from "./install.js";
-export type { ConceptLike, DisplayCardHints, RowLike } from "./types.js";
+// Element personality: what one value looks like, and which fields a table
+// or a card shows. Inside view-kit so every consumer improves at once.
+export {
+  displayColumns,
+  cellKind,
+  cellAttrs,
+  cellContent,
+  DISPLAY_COLUMN_CAP,
+  type CellKind,
+  type RefResolver,
+} from "./cell.js";
+export type {
+  ConceptFieldLike,
+  ConceptLike,
+  ConceptRelationshipLike,
+  DeclaredFieldKind,
+  DisplayCardHints,
+  RowLike,
+} from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
+
+// Where the elements of an arrangement go. A PLAN rather than a renderer:
+// the host wraps each element itself (selection, keyboard, theme), and what
+// it should not re-derive is which slot each entry belongs in.
+export {
+  planLayout,
+  layoutClassName,
+  slotClassName,
+  roleClassName,
+  type LayoutPlan,
+  type LayoutSlotName,
+  type PlannedEntry,
+  type PlannedSlot,
+} from "./layout.js";
 
 // Element fitness -- the contract a view system matches elements against.
 export {
@@ -90,16 +122,24 @@ export {
   sanitizeArrangement,
   readArrangement,
   arrangementRequest,
+  arrangementLayout,
+  entryRole,
   elementOptions,
   EMPTY_ARRANGEMENT,
   ARRANGEMENT_PROPOSAL_SCHEMA,
+  SECTION_LAYOUTS,
+  ENTRY_ROLES,
+  LAYOUT_DESCRIPTIONS,
   type ArrangedElement,
   type Arrangement,
   type ArrangementFault,
+  type ArrangementOptions,
   type ArrangementProblem,
   type ArrangementProposal,
   type ArrangementRequest,
   type ElementCandidate,
+  type EntryRole,
+  type SectionLayout,
 } from "./arrangement.js";
 
 // The element library.
@@ -108,6 +148,10 @@ export {
   elementById,
   ROW_LIST_ELEMENT,
   DETAIL_ELEMENT,
+  SCENE_ELEMENT,
+  SCENE_ELEMENT_ID,
+  WIDGET_ELEMENT,
+  WIDGET_ELEMENT_ID,
 } from "./elements.js";
 export { renderTable, TABLE_ELEMENT, isLongTableField } from "./table.js";
 export { renderCalendar, CALENDAR_ELEMENT } from "./calendar.js";
@@ -122,7 +166,6 @@ export {
   renderPieChart,
   renderProportionBar,
   axisScale,
-  formatCompact,
   BAR_CHART_ELEMENT,
   LINE_CHART_ELEMENT,
   PIE_CHART_ELEMENT,
@@ -142,6 +185,8 @@ export {
   formatTime,
   formatDateTime,
   formatNumber,
+  formatCompact,
+  formatRelative,
   compareScalars,
   isMissing,
   MONTH_NAMES,

@@ -35,6 +35,14 @@ export interface SavedView {
   readonly arrangements: readonly Arrangement[];
   readonly origin: ViewOrigin;
   readonly status: "active" | "archived";
+  // What this row IS (epic memql#4661). "composed" is a view somebody built
+  // and opens by name; "override" is a person's own arrangement of an
+  // EXISTING page, resolved at render in place of that page's seed and
+  // appearing in no list. Absent on the wire means composed, which is what
+  // every row written before the field meant.
+  readonly kind: "composed" | "override";
+  // Which page an override belongs to. Empty on a composed view.
+  readonly targetPageId: string;
   readonly updatedAt: string;
   readonly createdAt: string;
 }
@@ -60,6 +68,8 @@ export function parseSavedView(raw: Row): SavedView | undefined {
     arrangements: parseArrangements(row["arrangements"]),
     origin: row["origin"] === "suggested" ? "suggested" : "manual",
     status: row["status"] === "archived" ? "archived" : "active",
+    kind: row["kind"] === "override" ? "override" : "composed",
+    targetPageId: str(row["targetPageId"]),
     updatedAt: str(row["updatedAt"]),
     createdAt: str(row["createdAt"]),
   };
@@ -121,34 +131,58 @@ export function savedViewArgs(input: SavedViewInput): CreateComposedViewArgs {
   };
 }
 
-function serializeArrangement(arrangement: Arrangement): Record<string, unknown> {
-  return {
-    conceptId: arrangement.conceptId,
-    elements: arrangement.elements.map((entry) => {
-      const out: Record<string, unknown> = { element: entry.element, band: entry.band };
-      if (entry.title !== undefined) out["title"] = entry.title;
-      if (entry.bindings !== undefined) {
-        out["bindings"] = Object.fromEntries(
-          Object.entries(entry.bindings).map(([slot, fields]) => [slot, [...fields]]),
-        );
-      }
-      return out;
-    }),
-  };
+// serializeArrangement is the WRITE side of the round trip, and every field
+// the grammar has must be here: a field written by the composer and dropped
+// here is a setting that works until the view is saved and reopened, which is
+// the worst shape a bug can take -- it looks like it works.
+export function serializeArrangement(arrangement: Arrangement): Record<string, unknown> {
+  const out: Record<string, unknown> = { conceptId: arrangement.conceptId };
+  // Omitted rather than written as "stack", so a row stored before layouts
+  // existed and a row deliberately left as a stack are the same value. The
+  // absent-means-stack rule is only additive if absence survives a save.
+  if (arrangement.layout !== undefined && arrangement.layout !== "stack") {
+    out["layout"] = arrangement.layout;
+  }
+  out["elements"] = arrangement.elements.map((entry) => {
+    const el: Record<string, unknown> = { element: entry.element, band: entry.band };
+    if (entry.title !== undefined) el["title"] = entry.title;
+    // Same reasoning as layout: standard is what absence means.
+    if (entry.role !== undefined && entry.role !== "standard") el["role"] = entry.role;
+    if (entry.options !== undefined && Object.keys(entry.options).length > 0) {
+      el["options"] = { ...entry.options };
+    }
+    if (entry.bindings !== undefined) {
+      el["bindings"] = Object.fromEntries(
+        Object.entries(entry.bindings).map(([slot, fields]) => [slot, [...fields]]),
+      );
+    }
+    return el;
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Parsing the stored arrangement
 // ---------------------------------------------------------------------------
 
-function parseArrangements(raw: unknown): Arrangement[] {
+export function parseArrangements(raw: unknown): Arrangement[] {
   if (!Array.isArray(raw)) return [];
   const out: Arrangement[] = [];
   for (const item of raw) {
     if (!isRecord(item)) continue;
     const conceptId = str(item["conceptId"]);
     if (conceptId === "") continue;
-    out.push({ conceptId, elements: parseEntries(item["elements"]) });
+    // A layout this build does not have is READ AS STORED and repaired by
+    // sanitizeArrangement against the live rows, which is where repair
+    // belongs -- it needs a profile and this module has none. Correcting it
+    // here would hide from the composer that a stored row names something
+    // this release removed.
+    const layout = str(item["layout"]);
+    out.push({
+      conceptId,
+      ...(layout === "" ? {} : { layout: layout as Arrangement["layout"] }),
+      elements: parseEntries(item["elements"]),
+    });
   }
   return out;
 }
@@ -166,11 +200,15 @@ function parseEntries(raw: unknown): ArrangedElement[] {
     const band = BAND_ROLES.find((b) => b === item["band"]) ?? "roll";
     const title = str(item["title"]);
     const bindings = parseBindings(item["bindings"]);
+    const role = ROLES.find((r) => r === item["role"]);
+    const options = parseOptions(item["options"]);
     out.push({
       element,
       band,
       ...(title === "" ? {} : { title }),
       ...(bindings === undefined ? {} : { bindings }),
+      ...(role === undefined ? {} : { role }),
+      ...(options === undefined ? {} : { options }),
     });
   }
   return out;
@@ -187,6 +225,22 @@ function parseBindings(
     // somebody deliberately turned off.
     if (Array.isArray(value)) out[slot] = value.filter((v): v is string => typeof v === "string");
     else if (typeof value === "string") out[slot] = [value];
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+const ROLES = ["hero", "supporting", "standard"] as const;
+
+// Element options are STRING-VALUED, which is what keeps a stored arrangement
+// a plain JSON value that survives the round trip unchanged. A non-string is
+// dropped rather than coerced: a module id or a sort direction that arrived as
+// a number is a row somebody wrote by hand, and stringifying it would produce
+// an id that resolves to nothing while looking deliberate.
+function parseOptions(raw: unknown): Readonly<Record<string, string>> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string" && value !== "") out[key] = value;
   }
   return Object.keys(out).length === 0 ? undefined : out;
 }

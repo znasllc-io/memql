@@ -754,6 +754,34 @@ export interface ConceptInfoWire {
   dataState?: string;
   dataOrigin?: string;
   dataMirroredTo?: string[];
+  // The concept's declared SHAPE (epic memql#4661). Absent on a server
+  // that predates the fields -- which is why a client falls back to
+  // sampling rows rather than treating absence as "no fields".
+  fields?: ConceptFieldWire[];
+  relationships?: ConceptRelationshipWire[];
+}
+
+export interface ConceptFieldWire {
+  name?: string;
+  // The AUTHORING kind -- string / boolean / integer / number /
+  // datetime / enum / array / object -- not the JSON-Schema type the
+  // engine stores it as. The mapping happens server-side, once.
+  kind?: string;
+  required?: boolean;
+  enumValues?: string[];
+  description?: string;
+}
+
+export interface ConceptRelationshipWire {
+  // The closed ENGINE set (parent / owns / references / ...).
+  type?: string;
+  // The open DOMAIN label (respondsAs, assignedTo). Empty on every
+  // declaration that predates memql#3652 -- do not fall back to `type`,
+  // which is a different axis; fall back to `field`.
+  as?: string;
+  field?: string;
+  target?: string;
+  direction?: string;
 }
 
 export interface MyAccessResultPayload {

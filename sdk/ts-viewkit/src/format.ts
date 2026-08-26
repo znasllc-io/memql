@@ -100,6 +100,59 @@ export function formatNumber(value: number): string {
   return negative ? `-${out}` : out;
 }
 
+// formatRelative renders an instant as elapsed time -- "2 days ago", "in 3
+// hours" -- which is the question people actually ask of a timestamp.
+//
+// LOCALE-FREE AND UTC, like everything else here: no Intl.RelativeTimeFormat,
+// because view-kit's tests assert on strings and the VS Code panel, the portal
+// and a CI runner must not each produce a different one.
+//
+// `now` is a parameter with a default rather than a call to Date.now() inside,
+// so a test can pin it. A renderer that reads the clock is a renderer whose
+// output cannot be asserted on.
+//
+// The boundaries are deliberately coarse. "1 month ago" for anything from 30
+// to 60 days is imprecise and correct: the exact instant is one hover away,
+// and a reader scanning a column wants the magnitude.
+export function formatRelative(value: Date, now: Date = new Date()): string {
+  const seconds = Math.round((now.getTime() - value.getTime()) / 1000);
+  const future = seconds < 0;
+  const abs = Math.abs(seconds);
+
+  const said = (n: number, unit: string): string => {
+    const plural = n === 1 ? unit : `${unit}s`;
+    return future ? `in ${n} ${plural}` : `${n} ${plural} ago`;
+  };
+
+  // Under a minute is "just now" in both directions: "in 4 seconds" is noise
+  // for a value that will be wrong before it is read.
+  if (abs < 45) return "just now";
+  if (abs < 3600) return said(Math.round(abs / 60), "minute");
+  if (abs < 86400) return said(Math.round(abs / 3600), "hour");
+  if (abs < 2592000) return said(Math.round(abs / 86400), "day");
+  if (abs < 31536000) return said(Math.round(abs / 2592000), "month");
+  return said(Math.round(abs / 31536000), "year");
+}
+
+// formatCompact keeps a value short where it is read at a glance -- an axis
+// tick, a column of figures. Full precision belongs where a reader has asked
+// for one number: a tooltip, a direct label, a detail pane.
+//
+// It lived in chart.ts until table cells needed it too. Two implementations of
+// "what does 1,247,932 look like when it has to be short" is exactly the drift
+// this module exists to prevent.
+export function formatCompact(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${trimTenth(value / 1e9)}B`;
+  if (abs >= 1e6) return `${trimTenth(value / 1e6)}M`;
+  if (abs >= 1e3) return `${trimTenth(value / 1e3)}k`;
+  return formatNumber(value);
+}
+
+function trimTenth(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
 export function isMissing(value: unknown): boolean {
   return value === null || value === undefined || value === "";
 }

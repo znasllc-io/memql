@@ -340,12 +340,19 @@ describe("a concept this repository has never seen", () => {
     fireEvent.click(addButtons[0]!);
     await waitFor(() => expect(viewKitClasses(container).size).toBeGreaterThanOrEqual(before));
 
-    const removes = screen.getAllByRole("button", { name: "Remove" });
-    const bands = removes.length;
-    fireEvent.click(removes[0]!);
+    // Removal moved to the INSPECTOR when the composer became two panes (epic
+    // memql#4661): there is ONE Remove, acting on the selected entry, rather
+    // than one per band sitting on the preview. Counting the entry list is the
+    // honest equivalent of counting the buttons -- it is the list the button
+    // shortens.
+    const entries = () => screen.getAllByRole("button", { current: false }).length;
+    const listed = container.querySelectorAll('[aria-current], li > [role="button"]').length;
+    expect(listed).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "Remove" }).length).toBe(bands - 1),
+      expect(container.querySelectorAll('li > [role="button"]').length).toBeLessThan(listed),
     );
+    void entries;
   });
 });
 

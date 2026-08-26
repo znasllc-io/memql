@@ -71,6 +71,17 @@ const CONCEPTS: Concept[] = [
     description: "A registered node",
     type: "concept",
   },
+  // The machines page is an ARRANGEMENT since epic memql#4661, so it resolves
+  // its concept through the registry like every other page. The palette's
+  // landing assertion needs the page to actually draw.
+  {
+    id: "v1:worker:registration",
+    version: "v1",
+    domain: "worker",
+    entity: "registration",
+    description: "A machine registered to this cluster as a worker",
+    type: "concept",
+  },
 ];
 
 function renderShell(path = "/concepts", role = "owner") {

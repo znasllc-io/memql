@@ -131,6 +131,13 @@ var itemsEndExemptions = map[string]string{
 	"clients/portal/src/ui/PageHeader.tsx":         "page-header actions column, bottom-aligned to the title block",
 	"clients/portal/src/compose/ComposeLayout.tsx": "composer header actions column",
 	"clients/portal/src/compose/ComposerPage.tsx":  "composer header row and its actions column",
+	// The regenerate affordance is a page-HEADER actions column, not a form
+	// row: it stacks a cost reading, a trigger and a failure notice against the
+	// header's right edge, where bottom-alignment is what keeps the trigger on
+	// the title's baseline. The memql#4502 defect it is exempt from is the
+	// form-row one -- a hint pushing a hint-less neighbour's control off the
+	// line -- and there is no field beside it to push (epic memql#4661).
+	"clients/portal/src/pages/RegenerateAction.tsx": "page-header actions column for the regenerate affordance",
 }
 
 // insetExemptions: the recipe's one legal home, plus one variant of it.

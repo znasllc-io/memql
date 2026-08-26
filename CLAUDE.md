@@ -802,11 +802,35 @@ deny reasons and `memql provider-auth check`:
 - `AiTranscribeStreamStart` / `Chunk` / `End` -> `AiTranscribeStreamDelta` / `Complete` -- real-time streaming transcription
 - `AiSuggestMsg` / `AiSuggestResult` -- carries `domain` ∈ {spaces, spaceTitle,
   agents, groups, groupDescription, agentCardSummary, spaceCardSummary,
-  groupCardSummary, knowledge}. The rich `spaces` / `agents` / `groups` domains
-  return full payloads (description + suggested members + roles); `spaceTitle`
-  and `groupDescription` are the lightweight one-line paths used by Create
-  Space / Create Group; the three `*CardSummary` domains generate the LLM body
-  that lands on a canvas-creation card.
+  groupCardSummary, knowledge, viewArrangement, viewCompose}. The rich
+  `spaces` / `agents` / `groups` domains return full payloads (description +
+  suggested members + roles); `spaceTitle` and `groupDescription` are the
+  lightweight one-line paths used by Create Space / Create Group; the three
+  `*CardSummary` domains generate the LLM body that lands on a
+  canvas-creation card.
+
+  **`viewArrangement` and `viewCompose` are CORE, and they render DSL prompts**
+  (epic memql#4661, `component/memql/suggest_views.go`). They are the two
+  view-composition domains: `viewArrangement` improves the arrangement of a
+  concept the person already picked, `viewCompose` picks the CONCEPT too from
+  a compact registry digest. Unlike `knowledge`, whose prompt exists nowhere
+  else, both are declared in `dsl/portalviews/prompts.memql` -- so the
+  handlers render them through `SuggestContext.RenderPrompt` rather than
+  carrying a Go copy, and a nil renderer is an ERROR rather than a fallback: a
+  built-in substitute would serve a prompt nobody can find in the tree.
+
+  `viewArrangement` was called by the portal from the day the composer shipped
+  and registered by nothing until memql#4667. The registry's unknown-domain
+  error reaches the composer as "suggestions are not available on this
+  cluster" -- the same sentence a cluster with no provider gets -- so a missing
+  server half was indistinguishable from a deliberate configuration. When
+  adding a domain, the registration IS the feature; test it.
+
+  `AiSuggestResult.usage` carries what the call cost where the provider
+  reports it (`common.ChatStructuredUsageProvider`, implemented by the OpenAI
+  and Anthropic structured paths). ABSENT when nothing was reported -- zero and
+  "not measured" are different answers, and a client falls back to its own
+  estimate only if the field is missing.
 
 Cross-node proxying (BFF -> Voice, BFF -> Agent, ...) rides `AiForwardRequest` /
 `AiForwardResponse` on `NodeService.Stream`. Handlers:
@@ -2279,6 +2303,69 @@ DSL** at runtime through the product's bundle (`MEMQL_DSL_PATH`); its physical
 absorption into the engine is mid-migration, so treat canvas as product-owned
 for now. Product rows ride the chat-reply delivery substrate via
 `node.RegisterChatReplyConcept`.
+
+### Views, layouts and living pages (epic memql#4661)
+
+**The arrangement system IS the page system.** Every portal page that shows
+data is a `PageManifest` -- a title, a line of copy, and sections of one
+concept each -- rendered by `clients/portal/src/pages/ArrangedPage.tsx`. The
+five predefined views, the composed ones, the fleet pages, Artifacts,
+Deployables, the Me tabs and the Nexus goal page all go through it; there is
+no branch for which kind a page is, because there is no longer a difference.
+
+Five things about it are load-bearing rather than stylistic:
+
+- **Absent means stack, and absent means standard.** A section's `layout` and
+  an entry's `role` are additive, and every `v1:portalviews:view` row stored
+  before them names neither. Nothing writes the defaults -- not
+  `sanitizeArrangement`, not the composer's picker, not the serializer --
+  because if absent ever meant anything else, the release that changed it
+  would silently re-lay-out every view every person has.
+- **`sanitizeArrangement` is the ONE gate**, and it repairs the RENDERED value
+  and never the stored row. Unknown layout to stack; focus with no hero
+  PROMOTED (the library's own ranking, so it agrees with the deterministic
+  proposal) rather than demoted; split with no detail pane to stack;
+  unexpressible roles ignored but their element kept. A page manifest's
+  `required` entries are re-inserted here, which is what stops a regeneration
+  producing a valid arrangement of a page that no longer does its job.
+- **AI runs on ONE explicit action and never at render** (spec D3). A render
+  path that reached a provider would cost money on every page view, change a
+  page under somebody mid-read, and make the console unusable with no provider
+  configured. Resolution is: the caller's override row -> else the seed ->
+  never a model.
+- **A regeneration is a per-user row** (D4): `kind="override"` +
+  `targetPageId` on `v1:portalviews:view`, gated by one filter conjunct and
+  one `@serverSet` field. **Revert is an APPEND** (D5) -- the history grows and
+  nothing is destroyed, which is why reverting twice is coherent and why
+  browsing your own history cannot end it. `composedViews` filters
+  `kind!="override"` and NOT `kind=="composed"`, because `!=` is null-safe
+  against a non-empty string (memql#1685) and every pre-epic row has no
+  `kind`.
+- **Two CLOSED registries**, and their laziness differs on purpose. A `scene`
+  (`clients/portal/src/nexus/scene/registry.tsx`) is lazy because three.js is
+  the portal's largest dependency and the registry is reachable from every
+  arranged page; `nexusMap.test.tsx` enforces that only canvas modules import
+  it. A `widget` (`clients/portal/src/widgets/`) is a form, so it is static:
+  lazy where the dependency is heavy AND isolated, not lazy because a registry
+  is a natural boundary.
+
+**Element personality lives in view-kit** (`sdk/ts-viewkit/src/cell.ts`), so
+every consumer improves at once: datetimes elapsed with the exact instant on
+`title` AND `datetime` (title alone is unreachable on touch), enums as pills,
+booleans as a dot plus the FIELD's label, numbers compact and tabular, ids and
+unresolved references in the data voice. **Nothing renders blank** -- an
+absent value is an em dash, and an unresolvable lookup is the id, which is
+true whether the target is deleted, unreadable, unknown or merely not yet
+arrived.
+
+**Lookups are batched client-side, never joined** (D2):
+`sdk/ts/src/client/lookups.ts`, one read per (concept, id set) with
+coalescing. Row authz is untouched -- a target the caller may not read simply
+does not come back.
+
+Design record:
+`docs/superpowers/specs/2026-08-26-views-layouts-personality-regeneration-design.md`.
+QA findings: `docs/internal/ops/2026-08-26-views-layouts-visual-qa.md`.
 
 ### Nexus -- the portal's living map of a goal (memql#4369)
 

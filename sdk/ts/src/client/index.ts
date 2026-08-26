@@ -70,7 +70,10 @@ export {
   rowString,
   type AccessSummary,
   type Concept,
+  type ConceptField,
+  type ConceptFieldKind,
   type ConceptRegistryDelta,
+  type ConceptRelationship,
   type DomainSubscription,
   type Event,
   type GraphAction,
@@ -79,6 +82,15 @@ export {
   type SubscriptionKind,
 } from "./types.js";
 export { newShortId, bareShortId, sameEntityId } from "./id.js";
+// Relationship lookups: resolving a pointer field to the row it names, in
+// batches, WITHOUT an engine join (epic memql#4661).
+export {
+  LookupCache,
+  parseRefBinding,
+  isRefBinding,
+  REF_PREFIX,
+  type RefBinding,
+} from "./lookups.js";
 export { renderMemQLValue } from "./memqlValue.js";
 export { deepStripNulls } from "./payload.js";
 export { displayDomainIds, isSyntheticDomainId } from "./domainIds.js";

@@ -64,17 +64,39 @@ import (
 // What it DOES catch is the whole of the cheap, likely mistake: markup for a
 // row, or a loop that could produce one, inside a view module.
 
-// viewDir is the tree these rules apply to: the predefined views' layout
-// modules. A directory rather than a file list, deliberately -- a closed list
-// goes quiet the moment someone adds a file to it, and the file they add is
-// exactly where the first hand-rendered row would land.
+// viewDir is the tree these rules apply to. A directory rather than a file
+// list, deliberately -- a closed list goes quiet the moment someone adds a
+// file to it, and the file they add is exactly where the first hand-rendered
+// row would land.
 const viewDir = "clients/portal/src/views"
 
-// viewBodyFiles are the five designed screens. Named individually because the
-// directory also holds the shared chrome (ViewLayout), the element bridge
-// (ViewElement), the catalog and the URL builders, none of which compose
-// elements themselves.
-var viewBodyFiles = []string{
+// pageFiles are the SHARED page renderers (epic memql#4661). They are guarded
+// under the same rules because they are now what the five view bodies used to
+// be: the code between a page's declaration and its rows. If any of them
+// hand-rendered a row, EVERY page in the console would inherit it -- which
+// makes them a worse place for the mistake than the five modules ever were,
+// not a better one.
+//
+// The list grows as pages converge (spec section H): each converged page's
+// renderer, and nothing else. Widgets are deliberately absent -- a widget is a
+// CONTROL, and a form legitimately writes its own markup.
+var pageFiles = []string{
+	"clients/portal/src/pages/ArrangedPage.tsx",
+	"clients/portal/src/pages/ArrangedSection.tsx",
+	"clients/portal/src/pages/manifest.ts",
+	"clients/portal/src/compose/ArrangementLayout.tsx",
+}
+
+// retiredViewBodies are the five modules that used to hand-render the designed
+// screens, and must never come back (epic memql#4661).
+//
+// They are named here rather than merely deleted because "the file is gone" is
+// not the property worth protecting -- "a predefined view is DATA" is, and the
+// way that claim fails is that somebody adds UsersView.tsx back because one
+// screen wanted something the grammar could not say. When that happens the
+// answer is a new ELEMENT or a new WIDGET, and this list is where the argument
+// gets read.
+var retiredViewBodies = []string{
 	"UsersView.tsx",
 	"AgentsView.tsx",
 	"AccountsView.tsx",
@@ -100,16 +122,17 @@ var rowMarkupTags = []string{
 // the elements themselves.
 var iterationForms = []string{".map(", ".forEach(", ".flatMap(", ".reduce("}
 
-// theBridge is the ONE module allowed to turn a view-kit VNode tree into
-// React, because it is the thing every other module goes through. Exempt from
-// the vnodeEscapes rule below and from nothing else -- it renders no markup of
-// its own, iterates nothing, and reads no display card.
-const theBridge = "ViewElement.tsx"
+// The single VNode-to-React bridge is src/viewkit/ElementView.tsx, and it is
+// OUTSIDE both guarded trees -- so unlike before, there is no exemption here
+// for anything. There used to be two of that bridge, one per tree, because the
+// view tree was closed and the composer could not reach into it; predefined
+// views now render through the composer's own path, so the copy's reason went
+// with it (epic memql#4661).
 
-// vnodeEscapes are the ways a view could hand-render rows while still
+// vnodeEscapes are the ways a module could hand-render rows while still
 // technically importing view-kit: build a VNode tree with view-kit's own
 // element builder, or walk one into React itself instead of going through
-// <ViewElement>, which is the single sanctioned bridge (and the thing that
+// <ElementView>, which is the single sanctioned bridge (and the thing that
 // stamps the resolved theme and attaches keyboard selection).
 var vnodeEscapes = []*regexp.Regexp{
 	regexp.MustCompile(`\bvnodeToReact\b`),
@@ -134,8 +157,11 @@ func TestPortalViewsComposeElements(t *testing.T) {
 
 	// Anti-vacuous floor. A scan over an empty file list reports every file
 	// clean, having read none -- which is how a renamed tree turns a gate
-	// green forever.
-	if len(files) < 8 {
+	// green forever. The floor dropped from 8 to 4 when the five body modules
+	// became data (epic memql#4661): it is a claim about the tree being FOUND,
+	// not about how big it ought to be, so it tracks what the tree actually
+	// carries rather than aspiring upward.
+	if len(files) < 4 {
 		t.Fatalf("the predefined-view tree scanned only %d files (%v), which is fewer "+
 			"than it carries. If clients/portal/src/views moved or was restructured, "+
 			"retarget viewDir rather than letting this guard pass vacuously "+
@@ -147,6 +173,80 @@ func TestPortalViewsComposeElements(t *testing.T) {
 			t.Errorf("%s %s\n\n%s", rel, why, compositionRule)
 		}
 	}
+}
+
+// TestArrangedPageRenderersComposeElements applies the same rules to the
+// SHARED renderers (epic memql#4661).
+//
+// The five view bodies were the place a hand-rendered row could appear and
+// damage one screen. These four files are the place it would appear and damage
+// EVERY screen -- the fleet pages, the artifacts page, the profile tabs, the
+// composed views and the five designed ones all render through them. So the
+// guard follows the risk rather than the directory it started in.
+func TestArrangedPageRenderersComposeElements(t *testing.T) {
+	for _, rel := range pageFiles {
+		info, err := os.Stat(filepath.FromSlash(rel))
+		if err != nil || info.IsDir() {
+			t.Errorf("%s does not exist. Retarget pageFiles rather than letting the "+
+				"shared render path go unguarded -- a stale row here silently removes "+
+				"every converged page from this guard (epic memql#4661).", rel)
+			continue
+		}
+		for _, why := range pageViolations(readViewFile(t, rel)) {
+			t.Errorf("%s %s\n\n%s", rel, why, compositionRule)
+		}
+	}
+}
+
+// pageViolations is viewViolations minus ONE rule and plus a narrower version
+// of it.
+//
+// The blanket iteration ban does not transfer. In a view body every sequence
+// was a sequence of rows, which is why the ban could be that broad. A page
+// renderer legitimately iterates SECTIONS (a page has several) and SLOTS (a
+// layout has several), and banning `.map(` there would ban rendering a
+// multi-section page at all.
+//
+// What the ban was actually protecting -- turning rows into markup here
+// instead of in an element -- survives as a ban on iterating anything called
+// `rows`. That is narrower and it is checkable, which the broad rule would not
+// have been.
+func pageViolations(source string) []string {
+	code := stripTSComments(source)
+	var out []string
+
+	for _, tag := range rowMarkupTags {
+		pattern := regexp.MustCompile(`<` + tag + `[\s/>]`)
+		if hit := pattern.FindString(code); hit != "" {
+			out = append(out, fmt.Sprintf("builds row markup itself (%q).", strings.TrimSpace(hit)))
+		}
+	}
+
+	for _, form := range iterationForms {
+		// `rows.map(`, `data.rows.map(`, `props.rows.forEach(` -- any
+		// iteration whose receiver is named rows.
+		pattern := regexp.MustCompile(`\brows` + regexp.QuoteMeta(form))
+		if hit := pattern.FindString(code); hit != "" {
+			out = append(out, fmt.Sprintf("iterates rows (%q) in the shared render path. "+
+				"Turning rows into markup is the element library's job, and a page "+
+				"renderer that does it does it for every page in the console.", hit))
+		}
+	}
+
+	for _, escape := range vnodeEscapes {
+		if hit := escape.FindString(code); hit != "" {
+			out = append(out, fmt.Sprintf("renders a view-kit VNode tree itself (%q). "+
+				"<ElementView> is the single sanctioned bridge from an element to "+
+				"React.", strings.TrimSpace(hit)))
+		}
+	}
+
+	if hit := displayCardRead.FindString(code); hit != "" {
+		out = append(out, fmt.Sprintf("reads %q directly. A renderer names an element's "+
+			"REQUIREMENT SLOT, never a display-card slot.", hit))
+	}
+
+	return out
 }
 
 // viewViolations reports every rule a view module breaks, as prose. Split out
@@ -177,19 +277,22 @@ func viewViolations(name, source string) []string {
 		}
 	}
 
-	if name != theBridge {
-		for _, escape := range vnodeEscapes {
-			if hit := escape.FindString(code); hit != "" {
-				out = append(out, fmt.Sprintf("renders a view-kit VNode tree itself (%q). "+
-					"<ViewElement> is the single sanctioned bridge from an element to "+
-					"React: it stamps the resolved light/dark theme onto charts, makes "+
-					"every row view-kit marks with data-row-id focusable and "+
-					"keyboard-operable, and renders view-kit's own explanation when the "+
-					"element does not fit the rows. A second bridge gets none of that.",
-					strings.TrimSpace(hit)))
-			}
+	// NO EXEMPTION. The bridge lives outside this tree now, so every file in
+	// it is subject to this rule -- which is stricter than before and is the
+	// point: the reason for the exemption was that the bridge had to live here,
+	// and it no longer does.
+	for _, escape := range vnodeEscapes {
+		if hit := escape.FindString(code); hit != "" {
+			out = append(out, fmt.Sprintf("renders a view-kit VNode tree itself (%q). "+
+				"<ElementView> (src/viewkit/ElementView.tsx) is the single sanctioned "+
+				"bridge from an element to React: it stamps the resolved light/dark "+
+				"theme onto charts, makes every row view-kit marks with data-row-id "+
+				"focusable and keyboard-operable, and renders view-kit's own "+
+				"explanation when the element does not fit the rows. A second bridge "+
+				"gets none of that.", strings.TrimSpace(hit)))
 		}
 	}
+	_ = name
 
 	if hit := displayCardRead.FindString(code); hit != "" {
 		out = append(out, fmt.Sprintf("reads %q directly. A view names an element's "+
@@ -269,20 +372,33 @@ export function Good({ concept, rows }: ViewProps) {
 		}
 	}
 
-	// And the exemption is narrow: the bridge may convert a tree, and nothing
-	// else about it is excused.
-	bridge := `import { vnodeToReact } from "../viewkit/react";
-export function ViewElement() { return <table />; }`
-	got := viewViolations(theBridge, bridge)
-	if slices.ContainsFunc(got, func(v string) bool {
+	// THERE IS NO LONGER AN EXEMPTION, and this is what asserts it. The bridge
+	// used to live in this tree and be excused from the VNode rule; it now
+	// lives in src/viewkit, so a file here converting a tree is a SECOND bridge
+	// -- which gets none of the theme stamping, keyboard selection or
+	// explain-the-unfit behaviour the real one carries.
+	second := `import { vnodeToReact } from "../viewkit/react";
+export function AlmostTheBridge() { return vnodeToReact(tree); }`
+	if got := viewViolations("AlmostTheBridge.tsx", second); !slices.ContainsFunc(got, func(v string) bool {
 		return strings.Contains(v, "renders a view-kit VNode tree")
 	}) {
-		t.Errorf("the bridge was flagged for doing its job: %v", got)
+		t.Errorf("a second VNode bridge inside the view tree went unreported: %v", got)
 	}
-	if !slices.ContainsFunc(got, func(v string) bool {
-		return strings.Contains(v, "builds row markup itself")
+
+	// The SHARED renderers run a different iteration rule, and both halves of
+	// the difference are asserted: mapping sections is how a multi-section page
+	// renders at all, and mapping rows is the thing the rule exists to stop.
+	sections := `export function P({ manifest }) { return manifest.sections.map((s) => s.conceptId); }`
+	if got := pageViolations(sections); slices.ContainsFunc(got, func(v string) bool {
+		return strings.Contains(v, "iterates rows")
 	}) {
-		t.Errorf("the bridge's exemption leaked into the markup rule: %v", got)
+		t.Errorf("iterating SECTIONS was flagged as iterating rows: %v", got)
+	}
+	overRows := `export function P({ rows }) { return rows.map((r) => r.id); }`
+	if got := pageViolations(overRows); !slices.ContainsFunc(got, func(v string) bool {
+		return strings.Contains(v, "iterates rows")
+	}) {
+		t.Errorf("iterating rows in the shared render path went unreported: %v", got)
 	}
 }
 
@@ -304,31 +420,126 @@ func TestStripTSCommentsKeepsCode(t *testing.T) {
 	}
 }
 
-// TestPortalViewBodiesActuallyUseTheLibrary is the other half: the scan above
-// proves no view hand-renders, and this proves the views RENDER AT ALL through
-// the library. Without it, deleting every <ViewElement> from a body would
-// leave a screen that draws nothing and a guard that reports it clean.
-func TestPortalViewBodiesActuallyUseTheLibrary(t *testing.T) {
-	for _, name := range viewBodyFiles {
-		rel := filepath.ToSlash(filepath.Join(viewDir, name))
-		info, err := os.Stat(filepath.FromSlash(rel))
-		if err != nil || info.IsDir() {
-			t.Errorf("%s does not exist. Retarget viewBodyFiles (or drop the row if the "+
-				"view is gone) -- a stale row quietly removes a screen from this "+
-				"guard (memql#3319).", rel)
+// convergedPages are the phase-1 pages that became arrangements (epic
+// memql#4661, task memql#4674): the manifest that declares each one, and the
+// page id an override row is keyed on.
+//
+// THE PAGE ID IS PINNED HERE ON PURPOSE. It is a durable identifier rather
+// than a route: an override row is keyed on it, so renaming one orphans every
+// regeneration anybody made of that page -- silently, because the page still
+// works and simply forgets what somebody did to it. A rename should show up in
+// a diff of this file.
+var convergedPages = []struct {
+	manifest string
+	pageID   string
+}{
+	{"clients/portal/src/fleet/manifests.ts", "fleet.machines"},
+	{"clients/portal/src/fleet/manifests.ts", "fleet.workbenches"},
+	{"clients/portal/src/artifacts/manifest.ts", "library.artifacts"},
+	{"clients/portal/src/deployables/manifest.ts", "platform.deployables"},
+	{"clients/portal/src/me/manifests.ts", "me.account"},
+	{"clients/portal/src/me/manifests.ts", "me.settings"},
+	{"clients/portal/src/me/manifests.ts", "me.sessions"},
+	{"clients/portal/src/me/manifests.ts", "me.security"},
+	{"clients/portal/src/nexus/goalPage.ts", "nexus.goal"},
+}
+
+// TestConvergedPagesAreManifests is the guard growing with each converged page,
+// which is what task memql#4674 asks of it.
+//
+// It asserts the two things that make a converged page converged, and both
+// fail SILENTLY if unasserted: the page declares a manifest (so it has a seed,
+// a version strip and a regenerate control), and that manifest declares
+// REQUIRED entries (so a regeneration cannot produce a valid arrangement of a
+// page that no longer does its job -- a fleet page with no machines on it is
+// not a rearrangement of the fleet page).
+func TestConvergedPagesAreManifests(t *testing.T) {
+	for _, page := range convergedPages {
+		source := readViewFile(t, page.manifest)
+		if !strings.Contains(source, `pageId: "`+page.pageID+`"`) &&
+			!strings.Contains(source, `"`+page.pageID+`"`) {
+			t.Errorf("%s declares no manifest for %q. A converged page is a manifest "+
+				"(epic memql#4661): without one it has no seed, no version strip and no "+
+				"regenerate control, and it has quietly gone back to being a bespoke "+
+				"page.", page.manifest, page.pageID)
+		}
+	}
+
+	// Required entries, per manifest file. Checked per FILE rather than per
+	// page because a manifest file may declare several and the shape is the
+	// same; what matters is that none of them forgot the guardrail.
+	seen := map[string]bool{}
+	for _, page := range convergedPages {
+		if seen[page.manifest] {
 			continue
 		}
+		seen[page.manifest] = true
+		source := stripTSComments(readViewFile(t, page.manifest))
+		if !strings.Contains(source, "required:") {
+			t.Errorf("%s declares no `required` entries. That is the guardrail behind "+
+				"regeneration: without it a model may produce a valid arrangement of a "+
+				"page that no longer does its job, and the page will look deliberate.",
+				page.manifest)
+		}
+	}
+}
 
-		code := stripTSComments(readViewFile(t, rel))
-		if !strings.Contains(code, "<ViewElement") {
-			t.Errorf("%s renders no element. A predefined view is a composition of "+
-				"library elements; one that contains no <ViewElement> is either empty "+
-				"or is drawing rows some other way.", rel)
+// TestAPredefinedViewIsData is the other half, and it is the claim epic
+// memql#4661 actually makes.
+//
+// The scan above proves no module in the tree hand-renders a row. On its own
+// that is satisfied by a tree that renders NOTHING, which is how deleting the
+// five bodies could have turned this file into a guard over an empty room. So
+// this asserts the positive: each of the five views declares a SEED
+// arrangement, and the modules that used to draw them are gone and stay gone.
+//
+// Why the seed rather than the module: a seed is data, so it is regenerable,
+// versionable and readable by the same code a composed view uses. That is the
+// whole difference the epic bought, and it is the thing a future change would
+// undo by adding one React module back "just for this one screen".
+func TestAPredefinedViewIsData(t *testing.T) {
+	rel := filepath.ToSlash(filepath.Join(viewDir, "registry.ts"))
+	source := stripTSComments(readViewFile(t, rel))
+
+	if !strings.Contains(source, "seed: {") {
+		t.Fatalf("%s declares no seed arrangement at all. A predefined view is DATA "+
+			"(epic memql#4661): its composition lives in the registry as a page "+
+			"manifest, not in a React module.", rel)
+	}
+	// One per view. Counted rather than spot-checked, because four seeds and
+	// one screen still rendering some other way is the exact half-migration
+	// this guard exists to refuse.
+	if got := strings.Count(source, "seed: {"); got != len(retiredViewBodies) {
+		t.Errorf("%s declares %d seed arrangements for %d views. Every predefined "+
+			"view is data or none of them are -- a screen with no seed has to be "+
+			"drawn some other way.", rel, got, len(retiredViewBodies))
+	}
+	// A seed that names no element is a page that shows nothing, which the
+	// scan above would report clean.
+	if !strings.Contains(source, "elements: [") {
+		t.Errorf("%s declares seeds with no elements, so the views render nothing.", rel)
+	}
+
+	for _, name := range retiredViewBodies {
+		body := filepath.ToSlash(filepath.Join(viewDir, name))
+		if _, err := os.Stat(filepath.FromSlash(body)); err == nil {
+			t.Errorf("%s is back. A predefined view is DATA (epic memql#4661): if a "+
+				"screen needs something the arrangement grammar cannot say, the answer "+
+				"is a new ELEMENT (sdk/ts-viewkit) or a new WIDGET "+
+				"(clients/portal/src/widgets), not a hand-built page -- a hand-built "+
+				"page cannot be regenerated, cannot carry a version strip, and improves "+
+				"only when somebody edits it.", body)
 		}
-		if !strings.Contains(code, `"@znasllc-io/memql-view-kit"`) {
-			t.Errorf("%s imports nothing from view-kit, so it names no element to "+
-				"compose.", rel)
-		}
+	}
+
+	// ...and the route renders them through the SHARED path. A ViewPage that
+	// grew a per-view branch would put the five screens back on their own
+	// renderer without adding a file for the check above to find.
+	page := stripTSComments(readViewFile(t, filepath.ToSlash(filepath.Join(viewDir, "ViewPage.tsx"))))
+	if !strings.Contains(page, "ArrangedPage") {
+		t.Errorf("%s/ViewPage.tsx does not render through ArrangedPage. The designed "+
+			"views and the composed ones go through one renderer; a second one is how "+
+			"they drift apart again.", viewDir)
 	}
 }
 

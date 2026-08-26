@@ -430,7 +430,7 @@ func (x VoiceAgentTurnRequest_ThreadContext) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use VoiceAgentTurnRequest_ThreadContext.Descriptor instead.
 func (VoiceAgentTurnRequest_ThreadContext) EnumDescriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{171, 0}
+	return file_memql_proto_rawDescGZIP(), []int{174, 0}
 }
 
 // Provenance is the engine-stamped origin metadata stored as an
@@ -6208,10 +6208,17 @@ func (x *AiSuggestMsg) GetPayload() *structpb.Struct {
 }
 
 type AiSuggestResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Domain        string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
-	Result        *structpb.Struct       `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Domain    string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
+	Result    *structpb.Struct       `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	// What the call actually cost, WHERE THE PROVIDER SAID SO (task
+	// memql#4667). Additive and OPTIONAL in the strong sense: a provider
+	// that reports no usage leaves this absent, and a client showing a
+	// spend figure falls back to its own estimate rather than rendering
+	// a confident zero. Zero and "not reported" are different answers
+	// and only one of them is ever true.
+	Usage         *AiSuggestUsage `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6267,6 +6274,77 @@ func (x *AiSuggestResult) GetResult() *structpb.Struct {
 	return nil
 }
 
+func (x *AiSuggestResult) GetUsage() *AiSuggestUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+type AiSuggestUsage struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	InputTokens  int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int64                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// The provider-facing model id the call actually ran on, which is
+	// not always the one the prompt named (a policy fallback, a vendor
+	// alias). Carried because a token count without the model it was
+	// spent on cannot be priced.
+	Model         string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AiSuggestUsage) Reset() {
+	*x = AiSuggestUsage{}
+	mi := &file_memql_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AiSuggestUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AiSuggestUsage) ProtoMessage() {}
+
+func (x *AiSuggestUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_memql_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AiSuggestUsage.ProtoReflect.Descriptor instead.
+func (*AiSuggestUsage) Descriptor() ([]byte, []int) {
+	return file_memql_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *AiSuggestUsage) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *AiSuggestUsage) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *AiSuggestUsage) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
 type IdentityCreateMsg struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	RequestId                string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -6287,7 +6365,7 @@ type IdentityCreateMsg struct {
 
 func (x *IdentityCreateMsg) Reset() {
 	*x = IdentityCreateMsg{}
-	mi := &file_memql_proto_msgTypes[43]
+	mi := &file_memql_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6299,7 +6377,7 @@ func (x *IdentityCreateMsg) String() string {
 func (*IdentityCreateMsg) ProtoMessage() {}
 
 func (x *IdentityCreateMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[43]
+	mi := &file_memql_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6312,7 +6390,7 @@ func (x *IdentityCreateMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityCreateMsg.ProtoReflect.Descriptor instead.
 func (*IdentityCreateMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{43}
+	return file_memql_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *IdentityCreateMsg) GetRequestId() string {
@@ -6410,7 +6488,7 @@ type IdentityUpdateMsg struct {
 
 func (x *IdentityUpdateMsg) Reset() {
 	*x = IdentityUpdateMsg{}
-	mi := &file_memql_proto_msgTypes[44]
+	mi := &file_memql_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6422,7 +6500,7 @@ func (x *IdentityUpdateMsg) String() string {
 func (*IdentityUpdateMsg) ProtoMessage() {}
 
 func (x *IdentityUpdateMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[44]
+	mi := &file_memql_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6435,7 +6513,7 @@ func (x *IdentityUpdateMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityUpdateMsg.ProtoReflect.Descriptor instead.
 func (*IdentityUpdateMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{44}
+	return file_memql_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *IdentityUpdateMsg) GetRequestId() string {
@@ -6471,7 +6549,7 @@ type IdentityListMsg struct {
 
 func (x *IdentityListMsg) Reset() {
 	*x = IdentityListMsg{}
-	mi := &file_memql_proto_msgTypes[45]
+	mi := &file_memql_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6483,7 +6561,7 @@ func (x *IdentityListMsg) String() string {
 func (*IdentityListMsg) ProtoMessage() {}
 
 func (x *IdentityListMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[45]
+	mi := &file_memql_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6496,7 +6574,7 @@ func (x *IdentityListMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityListMsg.ProtoReflect.Descriptor instead.
 func (*IdentityListMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{45}
+	return file_memql_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *IdentityListMsg) GetRequestId() string {
@@ -6539,7 +6617,7 @@ type IdentityResult struct {
 
 func (x *IdentityResult) Reset() {
 	*x = IdentityResult{}
-	mi := &file_memql_proto_msgTypes[46]
+	mi := &file_memql_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6551,7 +6629,7 @@ func (x *IdentityResult) String() string {
 func (*IdentityResult) ProtoMessage() {}
 
 func (x *IdentityResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[46]
+	mi := &file_memql_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6564,7 +6642,7 @@ func (x *IdentityResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityResult.ProtoReflect.Descriptor instead.
 func (*IdentityResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{46}
+	return file_memql_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *IdentityResult) GetRequestId() string {
@@ -6619,7 +6697,7 @@ type IdentityInfo struct {
 
 func (x *IdentityInfo) Reset() {
 	*x = IdentityInfo{}
-	mi := &file_memql_proto_msgTypes[47]
+	mi := &file_memql_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6631,7 +6709,7 @@ func (x *IdentityInfo) String() string {
 func (*IdentityInfo) ProtoMessage() {}
 
 func (x *IdentityInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[47]
+	mi := &file_memql_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6644,7 +6722,7 @@ func (x *IdentityInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityInfo.ProtoReflect.Descriptor instead.
 func (*IdentityInfo) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{47}
+	return file_memql_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *IdentityInfo) GetId() string {
@@ -6774,7 +6852,7 @@ type DelegationCreateMsg struct {
 
 func (x *DelegationCreateMsg) Reset() {
 	*x = DelegationCreateMsg{}
-	mi := &file_memql_proto_msgTypes[48]
+	mi := &file_memql_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6786,7 +6864,7 @@ func (x *DelegationCreateMsg) String() string {
 func (*DelegationCreateMsg) ProtoMessage() {}
 
 func (x *DelegationCreateMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[48]
+	mi := &file_memql_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6799,7 +6877,7 @@ func (x *DelegationCreateMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelegationCreateMsg.ProtoReflect.Descriptor instead.
 func (*DelegationCreateMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{48}
+	return file_memql_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *DelegationCreateMsg) GetRequestId() string {
@@ -6861,7 +6939,7 @@ type DelegationRevokeMsg struct {
 
 func (x *DelegationRevokeMsg) Reset() {
 	*x = DelegationRevokeMsg{}
-	mi := &file_memql_proto_msgTypes[49]
+	mi := &file_memql_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6873,7 +6951,7 @@ func (x *DelegationRevokeMsg) String() string {
 func (*DelegationRevokeMsg) ProtoMessage() {}
 
 func (x *DelegationRevokeMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[49]
+	mi := &file_memql_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6886,7 +6964,7 @@ func (x *DelegationRevokeMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelegationRevokeMsg.ProtoReflect.Descriptor instead.
 func (*DelegationRevokeMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{49}
+	return file_memql_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *DelegationRevokeMsg) GetRequestId() string {
@@ -6915,7 +6993,7 @@ type DelegationListMsg struct {
 
 func (x *DelegationListMsg) Reset() {
 	*x = DelegationListMsg{}
-	mi := &file_memql_proto_msgTypes[50]
+	mi := &file_memql_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6927,7 +7005,7 @@ func (x *DelegationListMsg) String() string {
 func (*DelegationListMsg) ProtoMessage() {}
 
 func (x *DelegationListMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[50]
+	mi := &file_memql_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6940,7 +7018,7 @@ func (x *DelegationListMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelegationListMsg.ProtoReflect.Descriptor instead.
 func (*DelegationListMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{50}
+	return file_memql_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *DelegationListMsg) GetRequestId() string {
@@ -6983,7 +7061,7 @@ type DelegationResult struct {
 
 func (x *DelegationResult) Reset() {
 	*x = DelegationResult{}
-	mi := &file_memql_proto_msgTypes[51]
+	mi := &file_memql_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6995,7 +7073,7 @@ func (x *DelegationResult) String() string {
 func (*DelegationResult) ProtoMessage() {}
 
 func (x *DelegationResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[51]
+	mi := &file_memql_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7008,7 +7086,7 @@ func (x *DelegationResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelegationResult.ProtoReflect.Descriptor instead.
 func (*DelegationResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{51}
+	return file_memql_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *DelegationResult) GetRequestId() string {
@@ -7062,7 +7140,7 @@ type DelegationInfo struct {
 
 func (x *DelegationInfo) Reset() {
 	*x = DelegationInfo{}
-	mi := &file_memql_proto_msgTypes[52]
+	mi := &file_memql_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7074,7 +7152,7 @@ func (x *DelegationInfo) String() string {
 func (*DelegationInfo) ProtoMessage() {}
 
 func (x *DelegationInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[52]
+	mi := &file_memql_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7087,7 +7165,7 @@ func (x *DelegationInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelegationInfo.ProtoReflect.Descriptor instead.
 func (*DelegationInfo) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{52}
+	return file_memql_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *DelegationInfo) GetId() string {
@@ -7205,7 +7283,7 @@ type SensePosition struct {
 
 func (x *SensePosition) Reset() {
 	*x = SensePosition{}
-	mi := &file_memql_proto_msgTypes[53]
+	mi := &file_memql_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7217,7 +7295,7 @@ func (x *SensePosition) String() string {
 func (*SensePosition) ProtoMessage() {}
 
 func (x *SensePosition) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[53]
+	mi := &file_memql_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7230,7 +7308,7 @@ func (x *SensePosition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SensePosition.ProtoReflect.Descriptor instead.
 func (*SensePosition) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{53}
+	return file_memql_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *SensePosition) GetLine() int32 {
@@ -7257,7 +7335,7 @@ type SenseRange struct {
 
 func (x *SenseRange) Reset() {
 	*x = SenseRange{}
-	mi := &file_memql_proto_msgTypes[54]
+	mi := &file_memql_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7269,7 +7347,7 @@ func (x *SenseRange) String() string {
 func (*SenseRange) ProtoMessage() {}
 
 func (x *SenseRange) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[54]
+	mi := &file_memql_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7282,7 +7360,7 @@ func (x *SenseRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseRange.ProtoReflect.Descriptor instead.
 func (*SenseRange) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{54}
+	return file_memql_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *SenseRange) GetStart() *SensePosition {
@@ -7310,7 +7388,7 @@ type SenseTokenizeMsg struct {
 
 func (x *SenseTokenizeMsg) Reset() {
 	*x = SenseTokenizeMsg{}
-	mi := &file_memql_proto_msgTypes[55]
+	mi := &file_memql_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7322,7 +7400,7 @@ func (x *SenseTokenizeMsg) String() string {
 func (*SenseTokenizeMsg) ProtoMessage() {}
 
 func (x *SenseTokenizeMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[55]
+	mi := &file_memql_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7335,7 +7413,7 @@ func (x *SenseTokenizeMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseTokenizeMsg.ProtoReflect.Descriptor instead.
 func (*SenseTokenizeMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{55}
+	return file_memql_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *SenseTokenizeMsg) GetRequestId() string {
@@ -7362,7 +7440,7 @@ type SenseTokenizeResult struct {
 
 func (x *SenseTokenizeResult) Reset() {
 	*x = SenseTokenizeResult{}
-	mi := &file_memql_proto_msgTypes[56]
+	mi := &file_memql_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7374,7 +7452,7 @@ func (x *SenseTokenizeResult) String() string {
 func (*SenseTokenizeResult) ProtoMessage() {}
 
 func (x *SenseTokenizeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[56]
+	mi := &file_memql_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7387,7 +7465,7 @@ func (x *SenseTokenizeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseTokenizeResult.ProtoReflect.Descriptor instead.
 func (*SenseTokenizeResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{56}
+	return file_memql_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *SenseTokenizeResult) GetRequestId() string {
@@ -7415,7 +7493,7 @@ type SenseToken struct {
 
 func (x *SenseToken) Reset() {
 	*x = SenseToken{}
-	mi := &file_memql_proto_msgTypes[57]
+	mi := &file_memql_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7427,7 +7505,7 @@ func (x *SenseToken) String() string {
 func (*SenseToken) ProtoMessage() {}
 
 func (x *SenseToken) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[57]
+	mi := &file_memql_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7440,7 +7518,7 @@ func (x *SenseToken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseToken.ProtoReflect.Descriptor instead.
 func (*SenseToken) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{57}
+	return file_memql_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *SenseToken) GetType() string {
@@ -7477,7 +7555,7 @@ type SenseCompleteMsg struct {
 
 func (x *SenseCompleteMsg) Reset() {
 	*x = SenseCompleteMsg{}
-	mi := &file_memql_proto_msgTypes[58]
+	mi := &file_memql_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7489,7 +7567,7 @@ func (x *SenseCompleteMsg) String() string {
 func (*SenseCompleteMsg) ProtoMessage() {}
 
 func (x *SenseCompleteMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[58]
+	mi := &file_memql_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7502,7 +7580,7 @@ func (x *SenseCompleteMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseCompleteMsg.ProtoReflect.Descriptor instead.
 func (*SenseCompleteMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{58}
+	return file_memql_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *SenseCompleteMsg) GetRequestId() string {
@@ -7543,7 +7621,7 @@ type SenseCompleteResult struct {
 
 func (x *SenseCompleteResult) Reset() {
 	*x = SenseCompleteResult{}
-	mi := &file_memql_proto_msgTypes[59]
+	mi := &file_memql_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7555,7 +7633,7 @@ func (x *SenseCompleteResult) String() string {
 func (*SenseCompleteResult) ProtoMessage() {}
 
 func (x *SenseCompleteResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[59]
+	mi := &file_memql_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7568,7 +7646,7 @@ func (x *SenseCompleteResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseCompleteResult.ProtoReflect.Descriptor instead.
 func (*SenseCompleteResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{59}
+	return file_memql_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *SenseCompleteResult) GetRequestId() string {
@@ -7600,7 +7678,7 @@ type SenseCompletionItem struct {
 
 func (x *SenseCompletionItem) Reset() {
 	*x = SenseCompletionItem{}
-	mi := &file_memql_proto_msgTypes[60]
+	mi := &file_memql_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7612,7 +7690,7 @@ func (x *SenseCompletionItem) String() string {
 func (*SenseCompletionItem) ProtoMessage() {}
 
 func (x *SenseCompletionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[60]
+	mi := &file_memql_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7625,7 +7703,7 @@ func (x *SenseCompletionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseCompletionItem.ProtoReflect.Descriptor instead.
 func (*SenseCompletionItem) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{60}
+	return file_memql_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *SenseCompletionItem) GetLabel() string {
@@ -7689,7 +7767,7 @@ type SenseDiagnoseMsg struct {
 
 func (x *SenseDiagnoseMsg) Reset() {
 	*x = SenseDiagnoseMsg{}
-	mi := &file_memql_proto_msgTypes[61]
+	mi := &file_memql_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7701,7 +7779,7 @@ func (x *SenseDiagnoseMsg) String() string {
 func (*SenseDiagnoseMsg) ProtoMessage() {}
 
 func (x *SenseDiagnoseMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[61]
+	mi := &file_memql_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7714,7 +7792,7 @@ func (x *SenseDiagnoseMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDiagnoseMsg.ProtoReflect.Descriptor instead.
 func (*SenseDiagnoseMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{61}
+	return file_memql_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *SenseDiagnoseMsg) GetRequestId() string {
@@ -7748,7 +7826,7 @@ type SenseDiagnoseResult struct {
 
 func (x *SenseDiagnoseResult) Reset() {
 	*x = SenseDiagnoseResult{}
-	mi := &file_memql_proto_msgTypes[62]
+	mi := &file_memql_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7760,7 +7838,7 @@ func (x *SenseDiagnoseResult) String() string {
 func (*SenseDiagnoseResult) ProtoMessage() {}
 
 func (x *SenseDiagnoseResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[62]
+	mi := &file_memql_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7773,7 +7851,7 @@ func (x *SenseDiagnoseResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDiagnoseResult.ProtoReflect.Descriptor instead.
 func (*SenseDiagnoseResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{62}
+	return file_memql_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *SenseDiagnoseResult) GetRequestId() string {
@@ -7802,7 +7880,7 @@ type SenseDiagnostic struct {
 
 func (x *SenseDiagnostic) Reset() {
 	*x = SenseDiagnostic{}
-	mi := &file_memql_proto_msgTypes[63]
+	mi := &file_memql_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7814,7 +7892,7 @@ func (x *SenseDiagnostic) String() string {
 func (*SenseDiagnostic) ProtoMessage() {}
 
 func (x *SenseDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[63]
+	mi := &file_memql_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7827,7 +7905,7 @@ func (x *SenseDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDiagnostic.ProtoReflect.Descriptor instead.
 func (*SenseDiagnostic) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{63}
+	return file_memql_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *SenseDiagnostic) GetRange() *SenseRange {
@@ -7871,7 +7949,7 @@ type SenseHoverMsg struct {
 
 func (x *SenseHoverMsg) Reset() {
 	*x = SenseHoverMsg{}
-	mi := &file_memql_proto_msgTypes[64]
+	mi := &file_memql_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7883,7 +7961,7 @@ func (x *SenseHoverMsg) String() string {
 func (*SenseHoverMsg) ProtoMessage() {}
 
 func (x *SenseHoverMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[64]
+	mi := &file_memql_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7896,7 +7974,7 @@ func (x *SenseHoverMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseHoverMsg.ProtoReflect.Descriptor instead.
 func (*SenseHoverMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{64}
+	return file_memql_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *SenseHoverMsg) GetRequestId() string {
@@ -7938,7 +8016,7 @@ type SenseHoverResult struct {
 
 func (x *SenseHoverResult) Reset() {
 	*x = SenseHoverResult{}
-	mi := &file_memql_proto_msgTypes[65]
+	mi := &file_memql_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7950,7 +8028,7 @@ func (x *SenseHoverResult) String() string {
 func (*SenseHoverResult) ProtoMessage() {}
 
 func (x *SenseHoverResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[65]
+	mi := &file_memql_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7963,7 +8041,7 @@ func (x *SenseHoverResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseHoverResult.ProtoReflect.Descriptor instead.
 func (*SenseHoverResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{65}
+	return file_memql_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *SenseHoverResult) GetRequestId() string {
@@ -8004,7 +8082,7 @@ type SenseDefinitionMsg struct {
 
 func (x *SenseDefinitionMsg) Reset() {
 	*x = SenseDefinitionMsg{}
-	mi := &file_memql_proto_msgTypes[66]
+	mi := &file_memql_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8016,7 +8094,7 @@ func (x *SenseDefinitionMsg) String() string {
 func (*SenseDefinitionMsg) ProtoMessage() {}
 
 func (x *SenseDefinitionMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[66]
+	mi := &file_memql_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8029,7 +8107,7 @@ func (x *SenseDefinitionMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDefinitionMsg.ProtoReflect.Descriptor instead.
 func (*SenseDefinitionMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{66}
+	return file_memql_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SenseDefinitionMsg) GetRequestId() string {
@@ -8070,7 +8148,7 @@ type SenseDefinitionResult struct {
 
 func (x *SenseDefinitionResult) Reset() {
 	*x = SenseDefinitionResult{}
-	mi := &file_memql_proto_msgTypes[67]
+	mi := &file_memql_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8082,7 +8160,7 @@ func (x *SenseDefinitionResult) String() string {
 func (*SenseDefinitionResult) ProtoMessage() {}
 
 func (x *SenseDefinitionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[67]
+	mi := &file_memql_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8095,7 +8173,7 @@ func (x *SenseDefinitionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDefinitionResult.ProtoReflect.Descriptor instead.
 func (*SenseDefinitionResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{67}
+	return file_memql_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SenseDefinitionResult) GetRequestId() string {
@@ -8123,7 +8201,7 @@ type SenseDefinitionTarget struct {
 
 func (x *SenseDefinitionTarget) Reset() {
 	*x = SenseDefinitionTarget{}
-	mi := &file_memql_proto_msgTypes[68]
+	mi := &file_memql_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8135,7 +8213,7 @@ func (x *SenseDefinitionTarget) String() string {
 func (*SenseDefinitionTarget) ProtoMessage() {}
 
 func (x *SenseDefinitionTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[68]
+	mi := &file_memql_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8148,7 +8226,7 @@ func (x *SenseDefinitionTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseDefinitionTarget.ProtoReflect.Descriptor instead.
 func (*SenseDefinitionTarget) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{68}
+	return file_memql_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SenseDefinitionTarget) GetFile() string {
@@ -8184,7 +8262,7 @@ type SenseSignatureHelpMsg struct {
 
 func (x *SenseSignatureHelpMsg) Reset() {
 	*x = SenseSignatureHelpMsg{}
-	mi := &file_memql_proto_msgTypes[69]
+	mi := &file_memql_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8196,7 +8274,7 @@ func (x *SenseSignatureHelpMsg) String() string {
 func (*SenseSignatureHelpMsg) ProtoMessage() {}
 
 func (x *SenseSignatureHelpMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[69]
+	mi := &file_memql_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8209,7 +8287,7 @@ func (x *SenseSignatureHelpMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseSignatureHelpMsg.ProtoReflect.Descriptor instead.
 func (*SenseSignatureHelpMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{69}
+	return file_memql_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *SenseSignatureHelpMsg) GetRequestId() string {
@@ -8245,7 +8323,7 @@ type SenseSignatureHelpResult struct {
 
 func (x *SenseSignatureHelpResult) Reset() {
 	*x = SenseSignatureHelpResult{}
-	mi := &file_memql_proto_msgTypes[70]
+	mi := &file_memql_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8257,7 +8335,7 @@ func (x *SenseSignatureHelpResult) String() string {
 func (*SenseSignatureHelpResult) ProtoMessage() {}
 
 func (x *SenseSignatureHelpResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[70]
+	mi := &file_memql_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8270,7 +8348,7 @@ func (x *SenseSignatureHelpResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseSignatureHelpResult.ProtoReflect.Descriptor instead.
 func (*SenseSignatureHelpResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{70}
+	return file_memql_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *SenseSignatureHelpResult) GetRequestId() string {
@@ -8312,7 +8390,7 @@ type SenseSignature struct {
 
 func (x *SenseSignature) Reset() {
 	*x = SenseSignature{}
-	mi := &file_memql_proto_msgTypes[71]
+	mi := &file_memql_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8324,7 +8402,7 @@ func (x *SenseSignature) String() string {
 func (*SenseSignature) ProtoMessage() {}
 
 func (x *SenseSignature) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[71]
+	mi := &file_memql_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8337,7 +8415,7 @@ func (x *SenseSignature) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseSignature.ProtoReflect.Descriptor instead.
 func (*SenseSignature) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{71}
+	return file_memql_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *SenseSignature) GetLabel() string {
@@ -8371,7 +8449,7 @@ type SenseParameter struct {
 
 func (x *SenseParameter) Reset() {
 	*x = SenseParameter{}
-	mi := &file_memql_proto_msgTypes[72]
+	mi := &file_memql_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8383,7 +8461,7 @@ func (x *SenseParameter) String() string {
 func (*SenseParameter) ProtoMessage() {}
 
 func (x *SenseParameter) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[72]
+	mi := &file_memql_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8396,7 +8474,7 @@ func (x *SenseParameter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SenseParameter.ProtoReflect.Descriptor instead.
 func (*SenseParameter) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{72}
+	return file_memql_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *SenseParameter) GetLabel() string {
@@ -8424,7 +8502,7 @@ type ListPackDomainsMsg struct {
 
 func (x *ListPackDomainsMsg) Reset() {
 	*x = ListPackDomainsMsg{}
-	mi := &file_memql_proto_msgTypes[73]
+	mi := &file_memql_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8436,7 +8514,7 @@ func (x *ListPackDomainsMsg) String() string {
 func (*ListPackDomainsMsg) ProtoMessage() {}
 
 func (x *ListPackDomainsMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[73]
+	mi := &file_memql_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8449,7 +8527,7 @@ func (x *ListPackDomainsMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPackDomainsMsg.ProtoReflect.Descriptor instead.
 func (*ListPackDomainsMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{73}
+	return file_memql_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ListPackDomainsMsg) GetRequestId() string {
@@ -8469,7 +8547,7 @@ type ListPackDomainsResult struct {
 
 func (x *ListPackDomainsResult) Reset() {
 	*x = ListPackDomainsResult{}
-	mi := &file_memql_proto_msgTypes[74]
+	mi := &file_memql_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8481,7 +8559,7 @@ func (x *ListPackDomainsResult) String() string {
 func (*ListPackDomainsResult) ProtoMessage() {}
 
 func (x *ListPackDomainsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[74]
+	mi := &file_memql_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8494,7 +8572,7 @@ func (x *ListPackDomainsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPackDomainsResult.ProtoReflect.Descriptor instead.
 func (*ListPackDomainsResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{74}
+	return file_memql_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ListPackDomainsResult) GetRequestId() string {
@@ -8522,7 +8600,7 @@ type PackDomain struct {
 
 func (x *PackDomain) Reset() {
 	*x = PackDomain{}
-	mi := &file_memql_proto_msgTypes[75]
+	mi := &file_memql_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8534,7 +8612,7 @@ func (x *PackDomain) String() string {
 func (*PackDomain) ProtoMessage() {}
 
 func (x *PackDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[75]
+	mi := &file_memql_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8547,7 +8625,7 @@ func (x *PackDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackDomain.ProtoReflect.Descriptor instead.
 func (*PackDomain) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{75}
+	return file_memql_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *PackDomain) GetName() string {
@@ -8582,7 +8660,7 @@ type ListPackFilesMsg struct {
 
 func (x *ListPackFilesMsg) Reset() {
 	*x = ListPackFilesMsg{}
-	mi := &file_memql_proto_msgTypes[76]
+	mi := &file_memql_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8594,7 +8672,7 @@ func (x *ListPackFilesMsg) String() string {
 func (*ListPackFilesMsg) ProtoMessage() {}
 
 func (x *ListPackFilesMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[76]
+	mi := &file_memql_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8607,7 +8685,7 @@ func (x *ListPackFilesMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPackFilesMsg.ProtoReflect.Descriptor instead.
 func (*ListPackFilesMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{76}
+	return file_memql_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ListPackFilesMsg) GetRequestId() string {
@@ -8635,7 +8713,7 @@ type ListPackFilesResult struct {
 
 func (x *ListPackFilesResult) Reset() {
 	*x = ListPackFilesResult{}
-	mi := &file_memql_proto_msgTypes[77]
+	mi := &file_memql_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8647,7 +8725,7 @@ func (x *ListPackFilesResult) String() string {
 func (*ListPackFilesResult) ProtoMessage() {}
 
 func (x *ListPackFilesResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[77]
+	mi := &file_memql_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8660,7 +8738,7 @@ func (x *ListPackFilesResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPackFilesResult.ProtoReflect.Descriptor instead.
 func (*ListPackFilesResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{77}
+	return file_memql_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ListPackFilesResult) GetRequestId() string {
@@ -8694,7 +8772,7 @@ type PackFile struct {
 
 func (x *PackFile) Reset() {
 	*x = PackFile{}
-	mi := &file_memql_proto_msgTypes[78]
+	mi := &file_memql_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8706,7 +8784,7 @@ func (x *PackFile) String() string {
 func (*PackFile) ProtoMessage() {}
 
 func (x *PackFile) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[78]
+	mi := &file_memql_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8719,7 +8797,7 @@ func (x *PackFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackFile.ProtoReflect.Descriptor instead.
 func (*PackFile) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{78}
+	return file_memql_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *PackFile) GetPath() string {
@@ -8748,7 +8826,7 @@ type ReadPackFileMsg struct {
 
 func (x *ReadPackFileMsg) Reset() {
 	*x = ReadPackFileMsg{}
-	mi := &file_memql_proto_msgTypes[79]
+	mi := &file_memql_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8760,7 +8838,7 @@ func (x *ReadPackFileMsg) String() string {
 func (*ReadPackFileMsg) ProtoMessage() {}
 
 func (x *ReadPackFileMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[79]
+	mi := &file_memql_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8773,7 +8851,7 @@ func (x *ReadPackFileMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadPackFileMsg.ProtoReflect.Descriptor instead.
 func (*ReadPackFileMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{79}
+	return file_memql_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *ReadPackFileMsg) GetRequestId() string {
@@ -8811,7 +8889,7 @@ type ReadPackFileResult struct {
 
 func (x *ReadPackFileResult) Reset() {
 	*x = ReadPackFileResult{}
-	mi := &file_memql_proto_msgTypes[80]
+	mi := &file_memql_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8823,7 +8901,7 @@ func (x *ReadPackFileResult) String() string {
 func (*ReadPackFileResult) ProtoMessage() {}
 
 func (x *ReadPackFileResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[80]
+	mi := &file_memql_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8836,7 +8914,7 @@ func (x *ReadPackFileResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadPackFileResult.ProtoReflect.Descriptor instead.
 func (*ReadPackFileResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{80}
+	return file_memql_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ReadPackFileResult) GetRequestId() string {
@@ -8893,7 +8971,7 @@ type ListConstructsMsg struct {
 
 func (x *ListConstructsMsg) Reset() {
 	*x = ListConstructsMsg{}
-	mi := &file_memql_proto_msgTypes[81]
+	mi := &file_memql_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8905,7 +8983,7 @@ func (x *ListConstructsMsg) String() string {
 func (*ListConstructsMsg) ProtoMessage() {}
 
 func (x *ListConstructsMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[81]
+	mi := &file_memql_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8918,7 +8996,7 @@ func (x *ListConstructsMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConstructsMsg.ProtoReflect.Descriptor instead.
 func (*ListConstructsMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{81}
+	return file_memql_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ListConstructsMsg) GetRequestId() string {
@@ -8938,7 +9016,7 @@ type ListConstructsResult struct {
 
 func (x *ListConstructsResult) Reset() {
 	*x = ListConstructsResult{}
-	mi := &file_memql_proto_msgTypes[82]
+	mi := &file_memql_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8950,7 +9028,7 @@ func (x *ListConstructsResult) String() string {
 func (*ListConstructsResult) ProtoMessage() {}
 
 func (x *ListConstructsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[82]
+	mi := &file_memql_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8963,7 +9041,7 @@ func (x *ListConstructsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConstructsResult.ProtoReflect.Descriptor instead.
 func (*ListConstructsResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{82}
+	return file_memql_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ListConstructsResult) GetRequestId() string {
@@ -9091,7 +9169,7 @@ type ConstructInfo struct {
 
 func (x *ConstructInfo) Reset() {
 	*x = ConstructInfo{}
-	mi := &file_memql_proto_msgTypes[83]
+	mi := &file_memql_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9103,7 +9181,7 @@ func (x *ConstructInfo) String() string {
 func (*ConstructInfo) ProtoMessage() {}
 
 func (x *ConstructInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[83]
+	mi := &file_memql_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9116,7 +9194,7 @@ func (x *ConstructInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConstructInfo.ProtoReflect.Descriptor instead.
 func (*ConstructInfo) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{83}
+	return file_memql_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ConstructInfo) GetName() string {
@@ -9239,7 +9317,7 @@ type ConstructTrigger struct {
 
 func (x *ConstructTrigger) Reset() {
 	*x = ConstructTrigger{}
-	mi := &file_memql_proto_msgTypes[84]
+	mi := &file_memql_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9251,7 +9329,7 @@ func (x *ConstructTrigger) String() string {
 func (*ConstructTrigger) ProtoMessage() {}
 
 func (x *ConstructTrigger) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[84]
+	mi := &file_memql_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9264,7 +9342,7 @@ func (x *ConstructTrigger) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConstructTrigger.ProtoReflect.Descriptor instead.
 func (*ConstructTrigger) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{84}
+	return file_memql_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ConstructTrigger) GetConcept() string {
@@ -9312,7 +9390,7 @@ type ConstructArg struct {
 
 func (x *ConstructArg) Reset() {
 	*x = ConstructArg{}
-	mi := &file_memql_proto_msgTypes[85]
+	mi := &file_memql_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9324,7 +9402,7 @@ func (x *ConstructArg) String() string {
 func (*ConstructArg) ProtoMessage() {}
 
 func (x *ConstructArg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[85]
+	mi := &file_memql_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9337,7 +9415,7 @@ func (x *ConstructArg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConstructArg.ProtoReflect.Descriptor instead.
 func (*ConstructArg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{85}
+	return file_memql_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ConstructArg) GetName() string {
@@ -9407,7 +9485,7 @@ type AuthoringDiagnostic struct {
 
 func (x *AuthoringDiagnostic) Reset() {
 	*x = AuthoringDiagnostic{}
-	mi := &file_memql_proto_msgTypes[86]
+	mi := &file_memql_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9419,7 +9497,7 @@ func (x *AuthoringDiagnostic) String() string {
 func (*AuthoringDiagnostic) ProtoMessage() {}
 
 func (x *AuthoringDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[86]
+	mi := &file_memql_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9432,7 +9510,7 @@ func (x *AuthoringDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthoringDiagnostic.ProtoReflect.Descriptor instead.
 func (*AuthoringDiagnostic) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{86}
+	return file_memql_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *AuthoringDiagnostic) GetName() string {
@@ -9509,7 +9587,7 @@ type AuthoringConstruct struct {
 
 func (x *AuthoringConstruct) Reset() {
 	*x = AuthoringConstruct{}
-	mi := &file_memql_proto_msgTypes[87]
+	mi := &file_memql_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9521,7 +9599,7 @@ func (x *AuthoringConstruct) String() string {
 func (*AuthoringConstruct) ProtoMessage() {}
 
 func (x *AuthoringConstruct) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[87]
+	mi := &file_memql_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9534,7 +9612,7 @@ func (x *AuthoringConstruct) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthoringConstruct.ProtoReflect.Descriptor instead.
 func (*AuthoringConstruct) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{87}
+	return file_memql_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *AuthoringConstruct) GetKind() string {
@@ -9578,7 +9656,7 @@ type AuthoringValidateBundleMsg struct {
 
 func (x *AuthoringValidateBundleMsg) Reset() {
 	*x = AuthoringValidateBundleMsg{}
-	mi := &file_memql_proto_msgTypes[88]
+	mi := &file_memql_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9590,7 +9668,7 @@ func (x *AuthoringValidateBundleMsg) String() string {
 func (*AuthoringValidateBundleMsg) ProtoMessage() {}
 
 func (x *AuthoringValidateBundleMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[88]
+	mi := &file_memql_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9603,7 +9681,7 @@ func (x *AuthoringValidateBundleMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthoringValidateBundleMsg.ProtoReflect.Descriptor instead.
 func (*AuthoringValidateBundleMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{88}
+	return file_memql_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *AuthoringValidateBundleMsg) GetRequestId() string {
@@ -9638,7 +9716,7 @@ type AuthoringValidateBundleResult struct {
 
 func (x *AuthoringValidateBundleResult) Reset() {
 	*x = AuthoringValidateBundleResult{}
-	mi := &file_memql_proto_msgTypes[89]
+	mi := &file_memql_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9650,7 +9728,7 @@ func (x *AuthoringValidateBundleResult) String() string {
 func (*AuthoringValidateBundleResult) ProtoMessage() {}
 
 func (x *AuthoringValidateBundleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[89]
+	mi := &file_memql_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9663,7 +9741,7 @@ func (x *AuthoringValidateBundleResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthoringValidateBundleResult.ProtoReflect.Descriptor instead.
 func (*AuthoringValidateBundleResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{89}
+	return file_memql_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *AuthoringValidateBundleResult) GetRequestId() string {
@@ -9715,7 +9793,7 @@ type AuthoringSessionDefineBundleMsg struct {
 
 func (x *AuthoringSessionDefineBundleMsg) Reset() {
 	*x = AuthoringSessionDefineBundleMsg{}
-	mi := &file_memql_proto_msgTypes[90]
+	mi := &file_memql_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9727,7 +9805,7 @@ func (x *AuthoringSessionDefineBundleMsg) String() string {
 func (*AuthoringSessionDefineBundleMsg) ProtoMessage() {}
 
 func (x *AuthoringSessionDefineBundleMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[90]
+	mi := &file_memql_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9740,7 +9818,7 @@ func (x *AuthoringSessionDefineBundleMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthoringSessionDefineBundleMsg.ProtoReflect.Descriptor instead.
 func (*AuthoringSessionDefineBundleMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{90}
+	return file_memql_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *AuthoringSessionDefineBundleMsg) GetRequestId() string {
@@ -9777,7 +9855,7 @@ type AuthoringSessionDefineBundleResult struct {
 
 func (x *AuthoringSessionDefineBundleResult) Reset() {
 	*x = AuthoringSessionDefineBundleResult{}
-	mi := &file_memql_proto_msgTypes[91]
+	mi := &file_memql_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9789,7 +9867,7 @@ func (x *AuthoringSessionDefineBundleResult) String() string {
 func (*AuthoringSessionDefineBundleResult) ProtoMessage() {}
 
 func (x *AuthoringSessionDefineBundleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[91]
+	mi := &file_memql_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9802,7 +9880,7 @@ func (x *AuthoringSessionDefineBundleResult) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use AuthoringSessionDefineBundleResult.ProtoReflect.Descriptor instead.
 func (*AuthoringSessionDefineBundleResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{91}
+	return file_memql_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *AuthoringSessionDefineBundleResult) GetRequestId() string {
@@ -9874,7 +9952,7 @@ type DurablePromoteBundleMsg struct {
 
 func (x *DurablePromoteBundleMsg) Reset() {
 	*x = DurablePromoteBundleMsg{}
-	mi := &file_memql_proto_msgTypes[92]
+	mi := &file_memql_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9886,7 +9964,7 @@ func (x *DurablePromoteBundleMsg) String() string {
 func (*DurablePromoteBundleMsg) ProtoMessage() {}
 
 func (x *DurablePromoteBundleMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[92]
+	mi := &file_memql_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9899,7 +9977,7 @@ func (x *DurablePromoteBundleMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DurablePromoteBundleMsg.ProtoReflect.Descriptor instead.
 func (*DurablePromoteBundleMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{92}
+	return file_memql_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *DurablePromoteBundleMsg) GetRequestId() string {
@@ -9952,7 +10030,7 @@ type DurablePromoteBundleResult struct {
 
 func (x *DurablePromoteBundleResult) Reset() {
 	*x = DurablePromoteBundleResult{}
-	mi := &file_memql_proto_msgTypes[93]
+	mi := &file_memql_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9964,7 +10042,7 @@ func (x *DurablePromoteBundleResult) String() string {
 func (*DurablePromoteBundleResult) ProtoMessage() {}
 
 func (x *DurablePromoteBundleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[93]
+	mi := &file_memql_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9977,7 +10055,7 @@ func (x *DurablePromoteBundleResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DurablePromoteBundleResult.ProtoReflect.Descriptor instead.
 func (*DurablePromoteBundleResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{93}
+	return file_memql_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *DurablePromoteBundleResult) GetRequestId() string {
@@ -10040,7 +10118,7 @@ type ConceptSchemaDiff struct {
 
 func (x *ConceptSchemaDiff) Reset() {
 	*x = ConceptSchemaDiff{}
-	mi := &file_memql_proto_msgTypes[94]
+	mi := &file_memql_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10052,7 +10130,7 @@ func (x *ConceptSchemaDiff) String() string {
 func (*ConceptSchemaDiff) ProtoMessage() {}
 
 func (x *ConceptSchemaDiff) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[94]
+	mi := &file_memql_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10065,7 +10143,7 @@ func (x *ConceptSchemaDiff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptSchemaDiff.ProtoReflect.Descriptor instead.
 func (*ConceptSchemaDiff) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{94}
+	return file_memql_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *ConceptSchemaDiff) GetConcept() string {
@@ -10138,7 +10216,7 @@ type ConceptSchemaChange struct {
 
 func (x *ConceptSchemaChange) Reset() {
 	*x = ConceptSchemaChange{}
-	mi := &file_memql_proto_msgTypes[95]
+	mi := &file_memql_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10150,7 +10228,7 @@ func (x *ConceptSchemaChange) String() string {
 func (*ConceptSchemaChange) ProtoMessage() {}
 
 func (x *ConceptSchemaChange) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[95]
+	mi := &file_memql_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10163,7 +10241,7 @@ func (x *ConceptSchemaChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptSchemaChange.ProtoReflect.Descriptor instead.
 func (*ConceptSchemaChange) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{95}
+	return file_memql_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *ConceptSchemaChange) GetConcept() string {
@@ -10256,7 +10334,7 @@ type DurableDemoteBundleMsg struct {
 
 func (x *DurableDemoteBundleMsg) Reset() {
 	*x = DurableDemoteBundleMsg{}
-	mi := &file_memql_proto_msgTypes[96]
+	mi := &file_memql_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10268,7 +10346,7 @@ func (x *DurableDemoteBundleMsg) String() string {
 func (*DurableDemoteBundleMsg) ProtoMessage() {}
 
 func (x *DurableDemoteBundleMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[96]
+	mi := &file_memql_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10281,7 +10359,7 @@ func (x *DurableDemoteBundleMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DurableDemoteBundleMsg.ProtoReflect.Descriptor instead.
 func (*DurableDemoteBundleMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{96}
+	return file_memql_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *DurableDemoteBundleMsg) GetRequestId() string {
@@ -10325,7 +10403,7 @@ type DurableDemoteOutcome struct {
 
 func (x *DurableDemoteOutcome) Reset() {
 	*x = DurableDemoteOutcome{}
-	mi := &file_memql_proto_msgTypes[97]
+	mi := &file_memql_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10337,7 +10415,7 @@ func (x *DurableDemoteOutcome) String() string {
 func (*DurableDemoteOutcome) ProtoMessage() {}
 
 func (x *DurableDemoteOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[97]
+	mi := &file_memql_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10350,7 +10428,7 @@ func (x *DurableDemoteOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DurableDemoteOutcome.ProtoReflect.Descriptor instead.
 func (*DurableDemoteOutcome) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{97}
+	return file_memql_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *DurableDemoteOutcome) GetKind() string {
@@ -10406,7 +10484,7 @@ type DurableDemoteBundleResult struct {
 
 func (x *DurableDemoteBundleResult) Reset() {
 	*x = DurableDemoteBundleResult{}
-	mi := &file_memql_proto_msgTypes[98]
+	mi := &file_memql_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10418,7 +10496,7 @@ func (x *DurableDemoteBundleResult) String() string {
 func (*DurableDemoteBundleResult) ProtoMessage() {}
 
 func (x *DurableDemoteBundleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[98]
+	mi := &file_memql_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10431,7 +10509,7 @@ func (x *DurableDemoteBundleResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DurableDemoteBundleResult.ProtoReflect.Descriptor instead.
 func (*DurableDemoteBundleResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{98}
+	return file_memql_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *DurableDemoteBundleResult) GetRequestId() string {
@@ -10523,7 +10601,7 @@ type StageBundleMsg struct {
 
 func (x *StageBundleMsg) Reset() {
 	*x = StageBundleMsg{}
-	mi := &file_memql_proto_msgTypes[99]
+	mi := &file_memql_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10535,7 +10613,7 @@ func (x *StageBundleMsg) String() string {
 func (*StageBundleMsg) ProtoMessage() {}
 
 func (x *StageBundleMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[99]
+	mi := &file_memql_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10548,7 +10626,7 @@ func (x *StageBundleMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StageBundleMsg.ProtoReflect.Descriptor instead.
 func (*StageBundleMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{99}
+	return file_memql_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *StageBundleMsg) GetRequestId() string {
@@ -10585,7 +10663,7 @@ type StageBundleResult struct {
 
 func (x *StageBundleResult) Reset() {
 	*x = StageBundleResult{}
-	mi := &file_memql_proto_msgTypes[100]
+	mi := &file_memql_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10597,7 +10675,7 @@ func (x *StageBundleResult) String() string {
 func (*StageBundleResult) ProtoMessage() {}
 
 func (x *StageBundleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[100]
+	mi := &file_memql_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10610,7 +10688,7 @@ func (x *StageBundleResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StageBundleResult.ProtoReflect.Descriptor instead.
 func (*StageBundleResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{100}
+	return file_memql_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *StageBundleResult) GetRequestId() string {
@@ -10660,7 +10738,7 @@ type DslSpecMsg struct {
 
 func (x *DslSpecMsg) Reset() {
 	*x = DslSpecMsg{}
-	mi := &file_memql_proto_msgTypes[101]
+	mi := &file_memql_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10672,7 +10750,7 @@ func (x *DslSpecMsg) String() string {
 func (*DslSpecMsg) ProtoMessage() {}
 
 func (x *DslSpecMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[101]
+	mi := &file_memql_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10685,7 +10763,7 @@ func (x *DslSpecMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DslSpecMsg.ProtoReflect.Descriptor instead.
 func (*DslSpecMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{101}
+	return file_memql_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *DslSpecMsg) GetRequestId() string {
@@ -10715,7 +10793,7 @@ type DslSpecResult struct {
 
 func (x *DslSpecResult) Reset() {
 	*x = DslSpecResult{}
-	mi := &file_memql_proto_msgTypes[102]
+	mi := &file_memql_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10727,7 +10805,7 @@ func (x *DslSpecResult) String() string {
 func (*DslSpecResult) ProtoMessage() {}
 
 func (x *DslSpecResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[102]
+	mi := &file_memql_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10740,7 +10818,7 @@ func (x *DslSpecResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DslSpecResult.ProtoReflect.Descriptor instead.
 func (*DslSpecResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{102}
+	return file_memql_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *DslSpecResult) GetRequestId() string {
@@ -10777,7 +10855,7 @@ type PolyphonRoomTokenMsg struct {
 
 func (x *PolyphonRoomTokenMsg) Reset() {
 	*x = PolyphonRoomTokenMsg{}
-	mi := &file_memql_proto_msgTypes[103]
+	mi := &file_memql_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10789,7 +10867,7 @@ func (x *PolyphonRoomTokenMsg) String() string {
 func (*PolyphonRoomTokenMsg) ProtoMessage() {}
 
 func (x *PolyphonRoomTokenMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[103]
+	mi := &file_memql_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10802,7 +10880,7 @@ func (x *PolyphonRoomTokenMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonRoomTokenMsg.ProtoReflect.Descriptor instead.
 func (*PolyphonRoomTokenMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{103}
+	return file_memql_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *PolyphonRoomTokenMsg) GetRequestId() string {
@@ -10846,7 +10924,7 @@ type PolyphonRoomTokenResult struct {
 
 func (x *PolyphonRoomTokenResult) Reset() {
 	*x = PolyphonRoomTokenResult{}
-	mi := &file_memql_proto_msgTypes[104]
+	mi := &file_memql_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10858,7 +10936,7 @@ func (x *PolyphonRoomTokenResult) String() string {
 func (*PolyphonRoomTokenResult) ProtoMessage() {}
 
 func (x *PolyphonRoomTokenResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[104]
+	mi := &file_memql_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10871,7 +10949,7 @@ func (x *PolyphonRoomTokenResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonRoomTokenResult.ProtoReflect.Descriptor instead.
 func (*PolyphonRoomTokenResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{104}
+	return file_memql_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *PolyphonRoomTokenResult) GetRequestId() string {
@@ -10919,7 +10997,7 @@ type PolyphonStatusMsg struct {
 
 func (x *PolyphonStatusMsg) Reset() {
 	*x = PolyphonStatusMsg{}
-	mi := &file_memql_proto_msgTypes[105]
+	mi := &file_memql_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10931,7 +11009,7 @@ func (x *PolyphonStatusMsg) String() string {
 func (*PolyphonStatusMsg) ProtoMessage() {}
 
 func (x *PolyphonStatusMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[105]
+	mi := &file_memql_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10944,7 +11022,7 @@ func (x *PolyphonStatusMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonStatusMsg.ProtoReflect.Descriptor instead.
 func (*PolyphonStatusMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{105}
+	return file_memql_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *PolyphonStatusMsg) GetRequestId() string {
@@ -10966,7 +11044,7 @@ type PolyphonStatusResult struct {
 
 func (x *PolyphonStatusResult) Reset() {
 	*x = PolyphonStatusResult{}
-	mi := &file_memql_proto_msgTypes[106]
+	mi := &file_memql_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10978,7 +11056,7 @@ func (x *PolyphonStatusResult) String() string {
 func (*PolyphonStatusResult) ProtoMessage() {}
 
 func (x *PolyphonStatusResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[106]
+	mi := &file_memql_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10991,7 +11069,7 @@ func (x *PolyphonStatusResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonStatusResult.ProtoReflect.Descriptor instead.
 func (*PolyphonStatusResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{106}
+	return file_memql_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *PolyphonStatusResult) GetRequestId() string {
@@ -11035,7 +11113,7 @@ type PolyphonUtteranceMsg struct {
 
 func (x *PolyphonUtteranceMsg) Reset() {
 	*x = PolyphonUtteranceMsg{}
-	mi := &file_memql_proto_msgTypes[107]
+	mi := &file_memql_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11047,7 +11125,7 @@ func (x *PolyphonUtteranceMsg) String() string {
 func (*PolyphonUtteranceMsg) ProtoMessage() {}
 
 func (x *PolyphonUtteranceMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[107]
+	mi := &file_memql_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11060,7 +11138,7 @@ func (x *PolyphonUtteranceMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonUtteranceMsg.ProtoReflect.Descriptor instead.
 func (*PolyphonUtteranceMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{107}
+	return file_memql_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *PolyphonUtteranceMsg) GetRequestId() string {
@@ -11101,7 +11179,7 @@ type PolyphonUtteranceResult struct {
 
 func (x *PolyphonUtteranceResult) Reset() {
 	*x = PolyphonUtteranceResult{}
-	mi := &file_memql_proto_msgTypes[108]
+	mi := &file_memql_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11113,7 +11191,7 @@ func (x *PolyphonUtteranceResult) String() string {
 func (*PolyphonUtteranceResult) ProtoMessage() {}
 
 func (x *PolyphonUtteranceResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[108]
+	mi := &file_memql_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11126,7 +11204,7 @@ func (x *PolyphonUtteranceResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolyphonUtteranceResult.ProtoReflect.Descriptor instead.
 func (*PolyphonUtteranceResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{108}
+	return file_memql_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *PolyphonUtteranceResult) GetRequestId() string {
@@ -11153,7 +11231,7 @@ type ConceptsListMsg struct {
 
 func (x *ConceptsListMsg) Reset() {
 	*x = ConceptsListMsg{}
-	mi := &file_memql_proto_msgTypes[109]
+	mi := &file_memql_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11165,7 +11243,7 @@ func (x *ConceptsListMsg) String() string {
 func (*ConceptsListMsg) ProtoMessage() {}
 
 func (x *ConceptsListMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[109]
+	mi := &file_memql_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11178,7 +11256,7 @@ func (x *ConceptsListMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptsListMsg.ProtoReflect.Descriptor instead.
 func (*ConceptsListMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{109}
+	return file_memql_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *ConceptsListMsg) GetRequestId() string {
@@ -11200,7 +11278,7 @@ type ConceptsListResult struct {
 
 func (x *ConceptsListResult) Reset() {
 	*x = ConceptsListResult{}
-	mi := &file_memql_proto_msgTypes[110]
+	mi := &file_memql_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11212,7 +11290,7 @@ func (x *ConceptsListResult) String() string {
 func (*ConceptsListResult) ProtoMessage() {}
 
 func (x *ConceptsListResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[110]
+	mi := &file_memql_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11225,7 +11303,7 @@ func (x *ConceptsListResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptsListResult.ProtoReflect.Descriptor instead.
 func (*ConceptsListResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{110}
+	return file_memql_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *ConceptsListResult) GetRequestId() string {
@@ -11299,13 +11377,40 @@ type ConceptInfo struct {
 	DataState      string   `protobuf:"bytes,8,opt,name=data_state,json=dataState,proto3" json:"data_state,omitempty"`
 	DataOrigin     string   `protobuf:"bytes,9,opt,name=data_origin,json=dataOrigin,proto3" json:"data_origin,omitempty"`
 	DataMirroredTo []string `protobuf:"bytes,10,rep,name=data_mirrored_to,json=dataMirroredTo,proto3" json:"data_mirrored_to,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The concept's DECLARED SHAPE (epic memql#4661, task memql#4662).
+	//
+	// Until this landed, ConceptInfo carried a concept's identity, its
+	// prose and its display card -- and nothing about what a row of it
+	// actually holds. Every client that needed the shape had to derive
+	// it from a SAMPLE OF ROWS, which answers a subtly different
+	// question: a field no loaded row happens to carry does not exist,
+	// an optional enum looks like free text until two values show up,
+	// and a relationship is invisible entirely because a foreign key is
+	// just another string. sdk/ts-viewkit's element fitness said so in
+	// its own header comment for two releases ("there is therefore no
+	// schema to match against at runtime").
+	//
+	// `fields` is projected from the stored `Schemas` JSON of the
+	// concept's CURRENT version, and `relationships` from its
+	// `@relationship` declarations -- BOTH AXES, since the engine `type`
+	// and the domain `as` mean different things (memql#3652) and a
+	// client rendering a lookup label wants the second one.
+	//
+	// ADDITIVE, and additive is load-bearing rather than polite: an
+	// older client ignores unknown fields, and a newer client reading an
+	// older server sees empty lists. Empty is honest -- it says "this
+	// server does not publish a shape", which is exactly the state that
+	// preceded these fields -- so a client falls back to row sampling
+	// rather than rendering a concept as having no fields.
+	Fields        []*ConceptField        `protobuf:"bytes,11,rep,name=fields,proto3" json:"fields,omitempty"`
+	Relationships []*ConceptRelationship `protobuf:"bytes,12,rep,name=relationships,proto3" json:"relationships,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConceptInfo) Reset() {
 	*x = ConceptInfo{}
-	mi := &file_memql_proto_msgTypes[111]
+	mi := &file_memql_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11317,7 +11422,7 @@ func (x *ConceptInfo) String() string {
 func (*ConceptInfo) ProtoMessage() {}
 
 func (x *ConceptInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[111]
+	mi := &file_memql_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11330,7 +11435,7 @@ func (x *ConceptInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptInfo.ProtoReflect.Descriptor instead.
 func (*ConceptInfo) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{111}
+	return file_memql_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *ConceptInfo) GetId() string {
@@ -11403,6 +11508,190 @@ func (x *ConceptInfo) GetDataMirroredTo() []string {
 	return nil
 }
 
+func (x *ConceptInfo) GetFields() []*ConceptField {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+func (x *ConceptInfo) GetRelationships() []*ConceptRelationship {
+	if x != nil {
+		return x.Relationships
+	}
+	return nil
+}
+
+// ConceptField is one declared field of a concept, as the DSL declared
+// it rather than as a Go type. `kind` is the authoring vocabulary --
+// string / boolean / integer / number / datetime / enum / array /
+// object -- because that is the word a client needs to pick a cell
+// renderer, and mapping it back from "the JSON Schema said type:string
+// with format:date-time" is a derivation every client would otherwise
+// repeat.
+type ConceptField struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Name     string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Kind     string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Required bool                   `protobuf:"varint,3,opt,name=required,proto3" json:"required,omitempty"`
+	// The declared members, for kind == "enum". Empty otherwise.
+	EnumValues []string `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"`
+	// The field's own `///` doc comment, verbatim. Empty when it has none.
+	Description   string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConceptField) Reset() {
+	*x = ConceptField{}
+	mi := &file_memql_proto_msgTypes[113]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConceptField) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConceptField) ProtoMessage() {}
+
+func (x *ConceptField) ProtoReflect() protoreflect.Message {
+	mi := &file_memql_proto_msgTypes[113]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConceptField.ProtoReflect.Descriptor instead.
+func (*ConceptField) Descriptor() ([]byte, []int) {
+	return file_memql_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *ConceptField) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ConceptField) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ConceptField) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *ConceptField) GetEnumValues() []string {
+	if x != nil {
+		return x.EnumValues
+	}
+	return nil
+}
+
+func (x *ConceptField) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+// ConceptRelationship is one declared edge. The two axes are carried
+// SEPARATELY and neither is derived from the other (memql#3652):
+// `type` is the closed engine set (parent / owns / references / ...)
+// and drives traversal; `as` is the open domain label (respondsAs,
+// assignedTo) and is what a person reads. `as` is empty on every
+// declaration that predates the split, which is why a client labelling
+// an edge falls back to `field` rather than to `type`.
+type ConceptRelationship struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Type  string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	As    string                 `protobuf:"bytes,2,opt,name=as,proto3" json:"as,omitempty"`
+	// The field holding the pointer. May be a dotted path when the
+	// pointer sits inside a nested block ("lineage.originatingPlanId").
+	Field         string `protobuf:"bytes,3,opt,name=field,proto3" json:"field,omitempty"`
+	Target        string `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	Direction     string `protobuf:"bytes,5,opt,name=direction,proto3" json:"direction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConceptRelationship) Reset() {
+	*x = ConceptRelationship{}
+	mi := &file_memql_proto_msgTypes[114]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConceptRelationship) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConceptRelationship) ProtoMessage() {}
+
+func (x *ConceptRelationship) ProtoReflect() protoreflect.Message {
+	mi := &file_memql_proto_msgTypes[114]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConceptRelationship.ProtoReflect.Descriptor instead.
+func (*ConceptRelationship) Descriptor() ([]byte, []int) {
+	return file_memql_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *ConceptRelationship) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ConceptRelationship) GetAs() string {
+	if x != nil {
+		return x.As
+	}
+	return ""
+}
+
+func (x *ConceptRelationship) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *ConceptRelationship) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *ConceptRelationship) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
 type DisplayCard struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Primary       string                 `protobuf:"bytes,1,opt,name=primary,proto3" json:"primary,omitempty"`
@@ -11415,7 +11704,7 @@ type DisplayCard struct {
 
 func (x *DisplayCard) Reset() {
 	*x = DisplayCard{}
-	mi := &file_memql_proto_msgTypes[112]
+	mi := &file_memql_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11427,7 +11716,7 @@ func (x *DisplayCard) String() string {
 func (*DisplayCard) ProtoMessage() {}
 
 func (x *DisplayCard) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[112]
+	mi := &file_memql_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11440,7 +11729,7 @@ func (x *DisplayCard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisplayCard.ProtoReflect.Descriptor instead.
 func (*DisplayCard) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{112}
+	return file_memql_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *DisplayCard) GetPrimary() string {
@@ -11492,7 +11781,7 @@ type ConceptsSubscribeMsg struct {
 
 func (x *ConceptsSubscribeMsg) Reset() {
 	*x = ConceptsSubscribeMsg{}
-	mi := &file_memql_proto_msgTypes[113]
+	mi := &file_memql_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11504,7 +11793,7 @@ func (x *ConceptsSubscribeMsg) String() string {
 func (*ConceptsSubscribeMsg) ProtoMessage() {}
 
 func (x *ConceptsSubscribeMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[113]
+	mi := &file_memql_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11517,7 +11806,7 @@ func (x *ConceptsSubscribeMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptsSubscribeMsg.ProtoReflect.Descriptor instead.
 func (*ConceptsSubscribeMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{113}
+	return file_memql_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *ConceptsSubscribeMsg) GetRequestId() string {
@@ -11551,7 +11840,7 @@ type ConceptsSubscribeResult struct {
 
 func (x *ConceptsSubscribeResult) Reset() {
 	*x = ConceptsSubscribeResult{}
-	mi := &file_memql_proto_msgTypes[114]
+	mi := &file_memql_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11563,7 +11852,7 @@ func (x *ConceptsSubscribeResult) String() string {
 func (*ConceptsSubscribeResult) ProtoMessage() {}
 
 func (x *ConceptsSubscribeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[114]
+	mi := &file_memql_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11576,7 +11865,7 @@ func (x *ConceptsSubscribeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptsSubscribeResult.ProtoReflect.Descriptor instead.
 func (*ConceptsSubscribeResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{114}
+	return file_memql_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *ConceptsSubscribeResult) GetRequestId() string {
@@ -11603,7 +11892,7 @@ type DomainSubscription struct {
 
 func (x *DomainSubscription) Reset() {
 	*x = DomainSubscription{}
-	mi := &file_memql_proto_msgTypes[115]
+	mi := &file_memql_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11615,7 +11904,7 @@ func (x *DomainSubscription) String() string {
 func (*DomainSubscription) ProtoMessage() {}
 
 func (x *DomainSubscription) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[115]
+	mi := &file_memql_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11628,7 +11917,7 @@ func (x *DomainSubscription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainSubscription.ProtoReflect.Descriptor instead.
 func (*DomainSubscription) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{115}
+	return file_memql_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *DomainSubscription) GetDomain() string {
@@ -11676,7 +11965,7 @@ type ConceptsRegistryDelta struct {
 
 func (x *ConceptsRegistryDelta) Reset() {
 	*x = ConceptsRegistryDelta{}
-	mi := &file_memql_proto_msgTypes[116]
+	mi := &file_memql_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11688,7 +11977,7 @@ func (x *ConceptsRegistryDelta) String() string {
 func (*ConceptsRegistryDelta) ProtoMessage() {}
 
 func (x *ConceptsRegistryDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[116]
+	mi := &file_memql_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11701,7 +11990,7 @@ func (x *ConceptsRegistryDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConceptsRegistryDelta.ProtoReflect.Descriptor instead.
 func (*ConceptsRegistryDelta) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{116}
+	return file_memql_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *ConceptsRegistryDelta) GetRequestId() string {
@@ -11758,7 +12047,7 @@ type MyAccessMsg struct {
 
 func (x *MyAccessMsg) Reset() {
 	*x = MyAccessMsg{}
-	mi := &file_memql_proto_msgTypes[117]
+	mi := &file_memql_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11770,7 +12059,7 @@ func (x *MyAccessMsg) String() string {
 func (*MyAccessMsg) ProtoMessage() {}
 
 func (x *MyAccessMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[117]
+	mi := &file_memql_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11783,7 +12072,7 @@ func (x *MyAccessMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MyAccessMsg.ProtoReflect.Descriptor instead.
 func (*MyAccessMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{117}
+	return file_memql_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *MyAccessMsg) GetRequestId() string {
@@ -11838,7 +12127,7 @@ type MyAccessResult struct {
 
 func (x *MyAccessResult) Reset() {
 	*x = MyAccessResult{}
-	mi := &file_memql_proto_msgTypes[118]
+	mi := &file_memql_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11850,7 +12139,7 @@ func (x *MyAccessResult) String() string {
 func (*MyAccessResult) ProtoMessage() {}
 
 func (x *MyAccessResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[118]
+	mi := &file_memql_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11863,7 +12152,7 @@ func (x *MyAccessResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MyAccessResult.ProtoReflect.Descriptor instead.
 func (*MyAccessResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{118}
+	return file_memql_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *MyAccessResult) GetRequestId() string {
@@ -11942,7 +12231,7 @@ type AgentGenerateTurnMsg struct {
 
 func (x *AgentGenerateTurnMsg) Reset() {
 	*x = AgentGenerateTurnMsg{}
-	mi := &file_memql_proto_msgTypes[119]
+	mi := &file_memql_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11954,7 +12243,7 @@ func (x *AgentGenerateTurnMsg) String() string {
 func (*AgentGenerateTurnMsg) ProtoMessage() {}
 
 func (x *AgentGenerateTurnMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[119]
+	mi := &file_memql_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11967,7 +12256,7 @@ func (x *AgentGenerateTurnMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentGenerateTurnMsg.ProtoReflect.Descriptor instead.
 func (*AgentGenerateTurnMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{119}
+	return file_memql_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *AgentGenerateTurnMsg) GetRequestId() string {
@@ -12057,7 +12346,7 @@ type ActingAgentIdentity struct {
 
 func (x *ActingAgentIdentity) Reset() {
 	*x = ActingAgentIdentity{}
-	mi := &file_memql_proto_msgTypes[120]
+	mi := &file_memql_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12069,7 +12358,7 @@ func (x *ActingAgentIdentity) String() string {
 func (*ActingAgentIdentity) ProtoMessage() {}
 
 func (x *ActingAgentIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[120]
+	mi := &file_memql_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12082,7 +12371,7 @@ func (x *ActingAgentIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActingAgentIdentity.ProtoReflect.Descriptor instead.
 func (*ActingAgentIdentity) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{120}
+	return file_memql_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *ActingAgentIdentity) GetId() string {
@@ -12160,7 +12449,7 @@ type AgentTurnMessage struct {
 
 func (x *AgentTurnMessage) Reset() {
 	*x = AgentTurnMessage{}
-	mi := &file_memql_proto_msgTypes[121]
+	mi := &file_memql_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12172,7 +12461,7 @@ func (x *AgentTurnMessage) String() string {
 func (*AgentTurnMessage) ProtoMessage() {}
 
 func (x *AgentTurnMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[121]
+	mi := &file_memql_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12185,7 +12474,7 @@ func (x *AgentTurnMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnMessage.ProtoReflect.Descriptor instead.
 func (*AgentTurnMessage) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{121}
+	return file_memql_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *AgentTurnMessage) GetRole() string {
@@ -12259,7 +12548,7 @@ type AgentTurnRoutingContext struct {
 
 func (x *AgentTurnRoutingContext) Reset() {
 	*x = AgentTurnRoutingContext{}
-	mi := &file_memql_proto_msgTypes[122]
+	mi := &file_memql_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12271,7 +12560,7 @@ func (x *AgentTurnRoutingContext) String() string {
 func (*AgentTurnRoutingContext) ProtoMessage() {}
 
 func (x *AgentTurnRoutingContext) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[122]
+	mi := &file_memql_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12284,7 +12573,7 @@ func (x *AgentTurnRoutingContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnRoutingContext.ProtoReflect.Descriptor instead.
 func (*AgentTurnRoutingContext) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{122}
+	return file_memql_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *AgentTurnRoutingContext) GetTrigger() string {
@@ -12375,7 +12664,7 @@ type AgentTurnHuman struct {
 
 func (x *AgentTurnHuman) Reset() {
 	*x = AgentTurnHuman{}
-	mi := &file_memql_proto_msgTypes[123]
+	mi := &file_memql_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12387,7 +12676,7 @@ func (x *AgentTurnHuman) String() string {
 func (*AgentTurnHuman) ProtoMessage() {}
 
 func (x *AgentTurnHuman) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[123]
+	mi := &file_memql_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12400,7 +12689,7 @@ func (x *AgentTurnHuman) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnHuman.ProtoReflect.Descriptor instead.
 func (*AgentTurnHuman) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{123}
+	return file_memql_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *AgentTurnHuman) GetId() string {
@@ -12436,7 +12725,7 @@ type AgentTurnPeer struct {
 
 func (x *AgentTurnPeer) Reset() {
 	*x = AgentTurnPeer{}
-	mi := &file_memql_proto_msgTypes[124]
+	mi := &file_memql_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12448,7 +12737,7 @@ func (x *AgentTurnPeer) String() string {
 func (*AgentTurnPeer) ProtoMessage() {}
 
 func (x *AgentTurnPeer) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[124]
+	mi := &file_memql_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12461,7 +12750,7 @@ func (x *AgentTurnPeer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnPeer.ProtoReflect.Descriptor instead.
 func (*AgentTurnPeer) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{124}
+	return file_memql_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *AgentTurnPeer) GetId() string {
@@ -12505,7 +12794,7 @@ type AgentTurnPeerActivity struct {
 
 func (x *AgentTurnPeerActivity) Reset() {
 	*x = AgentTurnPeerActivity{}
-	mi := &file_memql_proto_msgTypes[125]
+	mi := &file_memql_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12517,7 +12806,7 @@ func (x *AgentTurnPeerActivity) String() string {
 func (*AgentTurnPeerActivity) ProtoMessage() {}
 
 func (x *AgentTurnPeerActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[125]
+	mi := &file_memql_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12530,7 +12819,7 @@ func (x *AgentTurnPeerActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnPeerActivity.ProtoReflect.Descriptor instead.
 func (*AgentTurnPeerActivity) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{125}
+	return file_memql_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *AgentTurnPeerActivity) GetName() string {
@@ -12597,7 +12886,7 @@ type AgentTurnSpaceContext struct {
 
 func (x *AgentTurnSpaceContext) Reset() {
 	*x = AgentTurnSpaceContext{}
-	mi := &file_memql_proto_msgTypes[126]
+	mi := &file_memql_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12609,7 +12898,7 @@ func (x *AgentTurnSpaceContext) String() string {
 func (*AgentTurnSpaceContext) ProtoMessage() {}
 
 func (x *AgentTurnSpaceContext) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[126]
+	mi := &file_memql_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12622,7 +12911,7 @@ func (x *AgentTurnSpaceContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnSpaceContext.ProtoReflect.Descriptor instead.
 func (*AgentTurnSpaceContext) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{126}
+	return file_memql_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *AgentTurnSpaceContext) GetId() string {
@@ -12688,7 +12977,7 @@ type AgentTurnSpaceGoal struct {
 
 func (x *AgentTurnSpaceGoal) Reset() {
 	*x = AgentTurnSpaceGoal{}
-	mi := &file_memql_proto_msgTypes[127]
+	mi := &file_memql_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12700,7 +12989,7 @@ func (x *AgentTurnSpaceGoal) String() string {
 func (*AgentTurnSpaceGoal) ProtoMessage() {}
 
 func (x *AgentTurnSpaceGoal) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[127]
+	mi := &file_memql_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12713,7 +13002,7 @@ func (x *AgentTurnSpaceGoal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnSpaceGoal.ProtoReflect.Descriptor instead.
 func (*AgentTurnSpaceGoal) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{127}
+	return file_memql_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *AgentTurnSpaceGoal) GetStatement() string {
@@ -12741,7 +13030,7 @@ type AgentTurnAttachment struct {
 
 func (x *AgentTurnAttachment) Reset() {
 	*x = AgentTurnAttachment{}
-	mi := &file_memql_proto_msgTypes[128]
+	mi := &file_memql_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12753,7 +13042,7 @@ func (x *AgentTurnAttachment) String() string {
 func (*AgentTurnAttachment) ProtoMessage() {}
 
 func (x *AgentTurnAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[128]
+	mi := &file_memql_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12766,7 +13055,7 @@ func (x *AgentTurnAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnAttachment.ProtoReflect.Descriptor instead.
 func (*AgentTurnAttachment) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{128}
+	return file_memql_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *AgentTurnAttachment) GetId() string {
@@ -12808,7 +13097,7 @@ type AgentGenerateTurnDelta struct {
 
 func (x *AgentGenerateTurnDelta) Reset() {
 	*x = AgentGenerateTurnDelta{}
-	mi := &file_memql_proto_msgTypes[129]
+	mi := &file_memql_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12820,7 +13109,7 @@ func (x *AgentGenerateTurnDelta) String() string {
 func (*AgentGenerateTurnDelta) ProtoMessage() {}
 
 func (x *AgentGenerateTurnDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[129]
+	mi := &file_memql_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12833,7 +13122,7 @@ func (x *AgentGenerateTurnDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentGenerateTurnDelta.ProtoReflect.Descriptor instead.
 func (*AgentGenerateTurnDelta) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{129}
+	return file_memql_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *AgentGenerateTurnDelta) GetRequestId() string {
@@ -12908,7 +13197,7 @@ type AgentTurnTextDelta struct {
 
 func (x *AgentTurnTextDelta) Reset() {
 	*x = AgentTurnTextDelta{}
-	mi := &file_memql_proto_msgTypes[130]
+	mi := &file_memql_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12920,7 +13209,7 @@ func (x *AgentTurnTextDelta) String() string {
 func (*AgentTurnTextDelta) ProtoMessage() {}
 
 func (x *AgentTurnTextDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[130]
+	mi := &file_memql_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12933,7 +13222,7 @@ func (x *AgentTurnTextDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnTextDelta.ProtoReflect.Descriptor instead.
 func (*AgentTurnTextDelta) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{130}
+	return file_memql_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *AgentTurnTextDelta) GetText() string {
@@ -12954,7 +13243,7 @@ type AgentTurnToolCall struct {
 
 func (x *AgentTurnToolCall) Reset() {
 	*x = AgentTurnToolCall{}
-	mi := &file_memql_proto_msgTypes[131]
+	mi := &file_memql_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12966,7 +13255,7 @@ func (x *AgentTurnToolCall) String() string {
 func (*AgentTurnToolCall) ProtoMessage() {}
 
 func (x *AgentTurnToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[131]
+	mi := &file_memql_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12979,7 +13268,7 @@ func (x *AgentTurnToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnToolCall.ProtoReflect.Descriptor instead.
 func (*AgentTurnToolCall) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{131}
+	return file_memql_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *AgentTurnToolCall) GetToolCallId() string {
@@ -13014,7 +13303,7 @@ type AgentTurnToolResult struct {
 
 func (x *AgentTurnToolResult) Reset() {
 	*x = AgentTurnToolResult{}
-	mi := &file_memql_proto_msgTypes[132]
+	mi := &file_memql_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13026,7 +13315,7 @@ func (x *AgentTurnToolResult) String() string {
 func (*AgentTurnToolResult) ProtoMessage() {}
 
 func (x *AgentTurnToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[132]
+	mi := &file_memql_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13039,7 +13328,7 @@ func (x *AgentTurnToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnToolResult.ProtoReflect.Descriptor instead.
 func (*AgentTurnToolResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{132}
+	return file_memql_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *AgentTurnToolResult) GetToolCallId() string {
@@ -13098,7 +13387,7 @@ type AgentGenerateTurnComplete struct {
 
 func (x *AgentGenerateTurnComplete) Reset() {
 	*x = AgentGenerateTurnComplete{}
-	mi := &file_memql_proto_msgTypes[133]
+	mi := &file_memql_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13110,7 +13399,7 @@ func (x *AgentGenerateTurnComplete) String() string {
 func (*AgentGenerateTurnComplete) ProtoMessage() {}
 
 func (x *AgentGenerateTurnComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[133]
+	mi := &file_memql_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13123,7 +13412,7 @@ func (x *AgentGenerateTurnComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentGenerateTurnComplete.ProtoReflect.Descriptor instead.
 func (*AgentGenerateTurnComplete) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{133}
+	return file_memql_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *AgentGenerateTurnComplete) GetRequestId() string {
@@ -13205,7 +13494,7 @@ type AgentPreemptTurnMsg struct {
 
 func (x *AgentPreemptTurnMsg) Reset() {
 	*x = AgentPreemptTurnMsg{}
-	mi := &file_memql_proto_msgTypes[134]
+	mi := &file_memql_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13217,7 +13506,7 @@ func (x *AgentPreemptTurnMsg) String() string {
 func (*AgentPreemptTurnMsg) ProtoMessage() {}
 
 func (x *AgentPreemptTurnMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[134]
+	mi := &file_memql_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13230,7 +13519,7 @@ func (x *AgentPreemptTurnMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPreemptTurnMsg.ProtoReflect.Descriptor instead.
 func (*AgentPreemptTurnMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{134}
+	return file_memql_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *AgentPreemptTurnMsg) GetRequestId() string {
@@ -13254,7 +13543,7 @@ type AgentTurnCitation struct {
 
 func (x *AgentTurnCitation) Reset() {
 	*x = AgentTurnCitation{}
-	mi := &file_memql_proto_msgTypes[135]
+	mi := &file_memql_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13266,7 +13555,7 @@ func (x *AgentTurnCitation) String() string {
 func (*AgentTurnCitation) ProtoMessage() {}
 
 func (x *AgentTurnCitation) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[135]
+	mi := &file_memql_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13279,7 +13568,7 @@ func (x *AgentTurnCitation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnCitation.ProtoReflect.Descriptor instead.
 func (*AgentTurnCitation) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{135}
+	return file_memql_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *AgentTurnCitation) GetDomainId() string {
@@ -13314,7 +13603,7 @@ type AgentRetrievedChunk struct {
 
 func (x *AgentRetrievedChunk) Reset() {
 	*x = AgentRetrievedChunk{}
-	mi := &file_memql_proto_msgTypes[136]
+	mi := &file_memql_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13326,7 +13615,7 @@ func (x *AgentRetrievedChunk) String() string {
 func (*AgentRetrievedChunk) ProtoMessage() {}
 
 func (x *AgentRetrievedChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[136]
+	mi := &file_memql_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13339,7 +13628,7 @@ func (x *AgentRetrievedChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentRetrievedChunk.ProtoReflect.Descriptor instead.
 func (*AgentRetrievedChunk) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{136}
+	return file_memql_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *AgentRetrievedChunk) GetDomainId() string {
@@ -13388,7 +13677,7 @@ type AgentTurnError struct {
 
 func (x *AgentTurnError) Reset() {
 	*x = AgentTurnError{}
-	mi := &file_memql_proto_msgTypes[137]
+	mi := &file_memql_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13400,7 +13689,7 @@ func (x *AgentTurnError) String() string {
 func (*AgentTurnError) ProtoMessage() {}
 
 func (x *AgentTurnError) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[137]
+	mi := &file_memql_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13413,7 +13702,7 @@ func (x *AgentTurnError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTurnError.ProtoReflect.Descriptor instead.
 func (*AgentTurnError) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{137}
+	return file_memql_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *AgentTurnError) GetErrorId() string {
@@ -13464,7 +13753,7 @@ type SendGuestInviteMsg struct {
 
 func (x *SendGuestInviteMsg) Reset() {
 	*x = SendGuestInviteMsg{}
-	mi := &file_memql_proto_msgTypes[138]
+	mi := &file_memql_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13476,7 +13765,7 @@ func (x *SendGuestInviteMsg) String() string {
 func (*SendGuestInviteMsg) ProtoMessage() {}
 
 func (x *SendGuestInviteMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[138]
+	mi := &file_memql_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13489,7 +13778,7 @@ func (x *SendGuestInviteMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendGuestInviteMsg.ProtoReflect.Descriptor instead.
 func (*SendGuestInviteMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{138}
+	return file_memql_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *SendGuestInviteMsg) GetRequestId() string {
@@ -13570,7 +13859,7 @@ type SendGuestInviteResult struct {
 
 func (x *SendGuestInviteResult) Reset() {
 	*x = SendGuestInviteResult{}
-	mi := &file_memql_proto_msgTypes[139]
+	mi := &file_memql_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13582,7 +13871,7 @@ func (x *SendGuestInviteResult) String() string {
 func (*SendGuestInviteResult) ProtoMessage() {}
 
 func (x *SendGuestInviteResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[139]
+	mi := &file_memql_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13595,7 +13884,7 @@ func (x *SendGuestInviteResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendGuestInviteResult.ProtoReflect.Descriptor instead.
 func (*SendGuestInviteResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{139}
+	return file_memql_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *SendGuestInviteResult) GetRequestId() string {
@@ -13646,7 +13935,7 @@ type ResolveGuestInviteMsg struct {
 
 func (x *ResolveGuestInviteMsg) Reset() {
 	*x = ResolveGuestInviteMsg{}
-	mi := &file_memql_proto_msgTypes[140]
+	mi := &file_memql_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13658,7 +13947,7 @@ func (x *ResolveGuestInviteMsg) String() string {
 func (*ResolveGuestInviteMsg) ProtoMessage() {}
 
 func (x *ResolveGuestInviteMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[140]
+	mi := &file_memql_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13671,7 +13960,7 @@ func (x *ResolveGuestInviteMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGuestInviteMsg.ProtoReflect.Descriptor instead.
 func (*ResolveGuestInviteMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{140}
+	return file_memql_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *ResolveGuestInviteMsg) GetRequestId() string {
@@ -13714,7 +14003,7 @@ type ResolveGuestInviteResult struct {
 
 func (x *ResolveGuestInviteResult) Reset() {
 	*x = ResolveGuestInviteResult{}
-	mi := &file_memql_proto_msgTypes[141]
+	mi := &file_memql_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13726,7 +14015,7 @@ func (x *ResolveGuestInviteResult) String() string {
 func (*ResolveGuestInviteResult) ProtoMessage() {}
 
 func (x *ResolveGuestInviteResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[141]
+	mi := &file_memql_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13739,7 +14028,7 @@ func (x *ResolveGuestInviteResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGuestInviteResult.ProtoReflect.Descriptor instead.
 func (*ResolveGuestInviteResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{141}
+	return file_memql_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *ResolveGuestInviteResult) GetRequestId() string {
@@ -13830,7 +14119,7 @@ type JoinSpaceAsGuestMsg struct {
 
 func (x *JoinSpaceAsGuestMsg) Reset() {
 	*x = JoinSpaceAsGuestMsg{}
-	mi := &file_memql_proto_msgTypes[142]
+	mi := &file_memql_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13842,7 +14131,7 @@ func (x *JoinSpaceAsGuestMsg) String() string {
 func (*JoinSpaceAsGuestMsg) ProtoMessage() {}
 
 func (x *JoinSpaceAsGuestMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[142]
+	mi := &file_memql_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13855,7 +14144,7 @@ func (x *JoinSpaceAsGuestMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinSpaceAsGuestMsg.ProtoReflect.Descriptor instead.
 func (*JoinSpaceAsGuestMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{142}
+	return file_memql_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *JoinSpaceAsGuestMsg) GetRequestId() string {
@@ -13902,7 +14191,7 @@ type JoinSpaceAsGuestResult struct {
 
 func (x *JoinSpaceAsGuestResult) Reset() {
 	*x = JoinSpaceAsGuestResult{}
-	mi := &file_memql_proto_msgTypes[143]
+	mi := &file_memql_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13914,7 +14203,7 @@ func (x *JoinSpaceAsGuestResult) String() string {
 func (*JoinSpaceAsGuestResult) ProtoMessage() {}
 
 func (x *JoinSpaceAsGuestResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[143]
+	mi := &file_memql_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13927,7 +14216,7 @@ func (x *JoinSpaceAsGuestResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinSpaceAsGuestResult.ProtoReflect.Descriptor instead.
 func (*JoinSpaceAsGuestResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{143}
+	return file_memql_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *JoinSpaceAsGuestResult) GetRequestId() string {
@@ -13988,7 +14277,7 @@ type CancelGuestInviteMsg struct {
 
 func (x *CancelGuestInviteMsg) Reset() {
 	*x = CancelGuestInviteMsg{}
-	mi := &file_memql_proto_msgTypes[144]
+	mi := &file_memql_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14000,7 +14289,7 @@ func (x *CancelGuestInviteMsg) String() string {
 func (*CancelGuestInviteMsg) ProtoMessage() {}
 
 func (x *CancelGuestInviteMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[144]
+	mi := &file_memql_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14013,7 +14302,7 @@ func (x *CancelGuestInviteMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelGuestInviteMsg.ProtoReflect.Descriptor instead.
 func (*CancelGuestInviteMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{144}
+	return file_memql_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *CancelGuestInviteMsg) GetRequestId() string {
@@ -14050,7 +14339,7 @@ type CancelGuestInviteResult struct {
 
 func (x *CancelGuestInviteResult) Reset() {
 	*x = CancelGuestInviteResult{}
-	mi := &file_memql_proto_msgTypes[145]
+	mi := &file_memql_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14062,7 +14351,7 @@ func (x *CancelGuestInviteResult) String() string {
 func (*CancelGuestInviteResult) ProtoMessage() {}
 
 func (x *CancelGuestInviteResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[145]
+	mi := &file_memql_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14075,7 +14364,7 @@ func (x *CancelGuestInviteResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelGuestInviteResult.ProtoReflect.Descriptor instead.
 func (*CancelGuestInviteResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{145}
+	return file_memql_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *CancelGuestInviteResult) GetRequestId() string {
@@ -14129,7 +14418,7 @@ type ResendGuestInviteEmailMsg struct {
 
 func (x *ResendGuestInviteEmailMsg) Reset() {
 	*x = ResendGuestInviteEmailMsg{}
-	mi := &file_memql_proto_msgTypes[146]
+	mi := &file_memql_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14141,7 +14430,7 @@ func (x *ResendGuestInviteEmailMsg) String() string {
 func (*ResendGuestInviteEmailMsg) ProtoMessage() {}
 
 func (x *ResendGuestInviteEmailMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[146]
+	mi := &file_memql_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14154,7 +14443,7 @@ func (x *ResendGuestInviteEmailMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResendGuestInviteEmailMsg.ProtoReflect.Descriptor instead.
 func (*ResendGuestInviteEmailMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{146}
+	return file_memql_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *ResendGuestInviteEmailMsg) GetRequestId() string {
@@ -14199,7 +14488,7 @@ type ResendGuestInviteEmailResult struct {
 
 func (x *ResendGuestInviteEmailResult) Reset() {
 	*x = ResendGuestInviteEmailResult{}
-	mi := &file_memql_proto_msgTypes[147]
+	mi := &file_memql_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14211,7 +14500,7 @@ func (x *ResendGuestInviteEmailResult) String() string {
 func (*ResendGuestInviteEmailResult) ProtoMessage() {}
 
 func (x *ResendGuestInviteEmailResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[147]
+	mi := &file_memql_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14224,7 +14513,7 @@ func (x *ResendGuestInviteEmailResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResendGuestInviteEmailResult.ProtoReflect.Descriptor instead.
 func (*ResendGuestInviteEmailResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{147}
+	return file_memql_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *ResendGuestInviteEmailResult) GetRequestId() string {
@@ -14274,7 +14563,7 @@ type RevokeCurrentSessionMsg struct {
 
 func (x *RevokeCurrentSessionMsg) Reset() {
 	*x = RevokeCurrentSessionMsg{}
-	mi := &file_memql_proto_msgTypes[148]
+	mi := &file_memql_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14286,7 +14575,7 @@ func (x *RevokeCurrentSessionMsg) String() string {
 func (*RevokeCurrentSessionMsg) ProtoMessage() {}
 
 func (x *RevokeCurrentSessionMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[148]
+	mi := &file_memql_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14299,7 +14588,7 @@ func (x *RevokeCurrentSessionMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCurrentSessionMsg.ProtoReflect.Descriptor instead.
 func (*RevokeCurrentSessionMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{148}
+	return file_memql_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *RevokeCurrentSessionMsg) GetRequestId() string {
@@ -14329,7 +14618,7 @@ type RevokeCurrentSessionResult struct {
 
 func (x *RevokeCurrentSessionResult) Reset() {
 	*x = RevokeCurrentSessionResult{}
-	mi := &file_memql_proto_msgTypes[149]
+	mi := &file_memql_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14341,7 +14630,7 @@ func (x *RevokeCurrentSessionResult) String() string {
 func (*RevokeCurrentSessionResult) ProtoMessage() {}
 
 func (x *RevokeCurrentSessionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[149]
+	mi := &file_memql_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14354,7 +14643,7 @@ func (x *RevokeCurrentSessionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCurrentSessionResult.ProtoReflect.Descriptor instead.
 func (*RevokeCurrentSessionResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{149}
+	return file_memql_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *RevokeCurrentSessionResult) GetRequestId() string {
@@ -14403,7 +14692,7 @@ type RevokeAllSessionsMsg struct {
 
 func (x *RevokeAllSessionsMsg) Reset() {
 	*x = RevokeAllSessionsMsg{}
-	mi := &file_memql_proto_msgTypes[150]
+	mi := &file_memql_proto_msgTypes[153]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14415,7 +14704,7 @@ func (x *RevokeAllSessionsMsg) String() string {
 func (*RevokeAllSessionsMsg) ProtoMessage() {}
 
 func (x *RevokeAllSessionsMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[150]
+	mi := &file_memql_proto_msgTypes[153]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14428,7 +14717,7 @@ func (x *RevokeAllSessionsMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAllSessionsMsg.ProtoReflect.Descriptor instead.
 func (*RevokeAllSessionsMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{150}
+	return file_memql_proto_rawDescGZIP(), []int{153}
 }
 
 func (x *RevokeAllSessionsMsg) GetRequestId() string {
@@ -14454,7 +14743,7 @@ type RevokeAllSessionsResult struct {
 
 func (x *RevokeAllSessionsResult) Reset() {
 	*x = RevokeAllSessionsResult{}
-	mi := &file_memql_proto_msgTypes[151]
+	mi := &file_memql_proto_msgTypes[154]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14466,7 +14755,7 @@ func (x *RevokeAllSessionsResult) String() string {
 func (*RevokeAllSessionsResult) ProtoMessage() {}
 
 func (x *RevokeAllSessionsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[151]
+	mi := &file_memql_proto_msgTypes[154]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14479,7 +14768,7 @@ func (x *RevokeAllSessionsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAllSessionsResult.ProtoReflect.Descriptor instead.
 func (*RevokeAllSessionsResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{151}
+	return file_memql_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *RevokeAllSessionsResult) GetRequestId() string {
@@ -14544,7 +14833,7 @@ type RevokeSessionMsg struct {
 
 func (x *RevokeSessionMsg) Reset() {
 	*x = RevokeSessionMsg{}
-	mi := &file_memql_proto_msgTypes[152]
+	mi := &file_memql_proto_msgTypes[155]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14556,7 +14845,7 @@ func (x *RevokeSessionMsg) String() string {
 func (*RevokeSessionMsg) ProtoMessage() {}
 
 func (x *RevokeSessionMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[152]
+	mi := &file_memql_proto_msgTypes[155]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14569,7 +14858,7 @@ func (x *RevokeSessionMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionMsg.ProtoReflect.Descriptor instead.
 func (*RevokeSessionMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{152}
+	return file_memql_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *RevokeSessionMsg) GetRequestId() string {
@@ -14614,7 +14903,7 @@ type RevokeSessionResult struct {
 
 func (x *RevokeSessionResult) Reset() {
 	*x = RevokeSessionResult{}
-	mi := &file_memql_proto_msgTypes[153]
+	mi := &file_memql_proto_msgTypes[156]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14626,7 +14915,7 @@ func (x *RevokeSessionResult) String() string {
 func (*RevokeSessionResult) ProtoMessage() {}
 
 func (x *RevokeSessionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[153]
+	mi := &file_memql_proto_msgTypes[156]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14639,7 +14928,7 @@ func (x *RevokeSessionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionResult.ProtoReflect.Descriptor instead.
 func (*RevokeSessionResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{153}
+	return file_memql_proto_rawDescGZIP(), []int{156}
 }
 
 func (x *RevokeSessionResult) GetRequestId() string {
@@ -14714,7 +15003,7 @@ type SetSignInPolicyMsg struct {
 
 func (x *SetSignInPolicyMsg) Reset() {
 	*x = SetSignInPolicyMsg{}
-	mi := &file_memql_proto_msgTypes[154]
+	mi := &file_memql_proto_msgTypes[157]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14726,7 +15015,7 @@ func (x *SetSignInPolicyMsg) String() string {
 func (*SetSignInPolicyMsg) ProtoMessage() {}
 
 func (x *SetSignInPolicyMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[154]
+	mi := &file_memql_proto_msgTypes[157]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14739,7 +15028,7 @@ func (x *SetSignInPolicyMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSignInPolicyMsg.ProtoReflect.Descriptor instead.
 func (*SetSignInPolicyMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{154}
+	return file_memql_proto_rawDescGZIP(), []int{157}
 }
 
 func (x *SetSignInPolicyMsg) GetRequestId() string {
@@ -14783,7 +15072,7 @@ type SetSignInPolicyResult struct {
 
 func (x *SetSignInPolicyResult) Reset() {
 	*x = SetSignInPolicyResult{}
-	mi := &file_memql_proto_msgTypes[155]
+	mi := &file_memql_proto_msgTypes[158]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14795,7 +15084,7 @@ func (x *SetSignInPolicyResult) String() string {
 func (*SetSignInPolicyResult) ProtoMessage() {}
 
 func (x *SetSignInPolicyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[155]
+	mi := &file_memql_proto_msgTypes[158]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14808,7 +15097,7 @@ func (x *SetSignInPolicyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSignInPolicyResult.ProtoReflect.Descriptor instead.
 func (*SetSignInPolicyResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{155}
+	return file_memql_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *SetSignInPolicyResult) GetRequestId() string {
@@ -14867,7 +15156,7 @@ type CreateWorkerTokenMsg struct {
 
 func (x *CreateWorkerTokenMsg) Reset() {
 	*x = CreateWorkerTokenMsg{}
-	mi := &file_memql_proto_msgTypes[156]
+	mi := &file_memql_proto_msgTypes[159]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14879,7 +15168,7 @@ func (x *CreateWorkerTokenMsg) String() string {
 func (*CreateWorkerTokenMsg) ProtoMessage() {}
 
 func (x *CreateWorkerTokenMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[156]
+	mi := &file_memql_proto_msgTypes[159]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14892,7 +15181,7 @@ func (x *CreateWorkerTokenMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkerTokenMsg.ProtoReflect.Descriptor instead.
 func (*CreateWorkerTokenMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{156}
+	return file_memql_proto_rawDescGZIP(), []int{159}
 }
 
 func (x *CreateWorkerTokenMsg) GetRequestId() string {
@@ -14943,7 +15232,7 @@ type CreateWorkerTokenResult struct {
 
 func (x *CreateWorkerTokenResult) Reset() {
 	*x = CreateWorkerTokenResult{}
-	mi := &file_memql_proto_msgTypes[157]
+	mi := &file_memql_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14955,7 +15244,7 @@ func (x *CreateWorkerTokenResult) String() string {
 func (*CreateWorkerTokenResult) ProtoMessage() {}
 
 func (x *CreateWorkerTokenResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[157]
+	mi := &file_memql_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14968,7 +15257,7 @@ func (x *CreateWorkerTokenResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkerTokenResult.ProtoReflect.Descriptor instead.
 func (*CreateWorkerTokenResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{157}
+	return file_memql_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *CreateWorkerTokenResult) GetRequestId() string {
@@ -15035,7 +15324,7 @@ type RevokeWorkerTokenMsg struct {
 
 func (x *RevokeWorkerTokenMsg) Reset() {
 	*x = RevokeWorkerTokenMsg{}
-	mi := &file_memql_proto_msgTypes[158]
+	mi := &file_memql_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15047,7 +15336,7 @@ func (x *RevokeWorkerTokenMsg) String() string {
 func (*RevokeWorkerTokenMsg) ProtoMessage() {}
 
 func (x *RevokeWorkerTokenMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[158]
+	mi := &file_memql_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15060,7 +15349,7 @@ func (x *RevokeWorkerTokenMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeWorkerTokenMsg.ProtoReflect.Descriptor instead.
 func (*RevokeWorkerTokenMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{158}
+	return file_memql_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *RevokeWorkerTokenMsg) GetRequestId() string {
@@ -15089,7 +15378,7 @@ type RevokeWorkerTokenResult struct {
 
 func (x *RevokeWorkerTokenResult) Reset() {
 	*x = RevokeWorkerTokenResult{}
-	mi := &file_memql_proto_msgTypes[159]
+	mi := &file_memql_proto_msgTypes[162]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15101,7 +15390,7 @@ func (x *RevokeWorkerTokenResult) String() string {
 func (*RevokeWorkerTokenResult) ProtoMessage() {}
 
 func (x *RevokeWorkerTokenResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[159]
+	mi := &file_memql_proto_msgTypes[162]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15114,7 +15403,7 @@ func (x *RevokeWorkerTokenResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeWorkerTokenResult.ProtoReflect.Descriptor instead.
 func (*RevokeWorkerTokenResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{159}
+	return file_memql_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *RevokeWorkerTokenResult) GetRequestId() string {
@@ -15168,7 +15457,7 @@ type CreateBadgeMsg struct {
 
 func (x *CreateBadgeMsg) Reset() {
 	*x = CreateBadgeMsg{}
-	mi := &file_memql_proto_msgTypes[160]
+	mi := &file_memql_proto_msgTypes[163]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15180,7 +15469,7 @@ func (x *CreateBadgeMsg) String() string {
 func (*CreateBadgeMsg) ProtoMessage() {}
 
 func (x *CreateBadgeMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[160]
+	mi := &file_memql_proto_msgTypes[163]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15193,7 +15482,7 @@ func (x *CreateBadgeMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateBadgeMsg.ProtoReflect.Descriptor instead.
 func (*CreateBadgeMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{160}
+	return file_memql_proto_rawDescGZIP(), []int{163}
 }
 
 func (x *CreateBadgeMsg) GetRequestId() string {
@@ -15240,7 +15529,7 @@ type CreateBadgeResult struct {
 
 func (x *CreateBadgeResult) Reset() {
 	*x = CreateBadgeResult{}
-	mi := &file_memql_proto_msgTypes[161]
+	mi := &file_memql_proto_msgTypes[164]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15252,7 +15541,7 @@ func (x *CreateBadgeResult) String() string {
 func (*CreateBadgeResult) ProtoMessage() {}
 
 func (x *CreateBadgeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[161]
+	mi := &file_memql_proto_msgTypes[164]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15265,7 +15554,7 @@ func (x *CreateBadgeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateBadgeResult.ProtoReflect.Descriptor instead.
 func (*CreateBadgeResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{161}
+	return file_memql_proto_rawDescGZIP(), []int{164}
 }
 
 func (x *CreateBadgeResult) GetRequestId() string {
@@ -15323,7 +15612,7 @@ type RevokeBadgeMsg struct {
 
 func (x *RevokeBadgeMsg) Reset() {
 	*x = RevokeBadgeMsg{}
-	mi := &file_memql_proto_msgTypes[162]
+	mi := &file_memql_proto_msgTypes[165]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15335,7 +15624,7 @@ func (x *RevokeBadgeMsg) String() string {
 func (*RevokeBadgeMsg) ProtoMessage() {}
 
 func (x *RevokeBadgeMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[162]
+	mi := &file_memql_proto_msgTypes[165]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15348,7 +15637,7 @@ func (x *RevokeBadgeMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeBadgeMsg.ProtoReflect.Descriptor instead.
 func (*RevokeBadgeMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{162}
+	return file_memql_proto_rawDescGZIP(), []int{165}
 }
 
 func (x *RevokeBadgeMsg) GetRequestId() string {
@@ -15377,7 +15666,7 @@ type RevokeBadgeResult struct {
 
 func (x *RevokeBadgeResult) Reset() {
 	*x = RevokeBadgeResult{}
-	mi := &file_memql_proto_msgTypes[163]
+	mi := &file_memql_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15389,7 +15678,7 @@ func (x *RevokeBadgeResult) String() string {
 func (*RevokeBadgeResult) ProtoMessage() {}
 
 func (x *RevokeBadgeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[163]
+	mi := &file_memql_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15402,7 +15691,7 @@ func (x *RevokeBadgeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeBadgeResult.ProtoReflect.Descriptor instead.
 func (*RevokeBadgeResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{163}
+	return file_memql_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *RevokeBadgeResult) GetRequestId() string {
@@ -15454,7 +15743,7 @@ type VoiceAgentSessionStart struct {
 
 func (x *VoiceAgentSessionStart) Reset() {
 	*x = VoiceAgentSessionStart{}
-	mi := &file_memql_proto_msgTypes[164]
+	mi := &file_memql_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15466,7 +15755,7 @@ func (x *VoiceAgentSessionStart) String() string {
 func (*VoiceAgentSessionStart) ProtoMessage() {}
 
 func (x *VoiceAgentSessionStart) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[164]
+	mi := &file_memql_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15479,7 +15768,7 @@ func (x *VoiceAgentSessionStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentSessionStart.ProtoReflect.Descriptor instead.
 func (*VoiceAgentSessionStart) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{164}
+	return file_memql_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *VoiceAgentSessionStart) GetRequestId() string {
@@ -15566,7 +15855,7 @@ type VoiceAgentSessionAck struct {
 
 func (x *VoiceAgentSessionAck) Reset() {
 	*x = VoiceAgentSessionAck{}
-	mi := &file_memql_proto_msgTypes[165]
+	mi := &file_memql_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15578,7 +15867,7 @@ func (x *VoiceAgentSessionAck) String() string {
 func (*VoiceAgentSessionAck) ProtoMessage() {}
 
 func (x *VoiceAgentSessionAck) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[165]
+	mi := &file_memql_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15591,7 +15880,7 @@ func (x *VoiceAgentSessionAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentSessionAck.ProtoReflect.Descriptor instead.
 func (*VoiceAgentSessionAck) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{165}
+	return file_memql_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *VoiceAgentSessionAck) GetRequestId() string {
@@ -15715,7 +16004,7 @@ type VoiceAgentSessionEnd struct {
 
 func (x *VoiceAgentSessionEnd) Reset() {
 	*x = VoiceAgentSessionEnd{}
-	mi := &file_memql_proto_msgTypes[166]
+	mi := &file_memql_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15727,7 +16016,7 @@ func (x *VoiceAgentSessionEnd) String() string {
 func (*VoiceAgentSessionEnd) ProtoMessage() {}
 
 func (x *VoiceAgentSessionEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[166]
+	mi := &file_memql_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15740,7 +16029,7 @@ func (x *VoiceAgentSessionEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentSessionEnd.ProtoReflect.Descriptor instead.
 func (*VoiceAgentSessionEnd) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{166}
+	return file_memql_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *VoiceAgentSessionEnd) GetRequestId() string {
@@ -15791,7 +16080,7 @@ type VoiceAgentPartialTranscript struct {
 
 func (x *VoiceAgentPartialTranscript) Reset() {
 	*x = VoiceAgentPartialTranscript{}
-	mi := &file_memql_proto_msgTypes[167]
+	mi := &file_memql_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15803,7 +16092,7 @@ func (x *VoiceAgentPartialTranscript) String() string {
 func (*VoiceAgentPartialTranscript) ProtoMessage() {}
 
 func (x *VoiceAgentPartialTranscript) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[167]
+	mi := &file_memql_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15816,7 +16105,7 @@ func (x *VoiceAgentPartialTranscript) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentPartialTranscript.ProtoReflect.Descriptor instead.
 func (*VoiceAgentPartialTranscript) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{167}
+	return file_memql_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *VoiceAgentPartialTranscript) GetRequestId() string {
@@ -15866,7 +16155,7 @@ type VoiceAgentPartialAck struct {
 
 func (x *VoiceAgentPartialAck) Reset() {
 	*x = VoiceAgentPartialAck{}
-	mi := &file_memql_proto_msgTypes[168]
+	mi := &file_memql_proto_msgTypes[171]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15878,7 +16167,7 @@ func (x *VoiceAgentPartialAck) String() string {
 func (*VoiceAgentPartialAck) ProtoMessage() {}
 
 func (x *VoiceAgentPartialAck) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[168]
+	mi := &file_memql_proto_msgTypes[171]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15891,7 +16180,7 @@ func (x *VoiceAgentPartialAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentPartialAck.ProtoReflect.Descriptor instead.
 func (*VoiceAgentPartialAck) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{168}
+	return file_memql_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *VoiceAgentPartialAck) GetRequestId() string {
@@ -15949,7 +16238,7 @@ type VoiceAgentFinalTranscript struct {
 
 func (x *VoiceAgentFinalTranscript) Reset() {
 	*x = VoiceAgentFinalTranscript{}
-	mi := &file_memql_proto_msgTypes[169]
+	mi := &file_memql_proto_msgTypes[172]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15961,7 +16250,7 @@ func (x *VoiceAgentFinalTranscript) String() string {
 func (*VoiceAgentFinalTranscript) ProtoMessage() {}
 
 func (x *VoiceAgentFinalTranscript) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[169]
+	mi := &file_memql_proto_msgTypes[172]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15974,7 +16263,7 @@ func (x *VoiceAgentFinalTranscript) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentFinalTranscript.ProtoReflect.Descriptor instead.
 func (*VoiceAgentFinalTranscript) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{169}
+	return file_memql_proto_rawDescGZIP(), []int{172}
 }
 
 func (x *VoiceAgentFinalTranscript) GetRequestId() string {
@@ -16045,7 +16334,7 @@ type VoiceAgentFinalAck struct {
 
 func (x *VoiceAgentFinalAck) Reset() {
 	*x = VoiceAgentFinalAck{}
-	mi := &file_memql_proto_msgTypes[170]
+	mi := &file_memql_proto_msgTypes[173]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16057,7 +16346,7 @@ func (x *VoiceAgentFinalAck) String() string {
 func (*VoiceAgentFinalAck) ProtoMessage() {}
 
 func (x *VoiceAgentFinalAck) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[170]
+	mi := &file_memql_proto_msgTypes[173]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16070,7 +16359,7 @@ func (x *VoiceAgentFinalAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentFinalAck.ProtoReflect.Descriptor instead.
 func (*VoiceAgentFinalAck) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{170}
+	return file_memql_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *VoiceAgentFinalAck) GetRequestId() string {
@@ -16138,7 +16427,7 @@ type VoiceAgentTurnRequest struct {
 
 func (x *VoiceAgentTurnRequest) Reset() {
 	*x = VoiceAgentTurnRequest{}
-	mi := &file_memql_proto_msgTypes[171]
+	mi := &file_memql_proto_msgTypes[174]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16150,7 +16439,7 @@ func (x *VoiceAgentTurnRequest) String() string {
 func (*VoiceAgentTurnRequest) ProtoMessage() {}
 
 func (x *VoiceAgentTurnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[171]
+	mi := &file_memql_proto_msgTypes[174]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16163,7 +16452,7 @@ func (x *VoiceAgentTurnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentTurnRequest.ProtoReflect.Descriptor instead.
 func (*VoiceAgentTurnRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{171}
+	return file_memql_proto_rawDescGZIP(), []int{174}
 }
 
 func (x *VoiceAgentTurnRequest) GetRequestId() string {
@@ -16226,7 +16515,7 @@ type VoiceAgentTurnDelta struct {
 
 func (x *VoiceAgentTurnDelta) Reset() {
 	*x = VoiceAgentTurnDelta{}
-	mi := &file_memql_proto_msgTypes[172]
+	mi := &file_memql_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16238,7 +16527,7 @@ func (x *VoiceAgentTurnDelta) String() string {
 func (*VoiceAgentTurnDelta) ProtoMessage() {}
 
 func (x *VoiceAgentTurnDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[172]
+	mi := &file_memql_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16251,7 +16540,7 @@ func (x *VoiceAgentTurnDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentTurnDelta.ProtoReflect.Descriptor instead.
 func (*VoiceAgentTurnDelta) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{172}
+	return file_memql_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *VoiceAgentTurnDelta) GetRequestId() string {
@@ -16307,7 +16596,7 @@ type VoiceAgentTurnComplete struct {
 
 func (x *VoiceAgentTurnComplete) Reset() {
 	*x = VoiceAgentTurnComplete{}
-	mi := &file_memql_proto_msgTypes[173]
+	mi := &file_memql_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16319,7 +16608,7 @@ func (x *VoiceAgentTurnComplete) String() string {
 func (*VoiceAgentTurnComplete) ProtoMessage() {}
 
 func (x *VoiceAgentTurnComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[173]
+	mi := &file_memql_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16332,7 +16621,7 @@ func (x *VoiceAgentTurnComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentTurnComplete.ProtoReflect.Descriptor instead.
 func (*VoiceAgentTurnComplete) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{173}
+	return file_memql_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *VoiceAgentTurnComplete) GetRequestId() string {
@@ -16433,7 +16722,7 @@ type VoiceAgentSpeak struct {
 
 func (x *VoiceAgentSpeak) Reset() {
 	*x = VoiceAgentSpeak{}
-	mi := &file_memql_proto_msgTypes[174]
+	mi := &file_memql_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16445,7 +16734,7 @@ func (x *VoiceAgentSpeak) String() string {
 func (*VoiceAgentSpeak) ProtoMessage() {}
 
 func (x *VoiceAgentSpeak) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[174]
+	mi := &file_memql_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16458,7 +16747,7 @@ func (x *VoiceAgentSpeak) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentSpeak.ProtoReflect.Descriptor instead.
 func (*VoiceAgentSpeak) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{174}
+	return file_memql_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *VoiceAgentSpeak) GetRequestId() string {
@@ -16541,7 +16830,7 @@ type VoiceAgentRealtimeOutput struct {
 
 func (x *VoiceAgentRealtimeOutput) Reset() {
 	*x = VoiceAgentRealtimeOutput{}
-	mi := &file_memql_proto_msgTypes[175]
+	mi := &file_memql_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16553,7 +16842,7 @@ func (x *VoiceAgentRealtimeOutput) String() string {
 func (*VoiceAgentRealtimeOutput) ProtoMessage() {}
 
 func (x *VoiceAgentRealtimeOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[175]
+	mi := &file_memql_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16566,7 +16855,7 @@ func (x *VoiceAgentRealtimeOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentRealtimeOutput.ProtoReflect.Descriptor instead.
 func (*VoiceAgentRealtimeOutput) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{175}
+	return file_memql_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *VoiceAgentRealtimeOutput) GetRequestId() string {
@@ -16631,7 +16920,7 @@ type VoiceAgentRealtimeOutputAck struct {
 
 func (x *VoiceAgentRealtimeOutputAck) Reset() {
 	*x = VoiceAgentRealtimeOutputAck{}
-	mi := &file_memql_proto_msgTypes[176]
+	mi := &file_memql_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16643,7 +16932,7 @@ func (x *VoiceAgentRealtimeOutputAck) String() string {
 func (*VoiceAgentRealtimeOutputAck) ProtoMessage() {}
 
 func (x *VoiceAgentRealtimeOutputAck) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[176]
+	mi := &file_memql_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16656,7 +16945,7 @@ func (x *VoiceAgentRealtimeOutputAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentRealtimeOutputAck.ProtoReflect.Descriptor instead.
 func (*VoiceAgentRealtimeOutputAck) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{176}
+	return file_memql_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *VoiceAgentRealtimeOutputAck) GetRequestId() string {
@@ -16731,7 +17020,7 @@ type VoiceAgentRealtimeSpeaking struct {
 
 func (x *VoiceAgentRealtimeSpeaking) Reset() {
 	*x = VoiceAgentRealtimeSpeaking{}
-	mi := &file_memql_proto_msgTypes[177]
+	mi := &file_memql_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16743,7 +17032,7 @@ func (x *VoiceAgentRealtimeSpeaking) String() string {
 func (*VoiceAgentRealtimeSpeaking) ProtoMessage() {}
 
 func (x *VoiceAgentRealtimeSpeaking) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[177]
+	mi := &file_memql_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16756,7 +17045,7 @@ func (x *VoiceAgentRealtimeSpeaking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VoiceAgentRealtimeSpeaking.ProtoReflect.Descriptor instead.
 func (*VoiceAgentRealtimeSpeaking) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{177}
+	return file_memql_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *VoiceAgentRealtimeSpeaking) GetRequestId() string {
@@ -16805,7 +17094,7 @@ type RotateAuthMsg struct {
 
 func (x *RotateAuthMsg) Reset() {
 	*x = RotateAuthMsg{}
-	mi := &file_memql_proto_msgTypes[178]
+	mi := &file_memql_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16817,7 +17106,7 @@ func (x *RotateAuthMsg) String() string {
 func (*RotateAuthMsg) ProtoMessage() {}
 
 func (x *RotateAuthMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[178]
+	mi := &file_memql_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16830,7 +17119,7 @@ func (x *RotateAuthMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateAuthMsg.ProtoReflect.Descriptor instead.
 func (*RotateAuthMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{178}
+	return file_memql_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *RotateAuthMsg) GetAccessToken() string {
@@ -16867,7 +17156,7 @@ type RotateAuthResult struct {
 
 func (x *RotateAuthResult) Reset() {
 	*x = RotateAuthResult{}
-	mi := &file_memql_proto_msgTypes[179]
+	mi := &file_memql_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16879,7 +17168,7 @@ func (x *RotateAuthResult) String() string {
 func (*RotateAuthResult) ProtoMessage() {}
 
 func (x *RotateAuthResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[179]
+	mi := &file_memql_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16892,7 +17181,7 @@ func (x *RotateAuthResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateAuthResult.ProtoReflect.Descriptor instead.
 func (*RotateAuthResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{179}
+	return file_memql_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *RotateAuthResult) GetOk() bool {
@@ -16947,7 +17236,7 @@ type NodeMaintenanceMsg struct {
 
 func (x *NodeMaintenanceMsg) Reset() {
 	*x = NodeMaintenanceMsg{}
-	mi := &file_memql_proto_msgTypes[180]
+	mi := &file_memql_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16959,7 +17248,7 @@ func (x *NodeMaintenanceMsg) String() string {
 func (*NodeMaintenanceMsg) ProtoMessage() {}
 
 func (x *NodeMaintenanceMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[180]
+	mi := &file_memql_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16972,7 +17261,7 @@ func (x *NodeMaintenanceMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMaintenanceMsg.ProtoReflect.Descriptor instead.
 func (*NodeMaintenanceMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{180}
+	return file_memql_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *NodeMaintenanceMsg) GetRequestId() string {
@@ -17027,7 +17316,7 @@ type NodeMaintenanceResult struct {
 
 func (x *NodeMaintenanceResult) Reset() {
 	*x = NodeMaintenanceResult{}
-	mi := &file_memql_proto_msgTypes[181]
+	mi := &file_memql_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17039,7 +17328,7 @@ func (x *NodeMaintenanceResult) String() string {
 func (*NodeMaintenanceResult) ProtoMessage() {}
 
 func (x *NodeMaintenanceResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[181]
+	mi := &file_memql_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17052,7 +17341,7 @@ func (x *NodeMaintenanceResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMaintenanceResult.ProtoReflect.Descriptor instead.
 func (*NodeMaintenanceResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{181}
+	return file_memql_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *NodeMaintenanceResult) GetRequestId() string {
@@ -17161,7 +17450,7 @@ type DeployControlMsg struct {
 
 func (x *DeployControlMsg) Reset() {
 	*x = DeployControlMsg{}
-	mi := &file_memql_proto_msgTypes[182]
+	mi := &file_memql_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17173,7 +17462,7 @@ func (x *DeployControlMsg) String() string {
 func (*DeployControlMsg) ProtoMessage() {}
 
 func (x *DeployControlMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[182]
+	mi := &file_memql_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17186,7 +17475,7 @@ func (x *DeployControlMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployControlMsg.ProtoReflect.Descriptor instead.
 func (*DeployControlMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{182}
+	return file_memql_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *DeployControlMsg) GetRequestId() string {
@@ -17391,7 +17680,7 @@ type DeployControlResult struct {
 
 func (x *DeployControlResult) Reset() {
 	*x = DeployControlResult{}
-	mi := &file_memql_proto_msgTypes[183]
+	mi := &file_memql_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17403,7 +17692,7 @@ func (x *DeployControlResult) String() string {
 func (*DeployControlResult) ProtoMessage() {}
 
 func (x *DeployControlResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[183]
+	mi := &file_memql_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17416,7 +17705,7 @@ func (x *DeployControlResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployControlResult.ProtoReflect.Descriptor instead.
 func (*DeployControlResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{183}
+	return file_memql_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *DeployControlResult) GetRequestId() string {
@@ -17584,7 +17873,7 @@ type RunAutomationMsg struct {
 
 func (x *RunAutomationMsg) Reset() {
 	*x = RunAutomationMsg{}
-	mi := &file_memql_proto_msgTypes[184]
+	mi := &file_memql_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17596,7 +17885,7 @@ func (x *RunAutomationMsg) String() string {
 func (*RunAutomationMsg) ProtoMessage() {}
 
 func (x *RunAutomationMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[184]
+	mi := &file_memql_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17609,7 +17898,7 @@ func (x *RunAutomationMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAutomationMsg.ProtoReflect.Descriptor instead.
 func (*RunAutomationMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{184}
+	return file_memql_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *RunAutomationMsg) GetRequestId() string {
@@ -17698,7 +17987,7 @@ type AutomationRunEvent struct {
 
 func (x *AutomationRunEvent) Reset() {
 	*x = AutomationRunEvent{}
-	mi := &file_memql_proto_msgTypes[185]
+	mi := &file_memql_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17710,7 +17999,7 @@ func (x *AutomationRunEvent) String() string {
 func (*AutomationRunEvent) ProtoMessage() {}
 
 func (x *AutomationRunEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[185]
+	mi := &file_memql_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17723,7 +18012,7 @@ func (x *AutomationRunEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunEvent.ProtoReflect.Descriptor instead.
 func (*AutomationRunEvent) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{185}
+	return file_memql_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *AutomationRunEvent) GetRequestId() string {
@@ -17829,7 +18118,7 @@ type AutomationRunAccepted struct {
 
 func (x *AutomationRunAccepted) Reset() {
 	*x = AutomationRunAccepted{}
-	mi := &file_memql_proto_msgTypes[186]
+	mi := &file_memql_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17841,7 +18130,7 @@ func (x *AutomationRunAccepted) String() string {
 func (*AutomationRunAccepted) ProtoMessage() {}
 
 func (x *AutomationRunAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[186]
+	mi := &file_memql_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17854,7 +18143,7 @@ func (x *AutomationRunAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunAccepted.ProtoReflect.Descriptor instead.
 func (*AutomationRunAccepted) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{186}
+	return file_memql_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *AutomationRunAccepted) GetAutomation() string {
@@ -17937,7 +18226,7 @@ type AutomationRunStep struct {
 
 func (x *AutomationRunStep) Reset() {
 	*x = AutomationRunStep{}
-	mi := &file_memql_proto_msgTypes[187]
+	mi := &file_memql_proto_msgTypes[190]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17949,7 +18238,7 @@ func (x *AutomationRunStep) String() string {
 func (*AutomationRunStep) ProtoMessage() {}
 
 func (x *AutomationRunStep) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[187]
+	mi := &file_memql_proto_msgTypes[190]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17962,7 +18251,7 @@ func (x *AutomationRunStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunStep.ProtoReflect.Descriptor instead.
 func (*AutomationRunStep) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{187}
+	return file_memql_proto_rawDescGZIP(), []int{190}
 }
 
 func (x *AutomationRunStep) GetSequence() int32 {
@@ -18044,7 +18333,7 @@ type AutomationRunComplete struct {
 
 func (x *AutomationRunComplete) Reset() {
 	*x = AutomationRunComplete{}
-	mi := &file_memql_proto_msgTypes[188]
+	mi := &file_memql_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18056,7 +18345,7 @@ func (x *AutomationRunComplete) String() string {
 func (*AutomationRunComplete) ProtoMessage() {}
 
 func (x *AutomationRunComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[188]
+	mi := &file_memql_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18069,7 +18358,7 @@ func (x *AutomationRunComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunComplete.ProtoReflect.Descriptor instead.
 func (*AutomationRunComplete) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{188}
+	return file_memql_proto_rawDescGZIP(), []int{191}
 }
 
 func (x *AutomationRunComplete) GetStatus() string {
@@ -18158,7 +18447,7 @@ type CreateAccountTokenMsg struct {
 
 func (x *CreateAccountTokenMsg) Reset() {
 	*x = CreateAccountTokenMsg{}
-	mi := &file_memql_proto_msgTypes[189]
+	mi := &file_memql_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18170,7 +18459,7 @@ func (x *CreateAccountTokenMsg) String() string {
 func (*CreateAccountTokenMsg) ProtoMessage() {}
 
 func (x *CreateAccountTokenMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[189]
+	mi := &file_memql_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18183,7 +18472,7 @@ func (x *CreateAccountTokenMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAccountTokenMsg.ProtoReflect.Descriptor instead.
 func (*CreateAccountTokenMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{189}
+	return file_memql_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *CreateAccountTokenMsg) GetRequestId() string {
@@ -18243,7 +18532,7 @@ type CreateAccountTokenResult struct {
 
 func (x *CreateAccountTokenResult) Reset() {
 	*x = CreateAccountTokenResult{}
-	mi := &file_memql_proto_msgTypes[190]
+	mi := &file_memql_proto_msgTypes[193]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18255,7 +18544,7 @@ func (x *CreateAccountTokenResult) String() string {
 func (*CreateAccountTokenResult) ProtoMessage() {}
 
 func (x *CreateAccountTokenResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[190]
+	mi := &file_memql_proto_msgTypes[193]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18268,7 +18557,7 @@ func (x *CreateAccountTokenResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAccountTokenResult.ProtoReflect.Descriptor instead.
 func (*CreateAccountTokenResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{190}
+	return file_memql_proto_rawDescGZIP(), []int{193}
 }
 
 func (x *CreateAccountTokenResult) GetRequestId() string {
@@ -18344,7 +18633,7 @@ type RevokeAccountTokenMsg struct {
 
 func (x *RevokeAccountTokenMsg) Reset() {
 	*x = RevokeAccountTokenMsg{}
-	mi := &file_memql_proto_msgTypes[191]
+	mi := &file_memql_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18356,7 +18645,7 @@ func (x *RevokeAccountTokenMsg) String() string {
 func (*RevokeAccountTokenMsg) ProtoMessage() {}
 
 func (x *RevokeAccountTokenMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[191]
+	mi := &file_memql_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18369,7 +18658,7 @@ func (x *RevokeAccountTokenMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAccountTokenMsg.ProtoReflect.Descriptor instead.
 func (*RevokeAccountTokenMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{191}
+	return file_memql_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *RevokeAccountTokenMsg) GetRequestId() string {
@@ -18399,7 +18688,7 @@ type RevokeAccountTokenResult struct {
 
 func (x *RevokeAccountTokenResult) Reset() {
 	*x = RevokeAccountTokenResult{}
-	mi := &file_memql_proto_msgTypes[192]
+	mi := &file_memql_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18411,7 +18700,7 @@ func (x *RevokeAccountTokenResult) String() string {
 func (*RevokeAccountTokenResult) ProtoMessage() {}
 
 func (x *RevokeAccountTokenResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[192]
+	mi := &file_memql_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18424,7 +18713,7 @@ func (x *RevokeAccountTokenResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAccountTokenResult.ProtoReflect.Descriptor instead.
 func (*RevokeAccountTokenResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{192}
+	return file_memql_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *RevokeAccountTokenResult) GetRequestId() string {
@@ -18522,7 +18811,7 @@ type IdentityAdminMsg struct {
 
 func (x *IdentityAdminMsg) Reset() {
 	*x = IdentityAdminMsg{}
-	mi := &file_memql_proto_msgTypes[193]
+	mi := &file_memql_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18534,7 +18823,7 @@ func (x *IdentityAdminMsg) String() string {
 func (*IdentityAdminMsg) ProtoMessage() {}
 
 func (x *IdentityAdminMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[193]
+	mi := &file_memql_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18547,7 +18836,7 @@ func (x *IdentityAdminMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityAdminMsg.ProtoReflect.Descriptor instead.
 func (*IdentityAdminMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{193}
+	return file_memql_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *IdentityAdminMsg) GetRequestId() string {
@@ -18877,7 +19166,7 @@ type IdentityAdminResult struct {
 
 func (x *IdentityAdminResult) Reset() {
 	*x = IdentityAdminResult{}
-	mi := &file_memql_proto_msgTypes[194]
+	mi := &file_memql_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18889,7 +19178,7 @@ func (x *IdentityAdminResult) String() string {
 func (*IdentityAdminResult) ProtoMessage() {}
 
 func (x *IdentityAdminResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[194]
+	mi := &file_memql_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18902,7 +19191,7 @@ func (x *IdentityAdminResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityAdminResult.ProtoReflect.Descriptor instead.
 func (*IdentityAdminResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{194}
+	return file_memql_proto_rawDescGZIP(), []int{197}
 }
 
 func (x *IdentityAdminResult) GetRequestId() string {
@@ -19037,7 +19326,7 @@ type IssueUserInvitationRequest struct {
 
 func (x *IssueUserInvitationRequest) Reset() {
 	*x = IssueUserInvitationRequest{}
-	mi := &file_memql_proto_msgTypes[195]
+	mi := &file_memql_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19049,7 +19338,7 @@ func (x *IssueUserInvitationRequest) String() string {
 func (*IssueUserInvitationRequest) ProtoMessage() {}
 
 func (x *IssueUserInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[195]
+	mi := &file_memql_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19062,7 +19351,7 @@ func (x *IssueUserInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueUserInvitationRequest.ProtoReflect.Descriptor instead.
 func (*IssueUserInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{195}
+	return file_memql_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *IssueUserInvitationRequest) GetEmail() string {
@@ -19103,7 +19392,7 @@ type RevokeUserInvitationRequest struct {
 
 func (x *RevokeUserInvitationRequest) Reset() {
 	*x = RevokeUserInvitationRequest{}
-	mi := &file_memql_proto_msgTypes[196]
+	mi := &file_memql_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19115,7 +19404,7 @@ func (x *RevokeUserInvitationRequest) String() string {
 func (*RevokeUserInvitationRequest) ProtoMessage() {}
 
 func (x *RevokeUserInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[196]
+	mi := &file_memql_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19128,7 +19417,7 @@ func (x *RevokeUserInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeUserInvitationRequest.ProtoReflect.Descriptor instead.
 func (*RevokeUserInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{196}
+	return file_memql_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *RevokeUserInvitationRequest) GetInvitationId() string {
@@ -19162,7 +19451,7 @@ type UpdateUserProfileRequest struct {
 
 func (x *UpdateUserProfileRequest) Reset() {
 	*x = UpdateUserProfileRequest{}
-	mi := &file_memql_proto_msgTypes[197]
+	mi := &file_memql_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19174,7 +19463,7 @@ func (x *UpdateUserProfileRequest) String() string {
 func (*UpdateUserProfileRequest) ProtoMessage() {}
 
 func (x *UpdateUserProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[197]
+	mi := &file_memql_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19187,7 +19476,7 @@ func (x *UpdateUserProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserProfileRequest.ProtoReflect.Descriptor instead.
 func (*UpdateUserProfileRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{197}
+	return file_memql_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *UpdateUserProfileRequest) GetUserId() string {
@@ -19259,7 +19548,7 @@ type SetUserRoleRequest struct {
 
 func (x *SetUserRoleRequest) Reset() {
 	*x = SetUserRoleRequest{}
-	mi := &file_memql_proto_msgTypes[198]
+	mi := &file_memql_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19271,7 +19560,7 @@ func (x *SetUserRoleRequest) String() string {
 func (*SetUserRoleRequest) ProtoMessage() {}
 
 func (x *SetUserRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[198]
+	mi := &file_memql_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19284,7 +19573,7 @@ func (x *SetUserRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserRoleRequest.ProtoReflect.Descriptor instead.
 func (*SetUserRoleRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{198}
+	return file_memql_proto_rawDescGZIP(), []int{201}
 }
 
 func (x *SetUserRoleRequest) GetUserId() string {
@@ -19317,7 +19606,7 @@ type SetUserSuspendedRequest struct {
 
 func (x *SetUserSuspendedRequest) Reset() {
 	*x = SetUserSuspendedRequest{}
-	mi := &file_memql_proto_msgTypes[199]
+	mi := &file_memql_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19329,7 +19618,7 @@ func (x *SetUserSuspendedRequest) String() string {
 func (*SetUserSuspendedRequest) ProtoMessage() {}
 
 func (x *SetUserSuspendedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[199]
+	mi := &file_memql_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19342,7 +19631,7 @@ func (x *SetUserSuspendedRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserSuspendedRequest.ProtoReflect.Descriptor instead.
 func (*SetUserSuspendedRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{199}
+	return file_memql_proto_rawDescGZIP(), []int{202}
 }
 
 func (x *SetUserSuspendedRequest) GetUserId() string {
@@ -19393,7 +19682,7 @@ type ResetSignInPolicyRequest struct {
 
 func (x *ResetSignInPolicyRequest) Reset() {
 	*x = ResetSignInPolicyRequest{}
-	mi := &file_memql_proto_msgTypes[200]
+	mi := &file_memql_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19405,7 +19694,7 @@ func (x *ResetSignInPolicyRequest) String() string {
 func (*ResetSignInPolicyRequest) ProtoMessage() {}
 
 func (x *ResetSignInPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[200]
+	mi := &file_memql_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19418,7 +19707,7 @@ func (x *ResetSignInPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetSignInPolicyRequest.ProtoReflect.Descriptor instead.
 func (*ResetSignInPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{200}
+	return file_memql_proto_rawDescGZIP(), []int{203}
 }
 
 func (x *ResetSignInPolicyRequest) GetUserId() string {
@@ -19445,7 +19734,7 @@ type SetUserSharedMailboxRequest struct {
 
 func (x *SetUserSharedMailboxRequest) Reset() {
 	*x = SetUserSharedMailboxRequest{}
-	mi := &file_memql_proto_msgTypes[201]
+	mi := &file_memql_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19457,7 +19746,7 @@ func (x *SetUserSharedMailboxRequest) String() string {
 func (*SetUserSharedMailboxRequest) ProtoMessage() {}
 
 func (x *SetUserSharedMailboxRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[201]
+	mi := &file_memql_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19470,7 +19759,7 @@ func (x *SetUserSharedMailboxRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserSharedMailboxRequest.ProtoReflect.Descriptor instead.
 func (*SetUserSharedMailboxRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{201}
+	return file_memql_proto_rawDescGZIP(), []int{204}
 }
 
 func (x *SetUserSharedMailboxRequest) GetUserId() string {
@@ -19499,7 +19788,7 @@ type RevokeUserTokenRequest struct {
 
 func (x *RevokeUserTokenRequest) Reset() {
 	*x = RevokeUserTokenRequest{}
-	mi := &file_memql_proto_msgTypes[202]
+	mi := &file_memql_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19511,7 +19800,7 @@ func (x *RevokeUserTokenRequest) String() string {
 func (*RevokeUserTokenRequest) ProtoMessage() {}
 
 func (x *RevokeUserTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[202]
+	mi := &file_memql_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19524,7 +19813,7 @@ func (x *RevokeUserTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeUserTokenRequest.ProtoReflect.Descriptor instead.
 func (*RevokeUserTokenRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{202}
+	return file_memql_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *RevokeUserTokenRequest) GetIdentityId() string {
@@ -19551,7 +19840,7 @@ type RevokeNodeTokenRequest struct {
 
 func (x *RevokeNodeTokenRequest) Reset() {
 	*x = RevokeNodeTokenRequest{}
-	mi := &file_memql_proto_msgTypes[203]
+	mi := &file_memql_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19563,7 +19852,7 @@ func (x *RevokeNodeTokenRequest) String() string {
 func (*RevokeNodeTokenRequest) ProtoMessage() {}
 
 func (x *RevokeNodeTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[203]
+	mi := &file_memql_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19576,7 +19865,7 @@ func (x *RevokeNodeTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeNodeTokenRequest.ProtoReflect.Descriptor instead.
 func (*RevokeNodeTokenRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{203}
+	return file_memql_proto_rawDescGZIP(), []int{206}
 }
 
 func (x *RevokeNodeTokenRequest) GetIdentityId() string {
@@ -19620,7 +19909,7 @@ type UpdateClusterSettingsRequest struct {
 
 func (x *UpdateClusterSettingsRequest) Reset() {
 	*x = UpdateClusterSettingsRequest{}
-	mi := &file_memql_proto_msgTypes[204]
+	mi := &file_memql_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19632,7 +19921,7 @@ func (x *UpdateClusterSettingsRequest) String() string {
 func (*UpdateClusterSettingsRequest) ProtoMessage() {}
 
 func (x *UpdateClusterSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[204]
+	mi := &file_memql_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19645,7 +19934,7 @@ func (x *UpdateClusterSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateClusterSettingsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateClusterSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{204}
+	return file_memql_proto_rawDescGZIP(), []int{207}
 }
 
 func (x *UpdateClusterSettingsRequest) GetBrandName() string {
@@ -19777,7 +20066,7 @@ type IssueEnrolmentLinkRequest struct {
 
 func (x *IssueEnrolmentLinkRequest) Reset() {
 	*x = IssueEnrolmentLinkRequest{}
-	mi := &file_memql_proto_msgTypes[205]
+	mi := &file_memql_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19789,7 +20078,7 @@ func (x *IssueEnrolmentLinkRequest) String() string {
 func (*IssueEnrolmentLinkRequest) ProtoMessage() {}
 
 func (x *IssueEnrolmentLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[205]
+	mi := &file_memql_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19802,7 +20091,7 @@ func (x *IssueEnrolmentLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueEnrolmentLinkRequest.ProtoReflect.Descriptor instead.
 func (*IssueEnrolmentLinkRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{205}
+	return file_memql_proto_rawDescGZIP(), []int{208}
 }
 
 func (x *IssueEnrolmentLinkRequest) GetUserId() string {
@@ -19835,7 +20124,7 @@ type RevokeEnrolmentLinkRequest struct {
 
 func (x *RevokeEnrolmentLinkRequest) Reset() {
 	*x = RevokeEnrolmentLinkRequest{}
-	mi := &file_memql_proto_msgTypes[206]
+	mi := &file_memql_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19847,7 +20136,7 @@ func (x *RevokeEnrolmentLinkRequest) String() string {
 func (*RevokeEnrolmentLinkRequest) ProtoMessage() {}
 
 func (x *RevokeEnrolmentLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[206]
+	mi := &file_memql_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19860,7 +20149,7 @@ func (x *RevokeEnrolmentLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeEnrolmentLinkRequest.ProtoReflect.Descriptor instead.
 func (*RevokeEnrolmentLinkRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{206}
+	return file_memql_proto_rawDescGZIP(), []int{209}
 }
 
 func (x *RevokeEnrolmentLinkRequest) GetEnrolmentTokenId() string {
@@ -19898,7 +20187,7 @@ type RotateRecoveryKeyRequest struct {
 
 func (x *RotateRecoveryKeyRequest) Reset() {
 	*x = RotateRecoveryKeyRequest{}
-	mi := &file_memql_proto_msgTypes[207]
+	mi := &file_memql_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19910,7 +20199,7 @@ func (x *RotateRecoveryKeyRequest) String() string {
 func (*RotateRecoveryKeyRequest) ProtoMessage() {}
 
 func (x *RotateRecoveryKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[207]
+	mi := &file_memql_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19923,7 +20212,7 @@ func (x *RotateRecoveryKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateRecoveryKeyRequest.ProtoReflect.Descriptor instead.
 func (*RotateRecoveryKeyRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{207}
+	return file_memql_proto_rawDescGZIP(), []int{210}
 }
 
 func (x *RotateRecoveryKeyRequest) GetUserId() string {
@@ -19970,7 +20259,7 @@ type SetOAuthClientCorsOriginsRequest struct {
 
 func (x *SetOAuthClientCorsOriginsRequest) Reset() {
 	*x = SetOAuthClientCorsOriginsRequest{}
-	mi := &file_memql_proto_msgTypes[208]
+	mi := &file_memql_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19982,7 +20271,7 @@ func (x *SetOAuthClientCorsOriginsRequest) String() string {
 func (*SetOAuthClientCorsOriginsRequest) ProtoMessage() {}
 
 func (x *SetOAuthClientCorsOriginsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[208]
+	mi := &file_memql_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19995,7 +20284,7 @@ func (x *SetOAuthClientCorsOriginsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetOAuthClientCorsOriginsRequest.ProtoReflect.Descriptor instead.
 func (*SetOAuthClientCorsOriginsRequest) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{208}
+	return file_memql_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *SetOAuthClientCorsOriginsRequest) GetClientId() string {
@@ -20021,7 +20310,7 @@ type ModulesListMsg struct {
 
 func (x *ModulesListMsg) Reset() {
 	*x = ModulesListMsg{}
-	mi := &file_memql_proto_msgTypes[209]
+	mi := &file_memql_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20033,7 +20322,7 @@ func (x *ModulesListMsg) String() string {
 func (*ModulesListMsg) ProtoMessage() {}
 
 func (x *ModulesListMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[209]
+	mi := &file_memql_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20046,7 +20335,7 @@ func (x *ModulesListMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModulesListMsg.ProtoReflect.Descriptor instead.
 func (*ModulesListMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{209}
+	return file_memql_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *ModulesListMsg) GetRequestId() string {
@@ -20087,7 +20376,7 @@ type ModuleInfo struct {
 
 func (x *ModuleInfo) Reset() {
 	*x = ModuleInfo{}
-	mi := &file_memql_proto_msgTypes[210]
+	mi := &file_memql_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20099,7 +20388,7 @@ func (x *ModuleInfo) String() string {
 func (*ModuleInfo) ProtoMessage() {}
 
 func (x *ModuleInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[210]
+	mi := &file_memql_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20112,7 +20401,7 @@ func (x *ModuleInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleInfo.ProtoReflect.Descriptor instead.
 func (*ModuleInfo) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{210}
+	return file_memql_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *ModuleInfo) GetKind() string {
@@ -20194,7 +20483,7 @@ type ModulesListResult struct {
 
 func (x *ModulesListResult) Reset() {
 	*x = ModulesListResult{}
-	mi := &file_memql_proto_msgTypes[211]
+	mi := &file_memql_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20206,7 +20495,7 @@ func (x *ModulesListResult) String() string {
 func (*ModulesListResult) ProtoMessage() {}
 
 func (x *ModulesListResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[211]
+	mi := &file_memql_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20219,7 +20508,7 @@ func (x *ModulesListResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModulesListResult.ProtoReflect.Descriptor instead.
 func (*ModulesListResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{211}
+	return file_memql_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *ModulesListResult) GetRequestId() string {
@@ -20276,7 +20565,7 @@ type ModuleDetailMsg struct {
 
 func (x *ModuleDetailMsg) Reset() {
 	*x = ModuleDetailMsg{}
-	mi := &file_memql_proto_msgTypes[212]
+	mi := &file_memql_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20288,7 +20577,7 @@ func (x *ModuleDetailMsg) String() string {
 func (*ModuleDetailMsg) ProtoMessage() {}
 
 func (x *ModuleDetailMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[212]
+	mi := &file_memql_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20301,7 +20590,7 @@ func (x *ModuleDetailMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleDetailMsg.ProtoReflect.Descriptor instead.
 func (*ModuleDetailMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{212}
+	return file_memql_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *ModuleDetailMsg) GetRequestId() string {
@@ -20351,7 +20640,7 @@ type ModuleEnvVar struct {
 
 func (x *ModuleEnvVar) Reset() {
 	*x = ModuleEnvVar{}
-	mi := &file_memql_proto_msgTypes[213]
+	mi := &file_memql_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20363,7 +20652,7 @@ func (x *ModuleEnvVar) String() string {
 func (*ModuleEnvVar) ProtoMessage() {}
 
 func (x *ModuleEnvVar) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[213]
+	mi := &file_memql_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20376,7 +20665,7 @@ func (x *ModuleEnvVar) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleEnvVar.ProtoReflect.Descriptor instead.
 func (*ModuleEnvVar) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{213}
+	return file_memql_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *ModuleEnvVar) GetName() string {
@@ -20450,7 +20739,7 @@ type ModuleDetailResult struct {
 
 func (x *ModuleDetailResult) Reset() {
 	*x = ModuleDetailResult{}
-	mi := &file_memql_proto_msgTypes[214]
+	mi := &file_memql_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20462,7 +20751,7 @@ func (x *ModuleDetailResult) String() string {
 func (*ModuleDetailResult) ProtoMessage() {}
 
 func (x *ModuleDetailResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[214]
+	mi := &file_memql_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20475,7 +20764,7 @@ func (x *ModuleDetailResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleDetailResult.ProtoReflect.Descriptor instead.
 func (*ModuleDetailResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{214}
+	return file_memql_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *ModuleDetailResult) GetRequestId() string {
@@ -20546,7 +20835,7 @@ type SetPackEnabledMsg struct {
 
 func (x *SetPackEnabledMsg) Reset() {
 	*x = SetPackEnabledMsg{}
-	mi := &file_memql_proto_msgTypes[215]
+	mi := &file_memql_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20558,7 +20847,7 @@ func (x *SetPackEnabledMsg) String() string {
 func (*SetPackEnabledMsg) ProtoMessage() {}
 
 func (x *SetPackEnabledMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[215]
+	mi := &file_memql_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20571,7 +20860,7 @@ func (x *SetPackEnabledMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPackEnabledMsg.ProtoReflect.Descriptor instead.
 func (*SetPackEnabledMsg) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{215}
+	return file_memql_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *SetPackEnabledMsg) GetRequestId() string {
@@ -20621,7 +20910,7 @@ type SetPackEnabledResult struct {
 
 func (x *SetPackEnabledResult) Reset() {
 	*x = SetPackEnabledResult{}
-	mi := &file_memql_proto_msgTypes[216]
+	mi := &file_memql_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20633,7 +20922,7 @@ func (x *SetPackEnabledResult) String() string {
 func (*SetPackEnabledResult) ProtoMessage() {}
 
 func (x *SetPackEnabledResult) ProtoReflect() protoreflect.Message {
-	mi := &file_memql_proto_msgTypes[216]
+	mi := &file_memql_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20646,7 +20935,7 @@ func (x *SetPackEnabledResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPackEnabledResult.ProtoReflect.Descriptor instead.
 func (*SetPackEnabledResult) Descriptor() ([]byte, []int) {
-	return file_memql_proto_rawDescGZIP(), []int{216}
+	return file_memql_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *SetPackEnabledResult) GetRequestId() string {
@@ -21118,12 +21407,17 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06domain\x18\x02 \x01(\tR\x06domain\x121\n" +
-	"\apayload\x18\x03 \x01(\v2\x17.google.protobuf.StructR\apayload\"y\n" +
+	"\apayload\x18\x03 \x01(\v2\x17.google.protobuf.StructR\apayload\"\xb1\x01\n" +
 	"\x0fAiSuggestResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06domain\x18\x02 \x01(\tR\x06domain\x12/\n" +
-	"\x06result\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06result\"\xb1\x03\n" +
+	"\x06result\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06result\x126\n" +
+	"\x05usage\x18\x04 \x01(\v2 .znasllc.memql.v1.AiSuggestUsageR\x05usage\"n\n" +
+	"\x0eAiSuggestUsage\x12!\n" +
+	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\"\xb1\x03\n" +
 	"\x11IdentityCreateMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
@@ -21563,7 +21857,7 @@ const file_memql_proto_rawDesc = "" +
 	"\bconcepts\x18\x02 \x03(\v2\x1d.znasllc.memql.v1.ConceptInfoR\bconcepts\x12\x1f\n" +
 	"\vbase_topics\x18\x03 \x03(\tR\n" +
 	"baseTopics\x12#\n" +
-	"\rsystem_topics\x18\x04 \x03(\tR\fsystemTopics\"\xc9\x02\n" +
+	"\rsystem_topics\x18\x04 \x03(\tR\fsystemTopics\"\xce\x03\n" +
 	"\vConceptInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
@@ -21577,7 +21871,22 @@ const file_memql_proto_rawDesc = "" +
 	"\vdata_origin\x18\t \x01(\tR\n" +
 	"dataOrigin\x12(\n" +
 	"\x10data_mirrored_to\x18\n" +
-	" \x03(\tR\x0edataMirroredTo\"y\n" +
+	" \x03(\tR\x0edataMirroredTo\x126\n" +
+	"\x06fields\x18\v \x03(\v2\x1e.znasllc.memql.v1.ConceptFieldR\x06fields\x12K\n" +
+	"\rrelationships\x18\f \x03(\v2%.znasllc.memql.v1.ConceptRelationshipR\rrelationships\"\x95\x01\n" +
+	"\fConceptField\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x1a\n" +
+	"\brequired\x18\x03 \x01(\bR\brequired\x12\x1f\n" +
+	"\venum_values\x18\x04 \x03(\tR\n" +
+	"enumValues\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\"\x85\x01\n" +
+	"\x13ConceptRelationship\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x0e\n" +
+	"\x02as\x18\x02 \x01(\tR\x02as\x12\x14\n" +
+	"\x05field\x18\x03 \x01(\tR\x05field\x12\x16\n" +
+	"\x06target\x18\x04 \x01(\tR\x06target\x12\x1c\n" +
+	"\tdirection\x18\x05 \x01(\tR\tdirection\"y\n" +
 	"\vDisplayCard\x12\x18\n" +
 	"\aprimary\x18\x01 \x01(\tR\aprimary\x12\x1c\n" +
 	"\tsecondary\x18\x02 \x01(\tR\tsecondary\x12\x1a\n" +
@@ -22442,7 +22751,7 @@ func file_memql_proto_rawDescGZIP() []byte {
 }
 
 var file_memql_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_memql_proto_msgTypes = make([]protoimpl.MessageInfo, 222)
+var file_memql_proto_msgTypes = make([]protoimpl.MessageInfo, 225)
 var file_memql_proto_goTypes = []any{
 	(UserRole)(0),                              // 0: znasllc.memql.v1.UserRole
 	(GraphNodeAction)(0),                       // 1: znasllc.memql.v1.GraphNodeAction
@@ -22493,202 +22802,205 @@ var file_memql_proto_goTypes = []any{
 	(*AiTranscribeStreamComplete)(nil),         // 46: znasllc.memql.v1.AiTranscribeStreamComplete
 	(*AiSuggestMsg)(nil),                       // 47: znasllc.memql.v1.AiSuggestMsg
 	(*AiSuggestResult)(nil),                    // 48: znasllc.memql.v1.AiSuggestResult
-	(*IdentityCreateMsg)(nil),                  // 49: znasllc.memql.v1.IdentityCreateMsg
-	(*IdentityUpdateMsg)(nil),                  // 50: znasllc.memql.v1.IdentityUpdateMsg
-	(*IdentityListMsg)(nil),                    // 51: znasllc.memql.v1.IdentityListMsg
-	(*IdentityResult)(nil),                     // 52: znasllc.memql.v1.IdentityResult
-	(*IdentityInfo)(nil),                       // 53: znasllc.memql.v1.IdentityInfo
-	(*DelegationCreateMsg)(nil),                // 54: znasllc.memql.v1.DelegationCreateMsg
-	(*DelegationRevokeMsg)(nil),                // 55: znasllc.memql.v1.DelegationRevokeMsg
-	(*DelegationListMsg)(nil),                  // 56: znasllc.memql.v1.DelegationListMsg
-	(*DelegationResult)(nil),                   // 57: znasllc.memql.v1.DelegationResult
-	(*DelegationInfo)(nil),                     // 58: znasllc.memql.v1.DelegationInfo
-	(*SensePosition)(nil),                      // 59: znasllc.memql.v1.SensePosition
-	(*SenseRange)(nil),                         // 60: znasllc.memql.v1.SenseRange
-	(*SenseTokenizeMsg)(nil),                   // 61: znasllc.memql.v1.SenseTokenizeMsg
-	(*SenseTokenizeResult)(nil),                // 62: znasllc.memql.v1.SenseTokenizeResult
-	(*SenseToken)(nil),                         // 63: znasllc.memql.v1.SenseToken
-	(*SenseCompleteMsg)(nil),                   // 64: znasllc.memql.v1.SenseCompleteMsg
-	(*SenseCompleteResult)(nil),                // 65: znasllc.memql.v1.SenseCompleteResult
-	(*SenseCompletionItem)(nil),                // 66: znasllc.memql.v1.SenseCompletionItem
-	(*SenseDiagnoseMsg)(nil),                   // 67: znasllc.memql.v1.SenseDiagnoseMsg
-	(*SenseDiagnoseResult)(nil),                // 68: znasllc.memql.v1.SenseDiagnoseResult
-	(*SenseDiagnostic)(nil),                    // 69: znasllc.memql.v1.SenseDiagnostic
-	(*SenseHoverMsg)(nil),                      // 70: znasllc.memql.v1.SenseHoverMsg
-	(*SenseHoverResult)(nil),                   // 71: znasllc.memql.v1.SenseHoverResult
-	(*SenseDefinitionMsg)(nil),                 // 72: znasllc.memql.v1.SenseDefinitionMsg
-	(*SenseDefinitionResult)(nil),              // 73: znasllc.memql.v1.SenseDefinitionResult
-	(*SenseDefinitionTarget)(nil),              // 74: znasllc.memql.v1.SenseDefinitionTarget
-	(*SenseSignatureHelpMsg)(nil),              // 75: znasllc.memql.v1.SenseSignatureHelpMsg
-	(*SenseSignatureHelpResult)(nil),           // 76: znasllc.memql.v1.SenseSignatureHelpResult
-	(*SenseSignature)(nil),                     // 77: znasllc.memql.v1.SenseSignature
-	(*SenseParameter)(nil),                     // 78: znasllc.memql.v1.SenseParameter
-	(*ListPackDomainsMsg)(nil),                 // 79: znasllc.memql.v1.ListPackDomainsMsg
-	(*ListPackDomainsResult)(nil),              // 80: znasllc.memql.v1.ListPackDomainsResult
-	(*PackDomain)(nil),                         // 81: znasllc.memql.v1.PackDomain
-	(*ListPackFilesMsg)(nil),                   // 82: znasllc.memql.v1.ListPackFilesMsg
-	(*ListPackFilesResult)(nil),                // 83: znasllc.memql.v1.ListPackFilesResult
-	(*PackFile)(nil),                           // 84: znasllc.memql.v1.PackFile
-	(*ReadPackFileMsg)(nil),                    // 85: znasllc.memql.v1.ReadPackFileMsg
-	(*ReadPackFileResult)(nil),                 // 86: znasllc.memql.v1.ReadPackFileResult
-	(*ListConstructsMsg)(nil),                  // 87: znasllc.memql.v1.ListConstructsMsg
-	(*ListConstructsResult)(nil),               // 88: znasllc.memql.v1.ListConstructsResult
-	(*ConstructInfo)(nil),                      // 89: znasllc.memql.v1.ConstructInfo
-	(*ConstructTrigger)(nil),                   // 90: znasllc.memql.v1.ConstructTrigger
-	(*ConstructArg)(nil),                       // 91: znasllc.memql.v1.ConstructArg
-	(*AuthoringDiagnostic)(nil),                // 92: znasllc.memql.v1.AuthoringDiagnostic
-	(*AuthoringConstruct)(nil),                 // 93: znasllc.memql.v1.AuthoringConstruct
-	(*AuthoringValidateBundleMsg)(nil),         // 94: znasllc.memql.v1.AuthoringValidateBundleMsg
-	(*AuthoringValidateBundleResult)(nil),      // 95: znasllc.memql.v1.AuthoringValidateBundleResult
-	(*AuthoringSessionDefineBundleMsg)(nil),    // 96: znasllc.memql.v1.AuthoringSessionDefineBundleMsg
-	(*AuthoringSessionDefineBundleResult)(nil), // 97: znasllc.memql.v1.AuthoringSessionDefineBundleResult
-	(*DurablePromoteBundleMsg)(nil),            // 98: znasllc.memql.v1.DurablePromoteBundleMsg
-	(*DurablePromoteBundleResult)(nil),         // 99: znasllc.memql.v1.DurablePromoteBundleResult
-	(*ConceptSchemaDiff)(nil),                  // 100: znasllc.memql.v1.ConceptSchemaDiff
-	(*ConceptSchemaChange)(nil),                // 101: znasllc.memql.v1.ConceptSchemaChange
-	(*DurableDemoteBundleMsg)(nil),             // 102: znasllc.memql.v1.DurableDemoteBundleMsg
-	(*DurableDemoteOutcome)(nil),               // 103: znasllc.memql.v1.DurableDemoteOutcome
-	(*DurableDemoteBundleResult)(nil),          // 104: znasllc.memql.v1.DurableDemoteBundleResult
-	(*StageBundleMsg)(nil),                     // 105: znasllc.memql.v1.StageBundleMsg
-	(*StageBundleResult)(nil),                  // 106: znasllc.memql.v1.StageBundleResult
-	(*DslSpecMsg)(nil),                         // 107: znasllc.memql.v1.DslSpecMsg
-	(*DslSpecResult)(nil),                      // 108: znasllc.memql.v1.DslSpecResult
-	(*PolyphonRoomTokenMsg)(nil),               // 109: znasllc.memql.v1.PolyphonRoomTokenMsg
-	(*PolyphonRoomTokenResult)(nil),            // 110: znasllc.memql.v1.PolyphonRoomTokenResult
-	(*PolyphonStatusMsg)(nil),                  // 111: znasllc.memql.v1.PolyphonStatusMsg
-	(*PolyphonStatusResult)(nil),               // 112: znasllc.memql.v1.PolyphonStatusResult
-	(*PolyphonUtteranceMsg)(nil),               // 113: znasllc.memql.v1.PolyphonUtteranceMsg
-	(*PolyphonUtteranceResult)(nil),            // 114: znasllc.memql.v1.PolyphonUtteranceResult
-	(*ConceptsListMsg)(nil),                    // 115: znasllc.memql.v1.ConceptsListMsg
-	(*ConceptsListResult)(nil),                 // 116: znasllc.memql.v1.ConceptsListResult
-	(*ConceptInfo)(nil),                        // 117: znasllc.memql.v1.ConceptInfo
-	(*DisplayCard)(nil),                        // 118: znasllc.memql.v1.DisplayCard
-	(*ConceptsSubscribeMsg)(nil),               // 119: znasllc.memql.v1.ConceptsSubscribeMsg
-	(*ConceptsSubscribeResult)(nil),            // 120: znasllc.memql.v1.ConceptsSubscribeResult
-	(*DomainSubscription)(nil),                 // 121: znasllc.memql.v1.DomainSubscription
-	(*ConceptsRegistryDelta)(nil),              // 122: znasllc.memql.v1.ConceptsRegistryDelta
-	(*MyAccessMsg)(nil),                        // 123: znasllc.memql.v1.MyAccessMsg
-	(*MyAccessResult)(nil),                     // 124: znasllc.memql.v1.MyAccessResult
-	(*AgentGenerateTurnMsg)(nil),               // 125: znasllc.memql.v1.AgentGenerateTurnMsg
-	(*ActingAgentIdentity)(nil),                // 126: znasllc.memql.v1.ActingAgentIdentity
-	(*AgentTurnMessage)(nil),                   // 127: znasllc.memql.v1.AgentTurnMessage
-	(*AgentTurnRoutingContext)(nil),            // 128: znasllc.memql.v1.AgentTurnRoutingContext
-	(*AgentTurnHuman)(nil),                     // 129: znasllc.memql.v1.AgentTurnHuman
-	(*AgentTurnPeer)(nil),                      // 130: znasllc.memql.v1.AgentTurnPeer
-	(*AgentTurnPeerActivity)(nil),              // 131: znasllc.memql.v1.AgentTurnPeerActivity
-	(*AgentTurnSpaceContext)(nil),              // 132: znasllc.memql.v1.AgentTurnSpaceContext
-	(*AgentTurnSpaceGoal)(nil),                 // 133: znasllc.memql.v1.AgentTurnSpaceGoal
-	(*AgentTurnAttachment)(nil),                // 134: znasllc.memql.v1.AgentTurnAttachment
-	(*AgentGenerateTurnDelta)(nil),             // 135: znasllc.memql.v1.AgentGenerateTurnDelta
-	(*AgentTurnTextDelta)(nil),                 // 136: znasllc.memql.v1.AgentTurnTextDelta
-	(*AgentTurnToolCall)(nil),                  // 137: znasllc.memql.v1.AgentTurnToolCall
-	(*AgentTurnToolResult)(nil),                // 138: znasllc.memql.v1.AgentTurnToolResult
-	(*AgentGenerateTurnComplete)(nil),          // 139: znasllc.memql.v1.AgentGenerateTurnComplete
-	(*AgentPreemptTurnMsg)(nil),                // 140: znasllc.memql.v1.AgentPreemptTurnMsg
-	(*AgentTurnCitation)(nil),                  // 141: znasllc.memql.v1.AgentTurnCitation
-	(*AgentRetrievedChunk)(nil),                // 142: znasllc.memql.v1.AgentRetrievedChunk
-	(*AgentTurnError)(nil),                     // 143: znasllc.memql.v1.AgentTurnError
-	(*SendGuestInviteMsg)(nil),                 // 144: znasllc.memql.v1.SendGuestInviteMsg
-	(*SendGuestInviteResult)(nil),              // 145: znasllc.memql.v1.SendGuestInviteResult
-	(*ResolveGuestInviteMsg)(nil),              // 146: znasllc.memql.v1.ResolveGuestInviteMsg
-	(*ResolveGuestInviteResult)(nil),           // 147: znasllc.memql.v1.ResolveGuestInviteResult
-	(*JoinSpaceAsGuestMsg)(nil),                // 148: znasllc.memql.v1.JoinSpaceAsGuestMsg
-	(*JoinSpaceAsGuestResult)(nil),             // 149: znasllc.memql.v1.JoinSpaceAsGuestResult
-	(*CancelGuestInviteMsg)(nil),               // 150: znasllc.memql.v1.CancelGuestInviteMsg
-	(*CancelGuestInviteResult)(nil),            // 151: znasllc.memql.v1.CancelGuestInviteResult
-	(*ResendGuestInviteEmailMsg)(nil),          // 152: znasllc.memql.v1.ResendGuestInviteEmailMsg
-	(*ResendGuestInviteEmailResult)(nil),       // 153: znasllc.memql.v1.ResendGuestInviteEmailResult
-	(*RevokeCurrentSessionMsg)(nil),            // 154: znasllc.memql.v1.RevokeCurrentSessionMsg
-	(*RevokeCurrentSessionResult)(nil),         // 155: znasllc.memql.v1.RevokeCurrentSessionResult
-	(*RevokeAllSessionsMsg)(nil),               // 156: znasllc.memql.v1.RevokeAllSessionsMsg
-	(*RevokeAllSessionsResult)(nil),            // 157: znasllc.memql.v1.RevokeAllSessionsResult
-	(*RevokeSessionMsg)(nil),                   // 158: znasllc.memql.v1.RevokeSessionMsg
-	(*RevokeSessionResult)(nil),                // 159: znasllc.memql.v1.RevokeSessionResult
-	(*SetSignInPolicyMsg)(nil),                 // 160: znasllc.memql.v1.SetSignInPolicyMsg
-	(*SetSignInPolicyResult)(nil),              // 161: znasllc.memql.v1.SetSignInPolicyResult
-	(*CreateWorkerTokenMsg)(nil),               // 162: znasllc.memql.v1.CreateWorkerTokenMsg
-	(*CreateWorkerTokenResult)(nil),            // 163: znasllc.memql.v1.CreateWorkerTokenResult
-	(*RevokeWorkerTokenMsg)(nil),               // 164: znasllc.memql.v1.RevokeWorkerTokenMsg
-	(*RevokeWorkerTokenResult)(nil),            // 165: znasllc.memql.v1.RevokeWorkerTokenResult
-	(*CreateBadgeMsg)(nil),                     // 166: znasllc.memql.v1.CreateBadgeMsg
-	(*CreateBadgeResult)(nil),                  // 167: znasllc.memql.v1.CreateBadgeResult
-	(*RevokeBadgeMsg)(nil),                     // 168: znasllc.memql.v1.RevokeBadgeMsg
-	(*RevokeBadgeResult)(nil),                  // 169: znasllc.memql.v1.RevokeBadgeResult
-	(*VoiceAgentSessionStart)(nil),             // 170: znasllc.memql.v1.VoiceAgentSessionStart
-	(*VoiceAgentSessionAck)(nil),               // 171: znasllc.memql.v1.VoiceAgentSessionAck
-	(*VoiceAgentSessionEnd)(nil),               // 172: znasllc.memql.v1.VoiceAgentSessionEnd
-	(*VoiceAgentPartialTranscript)(nil),        // 173: znasllc.memql.v1.VoiceAgentPartialTranscript
-	(*VoiceAgentPartialAck)(nil),               // 174: znasllc.memql.v1.VoiceAgentPartialAck
-	(*VoiceAgentFinalTranscript)(nil),          // 175: znasllc.memql.v1.VoiceAgentFinalTranscript
-	(*VoiceAgentFinalAck)(nil),                 // 176: znasllc.memql.v1.VoiceAgentFinalAck
-	(*VoiceAgentTurnRequest)(nil),              // 177: znasllc.memql.v1.VoiceAgentTurnRequest
-	(*VoiceAgentTurnDelta)(nil),                // 178: znasllc.memql.v1.VoiceAgentTurnDelta
-	(*VoiceAgentTurnComplete)(nil),             // 179: znasllc.memql.v1.VoiceAgentTurnComplete
-	(*VoiceAgentSpeak)(nil),                    // 180: znasllc.memql.v1.VoiceAgentSpeak
-	(*VoiceAgentRealtimeOutput)(nil),           // 181: znasllc.memql.v1.VoiceAgentRealtimeOutput
-	(*VoiceAgentRealtimeOutputAck)(nil),        // 182: znasllc.memql.v1.VoiceAgentRealtimeOutputAck
-	(*VoiceAgentRealtimeSpeaking)(nil),         // 183: znasllc.memql.v1.VoiceAgentRealtimeSpeaking
-	(*RotateAuthMsg)(nil),                      // 184: znasllc.memql.v1.RotateAuthMsg
-	(*RotateAuthResult)(nil),                   // 185: znasllc.memql.v1.RotateAuthResult
-	(*NodeMaintenanceMsg)(nil),                 // 186: znasllc.memql.v1.NodeMaintenanceMsg
-	(*NodeMaintenanceResult)(nil),              // 187: znasllc.memql.v1.NodeMaintenanceResult
-	(*DeployControlMsg)(nil),                   // 188: znasllc.memql.v1.DeployControlMsg
-	(*DeployControlResult)(nil),                // 189: znasllc.memql.v1.DeployControlResult
-	(*RunAutomationMsg)(nil),                   // 190: znasllc.memql.v1.RunAutomationMsg
-	(*AutomationRunEvent)(nil),                 // 191: znasllc.memql.v1.AutomationRunEvent
-	(*AutomationRunAccepted)(nil),              // 192: znasllc.memql.v1.AutomationRunAccepted
-	(*AutomationRunStep)(nil),                  // 193: znasllc.memql.v1.AutomationRunStep
-	(*AutomationRunComplete)(nil),              // 194: znasllc.memql.v1.AutomationRunComplete
-	(*CreateAccountTokenMsg)(nil),              // 195: znasllc.memql.v1.CreateAccountTokenMsg
-	(*CreateAccountTokenResult)(nil),           // 196: znasllc.memql.v1.CreateAccountTokenResult
-	(*RevokeAccountTokenMsg)(nil),              // 197: znasllc.memql.v1.RevokeAccountTokenMsg
-	(*RevokeAccountTokenResult)(nil),           // 198: znasllc.memql.v1.RevokeAccountTokenResult
-	(*IdentityAdminMsg)(nil),                   // 199: znasllc.memql.v1.IdentityAdminMsg
-	(*IdentityAdminResult)(nil),                // 200: znasllc.memql.v1.IdentityAdminResult
-	(*IssueUserInvitationRequest)(nil),         // 201: znasllc.memql.v1.IssueUserInvitationRequest
-	(*RevokeUserInvitationRequest)(nil),        // 202: znasllc.memql.v1.RevokeUserInvitationRequest
-	(*UpdateUserProfileRequest)(nil),           // 203: znasllc.memql.v1.UpdateUserProfileRequest
-	(*SetUserRoleRequest)(nil),                 // 204: znasllc.memql.v1.SetUserRoleRequest
-	(*SetUserSuspendedRequest)(nil),            // 205: znasllc.memql.v1.SetUserSuspendedRequest
-	(*ResetSignInPolicyRequest)(nil),           // 206: znasllc.memql.v1.ResetSignInPolicyRequest
-	(*SetUserSharedMailboxRequest)(nil),        // 207: znasllc.memql.v1.SetUserSharedMailboxRequest
-	(*RevokeUserTokenRequest)(nil),             // 208: znasllc.memql.v1.RevokeUserTokenRequest
-	(*RevokeNodeTokenRequest)(nil),             // 209: znasllc.memql.v1.RevokeNodeTokenRequest
-	(*UpdateClusterSettingsRequest)(nil),       // 210: znasllc.memql.v1.UpdateClusterSettingsRequest
-	(*IssueEnrolmentLinkRequest)(nil),          // 211: znasllc.memql.v1.IssueEnrolmentLinkRequest
-	(*RevokeEnrolmentLinkRequest)(nil),         // 212: znasllc.memql.v1.RevokeEnrolmentLinkRequest
-	(*RotateRecoveryKeyRequest)(nil),           // 213: znasllc.memql.v1.RotateRecoveryKeyRequest
-	(*SetOAuthClientCorsOriginsRequest)(nil),   // 214: znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
-	(*ModulesListMsg)(nil),                     // 215: znasllc.memql.v1.ModulesListMsg
-	(*ModuleInfo)(nil),                         // 216: znasllc.memql.v1.ModuleInfo
-	(*ModulesListResult)(nil),                  // 217: znasllc.memql.v1.ModulesListResult
-	(*ModuleDetailMsg)(nil),                    // 218: znasllc.memql.v1.ModuleDetailMsg
-	(*ModuleEnvVar)(nil),                       // 219: znasllc.memql.v1.ModuleEnvVar
-	(*ModuleDetailResult)(nil),                 // 220: znasllc.memql.v1.ModuleDetailResult
-	(*SetPackEnabledMsg)(nil),                  // 221: znasllc.memql.v1.SetPackEnabledMsg
-	(*SetPackEnabledResult)(nil),               // 222: znasllc.memql.v1.SetPackEnabledResult
-	nil,                                        // 223: znasllc.memql.v1.MemqlClientMessage.MetadataEntry
-	nil,                                        // 224: znasllc.memql.v1.MemqlServerMessage.MetadataEntry
-	nil,                                        // 225: znasllc.memql.v1.QueryError.MetadataEntry
-	nil,                                        // 226: znasllc.memql.v1.AgentGenerateTurnMsg.HintsEntry
-	nil,                                        // 227: znasllc.memql.v1.AgentTurnSpaceContext.ExtraEntry
-	(*timestamppb.Timestamp)(nil),              // 228: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),                    // 229: google.protobuf.Struct
-	(*structpb.Value)(nil),                     // 230: google.protobuf.Value
-	(*GetDeploymentStatusRequest)(nil),         // 231: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
-	(*SuggestNextVersionRequest)(nil),          // 232: znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	(*RollbackRequest)(nil),                    // 233: znasllc.memql.deploycontrol.v1.RollbackRequest
-	(*RolloutActionRequest)(nil),               // 234: znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	(*CutVersionRequest)(nil),                  // 235: znasllc.memql.deploycontrol.v1.CutVersionRequest
-	(*DeployRequest)(nil),                      // 236: znasllc.memql.deploycontrol.v1.DeployRequest
-	(*RollbackDeploymentRequest)(nil),          // 237: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	(*RepairRequest)(nil),                      // 238: znasllc.memql.deploycontrol.v1.RepairRequest
-	(*DeploymentStatus)(nil),                   // 239: znasllc.memql.deploycontrol.v1.DeploymentStatus
-	(*SuggestNextVersionResult)(nil),           // 240: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	(*ActionResult)(nil),                       // 241: znasllc.memql.deploycontrol.v1.ActionResult
+	(*AiSuggestUsage)(nil),                     // 49: znasllc.memql.v1.AiSuggestUsage
+	(*IdentityCreateMsg)(nil),                  // 50: znasllc.memql.v1.IdentityCreateMsg
+	(*IdentityUpdateMsg)(nil),                  // 51: znasllc.memql.v1.IdentityUpdateMsg
+	(*IdentityListMsg)(nil),                    // 52: znasllc.memql.v1.IdentityListMsg
+	(*IdentityResult)(nil),                     // 53: znasllc.memql.v1.IdentityResult
+	(*IdentityInfo)(nil),                       // 54: znasllc.memql.v1.IdentityInfo
+	(*DelegationCreateMsg)(nil),                // 55: znasllc.memql.v1.DelegationCreateMsg
+	(*DelegationRevokeMsg)(nil),                // 56: znasllc.memql.v1.DelegationRevokeMsg
+	(*DelegationListMsg)(nil),                  // 57: znasllc.memql.v1.DelegationListMsg
+	(*DelegationResult)(nil),                   // 58: znasllc.memql.v1.DelegationResult
+	(*DelegationInfo)(nil),                     // 59: znasllc.memql.v1.DelegationInfo
+	(*SensePosition)(nil),                      // 60: znasllc.memql.v1.SensePosition
+	(*SenseRange)(nil),                         // 61: znasllc.memql.v1.SenseRange
+	(*SenseTokenizeMsg)(nil),                   // 62: znasllc.memql.v1.SenseTokenizeMsg
+	(*SenseTokenizeResult)(nil),                // 63: znasllc.memql.v1.SenseTokenizeResult
+	(*SenseToken)(nil),                         // 64: znasllc.memql.v1.SenseToken
+	(*SenseCompleteMsg)(nil),                   // 65: znasllc.memql.v1.SenseCompleteMsg
+	(*SenseCompleteResult)(nil),                // 66: znasllc.memql.v1.SenseCompleteResult
+	(*SenseCompletionItem)(nil),                // 67: znasllc.memql.v1.SenseCompletionItem
+	(*SenseDiagnoseMsg)(nil),                   // 68: znasllc.memql.v1.SenseDiagnoseMsg
+	(*SenseDiagnoseResult)(nil),                // 69: znasllc.memql.v1.SenseDiagnoseResult
+	(*SenseDiagnostic)(nil),                    // 70: znasllc.memql.v1.SenseDiagnostic
+	(*SenseHoverMsg)(nil),                      // 71: znasllc.memql.v1.SenseHoverMsg
+	(*SenseHoverResult)(nil),                   // 72: znasllc.memql.v1.SenseHoverResult
+	(*SenseDefinitionMsg)(nil),                 // 73: znasllc.memql.v1.SenseDefinitionMsg
+	(*SenseDefinitionResult)(nil),              // 74: znasllc.memql.v1.SenseDefinitionResult
+	(*SenseDefinitionTarget)(nil),              // 75: znasllc.memql.v1.SenseDefinitionTarget
+	(*SenseSignatureHelpMsg)(nil),              // 76: znasllc.memql.v1.SenseSignatureHelpMsg
+	(*SenseSignatureHelpResult)(nil),           // 77: znasllc.memql.v1.SenseSignatureHelpResult
+	(*SenseSignature)(nil),                     // 78: znasllc.memql.v1.SenseSignature
+	(*SenseParameter)(nil),                     // 79: znasllc.memql.v1.SenseParameter
+	(*ListPackDomainsMsg)(nil),                 // 80: znasllc.memql.v1.ListPackDomainsMsg
+	(*ListPackDomainsResult)(nil),              // 81: znasllc.memql.v1.ListPackDomainsResult
+	(*PackDomain)(nil),                         // 82: znasllc.memql.v1.PackDomain
+	(*ListPackFilesMsg)(nil),                   // 83: znasllc.memql.v1.ListPackFilesMsg
+	(*ListPackFilesResult)(nil),                // 84: znasllc.memql.v1.ListPackFilesResult
+	(*PackFile)(nil),                           // 85: znasllc.memql.v1.PackFile
+	(*ReadPackFileMsg)(nil),                    // 86: znasllc.memql.v1.ReadPackFileMsg
+	(*ReadPackFileResult)(nil),                 // 87: znasllc.memql.v1.ReadPackFileResult
+	(*ListConstructsMsg)(nil),                  // 88: znasllc.memql.v1.ListConstructsMsg
+	(*ListConstructsResult)(nil),               // 89: znasllc.memql.v1.ListConstructsResult
+	(*ConstructInfo)(nil),                      // 90: znasllc.memql.v1.ConstructInfo
+	(*ConstructTrigger)(nil),                   // 91: znasllc.memql.v1.ConstructTrigger
+	(*ConstructArg)(nil),                       // 92: znasllc.memql.v1.ConstructArg
+	(*AuthoringDiagnostic)(nil),                // 93: znasllc.memql.v1.AuthoringDiagnostic
+	(*AuthoringConstruct)(nil),                 // 94: znasllc.memql.v1.AuthoringConstruct
+	(*AuthoringValidateBundleMsg)(nil),         // 95: znasllc.memql.v1.AuthoringValidateBundleMsg
+	(*AuthoringValidateBundleResult)(nil),      // 96: znasllc.memql.v1.AuthoringValidateBundleResult
+	(*AuthoringSessionDefineBundleMsg)(nil),    // 97: znasllc.memql.v1.AuthoringSessionDefineBundleMsg
+	(*AuthoringSessionDefineBundleResult)(nil), // 98: znasllc.memql.v1.AuthoringSessionDefineBundleResult
+	(*DurablePromoteBundleMsg)(nil),            // 99: znasllc.memql.v1.DurablePromoteBundleMsg
+	(*DurablePromoteBundleResult)(nil),         // 100: znasllc.memql.v1.DurablePromoteBundleResult
+	(*ConceptSchemaDiff)(nil),                  // 101: znasllc.memql.v1.ConceptSchemaDiff
+	(*ConceptSchemaChange)(nil),                // 102: znasllc.memql.v1.ConceptSchemaChange
+	(*DurableDemoteBundleMsg)(nil),             // 103: znasllc.memql.v1.DurableDemoteBundleMsg
+	(*DurableDemoteOutcome)(nil),               // 104: znasllc.memql.v1.DurableDemoteOutcome
+	(*DurableDemoteBundleResult)(nil),          // 105: znasllc.memql.v1.DurableDemoteBundleResult
+	(*StageBundleMsg)(nil),                     // 106: znasllc.memql.v1.StageBundleMsg
+	(*StageBundleResult)(nil),                  // 107: znasllc.memql.v1.StageBundleResult
+	(*DslSpecMsg)(nil),                         // 108: znasllc.memql.v1.DslSpecMsg
+	(*DslSpecResult)(nil),                      // 109: znasllc.memql.v1.DslSpecResult
+	(*PolyphonRoomTokenMsg)(nil),               // 110: znasllc.memql.v1.PolyphonRoomTokenMsg
+	(*PolyphonRoomTokenResult)(nil),            // 111: znasllc.memql.v1.PolyphonRoomTokenResult
+	(*PolyphonStatusMsg)(nil),                  // 112: znasllc.memql.v1.PolyphonStatusMsg
+	(*PolyphonStatusResult)(nil),               // 113: znasllc.memql.v1.PolyphonStatusResult
+	(*PolyphonUtteranceMsg)(nil),               // 114: znasllc.memql.v1.PolyphonUtteranceMsg
+	(*PolyphonUtteranceResult)(nil),            // 115: znasllc.memql.v1.PolyphonUtteranceResult
+	(*ConceptsListMsg)(nil),                    // 116: znasllc.memql.v1.ConceptsListMsg
+	(*ConceptsListResult)(nil),                 // 117: znasllc.memql.v1.ConceptsListResult
+	(*ConceptInfo)(nil),                        // 118: znasllc.memql.v1.ConceptInfo
+	(*ConceptField)(nil),                       // 119: znasllc.memql.v1.ConceptField
+	(*ConceptRelationship)(nil),                // 120: znasllc.memql.v1.ConceptRelationship
+	(*DisplayCard)(nil),                        // 121: znasllc.memql.v1.DisplayCard
+	(*ConceptsSubscribeMsg)(nil),               // 122: znasllc.memql.v1.ConceptsSubscribeMsg
+	(*ConceptsSubscribeResult)(nil),            // 123: znasllc.memql.v1.ConceptsSubscribeResult
+	(*DomainSubscription)(nil),                 // 124: znasllc.memql.v1.DomainSubscription
+	(*ConceptsRegistryDelta)(nil),              // 125: znasllc.memql.v1.ConceptsRegistryDelta
+	(*MyAccessMsg)(nil),                        // 126: znasllc.memql.v1.MyAccessMsg
+	(*MyAccessResult)(nil),                     // 127: znasllc.memql.v1.MyAccessResult
+	(*AgentGenerateTurnMsg)(nil),               // 128: znasllc.memql.v1.AgentGenerateTurnMsg
+	(*ActingAgentIdentity)(nil),                // 129: znasllc.memql.v1.ActingAgentIdentity
+	(*AgentTurnMessage)(nil),                   // 130: znasllc.memql.v1.AgentTurnMessage
+	(*AgentTurnRoutingContext)(nil),            // 131: znasllc.memql.v1.AgentTurnRoutingContext
+	(*AgentTurnHuman)(nil),                     // 132: znasllc.memql.v1.AgentTurnHuman
+	(*AgentTurnPeer)(nil),                      // 133: znasllc.memql.v1.AgentTurnPeer
+	(*AgentTurnPeerActivity)(nil),              // 134: znasllc.memql.v1.AgentTurnPeerActivity
+	(*AgentTurnSpaceContext)(nil),              // 135: znasllc.memql.v1.AgentTurnSpaceContext
+	(*AgentTurnSpaceGoal)(nil),                 // 136: znasllc.memql.v1.AgentTurnSpaceGoal
+	(*AgentTurnAttachment)(nil),                // 137: znasllc.memql.v1.AgentTurnAttachment
+	(*AgentGenerateTurnDelta)(nil),             // 138: znasllc.memql.v1.AgentGenerateTurnDelta
+	(*AgentTurnTextDelta)(nil),                 // 139: znasllc.memql.v1.AgentTurnTextDelta
+	(*AgentTurnToolCall)(nil),                  // 140: znasllc.memql.v1.AgentTurnToolCall
+	(*AgentTurnToolResult)(nil),                // 141: znasllc.memql.v1.AgentTurnToolResult
+	(*AgentGenerateTurnComplete)(nil),          // 142: znasllc.memql.v1.AgentGenerateTurnComplete
+	(*AgentPreemptTurnMsg)(nil),                // 143: znasllc.memql.v1.AgentPreemptTurnMsg
+	(*AgentTurnCitation)(nil),                  // 144: znasllc.memql.v1.AgentTurnCitation
+	(*AgentRetrievedChunk)(nil),                // 145: znasllc.memql.v1.AgentRetrievedChunk
+	(*AgentTurnError)(nil),                     // 146: znasllc.memql.v1.AgentTurnError
+	(*SendGuestInviteMsg)(nil),                 // 147: znasllc.memql.v1.SendGuestInviteMsg
+	(*SendGuestInviteResult)(nil),              // 148: znasllc.memql.v1.SendGuestInviteResult
+	(*ResolveGuestInviteMsg)(nil),              // 149: znasllc.memql.v1.ResolveGuestInviteMsg
+	(*ResolveGuestInviteResult)(nil),           // 150: znasllc.memql.v1.ResolveGuestInviteResult
+	(*JoinSpaceAsGuestMsg)(nil),                // 151: znasllc.memql.v1.JoinSpaceAsGuestMsg
+	(*JoinSpaceAsGuestResult)(nil),             // 152: znasllc.memql.v1.JoinSpaceAsGuestResult
+	(*CancelGuestInviteMsg)(nil),               // 153: znasllc.memql.v1.CancelGuestInviteMsg
+	(*CancelGuestInviteResult)(nil),            // 154: znasllc.memql.v1.CancelGuestInviteResult
+	(*ResendGuestInviteEmailMsg)(nil),          // 155: znasllc.memql.v1.ResendGuestInviteEmailMsg
+	(*ResendGuestInviteEmailResult)(nil),       // 156: znasllc.memql.v1.ResendGuestInviteEmailResult
+	(*RevokeCurrentSessionMsg)(nil),            // 157: znasllc.memql.v1.RevokeCurrentSessionMsg
+	(*RevokeCurrentSessionResult)(nil),         // 158: znasllc.memql.v1.RevokeCurrentSessionResult
+	(*RevokeAllSessionsMsg)(nil),               // 159: znasllc.memql.v1.RevokeAllSessionsMsg
+	(*RevokeAllSessionsResult)(nil),            // 160: znasllc.memql.v1.RevokeAllSessionsResult
+	(*RevokeSessionMsg)(nil),                   // 161: znasllc.memql.v1.RevokeSessionMsg
+	(*RevokeSessionResult)(nil),                // 162: znasllc.memql.v1.RevokeSessionResult
+	(*SetSignInPolicyMsg)(nil),                 // 163: znasllc.memql.v1.SetSignInPolicyMsg
+	(*SetSignInPolicyResult)(nil),              // 164: znasllc.memql.v1.SetSignInPolicyResult
+	(*CreateWorkerTokenMsg)(nil),               // 165: znasllc.memql.v1.CreateWorkerTokenMsg
+	(*CreateWorkerTokenResult)(nil),            // 166: znasllc.memql.v1.CreateWorkerTokenResult
+	(*RevokeWorkerTokenMsg)(nil),               // 167: znasllc.memql.v1.RevokeWorkerTokenMsg
+	(*RevokeWorkerTokenResult)(nil),            // 168: znasllc.memql.v1.RevokeWorkerTokenResult
+	(*CreateBadgeMsg)(nil),                     // 169: znasllc.memql.v1.CreateBadgeMsg
+	(*CreateBadgeResult)(nil),                  // 170: znasllc.memql.v1.CreateBadgeResult
+	(*RevokeBadgeMsg)(nil),                     // 171: znasllc.memql.v1.RevokeBadgeMsg
+	(*RevokeBadgeResult)(nil),                  // 172: znasllc.memql.v1.RevokeBadgeResult
+	(*VoiceAgentSessionStart)(nil),             // 173: znasllc.memql.v1.VoiceAgentSessionStart
+	(*VoiceAgentSessionAck)(nil),               // 174: znasllc.memql.v1.VoiceAgentSessionAck
+	(*VoiceAgentSessionEnd)(nil),               // 175: znasllc.memql.v1.VoiceAgentSessionEnd
+	(*VoiceAgentPartialTranscript)(nil),        // 176: znasllc.memql.v1.VoiceAgentPartialTranscript
+	(*VoiceAgentPartialAck)(nil),               // 177: znasllc.memql.v1.VoiceAgentPartialAck
+	(*VoiceAgentFinalTranscript)(nil),          // 178: znasllc.memql.v1.VoiceAgentFinalTranscript
+	(*VoiceAgentFinalAck)(nil),                 // 179: znasllc.memql.v1.VoiceAgentFinalAck
+	(*VoiceAgentTurnRequest)(nil),              // 180: znasllc.memql.v1.VoiceAgentTurnRequest
+	(*VoiceAgentTurnDelta)(nil),                // 181: znasllc.memql.v1.VoiceAgentTurnDelta
+	(*VoiceAgentTurnComplete)(nil),             // 182: znasllc.memql.v1.VoiceAgentTurnComplete
+	(*VoiceAgentSpeak)(nil),                    // 183: znasllc.memql.v1.VoiceAgentSpeak
+	(*VoiceAgentRealtimeOutput)(nil),           // 184: znasllc.memql.v1.VoiceAgentRealtimeOutput
+	(*VoiceAgentRealtimeOutputAck)(nil),        // 185: znasllc.memql.v1.VoiceAgentRealtimeOutputAck
+	(*VoiceAgentRealtimeSpeaking)(nil),         // 186: znasllc.memql.v1.VoiceAgentRealtimeSpeaking
+	(*RotateAuthMsg)(nil),                      // 187: znasllc.memql.v1.RotateAuthMsg
+	(*RotateAuthResult)(nil),                   // 188: znasllc.memql.v1.RotateAuthResult
+	(*NodeMaintenanceMsg)(nil),                 // 189: znasllc.memql.v1.NodeMaintenanceMsg
+	(*NodeMaintenanceResult)(nil),              // 190: znasllc.memql.v1.NodeMaintenanceResult
+	(*DeployControlMsg)(nil),                   // 191: znasllc.memql.v1.DeployControlMsg
+	(*DeployControlResult)(nil),                // 192: znasllc.memql.v1.DeployControlResult
+	(*RunAutomationMsg)(nil),                   // 193: znasllc.memql.v1.RunAutomationMsg
+	(*AutomationRunEvent)(nil),                 // 194: znasllc.memql.v1.AutomationRunEvent
+	(*AutomationRunAccepted)(nil),              // 195: znasllc.memql.v1.AutomationRunAccepted
+	(*AutomationRunStep)(nil),                  // 196: znasllc.memql.v1.AutomationRunStep
+	(*AutomationRunComplete)(nil),              // 197: znasllc.memql.v1.AutomationRunComplete
+	(*CreateAccountTokenMsg)(nil),              // 198: znasllc.memql.v1.CreateAccountTokenMsg
+	(*CreateAccountTokenResult)(nil),           // 199: znasllc.memql.v1.CreateAccountTokenResult
+	(*RevokeAccountTokenMsg)(nil),              // 200: znasllc.memql.v1.RevokeAccountTokenMsg
+	(*RevokeAccountTokenResult)(nil),           // 201: znasllc.memql.v1.RevokeAccountTokenResult
+	(*IdentityAdminMsg)(nil),                   // 202: znasllc.memql.v1.IdentityAdminMsg
+	(*IdentityAdminResult)(nil),                // 203: znasllc.memql.v1.IdentityAdminResult
+	(*IssueUserInvitationRequest)(nil),         // 204: znasllc.memql.v1.IssueUserInvitationRequest
+	(*RevokeUserInvitationRequest)(nil),        // 205: znasllc.memql.v1.RevokeUserInvitationRequest
+	(*UpdateUserProfileRequest)(nil),           // 206: znasllc.memql.v1.UpdateUserProfileRequest
+	(*SetUserRoleRequest)(nil),                 // 207: znasllc.memql.v1.SetUserRoleRequest
+	(*SetUserSuspendedRequest)(nil),            // 208: znasllc.memql.v1.SetUserSuspendedRequest
+	(*ResetSignInPolicyRequest)(nil),           // 209: znasllc.memql.v1.ResetSignInPolicyRequest
+	(*SetUserSharedMailboxRequest)(nil),        // 210: znasllc.memql.v1.SetUserSharedMailboxRequest
+	(*RevokeUserTokenRequest)(nil),             // 211: znasllc.memql.v1.RevokeUserTokenRequest
+	(*RevokeNodeTokenRequest)(nil),             // 212: znasllc.memql.v1.RevokeNodeTokenRequest
+	(*UpdateClusterSettingsRequest)(nil),       // 213: znasllc.memql.v1.UpdateClusterSettingsRequest
+	(*IssueEnrolmentLinkRequest)(nil),          // 214: znasllc.memql.v1.IssueEnrolmentLinkRequest
+	(*RevokeEnrolmentLinkRequest)(nil),         // 215: znasllc.memql.v1.RevokeEnrolmentLinkRequest
+	(*RotateRecoveryKeyRequest)(nil),           // 216: znasllc.memql.v1.RotateRecoveryKeyRequest
+	(*SetOAuthClientCorsOriginsRequest)(nil),   // 217: znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
+	(*ModulesListMsg)(nil),                     // 218: znasllc.memql.v1.ModulesListMsg
+	(*ModuleInfo)(nil),                         // 219: znasllc.memql.v1.ModuleInfo
+	(*ModulesListResult)(nil),                  // 220: znasllc.memql.v1.ModulesListResult
+	(*ModuleDetailMsg)(nil),                    // 221: znasllc.memql.v1.ModuleDetailMsg
+	(*ModuleEnvVar)(nil),                       // 222: znasllc.memql.v1.ModuleEnvVar
+	(*ModuleDetailResult)(nil),                 // 223: znasllc.memql.v1.ModuleDetailResult
+	(*SetPackEnabledMsg)(nil),                  // 224: znasllc.memql.v1.SetPackEnabledMsg
+	(*SetPackEnabledResult)(nil),               // 225: znasllc.memql.v1.SetPackEnabledResult
+	nil,                                        // 226: znasllc.memql.v1.MemqlClientMessage.MetadataEntry
+	nil,                                        // 227: znasllc.memql.v1.MemqlServerMessage.MetadataEntry
+	nil,                                        // 228: znasllc.memql.v1.QueryError.MetadataEntry
+	nil,                                        // 229: znasllc.memql.v1.AgentGenerateTurnMsg.HintsEntry
+	nil,                                        // 230: znasllc.memql.v1.AgentTurnSpaceContext.ExtraEntry
+	(*timestamppb.Timestamp)(nil),              // 231: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                    // 232: google.protobuf.Struct
+	(*structpb.Value)(nil),                     // 233: google.protobuf.Value
+	(*GetDeploymentStatusRequest)(nil),         // 234: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
+	(*SuggestNextVersionRequest)(nil),          // 235: znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
+	(*RollbackRequest)(nil),                    // 236: znasllc.memql.deploycontrol.v1.RollbackRequest
+	(*RolloutActionRequest)(nil),               // 237: znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	(*CutVersionRequest)(nil),                  // 238: znasllc.memql.deploycontrol.v1.CutVersionRequest
+	(*DeployRequest)(nil),                      // 239: znasllc.memql.deploycontrol.v1.DeployRequest
+	(*RollbackDeploymentRequest)(nil),          // 240: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	(*RepairRequest)(nil),                      // 241: znasllc.memql.deploycontrol.v1.RepairRequest
+	(*DeploymentStatus)(nil),                   // 242: znasllc.memql.deploycontrol.v1.DeploymentStatus
+	(*SuggestNextVersionResult)(nil),           // 243: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	(*ActionResult)(nil),                       // 244: znasllc.memql.deploycontrol.v1.ActionResult
 }
 var file_memql_proto_depIdxs = []int32{
-	223, // 0: znasllc.memql.v1.MemqlClientMessage.metadata:type_name -> znasllc.memql.v1.MemqlClientMessage.MetadataEntry
+	226, // 0: znasllc.memql.v1.MemqlClientMessage.metadata:type_name -> znasllc.memql.v1.MemqlClientMessage.MetadataEntry
 	6,   // 1: znasllc.memql.v1.MemqlClientMessage.provenance:type_name -> znasllc.memql.v1.Provenance
 	9,   // 2: znasllc.memql.v1.MemqlClientMessage.client_hello:type_name -> znasllc.memql.v1.ClientHello
 	13,  // 3: znasllc.memql.v1.MemqlClientMessage.execute_query:type_name -> znasllc.memql.v1.ExecuteQueryMsg
@@ -22702,71 +23014,71 @@ var file_memql_proto_depIdxs = []int32{
 	38,  // 11: znasllc.memql.v1.MemqlClientMessage.ai_speech:type_name -> znasllc.memql.v1.AiSpeechMsg
 	40,  // 12: znasllc.memql.v1.MemqlClientMessage.ai_transcribe:type_name -> znasllc.memql.v1.AiTranscribeMsg
 	47,  // 13: znasllc.memql.v1.MemqlClientMessage.ai_suggest:type_name -> znasllc.memql.v1.AiSuggestMsg
-	49,  // 14: znasllc.memql.v1.MemqlClientMessage.identity_create:type_name -> znasllc.memql.v1.IdentityCreateMsg
-	50,  // 15: znasllc.memql.v1.MemqlClientMessage.identity_update:type_name -> znasllc.memql.v1.IdentityUpdateMsg
-	51,  // 16: znasllc.memql.v1.MemqlClientMessage.identity_list:type_name -> znasllc.memql.v1.IdentityListMsg
-	54,  // 17: znasllc.memql.v1.MemqlClientMessage.delegation_create:type_name -> znasllc.memql.v1.DelegationCreateMsg
-	55,  // 18: znasllc.memql.v1.MemqlClientMessage.delegation_revoke:type_name -> znasllc.memql.v1.DelegationRevokeMsg
-	56,  // 19: znasllc.memql.v1.MemqlClientMessage.delegation_list:type_name -> znasllc.memql.v1.DelegationListMsg
-	61,  // 20: znasllc.memql.v1.MemqlClientMessage.sense_tokenize:type_name -> znasllc.memql.v1.SenseTokenizeMsg
-	64,  // 21: znasllc.memql.v1.MemqlClientMessage.sense_complete:type_name -> znasllc.memql.v1.SenseCompleteMsg
-	67,  // 22: znasllc.memql.v1.MemqlClientMessage.sense_diagnose:type_name -> znasllc.memql.v1.SenseDiagnoseMsg
-	70,  // 23: znasllc.memql.v1.MemqlClientMessage.sense_hover:type_name -> znasllc.memql.v1.SenseHoverMsg
-	75,  // 24: znasllc.memql.v1.MemqlClientMessage.sense_signature_help:type_name -> znasllc.memql.v1.SenseSignatureHelpMsg
-	72,  // 25: znasllc.memql.v1.MemqlClientMessage.sense_definition:type_name -> znasllc.memql.v1.SenseDefinitionMsg
-	109, // 26: znasllc.memql.v1.MemqlClientMessage.polyphon_room_token:type_name -> znasllc.memql.v1.PolyphonRoomTokenMsg
-	111, // 27: znasllc.memql.v1.MemqlClientMessage.polyphon_status:type_name -> znasllc.memql.v1.PolyphonStatusMsg
-	113, // 28: znasllc.memql.v1.MemqlClientMessage.polyphon_utterance:type_name -> znasllc.memql.v1.PolyphonUtteranceMsg
-	115, // 29: znasllc.memql.v1.MemqlClientMessage.concepts_list:type_name -> znasllc.memql.v1.ConceptsListMsg
-	119, // 30: znasllc.memql.v1.MemqlClientMessage.concepts_subscribe:type_name -> znasllc.memql.v1.ConceptsSubscribeMsg
-	123, // 31: znasllc.memql.v1.MemqlClientMessage.my_access:type_name -> znasllc.memql.v1.MyAccessMsg
+	50,  // 14: znasllc.memql.v1.MemqlClientMessage.identity_create:type_name -> znasllc.memql.v1.IdentityCreateMsg
+	51,  // 15: znasllc.memql.v1.MemqlClientMessage.identity_update:type_name -> znasllc.memql.v1.IdentityUpdateMsg
+	52,  // 16: znasllc.memql.v1.MemqlClientMessage.identity_list:type_name -> znasllc.memql.v1.IdentityListMsg
+	55,  // 17: znasllc.memql.v1.MemqlClientMessage.delegation_create:type_name -> znasllc.memql.v1.DelegationCreateMsg
+	56,  // 18: znasllc.memql.v1.MemqlClientMessage.delegation_revoke:type_name -> znasllc.memql.v1.DelegationRevokeMsg
+	57,  // 19: znasllc.memql.v1.MemqlClientMessage.delegation_list:type_name -> znasllc.memql.v1.DelegationListMsg
+	62,  // 20: znasllc.memql.v1.MemqlClientMessage.sense_tokenize:type_name -> znasllc.memql.v1.SenseTokenizeMsg
+	65,  // 21: znasllc.memql.v1.MemqlClientMessage.sense_complete:type_name -> znasllc.memql.v1.SenseCompleteMsg
+	68,  // 22: znasllc.memql.v1.MemqlClientMessage.sense_diagnose:type_name -> znasllc.memql.v1.SenseDiagnoseMsg
+	71,  // 23: znasllc.memql.v1.MemqlClientMessage.sense_hover:type_name -> znasllc.memql.v1.SenseHoverMsg
+	76,  // 24: znasllc.memql.v1.MemqlClientMessage.sense_signature_help:type_name -> znasllc.memql.v1.SenseSignatureHelpMsg
+	73,  // 25: znasllc.memql.v1.MemqlClientMessage.sense_definition:type_name -> znasllc.memql.v1.SenseDefinitionMsg
+	110, // 26: znasllc.memql.v1.MemqlClientMessage.polyphon_room_token:type_name -> znasllc.memql.v1.PolyphonRoomTokenMsg
+	112, // 27: znasllc.memql.v1.MemqlClientMessage.polyphon_status:type_name -> znasllc.memql.v1.PolyphonStatusMsg
+	114, // 28: znasllc.memql.v1.MemqlClientMessage.polyphon_utterance:type_name -> znasllc.memql.v1.PolyphonUtteranceMsg
+	116, // 29: znasllc.memql.v1.MemqlClientMessage.concepts_list:type_name -> znasllc.memql.v1.ConceptsListMsg
+	122, // 30: znasllc.memql.v1.MemqlClientMessage.concepts_subscribe:type_name -> znasllc.memql.v1.ConceptsSubscribeMsg
+	126, // 31: znasllc.memql.v1.MemqlClientMessage.my_access:type_name -> znasllc.memql.v1.MyAccessMsg
 	42,  // 32: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_start:type_name -> znasllc.memql.v1.AiTranscribeStreamStart
 	43,  // 33: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_chunk:type_name -> znasllc.memql.v1.AiTranscribeStreamChunk
 	44,  // 34: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_end:type_name -> znasllc.memql.v1.AiTranscribeStreamEnd
-	125, // 35: znasllc.memql.v1.MemqlClientMessage.agent_generate_turn:type_name -> znasllc.memql.v1.AgentGenerateTurnMsg
+	128, // 35: znasllc.memql.v1.MemqlClientMessage.agent_generate_turn:type_name -> znasllc.memql.v1.AgentGenerateTurnMsg
 	34,  // 36: znasllc.memql.v1.MemqlClientMessage.client_tool_result:type_name -> znasllc.memql.v1.ClientToolResult
-	144, // 37: znasllc.memql.v1.MemqlClientMessage.send_guest_invite:type_name -> znasllc.memql.v1.SendGuestInviteMsg
-	146, // 38: znasllc.memql.v1.MemqlClientMessage.resolve_guest_invite:type_name -> znasllc.memql.v1.ResolveGuestInviteMsg
-	148, // 39: znasllc.memql.v1.MemqlClientMessage.join_space_as_guest:type_name -> znasllc.memql.v1.JoinSpaceAsGuestMsg
-	150, // 40: znasllc.memql.v1.MemqlClientMessage.cancel_guest_invite:type_name -> znasllc.memql.v1.CancelGuestInviteMsg
-	152, // 41: znasllc.memql.v1.MemqlClientMessage.resend_guest_invite_email:type_name -> znasllc.memql.v1.ResendGuestInviteEmailMsg
-	154, // 42: znasllc.memql.v1.MemqlClientMessage.revoke_current_session:type_name -> znasllc.memql.v1.RevokeCurrentSessionMsg
-	156, // 43: znasllc.memql.v1.MemqlClientMessage.revoke_all_sessions:type_name -> znasllc.memql.v1.RevokeAllSessionsMsg
-	158, // 44: znasllc.memql.v1.MemqlClientMessage.revoke_session:type_name -> znasllc.memql.v1.RevokeSessionMsg
-	160, // 45: znasllc.memql.v1.MemqlClientMessage.set_sign_in_policy:type_name -> znasllc.memql.v1.SetSignInPolicyMsg
-	162, // 46: znasllc.memql.v1.MemqlClientMessage.create_worker_token:type_name -> znasllc.memql.v1.CreateWorkerTokenMsg
-	164, // 47: znasllc.memql.v1.MemqlClientMessage.revoke_worker_token:type_name -> znasllc.memql.v1.RevokeWorkerTokenMsg
-	173, // 48: znasllc.memql.v1.MemqlClientMessage.voice_agent_partial_transcript:type_name -> znasllc.memql.v1.VoiceAgentPartialTranscript
-	175, // 49: znasllc.memql.v1.MemqlClientMessage.voice_agent_final_transcript:type_name -> znasllc.memql.v1.VoiceAgentFinalTranscript
-	177, // 50: znasllc.memql.v1.MemqlClientMessage.voice_agent_turn_request:type_name -> znasllc.memql.v1.VoiceAgentTurnRequest
-	170, // 51: znasllc.memql.v1.MemqlClientMessage.voice_agent_session_start:type_name -> znasllc.memql.v1.VoiceAgentSessionStart
-	172, // 52: znasllc.memql.v1.MemqlClientMessage.voice_agent_session_end:type_name -> znasllc.memql.v1.VoiceAgentSessionEnd
-	181, // 53: znasllc.memql.v1.MemqlClientMessage.voice_agent_realtime_output:type_name -> znasllc.memql.v1.VoiceAgentRealtimeOutput
-	184, // 54: znasllc.memql.v1.MemqlClientMessage.rotate_auth:type_name -> znasllc.memql.v1.RotateAuthMsg
-	140, // 55: znasllc.memql.v1.MemqlClientMessage.agent_preempt_turn:type_name -> znasllc.memql.v1.AgentPreemptTurnMsg
-	186, // 56: znasllc.memql.v1.MemqlClientMessage.node_maintenance:type_name -> znasllc.memql.v1.NodeMaintenanceMsg
-	183, // 57: znasllc.memql.v1.MemqlClientMessage.voice_agent_realtime_speaking:type_name -> znasllc.memql.v1.VoiceAgentRealtimeSpeaking
-	79,  // 58: znasllc.memql.v1.MemqlClientMessage.list_pack_domains:type_name -> znasllc.memql.v1.ListPackDomainsMsg
-	82,  // 59: znasllc.memql.v1.MemqlClientMessage.list_pack_files:type_name -> znasllc.memql.v1.ListPackFilesMsg
-	85,  // 60: znasllc.memql.v1.MemqlClientMessage.read_pack_file:type_name -> znasllc.memql.v1.ReadPackFileMsg
-	94,  // 61: znasllc.memql.v1.MemqlClientMessage.authoring_validate_bundle:type_name -> znasllc.memql.v1.AuthoringValidateBundleMsg
-	96,  // 62: znasllc.memql.v1.MemqlClientMessage.authoring_session_define_bundle:type_name -> znasllc.memql.v1.AuthoringSessionDefineBundleMsg
-	107, // 63: znasllc.memql.v1.MemqlClientMessage.dsl_spec:type_name -> znasllc.memql.v1.DslSpecMsg
-	98,  // 64: znasllc.memql.v1.MemqlClientMessage.durable_promote_bundle:type_name -> znasllc.memql.v1.DurablePromoteBundleMsg
-	102, // 65: znasllc.memql.v1.MemqlClientMessage.durable_demote_bundle:type_name -> znasllc.memql.v1.DurableDemoteBundleMsg
-	166, // 66: znasllc.memql.v1.MemqlClientMessage.create_badge:type_name -> znasllc.memql.v1.CreateBadgeMsg
-	168, // 67: znasllc.memql.v1.MemqlClientMessage.revoke_badge:type_name -> znasllc.memql.v1.RevokeBadgeMsg
-	188, // 68: znasllc.memql.v1.MemqlClientMessage.deploy_control:type_name -> znasllc.memql.v1.DeployControlMsg
-	190, // 69: znasllc.memql.v1.MemqlClientMessage.run_automation:type_name -> znasllc.memql.v1.RunAutomationMsg
-	195, // 70: znasllc.memql.v1.MemqlClientMessage.create_account_token:type_name -> znasllc.memql.v1.CreateAccountTokenMsg
-	197, // 71: znasllc.memql.v1.MemqlClientMessage.revoke_account_token:type_name -> znasllc.memql.v1.RevokeAccountTokenMsg
-	199, // 72: znasllc.memql.v1.MemqlClientMessage.identity_admin:type_name -> znasllc.memql.v1.IdentityAdminMsg
-	87,  // 73: znasllc.memql.v1.MemqlClientMessage.list_constructs:type_name -> znasllc.memql.v1.ListConstructsMsg
-	105, // 74: znasllc.memql.v1.MemqlClientMessage.stage_bundle:type_name -> znasllc.memql.v1.StageBundleMsg
-	215, // 75: znasllc.memql.v1.MemqlClientMessage.modules_list:type_name -> znasllc.memql.v1.ModulesListMsg
-	218, // 76: znasllc.memql.v1.MemqlClientMessage.module_detail:type_name -> znasllc.memql.v1.ModuleDetailMsg
-	221, // 77: znasllc.memql.v1.MemqlClientMessage.set_pack_enabled:type_name -> znasllc.memql.v1.SetPackEnabledMsg
-	224, // 78: znasllc.memql.v1.MemqlServerMessage.metadata:type_name -> znasllc.memql.v1.MemqlServerMessage.MetadataEntry
+	147, // 37: znasllc.memql.v1.MemqlClientMessage.send_guest_invite:type_name -> znasllc.memql.v1.SendGuestInviteMsg
+	149, // 38: znasllc.memql.v1.MemqlClientMessage.resolve_guest_invite:type_name -> znasllc.memql.v1.ResolveGuestInviteMsg
+	151, // 39: znasllc.memql.v1.MemqlClientMessage.join_space_as_guest:type_name -> znasllc.memql.v1.JoinSpaceAsGuestMsg
+	153, // 40: znasllc.memql.v1.MemqlClientMessage.cancel_guest_invite:type_name -> znasllc.memql.v1.CancelGuestInviteMsg
+	155, // 41: znasllc.memql.v1.MemqlClientMessage.resend_guest_invite_email:type_name -> znasllc.memql.v1.ResendGuestInviteEmailMsg
+	157, // 42: znasllc.memql.v1.MemqlClientMessage.revoke_current_session:type_name -> znasllc.memql.v1.RevokeCurrentSessionMsg
+	159, // 43: znasllc.memql.v1.MemqlClientMessage.revoke_all_sessions:type_name -> znasllc.memql.v1.RevokeAllSessionsMsg
+	161, // 44: znasllc.memql.v1.MemqlClientMessage.revoke_session:type_name -> znasllc.memql.v1.RevokeSessionMsg
+	163, // 45: znasllc.memql.v1.MemqlClientMessage.set_sign_in_policy:type_name -> znasllc.memql.v1.SetSignInPolicyMsg
+	165, // 46: znasllc.memql.v1.MemqlClientMessage.create_worker_token:type_name -> znasllc.memql.v1.CreateWorkerTokenMsg
+	167, // 47: znasllc.memql.v1.MemqlClientMessage.revoke_worker_token:type_name -> znasllc.memql.v1.RevokeWorkerTokenMsg
+	176, // 48: znasllc.memql.v1.MemqlClientMessage.voice_agent_partial_transcript:type_name -> znasllc.memql.v1.VoiceAgentPartialTranscript
+	178, // 49: znasllc.memql.v1.MemqlClientMessage.voice_agent_final_transcript:type_name -> znasllc.memql.v1.VoiceAgentFinalTranscript
+	180, // 50: znasllc.memql.v1.MemqlClientMessage.voice_agent_turn_request:type_name -> znasllc.memql.v1.VoiceAgentTurnRequest
+	173, // 51: znasllc.memql.v1.MemqlClientMessage.voice_agent_session_start:type_name -> znasllc.memql.v1.VoiceAgentSessionStart
+	175, // 52: znasllc.memql.v1.MemqlClientMessage.voice_agent_session_end:type_name -> znasllc.memql.v1.VoiceAgentSessionEnd
+	184, // 53: znasllc.memql.v1.MemqlClientMessage.voice_agent_realtime_output:type_name -> znasllc.memql.v1.VoiceAgentRealtimeOutput
+	187, // 54: znasllc.memql.v1.MemqlClientMessage.rotate_auth:type_name -> znasllc.memql.v1.RotateAuthMsg
+	143, // 55: znasllc.memql.v1.MemqlClientMessage.agent_preempt_turn:type_name -> znasllc.memql.v1.AgentPreemptTurnMsg
+	189, // 56: znasllc.memql.v1.MemqlClientMessage.node_maintenance:type_name -> znasllc.memql.v1.NodeMaintenanceMsg
+	186, // 57: znasllc.memql.v1.MemqlClientMessage.voice_agent_realtime_speaking:type_name -> znasllc.memql.v1.VoiceAgentRealtimeSpeaking
+	80,  // 58: znasllc.memql.v1.MemqlClientMessage.list_pack_domains:type_name -> znasllc.memql.v1.ListPackDomainsMsg
+	83,  // 59: znasllc.memql.v1.MemqlClientMessage.list_pack_files:type_name -> znasllc.memql.v1.ListPackFilesMsg
+	86,  // 60: znasllc.memql.v1.MemqlClientMessage.read_pack_file:type_name -> znasllc.memql.v1.ReadPackFileMsg
+	95,  // 61: znasllc.memql.v1.MemqlClientMessage.authoring_validate_bundle:type_name -> znasllc.memql.v1.AuthoringValidateBundleMsg
+	97,  // 62: znasllc.memql.v1.MemqlClientMessage.authoring_session_define_bundle:type_name -> znasllc.memql.v1.AuthoringSessionDefineBundleMsg
+	108, // 63: znasllc.memql.v1.MemqlClientMessage.dsl_spec:type_name -> znasllc.memql.v1.DslSpecMsg
+	99,  // 64: znasllc.memql.v1.MemqlClientMessage.durable_promote_bundle:type_name -> znasllc.memql.v1.DurablePromoteBundleMsg
+	103, // 65: znasllc.memql.v1.MemqlClientMessage.durable_demote_bundle:type_name -> znasllc.memql.v1.DurableDemoteBundleMsg
+	169, // 66: znasllc.memql.v1.MemqlClientMessage.create_badge:type_name -> znasllc.memql.v1.CreateBadgeMsg
+	171, // 67: znasllc.memql.v1.MemqlClientMessage.revoke_badge:type_name -> znasllc.memql.v1.RevokeBadgeMsg
+	191, // 68: znasllc.memql.v1.MemqlClientMessage.deploy_control:type_name -> znasllc.memql.v1.DeployControlMsg
+	193, // 69: znasllc.memql.v1.MemqlClientMessage.run_automation:type_name -> znasllc.memql.v1.RunAutomationMsg
+	198, // 70: znasllc.memql.v1.MemqlClientMessage.create_account_token:type_name -> znasllc.memql.v1.CreateAccountTokenMsg
+	200, // 71: znasllc.memql.v1.MemqlClientMessage.revoke_account_token:type_name -> znasllc.memql.v1.RevokeAccountTokenMsg
+	202, // 72: znasllc.memql.v1.MemqlClientMessage.identity_admin:type_name -> znasllc.memql.v1.IdentityAdminMsg
+	88,  // 73: znasllc.memql.v1.MemqlClientMessage.list_constructs:type_name -> znasllc.memql.v1.ListConstructsMsg
+	106, // 74: znasllc.memql.v1.MemqlClientMessage.stage_bundle:type_name -> znasllc.memql.v1.StageBundleMsg
+	218, // 75: znasllc.memql.v1.MemqlClientMessage.modules_list:type_name -> znasllc.memql.v1.ModulesListMsg
+	221, // 76: znasllc.memql.v1.MemqlClientMessage.module_detail:type_name -> znasllc.memql.v1.ModuleDetailMsg
+	224, // 77: znasllc.memql.v1.MemqlClientMessage.set_pack_enabled:type_name -> znasllc.memql.v1.SetPackEnabledMsg
+	227, // 78: znasllc.memql.v1.MemqlServerMessage.metadata:type_name -> znasllc.memql.v1.MemqlServerMessage.MetadataEntry
 	10,  // 79: znasllc.memql.v1.MemqlServerMessage.server_hello:type_name -> znasllc.memql.v1.ServerHello
 	15,  // 80: znasllc.memql.v1.MemqlServerMessage.query_result:type_name -> znasllc.memql.v1.QueryResultChunk
 	16,  // 81: znasllc.memql.v1.MemqlServerMessage.query_error:type_name -> znasllc.memql.v1.QueryErrorMsg
@@ -22779,210 +23091,213 @@ var file_memql_proto_depIdxs = []int32{
 	39,  // 88: znasllc.memql.v1.MemqlServerMessage.ai_speech_result:type_name -> znasllc.memql.v1.AiSpeechResult
 	41,  // 89: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_result:type_name -> znasllc.memql.v1.AiTranscribeResult
 	48,  // 90: znasllc.memql.v1.MemqlServerMessage.ai_suggest_result:type_name -> znasllc.memql.v1.AiSuggestResult
-	52,  // 91: znasllc.memql.v1.MemqlServerMessage.identity_result:type_name -> znasllc.memql.v1.IdentityResult
-	57,  // 92: znasllc.memql.v1.MemqlServerMessage.delegation_result:type_name -> znasllc.memql.v1.DelegationResult
-	62,  // 93: znasllc.memql.v1.MemqlServerMessage.sense_tokenize_result:type_name -> znasllc.memql.v1.SenseTokenizeResult
-	65,  // 94: znasllc.memql.v1.MemqlServerMessage.sense_complete_result:type_name -> znasllc.memql.v1.SenseCompleteResult
-	68,  // 95: znasllc.memql.v1.MemqlServerMessage.sense_diagnose_result:type_name -> znasllc.memql.v1.SenseDiagnoseResult
-	71,  // 96: znasllc.memql.v1.MemqlServerMessage.sense_hover_result:type_name -> znasllc.memql.v1.SenseHoverResult
-	76,  // 97: znasllc.memql.v1.MemqlServerMessage.sense_signature_help_result:type_name -> znasllc.memql.v1.SenseSignatureHelpResult
-	73,  // 98: znasllc.memql.v1.MemqlServerMessage.sense_definition_result:type_name -> znasllc.memql.v1.SenseDefinitionResult
-	110, // 99: znasllc.memql.v1.MemqlServerMessage.polyphon_room_token_result:type_name -> znasllc.memql.v1.PolyphonRoomTokenResult
-	112, // 100: znasllc.memql.v1.MemqlServerMessage.polyphon_status_result:type_name -> znasllc.memql.v1.PolyphonStatusResult
-	114, // 101: znasllc.memql.v1.MemqlServerMessage.polyphon_utterance_result:type_name -> znasllc.memql.v1.PolyphonUtteranceResult
-	116, // 102: znasllc.memql.v1.MemqlServerMessage.concepts_list_result:type_name -> znasllc.memql.v1.ConceptsListResult
-	120, // 103: znasllc.memql.v1.MemqlServerMessage.concepts_subscribe_result:type_name -> znasllc.memql.v1.ConceptsSubscribeResult
-	122, // 104: znasllc.memql.v1.MemqlServerMessage.concepts_registry_delta:type_name -> znasllc.memql.v1.ConceptsRegistryDelta
-	124, // 105: znasllc.memql.v1.MemqlServerMessage.my_access_result:type_name -> znasllc.memql.v1.MyAccessResult
+	53,  // 91: znasllc.memql.v1.MemqlServerMessage.identity_result:type_name -> znasllc.memql.v1.IdentityResult
+	58,  // 92: znasllc.memql.v1.MemqlServerMessage.delegation_result:type_name -> znasllc.memql.v1.DelegationResult
+	63,  // 93: znasllc.memql.v1.MemqlServerMessage.sense_tokenize_result:type_name -> znasllc.memql.v1.SenseTokenizeResult
+	66,  // 94: znasllc.memql.v1.MemqlServerMessage.sense_complete_result:type_name -> znasllc.memql.v1.SenseCompleteResult
+	69,  // 95: znasllc.memql.v1.MemqlServerMessage.sense_diagnose_result:type_name -> znasllc.memql.v1.SenseDiagnoseResult
+	72,  // 96: znasllc.memql.v1.MemqlServerMessage.sense_hover_result:type_name -> znasllc.memql.v1.SenseHoverResult
+	77,  // 97: znasllc.memql.v1.MemqlServerMessage.sense_signature_help_result:type_name -> znasllc.memql.v1.SenseSignatureHelpResult
+	74,  // 98: znasllc.memql.v1.MemqlServerMessage.sense_definition_result:type_name -> znasllc.memql.v1.SenseDefinitionResult
+	111, // 99: znasllc.memql.v1.MemqlServerMessage.polyphon_room_token_result:type_name -> znasllc.memql.v1.PolyphonRoomTokenResult
+	113, // 100: znasllc.memql.v1.MemqlServerMessage.polyphon_status_result:type_name -> znasllc.memql.v1.PolyphonStatusResult
+	115, // 101: znasllc.memql.v1.MemqlServerMessage.polyphon_utterance_result:type_name -> znasllc.memql.v1.PolyphonUtteranceResult
+	117, // 102: znasllc.memql.v1.MemqlServerMessage.concepts_list_result:type_name -> znasllc.memql.v1.ConceptsListResult
+	123, // 103: znasllc.memql.v1.MemqlServerMessage.concepts_subscribe_result:type_name -> znasllc.memql.v1.ConceptsSubscribeResult
+	125, // 104: znasllc.memql.v1.MemqlServerMessage.concepts_registry_delta:type_name -> znasllc.memql.v1.ConceptsRegistryDelta
+	127, // 105: znasllc.memql.v1.MemqlServerMessage.my_access_result:type_name -> znasllc.memql.v1.MyAccessResult
 	45,  // 106: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_stream_delta:type_name -> znasllc.memql.v1.AiTranscribeStreamDelta
 	46,  // 107: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_stream_complete:type_name -> znasllc.memql.v1.AiTranscribeStreamComplete
-	135, // 108: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_delta:type_name -> znasllc.memql.v1.AgentGenerateTurnDelta
-	139, // 109: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_complete:type_name -> znasllc.memql.v1.AgentGenerateTurnComplete
+	138, // 108: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_delta:type_name -> znasllc.memql.v1.AgentGenerateTurnDelta
+	142, // 109: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_complete:type_name -> znasllc.memql.v1.AgentGenerateTurnComplete
 	33,  // 110: znasllc.memql.v1.MemqlServerMessage.client_tool_call:type_name -> znasllc.memql.v1.ClientToolCall
-	145, // 111: znasllc.memql.v1.MemqlServerMessage.send_guest_invite_result:type_name -> znasllc.memql.v1.SendGuestInviteResult
-	147, // 112: znasllc.memql.v1.MemqlServerMessage.resolve_guest_invite_result:type_name -> znasllc.memql.v1.ResolveGuestInviteResult
-	149, // 113: znasllc.memql.v1.MemqlServerMessage.join_space_as_guest_result:type_name -> znasllc.memql.v1.JoinSpaceAsGuestResult
-	151, // 114: znasllc.memql.v1.MemqlServerMessage.cancel_guest_invite_result:type_name -> znasllc.memql.v1.CancelGuestInviteResult
-	153, // 115: znasllc.memql.v1.MemqlServerMessage.resend_guest_invite_email_result:type_name -> znasllc.memql.v1.ResendGuestInviteEmailResult
-	155, // 116: znasllc.memql.v1.MemqlServerMessage.revoke_current_session_result:type_name -> znasllc.memql.v1.RevokeCurrentSessionResult
-	157, // 117: znasllc.memql.v1.MemqlServerMessage.revoke_all_sessions_result:type_name -> znasllc.memql.v1.RevokeAllSessionsResult
-	159, // 118: znasllc.memql.v1.MemqlServerMessage.revoke_session_result:type_name -> znasllc.memql.v1.RevokeSessionResult
-	161, // 119: znasllc.memql.v1.MemqlServerMessage.set_sign_in_policy_result:type_name -> znasllc.memql.v1.SetSignInPolicyResult
-	163, // 120: znasllc.memql.v1.MemqlServerMessage.create_worker_token_result:type_name -> znasllc.memql.v1.CreateWorkerTokenResult
-	165, // 121: znasllc.memql.v1.MemqlServerMessage.revoke_worker_token_result:type_name -> znasllc.memql.v1.RevokeWorkerTokenResult
-	174, // 122: znasllc.memql.v1.MemqlServerMessage.voice_agent_partial_ack:type_name -> znasllc.memql.v1.VoiceAgentPartialAck
-	176, // 123: znasllc.memql.v1.MemqlServerMessage.voice_agent_final_ack:type_name -> znasllc.memql.v1.VoiceAgentFinalAck
-	178, // 124: znasllc.memql.v1.MemqlServerMessage.voice_agent_turn_delta:type_name -> znasllc.memql.v1.VoiceAgentTurnDelta
-	179, // 125: znasllc.memql.v1.MemqlServerMessage.voice_agent_turn_complete:type_name -> znasllc.memql.v1.VoiceAgentTurnComplete
-	171, // 126: znasllc.memql.v1.MemqlServerMessage.voice_agent_session_ack:type_name -> znasllc.memql.v1.VoiceAgentSessionAck
-	180, // 127: znasllc.memql.v1.MemqlServerMessage.voice_agent_speak:type_name -> znasllc.memql.v1.VoiceAgentSpeak
-	182, // 128: znasllc.memql.v1.MemqlServerMessage.voice_agent_realtime_output_ack:type_name -> znasllc.memql.v1.VoiceAgentRealtimeOutputAck
-	80,  // 129: znasllc.memql.v1.MemqlServerMessage.list_pack_domains_result:type_name -> znasllc.memql.v1.ListPackDomainsResult
-	83,  // 130: znasllc.memql.v1.MemqlServerMessage.list_pack_files_result:type_name -> znasllc.memql.v1.ListPackFilesResult
-	86,  // 131: znasllc.memql.v1.MemqlServerMessage.read_pack_file_result:type_name -> znasllc.memql.v1.ReadPackFileResult
-	185, // 132: znasllc.memql.v1.MemqlServerMessage.rotate_auth_result:type_name -> znasllc.memql.v1.RotateAuthResult
-	187, // 133: znasllc.memql.v1.MemqlServerMessage.node_maintenance_result:type_name -> znasllc.memql.v1.NodeMaintenanceResult
-	95,  // 134: znasllc.memql.v1.MemqlServerMessage.authoring_validate_bundle_result:type_name -> znasllc.memql.v1.AuthoringValidateBundleResult
-	97,  // 135: znasllc.memql.v1.MemqlServerMessage.authoring_session_define_bundle_result:type_name -> znasllc.memql.v1.AuthoringSessionDefineBundleResult
-	108, // 136: znasllc.memql.v1.MemqlServerMessage.dsl_spec_result:type_name -> znasllc.memql.v1.DslSpecResult
-	99,  // 137: znasllc.memql.v1.MemqlServerMessage.durable_promote_bundle_result:type_name -> znasllc.memql.v1.DurablePromoteBundleResult
-	104, // 138: znasllc.memql.v1.MemqlServerMessage.durable_demote_bundle_result:type_name -> znasllc.memql.v1.DurableDemoteBundleResult
-	167, // 139: znasllc.memql.v1.MemqlServerMessage.create_badge_result:type_name -> znasllc.memql.v1.CreateBadgeResult
-	169, // 140: znasllc.memql.v1.MemqlServerMessage.revoke_badge_result:type_name -> znasllc.memql.v1.RevokeBadgeResult
-	189, // 141: znasllc.memql.v1.MemqlServerMessage.deploy_control_result:type_name -> znasllc.memql.v1.DeployControlResult
-	191, // 142: znasllc.memql.v1.MemqlServerMessage.automation_run_event:type_name -> znasllc.memql.v1.AutomationRunEvent
-	196, // 143: znasllc.memql.v1.MemqlServerMessage.create_account_token_result:type_name -> znasllc.memql.v1.CreateAccountTokenResult
-	198, // 144: znasllc.memql.v1.MemqlServerMessage.revoke_account_token_result:type_name -> znasllc.memql.v1.RevokeAccountTokenResult
-	200, // 145: znasllc.memql.v1.MemqlServerMessage.identity_admin_result:type_name -> znasllc.memql.v1.IdentityAdminResult
-	88,  // 146: znasllc.memql.v1.MemqlServerMessage.list_constructs_result:type_name -> znasllc.memql.v1.ListConstructsResult
-	106, // 147: znasllc.memql.v1.MemqlServerMessage.stage_bundle_result:type_name -> znasllc.memql.v1.StageBundleResult
-	217, // 148: znasllc.memql.v1.MemqlServerMessage.modules_list_result:type_name -> znasllc.memql.v1.ModulesListResult
-	220, // 149: znasllc.memql.v1.MemqlServerMessage.module_detail_result:type_name -> znasllc.memql.v1.ModuleDetailResult
-	222, // 150: znasllc.memql.v1.MemqlServerMessage.set_pack_enabled_result:type_name -> znasllc.memql.v1.SetPackEnabledResult
-	228, // 151: znasllc.memql.v1.HeartbeatMsg.ts:type_name -> google.protobuf.Timestamp
-	229, // 152: znasllc.memql.v1.ExecuteQueryMsg.variables:type_name -> google.protobuf.Struct
+	148, // 111: znasllc.memql.v1.MemqlServerMessage.send_guest_invite_result:type_name -> znasllc.memql.v1.SendGuestInviteResult
+	150, // 112: znasllc.memql.v1.MemqlServerMessage.resolve_guest_invite_result:type_name -> znasllc.memql.v1.ResolveGuestInviteResult
+	152, // 113: znasllc.memql.v1.MemqlServerMessage.join_space_as_guest_result:type_name -> znasllc.memql.v1.JoinSpaceAsGuestResult
+	154, // 114: znasllc.memql.v1.MemqlServerMessage.cancel_guest_invite_result:type_name -> znasllc.memql.v1.CancelGuestInviteResult
+	156, // 115: znasllc.memql.v1.MemqlServerMessage.resend_guest_invite_email_result:type_name -> znasllc.memql.v1.ResendGuestInviteEmailResult
+	158, // 116: znasllc.memql.v1.MemqlServerMessage.revoke_current_session_result:type_name -> znasllc.memql.v1.RevokeCurrentSessionResult
+	160, // 117: znasllc.memql.v1.MemqlServerMessage.revoke_all_sessions_result:type_name -> znasllc.memql.v1.RevokeAllSessionsResult
+	162, // 118: znasllc.memql.v1.MemqlServerMessage.revoke_session_result:type_name -> znasllc.memql.v1.RevokeSessionResult
+	164, // 119: znasllc.memql.v1.MemqlServerMessage.set_sign_in_policy_result:type_name -> znasllc.memql.v1.SetSignInPolicyResult
+	166, // 120: znasllc.memql.v1.MemqlServerMessage.create_worker_token_result:type_name -> znasllc.memql.v1.CreateWorkerTokenResult
+	168, // 121: znasllc.memql.v1.MemqlServerMessage.revoke_worker_token_result:type_name -> znasllc.memql.v1.RevokeWorkerTokenResult
+	177, // 122: znasllc.memql.v1.MemqlServerMessage.voice_agent_partial_ack:type_name -> znasllc.memql.v1.VoiceAgentPartialAck
+	179, // 123: znasllc.memql.v1.MemqlServerMessage.voice_agent_final_ack:type_name -> znasllc.memql.v1.VoiceAgentFinalAck
+	181, // 124: znasllc.memql.v1.MemqlServerMessage.voice_agent_turn_delta:type_name -> znasllc.memql.v1.VoiceAgentTurnDelta
+	182, // 125: znasllc.memql.v1.MemqlServerMessage.voice_agent_turn_complete:type_name -> znasllc.memql.v1.VoiceAgentTurnComplete
+	174, // 126: znasllc.memql.v1.MemqlServerMessage.voice_agent_session_ack:type_name -> znasllc.memql.v1.VoiceAgentSessionAck
+	183, // 127: znasllc.memql.v1.MemqlServerMessage.voice_agent_speak:type_name -> znasllc.memql.v1.VoiceAgentSpeak
+	185, // 128: znasllc.memql.v1.MemqlServerMessage.voice_agent_realtime_output_ack:type_name -> znasllc.memql.v1.VoiceAgentRealtimeOutputAck
+	81,  // 129: znasllc.memql.v1.MemqlServerMessage.list_pack_domains_result:type_name -> znasllc.memql.v1.ListPackDomainsResult
+	84,  // 130: znasllc.memql.v1.MemqlServerMessage.list_pack_files_result:type_name -> znasllc.memql.v1.ListPackFilesResult
+	87,  // 131: znasllc.memql.v1.MemqlServerMessage.read_pack_file_result:type_name -> znasllc.memql.v1.ReadPackFileResult
+	188, // 132: znasllc.memql.v1.MemqlServerMessage.rotate_auth_result:type_name -> znasllc.memql.v1.RotateAuthResult
+	190, // 133: znasllc.memql.v1.MemqlServerMessage.node_maintenance_result:type_name -> znasllc.memql.v1.NodeMaintenanceResult
+	96,  // 134: znasllc.memql.v1.MemqlServerMessage.authoring_validate_bundle_result:type_name -> znasllc.memql.v1.AuthoringValidateBundleResult
+	98,  // 135: znasllc.memql.v1.MemqlServerMessage.authoring_session_define_bundle_result:type_name -> znasllc.memql.v1.AuthoringSessionDefineBundleResult
+	109, // 136: znasllc.memql.v1.MemqlServerMessage.dsl_spec_result:type_name -> znasllc.memql.v1.DslSpecResult
+	100, // 137: znasllc.memql.v1.MemqlServerMessage.durable_promote_bundle_result:type_name -> znasllc.memql.v1.DurablePromoteBundleResult
+	105, // 138: znasllc.memql.v1.MemqlServerMessage.durable_demote_bundle_result:type_name -> znasllc.memql.v1.DurableDemoteBundleResult
+	170, // 139: znasllc.memql.v1.MemqlServerMessage.create_badge_result:type_name -> znasllc.memql.v1.CreateBadgeResult
+	172, // 140: znasllc.memql.v1.MemqlServerMessage.revoke_badge_result:type_name -> znasllc.memql.v1.RevokeBadgeResult
+	192, // 141: znasllc.memql.v1.MemqlServerMessage.deploy_control_result:type_name -> znasllc.memql.v1.DeployControlResult
+	194, // 142: znasllc.memql.v1.MemqlServerMessage.automation_run_event:type_name -> znasllc.memql.v1.AutomationRunEvent
+	199, // 143: znasllc.memql.v1.MemqlServerMessage.create_account_token_result:type_name -> znasllc.memql.v1.CreateAccountTokenResult
+	201, // 144: znasllc.memql.v1.MemqlServerMessage.revoke_account_token_result:type_name -> znasllc.memql.v1.RevokeAccountTokenResult
+	203, // 145: znasllc.memql.v1.MemqlServerMessage.identity_admin_result:type_name -> znasllc.memql.v1.IdentityAdminResult
+	89,  // 146: znasllc.memql.v1.MemqlServerMessage.list_constructs_result:type_name -> znasllc.memql.v1.ListConstructsResult
+	107, // 147: znasllc.memql.v1.MemqlServerMessage.stage_bundle_result:type_name -> znasllc.memql.v1.StageBundleResult
+	220, // 148: znasllc.memql.v1.MemqlServerMessage.modules_list_result:type_name -> znasllc.memql.v1.ModulesListResult
+	223, // 149: znasllc.memql.v1.MemqlServerMessage.module_detail_result:type_name -> znasllc.memql.v1.ModuleDetailResult
+	225, // 150: znasllc.memql.v1.MemqlServerMessage.set_pack_enabled_result:type_name -> znasllc.memql.v1.SetPackEnabledResult
+	231, // 151: znasllc.memql.v1.HeartbeatMsg.ts:type_name -> google.protobuf.Timestamp
+	232, // 152: znasllc.memql.v1.ExecuteQueryMsg.variables:type_name -> google.protobuf.Struct
 	21,  // 153: znasllc.memql.v1.QueryResultChunk.result:type_name -> znasllc.memql.v1.Result
 	23,  // 154: znasllc.memql.v1.QueryErrorMsg.error:type_name -> znasllc.memql.v1.QueryError
 	2,   // 155: znasllc.memql.v1.SubscribeMsg.kind:type_name -> znasllc.memql.v1.SubscriptionKind
-	229, // 156: znasllc.memql.v1.SubscribeMsg.config:type_name -> google.protobuf.Struct
+	232, // 156: znasllc.memql.v1.SubscribeMsg.config:type_name -> google.protobuf.Struct
 	1,   // 157: znasllc.memql.v1.SubscribeMsg.actions:type_name -> znasllc.memql.v1.GraphNodeAction
 	3,   // 158: znasllc.memql.v1.EventNotification.kind:type_name -> znasllc.memql.v1.EventKind
-	228, // 159: znasllc.memql.v1.EventNotification.ts:type_name -> google.protobuf.Timestamp
-	229, // 160: znasllc.memql.v1.EventNotification.payload:type_name -> google.protobuf.Struct
-	229, // 161: znasllc.memql.v1.AiStreamChunk.json_delta:type_name -> google.protobuf.Struct
-	229, // 162: znasllc.memql.v1.AiStreamChunk.metadata:type_name -> google.protobuf.Struct
+	231, // 159: znasllc.memql.v1.EventNotification.ts:type_name -> google.protobuf.Timestamp
+	232, // 160: znasllc.memql.v1.EventNotification.payload:type_name -> google.protobuf.Struct
+	232, // 161: znasllc.memql.v1.AiStreamChunk.json_delta:type_name -> google.protobuf.Struct
+	232, // 162: znasllc.memql.v1.AiStreamChunk.metadata:type_name -> google.protobuf.Struct
 	24,  // 163: znasllc.memql.v1.Result.bundle:type_name -> znasllc.memql.v1.GraphBundle
-	230, // 164: znasllc.memql.v1.Result.data:type_name -> google.protobuf.Value
+	233, // 164: znasllc.memql.v1.Result.data:type_name -> google.protobuf.Value
 	22,  // 165: znasllc.memql.v1.Result.meta:type_name -> znasllc.memql.v1.ResultMeta
-	225, // 166: znasllc.memql.v1.QueryError.metadata:type_name -> znasllc.memql.v1.QueryError.MetadataEntry
+	228, // 166: znasllc.memql.v1.QueryError.metadata:type_name -> znasllc.memql.v1.QueryError.MetadataEntry
 	25,  // 167: znasllc.memql.v1.GraphBundle.nodes:type_name -> znasllc.memql.v1.MemoryNode
 	26,  // 168: znasllc.memql.v1.GraphBundle.edges:type_name -> znasllc.memql.v1.GraphEdge
-	228, // 169: znasllc.memql.v1.MemoryNode.created_at:type_name -> google.protobuf.Timestamp
-	229, // 170: znasllc.memql.v1.MemoryNode.payload:type_name -> google.protobuf.Struct
-	229, // 171: znasllc.memql.v1.MemoryNode.schema:type_name -> google.protobuf.Struct
-	229, // 172: znasllc.memql.v1.MemoryNode.metadata:type_name -> google.protobuf.Struct
+	231, // 169: znasllc.memql.v1.MemoryNode.created_at:type_name -> google.protobuf.Timestamp
+	232, // 170: znasllc.memql.v1.MemoryNode.payload:type_name -> google.protobuf.Struct
+	232, // 171: znasllc.memql.v1.MemoryNode.schema:type_name -> google.protobuf.Struct
+	232, // 172: znasllc.memql.v1.MemoryNode.metadata:type_name -> google.protobuf.Struct
 	6,   // 173: znasllc.memql.v1.MemoryNode.provenance:type_name -> znasllc.memql.v1.Provenance
 	29,  // 174: znasllc.memql.v1.ListToolsResult.tools:type_name -> znasllc.memql.v1.ToolDefinition
-	229, // 175: znasllc.memql.v1.CallToolMsg.arguments:type_name -> google.protobuf.Struct
+	232, // 175: znasllc.memql.v1.CallToolMsg.arguments:type_name -> google.protobuf.Struct
 	32,  // 176: znasllc.memql.v1.CallToolResult.content:type_name -> znasllc.memql.v1.ToolResultContent
 	32,  // 177: znasllc.memql.v1.ClientToolResult.content:type_name -> znasllc.memql.v1.ToolResultContent
 	36,  // 178: znasllc.memql.v1.AiChatMsg.messages:type_name -> znasllc.memql.v1.AiChatMessage
 	36,  // 179: znasllc.memql.v1.AiChatResult.message:type_name -> znasllc.memql.v1.AiChatMessage
-	229, // 180: znasllc.memql.v1.AiSuggestMsg.payload:type_name -> google.protobuf.Struct
-	229, // 181: znasllc.memql.v1.AiSuggestResult.result:type_name -> google.protobuf.Struct
-	0,   // 182: znasllc.memql.v1.IdentityCreateMsg.role:type_name -> znasllc.memql.v1.UserRole
-	229, // 183: znasllc.memql.v1.IdentityUpdateMsg.fields:type_name -> google.protobuf.Struct
-	53,  // 184: znasllc.memql.v1.IdentityResult.identities:type_name -> znasllc.memql.v1.IdentityInfo
-	0,   // 185: znasllc.memql.v1.IdentityInfo.role:type_name -> znasllc.memql.v1.UserRole
-	228, // 186: znasllc.memql.v1.IdentityInfo.created_at:type_name -> google.protobuf.Timestamp
-	228, // 187: znasllc.memql.v1.IdentityInfo.suspended_at:type_name -> google.protobuf.Timestamp
-	0,   // 188: znasllc.memql.v1.DelegationCreateMsg.role_ceiling:type_name -> znasllc.memql.v1.UserRole
-	228, // 189: znasllc.memql.v1.DelegationCreateMsg.expires_at:type_name -> google.protobuf.Timestamp
-	58,  // 190: znasllc.memql.v1.DelegationResult.delegations:type_name -> znasllc.memql.v1.DelegationInfo
-	0,   // 191: znasllc.memql.v1.DelegationInfo.role_ceiling:type_name -> znasllc.memql.v1.UserRole
-	228, // 192: znasllc.memql.v1.DelegationInfo.expires_at:type_name -> google.protobuf.Timestamp
-	228, // 193: znasllc.memql.v1.DelegationInfo.created_at:type_name -> google.protobuf.Timestamp
-	228, // 194: znasllc.memql.v1.DelegationInfo.revoked_at:type_name -> google.protobuf.Timestamp
-	59,  // 195: znasllc.memql.v1.SenseRange.start:type_name -> znasllc.memql.v1.SensePosition
-	59,  // 196: znasllc.memql.v1.SenseRange.end:type_name -> znasllc.memql.v1.SensePosition
-	63,  // 197: znasllc.memql.v1.SenseTokenizeResult.tokens:type_name -> znasllc.memql.v1.SenseToken
-	60,  // 198: znasllc.memql.v1.SenseToken.range:type_name -> znasllc.memql.v1.SenseRange
-	59,  // 199: znasllc.memql.v1.SenseCompleteMsg.cursor:type_name -> znasllc.memql.v1.SensePosition
-	66,  // 200: znasllc.memql.v1.SenseCompleteResult.items:type_name -> znasllc.memql.v1.SenseCompletionItem
-	69,  // 201: znasllc.memql.v1.SenseDiagnoseResult.diagnostics:type_name -> znasllc.memql.v1.SenseDiagnostic
-	60,  // 202: znasllc.memql.v1.SenseDiagnostic.range:type_name -> znasllc.memql.v1.SenseRange
-	4,   // 203: znasllc.memql.v1.SenseDiagnostic.severity:type_name -> znasllc.memql.v1.SenseSeverity
-	59,  // 204: znasllc.memql.v1.SenseHoverMsg.position:type_name -> znasllc.memql.v1.SensePosition
-	60,  // 205: znasllc.memql.v1.SenseHoverResult.range:type_name -> znasllc.memql.v1.SenseRange
-	59,  // 206: znasllc.memql.v1.SenseDefinitionMsg.position:type_name -> znasllc.memql.v1.SensePosition
-	74,  // 207: znasllc.memql.v1.SenseDefinitionResult.targets:type_name -> znasllc.memql.v1.SenseDefinitionTarget
-	60,  // 208: znasllc.memql.v1.SenseDefinitionTarget.range:type_name -> znasllc.memql.v1.SenseRange
-	59,  // 209: znasllc.memql.v1.SenseSignatureHelpMsg.position:type_name -> znasllc.memql.v1.SensePosition
-	77,  // 210: znasllc.memql.v1.SenseSignatureHelpResult.signatures:type_name -> znasllc.memql.v1.SenseSignature
-	78,  // 211: znasllc.memql.v1.SenseSignature.parameters:type_name -> znasllc.memql.v1.SenseParameter
-	81,  // 212: znasllc.memql.v1.ListPackDomainsResult.domains:type_name -> znasllc.memql.v1.PackDomain
-	84,  // 213: znasllc.memql.v1.ListPackFilesResult.files:type_name -> znasllc.memql.v1.PackFile
-	89,  // 214: znasllc.memql.v1.ListConstructsResult.constructs:type_name -> znasllc.memql.v1.ConstructInfo
-	91,  // 215: znasllc.memql.v1.ConstructInfo.args:type_name -> znasllc.memql.v1.ConstructArg
-	90,  // 216: znasllc.memql.v1.ConstructInfo.trigger:type_name -> znasllc.memql.v1.ConstructTrigger
-	92,  // 217: znasllc.memql.v1.AuthoringValidateBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
-	93,  // 218: znasllc.memql.v1.AuthoringSessionDefineBundleResult.defined:type_name -> znasllc.memql.v1.AuthoringConstruct
-	92,  // 219: znasllc.memql.v1.AuthoringSessionDefineBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
-	93,  // 220: znasllc.memql.v1.DurablePromoteBundleResult.promoted:type_name -> znasllc.memql.v1.AuthoringConstruct
-	92,  // 221: znasllc.memql.v1.DurablePromoteBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
-	100, // 222: znasllc.memql.v1.DurablePromoteBundleResult.concept_diffs:type_name -> znasllc.memql.v1.ConceptSchemaDiff
-	101, // 223: znasllc.memql.v1.ConceptSchemaDiff.changes:type_name -> znasllc.memql.v1.ConceptSchemaChange
-	93,  // 224: znasllc.memql.v1.DurableDemoteBundleResult.demoted:type_name -> znasllc.memql.v1.AuthoringConstruct
-	92,  // 225: znasllc.memql.v1.DurableDemoteBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
-	103, // 226: znasllc.memql.v1.DurableDemoteBundleResult.outcomes:type_name -> znasllc.memql.v1.DurableDemoteOutcome
-	93,  // 227: znasllc.memql.v1.StageBundleResult.staged:type_name -> znasllc.memql.v1.AuthoringConstruct
-	92,  // 228: znasllc.memql.v1.StageBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
-	117, // 229: znasllc.memql.v1.ConceptsListResult.concepts:type_name -> znasllc.memql.v1.ConceptInfo
-	118, // 230: znasllc.memql.v1.ConceptInfo.display_card:type_name -> znasllc.memql.v1.DisplayCard
-	121, // 231: znasllc.memql.v1.ConceptsSubscribeResult.domains:type_name -> znasllc.memql.v1.DomainSubscription
-	117, // 232: znasllc.memql.v1.ConceptsRegistryDelta.added:type_name -> znasllc.memql.v1.ConceptInfo
-	0,   // 233: znasllc.memql.v1.MyAccessResult.cluster_role:type_name -> znasllc.memql.v1.UserRole
-	127, // 234: znasllc.memql.v1.AgentGenerateTurnMsg.history:type_name -> znasllc.memql.v1.AgentTurnMessage
-	128, // 235: znasllc.memql.v1.AgentGenerateTurnMsg.routing:type_name -> znasllc.memql.v1.AgentTurnRoutingContext
-	126, // 236: znasllc.memql.v1.AgentGenerateTurnMsg.acting_agent:type_name -> znasllc.memql.v1.ActingAgentIdentity
-	134, // 237: znasllc.memql.v1.AgentGenerateTurnMsg.attachments:type_name -> znasllc.memql.v1.AgentTurnAttachment
-	226, // 238: znasllc.memql.v1.AgentGenerateTurnMsg.hints:type_name -> znasllc.memql.v1.AgentGenerateTurnMsg.HintsEntry
-	130, // 239: znasllc.memql.v1.AgentTurnRoutingContext.peers:type_name -> znasllc.memql.v1.AgentTurnPeer
-	131, // 240: znasllc.memql.v1.AgentTurnRoutingContext.peer_activity:type_name -> znasllc.memql.v1.AgentTurnPeerActivity
-	132, // 241: znasllc.memql.v1.AgentTurnRoutingContext.space:type_name -> znasllc.memql.v1.AgentTurnSpaceContext
-	129, // 242: znasllc.memql.v1.AgentTurnRoutingContext.humans:type_name -> znasllc.memql.v1.AgentTurnHuman
-	227, // 243: znasllc.memql.v1.AgentTurnSpaceContext.extra:type_name -> znasllc.memql.v1.AgentTurnSpaceContext.ExtraEntry
-	133, // 244: znasllc.memql.v1.AgentTurnSpaceContext.goal:type_name -> znasllc.memql.v1.AgentTurnSpaceGoal
-	136, // 245: znasllc.memql.v1.AgentGenerateTurnDelta.text:type_name -> znasllc.memql.v1.AgentTurnTextDelta
-	137, // 246: znasllc.memql.v1.AgentGenerateTurnDelta.tool_call:type_name -> znasllc.memql.v1.AgentTurnToolCall
-	138, // 247: znasllc.memql.v1.AgentGenerateTurnDelta.tool_result:type_name -> znasllc.memql.v1.AgentTurnToolResult
-	137, // 248: znasllc.memql.v1.AgentGenerateTurnComplete.tool_calls:type_name -> znasllc.memql.v1.AgentTurnToolCall
-	143, // 249: znasllc.memql.v1.AgentGenerateTurnComplete.error:type_name -> znasllc.memql.v1.AgentTurnError
-	141, // 250: znasllc.memql.v1.AgentGenerateTurnComplete.citations:type_name -> znasllc.memql.v1.AgentTurnCitation
-	142, // 251: znasllc.memql.v1.AgentGenerateTurnComplete.retrieved:type_name -> znasllc.memql.v1.AgentRetrievedChunk
-	228, // 252: znasllc.memql.v1.ResolveGuestInviteResult.expires_at:type_name -> google.protobuf.Timestamp
-	5,   // 253: znasllc.memql.v1.VoiceAgentTurnRequest.thread:type_name -> znasllc.memql.v1.VoiceAgentTurnRequest.ThreadContext
-	141, // 254: znasllc.memql.v1.VoiceAgentRealtimeOutput.citations:type_name -> znasllc.memql.v1.AgentTurnCitation
-	231, // 255: znasllc.memql.v1.DeployControlMsg.get_deployment_status:type_name -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
-	232, // 256: znasllc.memql.v1.DeployControlMsg.suggest_next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	233, // 257: znasllc.memql.v1.DeployControlMsg.rollback:type_name -> znasllc.memql.deploycontrol.v1.RollbackRequest
-	234, // 258: znasllc.memql.v1.DeployControlMsg.rollout_action:type_name -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	235, // 259: znasllc.memql.v1.DeployControlMsg.cut_version:type_name -> znasllc.memql.deploycontrol.v1.CutVersionRequest
-	236, // 260: znasllc.memql.v1.DeployControlMsg.deploy:type_name -> znasllc.memql.deploycontrol.v1.DeployRequest
-	237, // 261: znasllc.memql.v1.DeployControlMsg.rollback_deployment:type_name -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	238, // 262: znasllc.memql.v1.DeployControlMsg.repair:type_name -> znasllc.memql.deploycontrol.v1.RepairRequest
-	239, // 263: znasllc.memql.v1.DeployControlResult.deployment_status:type_name -> znasllc.memql.deploycontrol.v1.DeploymentStatus
-	240, // 264: znasllc.memql.v1.DeployControlResult.next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	241, // 265: znasllc.memql.v1.DeployControlResult.action:type_name -> znasllc.memql.deploycontrol.v1.ActionResult
-	229, // 266: znasllc.memql.v1.RunAutomationMsg.payload:type_name -> google.protobuf.Struct
-	192, // 267: znasllc.memql.v1.AutomationRunEvent.accepted:type_name -> znasllc.memql.v1.AutomationRunAccepted
-	193, // 268: znasllc.memql.v1.AutomationRunEvent.step:type_name -> znasllc.memql.v1.AutomationRunStep
-	194, // 269: znasllc.memql.v1.AutomationRunEvent.complete:type_name -> znasllc.memql.v1.AutomationRunComplete
-	229, // 270: znasllc.memql.v1.AutomationRunStep.output:type_name -> google.protobuf.Struct
-	203, // 271: znasllc.memql.v1.IdentityAdminMsg.update_user_profile:type_name -> znasllc.memql.v1.UpdateUserProfileRequest
-	204, // 272: znasllc.memql.v1.IdentityAdminMsg.set_user_role:type_name -> znasllc.memql.v1.SetUserRoleRequest
-	205, // 273: znasllc.memql.v1.IdentityAdminMsg.set_user_suspended:type_name -> znasllc.memql.v1.SetUserSuspendedRequest
-	208, // 274: znasllc.memql.v1.IdentityAdminMsg.revoke_user_token:type_name -> znasllc.memql.v1.RevokeUserTokenRequest
-	209, // 275: znasllc.memql.v1.IdentityAdminMsg.revoke_node_token:type_name -> znasllc.memql.v1.RevokeNodeTokenRequest
-	210, // 276: znasllc.memql.v1.IdentityAdminMsg.update_cluster_settings:type_name -> znasllc.memql.v1.UpdateClusterSettingsRequest
-	211, // 277: znasllc.memql.v1.IdentityAdminMsg.issue_enrolment_link:type_name -> znasllc.memql.v1.IssueEnrolmentLinkRequest
-	212, // 278: znasllc.memql.v1.IdentityAdminMsg.revoke_enrolment_link:type_name -> znasllc.memql.v1.RevokeEnrolmentLinkRequest
-	214, // 279: znasllc.memql.v1.IdentityAdminMsg.set_oauth_client_cors_origins:type_name -> znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
-	213, // 280: znasllc.memql.v1.IdentityAdminMsg.rotate_recovery_key:type_name -> znasllc.memql.v1.RotateRecoveryKeyRequest
-	201, // 281: znasllc.memql.v1.IdentityAdminMsg.issue_user_invitation:type_name -> znasllc.memql.v1.IssueUserInvitationRequest
-	202, // 282: znasllc.memql.v1.IdentityAdminMsg.revoke_user_invitation:type_name -> znasllc.memql.v1.RevokeUserInvitationRequest
-	206, // 283: znasllc.memql.v1.IdentityAdminMsg.reset_sign_in_policy:type_name -> znasllc.memql.v1.ResetSignInPolicyRequest
-	207, // 284: znasllc.memql.v1.IdentityAdminMsg.set_user_shared_mailbox:type_name -> znasllc.memql.v1.SetUserSharedMailboxRequest
-	216, // 285: znasllc.memql.v1.ModulesListResult.modules:type_name -> znasllc.memql.v1.ModuleInfo
-	216, // 286: znasllc.memql.v1.ModuleDetailResult.module:type_name -> znasllc.memql.v1.ModuleInfo
-	219, // 287: znasllc.memql.v1.ModuleDetailResult.env_vars:type_name -> znasllc.memql.v1.ModuleEnvVar
-	7,   // 288: znasllc.memql.v1.MemqlService.Stream:input_type -> znasllc.memql.v1.MemqlClientMessage
-	8,   // 289: znasllc.memql.v1.MemqlService.Stream:output_type -> znasllc.memql.v1.MemqlServerMessage
-	289, // [289:290] is the sub-list for method output_type
-	288, // [288:289] is the sub-list for method input_type
-	288, // [288:288] is the sub-list for extension type_name
-	288, // [288:288] is the sub-list for extension extendee
-	0,   // [0:288] is the sub-list for field type_name
+	232, // 180: znasllc.memql.v1.AiSuggestMsg.payload:type_name -> google.protobuf.Struct
+	232, // 181: znasllc.memql.v1.AiSuggestResult.result:type_name -> google.protobuf.Struct
+	49,  // 182: znasllc.memql.v1.AiSuggestResult.usage:type_name -> znasllc.memql.v1.AiSuggestUsage
+	0,   // 183: znasllc.memql.v1.IdentityCreateMsg.role:type_name -> znasllc.memql.v1.UserRole
+	232, // 184: znasllc.memql.v1.IdentityUpdateMsg.fields:type_name -> google.protobuf.Struct
+	54,  // 185: znasllc.memql.v1.IdentityResult.identities:type_name -> znasllc.memql.v1.IdentityInfo
+	0,   // 186: znasllc.memql.v1.IdentityInfo.role:type_name -> znasllc.memql.v1.UserRole
+	231, // 187: znasllc.memql.v1.IdentityInfo.created_at:type_name -> google.protobuf.Timestamp
+	231, // 188: znasllc.memql.v1.IdentityInfo.suspended_at:type_name -> google.protobuf.Timestamp
+	0,   // 189: znasllc.memql.v1.DelegationCreateMsg.role_ceiling:type_name -> znasllc.memql.v1.UserRole
+	231, // 190: znasllc.memql.v1.DelegationCreateMsg.expires_at:type_name -> google.protobuf.Timestamp
+	59,  // 191: znasllc.memql.v1.DelegationResult.delegations:type_name -> znasllc.memql.v1.DelegationInfo
+	0,   // 192: znasllc.memql.v1.DelegationInfo.role_ceiling:type_name -> znasllc.memql.v1.UserRole
+	231, // 193: znasllc.memql.v1.DelegationInfo.expires_at:type_name -> google.protobuf.Timestamp
+	231, // 194: znasllc.memql.v1.DelegationInfo.created_at:type_name -> google.protobuf.Timestamp
+	231, // 195: znasllc.memql.v1.DelegationInfo.revoked_at:type_name -> google.protobuf.Timestamp
+	60,  // 196: znasllc.memql.v1.SenseRange.start:type_name -> znasllc.memql.v1.SensePosition
+	60,  // 197: znasllc.memql.v1.SenseRange.end:type_name -> znasllc.memql.v1.SensePosition
+	64,  // 198: znasllc.memql.v1.SenseTokenizeResult.tokens:type_name -> znasllc.memql.v1.SenseToken
+	61,  // 199: znasllc.memql.v1.SenseToken.range:type_name -> znasllc.memql.v1.SenseRange
+	60,  // 200: znasllc.memql.v1.SenseCompleteMsg.cursor:type_name -> znasllc.memql.v1.SensePosition
+	67,  // 201: znasllc.memql.v1.SenseCompleteResult.items:type_name -> znasllc.memql.v1.SenseCompletionItem
+	70,  // 202: znasllc.memql.v1.SenseDiagnoseResult.diagnostics:type_name -> znasllc.memql.v1.SenseDiagnostic
+	61,  // 203: znasllc.memql.v1.SenseDiagnostic.range:type_name -> znasllc.memql.v1.SenseRange
+	4,   // 204: znasllc.memql.v1.SenseDiagnostic.severity:type_name -> znasllc.memql.v1.SenseSeverity
+	60,  // 205: znasllc.memql.v1.SenseHoverMsg.position:type_name -> znasllc.memql.v1.SensePosition
+	61,  // 206: znasllc.memql.v1.SenseHoverResult.range:type_name -> znasllc.memql.v1.SenseRange
+	60,  // 207: znasllc.memql.v1.SenseDefinitionMsg.position:type_name -> znasllc.memql.v1.SensePosition
+	75,  // 208: znasllc.memql.v1.SenseDefinitionResult.targets:type_name -> znasllc.memql.v1.SenseDefinitionTarget
+	61,  // 209: znasllc.memql.v1.SenseDefinitionTarget.range:type_name -> znasllc.memql.v1.SenseRange
+	60,  // 210: znasllc.memql.v1.SenseSignatureHelpMsg.position:type_name -> znasllc.memql.v1.SensePosition
+	78,  // 211: znasllc.memql.v1.SenseSignatureHelpResult.signatures:type_name -> znasllc.memql.v1.SenseSignature
+	79,  // 212: znasllc.memql.v1.SenseSignature.parameters:type_name -> znasllc.memql.v1.SenseParameter
+	82,  // 213: znasllc.memql.v1.ListPackDomainsResult.domains:type_name -> znasllc.memql.v1.PackDomain
+	85,  // 214: znasllc.memql.v1.ListPackFilesResult.files:type_name -> znasllc.memql.v1.PackFile
+	90,  // 215: znasllc.memql.v1.ListConstructsResult.constructs:type_name -> znasllc.memql.v1.ConstructInfo
+	92,  // 216: znasllc.memql.v1.ConstructInfo.args:type_name -> znasllc.memql.v1.ConstructArg
+	91,  // 217: znasllc.memql.v1.ConstructInfo.trigger:type_name -> znasllc.memql.v1.ConstructTrigger
+	93,  // 218: znasllc.memql.v1.AuthoringValidateBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
+	94,  // 219: znasllc.memql.v1.AuthoringSessionDefineBundleResult.defined:type_name -> znasllc.memql.v1.AuthoringConstruct
+	93,  // 220: znasllc.memql.v1.AuthoringSessionDefineBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
+	94,  // 221: znasllc.memql.v1.DurablePromoteBundleResult.promoted:type_name -> znasllc.memql.v1.AuthoringConstruct
+	93,  // 222: znasllc.memql.v1.DurablePromoteBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
+	101, // 223: znasllc.memql.v1.DurablePromoteBundleResult.concept_diffs:type_name -> znasllc.memql.v1.ConceptSchemaDiff
+	102, // 224: znasllc.memql.v1.ConceptSchemaDiff.changes:type_name -> znasllc.memql.v1.ConceptSchemaChange
+	94,  // 225: znasllc.memql.v1.DurableDemoteBundleResult.demoted:type_name -> znasllc.memql.v1.AuthoringConstruct
+	93,  // 226: znasllc.memql.v1.DurableDemoteBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
+	104, // 227: znasllc.memql.v1.DurableDemoteBundleResult.outcomes:type_name -> znasllc.memql.v1.DurableDemoteOutcome
+	94,  // 228: znasllc.memql.v1.StageBundleResult.staged:type_name -> znasllc.memql.v1.AuthoringConstruct
+	93,  // 229: znasllc.memql.v1.StageBundleResult.diagnostics:type_name -> znasllc.memql.v1.AuthoringDiagnostic
+	118, // 230: znasllc.memql.v1.ConceptsListResult.concepts:type_name -> znasllc.memql.v1.ConceptInfo
+	121, // 231: znasllc.memql.v1.ConceptInfo.display_card:type_name -> znasllc.memql.v1.DisplayCard
+	119, // 232: znasllc.memql.v1.ConceptInfo.fields:type_name -> znasllc.memql.v1.ConceptField
+	120, // 233: znasllc.memql.v1.ConceptInfo.relationships:type_name -> znasllc.memql.v1.ConceptRelationship
+	124, // 234: znasllc.memql.v1.ConceptsSubscribeResult.domains:type_name -> znasllc.memql.v1.DomainSubscription
+	118, // 235: znasllc.memql.v1.ConceptsRegistryDelta.added:type_name -> znasllc.memql.v1.ConceptInfo
+	0,   // 236: znasllc.memql.v1.MyAccessResult.cluster_role:type_name -> znasllc.memql.v1.UserRole
+	130, // 237: znasllc.memql.v1.AgentGenerateTurnMsg.history:type_name -> znasllc.memql.v1.AgentTurnMessage
+	131, // 238: znasllc.memql.v1.AgentGenerateTurnMsg.routing:type_name -> znasllc.memql.v1.AgentTurnRoutingContext
+	129, // 239: znasllc.memql.v1.AgentGenerateTurnMsg.acting_agent:type_name -> znasllc.memql.v1.ActingAgentIdentity
+	137, // 240: znasllc.memql.v1.AgentGenerateTurnMsg.attachments:type_name -> znasllc.memql.v1.AgentTurnAttachment
+	229, // 241: znasllc.memql.v1.AgentGenerateTurnMsg.hints:type_name -> znasllc.memql.v1.AgentGenerateTurnMsg.HintsEntry
+	133, // 242: znasllc.memql.v1.AgentTurnRoutingContext.peers:type_name -> znasllc.memql.v1.AgentTurnPeer
+	134, // 243: znasllc.memql.v1.AgentTurnRoutingContext.peer_activity:type_name -> znasllc.memql.v1.AgentTurnPeerActivity
+	135, // 244: znasllc.memql.v1.AgentTurnRoutingContext.space:type_name -> znasllc.memql.v1.AgentTurnSpaceContext
+	132, // 245: znasllc.memql.v1.AgentTurnRoutingContext.humans:type_name -> znasllc.memql.v1.AgentTurnHuman
+	230, // 246: znasllc.memql.v1.AgentTurnSpaceContext.extra:type_name -> znasllc.memql.v1.AgentTurnSpaceContext.ExtraEntry
+	136, // 247: znasllc.memql.v1.AgentTurnSpaceContext.goal:type_name -> znasllc.memql.v1.AgentTurnSpaceGoal
+	139, // 248: znasllc.memql.v1.AgentGenerateTurnDelta.text:type_name -> znasllc.memql.v1.AgentTurnTextDelta
+	140, // 249: znasllc.memql.v1.AgentGenerateTurnDelta.tool_call:type_name -> znasllc.memql.v1.AgentTurnToolCall
+	141, // 250: znasllc.memql.v1.AgentGenerateTurnDelta.tool_result:type_name -> znasllc.memql.v1.AgentTurnToolResult
+	140, // 251: znasllc.memql.v1.AgentGenerateTurnComplete.tool_calls:type_name -> znasllc.memql.v1.AgentTurnToolCall
+	146, // 252: znasllc.memql.v1.AgentGenerateTurnComplete.error:type_name -> znasllc.memql.v1.AgentTurnError
+	144, // 253: znasllc.memql.v1.AgentGenerateTurnComplete.citations:type_name -> znasllc.memql.v1.AgentTurnCitation
+	145, // 254: znasllc.memql.v1.AgentGenerateTurnComplete.retrieved:type_name -> znasllc.memql.v1.AgentRetrievedChunk
+	231, // 255: znasllc.memql.v1.ResolveGuestInviteResult.expires_at:type_name -> google.protobuf.Timestamp
+	5,   // 256: znasllc.memql.v1.VoiceAgentTurnRequest.thread:type_name -> znasllc.memql.v1.VoiceAgentTurnRequest.ThreadContext
+	144, // 257: znasllc.memql.v1.VoiceAgentRealtimeOutput.citations:type_name -> znasllc.memql.v1.AgentTurnCitation
+	234, // 258: znasllc.memql.v1.DeployControlMsg.get_deployment_status:type_name -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
+	235, // 259: znasllc.memql.v1.DeployControlMsg.suggest_next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
+	236, // 260: znasllc.memql.v1.DeployControlMsg.rollback:type_name -> znasllc.memql.deploycontrol.v1.RollbackRequest
+	237, // 261: znasllc.memql.v1.DeployControlMsg.rollout_action:type_name -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	238, // 262: znasllc.memql.v1.DeployControlMsg.cut_version:type_name -> znasllc.memql.deploycontrol.v1.CutVersionRequest
+	239, // 263: znasllc.memql.v1.DeployControlMsg.deploy:type_name -> znasllc.memql.deploycontrol.v1.DeployRequest
+	240, // 264: znasllc.memql.v1.DeployControlMsg.rollback_deployment:type_name -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	241, // 265: znasllc.memql.v1.DeployControlMsg.repair:type_name -> znasllc.memql.deploycontrol.v1.RepairRequest
+	242, // 266: znasllc.memql.v1.DeployControlResult.deployment_status:type_name -> znasllc.memql.deploycontrol.v1.DeploymentStatus
+	243, // 267: znasllc.memql.v1.DeployControlResult.next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	244, // 268: znasllc.memql.v1.DeployControlResult.action:type_name -> znasllc.memql.deploycontrol.v1.ActionResult
+	232, // 269: znasllc.memql.v1.RunAutomationMsg.payload:type_name -> google.protobuf.Struct
+	195, // 270: znasllc.memql.v1.AutomationRunEvent.accepted:type_name -> znasllc.memql.v1.AutomationRunAccepted
+	196, // 271: znasllc.memql.v1.AutomationRunEvent.step:type_name -> znasllc.memql.v1.AutomationRunStep
+	197, // 272: znasllc.memql.v1.AutomationRunEvent.complete:type_name -> znasllc.memql.v1.AutomationRunComplete
+	232, // 273: znasllc.memql.v1.AutomationRunStep.output:type_name -> google.protobuf.Struct
+	206, // 274: znasllc.memql.v1.IdentityAdminMsg.update_user_profile:type_name -> znasllc.memql.v1.UpdateUserProfileRequest
+	207, // 275: znasllc.memql.v1.IdentityAdminMsg.set_user_role:type_name -> znasllc.memql.v1.SetUserRoleRequest
+	208, // 276: znasllc.memql.v1.IdentityAdminMsg.set_user_suspended:type_name -> znasllc.memql.v1.SetUserSuspendedRequest
+	211, // 277: znasllc.memql.v1.IdentityAdminMsg.revoke_user_token:type_name -> znasllc.memql.v1.RevokeUserTokenRequest
+	212, // 278: znasllc.memql.v1.IdentityAdminMsg.revoke_node_token:type_name -> znasllc.memql.v1.RevokeNodeTokenRequest
+	213, // 279: znasllc.memql.v1.IdentityAdminMsg.update_cluster_settings:type_name -> znasllc.memql.v1.UpdateClusterSettingsRequest
+	214, // 280: znasllc.memql.v1.IdentityAdminMsg.issue_enrolment_link:type_name -> znasllc.memql.v1.IssueEnrolmentLinkRequest
+	215, // 281: znasllc.memql.v1.IdentityAdminMsg.revoke_enrolment_link:type_name -> znasllc.memql.v1.RevokeEnrolmentLinkRequest
+	217, // 282: znasllc.memql.v1.IdentityAdminMsg.set_oauth_client_cors_origins:type_name -> znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
+	216, // 283: znasllc.memql.v1.IdentityAdminMsg.rotate_recovery_key:type_name -> znasllc.memql.v1.RotateRecoveryKeyRequest
+	204, // 284: znasllc.memql.v1.IdentityAdminMsg.issue_user_invitation:type_name -> znasllc.memql.v1.IssueUserInvitationRequest
+	205, // 285: znasllc.memql.v1.IdentityAdminMsg.revoke_user_invitation:type_name -> znasllc.memql.v1.RevokeUserInvitationRequest
+	209, // 286: znasllc.memql.v1.IdentityAdminMsg.reset_sign_in_policy:type_name -> znasllc.memql.v1.ResetSignInPolicyRequest
+	210, // 287: znasllc.memql.v1.IdentityAdminMsg.set_user_shared_mailbox:type_name -> znasllc.memql.v1.SetUserSharedMailboxRequest
+	219, // 288: znasllc.memql.v1.ModulesListResult.modules:type_name -> znasllc.memql.v1.ModuleInfo
+	219, // 289: znasllc.memql.v1.ModuleDetailResult.module:type_name -> znasllc.memql.v1.ModuleInfo
+	222, // 290: znasllc.memql.v1.ModuleDetailResult.env_vars:type_name -> znasllc.memql.v1.ModuleEnvVar
+	7,   // 291: znasllc.memql.v1.MemqlService.Stream:input_type -> znasllc.memql.v1.MemqlClientMessage
+	8,   // 292: znasllc.memql.v1.MemqlService.Stream:output_type -> znasllc.memql.v1.MemqlServerMessage
+	292, // [292:293] is the sub-list for method output_type
+	291, // [291:292] is the sub-list for method input_type
+	291, // [291:291] is the sub-list for extension type_name
+	291, // [291:291] is the sub-list for extension extendee
+	0,   // [0:291] is the sub-list for field type_name
 }
 
 func init() { file_memql_proto_init() }
@@ -23149,12 +23464,12 @@ func file_memql_proto_init() {
 		(*AiStreamChunk_Metadata)(nil),
 	}
 	file_memql_proto_msgTypes[16].OneofWrappers = []any{}
-	file_memql_proto_msgTypes[129].OneofWrappers = []any{
+	file_memql_proto_msgTypes[132].OneofWrappers = []any{
 		(*AgentGenerateTurnDelta_Text)(nil),
 		(*AgentGenerateTurnDelta_ToolCall)(nil),
 		(*AgentGenerateTurnDelta_ToolResult)(nil),
 	}
-	file_memql_proto_msgTypes[182].OneofWrappers = []any{
+	file_memql_proto_msgTypes[185].OneofWrappers = []any{
 		(*DeployControlMsg_GetDeploymentStatus)(nil),
 		(*DeployControlMsg_SuggestNextVersion)(nil),
 		(*DeployControlMsg_Rollback)(nil),
@@ -23164,17 +23479,17 @@ func file_memql_proto_init() {
 		(*DeployControlMsg_RollbackDeployment)(nil),
 		(*DeployControlMsg_Repair)(nil),
 	}
-	file_memql_proto_msgTypes[183].OneofWrappers = []any{
+	file_memql_proto_msgTypes[186].OneofWrappers = []any{
 		(*DeployControlResult_DeploymentStatus)(nil),
 		(*DeployControlResult_NextVersion)(nil),
 		(*DeployControlResult_Action)(nil),
 	}
-	file_memql_proto_msgTypes[185].OneofWrappers = []any{
+	file_memql_proto_msgTypes[188].OneofWrappers = []any{
 		(*AutomationRunEvent_Accepted)(nil),
 		(*AutomationRunEvent_Step)(nil),
 		(*AutomationRunEvent_Complete)(nil),
 	}
-	file_memql_proto_msgTypes[193].OneofWrappers = []any{
+	file_memql_proto_msgTypes[196].OneofWrappers = []any{
 		(*IdentityAdminMsg_UpdateUserProfile)(nil),
 		(*IdentityAdminMsg_SetUserRole)(nil),
 		(*IdentityAdminMsg_SetUserSuspended)(nil),
@@ -23196,7 +23511,7 @@ func file_memql_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memql_proto_rawDesc), len(file_memql_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   222,
+			NumMessages:   225,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
