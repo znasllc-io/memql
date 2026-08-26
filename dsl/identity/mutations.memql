@@ -2186,8 +2186,6 @@ mutate identity revokeBadgeIdentity {
 // a zero signCount / false backupEligible / empty transports are all legal
 // values a caller passes explicitly rather than omits.
 
-/// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
-/// COSE key -- there is no secret half to withhold.
 /// Record that a user signs in through an upstream identity provider (memql#4611).
 ///
 /// STORES NO SECRET. The credential lives at the provider; this row holds only
@@ -2230,6 +2228,8 @@ mutate identity createOidcIdentity {
   }
 }
 
+/// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
+/// COSE key -- there is no secret half to withhold.
 mutate identity createPasskeyIdentity {
   args {
     identityId      string!

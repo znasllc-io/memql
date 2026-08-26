@@ -5008,7 +5008,7 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	return b.String()
 }
 
-// CreatePasskeyIdentity wraps the mutation named "createPasskeyIdentity".
+// CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
 type CreatePasskeyIdentityArgs struct {

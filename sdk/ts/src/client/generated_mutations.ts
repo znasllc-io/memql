@@ -2775,7 +2775,7 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
   return this.executeNamed("createPATIdentity", buildCreatePATIdentity(args), opts);
 };
 
-/** createPasskeyIdentity wraps the mutation named "createPasskeyIdentity". */
+/** Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.ts).
 export interface CreatePasskeyIdentityArgs {
   identityId: string;
