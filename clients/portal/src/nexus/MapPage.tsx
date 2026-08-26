@@ -1,66 +1,59 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { EmptyState } from "../ui";
-import { MapSurface } from "./map/MapSurface";
-import { NodeDetail } from "./NodeDetail";
+import { ArrangedPage } from "../pages/ArrangedPage";
 import { RecentGoals } from "./GoalPicker";
 import { useGoalContext } from "./GoalLayout";
 import { useGoals } from "./useGoals";
-import { layout } from "./scene/layout";
+import { GOAL_PAGE, GOAL_PAGE_ID } from "./goalPage";
 import { nexusPath, nodePath } from "./urls";
+import { NodeDetail } from "./NodeDetail";
+import { layout } from "./scene/layout";
 
-// /nexus/:planId -- the Map, and /node/:nodeId over it.
+// The goal page (epic memql#4661, task memql#4673).
 //
-// ===========================================================================
-// TWO LAYOUTS, ONE WORLD, AND THAT IS DELIBERATE
-// ===========================================================================
-// The DRAWN scene collapses a phase over the density threshold to one cluster
-// node, so the tasks inside it are not in that layout at all. A deep link to
-// one of those tasks would then resolve to nothing -- a dialog that refuses
-// to open on a URL somebody sent, for a reason that has nothing to do with
-// the row.
+// It used to lay itself out: a MapSurface, a recent-goals strip and a node
+// detail, stacked by hand. It is now an ARRANGEMENT -- a focus layout whose
+// hero is the `goalMap` scene -- rendered by the same component that renders
+// the five predefined views, the composed ones and the converged fleet pages.
 //
-// A node's IDENTITY does not depend on whether its phase is drawn collapsed,
-// so the resolution index is a second layout with the threshold lifted. It is
-// a pure function over a few hundred rows, computed only when the world
-// changes; the alternative is threading collapse state into the URL, which
-// would make a link mean something different depending on how the sender's
-// map happened to be arranged.
-
+// That is the proof spec D6 asks for. The richest page in the console, the one
+// with a WebGL scene and hover and click-to-detail and a demand frame loop,
+// speaks the same grammar as a table of users. And because it does, it is
+// regenerable and versioned like every other page for free.
+//
+// WHAT STAYS HERE is what is genuinely about this ROUTE rather than about the
+// page: the node detail the /node/:nodeId address opens, and the recent-goals
+// strip, which is navigation to a different goal rather than a reading of this
+// one.
 export function MapPage(): ReactNode {
   const { world, planId } = useGoalContext();
   const { nodeId = "" } = useParams();
   const navigate = useNavigate();
   const { goals } = useGoals();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
-  const scene = useMemo(() => layout(world, { expanded }), [world, expanded]);
-  // The resolution index: every node, whatever the drawing does. See above.
-  const index = useMemo(
-    () => layout(world, { clusterThreshold: Number.POSITIVE_INFINITY }),
-    [world],
+  // The FULL layout, uncollapsed: /node/:nodeId must resolve a node the map
+  // may currently be showing as part of a cluster, so the index the detail
+  // reads is computed with clustering off.
+  const index = layout(world, { clusterThreshold: Number.POSITIVE_INFINITY });
+
+  const onSelect = useCallback(
+    (id: string) => navigate(nodePath(planId, id)),
+    [navigate, planId],
   );
 
-  if (world.plan === null) {
-    return (
-      <EmptyState statement="This goal has not been read yet." />
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-5">
-      <MapSurface
-        world={world}
-        scene={scene}
-        selectedNodeId={nodeId}
-        onSelect={(id) => navigate(nodePath(planId, id))}
-        onExpandPhase={(phase) => setExpanded((current) => new Set([...current, phase]))}
+    <>
+      <ArrangedPage
+        manifest={GOAL_PAGE}
+        pageId={GOAL_PAGE_ID}
+        selectedRowId={planId}
+        onSelect={onSelect}
       />
       <RecentGoals goals={goals} currentId={planId} />
       {nodeId === "" ? null : (
         <NodeDetail scene={index} nodeId={nodeId} onClose={() => navigate(nexusPath(planId))} />
       )}
-    </div>
+    </>
   );
 }

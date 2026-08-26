@@ -183,6 +183,27 @@ describe("the lazy chunk", () => {
     "scene/ConceptGraphCanvas.tsx",
   ];
 
+  it("keeps the canvas's tunable values OUT of the canvas", () => {
+    // materials.ts exists because the canvas is the one module a test cannot
+    // load -- it imports three.js and jsdom has no WebGL -- so a value
+    // expressed as a literal inside it is a value nothing can assert and
+    // nothing can find. The visual-QA tuning pass (task memql#4675) edits one
+    // file rather than hunting literals through seven hundred lines.
+    const canvas =
+      Object.entries(sources).find(([path]) => path.endsWith("map/NexusCanvas.tsx"))?.[1] ?? "";
+    expect(canvas).not.toBe("");
+    expect(canvas).toContain('from "./materials"');
+    for (const name of ["SOLID_MATERIAL", "LIGHTING", "CONTACT", "BEVEL_RATIO"]) {
+      expect(canvas, `${name} is imported but never used`).toContain(name);
+    }
+    // ...and materials.ts imports no three.js, which is what makes it
+    // loadable by a test at all.
+    const materials =
+      Object.entries(sources).find(([path]) => path.endsWith("map/materials.ts"))?.[1] ?? "";
+    expect(materials).not.toBe("");
+    expect(/from "(three|@react-three)/.test(materials)).toBe(false);
+  });
+
   it("keeps three.js behind dynamic imports, one per scene", () => {
     const offenders: string[] = [];
     for (const [path, source] of Object.entries(sources)) {

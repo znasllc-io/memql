@@ -93,9 +93,19 @@ export const SCENE_ELEMENT: ElementSpec = {
   // Named by an arrangement, never discovered by the scan -- a scene is
   // nothing without a sceneId.
   placedOnly: true,
-  // A scene has nothing to draw with no rows -- and unlike a table, an empty
-  // one is not an honest empty state, it is a black rectangle.
-  minRows: 1,
+  // ZERO, and the reasoning changed when the second scene arrived. This said
+  // 1, because "a scene with no rows is a black rectangle" -- true of a scene
+  // that draws the POPULATION, which is what conceptGraph does. goalMap does
+  // not: it resolves ONE row by id and reads its whole world through its own
+  // subscription, so a section whose walk has not landed still has a scene
+  // with everything to draw.
+  //
+  // view-kit cannot tell those apart -- it does not know what a sceneId means
+  // -- so the row requirement belongs to the SCENE, and every registered one
+  // renders its own empty state. Keeping it at 1 here made a scene vanish from
+  // a page whose walk was merely slow, and `required` could not put it back:
+  // the guardrail refuses to force-feed an element that does not fit.
+  minRows: 0,
   render: () =>
     h("div", { class: "vk-empty" }, [
       text("This surface does not render scenes."),

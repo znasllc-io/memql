@@ -136,7 +136,14 @@ describe("the Nexus section", () => {
     const h = nexusHarness({ world: emptyGoal() });
     renderNexus(h, "/nexus/plan-empty");
     await waitFor(() => expect(screen.getByRole("heading", { name: /summarise last quarter/i })).toBeTruthy());
-    expect(screen.getByText(/no tasks yet/i)).toBeTruthy();
+    // AWAITED, because the map is a lazy chunk. Since epic memql#4661 the goal
+    // page is an arrangement whose hero is the `goalMap` SCENE, and the scene
+    // registry loads every scene behind a dynamic import -- three.js, fiber
+    // and drei are the portal's largest dependency and the registry is
+    // reachable from every arranged page, so a static import would bundle the
+    // whole WebGL stack for the entire console. The heading is chrome and
+    // arrives synchronously; the map's own content does not.
+    await waitFor(() => expect(screen.getByText(/no tasks yet/i)).toBeTruthy());
   });
 
   it("says a goal that is not yours is not yours, rather than 404ing it", async () => {
