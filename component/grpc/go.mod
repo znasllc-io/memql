@@ -45,7 +45,7 @@ require (
 	buf.build/go/protovalidate v1.2.0 // indirect
 	buf.build/go/protoyaml v0.7.0 // indirect
 	cel.dev/expr v0.25.2 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.63.1 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.66.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect

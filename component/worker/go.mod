@@ -18,7 +18,7 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.63.1 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.66.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
