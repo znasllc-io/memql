@@ -604,6 +604,20 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 			return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
 				"The planner was rate-limited by the model provider (429). The plan is parked and can be resumed shortly -- it was NOT re-attempted, to avoid hammering the provider.")
 		}
+		// NO ELIGIBLE LOCAL MODEL (epic memql#4676, design D2). The policy's
+		// primary is a fleet model, no machine can serve it, and the operator
+		// authored no cloud fallback -- so the work PARKS rather than quietly
+		// running on a paid API.
+		//
+		// It is a park and not a failure because nothing is wrong: a laptop
+		// is asleep. Failing the plan would throw away the work and make the
+		// user start again for a condition that fixes itself when they open
+		// their machine.
+		if refusal, ok := memql.FleetUnavailableFrom(err); ok {
+			l.logger.Warn("planner agent loop: no eligible local model; parking (no silent cloud spend)",
+				"planId", planId, "iter", iter, "model", refusal.ModelId, "machines_total", refusal.Total)
+			return l.parkOnUnavailableFleet(ctx, planId, refusal)
+		}
 		return l.markPlanFailed(ctx, planId, fmt.Sprintf("plannerAgent invocation failed: %v", err))
 	}
 	// Count this invocation against the cumulative ceiling immediately
@@ -1099,6 +1113,58 @@ func (l *PlannerAgentLoop) markPlanFailed(ctx context.Context, planId, errorMess
 		langparser.QuoteString(planId), langparser.QuoteString(errorMessage), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
+	return err
+}
+
+// parkOnUnavailableFleet parks a Plan on no_local_model_available, carrying
+// the report of every machine considered.
+//
+// TWO ACTIONS, AND THE SECOND IS CONDITIONAL. `wake_machine` is always
+// offered. `approve_cloud` is offered ONLY when the cluster actually has a
+// paid provider configured: a button that cannot work is worse than no button,
+// because it converts "your machines are asleep" into "you clicked the fix and
+// it did not fix it", and the second is much harder to act on.
+//
+// The approval is per-PLAN rather than per-call, because a plan spans many
+// calls and re-asking at each one is not consent, it is nagging.
+// cloudProviderReporter is the narrow question the park card asks of the
+// engine. It is an OPTIONAL interface rather than a method on Engine because
+// the answer only steers a button: a fake engine in a test, or a build that
+// does not implement it, reports "no cloud configured", which offers the user
+// strictly fewer options and never a broken one.
+type cloudProviderReporter interface {
+	HasCloudProviderConfigured() bool
+}
+
+func (l *PlannerAgentLoop) parkOnUnavailableFleet(ctx context.Context, planId string, refusal *memql.FleetUnavailable) error {
+	actions := []string{"wake_machine"}
+	cloudConfigured := false
+	if p, ok := l.engine.(cloudProviderReporter); ok {
+		cloudConfigured = p.HasCloudProviderConfigured()
+	}
+	if cloudConfigured {
+		actions = append(actions, "approve_cloud")
+	}
+
+	fbReq := refusal.AsMap()
+	fbReq["kind"] = "choice"
+	fbReq["actions"] = actions
+	fbReq["cloudProviderConfigured"] = cloudConfigured
+	fbReq["askedAt"] = time.Now().UTC().Format(time.RFC3339)
+	fbReq["question"] = fmt.Sprintf(
+		"No machine in your fleet can run %s right now, and this plan's policy names no cloud fallback. "+
+			"Wake a machine to continue, or approve running this plan on a cloud provider.", refusal.ModelId)
+	fbReqJSON, err := json.Marshal(fbReq)
+	if err != nil {
+		fbReqJSON = []byte(`{}`)
+	}
+	q := fmt.Sprintf(
+		`mutation updatePlanStatus(planId:%s, status:"awaitingFeedback", feedbackReason:%s, feedbackRequest:%s)`,
+		langparser.QuoteString(planId),
+		langparser.QuoteString(memql.FeedbackReasonNoLocalModel),
+		string(fbReqJSON),
+	)
+	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 

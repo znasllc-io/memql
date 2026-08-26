@@ -245,7 +245,7 @@ func IsFleetReference(name string) (string, bool) {
 // rather than convenient: a system call may only use opted-in machines, so
 // asking whether a user's laptop offers the model would answer a question
 // nobody asked.
-func (r *ProviderRegistry) fleetEntry(ctx context.Context, modelId string) (*ProviderConfigEntry, bool) {
+func (r *ProviderRegistry) fleetEntry(ctx context.Context, actingUserId, modelId string) (*ProviderConfigEntry, bool) {
 	r.mu.RLock()
 	f := r.fleet
 	r.mu.RUnlock()
@@ -255,7 +255,7 @@ func (r *ProviderRegistry) fleetEntry(ctx context.Context, modelId string) (*Pro
 		Type:  FleetProviderType,
 		Model: modelId,
 	}
-	client := &fleetProvider{registry: r, modelId: modelId}
+	client := &fleetProvider{registry: r, modelId: modelId, actingUserId: actingUserId}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
 	if f == nil {
 		// No worker service on this node. UNAVAILABLE, not an error: the
@@ -264,7 +264,6 @@ func (r *ProviderRegistry) fleetEntry(ctx context.Context, modelId string) (*Pro
 		return entry, true
 	}
 
-	actingUserId := actingUserFromContext(ctx)
 	models, err := f.Catalog(ctx, actingUserId)
 	if err != nil {
 		entry.err = err
@@ -305,9 +304,14 @@ func actingUserFromContext(ctx context.Context) string {
 // the chat, structured, streaming and embedding surfaces by dispatching
 // through the installed FleetInference.
 type fleetProvider struct {
-	registry   *ProviderRegistry
-	modelId    string
-	attributes FleetModel
+	registry *ProviderRegistry
+	modelId  string
+	// actingUserId is whoever the ENTRY was resolved for. It wins over the
+	// call context so availability and dispatch cannot disagree about whose
+	// machines are eligible -- a disagreement in that direction is a silent
+	// cloud call for a user whose laptop was awake.
+	actingUserId string
+	attributes   FleetModel
 	// lastMu guards the surface bookkeeping the ledger reads back after a
 	// call. It is per-entry rather than per-call because the provider
 	// interfaces return a string and have nowhere to carry it.
@@ -343,7 +347,10 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 		return FleetCallResult{}, fmt.Errorf("%w: this node has no fleet inference installed", ErrFleetUnavailable)
 	}
 	req.ModelId = p.modelId
-	req.ActingUserId = actingUserFromContext(ctx)
+	req.ActingUserId = p.actingUserId
+	if strings.TrimSpace(req.ActingUserId) == "" {
+		req.ActingUserId = actingUserFromContext(ctx)
+	}
 
 	// THE GUARDS (memql#4680). This is the one seam every fleet call passes,
 	// and it is where the chokepoint moved to: a local call has no

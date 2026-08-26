@@ -538,6 +538,20 @@ func (r *ProviderRegistry) Entry(name string) (*ProviderConfigEntry, bool) {
 // EntryForContext is Entry with the call's context, which is what a fleet
 // lookup needs: the acting user decides whose machines are eligible.
 func (r *ProviderRegistry) EntryForContext(ctx context.Context, name string) (*ProviderConfigEntry, bool) {
+	return r.EntryForUser(ctx, "", name)
+}
+
+// EntryForUser is EntryForContext with the acting user stated explicitly.
+//
+// The AI router carries the user on its ResolveRequest rather than on a
+// context, and the distinction is not cosmetic here. Resolving a user's fleet
+// model against the SYSTEM catalog would report it unavailable, and an
+// unavailable primary with an authored @fallback runs the fallback -- so the
+// mismatch would present as a silent cloud call for a user whose laptop was
+// awake the whole time. An explicit non-empty userId therefore wins over
+// whatever the context says; empty falls back to the context, and only then
+// to system work.
+func (r *ProviderRegistry) EntryForUser(ctx context.Context, actingUserId, name string) (*ProviderConfigEntry, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -552,7 +566,10 @@ func (r *ProviderRegistry) EntryForContext(ctx context.Context, name string) (*P
 		return entry, true
 	}
 	if modelId, isFleet := IsFleetReference(key); isFleet {
-		return r.fleetEntry(ctx, modelId)
+		if strings.TrimSpace(actingUserId) == "" {
+			actingUserId = actingUserFromContext(ctx)
+		}
+		return r.fleetEntry(ctx, actingUserId, modelId)
 	}
 	return nil, false
 }

@@ -161,7 +161,7 @@ func TestAnUnavailableFleetNamesEveryMachineConsidered(t *testing.T) {
 	if !errors.Is(err, memqlengine.ErrFleetUnavailable) {
 		t.Fatalf("the refusal must read as unavailable: %v", err)
 	}
-	var unavailable *FleetUnavailableError
+	var unavailable *memqlengine.FleetUnavailable
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("the refusal must carry the report: %v", err)
 	}

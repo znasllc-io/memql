@@ -30,7 +30,7 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 	var lastFailedResolved Resolved
 
 	for _, name := range f.chain {
-		client, resolved, ok := f.router.providerLookup(name, modalityStreamTools)
+		client, resolved, ok := f.router.providerLookup(ctx, f.req.UserId, name, modalityStreamTools)
 		if !ok {
 			continue
 		}
@@ -87,7 +87,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 	var lastFailedResolved Resolved
 
 	for _, name := range f.chain {
-		client, resolved, ok := f.router.providerLookup(name, modalityTools)
+		client, resolved, ok := f.router.providerLookup(ctx, f.req.UserId, name, modalityTools)
 		if !ok {
 			continue
 		}
@@ -130,7 +130,7 @@ func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessa
 	var lastFailedResolved Resolved
 
 	for _, name := range f.chain {
-		client, resolved, ok := f.router.providerLookup(name, modalityChat)
+		client, resolved, ok := f.router.providerLookup(ctx, f.req.UserId, name, modalityChat)
 		if !ok {
 			continue
 		}

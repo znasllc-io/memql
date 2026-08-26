@@ -166,7 +166,12 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 	// "primary" on the initial Resolved. The fallback wrapper may
 	// advance past this if the primary errors pre-flight.
 	for _, name := range chain {
-		entry, ok := r.providers.Entry(name)
+		// EntryForUser, not Entry: a `fleet:<modelId>` entry resolves against
+		// the ACTING USER'S machines (epic memql#4676), and resolving it
+		// against the system catalog instead would report a live laptop as
+		// unavailable -- which, with an authored @fallback, is a silent cloud
+		// call for a user whose machine was awake the whole time.
+		entry, ok := r.providers.EntryForUser(context.Background(), req.UserId, name)
 		if !ok || !entry.Available {
 			continue
 		}
@@ -194,6 +199,40 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 			PolicyName:   policyName,
 		}, nil
 	}
+	// A FLEET PRIMARY WITH NO WORKING ALTERNATIVE IS A REFUSAL, NOT AN ERROR
+	// (epic memql#4676, design D2). The chain is exhausted, and if it started
+	// with a fleet model the honest answer is "your machines cannot serve
+	// this", carrying which machines were considered and why each was ruled
+	// out -- not "the router resolved no provider", which describes a
+	// registry lookup and tells an operator nothing they can act on.
+	//
+	// Reaching HERE is already the proof that no cloud fallback was authored:
+	// had one been written into the policy it would have been in this chain
+	// and, being available, would have been returned above. That is what makes
+	// the no-silent-spend property structural rather than a rule somebody has
+	// to remember -- there is no branch here that could choose a paid provider,
+	// because choosing one would mean picking a name the policy never
+	// mentioned.
+	if refusal := r.fleetRefusalFor(req.UserId, chain); refusal != nil {
+		// The one exception, and it is a person's decision rather than a
+		// code path: the caller carries explicit consent to use a paid
+		// provider for this call. The surface that set it showed the refusal
+		// first and got a yes; nothing here can set it on its own.
+		if req.CloudConsent {
+			if client, resolved, ok := r.consentedCloudFallback(mod); ok {
+				r.logger.Info("router: local model unavailable and the user consented to cloud for this call",
+					"model", refusal.ModelId, "provider", resolved.ProviderName)
+				_ = client
+				return []string{resolved.ProviderName}, resolved, nil
+			}
+			// Consent given and nothing to spend it on. The refusal stands,
+			// which is more useful than a generic "no provider": the person
+			// said yes to something the cluster does not have.
+			refusal.LastError = "cloud was approved for this call, but this cluster has no configured cloud provider"
+		}
+		return nil, Resolved{}, refusal
+	}
+
 	// Every entry in the chain was unregistered, unavailable, or
 	// lacked the requested modality -- e.g. a policy whose @primary +
 	// every @fallback provider is @disabled. Name the policy (when the
@@ -208,8 +247,8 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 // metadata + interface check for the requested modality. Returns
 // (nil, zero, false) when the provider is unregistered, unavailable,
 // or doesn't implement the interface.
-func (r *Router) providerLookup(name string, mod providerModality) (any, Resolved, bool) {
-	entry, ok := r.providers.Entry(name)
+func (r *Router) providerLookup(ctx context.Context, userId, name string, mod providerModality) (any, Resolved, bool) {
+	entry, ok := r.providers.EntryForUser(ctx, userId, name)
 	if !ok || !entry.Available || entry.Client == nil {
 		return nil, Resolved{}, false
 	}
@@ -286,7 +325,7 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 // ceiling rather than disappearing into the covered bucket.
 func billingOrMetered(billing string) string {
 	switch billing {
-	case BillingSubscription, BillingUnknown:
+	case BillingSubscription, BillingLocal, BillingUnknown:
 		return billing
 	}
 	return BillingMetered
@@ -303,6 +342,18 @@ func billingOrMetered(billing string) string {
 // the write succeeds -- the alternative was every call emitting a
 // "no actor found in context" warning on every turn.
 func (r *Router) recordCall(rec CallRecord) {
+	// A router with no engine cannot write the ledger, and that is a state
+	// RecordsDropped's own doc anticipates ("engine unavailability"). Without
+	// this check the detached goroutine dereferences nil and takes the WHOLE
+	// PROCESS with it -- a panic on a goroutine nobody recovers is fatal, so
+	// the failure mode of an unwired observability path was a crash rather
+	// than a missing row.
+	if r == nil || r.engine == nil {
+		if r != nil {
+			r.recordsDropped.Add(1)
+		}
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -369,4 +420,58 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// fleetRefusalFor builds the typed no_local_model_available refusal when an
+// exhausted chain named a fleet model, or nil when it did not.
+//
+// It reports on the FIRST fleet entry in the chain, which is the one the
+// operator wrote as the primary and therefore the one whose machines they
+// want to hear about. A chain naming several fleet models is unusual; naming
+// them all would bury the answer.
+func (r *Router) fleetRefusalFor(userId string, chain []string) *memql.FleetUnavailable {
+	if r == nil || r.providers == nil {
+		return nil
+	}
+	for _, name := range chain {
+		modelId, isFleet := memql.IsFleetReference(name)
+		if !isFleet {
+			continue
+		}
+		return r.providers.FleetRefusal(context.Background(), userId, modelId)
+	}
+	return nil
+}
+
+// consentedCloudFallback finds a paid provider to honour a one-shot consent.
+//
+// It takes the registry DEFAULT rather than scanning for anything that
+// answers, because the default is the provider an operator configured as the
+// cluster's ordinary choice -- and a consent that landed on whichever entry
+// happened to sort first would be a different decision from the one the person
+// thought they were making.
+func (r *Router) consentedCloudFallback(mod providerModality) (any, Resolved, bool) {
+	if r == nil || r.providers == nil {
+		return nil, Resolved{}, false
+	}
+	name := strings.TrimSpace(r.providers.Default())
+	if name == "" {
+		return nil, Resolved{}, false
+	}
+	if _, isFleet := memql.IsFleetReference(name); isFleet {
+		// A fully-local cluster's default is a fleet model, and consenting to
+		// cloud cannot resolve to the same local model that was unavailable.
+		return nil, Resolved{}, false
+	}
+	return r.providerLookup(context.Background(), "", name, mod)
+}
+
+// Providers exposes the registry this router resolves against, so a caller
+// that already holds a Router can ask about provider availability without
+// being handed a second reference to keep in sync.
+func (r *Router) Providers() *memql.ProviderRegistry {
+	if r == nil {
+		return nil
+	}
+	return r.providers
 }

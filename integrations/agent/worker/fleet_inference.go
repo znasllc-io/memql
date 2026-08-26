@@ -22,7 +22,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -185,7 +184,7 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 		return memqlengine.FleetCallResult{}, fmt.Errorf("%w: %v", memqlengine.ErrFleetUnavailable, err)
 	}
 	if len(plan.Candidates) == 0 {
-		return memqlengine.FleetCallResult{}, &FleetUnavailableError{
+		return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
 			ModelId:    req.ModelId,
 			Considered: plan.Rejected,
 			Total:      plan.Total,
@@ -214,7 +213,7 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 	if lastErr == nil {
 		lastErr = memqlengine.ErrFleetUnavailable
 	}
-	return memqlengine.FleetCallResult{}, &FleetUnavailableError{
+	return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
 		ModelId:    req.ModelId,
 		Considered: plan.Rejected,
 		Total:      plan.Total,
@@ -395,51 +394,4 @@ func usageFrom(u workerservice.ModelCallUsage) memqlengine.FleetUsage {
 	}
 }
 
-// FleetUnavailableError is the typed refusal: no eligible machine, WITH the
-// machines considered and why each was ruled out.
-//
-// It carries the report rather than a bare sentinel because of what a bare
-// one costs. `no_worker_available` learned this: an empty candidate set says
-// only that the router found nothing, while the question a person actually has
-// is which of their four machines was ruled out for what. memql#4682 renders
-// this into the park card.
-type FleetUnavailableError struct {
-	ModelId string
-	// Considered maps machine id -> why it was ruled out.
-	Considered map[string]string
-	// Total is how many machines were looked at before any filtering, which
-	// separates "you have no machines" from "none of your four matched".
-	Total     int
-	LastError string
-}
-
-func (e *FleetUnavailableError) Error() string {
-	if e == nil {
-		return memqlengine.ErrFleetUnavailable.Error()
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "no eligible machine for model %s", e.ModelId)
-	if e.Total == 0 {
-		b.WriteString(" (no machines are paired)")
-	}
-	keys := make([]string, 0, len(e.Considered))
-	for k := range e.Considered {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		fmt.Fprintf(&b, "; %s: %s", k, e.Considered[k])
-	}
-	if e.LastError != "" {
-		fmt.Fprintf(&b, "; last attempt: %s", e.LastError)
-	}
-	return b.String()
-}
-
-// Unwrap makes errors.Is(err, memqlengine.ErrFleetUnavailable) true, so a
-// caller that only wants to know "unavailable" does not have to type-assert.
-func (e *FleetUnavailableError) Unwrap() error { return memqlengine.ErrFleetUnavailable }
-
 var _ memqlengine.FleetInference = (*FleetInference)(nil)
-var _ error = (*FleetUnavailableError)(nil)
-var _ = errors.Is
