@@ -25,6 +25,7 @@ wizard if the env var is unset.
 | `domain_restricted`  | Email must match `MEMQL_IDENTITY_REGISTRATION_DOMAINS`.                       |
 | `invite_only`        | No self-registration. Users only enter via admin invitations.           |
 | `waitlist`           | Users submit access requests; admins approve into invitations.          |
+| `directory`          | **Directory membership is the invitation** (memql#4611). Nobody self-registers by email; a person who authenticates through the configured upstream provider is admitted. See [oidc-federation.md](oidc-federation.md). |
 
 Mode is read by the identity web app (registration form) and by
 the magic-link issuer (rejects new emails when the mode forbids
@@ -140,6 +141,7 @@ flows:
   | `invite_only` | The normal path. The link is the only way in. |
   | `waitlist` | This verb mints the `invitationId` `approveAccessRequest` needs, which is what turns the queue into an admission. |
   | `domain_restricted` | **Refused** unless the address matches the allowlist. A link the recipient cannot redeem is worse than a refusal -- they only find out after clicking. |
+  | `directory` | The normal path for somebody the directory does NOT cover -- a contractor, an auditor. Staff need no invitation, which is the mode's whole point; an invitation is the escape hatch for everyone else, and it still works. |
   | `open` | Permitted, and the reply says the mode so a console can tell the operator this is a courtesy: the recipient could have registered unaided. |
 
   An inviter cannot grant a role above their own.

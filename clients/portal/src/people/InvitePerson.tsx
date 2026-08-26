@@ -57,6 +57,12 @@ export function modeStatement(mode: string, domains: string): string {
       return "Users can request access to this cluster. An invitation admits somebody directly, without waiting.";
     case "open":
       return "Anyone with an email can register on this cluster, so an invitation here is a convenience rather than a gate.";
+    case "directory":
+      // memql#4611. Directory membership IS the invitation for staff, so this
+      // control is for the people the directory does NOT cover -- and saying
+      // so is the difference between an operator who understands why the
+      // invite panel still exists and one who thinks it is now redundant.
+      return "This cluster admits people through your organisation's directory. An invitation is for somebody the directory does not cover -- a contractor, an auditor.";
     default:
       return "";
   }
