@@ -217,6 +217,30 @@ func structuredFallbackMessages(rendered string, schema json.RawMessage) []commo
 	}
 }
 
+// stripJSONFences unwraps a leading markdown code fence (```json, ```JSON or
+// bare ```) and its closing fence from a chat reply, returning the content
+// between them. Anything that does not open with a fence passes through
+// untouched -- this trims a wrapper, it does not hunt for JSON in prose.
+func stripJSONFences(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed
+	}
+	rest := trimmed[3:]
+	// Drop the fence's info string ("json", "JSON", or nothing) with its line.
+	if i := strings.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[i+1:]
+	} else {
+		// A one-line "```{...}```" -- rare, but trim both ends of it.
+		rest = strings.TrimPrefix(rest, "json")
+	}
+	rest = strings.TrimSpace(rest)
+	if i := strings.LastIndex(rest, "```"); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.TrimSpace(rest)
+}
+
 func (e *MemQLEngine) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
@@ -292,6 +316,14 @@ func (e *MemQLEngine) InvokeAIStructured(
 			return "", fmt.Errorf("no chat provider available for structured invocation")
 		}
 		result, err = chat.CallChat(ctx, structuredFallbackMessages(rendered, schema))
+		if err == nil {
+			// A chat model asked for "ONLY JSON" wraps it in a markdown
+			// fence often enough that the wrapper is the common case, not
+			// the exception (claude-sonnet-4-6, prod 2026-08-26: perfect
+			// JSON inside ```json, parse failed on the backtick). The
+			// structured paths above return verbatim JSON and skip this.
+			result = stripJSONFences(result)
+		}
 	}
 	if err != nil {
 		return "", err
