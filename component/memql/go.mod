@@ -36,7 +36,7 @@ require (
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/docs v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (

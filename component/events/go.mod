@@ -11,7 +11,7 @@ require (
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0-00010101000000-000000000000
 	github.com/znasllc-io/memql/core v0.0.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
