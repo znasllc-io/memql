@@ -24,9 +24,17 @@
 # THE CHAIN, and why it is four objects rather than two:
 #
 #   memql-internal-selfsigned (Issuer, selfSigned)
-#     -> memql-internal-ca (Certificate, isCA)  --> Secret `memql-ca`
-#          -> memql-internal-ca (Issuer, ca:)
-#               -> identity-tls (Certificate)   --> Secret `identity-tls`
+#     -> memql-internal-ca (Certificate, isCA)  --> Secret `memql-internal-ca`
+#          -> memql-internal-ca (Issuer, ca:)      (NEVER mounted -- holds the CA key)
+#               |-> memql-ca-bundle (Certificate) --> Secret `memql-ca`      (mounted x10)
+#               '-> identity-tls    (Certificate) --> Secret `identity-tls`
+#
+# THE CA SECRET AND THE MOUNTED BUNDLE ARE TWO DIFFERENT OBJECTS (memql#4599),
+# and that separation is the point: the Issuer reads the first, so it cannot go
+# Ready against a CA this component is about to replace, and the bundle and the
+# leaf are issued from that one Issuer, so they cannot disagree about who signed
+# what. The old shape had both roles on `memql-ca` and could mint a leaf against
+# the outgoing CA during adoption -- a failure no restart could fix.
 #
 # The two Issuers are NAMESPACED, not ClusterIssuers, deliberately: this CA is
 # an internal trust root for one instance's mesh and has no business being
@@ -38,8 +46,11 @@
 # cert-manager Certificate produces a kubernetes.io/tls Secret carrying tls.crt,
 # tls.key AND ca.crt. `memql-ca` is mounted by TEN workloads, and a volume with
 # no `items:` selector projects EVERY key -- so shipping this chain naively
-# would put THE CA'S PRIVATE KEY inside every mesh pod, and SSL_CERT_DIR would
-# scan it. Every one of those ten mounts therefore selects `ca.crt` explicitly.
+# would put a private key inside every mesh pod, and SSL_CERT_DIR would scan it.
+# Every one of those ten mounts therefore selects `ca.crt` explicitly. Since
+# memql#4599 the key in `memql-ca` belongs to a throwaway leaf rather than to
+# the CA, so a forgotten selector is no longer a trust-root compromise -- but
+# the selector stays required, because it is still a private key.
 # The openssl path produces a generic Secret with ca.crt alone, so the same
 # selector is correct there and the two paths stay interchangeable.
 #
@@ -59,8 +70,29 @@ kind: Certificate
 metadata:
   name: memql-internal-ca
 spec:
-  # The Secret name IS the contract -- ten Deployments name it.
-  secretName: memql-ca
+  # THE CA'S OWN SECRET, WHICH NOTHING MOUNTS AND NOTHING PRE-SEEDS (memql#4599).
+  #
+  # This used to be `memql-ca` -- the same Secret the Issuer below reads and the
+  # same one ten Deployments mount. Adopting the component on a live cluster
+  # then had a race it could not lose gracefully: a hand-seeded `memql-ca`
+  # already existed, so the CA Issuer went Ready against the OUTGOING CA and
+  # signed identity-tls with it, one second before this Certificate replaced the
+  # Secret's contents:
+  #
+  #   identity-tls        notBefore 2026-08-25T19:22:00Z   signer 7C:03:91...
+  #   memql-internal-ca   notBefore 2026-08-25T19:22:01Z   bundle 6F:2F:94...
+  #
+  # Every mesh node then rejected identity with `remote error: tls: bad
+  # certificate`, while every pod stayed Running and Ready and ArgoCD reported
+  # Healthy -- only sign-in was broken, as a 502 on "Continue to sign in". A
+  # restart did not help, because the certificate itself was wrong.
+  #
+  # With the CA in a Secret of its own, the Issuer CANNOT go Ready until this
+  # Certificate has been issued, so a leaf can only ever be signed by the CA
+  # this component minted. The race is gone by construction rather than by
+  # ordering, which is the property the issue asked for: restart ORDERING is a
+  # runbook step that gets skipped under pressure.
+  secretName: memql-internal-ca
   isCA: true
   commonName: memql-internal-ca
   subject:
@@ -87,7 +119,53 @@ metadata:
   name: memql-internal-ca
 spec:
   ca:
-    secretName: memql-ca
+    # The CA's own Secret, not the mounted trust bundle. See memql#4599 above.
+    secretName: memql-internal-ca
+---
+# THE TRUST BUNDLE THE MESH MOUNTS (memql#4599).
+#
+# `memql-ca` is the name ten Deployments carry, so it stays the contract -- what
+# changes is what PRODUCES it. It is now a leaf issued by the CA above, which
+# means cert-manager writes the CA into its `ca.crt` and keeps it in step with
+# the signer: the bundle and identity-tls are issued from the SAME Issuer, so
+# they cannot disagree about who the CA is. That is the defect this closes --
+# the failure was permanent precisely because bundle and leaf came from two
+# different CAs, and no restart could reconcile them.
+#
+# A ROTATION STILL NEEDS A MESH RESTART. Pods read ca.crt at startup, so a
+# running pod keeps trusting the CA it booted with. What is different is that
+# the restart is now SUFFICIENT: both Secrets carry the same new CA, so a roll
+# in any order converges. scripts/deploy/verify-internal-tls.sh is the preflight
+# that says whether one is needed, and prints the reissue remedy when the two
+# have drifted.
+#
+# THE CA'S PRIVATE KEY IS NO LONGER IN THIS SECRET, and that is a second win.
+# The old shape put the CA key in every one of the ten pods that mount this --
+# survivable only because every mount selects `items: [ca.crt]`, one forgotten
+# selector away from shipping a trust root's key to the mesh. The tls.key here
+# now belongs to a throwaway leaf nothing presents.
+#
+# NOT A SERVING CERTIFICATE. It exists to materialise `ca.crt`; the commonName
+# is descriptive and no dnsName is claimed, so it can never be mistaken for one.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: memql-ca-bundle
+spec:
+  # The Secret name IS the contract -- ten Deployments name it.
+  secretName: memql-ca
+  commonName: memql-ca-bundle
+  usages:
+    - client auth
+  duration: 19800h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    name: memql-internal-ca
+    kind: Issuer
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate

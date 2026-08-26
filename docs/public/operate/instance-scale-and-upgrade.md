@@ -118,11 +118,24 @@ There are two kinds of upgrade and only one of them is inherently safe.
 
 ### Application version rolls -- already zero-downtime
 
-Every mesh Deployment ships `maxSurge: 1, maxUnavailable: 0`. Kubernetes starts
+An instance overlay ships `maxSurge: 1, maxUnavailable: 0`. Kubernetes starts
 the replacement pod, waits for it to pass its readiness probe, and only then
 terminates the old one. **There is never a moment with zero ready pods**, even
 at one replica -- provided a node has room for the surge pod, which is the same
 headroom the scale section measured.
+
+> **This sentence was not true before memql#4598, and the paragraph above said
+> it anyway.** `base` ships `maxSurge: 0, maxUnavailable: 1` -- correctly, for
+> the two replicas it declares: draining old before starting new keeps a roll
+> from transiently doubling a node's Postgres pools (memql#1858), and one pod is
+> always ready. At the **one** replica an entry install runs, the identical
+> setting reads "take the only pod down, then start its replacement", and a
+> `v0.19.9 -> v0.20.0` bump returned 503 from the portal for about fifteen
+> minutes. `overlays/cloud-entry` now states the strategy itself, alongside the
+> replica counts, and right-sizes the mesh requests from measured usage (50m /
+> 128Mi against 2-12m / 44-56Mi observed) so the surge pod can actually be
+> placed -- `maxUnavailable: 0` only rolls if there is somewhere to put the new
+> pod, and at the old 200m x 6 on a two-node 2-vCPU pool there was not.
 
 The roll itself is a digest change in the instance overlay, reconciled by
 ArgoCD:
@@ -182,6 +195,42 @@ work into a window and say so, rather than describing the instance as
 zero-downtime.
 
 **Single-replica services during node maintenance**, as covered above.
+
+### Before an upgrade: check that the mesh still trusts identity
+
+Run this **before** syncing, and again after any change that could rotate the
+internal CA:
+
+```bash
+scripts/deploy/verify-internal-tls.sh --context=<ctx> --namespace=memql
+```
+
+It compares the CA in the `memql-ca` trust bundle every mesh pod mounts against
+the CA that actually signed identity's serving certificate, and exits 3 when
+they disagree.
+
+**Why this is worth its own step.** When those two drift, every mesh node
+rejects identity with `remote error: tls: bad certificate` -- and **every pod
+stays Running and Ready, ArgoCD reports Healthy, and nothing anywhere names
+TLS**. The only symptom is a 502 on "Continue to sign in". It happened on a live
+install (memql#4599): adopting `components/internal-tls` onto a cluster whose
+`memql-ca` had been hand-seeded let cert-manager sign `identity-tls` against the
+outgoing CA one second before replacing it.
+
+That specific race is gone -- the CA now lives in a Secret of its own, so the
+issuer cannot go Ready against a CA it is about to replace, and the bundle and
+the leaf are issued from that one issuer. What remains is ordinary: **pods read
+`ca.crt` at startup**, so a CA rotation leaves running pods trusting the
+outgoing CA until they are restarted. The check tells you whether that restart
+is owed.
+
+If it exits 3, a restart alone is not enough -- reissue the leaf first:
+
+```bash
+kubectl -n memql delete secret identity-tls     # cert-manager remints from the current CA
+kubectl -n memql rollout restart deploy/identity
+kubectl -n memql rollout restart deploy/bff deploy/cognition deploy/agent deploy/planner deploy/workbench deploy/edge
+```
 
 ## Verifying, and the trap in verifying
 

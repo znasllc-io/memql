@@ -110,6 +110,71 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 0 }
 
+  # -------------------------------------------------------------------------
+  # EVERY UPGRADE WAS AN OUTAGE, BY CONSTRUCTION (memql#4598).
+  # -------------------------------------------------------------------------
+  # base carries `maxSurge: 0 / maxUnavailable: 1`, and its reason is good: at
+  # the 2 replicas base declares, draining old before starting new keeps a roll
+  # from transiently doubling a node's Postgres pools and overshooting
+  # max_connections (memql#1858). There is always one ready pod, so there is no
+  # outage.
+  #
+  # AT THE ONE REPLICA THIS OVERLAY DECLARES, THE SAME SETTING READS: take the
+  # only pod down, then start its replacement. No window has a ready pod in it.
+  # A v0.19.9 -> v0.20.0 bump on a live entry install returned 503 from the
+  # portal for about fifteen minutes (znasllc-io/memql-znas#18). This is
+  # capacity-independent -- no amount of headroom changes it.
+  #
+  # So the strategy is STATED here, exactly as the replica counts above are,
+  # and for the same reason: it is a consequence of running at one replica, not
+  # a property of the mesh. base is untouched and overlays/cloud keeps
+  # memql#1858's behaviour unchanged. Surging to 2 pods transiently on entry is
+  # the same connection load overlays/cloud carries at rest, so #1858's ceiling
+  # is not approached.
+  #
+  # bff is deliberately absent: components/engine-bff already declares
+  # maxUnavailable 0 / maxSurge 1, and the voice-off deployments are absent
+  # because a rollout of zero replicas rolls nothing.
+  #
+  # THE SECOND HALF IS NOT OPTIONAL. `maxUnavailable: 0` is only honest if a
+  # surge pod can actually be placed, and at 200m x 6 on a two-node 2-vCPU pool
+  # it could not be -- the surge replica went FailedScheduling/Insufficient cpu,
+  # so this setting alone would stall a roll rather than fix it. The
+  # right-sizing below is what makes room for it. One defect, two patches.
+  - target:
+      kind: Deployment
+      name: (identity|cognition|agent|planner|workbench|edge)
+    patch: |
+      - { op: replace, path: /spec/strategy/rollingUpdate/maxUnavailable, value: 0 }
+      - { op: replace, path: /spec/strategy/rollingUpdate/maxSurge, value: 1 }
+
+  # RIGHT-SIZED FROM MEASURED USAGE, not from a guess (memql#4598). Measured on
+  # a live entry install:
+  #
+  #                  reserved   measured
+  #   CPU per node   200m       2-12m   (identity 12m, the rest 2-4m)
+  #   Memory         256Mi      44-56Mi
+  #   pool total     72-78%     3-4%
+  #
+  # 50m is still ~4x the busiest node's CPU and 128Mi ~2.3x its memory, so this
+  # is headroom, not a squeeze. It reserves 300m/768Mi across the six instead of
+  # 1200m/1536Mi, which is what leaves a 2-vCPU pool able to place the surge
+  # replica the strategy above now asks for.
+  #
+  # REQUESTS ONLY -- no limits. A CPU limit throttles rather than fails, which
+  # turns a burst into latency nobody can see in a dashboard, and these are
+  # scheduling reservations, not a capacity policy. base keeps its sizes for
+  # overlays/cloud, whose pool is not the constraint.
+  - target:
+      kind: Deployment
+      name: (identity|cognition|agent|planner|workbench|edge)
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests
+        value:
+          cpu: 50m
+          memory: 128Mi
+
   # VOICE-OFF, PART TWO: NO PUBLIC IPs (memql#4225). Replicas 0 above stops
   # the pods; it does not stop Azure allocating a public IP for every
   # LoadBalancer Service base declares for the media plane (livekit-rtc)

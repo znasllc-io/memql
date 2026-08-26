@@ -43,8 +43,9 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 	// ContainerCreating.
 	want := map[string]string{
 		"Issuer/memql-internal-selfsigned": "the self-signed root the CA certificate is issued from",
-		"Certificate/memql-internal-ca":    "the CA itself; its secretName IS the memql-ca contract",
+		"Certificate/memql-internal-ca":    "the CA itself, in a Secret nothing mounts (memql#4599)",
 		"Issuer/memql-internal-ca":         "the issuer that signs leaves from the CA Secret",
+		"Certificate/memql-ca-bundle":      "the trust bundle the mesh mounts, derived from that CA",
 		"Certificate/identity-tls":         "identity's serving certificate",
 	}
 
@@ -70,9 +71,38 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 			for _, c := range certificatesIn(t, rendered) {
 				switch c.Name {
 				case "memql-internal-ca":
+					// THE CA MUST NOT OWN THE MOUNTED SECRET (memql#4599).
+					// When it did, the CA Issuer read the same Secret ten
+					// Deployments mount -- so on adoption it went Ready
+					// against a hand-seeded OUTGOING CA and signed
+					// identity-tls with it, one second before this
+					// Certificate replaced the contents. Every mesh node
+					// then rejected identity with `tls: bad certificate`
+					// while staying Running, Ready and Healthy, and a
+					// restart could not fix it because the certificate
+					// itself was wrong.
+					if c.SecretName == "memql-ca" {
+						t.Errorf("%s: the CA Certificate writes the MOUNTED Secret \"memql-ca\". "+
+							"The CA needs a Secret of its own so the Issuer cannot go Ready "+
+							"against a CA this component is about to replace (memql#4599)", overlay)
+					}
+					if c.SecretName != "memql-internal-ca" {
+						t.Errorf("%s: the CA Certificate writes %q, but Issuer/memql-internal-ca "+
+							"reads \"memql-internal-ca\"", overlay, c.SecretName)
+					}
+				case "memql-ca-bundle":
 					if c.SecretName != "memql-ca" {
-						t.Errorf("%s: the CA Certificate writes %q, but ten Deployments mount "+
+						t.Errorf("%s: the trust bundle writes %q, but ten Deployments mount "+
 							"\"memql-ca\"", overlay, c.SecretName)
+					}
+					// The bundle and the leaf MUST come from one Issuer.
+					// That is what makes them unable to disagree about who
+					// the CA is -- the property whose absence made the
+					// original failure permanent.
+					if c.IssuerName != "memql-internal-ca" {
+						t.Errorf("%s: the trust bundle is issued by %q rather than the internal CA. "+
+							"Bundle and leaf must share an issuer or they can disagree about who "+
+							"signed what, which is a failure no restart resolves", overlay, c.IssuerName)
 					}
 				case "identity-tls":
 					if c.SecretName != "identity-tls" {
