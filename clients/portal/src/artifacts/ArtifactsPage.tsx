@@ -2,15 +2,15 @@ import { useState, type DragEvent, type FormEvent, type ReactNode } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
+import { ArrangedPage } from "../pages/ArrangedPage";
+import { ARTIFACTS_PAGE, ARTIFACTS_PAGE_ID } from "./manifest";
 import { RowList } from "../components/RowList";
 import {
   Band,
   Button,
   ButtonLink,
   ConfirmDialog,
-  Container,
   DataText,
   EmptyState,
   ErrorNotice,
@@ -60,7 +60,28 @@ import {
 // back button undoes a click the way an operator expects. The three compose:
 // ?q=budget&label=finance is "artifacts about budgets, among the ones
 // labelled finance".
+// The page (epic memql#4661, task memql#4674). An ARRANGEMENT: the header, the
+// version strip and the regenerate control come from ArrangedPage, and
+// everything below is one widget.
+//
+// It stayed one widget because most of this page is CONTROLS -- an upload, a
+// search, a create form, a label filter and a confirm dialog -- which is
+// exactly what a widget is for. The reading the arrangement adds beside it is
+// the count, rendered by the element library over the same rows.
 export function ArtifactsPage(): ReactNode {
+  return (
+    <ArrangedPage
+      manifest={ARTIFACTS_PAGE}
+      pageId={ARTIFACTS_PAGE_ID}
+      selectedRowId=""
+      onSelect={() => {}}
+    />
+  );
+}
+
+// ArtifactsBody is what the `artifacts` widget renders: every behaviour the
+// page had, unchanged.
+export function ArtifactsBody(): ReactNode {
   const navigate = useNavigate();
   const { concepts, loading: conceptsLoading, error: conceptsError } = useConcepts();
   const [params, setParams] = useSearchParams();
@@ -119,19 +140,13 @@ export function ArtifactsPage(): ReactNode {
   const hits = label === "" ? searchState.hits : searchState.hits.filter((hit) => hit.labels.includes(label));
 
   return (
-    <Container>
-      <AreaFrame
-        area="library"
-        pageId="library.artifacts"
-        subtitle="Library"
-        title="Artifacts"
-        blurb="Everything this cluster's Library has indexed for you -- files you uploaded, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
-        actions={
+    <>
+      <section className="flex min-w-0 flex-col gap-6">
+        <div className="flex justify-end">
           <Button size="xs" onClick={reload}>
             Refresh
           </Button>
-        }
-      >
+        </div>
 
         <Band
           title="Upload a file"
@@ -229,7 +244,7 @@ export function ArtifactsPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </AreaFrame>
+      </section>
 
       <ConfirmDialog
         open={pendingArchive !== null}
@@ -253,7 +268,7 @@ export function ArtifactsPage(): ReactNode {
           it.
         </p>
       </ConfirmDialog>
-    </Container>
+    </>
   );
 }
 

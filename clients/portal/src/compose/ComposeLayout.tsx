@@ -18,17 +18,28 @@ import { Band as UiBand, Button, PopulationMeta as UiPopulationMeta } from "../u
 // what stays here is only what is composer-specific (an h3 band, the accent
 // save tone, the per-concept SectionHeader).
 
-// ComposeBand is ui/Band at the h3 level: a composed view stacks per-concept
-// sections, so its bands sit one heading level below a page's.
+// ComposeBand is ui/Band with the heading level made explicit.
+//
+// IT IS A REAL DECISION, not a detail. A band caption is a page's second-level
+// structure -- "By role", "Everyone" -- so on a page it is an h2 under the
+// page's h1. Inside the COMPOSER a section header already occupies h2 (a
+// composed view stacks per-concept sections and each one is titled), so the
+// bands sit one level below it.
+//
+// Getting this wrong is invisible on screen and wrong for everyone navigating
+// by headings, which is why the caller states it rather than this file
+// guessing from context it cannot see.
 export function ComposeBand({
   title,
   meta,
   panel = false,
+  headingLevel = "h3",
   children,
 }: {
   title?: string;
   meta?: ReactNode;
   panel?: boolean;
+  headingLevel?: "h2" | "h3";
   children: ReactNode;
 }): ReactNode {
   return (
@@ -36,7 +47,7 @@ export function ComposeBand({
       {...(title === undefined ? {} : { title })}
       {...(meta === undefined ? {} : { meta })}
       panel={panel}
-      headingLevel="h3"
+      headingLevel={headingLevel}
     >
       {children}
     </UiBand>

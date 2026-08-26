@@ -1,7 +1,8 @@
-import { useEffect, useMemo, type Dispatch, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode } from "react";
 import {
   elementCandidates,
   profileConcept,
+  sanitizeArrangement,
   type ConceptProfile,
 } from "@znasllc-io/memql-view-kit";
 
@@ -9,8 +10,11 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
 import { Empty } from "../components/StatusMessage";
 import { ErrorNotice, Skeleton } from "../ui";
-import { ArrangementBands } from "./ArrangementBands";
+import { ArrangementLayout } from "./ArrangementLayout";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
+import { SCENE_IDS } from "../nexus/scene/registry";
+import { WIDGET_IDS } from "../widgets/registry";
+import { Inspector } from "./Inspector";
 import type { ComposerAction, ComposerDraft } from "./composerState";
 import { useArrangementSuggestion, type ArrangementSuggester } from "./suggest";
 
@@ -75,7 +79,41 @@ export function ComposerSection({
     dispatch({ kind: "seeded", conceptId, profile });
   }, [profile, conceptId, dispatch]);
 
+  // WHAT YOU SEE IS WHAT SHIPS, and it was not (found in the visual QA sweep,
+  // task memql#4675). The preview rendered the DRAFT; a saved view renders the
+  // draft put through sanitizeArrangement. So choosing `split` with no detail
+  // pane drew a split in the composer and a stack everywhere else, and a
+  // `focus` with no hero drew a lead column the saved view would not have.
+  //
+  // The preview is the sanitized value now. A person choosing a layout the
+  // entries cannot honour sees it fall back immediately -- which is the honest
+  // answer and one they can act on, where the old preview was a promise the
+  // save quietly broke.
+  //
+  // The DRAFT is untouched: sanitize repairs the rendered value and never the
+  // stored one, so the layout somebody chose is still what gets written and
+  // becomes live the moment they add the element it needs.
+  //
+  // ABOVE the early returns, deliberately: a hook after a conditional return
+  // changes the hook COUNT between renders, which React answers by discarding
+  // the subtree -- the composer rendered nothing at all until this moved.
+  const draftArrangement = draft.arrangements[conceptId];
+  const preview = useMemo(
+    () =>
+      draftArrangement === undefined || profile === undefined
+        ? undefined
+        : sanitizeArrangement(draftArrangement, profile, {
+            scenes: SCENE_IDS,
+            widgets: WIDGET_IDS,
+          }),
+    [draftArrangement, profile],
+  );
+
   const suggestion = useArrangementSuggestion(profile, suggester);
+  // Which entry the inspector is on. Held HERE rather than in the draft: it is
+  // a property of looking at a view, not of the view, and putting it in the
+  // draft would make selecting an element mark the view dirty.
+  const [selected, setSelected] = useState(0);
 
   if (data.registryError) {
     return <ErrorNotice sentence="Could not read the concept registry, so this section cannot be drawn." detail={data.registryError} />;
@@ -99,8 +137,9 @@ export function ComposerSection({
     );
   }
 
-  const arrangement = draft.arrangements[conceptId];
+  const arrangement = draftArrangement;
   const candidates = elementCandidates(profile);
+
 
   return (
     <section className="flex min-w-0 flex-col gap-5">
@@ -115,28 +154,12 @@ export function ComposerSection({
             onRetry={data.retry}
           />
         }
-        actions={
-          <div className="flex items-center gap-2">
-            <ComposeButton
-              onClick={suggestion.ask}
-              disabled={suggestion.status === "asking"}
-              title="Ask a model to propose an arrangement. The one below already works."
-            >
-              {suggestion.status === "asking" ? "Asking…" : "Suggest an arrangement"}
-            </ComposeButton>
-            <ComposeButton
-              onClick={() => dispatch({ kind: "reset", conceptId, profile })}
-              title="Discard edits and go back to the arrangement matched from these rows."
-            >
-              Start over
-            </ComposeButton>
-          </div>
-        }
       />
 
-      {/* The suggestion, when there is one to report. Rendered ABOVE the view
-          rather than replacing it -- a proposal is an offer, and the thing it
-          is an offer to replace has to stay visible while it is considered. */}
+      {/* The suggestion, when there is one to report. Rendered ABOVE both panes
+          rather than replacing either -- a proposal is an offer, and the thing
+          it is an offer to replace has to stay visible while it is
+          considered. */}
       {suggestion.status === "unavailable" ? (
         <p className="rounded border border-line bg-raised px-3 py-2 text-sm text-muted">
           No suggestion available: {suggestion.unavailable}. The arrangement below was
@@ -177,90 +200,38 @@ export function ComposerSection({
         </div>
       ) : null}
 
-      {arrangement === undefined ? (
+      {/* TWO PANES (spec E). The live view on the left is rendered by the
+          SAME component that renders a saved view, with nothing added: no
+          controls sit on it, because the thing a person is judging should not
+          be covered in the buttons they are judging it with. Everything that
+          edits is in the inspector. */}
+      {arrangement === undefined || preview === undefined ? (
         <Skeleton variant="rows" rows={4} />
       ) : (
-        <ArrangementBands
-          arrangement={arrangement}
-          concept={concept}
-          rows={data.rows}
-          controls={(index) => (
-            <span className="flex items-center gap-1">
-              <ComposeButton
-                onClick={() => dispatch({ kind: "elementMoved", conceptId, at: index, by: -1 })}
-                disabled={index === 0}
-                title="Move up"
-              >
-                ↑
-              </ComposeButton>
-              <ComposeButton
-                onClick={() => dispatch({ kind: "elementMoved", conceptId, at: index, by: 1 })}
-                disabled={index === arrangement.elements.length - 1}
-                title="Move down"
-              >
-                ↓
-              </ComposeButton>
-              <ComposeButton
-                tone="danger"
-                onClick={() => dispatch({ kind: "elementRemoved", conceptId, at: index })}
-                title="Remove from this view"
-              >
-                Remove
-              </ComposeButton>
-            </span>
-          )}
-        />
+        <div className="flex min-w-0 flex-col gap-6 xl:flex-row xl:items-start">
+          <div className="min-w-0 flex-1">
+            <ArrangementLayout
+              arrangement={preview}
+              concept={concept}
+              rows={data.rows}
+              onSelectEntry={setSelected}
+              selectedEntry={selected}
+            />
+          </div>
+          <Inspector
+            conceptId={conceptId}
+            arrangement={arrangement}
+            profile={profile}
+            candidates={candidates}
+            dispatch={dispatch}
+            selected={selected}
+            onSelect={setSelected}
+            onSuggest={suggestion.ask}
+            suggesting={suggestion.status === "asking"}
+            onReset={() => dispatch({ kind: "reset", conceptId, profile })}
+          />
+        </div>
       )}
-
-      {/* WHAT FITS, AND WHY NOT. Every element in the library is listed --
-          including the ones that CANNOT render these rows -- because the
-          question a person actually has is "why can't I pick the calendar",
-          and the answer is view-kit's own sentence rather than an absence.
-          Always visible rather than folded into a disclosure: in a composer
-          the list of what fits is the primary tool, not a footnote. */}
-      <div className="rounded border border-line bg-surface px-3 py-2">
-        <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">
-          What fits {concept.entity} ({candidates.filter((c) => c.usable).length} of{" "}
-          {candidates.length})
-        </h3>
-        <ul className="mt-3 flex flex-col gap-3">
-          {candidates.map((candidate) => {
-            const inView =
-              arrangement !== undefined &&
-              arrangement.elements.some((e) => e.element === candidate.element.id);
-            return (
-              <li key={candidate.element.id} className="flex items-start gap-3">
-                <span className="w-24 shrink-0">
-                  {candidate.usable && !inView ? (
-                    <ComposeButton
-                      onClick={() =>
-                        dispatch({
-                          kind: "elementAdded",
-                          conceptId,
-                          element: candidate.element.id,
-                        })
-                      }
-                    >
-                      Add
-                    </ComposeButton>
-                  ) : (
-                    <span className="text-xs text-subtle">
-                      {inView ? "in this view" : "does not fit"}
-                    </span>
-                  )}
-                </span>
-                <span className="min-w-0">
-                  <span className="text-sm font-medium text-fg">
-                    {candidate.element.title}
-                  </span>{" "}
-                  <span className="text-xs text-subtle">({candidate.band} band)</span>
-                  <p className="text-xs text-muted">{candidate.explanation}</p>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
     </section>
   );
 }

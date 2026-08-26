@@ -32,6 +32,10 @@ export function renderRowList(
   rows: RowLike[],
   concept: ConceptLike,
   selectedRowId?: string,
+  // "cards" is the gallery layout's presentation of the same rows: the same
+  // display card, the same selection contract, laid out as a grid instead of
+  // a column. Not a different element -- see ElementOptions.display for why.
+  display: "list" | "cards" = "list",
 ): VNode {
   if (rows.length === 0) {
     return h("div", { class: "vk-empty" }, [
@@ -44,7 +48,10 @@ export function renderRowList(
   const card = resolveDisplayCard(concept, rows);
   const items = rows.map((row) => {
     const id = rowDisplayId(row);
-    const attrs: Record<string, string> = { class: "vk-row", "data-row-id": id };
+    const attrs: Record<string, string> = {
+      class: display === "cards" ? "vk-card" : "vk-row",
+      "data-row-id": id,
+    };
     if (selectedRowId !== undefined && id === selectedRowId) {
       attrs["data-selected"] = "true";
     }
@@ -81,5 +88,5 @@ export function renderRowList(
     return h("li", attrs, children);
   });
 
-  return h("ul", { class: "vk-rows" }, items);
+  return h("ul", { class: display === "cards" ? "vk-cards" : "vk-rows" }, items);
 }

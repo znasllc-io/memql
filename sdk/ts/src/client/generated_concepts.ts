@@ -560,6 +560,7 @@ export const BoundConcepts = {
   outboxPending: "v1:platform:outboxEntry",
   overrideById: "v1:healing:healedOverride",
   overridesForConstruct: "v1:healing:healedOverride",
+  pageOverride: "v1:portalviews:view",
   participantByAgentSpace: "v1:cognition:participant",
   participantSession: "v1:cognition:session",
   passkeyByCredentialId: "v1:identity:identity",
@@ -956,6 +957,7 @@ export const BoundConcepts = {
   workersForUser: "v1:worker:registration",
   workspaceForPlan: "v1:workbench:workspace",
   writeKnowledgeChunk: "v1:knowledge:documentChunk",
+  writePageOverride: "v1:portalviews:view",
 } as const;
 
 /** Full emitted CDC topics: graph.node.<action>.<concept>. */

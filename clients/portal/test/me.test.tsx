@@ -116,7 +116,29 @@ interface Fixture {
 
 function fakeConnection(fx: Fixture): Connection {
   const query = asQueryClient({
-    listConcepts: vi.fn(async () => []),
+    // The registry a real cluster publishes. It was empty here until epic
+    // memql#4661 made the Me tabs ARRANGEMENTS: a section resolves its concept
+    // through the registry like every other page, so an empty one means "this
+    // cluster publishes no such concept" -- true of this fixture and false of
+    // any cluster the page runs against.
+    listConcepts: vi.fn(async () => [
+      {
+        id: "v1:identity:user",
+        version: "v1",
+        domain: "identity",
+        entity: "user",
+        type: "concept",
+        description: "A person who can sign in",
+      },
+      {
+        id: "v1:identity:authSession",
+        version: "v1",
+        domain: "identity",
+        entity: "authSession",
+        type: "concept",
+        description: "A live session",
+      },
+    ]),
     getMyAccess: vi.fn(async () => ({
       userId: "v1:identity:user:u-42",
       primaryEmail: "ada@example.test",

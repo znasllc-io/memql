@@ -1,55 +1,61 @@
 import { Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { ArrangedPage } from "../pages/ArrangedPage";
+import type { PageManifest } from "../pages/manifest";
 import { NotFoundPage } from "../pages/NotFoundPage";
-import { AccountTab } from "./AccountTab";
-import { MeLayout } from "./MeLayout";
-import { SecurityTab } from "./SecurityTab";
-import { SessionsTab } from "./SessionsTab";
-import { SettingsTab } from "./SettingsTab";
+import { MeLayout, type MeChrome } from "./MeLayout";
+import {
+  ME_ACCOUNT_PAGE,
+  ME_ACCOUNT_PAGE_ID,
+  ME_SECURITY_PAGE,
+  ME_SECURITY_PAGE_ID,
+  ME_SESSIONS_PAGE,
+  ME_SESSIONS_PAGE_ID,
+  ME_SETTINGS_PAGE,
+  ME_SETTINGS_PAGE_ID,
+} from "./manifests";
 import { useMe } from "./useMe";
 
-// The profile surface (memql#4318), mounted from the route table as a SPLAT
-// (`me/*`) the way every other feature directory is. Adding a facet is a row
-// in urls.ts plus a Route here, and no edit outside this directory.
+// The Me tabs (epic memql#4661, task memql#4674).
 //
-// # One useMe for the whole surface, hoisted here
+// Four ARRANGEMENTS now, one per tab, rather than four React bodies inside a
+// shared frame. Each is a manifest whose body is a registered widget; the tab
+// bar and the heading come from MeLayout through ArrangedPage's own slots,
+// because a manifest is data and does not know whose page this is.
 //
-// The account read backs all four facets -- the header's name and role, the
-// Account facts, the Security tab's policy switch, and the Settings tab's
-// preference bag -- so it is read ONCE at the layout and passed down. A hook
-// per tab would re-run the query on every tab change, which is a visible
-// flicker on a page whose whole content is four short facts.
-//
-// Settings rides that read rather than adding its own: `preferences` is
-// already on the `userFull` shape currentUser projects, so a second query
-// would ask for a field this one has in hand (memql#4523).
-//
-// Sessions is the exception and reads its own (useMySessions): it is the one
-// facet whose data is expensive enough to be worth not fetching until
-// somebody asks for it, and it refreshes on its own schedule after a revoke.
-//
-// # Nothing here is an authorization gate
-//
-// Every read behind these tabs is SELF-SCOPED server-side -- currentUser,
-// passkeysForSelf and authSessionsForSelf resolve their row set from
-// actor.userId and take no user id at all -- and every write resolves its
-// target from the verified caller rather than from an argument, the Settings
-// tab's updateMyPreferences and toggleComputerUseEnabled included. This module
-// decides what renders, not what is permitted.
-
+// What the convergence buys here is not cosmetic. Every tab has a version
+// strip and a regenerate control, so somebody who wants their sessions above
+// their preferences can have that, stored per-person like every other page
+// override -- on the page the epic singled out as the one nobody would expect
+// to converge.
 export function MeRoutes(): ReactNode {
   const me = useMe();
 
+  const tab = (manifest: PageManifest, pageId: string) => (chrome: MeChrome) => (
+    <ArrangedPage
+      manifest={manifest}
+      pageId={pageId}
+      selectedRowId=""
+      onSelect={() => {}}
+      title={chrome.title}
+      blurb={chrome.blurb}
+      actions={chrome.actions}
+      nav={chrome.nav}
+    />
+  );
+
   return (
     <MeLayout account={me.account} loading={me.loading}>
-      <Routes>
-        <Route index element={<AccountTab me={me} />} />
-        <Route path="settings" element={<SettingsTab me={me} />} />
-        <Route path="sessions" element={<SessionsTab />} />
-        <Route path="security" element={<SecurityTab me={me} />} />
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+      {(chrome) => (
+        <Routes>
+          <Route index element={tab(ME_ACCOUNT_PAGE, ME_ACCOUNT_PAGE_ID)(chrome)} />
+          <Route path="settings" element={tab(ME_SETTINGS_PAGE, ME_SETTINGS_PAGE_ID)(chrome)} />
+          <Route path="sessions" element={tab(ME_SESSIONS_PAGE, ME_SESSIONS_PAGE_ID)(chrome)} />
+          <Route path="security" element={tab(ME_SECURITY_PAGE, ME_SECURITY_PAGE_ID)(chrome)} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      )}
     </MeLayout>
   );
 }

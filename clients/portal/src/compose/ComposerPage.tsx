@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useReducer, useState, type ReactNode } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -7,10 +7,12 @@ import { Empty } from "../components/StatusMessage";
 import { ErrorNotice, Skeleton, TextInput } from "../ui";
 import { ComposeButton } from "./ComposeLayout";
 import { ComposerSection } from "./ComposerSection";
+import type { ViewDraft } from "./describe";
 import {
   composerReducer,
   draftArrangements,
   draftFromSavedView,
+  draftFromSuggestion,
   emptyDraft,
   isSavable,
   type ComposerDraft,
@@ -52,7 +54,17 @@ import { useSavedView, useSaveView } from "./useSavedViews";
 export function ComposerPage(): ReactNode {
   const [params] = useSearchParams();
   const conceptIds = useMemo(() => readConceptSelection(params), [params]);
-  const initial = useMemo(() => emptyDraft(conceptIds), [conceptIds]);
+  // A DESCRIBED draft arrives through history state rather than the URL (epic
+  // memql#4661): an arrangement is a structure, and a URL that carried one
+  // would be a URL nobody could read, share or shorten. The concept ids stay
+  // in the query string, so the address still says what the view is ABOUT and
+  // a reload without the state falls back to composing those concepts by hand
+  // -- which is a working composer, not an error.
+  const described = useDescribedDraft();
+  const initial = useMemo(
+    () => (described === undefined ? emptyDraft(conceptIds) : draftFromSuggestion(described)),
+    [conceptIds, described],
+  );
 
   if (conceptIds.length === 0) {
     return (
@@ -79,6 +91,27 @@ export function ComposerEditPage(): ReactNode {
     return <Empty>You have no saved view with that id.</Empty>;
   }
   return <Composer key={view.id} initial={draftFromSavedView(view)} mode="update" />;
+}
+
+// useDescribedDraft reads the draft "Describe it" put in history state.
+//
+// Typed defensively: history state is a value the BROWSER holds across a
+// reload and a person can arrive with anything in it. A malformed one is
+// treated as absent, which lands on the ordinary compose-by-hand path.
+function useDescribedDraft(): ViewDraft | undefined {
+  const { state } = useLocation();
+  if (state === null || typeof state !== "object") return undefined;
+  const draft = (state as Record<string, unknown>)["describedDraft"];
+  if (draft === null || typeof draft !== "object") return undefined;
+  const value = draft as Partial<ViewDraft>;
+  if (!Array.isArray(value.arrangements) || value.arrangements.length === 0) return undefined;
+  if (!Array.isArray(value.conceptIds) || value.conceptIds.length === 0) return undefined;
+  return {
+    name: typeof value.name === "string" ? value.name : "Suggested view",
+    reasoning: typeof value.reasoning === "string" ? value.reasoning : "",
+    conceptIds: value.conceptIds,
+    arrangements: value.arrangements,
+  };
 }
 
 function Composer({

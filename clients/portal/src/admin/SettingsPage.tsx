@@ -6,7 +6,7 @@ import type { ClusterSettingsEdit } from "@znasllc-io/memql-sdk-core/identityadm
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Band, Button, ErrorNotice, Field, Select, TextInput } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { brandAssetSummary, settingRows, SETTING_CONCEPT } from "./rows";
 
@@ -101,7 +101,7 @@ export function SettingsPage(): ReactNode {
               : "This cluster has no settings row yet. The first-run wizard writes it."}
           </p>
         ) : (
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={rows}
             concept={SETTING_CONCEPT}

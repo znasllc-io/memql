@@ -15,14 +15,17 @@
 
 import { h, text, type VNode } from "./vnode.js";
 import { rowDisplayId } from "./rowList.js";
-import { compareScalars, isMissing, scalarText } from "./format.js";
+import { cellAttrs, cellContent, cellKind, DISPLAY_COLUMN_CAP } from "./cell.js";
+import { compareScalars, isMissing } from "./format.js";
 import {
   boundFields,
   fitElement,
   profileConcept,
+  type ConceptProfile,
   type ElementOptions,
   type ElementRenderInput,
   type ElementSpec,
+  type FieldProfile,
 } from "./fitness.js";
 
 import type { ConceptLike, RowLike } from "./types.js";
@@ -64,6 +67,19 @@ export const TABLE_ELEMENT: ElementSpec = {
       // The display card orders the leading columns: whatever the concept
       // calls itself belongs at the left edge.
       prefer: ["primary", "secondary", "tertiary", "status"],
+      // CAPPED, since schema-first profiling made the field list COMPLETE and
+      // complete is not the same as useful: a concept with forty declared
+      // fields would render a forty-column table where the row-sampled
+      // profile used to show the dozen the loaded rows happened to carry.
+      //
+      // autoMax rather than max, so the cap binds only the AUTOMATIC choice.
+      // A person who names more columns in a binding gets all of them --
+      // naming a slot settles it, and second-guessing an explicit choice is
+      // what this must never do.
+      autoMax: DISPLAY_COLUMN_CAP,
+      // Among otherwise-equal candidates, a field the schema insists every
+      // row carries comes before one that is elaboration.
+      preferRequired: true,
     },
   ],
   render: (input) => draw(input),
@@ -99,11 +115,39 @@ function viewAction(id: string): VNode {
   );
 }
 
+// The per-column rendering rules, resolved ONCE for the whole table rather
+// than per cell. A rule cannot vary between rows of one field -- it is derived
+// from the field's profile, not from the value -- and deriving it per cell
+// would be one profile lookup per cell for an answer that is constant down the
+// column.
+interface ColumnRules {
+  readonly field: FieldProfile;
+  readonly kind: ReturnType<typeof cellKind>;
+}
+
+function columnPlan(
+  profile: ConceptProfile,
+  columns: readonly string[],
+): ReadonlyMap<string, ColumnRules> {
+  const byName = new Map(profile.fields.map((f) => [f.field, f]));
+  const out = new Map<string, ColumnRules>();
+  for (const column of columns) {
+    const field = byName.get(column);
+    // A bound column with no profile entry is a caller override naming a
+    // field nothing carries. It stays a column -- an override settles the
+    // slot -- and renders plainly, which is what an unknown field is.
+    if (field !== undefined) out.set(column, { field, kind: cellKind(field) });
+  }
+  return out;
+}
+
 function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
   const columns = boundFields(fit, "column");
   if (rows.length === 0 || columns.length === 0) {
     return h("div", { class: "vk-empty" }, [text(`No rows for ${concept.entity}.`)]);
   }
+
+  const plan = columnPlan(profileConcept(concept, rows), columns);
 
   const sort = options?.sort;
   const showView = options?.rowAction === "view";
@@ -135,9 +179,15 @@ function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
       attrs["data-selected"] = "true";
     }
     const cells = columns.map((field) => {
+      const rules = plan.get(field);
       const cell: Record<string, string> = { class: "vk-table-cell" };
       if (isLongTableField(field)) cell["data-vk-cell"] = "long";
-      return h("td", cell, [text(scalarText(row, field))]);
+      else if (rules !== undefined) Object.assign(cell, cellAttrs(rules.kind));
+      return h("td", cell, [
+        rules === undefined
+          ? text(String(row[field] ?? ""))
+          : cellContent(row, rules.field, rules.kind, options?.resolveRef),
+      ]);
     });
     if (showView) {
       cells.push(h("td", { class: "vk-table-cell vk-table-action" }, [viewAction(id)]));

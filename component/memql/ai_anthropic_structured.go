@@ -29,35 +29,65 @@ import (
 // StructuredChatProviderByName resolves them and the chat fallback becomes
 // what it was meant to be -- a last resort, not the Anthropic path.
 var (
-	_ common.ChatStructuredProvider = (*anthropicProvider)(nil)
-	_ common.ChatStructuredProvider = (*anthropicStreamProvider)(nil)
+	_ common.ChatStructuredProvider      = (*anthropicProvider)(nil)
+	_ common.ChatStructuredProvider      = (*anthropicStreamProvider)(nil)
+	_ common.ChatStructuredUsageProvider = (*anthropicProvider)(nil)
+	_ common.ChatStructuredUsageProvider = (*anthropicStreamProvider)(nil)
 )
 
 func (p *anthropicProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
-	return anthropicCallStructured(ctx, p.client, p.model, p.params, messages, schema)
+	content, _, err := anthropicCallStructured(ctx, p.client, p.model, p.params, messages, schema)
+	return content, err
 }
 
 func (p *anthropicStreamProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	content, _, err := anthropicCallStructured(ctx, p.client, p.model, p.params, messages, schema)
+	return content, err
+}
+
+// The usage-reporting half (epic memql#4661). Delegating in this direction --
+// the plain method calls the reporting one, never the reverse -- keeps ONE
+// request builder and one error taxonomy.
+func (p *anthropicProvider) CallChatStructuredWithUsage(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, common.ChatUsage, error) {
 	return anthropicCallStructured(ctx, p.client, p.model, p.params, messages, schema)
 }
 
-func anthropicCallStructured(ctx context.Context, client anthropic.Client, model string, params map[string]any, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+func (p *anthropicStreamProvider) CallChatStructuredWithUsage(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, common.ChatUsage, error) {
+	return anthropicCallStructured(ctx, p.client, p.model, p.params, messages, schema)
+}
+
+func anthropicCallStructured(ctx context.Context, client anthropic.Client, model string, params map[string]any, messages []common.ChatMessage, schema common.StructuredSchema) (string, common.ChatUsage, error) {
 	reqParams, err := anthropicStructuredParams(model, params, messages, schema)
 	if err != nil {
-		return "", err
+		return "", common.ChatUsage{}, err
 	}
 	resp, err := client.Messages.New(ctx, reqParams)
 	if err != nil {
-		return "", fmt.Errorf("anthropic structured (%s): %w", schema.Name, err)
+		return "", common.ChatUsage{}, fmt.Errorf("anthropic structured (%s): %w", schema.Name, err)
+	}
+	// Reported=true even when both counts are zero: the API SAID something,
+	// and "the provider reported zero" is a different fact from "the provider
+	// said nothing".
+	//
+	// Cache-creation and cache-read tokens are NOT folded into the input
+	// count. They are billed at different rates, so adding them would produce
+	// a number that is neither the tokens sent nor the tokens charged --
+	// wrong in a way that looks precise. A caller that needs the cached
+	// breakdown reads the provider's own log line.
+	usage := common.ChatUsage{
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		Model:        string(resp.Model),
+		Reported:     true,
 	}
 	for _, block := range resp.Content {
 		if block.Type == "tool_use" && strings.TrimSpace(block.Name) == anthropicStructuredToolName(schema) {
-			return strings.TrimSpace(string(block.Input)), nil
+			return strings.TrimSpace(string(block.Input)), usage, nil
 		}
 	}
 	// The forced tool choice makes this near-impossible; when it happens
 	// anyway (a refusal, an API change), the text is the only evidence.
-	return "", fmt.Errorf("anthropic structured (%s): no tool_use block in the reply; text was: %.200s",
+	return "", usage, fmt.Errorf("anthropic structured (%s): no tool_use block in the reply; text was: %.200s",
 		schema.Name, extractAnthropicText(resp))
 }
 

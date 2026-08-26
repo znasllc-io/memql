@@ -10,7 +10,7 @@ import { RowDetailDialog } from "../components/RowDetailDialog";
 import { Empty } from "../components/StatusMessage";
 import { Container, EmptyState, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
-import { ArrangementBands } from "./ArrangementBands";
+import { ArrangementLayout } from "./ArrangementLayout";
 import { PopulationMeta, SectionHeader } from "./ComposeLayout";
 import { composedViewEditPath } from "./urls";
 import { useSavedView } from "./useSavedViews";
@@ -160,7 +160,13 @@ function SavedSection({
         onReload={data.reload}
         selectedRowId={rowId}
       />
-      <ArrangementBands arrangement={live} concept={concept} rows={data.rows} onSelect={onSelect} />
+      <ArrangementLayout
+        arrangement={live}
+        concept={concept}
+        rows={data.rows}
+        onSelect={onSelect}
+        selectedRowId={rowId}
+      />
       <RowDetailDialog
         open={rowId !== ""}
         onClose={onClose}

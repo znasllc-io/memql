@@ -43,7 +43,7 @@
 //
 // See docs/public/concepts/composed-views.md.
 
-import { VIEW_KIT_ELEMENTS } from "./elements.js";
+import { SCENE_ELEMENT_ID, VIEW_KIT_ELEMENTS, WIDGET_ELEMENT_ID } from "./elements.js";
 import {
   BAND_ROLES,
   boundFields,
@@ -68,6 +68,54 @@ import {
 // an EMPTY LIST is how a composed view declines a slot the automatic
 // resolution would otherwise fill. A person who removed a chart's measure
 // meant it, and the arrangement has to be able to say so.
+// ---------------------------------------------------------------------------
+// Layout and role -- the second and third dimensions (epic memql#4661)
+// ---------------------------------------------------------------------------
+
+// SectionLayout is HOW a section's bands are placed, as distinct from WHICH
+// elements are in them. Five values, chosen against live mockups with the
+// owner (spec D1).
+//
+// It is a section-level property, not a per-entry one, because it is a
+// statement about the whole page and there is exactly one page. Two entries
+// cannot disagree about whether the section is a dashboard.
+//
+// ABSENT MEANS STACK, and that is what makes this additive: every arrangement
+// stored before this existed renders byte-identically to how it always did.
+// The default is not "the best layout we can infer" -- inferring one would
+// silently re-lay-out views people already have.
+export type SectionLayout = "stack" | "dashboard" | "split" | "focus" | "gallery";
+
+export const SECTION_LAYOUTS: readonly SectionLayout[] = [
+  "stack",
+  "dashboard",
+  "split",
+  "focus",
+  "gallery",
+];
+
+// One line per layout, for a picker. Prose rather than labels, for the same
+// reason BAND_QUESTIONS is prose: a person choosing a layout is choosing what
+// the page should EMPHASISE, not naming a CSS grid.
+export const LAYOUT_DESCRIPTIONS: Readonly<Record<SectionLayout, string>> = {
+  stack: "Everything in a column, in the order it reads.",
+  dashboard: "Numbers across the top, shapes side by side, the list below.",
+  split: "The list on the left, one row's detail on the right.",
+  focus: "One element carries the page, with the rest in a column beside it.",
+  gallery: "A card per row, with the numbers as a header strip.",
+};
+
+// EntryRole is the EMPHASIS one entry carries within its layout.
+//
+// `hero` is scarce by design: it is the one element the page is about, and a
+// page with two heroes has none. Sanitize does not enforce scarcity by
+// deleting a second hero -- it renders the first and treats the rest as
+// standard, because deleting somebody's element to enforce a design rule is
+// worse than laying it out plainly.
+export type EntryRole = "hero" | "supporting" | "standard";
+
+export const ENTRY_ROLES: readonly EntryRole[] = ["hero", "supporting", "standard"];
+
 export interface ArrangedElement {
   // ElementSpec.id. A string rather than the spec itself: an arrangement is
   // stored, sent over a wire and re-read against whatever element library the
@@ -78,6 +126,32 @@ export interface ArrangedElement {
   // say than the element's own title. Omitted uses the element's title.
   readonly title?: string;
   readonly bindings?: Readonly<Record<string, readonly string[]>>;
+  // How much of the page this entry carries. Omitted is `standard`, which is
+  // what every entry stored before roles existed means.
+  readonly role?: EntryRole;
+  // Per-entry ELEMENT OPTIONS: everything an entry says about its element
+  // that is not a field binding.
+  //
+  //   sceneId / widgetId   which registered module a `scene` or `widget`
+  //                        entry names. Both registries are CLOSED --
+  //                        sanitize drops an entry naming one that does not
+  //                        exist -- so an arrangement can PLACE a scene or a
+  //                        widget and can never invent one.
+  //   rowAction            "view" gives a population element a trailing
+  //                        per-row control, for a page that spends row-click
+  //                        on something else (deploy/rollback).
+  //   sortField / sortDir  the column a table or timeline opens sorted on.
+  //   month                the month a calendar opens on, "YYYY-MM".
+  //
+  // SEPARATE FROM `bindings` because a binding names FIELDS and these do not.
+  // Merging them would make "the field called goalMap" something a reader has
+  // to rule out, and would put a module id through the unknown-field check.
+  //
+  // STRING VALUES ONLY, which is what keeps a stored arrangement a plain JSON
+  // value that survives a round trip through the graph unchanged -- the sort
+  // direction is two keys rather than a nested object for exactly that
+  // reason.
+  readonly options?: Readonly<Record<string, string>>;
 }
 
 export interface Arrangement {
@@ -85,16 +159,50 @@ export interface Arrangement {
   // arrangement cannot be silently re-applied to a different row set, and so
   // a reader can profile the right concept before validating it.
   readonly conceptId: string;
+  // How this section places its bands. Omitted is `stack`.
+  readonly layout?: SectionLayout;
   readonly elements: readonly ArrangedElement[];
 }
 
 export const EMPTY_ARRANGEMENT: Arrangement = { conceptId: "", elements: [] };
 
+// arrangementLayout is the ONE place absent-means-stack is decided, so no
+// consumer has to remember the default and no two consumers can pick
+// different ones.
+export function arrangementLayout(arrangement: Arrangement): SectionLayout {
+  const named = SECTION_LAYOUTS.find((l) => l === arrangement.layout);
+  return named ?? "stack";
+}
+
+// entryRole is the same, for the entry dimension.
+export function entryRole(entry: ArrangedElement): EntryRole {
+  const named = ENTRY_ROLES.find((r) => r === entry.role);
+  return named ?? "standard";
+}
+
 // elementOptions turns one entry into the options its renderer takes. The
 // single place the conversion happens, so a host cannot forget that an entry's
 // bindings are the caller-override half of the fitness contract.
 export function elementOptions(entry: ArrangedElement): ElementOptions {
-  return entry.bindings === undefined ? {} : { bindings: entry.bindings };
+  const options: Record<string, unknown> = {};
+  if (entry.bindings !== undefined) options["bindings"] = entry.bindings;
+
+  const raw = entry.options ?? {};
+  // Read by NAME rather than spread, so an unknown key in a stored row -- one
+  // this release does not have, or a typo -- cannot reach an element's option
+  // bag and change a behaviour nobody meant to set.
+  if (raw["rowAction"] === "view") options["rowAction"] = "view";
+  if (raw["month"] !== undefined && raw["month"] !== "") options["month"] = raw["month"];
+  const sortField = raw["sortField"] ?? "";
+  if (sortField !== "") {
+    options["sort"] = {
+      field: sortField,
+      // Anything other than an explicit "desc" is ascending. A sort with a
+      // nonsense direction should still sort.
+      direction: raw["sortDir"] === "desc" ? "desc" : "asc",
+    };
+  }
+  return options as ElementOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,13 +303,18 @@ function rankFits(
 // pick agree the moment there is a single row to rank with.
 export function proposeArrangement(
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): Arrangement {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
   const candidates = elementCandidates(profile, library);
   const elements: ArrangedElement[] = [];
 
   for (const band of BAND_ROLES) {
-    const best = candidates.find((c) => c.band === band && c.usable);
+    // `placedOnly` elements are skipped: a scene or a widget is meaningless
+    // without an option naming which module it is, and the proposal has no
+    // basis for choosing one. They remain fully offerable in a picker -- see
+    // elementCandidates, which does NOT filter them.
+    const best = candidates.find((c) => c.band === band && c.usable && !c.element.placedOnly);
     if (best !== undefined) {
       elements.push({ element: best.element.id, band });
       continue;
@@ -212,7 +325,13 @@ export function proposeArrangement(
     }
   }
 
-  return { conceptId: profile.concept.id, elements };
+  // The proposal names no layout, which means stack. Inferring one from the
+  // band mix would make the deterministic answer a design opinion, and it is
+  // the one answer in this module that has to be predictable.
+  return {
+    conceptId: profile.concept.id,
+    elements: withRequired(elements, options.required ?? [], profile, options),
+  };
 }
 
 function universalFallback(library: readonly ElementSpec[]): ElementSpec | undefined {
@@ -229,8 +348,9 @@ function universalFallback(library: readonly ElementSpec[]): ElementSpec | undef
 export function explainArrangement(
   arrangement: Arrangement,
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): readonly string[] {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
   const byId = new Map(library.map((element) => [element.id, element]));
   const out: string[] = [];
   for (const entry of arrangement.elements) {
@@ -254,6 +374,20 @@ export type ArrangementFault =
   | "unknown-element"
   // The element cannot render these rows at all.
   | "unfit"
+  // A `scene` or `widget` entry naming a module no registry in this build
+  // carries. Fatal for the same reason unknown-element is: there is nothing
+  // to render, and a placeholder would be a page element that does nothing.
+  | "unknown-module"
+  // The section names a layout this build does not have. Repaired to stack,
+  // reported so a composer can say what happened.
+  | "unknown-layout"
+  // The layout could not be honoured with the entries present -- a focus with
+  // nothing that can be a hero, a split with no detail pane. Repaired to
+  // stack; the entries are untouched.
+  | "layout-unsatisfiable"
+  // An entry asked for a role the element cannot express. Ignored, never
+  // removed: the element was still a deliberate choice.
+  | "role-unexpressible"
   // A binding names a field no row in the sample carries. Not fatal BY
   // ITSELF: a field absent from a 100-row page may well be on page two, so
   // the arrangement is reported rather than rewritten. It often arrives
@@ -282,12 +416,25 @@ export interface ArrangementProblem {
 export function arrangementProblems(
   arrangement: Arrangement,
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): readonly ArrangementProblem[] {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
   const byId = new Map(library.map((element) => [element.id, element]));
   const fields = new Set(profile.fields.map((f) => f.field));
   const seen = new Set<string>();
   const out: ArrangementProblem[] = [];
+
+  // The section dimension first: it is a property of the whole arrangement,
+  // so it is reported at -1 rather than against an entry that did not cause
+  // it.
+  if (arrangement.layout !== undefined && !SECTION_LAYOUTS.includes(arrangement.layout)) {
+    out.push({
+      at: -1,
+      element: "",
+      fault: "unknown-layout",
+      detail: `There is no layout called ${arrangement.layout} in this build; the section reads as a stack.`,
+    });
+  }
 
   arrangement.elements.forEach((entry, at) => {
     const element = byId.get(entry.element);
@@ -299,6 +446,21 @@ export function arrangementProblems(
         detail: `There is no element called ${entry.element} in this build.`,
       });
       return;
+    }
+    const missingModule = unknownModule(entry, options);
+    if (missingModule !== undefined) {
+      out.push({ at, element: entry.element, fault: "unknown-module", detail: missingModule });
+      return;
+    }
+    if (entry.role !== undefined && !expresses(element, entry.role)) {
+      out.push({
+        at,
+        element: entry.element,
+        fault: "role-unexpressible",
+        detail:
+          `${element.title} cannot be the ${entry.role} of a page, so it is laid ` +
+          `out plainly. The element itself is unaffected.`,
+      });
     }
     const key = `${entry.band}/${entry.element}`;
     if (seen.has(key)) {
@@ -336,7 +498,140 @@ export function arrangementProblems(
     }
   });
 
+  // Satisfiability is judged against what SURVIVES, so it runs last: a focus
+  // whose only hero candidate is an unfit element is unsatisfiable, and
+  // judging it before the entry loop would have called it fine.
+  const surviving = arrangement.elements.filter(
+    (_, at) => !out.some((p) => p.at === at && isFatalFault(p.fault)),
+  );
+  const unsatisfiable = layoutUnsatisfiable(arrangementLayout(arrangement), surviving, options);
+  if (unsatisfiable !== undefined) {
+    out.push({ at: -1, element: "", fault: "layout-unsatisfiable", detail: unsatisfiable });
+  }
+
   return out;
+}
+
+// ArrangementOptions is the third parameter every function in this module
+// takes, replacing the bare library array they used to.
+//
+// It exists because repair grew a second input that is NOT a property of the
+// arrangement being repaired: a page's REQUIRED entries (epic memql#4661,
+// living pages). A regeneration that dropped the machines list off the fleet
+// page produced a valid arrangement of a page that no longer does its job, and
+// the only thing that knows the page has a job is the page's manifest.
+export interface ArrangementOptions {
+  readonly library?: readonly ElementSpec[];
+  // Entries the PAGE declares it cannot be without. Re-inserted by
+  // sanitizeArrangement when a stored version or a model's reply dropped
+  // them, matched on element id plus module option -- so a manifest can
+  // require "the machines table" without pinning its band or its title, and a
+  // person may still move and re-caption it.
+  //
+  // The stored row is NOT rewritten; like every other repair here, this
+  // applies to the rendered value.
+  readonly required?: readonly ArrangedElement[];
+  // Which scene ids this build's scene registry carries. An entry naming one
+  // outside the set is dropped -- the registry is CLOSED, so an arrangement
+  // places a scene and can never define one.
+  //
+  // UNDEFINED MEANS "THIS HOST REGISTERS NO SCENES", which is the honest
+  // default for view-kit itself: it must not import three.js, so it cannot
+  // host a scene and every scene entry is unknown to it. A host that renders
+  // scenes passes its registry.
+  readonly scenes?: readonly string[];
+  // The same, for the widget registry.
+  readonly widgets?: readonly string[];
+}
+
+// The faults that REMOVE an entry. An unknown field or a duplicate is
+// reported and kept -- both are recoverable states a person can see and fix,
+// and silently editing somebody's saved view is worse than showing them a
+// broken one. A role that cannot be expressed is likewise kept: the element
+// was still a deliberate choice, only its emphasis was not honourable.
+function isFatalFault(fault: ArrangementFault): boolean {
+  return fault === "unknown-element" || fault === "unfit" || fault === "unknown-module";
+}
+
+function expresses(element: ElementSpec, role: EntryRole): boolean {
+  return (element.roles ?? ENTRY_ROLES).includes(role);
+}
+
+// unknownModule reports a `scene` or `widget` entry naming a module this build
+// does not carry, as a sentence. Returns undefined for every other entry.
+function unknownModule(
+  entry: ArrangedElement,
+  options: ArrangementOptions,
+): string | undefined {
+  if (entry.element === SCENE_ELEMENT_ID) {
+    const id = entry.options?.["sceneId"] ?? "";
+    if (id === "") return "A scene element named no scene.";
+    if (!(options.scenes ?? []).includes(id)) {
+      return `There is no scene called ${id} in this build.`;
+    }
+    return undefined;
+  }
+  if (entry.element === WIDGET_ELEMENT_ID) {
+    const id = entry.options?.["widgetId"] ?? "";
+    if (id === "") return "A widget element named no widget.";
+    if (!(options.widgets ?? []).includes(id)) {
+      return `There is no widget called ${id} in this build.`;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+// layoutUnsatisfiable answers "can this layout be honoured with these
+// entries", as a sentence to show a person, or undefined when it can.
+//
+// Only two layouts can fail, and both fail for a structural reason rather
+// than an aesthetic one:
+//
+//   focus needs something that can BE the hero. Its whole shape is one large
+//     element and a column beside it; with nothing eligible there is no
+//     large element and the layout is a one-column stack with extra CSS.
+//   split needs a detail pane. "The list on the left and the list again on
+//     the right" is not a split.
+//
+// dashboard, gallery and stack degrade gracefully with any entry mix -- an
+// empty slot is an empty slot -- so they are never unsatisfiable.
+function layoutUnsatisfiable(
+  layout: SectionLayout,
+  entries: readonly ArrangedElement[],
+  options: ArrangementOptions,
+): string | undefined {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
+  const byId = new Map(library.map((element) => [element.id, element]));
+
+  if (layout === "focus") {
+    const eligible = entries.some((entry) => {
+      const element = byId.get(entry.element);
+      return element !== undefined && expresses(element, "hero");
+    });
+    if (!eligible) {
+      return "No element here can carry a focus layout, so the section reads as a stack.";
+    }
+    return undefined;
+  }
+
+  if (layout === "split") {
+    const hasRoll = entries.some((entry) => entry.band === "roll" && !isDetail(byId, entry));
+    const hasDetail = entries.some((entry) => isDetail(byId, entry));
+    if (!hasRoll || !hasDetail) {
+      return "A split needs a list and a detail pane; this section has only one of them, so it reads as a stack.";
+    }
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function isDetail(
+  byId: ReadonlyMap<string, ElementSpec>,
+  entry: ArrangedElement,
+): boolean {
+  return byId.get(entry.element)?.detail === true;
 }
 
 // sanitizeArrangement is the repair: drop what cannot render, keep everything
@@ -353,16 +648,122 @@ export function arrangementProblems(
 export function sanitizeArrangement(
   arrangement: Arrangement,
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): Arrangement {
-  const fatal = new Set(
-    arrangementProblems(arrangement, profile, library)
-      .filter((p) => p.fault === "unknown-element" || p.fault === "unfit")
-      .map((p) => p.at),
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
+  const byId = new Map(library.map((element) => [element.id, element]));
+  const problems = arrangementProblems(arrangement, profile, options);
+  const fatal = new Set(problems.filter((p) => isFatalFault(p.fault)).map((p) => p.at));
+
+  let kept: readonly ArrangedElement[] = arrangement.elements.filter((_, at) => !fatal.has(at));
+
+  // ROLES THE ELEMENT CANNOT EXPRESS ARE DROPPED FROM THE RENDERED VALUE, not
+  // from the stored one. The entry survives -- somebody chose that element --
+  // and it simply lays out plainly.
+  kept = kept.map((entry) =>
+    entry.role !== undefined && !expresses(byId.get(entry.element)!, entry.role)
+      ? stripRole(entry)
+      : entry,
   );
-  const kept = arrangement.elements.filter((_, at) => !fatal.has(at));
-  if (kept.length === 0) return proposeArrangement(profile, library);
-  return { conceptId: arrangement.conceptId, elements: kept };
+
+  // The page's REQUIRED entries. Re-inserted before the empty check, because a
+  // version that dropped everything but still belongs to a page with required
+  // entries should come back as that page rather than as the deterministic
+  // proposal for its concept.
+  kept = withRequired(kept, options.required ?? [], profile, options);
+
+  if (kept.length === 0) return proposeArrangement(profile, options);
+
+  // Now the layout, judged against what survived.
+  let layout = arrangementLayout(arrangement);
+  if (layoutUnsatisfiable(layout, kept, options) !== undefined) {
+    layout = "stack";
+  } else if (layout === "focus" && !kept.some((entry) => entryRole(entry) === "hero")) {
+    // PROMOTE RATHER THAN DEMOTE. A focus with no hero is a layout somebody
+    // asked for that is one annotation short of working; the best-fitting
+    // hero-capable entry becomes the hero. Falling back to stack here would
+    // discard a deliberate choice over a missing default.
+    //
+    // "Best-fitting" is the library's own ranking over this profile, so the
+    // promotion agrees with what the deterministic proposal would have picked
+    // and is not a second opinion about the concept.
+    kept = promoteHero(kept, profile, options);
+  }
+
+  const out: Arrangement = {
+    conceptId: arrangement.conceptId,
+    ...(layout === "stack" ? {} : { layout }),
+    elements: kept,
+  };
+  return out;
+}
+
+function stripRole(entry: ArrangedElement): ArrangedElement {
+  const { role: _dropped, ...rest } = entry;
+  return rest;
+}
+
+// withRequired re-inserts a page's required entries, matched on element id
+// plus module option.
+//
+// MATCHING IS DELIBERATELY LOOSE. A manifest requires "the machines table",
+// not "the machines table in the roll band captioned Machines" -- a person who
+// moved it or re-captioned it has not removed it, and re-inserting a second
+// copy because the title changed would be worse than the drop this guards
+// against. Band, title, bindings and role are all the arrangement's business.
+function withRequired(
+  entries: readonly ArrangedElement[],
+  required: readonly ArrangedElement[],
+  profile: ConceptProfile,
+  options: ArrangementOptions,
+): readonly ArrangedElement[] {
+  if (required.length === 0) return entries;
+  const key = (entry: ArrangedElement): string =>
+    `${entry.element}/${entry.options?.["sceneId"] ?? ""}/${entry.options?.["widgetId"] ?? ""}`;
+  const have = new Set(entries.map(key));
+  const missing = required.filter((entry) => !have.has(key(entry)));
+  if (missing.length === 0) return entries;
+
+  // A required entry that cannot render is NOT force-fed. The manifest says
+  // the page needs this element; it does not overrule the fitness contract,
+  // and inserting an unfit element would put view-kit's "cannot render, here
+  // is why" sentence on a page as though somebody had chosen it.
+  const renderable = missing.filter((entry) => {
+    const problems = arrangementProblems(
+      { conceptId: profile.concept.id, elements: [entry] },
+      profile,
+      options,
+    );
+    return !problems.some((p) => isFatalFault(p.fault));
+  });
+  return [...entries, ...renderable];
+}
+
+// promoteHero marks the best-fitting hero-capable entry as the hero, using the
+// library's own ranking so the choice agrees with proposeArrangement's.
+function promoteHero(
+  entries: readonly ArrangedElement[],
+  profile: ConceptProfile,
+  options: ArrangementOptions,
+): readonly ArrangedElement[] {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
+  const byId = new Map(library.map((element) => [element.id, element]));
+  const rank = new Map(
+    elementCandidates(profile, library).map((c, index) => [c.element.id, index]),
+  );
+  let bestAt = -1;
+  let bestRank = Number.POSITIVE_INFINITY;
+  entries.forEach((entry, at) => {
+    const element = byId.get(entry.element);
+    if (element === undefined || !expresses(element, "hero")) return;
+    const r = rank.get(entry.element) ?? Number.POSITIVE_INFINITY;
+    if (r < bestRank) {
+      bestRank = r;
+      bestAt = at;
+    }
+  });
+  if (bestAt === -1) return entries;
+  return entries.map((entry, at) => (at === bestAt ? { ...entry, role: "hero" as const } : entry));
 }
 
 // ---------------------------------------------------------------------------
@@ -397,8 +798,9 @@ export interface ArrangementProposal {
 export function readArrangement(
   raw: unknown,
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): ArrangementProposal {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
   const conceptId = profile.concept.id;
   const object = isRecord(raw) ? raw : undefined;
   const reasoning = typeof object?.["reasoning"] === "string" ? object["reasoning"] : "";
@@ -435,20 +837,51 @@ export function readArrangement(
     const band = readBand(item["band"]) ?? elementBand(element);
     const title = typeof item["title"] === "string" && item["title"] !== "" ? item["title"] : undefined;
     const bindings = readBindings(item["bindings"]);
+    // An unrecognised role is DROPPED rather than corrected to standard --
+    // which is the same value, but says the difference between "the model
+    // said standard" and "the model said something we do not have".
+    const role = ENTRY_ROLES.find((r) => r === item["role"]);
+    const moduleOptions = readModuleOptions(item["options"]);
 
     entries.push({
       element: element.id,
       band,
       ...(title === undefined ? {} : { title }),
       ...(bindings === undefined ? {} : { bindings }),
+      ...(role === undefined ? {} : { role }),
+      ...(moduleOptions === undefined ? {} : { options: moduleOptions }),
     });
   });
 
-  const parsed: Arrangement = { conceptId, elements: entries };
-  const validated = arrangementProblems(parsed, profile, library);
-  const arrangement = sanitizeArrangement(parsed, profile, library);
+  // A layout the reply named that this build does not have is carried through
+  // UNCHANGED into the parsed value, so arrangementProblems reports it as
+  // `unknown-layout` and the person is told. Silently correcting it here would
+  // make a model that keeps naming a layout we removed indistinguishable from
+  // one that always says stack.
+  const layout = typeof object?.["layout"] === "string" ? object["layout"] : undefined;
+  const parsed: Arrangement = {
+    conceptId,
+    ...(layout === undefined ? {} : { layout: layout as SectionLayout }),
+    elements: entries,
+  };
+  const validated = arrangementProblems(parsed, profile, options);
+  const arrangement = sanitizeArrangement(parsed, profile, options);
 
   return { arrangement, reasoning, problems: [...problems, ...validated] };
+}
+
+// readModuleOptions reads the `scene`/`widget` option map. String values only:
+// the two keys it carries name registered modules, and a non-string there is
+// not a module id under any coercion worth writing.
+function readModuleOptions(
+  value: unknown,
+): Readonly<Record<string, string>> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string" && raw !== "") out[key] = raw;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 function readBand(value: unknown): BandRole | undefined {
@@ -522,8 +955,9 @@ export interface ArrangementRequest {
 
 export function arrangementRequest(
   profile: ConceptProfile,
-  library: readonly ElementSpec[] = VIEW_KIT_ELEMENTS,
+  options: ArrangementOptions = {},
 ): ArrangementRequest {
+  const library = options.library ?? VIEW_KIT_ELEMENTS;
   const candidates = elementCandidates(profile, library);
   return {
     concept: { id: profile.concept.id, entity: profile.concept.entity },
@@ -547,7 +981,7 @@ export function arrangementRequest(
         bindings: slotBindings(c.element, c.fit),
         explanation: c.explanation,
       })),
-    baseline: proposeArrangement(profile, library),
+    baseline: proposeArrangement(profile, options),
   };
 }
 
@@ -595,6 +1029,12 @@ export const ARRANGEMENT_PROPOSAL_SCHEMA = {
       description:
         "One or two sentences on why this arrangement suits these rows. Written for the person composing the view.",
     },
+    layout: {
+      type: "string",
+      enum: [...SECTION_LAYOUTS],
+      description:
+        "How the section places its bands. Omit for a plain vertical stack, which is always a correct answer.",
+    },
     elements: {
       type: "array",
       description: "The elements of the view, in the order they should be read.",
@@ -621,6 +1061,12 @@ export const ARRANGEMENT_PROPOSAL_SCHEMA = {
             description:
               "Optional per-slot field overrides: slot name -> the field names to use. An empty list declines the slot.",
             additionalProperties: { type: "array", items: { type: "string" } },
+          },
+          role: {
+            type: "string",
+            enum: [...ENTRY_ROLES],
+            description:
+              "How much of the page this element carries. At most ONE hero per section -- it is the element the page is about. Omit for standard.",
           },
         },
       },

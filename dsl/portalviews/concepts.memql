@@ -19,6 +19,14 @@
 //   * it has version history, because a write in MemQL is an append.
 //     Editing a view keeps the previous arrangement.
 //
+// EPIC memql#4661 MADE THAT THIRD PROPERTY LOAD-BEARING. A row here is now
+// also how a person's REGENERATION of an existing page is stored: `kind` and
+// `targetPageId` turn the same concept into a per-user override of a page,
+// and the append-only history behind it is what the version strip walks --
+// Original, v1, v2 -- with revert expressed as re-writing a chosen version as
+// the newest rather than as destroying anything. There is no parallel version
+// table because there does not need to be one.
+//
 // Per-row authz tier: OWNED, engine-enforced. ownerUserId is @serverSet
 // and stamped from actor.userId on every write, and @rowAuthz makes the
 // engine AND ownerUserId==actor.userId into every read
@@ -51,6 +59,8 @@ concept view {
   description   string  @description("Free-text note on what the view is for. Rendered as the display card's secondary line and under the heading when the view is opened.")
   conceptIds    []string!  @description("The concepts the composer selected, in the order they were picked. THE SELECTION, as distinct from the arrangement below: it is what the person asked for, and it is what a 'which views cover this concept' lookup filters on. Usually one entry; several when the view stacks independent sections (see arrangements).")
   arrangements  []object!  @description("One arrangement per selected concept, in the order the sections should read. Each entry is view-kit's Arrangement value verbatim: {conceptId, elements:[{element, band, title?, bindings?}]}. `element` is an ElementSpec id (table / calendar / chart.line / ...), `band` is which question the element answers (reading | shape | roll), and `bindings` maps a requirement slot to the field names to use -- an EMPTY list there declines the slot, which is how a composer says 'count the rows, do not total anything'. Stored opaquely: the engine never interprets it, and view-kit re-validates every entry against the live rows on read, so a saved view naming an element a later release removed degrades to the deterministic arrangement instead of failing.")
+  kind          enum("composed", "override")  @description("What this row IS (epic memql#4661). 'composed' is a view somebody built in the composer and opens by name -- the only kind that existed before living pages. 'override' is a person's own arrangement OF AN EXISTING PAGE, resolved at render in place of that page's seed. The distinction is not cosmetic: a composed view appears in the saved-view list and has a URL; an override appears nowhere and is found only by the page it belongs to. Absent means composed, which is what every row written before this field meant.")
+  targetPageId  string  @description("WHICH page this row overrides, when kind is 'override'. A predefined view id like 'views.users', or a converged page id like 'fleet.machines' or 'me.settings'. Empty on a composed view. It is a DURABLE identifier rather than a route: renaming a page id orphans every regeneration anybody made of that page, while a route may change freely.")
   origin        enum("manual", "suggested")!  @description("Where the saved arrangement started: 'manual' = the deterministic match plus the composer's own edits, 'suggested' = a model's proposal was accepted (possibly then edited). Provenance for a person looking at a view months later, and the only signal that tells an operator how much of their library came out of a model. It is NOT an authorization or execution input -- both kinds of row render identically.")
   status        enum("active", "archived")!  @description("Lifecycle. active = in the composer's saved list. archived = retired but retained; there is no hard delete, since a write in MemQL is an append onto the same id. Stamped 'active' by createComposedView and flipped by archiveComposedView.")
   updatedAt     datetime  @description("RFC3339 watermark of the most recent edit, stamped to now on every write so the saved-view list can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for reading the latest version.")

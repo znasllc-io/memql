@@ -1167,6 +1167,24 @@ message AiSuggestResult {
   string request_id = 1;
   string domain = 2;
   google.protobuf.Struct result = 3;
+
+  // What the call actually cost, WHERE THE PROVIDER SAID SO (task
+  // memql#4667). Additive and OPTIONAL in the strong sense: a provider
+  // that reports no usage leaves this absent, and a client showing a
+  // spend figure falls back to its own estimate rather than rendering
+  // a confident zero. Zero and "not reported" are different answers
+  // and only one of them is ever true.
+  AiSuggestUsage usage = 4;
+}
+
+message AiSuggestUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  // The provider-facing model id the call actually ran on, which is
+  // not always the one the prompt named (a policy fallback, a vendor
+  // alias). Carried because a token count without the model it was
+  // spent on cannot be priced.
+  string model = 3;
 }
 
 // -----------------------------------------------------------------------------
@@ -2093,6 +2111,68 @@ message ConceptInfo {
   string data_state = 8;
   string data_origin = 9;
   repeated string data_mirrored_to = 10;
+
+  // The concept's DECLARED SHAPE (epic memql#4661, task memql#4662).
+  //
+  // Until this landed, ConceptInfo carried a concept's identity, its
+  // prose and its display card -- and nothing about what a row of it
+  // actually holds. Every client that needed the shape had to derive
+  // it from a SAMPLE OF ROWS, which answers a subtly different
+  // question: a field no loaded row happens to carry does not exist,
+  // an optional enum looks like free text until two values show up,
+  // and a relationship is invisible entirely because a foreign key is
+  // just another string. sdk/ts-viewkit's element fitness said so in
+  // its own header comment for two releases ("there is therefore no
+  // schema to match against at runtime").
+  //
+  // `fields` is projected from the stored `Schemas` JSON of the
+  // concept's CURRENT version, and `relationships` from its
+  // `@relationship` declarations -- BOTH AXES, since the engine `type`
+  // and the domain `as` mean different things (memql#3652) and a
+  // client rendering a lookup label wants the second one.
+  //
+  // ADDITIVE, and additive is load-bearing rather than polite: an
+  // older client ignores unknown fields, and a newer client reading an
+  // older server sees empty lists. Empty is honest -- it says "this
+  // server does not publish a shape", which is exactly the state that
+  // preceded these fields -- so a client falls back to row sampling
+  // rather than rendering a concept as having no fields.
+  repeated ConceptField fields = 11;
+  repeated ConceptRelationship relationships = 12;
+}
+
+// ConceptField is one declared field of a concept, as the DSL declared
+// it rather than as a Go type. `kind` is the authoring vocabulary --
+// string / boolean / integer / number / datetime / enum / array /
+// object -- because that is the word a client needs to pick a cell
+// renderer, and mapping it back from "the JSON Schema said type:string
+// with format:date-time" is a derivation every client would otherwise
+// repeat.
+message ConceptField {
+  string name = 1;
+  string kind = 2;
+  bool required = 3;
+  // The declared members, for kind == "enum". Empty otherwise.
+  repeated string enum_values = 4;
+  // The field's own `///` doc comment, verbatim. Empty when it has none.
+  string description = 5;
+}
+
+// ConceptRelationship is one declared edge. The two axes are carried
+// SEPARATELY and neither is derived from the other (memql#3652):
+// `type` is the closed engine set (parent / owns / references / ...)
+// and drives traversal; `as` is the open domain label (respondsAs,
+// assignedTo) and is what a person reads. `as` is empty on every
+// declaration that predates the split, which is why a client labelling
+// an edge falls back to `field` rather than to `type`.
+message ConceptRelationship {
+  string type = 1;
+  string as = 2;
+  // The field holding the pointer. May be a dotted path when the
+  // pointer sits inside a nested block ("lineage.originatingPlanId").
+  string field = 3;
+  string target = 4;
+  string direction = 5;
 }
 
 message DisplayCard {

@@ -12,7 +12,7 @@ import {
   Panel,
   Skeleton,
 } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { formatMoment } from "./MeLayout";
 import { SESSION_CONCEPT, sessionTableRows } from "./rows";
 import { useMySessions } from "./useMySessions";
@@ -101,7 +101,7 @@ export function SessionsTab(): ReactNode {
         <EmptyState statement="No live sessions are recorded for this account. If you are reading this, your own credential carries no session row -- a personal access token or an operator key, rather than a browser sign-in." />
       ) : (
         <Band title="Live sessions" meta={`${rows.length} active`} panel>
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={rows}
             concept={SESSION_CONCEPT}

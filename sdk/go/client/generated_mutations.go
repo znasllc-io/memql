@@ -3482,6 +3482,9 @@ type CreateComposedViewArgs struct {
 	Arrangements []map[string]any
 	// Enum: manual | suggested
 	Origin string
+	// Enum: composed | override
+	Kind         string
+	TargetPageId string
 }
 
 // CreateComposedView calls the engine mutation createComposedView.
@@ -3523,6 +3526,20 @@ func CreateComposedViewBuild(args CreateComposedViewArgs) string {
 		}
 		b.WriteString("origin: ")
 		b.WriteString(quoteMemQL(args.Origin))
+	}
+	if args.Kind != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.TargetPageId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetPageId: ")
+		b.WriteString(quoteMemQL(args.TargetPageId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -17034,6 +17051,56 @@ func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(quoteMemQL(args.SourceTopic))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// WritePageOverride -- Write the newest version of a page override -- the ONE write behind regeneration and behind "use this version" (epic memql#4661). Owned: ownerUserId is stamped from actor.userId, so a regeneration is per-person by construction and can never repaint somebody else's console.
+// It is a create-or-append rather than two calls because a write in MemQL is an append onto one id: the first regeneration of a page and the fifth are the same operation, and the version history the strip walks is the row's own. `kind` and `targetPageId` are re-stamped on every write so an override cannot be turned into a composed view -- or pointed at a different page -- by a later call.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["writePageOverride"] in generated_concepts.go).
+type WritePageOverrideArgs struct {
+	ViewId       string
+	TargetPageId string
+	Arrangements []map[string]any
+	ConceptIds   []string
+	// Enum: manual | suggested
+	Origin string
+}
+
+// WritePageOverride calls the engine mutation writePageOverride.
+func (qc *QueryClient) WritePageOverride(ctx context.Context, args WritePageOverrideArgs) (*Result, error) {
+	call := WritePageOverrideBuild(args)
+	return qc.executeNamed(ctx, "writePageOverride", call)
+}
+
+func WritePageOverrideBuild(args WritePageOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation writePageOverride(")
+	b.WriteString("viewId: ")
+	b.WriteString(quoteMemQL(args.ViewId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetPageId: ")
+	b.WriteString(quoteMemQL(args.TargetPageId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("arrangements: ")
+	b.WriteString(renderMemQLValue(args.Arrangements))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conceptIds: ")
+	b.WriteString(renderMemQLValue(args.ConceptIds))
+	if args.Origin != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("origin: ")
+		b.WriteString(quoteMemQL(args.Origin))
 	}
 	b.WriteString(")")
 	return b.String()

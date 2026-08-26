@@ -109,6 +109,63 @@ export interface Concept {
   // dataMirroredTo names the external systems MemQL pushes this
   // concept's changes out to. Empty unless dataState is "origin".
   dataMirroredTo?: string[];
+  // The concept's DECLARED SHAPE (epic memql#4661).
+  //
+  // EMPTY IS A REAL ANSWER AND IT IS NOT "no fields". It means this
+  // server does not publish a shape -- either it predates the fields or
+  // the concept's definition schema did not parse into properties -- and
+  // a client seeing it should fall back to profiling the rows it loaded,
+  // which is what every client did before these arrived. Treating empty
+  // as "the concept has no fields" renders a real concept as blank.
+  fields?: ConceptField[];
+  relationships?: ConceptRelationship[];
+}
+
+// ConceptField is one declared field, in the DSL's own vocabulary.
+export interface ConceptField {
+  name: string;
+  kind: ConceptFieldKind | "";
+  required: boolean;
+  // The declared members, for kind === "enum". Empty otherwise.
+  enumValues: string[];
+  // The field's `///` doc comment. Empty when it has none.
+  description: string;
+}
+
+// ConceptFieldKind is the authoring vocabulary, not the JSON-Schema one:
+// the engine maps `{"type":"string","format":"date-time"}` back to
+// "datetime" and `{"type":"string","enum":[...]}` back to "enum" before
+// it reaches a client, so this is the word the DSL author actually
+// wrote. A client must DEGRADE on an unrecognised value (render it as
+// text) rather than drop the field -- the set can grow.
+export type ConceptFieldKind =
+  | "string"
+  | "boolean"
+  | "integer"
+  | "number"
+  | "datetime"
+  | "enum"
+  | "array"
+  | "object";
+
+// ConceptRelationship is one declared edge, carrying BOTH axes
+// (memql#3652). They are not interchangeable:
+//
+//   type -- the closed ENGINE set; what traversal and id canonicalization
+//           do with the edge.
+//   as   -- the open DOMAIN label; what the edge MEANS to a person.
+//
+// `as` is empty on every declaration predating the split. A client
+// labelling an edge falls back to `field` -- never to `type`, which
+// would present "references" to a person as though it were a noun
+// somebody chose.
+export interface ConceptRelationship {
+  type: string;
+  as: string;
+  // May be a dotted path when the pointer sits in a nested block.
+  field: string;
+  target: string;
+  direction: string;
 }
 
 // DataState is the closed set of relationships MemQL can have to a
@@ -364,6 +421,29 @@ export function conceptsFromWire(in_: ConceptInfoWire[] | undefined): Concept[] 
         tertiary: c.displayCard.tertiary,
         status: c.displayCard.status,
       };
+    }
+    // The declared shape (epic memql#4661). Set only when the server
+    // sent something: `undefined` and `[]` mean different things to a
+    // client deciding whether to fall back to row sampling, and
+    // defaulting to `[]` here would erase the distinction at the one
+    // place it is still visible.
+    if (c.fields && c.fields.length > 0) {
+      concept.fields = c.fields.map((f) => ({
+        name: f.name ?? "",
+        kind: (f.kind ?? "") as ConceptFieldKind | "",
+        required: f.required === true,
+        enumValues: f.enumValues ?? [],
+        description: f.description ?? "",
+      }));
+    }
+    if (c.relationships && c.relationships.length > 0) {
+      concept.relationships = c.relationships.map((r) => ({
+        type: r.type ?? "",
+        as: r.as ?? "",
+        field: r.field ?? "",
+        target: r.target ?? "",
+        direction: r.direction ?? "",
+      }));
     }
     return concept;
   });

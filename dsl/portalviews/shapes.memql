@@ -14,6 +14,8 @@ shape view composedViewFull {
   arrangements
   origin
   status
+  kind
+  targetPageId
   updatedAt
   archivedAt
   row.createdAt

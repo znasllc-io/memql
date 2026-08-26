@@ -328,9 +328,28 @@ const IDLE_DETAIL: RowDetailState = {
   missing: false,
 };
 
-export function useRowDetail(conceptId: string, rowId: string): RowDetailState {
+// `reloadToken` re-reads the row when it changes (epic memql#4661).
+//
+// A dialog that acts on the row it is showing needs the row back afterwards:
+// suspending somebody should turn the button into "Reinstate the account"
+// while the dialog is still open. Closing the dialog instead -- which is what
+// this needed before the token existed -- means a second decision about the
+// same person costs a second navigation, and the first version of the
+// arranged Users page did exactly that.
+//
+// A TOKEN rather than a returned `reload` function: the caller already owns
+// the state that changes (a write counter), and a callback would have to be
+// memoized by every caller to avoid re-reading on every render.
+export function useRowDetail(
+  conceptId: string,
+  rowId: string,
+  reloadToken = 0,
+): RowDetailState {
   const { query } = useCluster();
   const [state, setState] = useState<RowDetailState>(IDLE_DETAIL);
+  // Which (concept, row) the held state is FOR, so a reload can be told from
+  // a change of target.
+  const sameTarget = useRef("");
 
   useEffect(() => {
     if (query === null || conceptId === "" || rowId === "") {
@@ -338,7 +357,20 @@ export function useRowDetail(conceptId: string, rowId: string): RowDetailState {
       return;
     }
     let live = true;
-    setState({ row: null, loading: true, error: "", missing: false });
+    // KEEP THE ROW WHILE REVALIDATING. Blanking it on a reload unmounts
+    // whatever is rendered from it -- and an action panel is exactly what
+    // reloads the row, so it would tear down its own form mid-write: the
+    // confirm dialog a person just opened would vanish, and the reason they
+    // typed with it.
+    //
+    // A row-or-concept CHANGE still blanks, because there the old row is the
+    // wrong row and showing it would be a lie about what the dialog is on.
+    setState((prev) =>
+      prev.row !== null && sameTarget.current === `${conceptId}\u0000${rowId}`
+        ? { ...prev, loading: true }
+        : { row: null, loading: true, error: "", missing: false },
+    );
+    sameTarget.current = `${conceptId}\u0000${rowId}`;
 
     void getRowByConceptAndId(query, conceptId, rowId)
       .then((row) => {
@@ -358,7 +390,7 @@ export function useRowDetail(conceptId: string, rowId: string): RowDetailState {
     return () => {
       live = false;
     };
-  }, [query, conceptId, rowId]);
+  }, [query, conceptId, rowId, reloadToken]);
 
   return state;
 }

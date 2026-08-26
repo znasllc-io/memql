@@ -9,6 +9,7 @@ import type { GoalWorld, NodeKind } from "../scene/world";
 import { latestAttempts } from "../scene/world";
 import { colourForTask, readPalette, type ScenePalette } from "./palette";
 import { easeOutBack, sceneIsAnimating, timingsFor } from "./motion";
+import { BEVEL_RATIO, BEVEL_SEGMENTS, CONTACT, LIGHTING, SOLID_MATERIAL, dprFor } from "./materials";
 
 // The scene.
 //
@@ -76,28 +77,83 @@ export interface NexusCanvasProps {
 // The four instanced kinds, with the geometry each draws.
 const INSTANCED: readonly NodeKind[] = ["task", "specialist", "artifact", "construct"];
 
+// beveledBox builds a box with rounded edges (epic memql#4661, task
+// memql#4673).
+//
+// THE CUBE WAS THE PROBLEM. A BoxGeometry has six flat faces meeting at hard
+// edges, so under one key light exactly one face is lit and the silhouette is
+// a hexagon -- which is what a placeholder looks like, because it is the
+// cheapest thing to draw. A bevel gives every edge a narrow band that catches
+// light at any camera angle, and that band is most of what separates "a solid"
+// from "a stand-in".
+//
+// Built from an extruded rounded rectangle rather than reached for from
+// three's examples: RoundedBoxGeometry lives in examples/jsm and drei's
+// RoundedBox is a COMPONENT, and an instanced mesh needs a BufferGeometry.
+// This is core three, it is twenty lines, and it is disposed with the rest.
+function beveledBox(size: number): THREE.BufferGeometry {
+  const bevel = size * BEVEL_RATIO;
+  // The extruded profile is the box's cross-section inset by the bevel; the
+  // bevel itself adds the inset back, so the finished solid is `size` across.
+  const half = size / 2 - bevel;
+  const shape = new THREE.Shape();
+  const r = Math.max(half * 0.35, 0.001);
+  shape.moveTo(-half + r, -half);
+  shape.lineTo(half - r, -half);
+  shape.quadraticCurveTo(half, -half, half, -half + r);
+  shape.lineTo(half, half - r);
+  shape.quadraticCurveTo(half, half, half - r, half);
+  shape.lineTo(-half + r, half);
+  shape.quadraticCurveTo(-half, half, -half, half - r);
+  shape.lineTo(-half, -half + r);
+  shape.quadraticCurveTo(-half, -half, -half + r, -half);
+
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: size - bevel * 2,
+    bevelEnabled: true,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+    bevelSegments: BEVEL_SEGMENTS,
+    curveSegments: 4,
+  });
+  // ExtrudeGeometry extrudes along +z from the shape's plane, so the solid
+  // sits entirely on one side of the origin. Centring it is what makes the
+  // instance matrix's translation mean "where the node is" rather than "where
+  // one corner of the node is".
+  geometry.center();
+  return geometry;
+}
+
+// The subdivision on the platonic solids goes from 0 to 1, which is the same
+// change in a different form: detail 0 is flat-shaded facets, and one level of
+// subdivision under a standard material reads as a faceted GEM rather than as
+// a wireframe primitive. Two levels is invisible at these sizes and multiplies
+// the vertex count.
 function geometryFor(kind: NodeKind): THREE.BufferGeometry {
   switch (kind) {
     case "you":
-      return new THREE.IcosahedronGeometry(0.62, 0);
+      return new THREE.IcosahedronGeometry(0.62, 1);
     case "goal":
-      return new THREE.OctahedronGeometry(1.15, 0);
+      return new THREE.OctahedronGeometry(1.15, 1);
     case "planner":
-      return new THREE.DodecahedronGeometry(0.72, 0);
+      return new THREE.DodecahedronGeometry(0.72, 1);
     case "specialist":
-      return new THREE.SphereGeometry(0.42, 16, 12);
+      return new THREE.SphereGeometry(0.42, 24, 16);
     case "task":
-      return new THREE.BoxGeometry(0.62, 0.62, 0.62);
+      // The one the owner named. A task is still recognisably a cube -- the
+      // shape a person learned to read -- with edges that catch light.
+      return beveledBox(0.62);
     case "cluster":
-      return new THREE.BoxGeometry(1.5, 1.5, 1.5);
+      return beveledBox(1.5);
     case "construct":
-      return new THREE.TetrahedronGeometry(0.5, 0);
+      return new THREE.TetrahedronGeometry(0.5, 1);
     case "artifact":
       // A disc: a cylinder with no height reads as a plate from every angle
-      // the camera reaches, where a CircleGeometry disappears edge-on.
-      return new THREE.CylinderGeometry(0.42, 0.42, 0.09, 18);
+      // the camera reaches, where a CircleGeometry disappears edge-on. The
+      // segment count goes up so its rim is a curve rather than a polygon.
+      return new THREE.CylinderGeometry(0.42, 0.42, 0.09, 32);
     case "bundle":
-      return new THREE.TorusGeometry(0.62, 0.12, 10, 28);
+      return new THREE.TorusGeometry(0.62, 0.12, 16, 40);
   }
 }
 
@@ -258,7 +314,13 @@ function InstancedKind({
         if (node !== undefined) onSelect(node.id);
       }}
     >
-      <meshStandardMaterial roughness={0.45} metalness={0.15} />
+      {/* One surface for every solid in the scene, from materials.ts --
+          which is where the visual-QA tuning pass edits it (task
+          memql#4675) rather than hunting literals through this file. */}
+      <meshStandardMaterial
+        roughness={SOLID_MATERIAL.roughness}
+        metalness={SOLID_MATERIAL.metalness}
+      />
     </instancedMesh>
   );
 }
@@ -333,12 +395,104 @@ function SingleGlyph({
       <meshStandardMaterial
         color={colour}
         emissive={colour}
-        emissiveIntensity={node.kind === "goal" ? 0.12 : 0.05}
+        // A trace of self-illumination so a node the key light has swung
+        // behind is still legible: the scene is read as information before it
+        // is read as a picture. The goal keeps its own brighter value -- it is
+        // the thing the whole scene is about.
+        emissiveIntensity={
+          node.kind === "goal" ? 0.22 : SOLID_MATERIAL.emissiveIntensity
+        }
         wireframe={node.kind === "goal"}
-        roughness={0.4}
-        metalness={0.2}
+        roughness={SOLID_MATERIAL.roughness}
+        metalness={SOLID_MATERIAL.metalness}
       />
     </mesh>
+  );
+}
+
+// The soft contact under every node (task memql#4673).
+//
+// NOT A SHADOW MAP. Real shadows need a shadow camera, a depth pass and a
+// per-frame render target -- on a canvas whose entire design is that it does
+// NOTHING when nothing is animating (frameloop="demand"), that would turn an
+// idle map into a continuous GPU cost. A dark blurred disc under each solid
+// buys most of the grounding for one instanced transparent quad, and it costs
+// exactly nothing while the loop is asleep.
+//
+// Instanced for the reason everything else here is: one draw call for three
+// hundred discs.
+//
+// The disc sits under the OBJECT rather than on the distant ground plane. A
+// mark on a floor eleven units below reads as a separate object; a mark just
+// under the solid reads as contact, which is the whole illusion.
+// footprintFor is roughly how wide each kind draws, which is what a contact
+// disc needs and what geometryFor knows in a form nothing can read back
+// (a BufferGeometry's bounds are computed, not declared). Stated here rather
+// than derived so the two stay legible side by side.
+function footprintFor(kind: NodeKind): number {
+  switch (kind) {
+    case "cluster":
+      return 1.5;
+    case "goal":
+      return 1.15;
+    case "planner":
+      return 0.72;
+    case "you":
+    case "task":
+    case "bundle":
+      return 0.62;
+    case "construct":
+      return 0.5;
+    case "specialist":
+    case "artifact":
+      return 0.42;
+  }
+}
+
+function Contacts({
+  nodes,
+  palette,
+}: {
+  nodes: readonly LayoutNode[];
+  palette: ScenePalette;
+}): ReactNode {
+  const ref = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    const mesh = ref.current;
+    if (mesh === null) return;
+    const matrix = new THREE.Matrix4();
+    const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    nodes.forEach((node, index) => {
+      // Sized off the node's own footprint. LayoutNode carries no scale --
+      // size is the geometry's, per kind -- so the contact reads it from the
+      // same place: a cluster stands in for many nodes and is drawn large, so
+      // its contact is too.
+      const size = footprintFor(node.kind) * CONTACT.radiusRatio;
+      matrix.compose(
+        new THREE.Vector3(node.x, node.y - CONTACT.drop, node.z),
+        quat,
+        new THREE.Vector3(size, size, size),
+      );
+      mesh.setMatrixAt(index, matrix);
+    });
+    mesh.count = nodes.length;
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [nodes]);
+
+  if (nodes.length === 0) return null;
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
+      <circleGeometry args={[0.5, 20]} />
+      {/* depthWrite off so a disc never occludes the solid above it or the
+          disc beside it; the ground plane is what it is drawn against. */}
+      <meshBasicMaterial
+        color={palette.ground}
+        transparent
+        opacity={CONTACT.opacity}
+        depthWrite={false}
+      />
+    </instancedMesh>
   );
 }
 
@@ -658,7 +812,12 @@ export default function NexusCanvas({
   return (
     <Canvas
       frameloop="demand"
-      dpr={[1, 2]}
+      dpr={[...dprFor()]}
+      // Anti-aliasing, explicitly. It is on by default in most browsers and
+      // off in some -- and a scene of bevelled edges is exactly the scene
+      // where the difference is visible, because every edge it added is a
+      // near-horizontal line.
+      gl={{ antialias: true }}
       camera={{ position: [scene.goalX * 0.55, 14, 26], fov: 48, near: 0.1, far: 400 }}
       style={{ background: palette.ground }}
       // Named for the accessible tree. The canvas itself carries no readable
@@ -667,12 +826,29 @@ export default function NexusCanvas({
       aria-label="Goal map"
       role="img"
     >
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[12, 22, 14]} intensity={1.1} />
+      {/* THREE LIGHTS, EACH DOING ONE JOB (task memql#4673). The rim is
+          the one that was missing: from behind and below, tinted with the
+          scene's own accent, it draws a bright edge along every silhouette --
+          which is most of what separates a solid from a placeholder, and is
+          what makes the new bevels visible from angles the key never reaches.
+          The values live in materials.ts so the visual-QA pass can tune them
+          in one diff. */}
+      <ambientLight intensity={LIGHTING.ambientIntensity} />
+      <directionalLight
+        position={[...LIGHTING.keyPosition]}
+        intensity={LIGHTING.keyIntensity}
+      />
+      <directionalLight
+        position={[...LIGHTING.rimPosition]}
+        intensity={LIGHTING.rimIntensity}
+        color={palette.agent}
+      />
       <gridHelper
         args={[220, 44, palette.grid, palette.grid]}
         position={[scene.goalX / 2, -11, 0]}
       />
+
+      <Contacts nodes={nodes} palette={palette} />
 
       <Edges scene={scene} palette={palette} progress={progress} hoveredPath={hoveredPath} />
 

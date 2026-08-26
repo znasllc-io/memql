@@ -4330,6 +4330,30 @@ QueryClient.prototype.overridesForConstruct = function (this: QueryClient, args:
   return this.executeNamed("overridesForConstruct", buildOverridesForConstruct(args), opts);
 };
 
+/** Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
+A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
+THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all. */
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["pageOverride"] in generated_concepts.ts).
+export interface PageOverrideArgs {
+  targetPageId: string;
+}
+
+export function buildPageOverride(args: PageOverrideArgs): string {
+  const parts: string[] = [];
+  parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
+  return "query pageOverride(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pageOverride(args: PageOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pageOverride = function (this: QueryClient, args: PageOverrideArgs = {} as PageOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pageOverride", buildPageOverride(args), opts);
+};
+
 /** Check if an AI agent is already a participant in a space (excludes left status) */
 // Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["participantByAgentSpace"] in generated_concepts.ts).
 export interface ParticipantByAgentSpaceArgs {

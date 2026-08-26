@@ -11,32 +11,33 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import { useResolvedTheme } from "../app/useResolvedTheme";
-import { vnodeToReact } from "../viewkit/react";
-import { ensureViewKitStyles } from "../viewkit/styles";
+import { vnodeToReact } from "./react";
+import { ensureViewKitStyles } from "./styles";
 
-// THE ONLY WAY A COMPOSED VIEW PUTS ROWS ON SCREEN.
+// THE ONLY WAY THE PORTAL PUTS ROWS ON SCREEN THROUGH AN ELEMENT.
 //
-// Deliberately the same shape as the predefined views' <ViewElement>: a view
-// says "these rows, through this element, bound like so" and stops. A composed
-// view has even less licence to do otherwise than a designed one -- the whole
-// claim of memql#3320 is that a concept nobody wrote code for renders through
-// the shared library, and markup written here for a row would be markup that
-// only exists for views composed in this release.
+// A surface says "these rows, through this element, bound like so" and stops.
+// Markup written here for a row would be markup that exists only for whichever
+// surface wrote it, and the whole claim of the view system is that a concept
+// nobody wrote code for renders through the shared library.
 //
-// It is a COPY rather than an import because the predefined-view tree is a
-// closed, guarded directory (portal_view_composition_test.go scans it and
-// counts its files); reaching into it for a component would couple a surface
-// under active parallel development to that guard's file list. The two are
-// twelve lines of identical plumbing and one shared contract, and the contract
-// -- renderElement, explainFit -- lives in view-kit where both read it.
+// There were TWO OF THIS FILE until epic memql#4661 -- views/ViewElement.tsx
+// and compose/ComposeElement.tsx, identical but for the exported name. The
+// copy existed because the predefined-view tree was a closed, guarded
+// directory whose file list a repo-root test counts, and reaching into it for
+// a component would have coupled the composer to that guard. Predefined views
+// are now DATA rendered through the composer's own path, so the tree they
+// lived in is gone and with it the reason for the copy. This file is the
+// survivor, moved to a neutral home: neither "the composer's" nor "the
+// designed views'", because it is both.
 //
-// AN UNFIT ELEMENT EXPLAINS ITSELF, which matters more here than in a designed
-// view. In a designed view an unfit element is a mistake somebody made once. In
-// a composer it is a normal, expected state -- a person is trying elements
-// against a concept, and the honest answer to "why is this one empty" is
-// view-kit's own sentence, built from the element author's requirement prose.
+// AN UNFIT ELEMENT EXPLAINS ITSELF. In a seeded page an unfit element is a
+// mistake somebody made once; in a composer it is a normal, expected state --
+// a person is trying elements against a concept, and the honest answer to
+// "why is this one empty" is view-kit's own sentence, built from the element
+// author's requirement prose.
 
-export interface ComposeElementProps {
+export interface ElementViewProps {
   element: ElementSpec;
   rows: readonly RowLike[];
   concept: ConceptLike;
@@ -45,14 +46,14 @@ export interface ComposeElementProps {
   onRowAction?: (action: string, rowId: string) => void;
 }
 
-export function ComposeElement({
+export function ElementView({
   element,
   rows,
   concept,
   options,
   onSelect,
   onRowAction,
-}: ComposeElementProps): ReactNode {
+}: ElementViewProps): ReactNode {
   useEffect(() => {
     ensureViewKitStyles();
   }, []);

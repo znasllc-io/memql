@@ -183,7 +183,13 @@ function renderOps(
 describe("cluster operations, on the Deployments view", () => {
   it("offers a reader none of the verbs", async () => {
     renderOps("reader");
-    await waitFor(() => expect(screen.getByText("Deployments")).toBeTruthy());
+    // Scoped to the page HEADING. The nav rail carries the word too, and
+      // since the page header renders before its rows land (epic memql#4661)
+      // a bare getByText now sees both -- which is a query that was always
+      // ambiguous and happened to resolve on the rail first.
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { level: 1, name: "Deployments" })).toBeTruthy(),
+      );
     // Absent, not present-and-refused. The gate is the cluster's; hiding the
     // control is the courtesy half (src/deploy/useDeployConsole.ts).
     for (const verb of [
