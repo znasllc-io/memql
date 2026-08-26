@@ -2197,6 +2197,12 @@ type InvitationRow struct {
 	InviterName string
 	ExpiresAt   time.Time
 	RespondedAt time.Time
+	// BindingHash is the SHA-256 hex digest of the nonce handed as a cookie to
+	// the browser that FIRST opened this invitation link (memql#4601). Empty
+	// means no browser has touched the row yet, or that it predates first-touch
+	// binding; the accept path decides what an unbound row is worth, which is
+	// why this is projected rather than judged here.
+	BindingHash string
 }
 
 // LookupInvitationByTokenHash resolves a presented invitation token to its row.
@@ -2212,13 +2218,52 @@ func (s *Store) LookupInvitationByTokenHash(ctx context.Context, tokenHash strin
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query invitationByTokenHash(tokenHash: "%s")`, escapeMemQLString(tokenHash))
+	// userInvitationByTokenHash, NOT invitationByTokenHash (memql#4612). The
+	// latter filters kind=="guest" -- it predates user invitations entirely --
+	// so running it here returned nothing for every kind="user" row, the redeem
+	// path refused invitation_not_found, and user-invitation redemption never
+	// once succeeded on any shipped version. The guest query is left exactly as
+	// it was: widening it would let a user invitation come back through the
+	// guest door, and the filter is what makes that impossible today.
+	query := fmt.Sprintf(`query userInvitationByTokenHash(tokenHash: "%s")`, escapeMemQLString(tokenHash))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup invitation: %w", err)
 	}
-	if len(nodes) == 0 || nodes[0] == nil {
+	return firstInvitationRow(nodes), nil
+}
+
+// LookupInvitationById is the by-id twin of LookupInvitationByTokenHash, for a
+// caller that already resolved the row once and holds its id -- the first-touch
+// binding re-read below is the first of those.
+//
+// Not @serverOnly, so no internal origin: invitationById is client-reachable and
+// carries its own tracked caller-scope debt (see
+// test/dslconformance/caller_arg_selection_test.go). Stamping an origin it does
+// not require would claim a boundary that is not there.
+func (s *Store) LookupInvitationById(ctx context.Context, invitationId string) (*InvitationRow, error) {
+	if strings.TrimSpace(invitationId) == "" {
 		return nil, nil
+	}
+	query := fmt.Sprintf(`query invitationById(invitationId: %s)`, langparser.QuoteString(invitationId))
+	nodes, err := s.executeAndExtract(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup invitation by id: %w", err)
+	}
+	return firstInvitationRow(nodes), nil
+}
+
+// firstInvitationRow projects the first node of an invitation query result.
+//
+// ONE reader for both lookups, deliberately. The two queries select the same
+// shape (invitationFull), and a field lifted in one projection and forgotten in
+// the other is a silent hole rather than a compile error: the caller reads the
+// zero value and concludes the row does not carry the field. bindingHash is the
+// field where that costs the most -- an empty one reads as "no browser has
+// bound this yet", which is the state the accept path admits (memql#4601).
+func firstInvitationRow(nodes []*memqlv1.MemoryNode) *InvitationRow {
+	if len(nodes) == 0 || nodes[0] == nil {
+		return nil
 	}
 	node := nodes[0]
 	g := newFieldGetter(node)
@@ -2233,7 +2278,179 @@ func (s *Store) LookupInvitationByTokenHash(ctx context.Context, tokenHash strin
 		InviterName: g.str("inviterName"),
 		ExpiresAt:   g.time("expiresAt"),
 		RespondedAt: g.time("respondedAt"),
-	}, nil
+		BindingHash: g.str("bindingHash"),
+	}
+}
+
+// Sentinel outcomes of the first-touch binding write. Both are ordinary
+// results of the flow rather than failures, and a caller that treats every
+// non-nil error as a 500 will render the wrong page for the second one.
+var (
+	// ErrInvitationNotFound means no invitation row exists at that id.
+	ErrInvitationNotFound = errors.New("identity.store: invitation not found")
+	// ErrInvitationBoundElsewhere means the row already carries a DIFFERENT
+	// browser's binding. It is the refusal the control exists to produce: the
+	// person holding this tab is not the person who opened the link first.
+	// Distinguished from a re-touch by the SAME browser, which returns nil,
+	// because a reload must not look like an attack.
+	ErrInvitationBoundElsewhere = errors.New("identity.store: invitation is bound to another browser")
+)
+
+// BindUserInvitation stamps the first-touch browser binding on a user
+// invitation, and refuses to move one that is already set (memql#4601).
+//
+// An emailed credential's holder is, on its own, anybody who can read the
+// mailbox: a forwarded message, a shared alias, a scanner that follows links.
+// The binding narrows that to one browser -- the accept completes only for a
+// caller presenting the nonce whose digest this stamps -- which is
+// magicLinkRequest's device binding (design D2, memql#4302) applied one
+// credential over. The plaintext nonce is never passed here and never stored:
+// it lives in the recipient's cookie and nowhere else, the same arrangement
+// magicLinkRequest.bindingHash makes for the magic-link flow.
+//
+// THE NO-OVERWRITE RULE IS THE CONTROL, NOT HYGIENE. A row a second browser can
+// re-bind is an unbound row: the forwardee opens the link, takes the binding,
+// and the accept then completes for them while the person the invitation names
+// is locked out of their own invitation. So the write happens only from empty.
+//
+// IT IS ENFORCED HERE BECAUSE IT CANNOT BE ENFORCED IN THE DSL. A mutation body
+// has no predicate to hang a compare-and-swap on -- `update{}` is a
+// read-merge-write, no mutation in the tree carries a filter, and two concurrent
+// writers each produce a version with neither able to tell it lost. That is the
+// finding magic_link_gate.go records for the magic-link consume, and this takes
+// the same answer: the compare and the swap happen while ONE caller holds the
+// advisory lock, so the loser re-reads, sees a binding, and is refused rather
+// than overwriting it.
+//
+// THE LOCK IS THE MAGIC-LINK GATE'S, reused on an invitation id, and that is
+// safe rather than convenient. The two-key advisory space is keyed
+// (class, FNV32a(id)); sharing the class means an invitation id and a magic-link
+// request id can hash to the same objid, which costs those two calls one
+// serialised critical section and nothing else -- the re-read inside the section
+// is keyed on the id itself, exactly as magicLinkGateKey's own note argues. What
+// it does cost is a log line that says "magic-link gate" while binding an
+// invitation, in the degraded no-DirectDB path. A dedicated lock class belongs
+// beside the others in magic_link_gate.go.
+//
+// WHICH ERROR IT IS MATTERS TO THE CALLER, which is why there are two
+// sentinels. A failure to STAMP is not fatal to the redeem: refusing to serve
+// the invitation page because a binding could not be written would strand
+// somebody whose invitation is perfectly good, so the caller may proceed while
+// recording that the control was not applied to this row -- what it must never
+// do is fail silently, which is why the error is returned rather than
+// swallowed. ErrInvitationBoundElsewhere is the opposite of that: not the
+// control failing but the control WORKING, on a browser that must not be let
+// through. A caller that collapses the two into "binding unavailable, carry on"
+// has removed the protection while appearing to log it.
+//
+// LIFECYCLE IS NOT JUDGED HERE. The row is pending when the flow calls this, but
+// an accepted or revoked one is not refused: status is what the accept path
+// checks, on a field this write does not touch, and a second refusal here would
+// only ever fire in a race whose loser the accept path already turns away.
+//
+// INTERNAL ORIGIN: bindUserInvitation is @serverOnly, for the reason its own doc
+// comment records -- on the wire it is a credential-forging primitive, since the
+// caller supplies the digest that decides which browser may accept.
+func (s *Store) BindUserInvitation(ctx context.Context, invitationId, bindingHash string) error {
+	invitationId = strings.TrimSpace(invitationId)
+	bindingHash = strings.TrimSpace(bindingHash)
+	if invitationId == "" {
+		return errors.New("identity.store: bind user invitation: no invitation id")
+	}
+	if bindingHash == "" {
+		// An empty digest is not a binding, it is the ABSENCE of one, and
+		// writing it would leave a row that reads as untouched to every reader
+		// while the browser that touched it believes it holds the binding.
+		return errors.New("identity.store: bind user invitation: no binding hash")
+	}
+	return s.withMagicLinkGate(ctx, invitationId, func(ctx context.Context) error {
+		row, err := s.LookupInvitationById(ctx, invitationId)
+		if err != nil {
+			return fmt.Errorf("identity.store: bind user invitation: re-read: %w", err)
+		}
+		if row == nil {
+			return ErrInvitationNotFound
+		}
+		if existing := strings.TrimSpace(row.BindingHash); existing != "" {
+			if existing == bindingHash {
+				// The same browser, touching again -- a reload, a back button,
+				// a prefetch. Idempotent by design: this is the ordinary case,
+				// not a near-miss.
+				return nil
+			}
+			return ErrInvitationBoundElsewhere
+		}
+		var b strings.Builder
+		b.WriteString(`mutation bindUserInvitation(`)
+		writeKVString(&b, "invitationId", invitationId, true)
+		writeKVString(&b, "bindingHash", bindingHash, false)
+		b.WriteString(`)`)
+		if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+			return fmt.Errorf("identity.store: bind user invitation: %w", err)
+		}
+		return nil
+	})
+}
+
+// MarkUserInvitationAccepted stamps a user invitation accepted -- the write
+// that makes the credential SINGLE-USE (memql#4606).
+//
+// Nothing wrote it before. resolveInvitation refuses a row whose status is not
+// "pending" as `invitation_already_used`, and on a kind="user" row the status
+// never left "pending", so the check tested a value that could not change: one
+// link stayed redeemable for its whole TTL and a forwarded email stayed live
+// for every recipient who read it. The concept has carried "accepted" in its
+// status enum and documented inviteeId as "Stamped on acceptance" the whole
+// time; only this half was missing.
+//
+// CALL IT AFTER THE USER ROW EXISTS, because inviteeId is the whole of what the
+// row records about who accepted -- and an empty one is the argument the engine
+// cannot refuse for us. Required-arg validation tests PRESENCE, not content
+// (component/memql/function_validator.go: `!exists || value == nil`), so ""
+// satisfies `inviteeId string!` and lands a row stamped accepted that names
+// nobody, which is exactly the state the concept's "Stamped on acceptance"
+// description promises cannot exist. The `!` sigil has no way to say non-empty;
+// this does.
+//
+// An empty invitationId is refused here too, for a smaller reason: the engine
+// already rejects it ("update() requires an explicit id"), so the guard buys a
+// message that names this operation instead of one about the update() form,
+// arriving from a layer the caller cannot act on. Refusing both keeps the two
+// halves of one call symmetrical rather than making a reader work out which
+// argument is load-bearing.
+//
+// A STAMP, NOT A COMPARE-AND-SWAP, unlike ConsumeMagicLinkRequest above. The
+// refusal it enables is read on a LATER request, so two redemptions that both
+// resolve the row before either stamps would both write. That race admits
+// nobody extra: resolveInvitation checks the invited ADDRESS, so only the
+// person the invitation names can reach this at all, and the outcome is the
+// same row stamped twice. The single-use property this exists for is about the
+// link's whole TTL, which is where the reuse actually was.
+//
+// INTERNAL ORIGIN: markUserInvitationAccepted is @serverOnly, and origin
+// DEFAULTS to client, so an unstamped call is refused at execute. The refusal
+// would not surface as a broken login -- the redemption succeeds and only the
+// stamp is lost -- so the feature would go back to being reusable while every
+// test that does not read the row stays green. That is the inert-gate failure
+// test/dslconformance/server_only_callers_stamp_test.go exists for.
+func (s *Store) MarkUserInvitationAccepted(ctx context.Context, invitationId, inviteeId string) error {
+	invitationId = strings.TrimSpace(invitationId)
+	inviteeId = strings.TrimSpace(inviteeId)
+	if invitationId == "" {
+		return errors.New("identity.store: mark user invitation accepted: no invitation id")
+	}
+	if inviteeId == "" {
+		return errors.New("identity.store: mark user invitation accepted: no invitee id")
+	}
+	var b strings.Builder
+	b.WriteString(`mutation markUserInvitationAccepted(`)
+	writeKVString(&b, "invitationId", invitationId, true)
+	writeKVString(&b, "inviteeId", inviteeId, false)
+	b.WriteString(`)`)
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+		return fmt.Errorf("identity.store: mark user invitation accepted: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

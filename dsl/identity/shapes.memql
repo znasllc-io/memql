@@ -266,6 +266,7 @@ shape identity identitySummary {
 shape invitation invitationFull {
   row.id
   kind
+  active
   partitionId
   spaceName
   inviterId
@@ -273,8 +274,10 @@ shape invitation invitationFull {
   inviteeId
   inviteeEmail
   inviteeName
+  inviteeRole
   tokenHash
   previousTokenHash
+  bindingHash
   expiresAt
   status
   respondedAt

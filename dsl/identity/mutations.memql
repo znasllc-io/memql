@@ -3039,6 +3039,124 @@ mutate invitation createUserInvitation {
   }
 }
 
+/// Bind a pending user invitation to the browser that FIRST opened its link
+/// (memql#4601).
+///
+/// The invitation arrives by email, which means that on its own its holder is
+/// anybody who can read the mailbox -- a forwarded message, a shared alias, a
+/// mail scanner that follows links. This stamps the SHA-256 digest of the nonce
+/// handed to the opening browser as a cookie, and the accept path then completes
+/// only for a browser that presents the preimage. It is magicLinkRequest's
+/// device binding (design D2, memql#4302) applied one credential over.
+///
+/// FIRST TOUCH ONLY, AND THE NO-OVERWRITE RULE IS THE WHOLE CONTROL. A row a
+/// second browser can re-bind is an unbound row: the forwardee opens the link,
+/// takes the binding, and the accept then completes for THEM while the person
+/// the invitation names is locked out of their own invitation. So "do not
+/// overwrite" is not idempotence hygiene, it is the property the field exists
+/// for, and every caller has to preserve it.
+///
+/// IT IS NOT ENFORCED HERE, and it cannot be. A mutation body has no predicate
+/// to hang a compare-and-swap on -- `update{}` is a read-merge-write, ZERO
+/// mutations in this tree carry a filter, and two concurrent writers each
+/// produce a version with neither able to tell it lost. That is the same
+/// finding component/identity/magic_link_gate.go records for the magic-link
+/// consume, and it takes the same answer: the compare and the swap both happen
+/// in Go, inside one critical section, in Store.BindUserInvitation. This
+/// construct is the SWAP half, and it is unconditional by construction.
+///
+/// @serverOnly, and here actor.userId scoping is not merely the wrong question
+/// -- it is answered "yes" by exactly the caller who must be refused. This
+/// writes a caller-supplied DIGEST that decides which browser may accept, which
+/// is the credential-forging shape createGuestInvitation and
+/// rotateGuestInvitationToken already carry: on the wire, any authenticated
+/// caller could bind an invitation they merely know the id of to a cookie they
+/// hold, and then accept it. A self-scoped filter passes them, because they
+/// legitimately are an authenticated user. And the legitimate caller cannot be
+/// scoped at all, for markUserInvitationAccepted's reason one construct down:
+/// the toucher of a /join link is unauthenticated by construction, so
+/// actor.userId is empty for every honest call.
+@serverOnly
+mutate invitation bindUserInvitation {
+  args {
+    invitationId  string!
+    bindingHash   string!
+  }
+  update {
+    accept { bindingHash }
+    stamp {
+      id: args.invitationId
+    }
+  }
+}
+
+/// Stamp a user invitation accepted, at the moment its holder finishes
+/// registering (memql#4606).
+///
+/// THE WRITE THAT MAKES THE CREDENTIAL SINGLE-USE. The resolve path refuses a
+/// row whose status is not "pending" with `invitation_already_used`, and on a
+/// kind="user" row nothing ever moved it off "pending". The concept has
+/// declared "accepted" in its status enum and documented inviteeId as "Stamped
+/// on acceptance" since it was written; only the write side was missing, so the
+/// status check tested a value that could not change. One link was redeemable
+/// for its whole TTL, and a forwarded email stayed live for every recipient who
+/// read it.
+///
+/// respondedAt rather than a second timestamp, because the concept carries ONE
+/// response stamp and both kinds write it. `active` is deliberately untouched:
+/// it means "not soft-cancelled", which is what revokeUserInvitation writes, and
+/// an accepted invitation was not cancelled. Keeping the two outcomes distinct
+/// on the row is what lets the redeeming page say "somebody cancelled this"
+/// rather than "you already used this" -- the distinction revokeUserInvitation
+/// records just below.
+///
+/// `inviteeId` is required rather than optional, for markGuestInvitationAccepted's
+/// reason: `??` is blank-coalescing, so an optional one would let a caller that
+/// resolved no user id write the empty string and leave a row that says accepted
+/// without saying by whom. The sigil buys PRESENCE rather than content, though --
+/// required-arg validation admits "" -- so the refusal that actually holds the
+/// line is in component/identity/store.go, which will not send either id empty.
+/// The id always exists by then: the invitee's user row is created or resolved by
+/// the redemption path before the invitation is stamped, never after.
+///
+/// @serverOnly, and actor.userId scoping is not the fix. The answer differs from
+/// the guest twin's by one step rather than in kind. The caller is the INVITEE,
+/// mid-registration: this runs on the redemption path, which is unauthenticated
+/// by construction -- it IS the request that creates the account -- so
+/// actor.userId is empty for every legitimate caller and a self-scoped filter
+/// would match zero rows for the only caller that ever runs it.
+///
+/// The row's two user pointers are no better. `inviterId` names the wrong person
+/// outright, and revokeUserInvitation records the same policy objection to
+/// filtering on it. `inviteeId` is the field this mutation SETS: it is empty on
+/// every kind="user" row until this write lands, so a filter over it would test
+/// the value being written.
+///
+/// What authorizes the write is possession of the token: the caller presented a
+/// plaintext whose SHA-256 matches the row's tokenHash, and the resolve path
+/// checked kind, active, status, expiry and the invited ADDRESS before this
+/// runs. The boundary sits where that authorization already lives, which is the
+/// argument setOAuthClientCORSOrigins makes and the guest half repeats. On the
+/// wire this would also be the denial-of-service primitive the write itself
+/// creates: burning an invitation is what makes it single-use, so any
+/// authenticated caller could name an arbitrary invitation id and burn it before
+/// its holder ever clicked.
+@serverOnly
+mutate invitation markUserInvitationAccepted {
+  args {
+    invitationId  string!
+    inviteeId     string!
+  }
+  update {
+    accept { inviteeId }
+    stamp {
+      id: args.invitationId
+      status: "accepted"
+      respondedAt: now
+    }
+  }
+}
+
 /// Revoke an unaccepted invitation before its TTL runs out (memql#4270).
 ///
 /// @serverOnly, and actor.userId scoping is not the fix -- it would be a
@@ -3093,12 +3211,12 @@ mutate invitation revokeUserInvitation {
 // WHY THE ENGINE OWNS THEM, rather than a product bundle at MEMQL_DSL_PATH.
 // The `invitation` concept, the `invitationFull` shape and both lookup queries
 // (invitationByTokenHash / invitationById) are already engine constructs; the
-// kind="user" twins createUserInvitation / revokeUserInvitation sit directly
-// above; and the handlers are first-party engine gRPC. A first-party handler
-// calling a construct the engine does not own -- with no declared dependency
-// and no failure path saying so -- is the shape the issue rejected. The
-// product-specific part of a guest flow is the SPACE, and that lives on the
-// participant side in dsl/cognition.
+// kind="user" siblings createUserInvitation / markUserInvitationAccepted /
+// revokeUserInvitation sit directly above; and the handlers are first-party
+// engine gRPC. A first-party handler calling a construct the engine does not
+// own -- with no declared dependency and no failure path saying so -- is the
+// shape the issue rejected. The product-specific part of a guest flow is the
+// SPACE, and that lives on the participant side in dsl/cognition.
 //
 // ALL FOUR ARE @serverOnly, and it is not a formality. Each writes a
 // `tokenHash`, which is the whole credential: the guest-auth interceptor

@@ -1,0 +1,156 @@
+package webtempl
+
+import "strings"
+
+// InvitationData drives GET /invitation?code=... -- the page a user-invitation
+// email lands on (memql#4601).
+//
+// Two shapes in one component, exactly as EnrollData carries: the live card,
+// and one of several distinct refusals. Rejection is what picks. They share a
+// template because they share a layout and an audience, not because they are
+// the same page.
+//
+// WHY THE ADDRESS IS DATA HERE AND NOT AN INPUT. Every other unauthenticated
+// page in this app asks the visitor who they are. This one already knows: the
+// token in the link resolved to a row naming one address, server-side, before
+// this struct was built. Rendering that address as a field the visitor could
+// edit would invite them to change it, and an invitation redeemed for a
+// different address is precisely what resolveInvitation refuses. So it is
+// shown, and it is not editable -- the page tells the holder what the
+// invitation says rather than asking them to tell it back.
+type InvitationData struct {
+	Layout LayoutData
+
+	// Code is the presented invitation token, carried into the accept form's
+	// hidden field so the POST can re-resolve it.
+	//
+	// IT IS ALREADY IN THE ADDRESS BAR. Putting it in a hidden input adds no
+	// exposure the URL did not already carry, and the alternative -- holding it
+	// in server-side state keyed by a second cookie -- would add a second
+	// short-lived store for no gain over the binding cookie that already
+	// governs this page.
+	Code string
+
+	// Rejection is "" on the live path. Otherwise it is the machine-readable
+	// state: "invalid", "expired", "already-used", "revoked" or "wrong-kind".
+	// Rendered into a data attribute so a test (and a support engineer reading
+	// a screenshot) can tell them apart without matching on prose.
+	Rejection string
+
+	// Heading and Message are the refusal's human text. Empty on the live path.
+	Heading string
+	Message string
+
+	// NextStep is the one thing the holder should do about it, when there is
+	// one. A refusal that only says "no" makes the reader guess.
+	NextStep string
+
+	// InviteeEmail is the address the invitation authorizes. Live path only.
+	InviteeEmail string
+
+	// InviterName is who issued it. Empty renders as an unattributed
+	// invitation rather than a fabricated one -- the same rule the email body
+	// follows.
+	InviterName string
+
+	// Role is the cluster role the holder will land with. Empty means the
+	// cluster default, and RoleSentence says so rather than naming a role
+	// nobody promised.
+	Role string
+
+	// ExpiresIn is a rendered duration ("2 days"), live path only.
+	ExpiresIn string
+
+	// StepUp is true when this invitation grants a privileged role, so
+	// accepting sends a sign-in link to the invited address instead of going
+	// straight to a passkey. The page says so BEFORE the button is pressed:
+	// an extra step that arrives unannounced reads as the flow failing.
+	StepUp bool
+}
+
+// InviterSentence attributes the invitation, or says nothing.
+//
+// An empty InviterName renders a shorter sentence rather than "invited by "
+// with a blank after it -- a message that looks broken invites less trust than
+// a shorter one. Same judgment emailsender.inviterSentence records for the
+// message that brought the holder here, so the two agree.
+func (d InvitationData) InviterSentence() string {
+	if n := strings.TrimSpace(d.InviterName); n != "" {
+		return n + " has invited you to join."
+	}
+	return "You have been invited to join."
+}
+
+// RoleSentence renders the granted role, or the honest absence of one.
+func (d InvitationData) RoleSentence() string {
+	if r := strings.TrimSpace(d.Role); r != "" {
+		return "You will join with the " + r + " role."
+	}
+	return "You will join with the cluster's default role."
+}
+
+// Invitation renders the invitation page.
+//
+// ONE BUTTON, AND IT POSTS. The form method is the security boundary, not a
+// preference: enterprise mail security prefetches URLs out of email, so a link
+// that accepted on GET would be spent by a scanner before its recipient
+// clicked. See the note at the top of component/identity/web/invitation.go.
+templ Invitation(data InvitationData) {
+	@Layout(data.Layout) {
+		if data.Rejection != "" {
+			<div class="card text-center" data-invitation-state={ data.Rejection }>
+				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand-primary); margin: 0 auto 12px; display: block;">
+					<path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"></path>
+				</svg>
+				<h1 class="card-title">{ data.Heading }</h1>
+				<p class="text-muted">{ data.Message }</p>
+				if data.NextStep != "" {
+					<p class="text-small text-subtle mt-2">{ data.NextStep }</p>
+				}
+			</div>
+		} else {
+			<div class="card" data-invitation-state="valid">
+				<h1 class="card-title">You have been invited</h1>
+				<p class="text-muted">
+					{ data.InviterSentence() } { data.RoleSentence() }
+				</p>
+				if data.InviteeEmail != "" {
+					<p class="text-small text-subtle mt-2">
+						This invitation is for <strong>{ data.InviteeEmail }</strong>.
+					</p>
+				}
+				if data.ExpiresIn != "" {
+					<p class="text-small text-subtle">
+						It is single-use and expires in { data.ExpiresIn }.
+					</p>
+				}
+				if data.StepUp {
+					<p class="text-small text-subtle">
+						Because this invitation grants an elevated role, we will email a
+						sign-in link to that address to confirm it is yours before your
+						account is created.
+					</p>
+				} else {
+					<p class="text-small text-subtle">
+						Accepting creates your account and sets up a passkey, so you sign in
+						with the unlock you already use on this device. There is nothing to
+						remember and nothing to type.
+					</p>
+				}
+				<form method="POST" action="/invitation/accept" data-submit-once>
+					@CSRFField(data.Layout.CSRFToken)
+					<input type="hidden" name="code" value={ data.Code }/>
+					<div class="mt-2">
+						<button type="submit" class="btn btn-primary" data-pending-label="Working...">
+							if data.StepUp {
+								Send my sign-in link
+							} else {
+								Accept the invitation
+							}
+						</button>
+					</div>
+				</form>
+			</div>
+		}
+	}
+}

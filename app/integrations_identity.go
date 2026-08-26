@@ -24,10 +24,12 @@ import (
 	"github.com/znasllc-io/memql/component/identity/emailsender"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
+	"github.com/znasllc-io/memql/component/identity/invitation"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/identity/recoverykey"
 	"github.com/znasllc-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity/registration"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
@@ -518,6 +520,150 @@ func (a *App) integrationsIdentity() {
 		}
 		return out, nil
 	}, auditLogger)
+
+	// Invitation redeem (memql#4601). The web package stays engine-free, so the
+	// stores live here and the page gets seams -- the same shape as the
+	// enrolment and recovery adapters above.
+	//
+	// THE ADAPTER REPORTS STATE, NEVER TOKEN MATERIAL. The plaintext stays in
+	// the caller's URL and the hash never leaves these closures, so nothing
+	// crossing into the web package can be logged into existence. The one
+	// digest that does cross is the BINDING hash, which is a value this server
+	// minted for one browser and is exactly what magicLinkRequest.bindingHash
+	// already persists in the clear.
+	webSrv.SetInvitationFlow(
+		func(ctx context.Context, plainToken string) (identityweb.InvitationResolution, error) {
+			row, err := store.LookupInvitationByTokenHash(ctx, invitation.Hash(plainToken))
+			if err != nil {
+				return identityweb.InvitationResolution{}, err
+			}
+			out := identityweb.InvitationResolution{State: identityweb.InvitationInvalid}
+			if row == nil {
+				return out, nil
+			}
+			out.InvitationId = row.ID
+
+			// ORDER MATTERS AND IT IS THE SAME ORDER resolveInvitation USES in
+			// the magic-link issuer. Kind before status before expiry, so a
+			// guest link presented here is called a guest link rather than
+			// whatever its status happens to be -- the holder of one is not
+			// making a typo, and telling them to re-check the link would send
+			// them looking for a problem that is not there.
+			switch {
+			case !strings.EqualFold(strings.TrimSpace(row.Kind), "user"):
+				out.State = identityweb.InvitationWrongKind
+			case !row.Active:
+				out.State = identityweb.InvitationRevoked
+			case !strings.EqualFold(strings.TrimSpace(row.Status), "pending"):
+				out.State = identityweb.InvitationAlreadyUsed
+			case !row.ExpiresAt.IsZero() && !row.ExpiresAt.After(time.Now().UTC()):
+				out.State = identityweb.InvitationExpired
+			default:
+				out.State = identityweb.InvitationValid
+			}
+
+			// A DEAD INVITATION NAMES NOBODY. Everything below this line is
+			// shown on the page, and telling an anonymous holder of a spent or
+			// expired link which address it was for would turn a stale
+			// credential into an address-disclosure oracle. The enrolment
+			// adapter withholds its account label for the same reason.
+			if out.State != identityweb.InvitationValid {
+				return out, nil
+			}
+
+			out.InviteeEmail = row.Email
+			out.InviterName = row.InviterName
+			out.Role = row.Role
+			out.ExpiresAt = row.ExpiresAt
+			out.BindingHash = row.BindingHash
+			out.StepUp = invitation.RequiresStepUp(row.Role)
+			return out, nil
+		},
+
+		func(ctx context.Context, invitationId, bindingHash string) error {
+			return store.BindUserInvitation(auth.ContextWithInternalOrigin(ctx), invitationId, bindingHash)
+		},
+
+		func(ctx context.Context, plainToken, sourceIP string) (identityweb.InvitationAcceptResult, error) {
+			internalCtx := auth.ContextWithInternalOrigin(ctx)
+
+			// RE-RESOLVED HERE, NOT TRUSTED FROM THE PAGE. This closure spends
+			// a credential; it does its own lookup so the decision to spend is
+			// made against the row as it is now, not as some earlier request
+			// reported it.
+			row, err := store.LookupInvitationByTokenHash(internalCtx, invitation.Hash(plainToken))
+			if err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+			if row == nil || !strings.EqualFold(strings.TrimSpace(row.Kind), "user") ||
+				!row.Active || !strings.EqualFold(strings.TrimSpace(row.Status), "pending") ||
+				(!row.ExpiresAt.IsZero() && !row.ExpiresAt.After(time.Now().UTC())) {
+				return identityweb.InvitationAcceptResult{}, fmt.Errorf("identity: invitation is not redeemable")
+			}
+
+			// THE ORDER OF THE NEXT THREE WRITES IS THE WHOLE FAILURE STORY,
+			// and it is chosen the way IssueUserInvitation chooses its own.
+			//
+			// User first. It is the durable thing the invitee actually needs,
+			// and creating it twice is what we must avoid -- so it happens
+			// once, before anything that could make us retry.
+			//
+			// Mark accepted second. This is what makes the invitation
+			// single-use, and it must land BEFORE a usable credential exists:
+			// if the process died between minting the enrolment token and
+			// stamping the row, the invitation would still read as pending and
+			// a forwarded copy could be redeemed again for a second account.
+			// Marking first can only fail the other way -- a spent invitation
+			// and no enrolment link -- which strands the invitee with a clear
+			// message and a row an admin can see, instead of quietly leaving a
+			// live credential behind.
+			//
+			// Enrolment token last, because it is the only one of the three the
+			// caller can be handed again by simply issuing a fresh invitation.
+			userId, err := identity.NewRandomId("")
+			if err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+			internal := cfg.IsInternalEmail(row.Email)
+			role := strings.TrimSpace(row.Role)
+			if role == "" && internal {
+				role = cfg.InternalDefaultRole
+			}
+			seed := identity.UserProfileSeed{
+				// Stamped at creation for the reason memql#4304 gives: the flag
+				// should be right from the first sign-in rather than appearing
+				// later, and the heuristic never runs again.
+				SharedMailbox: registration.LooksLikeSharedMailbox(row.Email),
+			}
+			if err := store.CreateUserOnFirstLogin(internalCtx, userId, row.Email, row.Email, role, internal, seed); err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+			if err := store.MarkUserInvitationAccepted(internalCtx, row.ID, userId); err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+
+			plain, hash, err := enrolment.Mint()
+			if err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+			enrolmentId, err := enrolment.NewId()
+			if err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+			// issuedBy names the INVITATION rather than a person, because no
+			// person issued this one -- the invitee's own click did, and the
+			// authority for it was the invitation. An operator reading the
+			// enrolment row should be able to see that without guessing.
+			issuedBy := "invitation:" + row.ID
+			expiresAt := time.Now().UTC().Add(enrolment.DefaultTTL)
+			if err := enrolStore.Create(internalCtx, enrolmentId, userId, hash, issuedBy, expiresAt, sourceIP); err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
+
+			return identityweb.InvitationAcceptResult{EnrolmentCode: plain, Email: row.Email}, nil
+		},
+		auditLogger,
+	)
 
 	// /me/devices passkey management (memql#3409). The SAME
 	// *webauthn.Store the registration ceremony builds per-request in

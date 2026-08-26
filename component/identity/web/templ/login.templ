@@ -267,6 +267,12 @@ templ loginFormWaitlist(data LoginData) {
 		if data.OAuthState != "" {
 			<input type="hidden" name="state" value={ data.OAuthState }/>
 		}
+		if data.CodeChallenge != "" {
+			<input type="hidden" name="code_challenge" value={ data.CodeChallenge }/>
+		}
+		if data.CodeChallengeMethod != "" {
+			<input type="hidden" name="code_challenge_method" value={ data.CodeChallengeMethod }/>
+		}
 		<div class="form-row">
 			<label for="email">Email</label>
 			<input id="email" name="email" type="email" required autocomplete="email" inputmode="email" value={ data.PrefillEmail }/>
@@ -289,9 +295,27 @@ templ loginFormWaitlist(data LoginData) {
 // loginFormInvite is rendered after step 1 reveals a new user in
 // invite-only mode, OR when an existing operator with a token
 // reaches /login?stage=needs_invite directly.
+// loginFormInvite is the needs_invite stage: somebody who has a token but no
+// working link.
+//
+// THE HIDDEN EMAIL FIELD IS NOT DECORATION (memql#4601). This form used to
+// render `form`, `return_to`, `client_id`, `redirect_uri` and `state` and no
+// address at all, while both sibling forms carried `value={ data.PrefillEmail }`
+// and the handler populated PrefillEmail for this very stage. So every
+// submission posted `email=""`, resolveInvitation compared the row's address
+// against the empty string, and the person holding a valid invitation was told
+// to check their email address. Redemption had never once succeeded, on any
+// shipped version, and no test posted this form.
+//
+// The address is HIDDEN rather than shown-and-editable because the visitor
+// typed it one step ago and an invitation authorizes exactly one address:
+// re-presenting it as an editable box invites a change that can only produce a
+// mismatch. handleLoginPost now also refuses an empty address on this branch,
+// so the field and the handler cannot drift apart silently again.
 templ loginFormInvite(data LoginData) {
 	<form method="POST" action="/login" data-submit-once>
 		<input type="hidden" name="form" value="invite"/>
+		<input type="hidden" name="email" value={ data.PrefillEmail }/>
 		if data.ReturnTo != "" {
 			<input type="hidden" name="return_to" value={ data.ReturnTo }/>
 		}
@@ -303,6 +327,12 @@ templ loginFormInvite(data LoginData) {
 		}
 		if data.OAuthState != "" {
 			<input type="hidden" name="state" value={ data.OAuthState }/>
+		}
+		if data.CodeChallenge != "" {
+			<input type="hidden" name="code_challenge" value={ data.CodeChallenge }/>
+		}
+		if data.CodeChallengeMethod != "" {
+			<input type="hidden" name="code_challenge_method" value={ data.CodeChallengeMethod }/>
 		}
 		<div class="form-row">
 			<label for="invitation">Invitation token</label>

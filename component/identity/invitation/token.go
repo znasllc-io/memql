@@ -46,20 +46,35 @@ const (
 	// DefaultTTL is the lifetime of a freshly-issued invitation when the issuer
 	// names none.
 	//
-	// Seven days rather than the enrolment token's fifteen minutes, and the
-	// difference is the conversation around it: an enrolment link is normally
-	// followed while the admin is still talking to the person, whereas an
-	// invitation is emailed to somebody who may be asleep, on holiday, or not
-	// yet expecting it. A credential that expires before it is read is a
-	// support ticket.
-	DefaultTTL = 7 * 24 * time.Hour
+	// Longer than the enrolment token's fifteen minutes, and the difference is
+	// the conversation around it: an enrolment link is normally followed while
+	// the admin is still talking to the person, whereas an invitation is
+	// emailed to somebody who may be asleep, on holiday, or not yet expecting
+	// it. A credential that expires before it is read is a support ticket.
+	//
+	// SEVENTY-TWO HOURS RATHER THAN THE SEVEN DAYS THIS ONCE WAS (memql#4601).
+	// The number is a direct trade against forwarding, which is the residual
+	// risk this credential cannot design away: it travels through email, and
+	// until it is redeemed once, whoever opens it first is who joins. Every
+	// hour of TTL is an hour in which a forward, an archived thread, or a
+	// mailbox somebody else can read stays live. Three days still covers the
+	// weekend and the timezone the paragraph above was written for, while
+	// cutting that window by more than half. An invitee who misses it asks for
+	// another; an invitation that admitted the wrong person is not recoverable
+	// by asking.
+	DefaultTTL = 72 * time.Hour
 
 	// MaxTTL is the ceiling on a per-issue override. An invitation is still a
 	// standing permission to enter the cluster, and one that outlives anybody's
 	// memory of issuing it is how a closed cluster quietly stops being closed.
 	// Requests above this are CLAMPED, not refused, for the reason
 	// enrolment.MaxTTL gives.
-	MaxTTL = 30 * 24 * time.Hour
+	//
+	// Lowered from thirty days alongside DefaultTTL, by the same argument. A
+	// ceiling ten times the default was in practice an invitation to ignore the
+	// default: any caller that named a TTL at all could reach a month, which is
+	// well past the point where the issuer remembers issuing it.
+	MaxTTL = 7 * 24 * time.Hour
 )
 
 // Mint generates a fresh invitation token. Returns the plaintext (which goes

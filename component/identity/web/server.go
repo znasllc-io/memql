@@ -282,6 +282,30 @@ type Server struct {
 	enrolLimiterValue *abuse.IPRateLimiter
 	enrolLimiterOnce  sync.Once
 
+	// Invitation redeem (memql#4601). resolveInvitation validates a presented
+	// invitation token, bindInvitation stamps the first-touch browser binding,
+	// acceptInvitation spends it (provision + mark accepted + mint the
+	// enrolment token), and invitationAudit receives one event per outcome.
+	//
+	// All four are wired together by SetInvitationFlow and all four must be
+	// non-nil for either route to mount, the same all-or-nothing judgment the
+	// pairs above make: a credential-redeem surface that renders but cannot
+	// complete is worse than one that is absent, because the first looks like
+	// it works.
+	//
+	// Its own audit field rather than a borrowed one, for the reason recorded
+	// on recoverAudit: a shared sink would let wiring one surface silently
+	// satisfy another's mount condition.
+	resolveInvitation ResolveInvitationFunc
+	bindInvitation    BindInvitationFunc
+	acceptInvitation  AcceptInvitationFunc
+	invitationAudit   identity.AuditLogger
+
+	// Per-IP invitation redeem limiter, Server-scoped for enrolLimiter's
+	// reason.
+	invitationLimiterValue *abuse.IPRateLimiter
+	invitationLimiterOnce  sync.Once
+
 	// Asset versioning. Computed once at boot from the embedded FS.
 	// The webtempl layout pulls versioned URLs through LayoutData.Asset
 	// (a closure over s.assetURL), and handlers run paths through
@@ -471,6 +495,20 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Mounts only when the validator + audit sink are both wired.
 	if s.resolveRecovery != nil && s.recoverAudit != nil {
 		mux.HandleFunc("GET /recover", wrap(s.handleRecover))
+	}
+
+	// Invitation redeem (memql#4601). Same reasoning as /enroll and /recover
+	// above -- the invitation code IS the credential, so neither route is
+	// wrapped in preAuth. Mounts only when the whole flow is wired.
+	//
+	// TWO ROUTES, AND THE SPLIT IS LOAD-BEARING. The GET renders and never
+	// spends; the POST spends. Enterprise mail security prefetches URLs out of
+	// email to scan them, so a GET that consumed the invitation would be burnt
+	// by a scanner before its recipient ever clicked -- see the note at the top
+	// of invitation.go.
+	if s.resolveInvitation != nil && s.bindInvitation != nil && s.acceptInvitation != nil && s.invitationAudit != nil {
+		mux.HandleFunc("GET /invitation", wrap(s.handleInvitationGet))
+		mux.HandleFunc("POST /invitation/accept", wrap(s.handleInvitationAccept))
 	}
 
 	// /me/* SPA shells. Authentication is fetched client-side via
