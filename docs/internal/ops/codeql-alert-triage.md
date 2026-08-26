@@ -163,6 +163,38 @@ real open redirect and the dismissal is void.
 
 ---
 
+## Residual after the fix: `go/request-forgery` on the bulk download
+
+The fix cleared five of the six real alerts. The bulk download's stays open,
+and is dismissed rather than chased.
+
+**CodeQL does not recognise a custom URL validator as a barrier.** The taint
+runs from the operator-written store row to `http.Client.Do`, and
+`checkBulkDownloadURL` sits in between; the query has no way to know that the
+function it passes through decides anything. This is a limitation of the
+analysis, not a gap in the code, and the shapes that WOULD clear it are worse
+code:
+
+- **Allowlisting the host** would clear it, and is the one thing deliberately
+  rejected in the fix. Shopify serves bulk results from object storage and
+  which bucket host that is stays theirs to change, so an allowlist turns a
+  vendor's routine migration into a backfill that stops working. The failure
+  would be loud, but it would be an outage caused by a hardcoded constant.
+- **Inlining the check** at the call site would not help: the query is
+  tracking the value, not the call depth.
+
+What is actually in front of that request, in order: `NormalizeShopDomain`
+means the status carrying the URL can only have come from a real shop host;
+`checkBulkDownloadURL` requires https, no credentials, and a public host where
+the host is a literal address; and `bulkDownloadClient` re-applies the same
+check to every redirect hop.
+
+**The property that makes the dismissal safe:** all three are on the path, and
+`TestTheBulkDownloadGuardIsConsulted` fails if `streamBulk` stops consulting
+the first. Remove any of them and the dismissal is void.
+
+---
+
 ## Re-triaging
 
 ```bash

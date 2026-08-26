@@ -393,6 +393,13 @@ func clampInt64ToInt(v int64) int {
 
 // clampFloat64ToInt narrows a float64 to int without wrapping. NaN has no
 // ordering and so no clamp: it becomes the same zero an absent field does.
+//
+// The last step goes through clampInt64ToInt rather than a bare int(v)
+// because the float comparisons above CANNOT be exact: float64 has no
+// representation of math.MaxInt and rounds it up to 2^63, so a value in the
+// gap passes the guard and then converts. Narrowing in the integer domain,
+// where the bound is exact, is the step that is actually provable -- to a
+// reader and to a static analyser alike.
 func clampFloat64ToInt(v float64) int {
 	switch {
 	case math.IsNaN(v):
@@ -402,5 +409,5 @@ func clampFloat64ToInt(v float64) int {
 	case v <= math.MinInt:
 		return math.MinInt
 	}
-	return int(v)
+	return clampInt64ToInt(int64(v))
 }
