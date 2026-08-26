@@ -57,6 +57,7 @@ import type {
   CredentialSource,
 } from "../connection/credentials.js";
 import { errorText } from "./errors.js";
+import type { RevocationOutcome } from "./revoke.js";
 
 /**
  * The subset of `vscode.SecretStorage` this extension needs.
@@ -155,9 +156,27 @@ export class ClusterCredentialStore {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
 
+  /**
+   * writeExpiry stores an absolute expiry, or DELETES the stored one when
+   * there is no lifetime to record (memql#4625).
+   *
+   * The delete is the fix. This used to return early on a non-positive value,
+   * which reads as "nothing to write" and is not: a re-sign-in that reports no
+   * lifetime left the PREVIOUS sign-in's expiry sitting in SecretStorage,
+   * attached to a token it no longer describes. Harmless for a JWT, whose own
+   * `exp` wins (connection/credentials.ts), and wrong for an opaque token,
+   * which readExpiry would then judge already expired -- so every connect
+   * spends a refresh renewing a token that was fine.
+   *
+   * Absent and zero are the same fact here: nobody told us when this expires.
+   * They must not be stored differently.
+   */
   async writeExpiry(clusterName: string, expiresAtEpochSeconds: number): Promise<void> {
     if (this.secrets === undefined) return;
-    if (!Number.isFinite(expiresAtEpochSeconds) || expiresAtEpochSeconds <= 0) return;
+    if (!Number.isFinite(expiresAtEpochSeconds) || expiresAtEpochSeconds <= 0) {
+      await this.remove(accessTokenExpirySecretKey(clusterName));
+      return;
+    }
     const stored = await this.write(
       accessTokenExpirySecretKey(clusterName),
       String(Math.floor(expiresAtEpochSeconds)),
@@ -320,12 +339,21 @@ export async function persistSignIn(
 }
 
 /**
- * signOut forgets a cluster's credentials completely.
+ * signOut forgets a cluster's credentials completely, and ends the session on
+ * the cluster when it can (memql#4625).
  *
  * Both halves of the split, in one call: the SecretStorage entries are deleted
  * and de-indexed, and the file's `token` / `refresh_token` keys are removed so
  * the Cockpit sees the same signed-out cluster this extension does. The cluster
  * entry itself survives -- signing out is not deleting a cluster.
+ *
+ * THE REVOKE RUNS FIRST AND IS NOT ALLOWED TO STOP THE FORGETTING. It has to
+ * be first because clearing destroys the only copy of the token it needs. It
+ * cannot be allowed to block because a person signing out on a plane, behind a
+ * captive portal, or against a cluster that is down must still end up signed
+ * out here -- keeping the credential on disk because the server was
+ * unreachable is worse in every direction. So the outcome is RETURNED, and the
+ * caller changes what it says rather than what it does.
  *
  * Dropping the live connection and refreshing the tree are the CALLER's, since
  * both are editor-side (memql#3403).
@@ -333,9 +361,27 @@ export async function persistSignIn(
 export async function signOut(
   deps: CredentialStoreDeps,
   clusterName: string,
-): Promise<void> {
-  await new ClusterCredentialStore(deps.secrets).clear(clusterName);
+  revoke?: (refreshToken: string) => Promise<RevocationOutcome>,
+): Promise<RevocationOutcome> {
+  const store = new ClusterCredentialStore(deps.secrets);
+
+  let outcome: RevocationOutcome = { attempted: false };
+  if (revoke !== undefined) {
+    const refreshToken = await store.readRefreshToken(clusterName).catch(() => undefined);
+    if (refreshToken !== undefined && refreshToken.trim() !== "") {
+      // Never throws out of here: a revocation that fails badly must not
+      // leave the credential on this machine.
+      outcome = await revoke(refreshToken).catch((err: unknown) => ({
+        attempted: true as const,
+        revoked: false as const,
+        reason: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  await store.clear(clusterName);
   await deps.writeCluster({ name: clusterName, token: "", refreshToken: "" });
+  return outcome;
 }
 
 /**

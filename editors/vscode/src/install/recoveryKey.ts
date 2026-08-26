@@ -49,17 +49,31 @@ export const RECOVERY_RESULT_FIELD = "recoveryKey";
 /**
  * The envelope field saying what became of the claim.
  *
- * `claimed`, `awaitingOwner` or `alreadyClaimed` -- three different facts the
- * script keeps deliberately tellable apart (see scripts/install/recovery-key.sh):
- * "you were just handed a credential", "there is nobody to hold one yet", and
- * "the credential exists and you already have it". `none` is this side's
- * fourth: the step is not in the report, did not succeed, or reported a state
- * this module has no model of -- in every one of those cases the done screen
- * renders nothing rather than a guess.
+ * `claimed`, `awaitingOwner`, `alreadyClaimed` or `revealLost` -- four
+ * different facts the script keeps deliberately tellable apart (see
+ * scripts/install/recovery-key.sh): "you were just handed a credential",
+ * "there is nobody to hold one yet", "the credential exists and you already
+ * have it", and "the credential was spent and nobody ever saw it".
+ *
+ * That fourth one exists because the third was doing duty for two facts
+ * (memql#4628). A reveal that did not survive the journey out of the pod left
+ * a cluster asserting an operator held a key that existed nowhere, and the
+ * copy for `alreadyClaimed` told them to keep it. They are separate states
+ * now because the remedies are opposite: `alreadyClaimed` means do nothing,
+ * `revealLost` means rotate.
+ *
+ * `none` is this side's fifth: the step is not in the report, did not run, or
+ * reported a state this module has no model of -- in every one of those cases
+ * the done screen renders nothing rather than a guess.
  */
 export const RECOVERY_STATE_FIELD = "recoveryKeyState";
 
-export type RecoveryKeyState = "claimed" | "awaitingOwner" | "alreadyClaimed" | "none";
+export type RecoveryKeyState =
+  | "claimed"
+  | "awaitingOwner"
+  | "alreadyClaimed"
+  | "revealLost"
+  | "none";
 
 /**
  * Whether a value is a bare recovery key.
@@ -82,14 +96,27 @@ function recoveryOutcome(report: ExecutionReport): StepOutcome | undefined {
  * What the claim reported, for the done screen's no-key renderings.
  *
  * Read off the step's own state field rather than inferred from the key's
- * presence, because the two no-key states ask the operator for different
- * things: `alreadyClaimed` means "the value you stored earlier is still the
- * live one", `awaitingOwner` means "sign in first, then claim".
+ * presence, because the no-key states ask the operator for different things:
+ * `alreadyClaimed` means "the value you stored earlier is still the live one",
+ * `awaitingOwner` means "sign in first, then claim", `revealLost` means "the
+ * key is spent and you must rotate".
+ *
+ * A FAILED OUTCOME IS READ, FOR EXACTLY ONE STATE (memql#4628). Every other
+ * state requires `status === "ok"`, because a step that did not succeed has
+ * not earned a claim about the cluster. `revealLost` is the exception by
+ * construction: the script reports it through `cap_fail`, since a
+ * break-glass credential that was spent and shown to nobody IS a failed
+ * install step. Refusing to read it would drop the one message the operator
+ * most needs and fall back to rendering nothing -- which is how this defect
+ * stayed invisible in the first place. The narrowness is the safety: only
+ * this literal, only from this step, and it reveals no value.
  */
 export function recoveryKeyStateFrom(report: ExecutionReport): RecoveryKeyState {
   const outcome = recoveryOutcome(report);
-  if (outcome === undefined || outcome.status !== "ok" || outcome.envelope === null) return "none";
+  if (outcome === undefined || outcome.envelope === null) return "none";
   const state = outcome.envelope.result[RECOVERY_STATE_FIELD];
+  if (state === "revealLost") return "revealLost";
+  if (outcome.status !== "ok") return "none";
   if (state === "claimed" || state === "awaitingOwner" || state === "alreadyClaimed") return state;
   return "none";
 }

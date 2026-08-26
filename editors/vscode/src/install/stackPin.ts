@@ -341,6 +341,43 @@ const DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z
  * Empty is accepted: an empty field is "not answered yet", which the required-
  * field check reports in its own words rather than as a domain that is wrong.
  */
+/**
+ * Why a local install cannot be driven from a remote window (memql#4623).
+ *
+ * `undefined` locally; a sentence otherwise.
+ *
+ * THE INSTALL IS NOT AN ADDRESS, IT IS A MACHINE. It writes hosts entries,
+ * issues an mkcert certificate into a trust store, creates a k3d cluster and
+ * bootstraps an owner -- all on the EXTENSION HOST, which under Remote-SSH, a
+ * dev container, WSL or Codespaces is the far end of a connection. The browser
+ * is on the near end. Three things then fail together and none of them says so:
+ *
+ *   - every credential link the wizard hands over is
+ *     `https://identity.memql.localhost/...`, and RFC 6761 makes the near-end
+ *     browser resolve the whole `.localhost` family to its OWN loopback, where
+ *     no cluster is running;
+ *   - `asExternalUri` cannot help, because it tunnels loopback AUTHORITIES and
+ *     `identity.memql.localhost` is a name, not one;
+ *   - the mkcert CA went into the FAR end's trust store, so even a forwarded
+ *     port would fail the certificate.
+ *
+ * The install would SUCCEED and every button on the done screen would open a
+ * tab that cannot connect -- which is the worst available outcome, because the
+ * cluster is real and the operator has no way to reach it. Refusing costs them
+ * one window.
+ */
+export function localInstallRemoteProblem(remoteName: string | undefined): string | undefined {
+  const remote = (remoteName ?? "").trim();
+  if (remote === "") return undefined;
+  return (
+    `A local cluster cannot be installed from a ${remote} window. Everything the install ` +
+    `writes -- hosts entries, the mkcert certificate, the cluster itself -- lands on the ` +
+    `remote host, while your browser is on this one, so the cluster would come up and none ` +
+    `of its sign-in links would open. Open a local window to install, then register the ` +
+    `cluster from anywhere with "Connect to an existing cluster".`
+  );
+}
+
 export function installDomainProblem(domain: string): string | undefined {
   const trimmed = domain.trim();
   if (trimmed === "") return undefined;

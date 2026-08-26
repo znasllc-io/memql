@@ -377,16 +377,28 @@ func (s *Server) requireUserForDevice(w http.ResponseWriter, r *http.Request) (*
 		s.renderError(w, r, http.StatusServiceUnavailable, "Device sign-in is temporarily unavailable.")
 		return nil, false
 	}
-	// The per-IP limit is checked BEFORE the session check, and on both
-	// verbs, because both are reachable without one: an unauthenticated
-	// caller can still burn budget probing this endpoint, and the
-	// page's whole job is to answer questions about a 40-bit code.
-	if allowed, retryAfter := s.verifyLimiter().Allow(clientIP(r)); !allowed {
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-		s.renderError(w, r, http.StatusTooManyRequests,
-			"Too many attempts from this address. Wait a little and try again.")
-		return nil, false
-	}
+	// THE SESSION CHECK RUNS FIRST, AND THE BUDGET IS CHARGED AFTER IT
+	// (memql#4626).
+	//
+	// It used to be the other way round, for a reason that reads well and
+	// does not survive checking: "an unauthenticated caller can still burn
+	// budget probing this endpoint, and the page's whole job is to answer
+	// questions about a 40-bit code". The first half is true of every
+	// endpoint. The second half is what matters, and the oracle is NOT open
+	// to an unauthenticated caller -- bounceToLoginForDevice issues the same
+	// redirect whether the user_code is live, spent or invented, so a signed
+	// out prober learns exactly nothing about the code space. Charging that
+	// request bought no protection.
+	//
+	// It cost real approvals instead. A signed-out visitor spends a token on
+	// the GET that bounces, another on the GET after signing in, and another
+	// on the POST -- three per approval against a budget of 120 an hour that
+	// is shared by everyone behind one NAT. An office hits it and reads an
+	// HTML 429, at the one moment they are trying to authorize a device.
+	//
+	// So the guess budget is now spent only by callers who can actually ask
+	// the oracle a question. Both verbs still charge, and the limit still
+	// covers the whole authenticated surface -- what changed is who pays.
 	raw := extractUserToken(r)
 	if raw == "" {
 		s.bounceToLoginForDevice(w, r)
@@ -395,6 +407,12 @@ func (s *Server) requireUserForDevice(w http.ResponseWriter, r *http.Request) (*
 	claims, err := s.deviceFlow.Issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil || claims == nil {
 		s.bounceToLoginForDevice(w, r)
+		return nil, false
+	}
+	if allowed, retryAfter := s.verifyLimiter().Allow(clientIP(r)); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		s.renderError(w, r, http.StatusTooManyRequests,
+			"Too many attempts from this address. Wait a little and try again.")
 		return nil, false
 	}
 	return claims, true

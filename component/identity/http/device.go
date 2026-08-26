@@ -97,9 +97,24 @@ func (s *Server) handleDeviceCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sourceIP := clientIP(r)
 
+	// NOT slow_down (memql#4626). `slow_down` is defined by RFC 8628 §3.5
+	// for the TOKEN endpoint, where it means one specific thing: you polled
+	// faster than `interval`, and `interval` has now gone up permanently.
+	// Returning it here -- from the device AUTHORIZATION endpoint, where no
+	// poll has happened and no interval exists yet -- gave one error code
+	// two meanings across two statuses. This server's own client is safe
+	// because it checks `response.ok` first, but a stock OAuth library keying
+	// on the `error` field alone reads one for the other, and the two ask for
+	// different behaviour.
+	//
+	// `temporarily_unavailable` is RFC 6749's registered code for "the server
+	// is currently unable to handle the request", which a spent rate budget
+	// is. The precision a caller needs lives where it belongs: 429 and
+	// Retry-After.
 	if allowed, retryAfter := deviceCodeLimiter(s).Allow(sourceIP); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-		s.writeJSONError(w, http.StatusTooManyRequests, "slow_down", "too many device authorization requests from this address")
+		s.writeJSONError(w, http.StatusTooManyRequests, "temporarily_unavailable",
+			"too many device authorization requests from this address")
 		return
 	}
 
@@ -255,6 +270,22 @@ func readDeviceAuthorizationRequest(r *http.Request) (*deviceAuthorizationReques
 // rather than at redemption. A device that mistypes its method would
 // otherwise complete the whole human round trip before discovering the
 // grant can never be redeemed.
+//
+// # `plain` IS REFUSED HERE BECAUSE IT IS REFUSED THERE (memql#4626)
+//
+// This validator used to admit `plain` while verifyPKCE (token.go)
+// refused it -- so a client using `plain` was told its request was fine,
+// printed a code, waited for a human to walk to another device and
+// approve it, and only then learned the grant could never be redeemed.
+// That is the exact failure a request-time validator exists to prevent,
+// which made admitting it here worse than having no validator at all:
+// the check ran, passed, and bought nothing.
+//
+// Of the two ways to close it -- accept `plain` at redemption, or refuse
+// it at request time -- the second is the only one that keeps memql#4303's
+// reasoning: `plain` puts the verifier in the challenge, so anyone who can
+// read the authorization request can redeem the code. RFC 7636 §7.2 says a
+// server SHOULD reject it, and no MemQL client uses it.
 func validateDevicePKCE(challenge, method string) error {
 	if challenge == "" {
 		if method != "" {
@@ -263,8 +294,12 @@ func validateDevicePKCE(challenge, method string) error {
 		return nil
 	}
 	switch method {
-	case "", "S256", "plain":
+	case "", "S256":
+		// The empty method means S256 (RFC 7636 §4.3), which is what
+		// verifyPKCE assumes on the other end.
 		return nil
+	case "plain":
+		return errDevicePKCEPlainNotAllowed
 	default:
 		return errDevicePKCEUnsupportedMethod
 	}
@@ -272,7 +307,13 @@ func validateDevicePKCE(challenge, method string) error {
 
 var (
 	errDevicePKCEMethodWithoutChallenge = deviceError("code_challenge_method supplied without a code_challenge")
-	errDevicePKCEUnsupportedMethod      = deviceError("unsupported code_challenge_method; use S256 or plain")
+	errDevicePKCEUnsupportedMethod      = deviceError("unsupported code_challenge_method; use S256")
+	// A DISTINCT ERROR FROM "unsupported", because `plain` is not a typo
+	// or an unknown method -- it is a real PKCE method this server
+	// deliberately does not accept, and the client's fix is to switch to
+	// S256 rather than to look for a spelling mistake.
+	errDevicePKCEPlainNotAllowed = deviceError("code_challenge_method=plain is not accepted; use S256 " +
+		"(plain carries the verifier in the challenge, so it protects nothing)")
 )
 
 type deviceError string

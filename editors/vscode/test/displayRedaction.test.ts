@@ -129,3 +129,62 @@ test("a CLOSED pane carries no output at all, redacted or otherwise", () => {
   assert.doesNotMatch(html, /argocd is ready/);
   assert.match(html, /Show logs -- 1 line/);
 });
+
+// ---------------------------------------------------------------------------
+// session credentials (memql#4625)
+// ---------------------------------------------------------------------------
+//
+// DEFENCE IN DEPTH, NOT A RESPONSE TO A LEAK. The #4625 audit could find no
+// path that puts a session token into an error message or an output channel,
+// so the protection today is "nothing puts one there" rather than "anything
+// that does gets stripped". The first is a property of every current call
+// site and dies the moment somebody adds one; the second is a property of
+// this function. These pin the second.
+
+// BUILT, NOT PASTED. A JWT literal in a source file is a secret-scanner
+// finding wherever that file travels, even when -- as here -- it is three
+// base64url blobs of `{"alg":"none"}` with no key behind them. Assembling it
+// keeps the test exercising a whole JWT while leaving no token-shaped literal
+// in the tree for a scanner to trip over.
+function fakeJwt(): string {
+  const seg = (o: unknown): string =>
+    Buffer.from(JSON.stringify(o)).toString("base64url");
+  return [seg({ alg: "none", typ: "JWT" }), seg({ sub: "v1:identity:user:ada" }), seg("sig")].join(
+    ".",
+  );
+}
+
+test("redactForDisplay scrubs a JWT", () => {
+  const jwt = fakeJwt();
+  assert.ok(jwt.startsWith("eyJ"), "the fixture is not JWT-shaped, so this asserts nothing");
+  const out = redactForDisplay(`connect failed with token ${jwt}`, "/home/ada");
+  assert.ok(!out.includes(jwt), `the JWT survived: ${out}`);
+  assert.ok(!out.includes("eyJ"), `a JWT fragment survived: ${out}`);
+  assert.ok(out.includes(SCRUBBED));
+});
+
+// A truncated token is still a credential's prefix, and a log that keeps half
+// of one has kept the half an attacker starts from.
+test("redactForDisplay scrubs a truncated JWT", () => {
+  const half = fakeJwt().slice(0, 24);
+  const out = redactForDisplay(`Authorization header was ${half}`, "/home/ada");
+  assert.ok(!out.includes(half), out);
+});
+
+// The scheme survives so the line still reads as an auth header. A redacted
+// log is only worth reading if it still says what it was.
+test("redactForDisplay scrubs a bearer credential and keeps the scheme", () => {
+  const out = redactForDisplay("sent Authorization: Bearer rt_abcdefghijklmnop", "/home/ada");
+  assert.ok(!out.includes("rt_abcdefghijklmnop"), `the bearer survived: ${out}`);
+  assert.ok(out.includes("Bearer"), `the scheme was eaten, so the line no longer says what it was: ${out}`);
+  assert.ok(out.includes(SCRUBBED));
+});
+
+// The rules must stay anchored on structure a normal word cannot have. A
+// redactor that eats the paths and ids an operator is reading the text FOR is
+// the failure `looksLikeProviderKey` documents.
+test("redactForDisplay leaves ordinary output alone", () => {
+  const ordinary =
+    "applied deploy/k8s/overlays/local; node bff-0 ready; concept v1:identity:user; bearing left";
+  assert.equal(redactForDisplay(ordinary, "/home/ada"), ordinary);
+});

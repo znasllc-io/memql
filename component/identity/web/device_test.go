@@ -379,3 +379,63 @@ func TestDevicePageIsRateLimitedPerIP(t *testing.T) {
 		t.Error("a 429 must carry Retry-After so a client knows when to come back")
 	}
 }
+
+// The guess budget is spent by callers who can actually ask the oracle a
+// question, and by nobody else (memql#4626).
+//
+// THE DEFECT THIS PINS. The limiter used to run BEFORE the session check, on
+// the reasoning that an unauthenticated caller "can still burn budget probing
+// this endpoint, and the page's whole job is to answer questions about a
+// 40-bit code". The second half is the important one, and it is exactly what
+// makes the ordering wrong: the page answers nothing until the caller is
+// signed in. A signed-out request gets the same bounce whether the user_code
+// is live, spent or invented, so it learns nothing and charging it protected
+// nothing.
+//
+// What it did cost was approvals. One visitor spends a token on the GET that
+// bounces, another on the GET after signing in, and another on the POST --
+// three per approval, against 120 an hour shared by everyone behind one NAT.
+// An office runs out and reads an HTML 429 at the moment it is trying to
+// authorize a device.
+func TestDeviceSignedOutBounceDoesNotSpendTheGuessBudget(t *testing.T) {
+	t.Setenv(envDeviceVerifyPerHour, "3")
+	s, _, token := newDeviceWebServer(t)
+
+	// Ten signed-out visits: more than triple the budget, all of them bounces.
+	for i := 0; i < 10; i++ {
+		rec := deviceGet(s, "", "?user_code="+url.QueryEscape(deviceTestUserCode))
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("signed-out visit %d: status = %d, want 303 -- a signed-out caller is bounced\n"+
+				"to sign in, not rate limited, because the bounce answers nothing about the code",
+				i, rec.Code)
+		}
+	}
+
+	// The budget must be untouched, so the visitor who signs in can still work.
+	for i := 0; i < 3; i++ {
+		if rec := deviceGet(s, token, ""); rec.Code != http.StatusOK {
+			t.Fatalf("authenticated request %d: status = %d, want 200. The signed-out bounces above\n"+
+				"spent this caller's guess budget, so a person who signs in to approve a device is\n"+
+				"refused by attempts that never reached the oracle", i, rec.Code)
+		}
+	}
+}
+
+// And the oracle protection itself is unchanged: an authenticated caller still
+// pays per attempt. This is the half that must NOT be traded away for the one
+// above -- the 40-bit code space is only as strong as the guesses allowed
+// against it.
+func TestDeviceAuthenticatedAttemptsStillSpendTheGuessBudget(t *testing.T) {
+	t.Setenv(envDeviceVerifyPerHour, "2")
+	s, _, token := newDeviceWebServer(t)
+
+	for i := 0; i < 2; i++ {
+		if rec := deviceGet(s, token, ""); rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200 inside the budget", i, rec.Code)
+		}
+	}
+	if rec := deviceGet(s, token, ""); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429. Moving the limiter after the session check must not "+
+			"remove it: the page is a code oracle for anyone signed in", rec.Code)
+	}
+}

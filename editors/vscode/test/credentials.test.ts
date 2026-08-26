@@ -97,7 +97,7 @@ function okHttp(
   return {
     calls,
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
       return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
     },
   };
@@ -108,7 +108,7 @@ function rejectingHttp(status = 400, body = '{"error":"invalid_grant","error_des
   return {
     calls,
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
       return { ok: false, status, text: async () => body };
     },
   };
@@ -457,7 +457,7 @@ function gatedHttp(payload: Record<string, unknown>): FakeHttp & { release: () =
     calls,
     release: () => release(),
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
       await gate;
       return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
     },

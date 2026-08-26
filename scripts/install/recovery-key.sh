@@ -248,19 +248,47 @@ function main() {
         cap_result_set     recoveryKey       ""
         cap_result_set_raw ownerClaimed      true
         cap_result_set     recoveryKeyState  "alreadyClaimed"
-        cap_result_set     nextStep     "nothing -- the key claimed earlier is still the live one. If it was lost, rotate deliberately: kubectl --context=${ctx} -n ${ns} exec ${target} -- ${binary} recovery-key claim --reclaim"
+        cap_result_set     nextStep     "nothing if you hold the key claimed earlier -- it is still the live one. If you do not hold it, rotate deliberately: kubectl --context=${ctx} -n ${ns} exec ${target} -- ${binary} recovery-key claim --reclaim"
         cap_info "the recovery key already exists and was claimed on an earlier run, so this install has nothing to do."
         cap_info "It is NOT re-revealed: only its SHA-256 hash was ever stored, so the original value cannot be shown again."
-        cap_info "If you still hold it, keep it -- it is the live key and nothing here has changed it."
-        cap_info "If you have LOST it, rotate deliberately (this retires the old key and reveals a replacement once):"
+        cap_info "If you hold it, keep it -- it is the live key and nothing here has changed it."
+        # DELIBERATELY NOT "you still hold it" (memql#4628). The stamp records
+        # that a claim happened, not that its value ever reached a human --
+        # and until reveal-before-commit landed there was a window where those
+        # differed. This step cannot tell the two apart from here, so it states
+        # the condition rather than asserting the happy half of it.
+        cap_info "If you do NOT hold it -- you never saw it, or an earlier run reported the reveal was lost -- rotate deliberately (this retires the old key and reveals a replacement once):"
         cap_info "  kubectl --context=${ctx} -n ${ns} exec ${target} -- ${binary} recovery-key claim --reclaim"
         cap_ok
     fi
 
+    # REVEALED, AND LOST ON THE WAY OUT (memql#4628). This used to say "the
+    # claim reported success but emitted no recovery key", which was wrong in
+    # the way that matters: the claim did not fail to emit. It SUCCEEDED.
+    #
+    # Since the subcommand now writes the plaintext and only stamps the row
+    # once that write has returned, an exit 0 with nothing matching here can
+    # only mean the value left the process and did not survive the journey --
+    # a truncated capture, interleaving, a transport hiccup between the pod
+    # and this shell. The key on the cluster is therefore spent, and nobody
+    # has ever seen it.
+    #
+    # That is a DIFFERENT fact from `alreadyClaimed`, which says the operator
+    # was handed a key on an earlier run. Collapsing the two is what left
+    # clusters permanently asserting an operator held a credential that
+    # existed nowhere, while the copy pointed them away from the one remedy.
+    # So it gets its own state, and the remedy is named.
     if [[ -z "$_RK_KEY" ]]; then
-        cap_result_set recoveryKey ""
-        cap_fail 5 "the claim reported success but emitted no recovery key; \
-check the identity workload's logs for a mint failure"
+        cap_result_set     recoveryKey       ""
+        cap_result_set_raw ownerClaimed      true
+        cap_result_set     recoveryKeyState  "revealLost"
+        cap_result_set     nextStep     "rotate deliberately -- this retires the spent key and reveals a replacement once: kubectl --context=${ctx} -n ${ns} exec ${target} -- ${binary} recovery-key claim --reclaim"
+        cap_warn "The recovery key was revealed and did not reach this step, so it has been spent and NOBODY holds it."
+        cap_warn "Do not treat this cluster as having a break-glass credential until you have rotated."
+        cap_info "Rotate deliberately (this retires the spent key and reveals a replacement once):"
+        cap_info "  kubectl --context=${ctx} -n ${ns} exec ${target} -- ${binary} recovery-key claim --reclaim"
+        cap_fail 5 "the recovery key was revealed but did not survive the capture, so it is spent and \
+held by nobody; rotate with --reclaim to obtain one you can store"
     fi
 
     cap_changed

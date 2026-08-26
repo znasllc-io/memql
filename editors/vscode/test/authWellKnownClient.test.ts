@@ -87,6 +87,16 @@ function recorder(): RequestLog {
     fetch: async (url) => {
       urls.push(url);
       const path = new URL(url).pathname;
+      // The RFC 8414 pre-flight (memql#4624).
+      if (path === "/.well-known/oauth-authorization-server") {
+        const metaBase = url.slice(0, -path.length);
+        return json(200, {
+          issuer: metaBase,
+          authorization_endpoint: `${metaBase}/authorize`,
+          token_endpoint: `${metaBase}/oauth/token`,
+          device_authorization_endpoint: `${metaBase}/device/code`,
+        });
+      }
       if (path === "/device/code") {
         return json(200, {
           device_code: "dc-1",
@@ -150,9 +160,15 @@ test("the browser flow authorizes as the well-known client and never calls /regi
   // The id reaches /authorize and the exchange, not just the return value.
   assert.equal(new URL(authorizeUrl).searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
   assert.deepEqual(
-    net.urls.map((u) => new URL(u).pathname),
+    net.urls
+      .map((u) => new URL(u).pathname)
+      // The RFC 8414 pre-flight is not an OAuth request and carries no
+      // credential (memql#4624); the claim here is about which OAuth
+      // endpoints a browser sign-in drives, and /register is the one that
+      // must not appear.
+      .filter((p) => p !== "/.well-known/oauth-authorization-server"),
     ["/oauth/token"],
-    "the only request a browser sign-in makes is the code exchange",
+    "the only OAuth request a browser sign-in makes is the code exchange",
   );
 });
 

@@ -179,7 +179,6 @@ func runRecoveryKeyClaim(args []string) int {
 		return 1
 	}
 
-	plain := ""
 	if row.IsClaimed() {
 		// --reclaim: rotate. The predecessor is deactivated and a fresh key
 		// takes its place, with rotatedFrom recording the lineage. This is the
@@ -208,13 +207,12 @@ func runRecoveryKeyClaim(args []string) int {
 			fmt.Fprintf(os.Stderr, "recovery-key claim: retire previous key: %v\n", err)
 			return 1
 		}
-		if err := recStore.Claim(ctx, newId, "", time.Now().UTC()); err != nil {
-			fmt.Fprintf(os.Stderr, "recovery-key claim: stamp claimed: %v\n", err)
-			return 1
-		}
-		plain = newPlain
 		fmt.Fprintf(os.Stderr, "recovery-key claim: rotated -- retired %s, minted %s for %s\n",
 			recoverykey.CanonicalId(row.ID), recoverykey.CanonicalId(newId), owner)
+		if err := revealThenClaim(ctx, recStore, newId, newPlain, realStdout); err != nil {
+			fmt.Fprintf(os.Stderr, "recovery-key claim: %v\n", err)
+			return 1
+		}
 	} else {
 		// THE ORDINARY PATH, AND IT CANNOT WORK. The plaintext of an
 		// already-minted key is not recoverable from its hash, so "claiming"
@@ -244,20 +242,87 @@ func runRecoveryKeyClaim(args []string) int {
 			fmt.Fprintf(os.Stderr, "recovery-key claim: retire the unclaimed placeholder: %v\n", err)
 			return 1
 		}
-		if err := recStore.Claim(ctx, newId, "", time.Now().UTC()); err != nil {
-			fmt.Fprintf(os.Stderr, "recovery-key claim: stamp claimed: %v\n", err)
-			return 1
-		}
-		plain = newPlain
 		fmt.Fprintf(os.Stderr, "recovery-key claim: claimed %s for %s\n",
 			recoverykey.CanonicalId(newId), owner)
+		if err := revealThenClaim(ctx, recStore, newId, newPlain, realStdout); err != nil {
+			fmt.Fprintf(os.Stderr, "recovery-key claim: %v\n", err)
+			return 1
+		}
 	}
 
-	// The ONE line on real stdout. Nothing else is written here, so
-	// `KEY=$(kubectl exec ... -- /app/memql recovery-key claim)` holds the key
-	// and only the key.
-	fmt.Fprintln(realStdout, plain)
 	fmt.Fprintln(os.Stderr, "recovery-key claim: store this somewhere the cluster is not. It is shown "+
 		"once, it is refused while the owner can still sign in normally, and it works exactly once.")
 	return 0
+}
+
+// recoveryKeyClaimer is the one method revealThenClaim needs, named as an
+// interface so the ORDERING can be tested without a database. *recoverykey.Store
+// satisfies it. The ordering is the entire fix in memql#4628, and a fix whose
+// only evidence is that the lines appear in the right order in a diff is a fix
+// that a later refactor un-does silently.
+type recoveryKeyClaimer interface {
+	Claim(ctx context.Context, identityId, claimedFromIP string, at time.Time) error
+}
+
+// revealThenClaim writes the plaintext to the caller's real stdout and stamps
+// the row claimed only once that write has succeeded (memql#4628).
+//
+// # THE ORDER IS THE WHOLE POINT
+//
+// It used to run the other way: Create, Deactivate, Claim, and only then
+// print. Between the stamp and the print the credential was irreversibly
+// spent while its plaintext existed nowhere but a local variable. Anything
+// that perturbed stdout on the way out of the pod -- a truncated capture,
+// interleaving, a transport hiccup mid-stream -- consumed the cluster's
+// break-glass credential and showed it to nobody. Every later run then read
+// the stamp and told the operator they still held a key they had never seen,
+// while pointing them away from `--reclaim`, the one thing that would have
+// helped.
+//
+// # WHY THE RESIDUAL FAILURE IS SAFE
+//
+// Reversing it leaves a different failure: revealed but not stamped. That one
+// is strictly better, and it is a state the system already tolerates -- an
+// active unclaimed key is exactly what recoverykey.EnsureForAllOwners leaves
+// behind on every boot. The operator holds a working key; the row simply has
+// not recorded that they do. Re-running rotates and reveals again, which
+// costs a rotation and strands nothing.
+//
+// # WHAT "THE WRITE SUCCEEDED" IS WORTH
+//
+// A returning Write means the bytes left this process -- into the pipe
+// `kubectl exec` is reading, or into the file the operator redirected. It is
+// not proof a human read them, and nothing available in here is. It is
+// strictly more than the previous order had, which was no signal at all.
+//
+// Sync's error is deliberately discarded: a pipe cannot be synced and says so
+// with EINVAL, so treating that as a failure would refuse the ordinary case.
+// It is called for the redirected-to-a-file case, where it does mean
+// something.
+func revealThenClaim(
+	ctx context.Context,
+	recStore recoveryKeyClaimer,
+	newId string,
+	plain string,
+	realStdout *os.File,
+) error {
+	// The ONE line on real stdout. Nothing else is written there, so
+	// `KEY=$(kubectl exec ... -- /app/memql recovery-key claim)` holds the key
+	// and only the key.
+	if _, err := fmt.Fprintln(realStdout, plain); err != nil {
+		// NOT CLAIMED, deliberately. The value never left, so the key stays
+		// live and unclaimed and the next run reveals it cleanly.
+		return fmt.Errorf("write the key to stdout: %w -- it was NOT stamped claimed, "+
+			"so nothing has been spent; run this again", err)
+	}
+	_ = realStdout.Sync()
+
+	if err := recStore.Claim(ctx, newId, "", time.Now().UTC()); err != nil {
+		// THE KEY ABOVE IS LIVE AND USABLE. Say so, because the exit code is
+		// about to say this failed and a human reading the pod output must not
+		// discard a credential that works.
+		return fmt.Errorf("stamp claimed: %w -- the key printed above IS live and usable, "+
+			"it simply was not recorded as claimed; store it", err)
+	}
+	return nil
 }

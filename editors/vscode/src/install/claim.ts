@@ -144,9 +144,14 @@ export function isClaimUrl(candidate: string): boolean {
 /**
  * Opens the magic link in the operator's browser.
  *
- * `asExternalUri` runs first and is not optional: without it the URL breaks
- * under Remote-SSH, Codespaces and devcontainers, where the extension host and
- * the browser are on different machines.
+ * `asExternalUri` runs first: it is what lets a host rewrite a URL into one its
+ * browser can reach, and skipping it would break every host that does.
+ *
+ * IT DOES NOT RESCUE A LOCAL INSTALL FROM A REMOTE WINDOW (memql#4623), for the
+ * reasons enrolment.ts records at its own opener: asExternalUri tunnels
+ * loopback authorities only, `identity.memql.localhost` is not one, and RFC
+ * 6761 makes the operator's own browser resolve the `.localhost` family to its
+ * own 127.0.0.1. A local install has to be driven from a local window.
  */
 export async function openClaimLink(url: string, deps: ClaimDeps): Promise<void> {
   if (!isClaimUrl(url)) {
