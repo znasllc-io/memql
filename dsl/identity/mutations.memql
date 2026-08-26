@@ -2188,6 +2188,48 @@ mutate identity revokeBadgeIdentity {
 
 /// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
 /// COSE key -- there is no secret half to withhold.
+/// Record that a user signs in through an upstream identity provider (memql#4611).
+///
+/// STORES NO SECRET. The credential lives at the provider; this row holds only
+/// the (issuer, subject) pair the provider asserted, which is what lands a
+/// returning person on their existing user row instead of a duplicate.
+///
+/// @serverOnly, and actor.userId scoping is NOT the fix. Caller-scoping would
+/// restrict WHOSE row gains a link; the danger is the CONTENT of the link. A
+/// client that could write `credentials.subject` for itself could claim any
+/// upstream identity it liked, and the next federated sign-in as that subject
+/// would resolve to the row that claimed it -- account takeover through a
+/// write, not through a sign-in. The pair may only be written by the code that
+/// VERIFIED an id token carrying it, which is the callback handler, and there
+/// is no caller to scope to at that moment: the person has not yet been
+/// admitted.
+@serverOnly
+mutate identity createOidcIdentity {
+  args {
+    identityId  string!
+    userId      string!
+    label       string!
+    issuer      string!
+    subject     string!
+    email       string
+  }
+  insert {
+    id: args.identityId
+    args.userId
+    identityType: "oidc"
+    credentials: {
+        issuer: args.issuer,
+        subject: args.subject,
+        email: args.email ?? "",
+        lastUsedAt: ""
+      }
+    args.label
+    usableByAgents: false
+    active: true
+    createdAt: now
+  }
+}
+
 mutate identity createPasskeyIdentity {
   args {
     identityId      string!

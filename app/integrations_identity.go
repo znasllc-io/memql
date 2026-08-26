@@ -204,6 +204,14 @@ func (a *App) integrationsIdentity() {
 		Abuse:             abuseMW,
 		LiveTokenSettings: liveSettings.TokenSettings,
 	}
+	// UPSTREAM FEDERATION (memql#4611). Wired unconditionally: both hooks are
+	// inert unless MEMQL_IDENTITY_OIDC_ENABLED is set, and the routes 404
+	// without a provider. Leaving them nil on a configured cluster would give
+	// the one failure mode the whole design refuses -- a sign-in button that
+	// reaches "federation_not_wired" per user, which is a boot-time
+	// configuration problem reported to everybody except the operator.
+	httpSrv.OIDCLookup = httpSrv.DefaultOIDCLookup
+	httpSrv.OIDCSignIn = httpSrv.DefaultOIDCSignIn
 	svc.SetHTTPMounter(httpSrv)
 
 	// Phase 3 + Phase 6: web UI. Phase 6 swaps the static

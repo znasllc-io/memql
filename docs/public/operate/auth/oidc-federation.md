@@ -158,6 +158,19 @@ Both are documented HTTP exceptions of the kind the identity service already
 carries: the other party is a browser performing an OAuth redirect, and there is
 no gRPC form of "the user was sent to Microsoft and came back".
 
+A successful callback lands on the **same seams the local factors use**:
+`startBrowserSession`, which has been factor-agnostic since memql#3920 and
+already stamped `source: "oidc_cookie"`, and `CreateUserOnFirstLogin`, which is
+what a magic-link first sign-in calls. Reusing them is the point — a federated
+cluster must not grow a second, subtly different definition of what a user row
+or a session is.
+
+**The registration mode still decides whether a new person may be created.** A
+federated sign-in is not a way around `invite_only`: under any mode other than
+`directory`, the ordinary policy runs with no invitation, so a cluster that
+turned federation on without choosing `directory` admits only people it would
+have admitted anyway.
+
 `state`, `nonce` and the PKCE verifier live in one short-lived HttpOnly
 `SameSite=Lax` cookie — never in the URL, which is handed to a third party and
 appears in its logs. **Lax rather than Strict is load-bearing**: the callback is

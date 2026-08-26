@@ -287,6 +287,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// never-delivered invitation read as a delivered one. There is also no
 		// caller to scope TO -- the identity node writes this under internal
 		// origin, immediately after the send it just attempted.
+		// memql#4611. createOidcIdentity writes the (issuer, subject) pair that
+		// makes a federated sign-in land on an existing user row, and
+		// caller-scoping is not the fix because ownership is not what is at
+		// stake -- the danger is the CONTENT of the link, not whose row gains
+		// it. A client that could write credentials.subject for itself could
+		// claim any upstream identity it liked, and the next federated sign-in
+		// as that subject would resolve to the row that claimed it: account
+		// takeover through a WRITE rather than through a sign-in. The pair may
+		// only be written by the code that VERIFIED an id token carrying it,
+		// and at that moment there is no caller to scope to -- the person has
+		// not been admitted yet.
+		{Path: "identity/mutations.memql", Name: "createOidcIdentity"}:           true,
 		{Path: "identity/mutations.memql", Name: "createUserInvitation"}:         true,
 		{Path: "identity/mutations.memql", Name: "recordUserInvitationDelivery"}: true,
 		{Path: "identity/mutations.memql", Name: "bindUserInvitation"}:           true,

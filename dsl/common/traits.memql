@@ -383,6 +383,20 @@ trait identityIsPasskey {
   return identityType=="passkey"
 }
 
+// ---- identityIsOidc ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType is "oidc" -- the link to an upstream identity provider
+// (memql#4611). It stores NO SECRET: the credential lives at the
+// provider, and this row holds only the (issuer, subject) pair the
+// provider asserted, which is what lands a returning person on their
+// existing user row rather than a duplicate.
+
+/// Matches v1:identity:identity rows with identityType=='oidc'.
+trait identityIsOidc {
+  return identityType=="oidc"
+}
+
 // ---- identityIsRecoveryKey ----
 //
 // Concept-targeted trait for v1:identity:identity rows whose

@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsRecoveryKey, identityIsVoiceAgentToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsOidc, identityIsPasskey, identityIsRecoveryKey, identityIsVoiceAgentToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -2236,6 +2236,40 @@ query identity passkeyByCredentialId {
     credentialId  string!
   }
   filter  identityIsPasskey && credentials.credentialId==args.credentialId
+  shape   identityFull
+}
+
+// ---- oidcIdentityBySubject ----
+//
+// The lookup that makes federation land a returning person on their EXISTING
+// user row (memql#4611).
+//
+// KEYED ON (issuer, subject), NOT ON EMAIL, and that is the whole design.
+// `subject` is the stable identity and the only one an upstream provider
+// guarantees: it survives a rename, an address change, and an address being
+// reassigned to somebody else. Email is the BOOTSTRAP, used exactly once
+// before this link exists; after that, matching on it would move somebody's
+// account when their surname changed.
+//
+// ISSUER IS PART OF THE KEY because a subject is only unique within its
+// issuer. Without it, a cluster that ever changed provider -- or was pointed
+// at a second one -- could match a subject from one directory against a row
+// created by another.
+//
+// @serverOnly is NOT needed: this reads a row that stores no secret. The oidc
+// variant's credentials are the (issuer, subject) pair the provider asserted,
+// which is public in the sense that matters -- possession of it authenticates
+// nobody, exactly as a passkey's COSE public key does not.
+
+/// Resolve the upstream-provider link for one (issuer, subject) pair. Empty when this person has
+/// never signed in through the provider on this cluster.
+@unbounded("upstream identity by unique (issuer, subject) -- bounded to a single row")
+query identity oidcIdentityBySubject {
+  args {
+    issuer   string!
+    subject  string!
+  }
+  filter  identityIsOidc && credentials.issuer==args.issuer && credentials.subject==args.subject
   shape   identityFull
 }
 
