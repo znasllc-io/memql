@@ -132,6 +132,7 @@ import type { ExecutionReport } from "../install/executor.js";
 import { listReleaseTags } from "../install/tags.js";
 import { DEFAULT_STACK_REPO, isMainBranchChoice } from "../install/stackPin.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
+import { errorText } from "../auth/errors.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
 const CHOICE_ACTIONS: readonly AddClusterAction[] = [
@@ -173,6 +174,12 @@ const CONNECT_ACTIONS = ["save", "discard"] as const;
 const UNINSTALL_ACTIONS = ["uninstallStart", "uninstallCancel", "uninstallBack"] as const;
 
 type UninstallAction = (typeof UNINSTALL_ACTIONS)[number];
+
+/** The claim failure's fallback action, for a host that cannot open a browser. */
+const COPY_CLAIM_LINK = "Copy link";
+
+/** The registration toast's action. Named once so the offer and the check cannot drift. */
+const SIGN_IN_ACTION = "Sign In";
 
 const CONNECT_LABELS: Record<ConnectField, string> = {
   name: "Cluster name",
@@ -299,7 +306,11 @@ export async function probeClusterOverHttps(
         reason: `no answer within ${String(CONNECT_PROBE_TIMEOUT_MS / 1000)}s (the host may not resolve, or a firewall may be dropping it)`,
       };
     }
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    // The shared renderer, not err.message (memql#4619): a wrong hostname, a
+    // firewall, an expired certificate and a self-signed CA all arrive here as
+    // the bare string "fetch failed", and they are four different problems with
+    // four different fixes.
+    return { ok: false, reason: errorText(err) };
   } finally {
     clearTimeout(bell);
   }
@@ -1489,12 +1500,44 @@ export class AddClusterPanel {
     // is derived from a file this just wrote, and every other writer of that
     // file drops the memo rather than reasoning about which reads it affects.
     this.presence.invalidate();
-    void vscode.window.showInformationMessage(
-      `MemQL: registered "${draft.name}" at ${draft.endpoint}. ` +
-        (draft.token === undefined
-          ? 'Run "MemQL: Sign In" to authenticate.'
-          : "Select it in the Clusters view to connect."),
-    );
+    // A BUTTON, NOT THE NAME OF A COMMAND (memql#4621).
+    //
+    // This used to hand over the string `Run "MemQL: Sign In" to authenticate.`
+    // and stop -- so the last step of registering a cluster was to open the
+    // palette and type the sentence back. The action runs the same command the
+    // ownership walk runs, against the entry that was just written.
+    //
+    // THE ENTRY IS RE-READ RATHER THAN SYNTHESISED. `draft` is a ClusterUpdate,
+    // not a ClusterConfig, and inventing the difference is the placeholder
+    // mistake HandoffEffects.select records: a fabricated `{ name, endpoint: "" }`
+    // dials nowhere and reports it as the cluster's fault. Re-reading also
+    // yields the file's own view after every default the writer applied. If the
+    // entry is gone by then -- another writer, a removal -- there is nothing
+    // honest to sign in to, so it does nothing rather than guess.
+    //
+    // Detached, and it outlives dispose() deliberately: nothing below touches
+    // panel state, and a notification carrying a button must not be awaited by
+    // a handler that is about to close the tab.
+    const registeredName = draft.name;
+    const needsSignIn = draft.token === undefined;
+    void (async () => {
+      const chosen = await vscode.window.showInformationMessage(
+        `MemQL: registered "${registeredName}" at ${draft.endpoint}. ` +
+          (needsSignIn
+            ? "Sign in to authenticate."
+            : "Connect to it from the Clusters view."),
+        ...(needsSignIn ? [SIGN_IN_ACTION] : []),
+      );
+      if (chosen !== SIGN_IN_ACTION) return;
+      const result = await readClustersFileSafe(this.deps.clustersPath);
+      if (!result.ok) return;
+      const cluster = result.file.clusters.find((c) => c.name === registeredName);
+      if (cluster === undefined) return;
+      await vscode.commands.executeCommand("memql.clusters.signIn", {
+        cluster,
+        selected: true,
+      });
+    })();
     this.dispose();
   }
 
@@ -2758,10 +2801,59 @@ ${followUp}`,
       });
     } catch (err) {
       const detail = err instanceof ClaimError ? err.message : String(err);
+
+      // A HEADLESS HOST GETS THE LINK, NOT AN APOLOGY (memql#4618).
+      //
+      // `browserUnavailable` means the machine could not open a browser, which
+      // says nothing about the credential: the link in hand is live, and this
+      // is the ONE route in on a fresh install -- no passkey exists yet, and
+      // sign-in cannot work until this has been used once. Telling that
+      // operator to go and recover the link from a pod log, while holding a
+      // valid one, is the dead end the enrolment path had until this issue.
+      //
+      // Only that reason. `malformed` means the value is not an https
+      // /auth/complete?ml= URL, and a value we refused to open is precisely the
+      // value not to put on somebody's clipboard.
+      if (err instanceof ClaimError && err.reason === "browserUnavailable") {
+        void (async () => {
+          const chosen = await vscode.window.showErrorMessage(detail, COPY_CLAIM_LINK);
+          if (chosen === COPY_CLAIM_LINK) await this.copyClaimLink(url);
+        })();
+        return;
+      }
+
       void vscode.window.showErrorMessage(
         `${detail} The install recovered the link from the identity service's log; you can recover it again there if this screen is gone.`,
       );
     }
+  }
+
+  /**
+   * Puts the owner magic link on the clipboard, for a host with no browser.
+   *
+   * Follows copyRecoveryKey's shape: the exception detail is record material,
+   * not toast material, and the LINK is never written to the diagnostics
+   * channel -- it authenticates as the cluster owner, so the record says the
+   * copy failed and not what it was copying.
+   */
+  private async copyClaimLink(url: string): Promise<void> {
+    try {
+      await vscode.env.clipboard.writeText(url);
+    } catch (err) {
+      recordDiagnostic(
+        this.deps.diagnostics,
+        "the claim link could not be copied to the clipboard",
+        err instanceof Error ? err.message : String(err),
+        new Date().toISOString(),
+      );
+      vscode.window.showErrorMessage(
+        "MemQL: the claim link could not be copied to the clipboard.",
+      );
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      "MemQL: claim link copied. Open it in a browser that can reach this cluster -- it signs you in as the owner, and it is single-use.",
+    );
   }
 
   /**

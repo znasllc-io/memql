@@ -33,6 +33,7 @@
 // is why `install/secrets.ts` grew `redactResult` for step results (memql#3886).
 
 import type { ExecutionReport, StepOutcome } from "./executor.js";
+import { errorText } from "../auth/errors.js";
 
 /** The graph step this module pairs with. */
 export const CLAIM_STEP_ID = "magicLink";
@@ -199,7 +200,11 @@ export async function completeClaim(report: ExecutionReport, deps: ClaimDeps): P
   return url;
 }
 
-function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
+// errorText is re-exported from src/auth/errors.ts rather than redefined here.
+//
+// THREE COPIES OF THIS FUNCTION IS HOW "fetch failed" SURVIVED (memql#4619).
+// Each one returned err.message alone, so the real reason -- which Node 20 puts
+// on `.cause`, not on the message -- was dropped at every site independently.
+// Fixing one left the others saying it. The shared renderer walks the chain and
+// carries the trust-store advice, and it imports nothing at all, so it is safe
+// to reach from a module that must stay free of `vscode`.
