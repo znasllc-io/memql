@@ -51,6 +51,13 @@ function row(concept: string, id: string, payload: Record<string, unknown>, crea
   return { id, concept, type: "concept", createdBy: "system", createdAt, payload } as unknown as Row;
 }
 
+// Sessions belong to two different people, which is what makes the linked
+// section's filter observable at all: an unfiltered render shows both.
+const SESSIONS: Row[] = [
+  row(SESSION, "sess-1", { userId: "user-1", userAgent: "Ada's laptop" }, "2026-08-25T00:00:00Z"),
+  row(SESSION, "sess-2", { userId: "user-2", userAgent: "Grace's phone" }, "2026-08-25T00:00:00Z"),
+];
+
 const USERS: Row[] = [
   row(USER, "user-1", { email: "ada@example.com", role: "owner", active: true }, "2026-08-01T00:00:00Z"),
   row(USER, "user-2", { email: "grace@example.com", role: "reader", active: true }, "2026-08-02T00:00:00Z"),
@@ -98,6 +105,9 @@ interface Harness {
   // hand it another person's row and watch it not arrive.
   actorUserId?: string;
   suggest?: "propose" | "refuse";
+  // The address to open on. A `/rows/:rowId` path is what SELECTS a row, and
+  // the selection is what a linked section filters by.
+  path?: string;
 }
 
 function renderUsers(harness: Harness = {}) {
@@ -142,7 +152,7 @@ function renderUsers(harness: Harness = {}) {
     if (browse) {
       const id = browse[1];
       return new Result({
-        bundle: { nodes: id === USER ? USERS : [] },
+        bundle: { nodes: id === USER ? USERS : id === SESSION ? SESSIONS : [] },
         meta: { cursor: "" },
       });
     }
@@ -152,7 +162,18 @@ function renderUsers(harness: Harness = {}) {
   const query = asQueryClient({
     listConcepts: vi.fn(async () => [
       { id: USER, version: "v1", domain: "identity", entity: "user", type: "concept", description: "", displayCard: { primary: "email", secondary: "role", status: "active" } },
-      { id: SESSION, version: "v1", domain: "identity", entity: "authSession", type: "concept", description: "" },
+      {
+        id: SESSION,
+        version: "v1",
+        domain: "identity",
+        entity: "authSession",
+        type: "concept",
+        description: "",
+        // A display card, because the real concept has one and a row list
+        // renders THROUGH it: without one the rows fall back to their ids and
+        // a test asserting on what a person reads is asserting on nothing.
+        displayCard: { primary: "userAgent", secondary: "userId" },
+      },
       { id: VIEW, version: "v1", domain: "portalviews", entity: "view", type: "concept", description: "" },
     ]),
     getMyAccess: vi.fn(async () => access),
@@ -190,8 +211,8 @@ function renderUsers(harness: Harness = {}) {
 
   const dial = vi.fn(async () => connection) as unknown as typeof Connection.dial;
 
-  render(
-    <MemoryRouter initialEntries={["/views/users"]}>
+  const rendered = render(
+    <MemoryRouter initialEntries={[harness.path ?? "/views/users"]}>
       <AuthProvider
         config={AUTH_DISABLED_CLUSTER}
         fetchImpl={async () => {
@@ -208,7 +229,7 @@ function renderUsers(harness: Harness = {}) {
     </MemoryRouter>,
   );
 
-  return { calls, suggestCalls };
+  return { calls, suggestCalls, container: rendered.container };
 }
 
 describe("resolution order", () => {
@@ -383,5 +404,61 @@ describe("regenerating", () => {
     expect(calls.some((c) => c.name === "writePageOverride")).toBe(false);
     // ...and the page is still the page.
     expect(screen.getByText("Everyone")).toBeTruthy();
+  });
+});
+
+describe("linked sections", () => {
+  // Spec F, and the half that is easy to ship wrong: the filter is honest
+  // about its own boundary, or it is a section that shows three of forty
+  // related rows and looks complete.
+
+  // Asserted on the container's own text rather than through getByText: a row
+  // list splits a label across spans, and a matcher that needs one element
+  // reports "not found" for something plainly on the page.
+  const pageText = (c: HTMLElement) => c.textContent ?? "";
+
+  it("shows every session when nothing is selected", async () => {
+    // The baseline the filter has to be measured against. Without it, a
+    // filter that dropped EVERYTHING would pass a "only Ada's is shown" test
+    // by showing nothing at all.
+    const { container } = renderUsers();
+    await waitFor(() => expect(pageText(container)).toContain("Ada's laptop"));
+    expect(pageText(container)).toContain("Grace's phone");
+  });
+
+  it("narrows to the selection's related rows", async () => {
+    const { container } = renderUsers({ path: "/views/users/rows/user-1" });
+    await waitFor(() => expect(pageText(container)).toContain("Ada's laptop"));
+    // user-2's session is filtered out: the link is `userId`, and the
+    // selection is user-1.
+    expect(pageText(container)).not.toContain("Grace's phone");
+  });
+
+  it("SAYS it filtered only what it had loaded", async () => {
+    // The label is part of the contract rather than decoration. A section
+    // that narrowed silently would be claiming to show "the sessions for this
+    // person" when it is showing "the sessions for this person, among the
+    // page of rows I happen to have walked to" -- and there is no engine join
+    // in this epic (spec D2), so the second is the true statement.
+    const { container } = renderUsers({ path: "/views/users/rows/user-1" });
+    // Waited on the COUNTS, not on the label. The label renders as soon as
+    // there is a selection -- before the section's own walk has landed -- so
+    // waiting for its presence and then asserting the numbers reads "0 of 0"
+    // and fails for a reason that has nothing to do with filtering.
+    //
+    // It names BOTH numbers, so a reader can see how much of the walk the
+    // section spoke for rather than taking the count on trust.
+    await waitFor(() => expect(pageText(container)).toContain("1 of 2 loaded"));
+    expect(pageText(container)).toContain("from loaded data");
+    expect(pageText(container)).toContain("not walked to yet are not counted");
+  });
+
+  it("says nothing about filtering when nothing is selected", async () => {
+    // The label is a caveat about a narrowing that happened. Rendering it
+    // over an unfiltered list would be a caveat about nothing, which teaches
+    // a reader to ignore it for the times it matters.
+    const { container } = renderUsers();
+    await waitFor(() => expect(pageText(container)).toContain("Open sessions"));
+    expect(pageText(container)).not.toContain("from loaded data");
   });
 });
