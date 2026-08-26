@@ -29,6 +29,7 @@ export {
   type MarkNode,
 } from "./markGeometry";
 export { prefersReducedMotion, useReducedMotion } from "./motion";
+export { PageGuide } from "./PageGuide";
 export { PageHeader } from "./PageHeader";
 export { PopulationMeta } from "./PopulationMeta";
 export { Skeleton } from "./Skeleton";

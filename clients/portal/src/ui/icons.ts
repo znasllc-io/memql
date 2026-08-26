@@ -27,6 +27,11 @@ export {
   ChevronsRight,
   Download,
   ExternalLink,
+  // The per-page guide's entry point (memql#4652). An eye rather than a
+  // question mark or an "i": what the control opens is a LOOK at the page --
+  // a video, a description, the internals behind it -- and a question mark
+  // reads as "help with a problem" on a screen where nothing has gone wrong.
+  Eye,
   Gauge,
   Globe,
   GraduationCap,
