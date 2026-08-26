@@ -4,8 +4,8 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetail } from "../components/RowDetail";
 import { RowList } from "../components/RowList";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Button, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Button, ErrorNotice, Skeleton } from "../ui";
 import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { CURSOR_LOOP_ERROR } from "../concepts/rowWalk";
 import { conceptPath, conceptRowPath } from "../concepts/urls";
@@ -139,11 +139,15 @@ function WalkFooter({
     const looped = walk.error === CURSOR_LOOP_ERROR;
     return (
       <div className="mt-3 flex flex-col gap-2">
-        <ErrorMessage>
-          {count > 0
-            ? `Paging stopped after ${count} rows: ${walk.error}`
-            : `Could not read rows: ${walk.error}`}
-        </ErrorMessage>
+        <ErrorNotice
+          sentence={
+            count > 0
+              ? `Paging stopped after ${count} rows.`
+              : "Could not read this concept's rows."
+          }
+          next={count > 0 ? "What is listed is what arrived before it stopped." : undefined}
+          detail={walk.error}
+        />
         <div className="flex gap-2">
           {/* A cursor loop is NOT resumable -- the cursor that caused it is
               the one a retry would re-send. Reload is the only honest exit,
@@ -210,7 +214,7 @@ function RowDetailPane({
     <div className="overflow-x-auto rounded-lg border border-line bg-surface p-3">
       <p className="mb-2 font-mono text-xs break-all text-subtle">{rowId}</p>
       {error ? (
-        <ErrorMessage>Failed to read the row: {error}</ErrorMessage>
+        <ErrorNotice sentence="Could not read this row." detail={error} />
       ) : loading ? (
         <Skeleton variant="kv" rows={6} />
       ) : missing ? (

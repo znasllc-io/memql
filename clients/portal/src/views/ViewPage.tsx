@@ -12,8 +12,8 @@ import { InvitePerson, PendingInvitations } from "../people/InvitePerson";
 import { PersonActions } from "../people/PersonActions";
 import { usePendingInvitations } from "../people/usePendingInvitations";
 import { useAdminAccess, useAdminWrites } from "../admin/useAdminConsole";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Band, Container, EmptyState, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { conceptPath, conceptsPath } from "../concepts/urls";
 import { AccountsView } from "./AccountsView";
 import { AgentsView } from "./AgentsView";
@@ -103,7 +103,7 @@ export function ViewPage(): ReactNode {
     );
   }
   if (data.registryError) {
-    return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read the concept registry, so this view cannot be drawn." detail={data.registryError} />;
   }
   if (data.concept === undefined) {
     if (data.registryLoading) return <Skeleton variant="rows" rows={4} />;
@@ -113,22 +113,20 @@ export function ViewPage(): ReactNode {
   const Body = BODIES[view.id];
   if (Body === undefined) {
     return (
-      <ErrorMessage>
-        The view “{view.id}” is declared but has no body. This is a bug in the
-        portal, not a problem with your cluster.
-      </ErrorMessage>
+      <ErrorNotice
+        sentence={<>The view “{view.id}” is declared but has no body.</>}
+        next="This is a bug in the portal, not a problem with your cluster."
+      />
     );
   }
 
   return (
     <ViewFrame
       view={view}
-      conceptId={view.conceptId}
       meta={
         <PopulationMeta
           count={data.rows.length}
           status={data.walk.status}
-          error={data.walk.error}
           onLoadMore={data.loadMore}
           onRetry={data.retry}
         />
@@ -167,7 +165,7 @@ export function ViewPage(): ReactNode {
       {usersAdmin ? (
         <Band title="Invited" meta="pending invitations, newest first — live">
           {invitations.error !== "" ? (
-            <ErrorMessage>Could not read invitations: {invitations.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the outstanding invitations." detail={invitations.error} />
           ) : (
             <PendingInvitations
               rows={invitations.rows}

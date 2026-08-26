@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { Band, Callout, DataText, Panel, Skeleton } from "../ui";
+import { Band, Callout, DataText, ErrorNotice, Panel, Skeleton } from "../ui";
 import { formatDay, formatMoment } from "./MeLayout";
 import { mePath } from "./urls";
 import type { MeState } from "./useMe";
@@ -35,9 +35,11 @@ import type { MeState } from "./useMe";
 export function AccountTab({ me }: { me: MeState }): ReactNode {
   if (me.error !== "") {
     return (
-      <Callout tone="danger" title="We could not read your account">
-        {me.error}
-      </Callout>
+      <ErrorNotice
+        sentence="Could not read your account."
+        next="Reload the page to read it again."
+        detail={me.error}
+      />
     );
   }
   if (me.account === null) {

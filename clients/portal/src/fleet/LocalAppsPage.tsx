@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Badge,
   Band,
@@ -10,13 +9,14 @@ import {
   Checkbox,
   Container,
   EmptyState,
+  ErrorNotice,
   Field,
-  PageHeader,
   Select,
   Skeleton,
   TextInput,
 } from "../ui";
-import { sessionPath } from "./urls";
+import { FleetFrame } from "./FleetFrame";
+import { fleetSurfaceById, sessionPath } from "./urls";
 import { appLabel } from "./rows";
 import { useAppSessions, type AppSessionCard } from "./useAppSessions";
 import {
@@ -50,15 +50,16 @@ export function LocalAppsPage(): ReactNode {
   const sessions = useAppSessions();
   const policy = useDelegationPolicy();
 
+  // THE FRAME, not a hand-rolled header (memql#4655). This page used to build
+  // its own PageHeader, so navigating to it made the Fleet tab strip
+  // disappear -- the strip is how a person gets back to Machines, and it
+  // vanished exactly when they had gone one level in.
+  const surface = fleetSurfaceById("apps");
+  if (surface === undefined) return null;
+
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow="v1:worker:delegationPolicy"
-          title="Local apps"
-          blurb="Handing a task to an app you already pay for, on a machine you own. Which apps a machine actually has is on its card under Machines; this page decides when the planner uses them, and shows what happened when it did."
-        />
-
+      <FleetFrame surface={surface}>
         <Band title="Delegation">
           <DelegationPolicyEditor state={policy} />
         </Band>
@@ -67,7 +68,7 @@ export function LocalAppsPage(): ReactNode {
           {sessions.loading ? (
             <Skeleton />
           ) : sessions.error !== "" ? (
-            <ErrorMessage>{sessions.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the delegated runs." next="Reload the page to read them again." detail={sessions.error} />
           ) : sessions.sessions.length === 0 ? (
             <EmptyState statement="No app session has run yet. One appears here the first time the planner hands a task to a local app." />
           ) : (
@@ -78,7 +79,7 @@ export function LocalAppsPage(): ReactNode {
             </ul>
           )}
         </Band>
-      </section>
+      </FleetFrame>
     </Container>
   );
 }
@@ -133,7 +134,8 @@ function DelegationPolicyEditor({
   }, [state.policy]);
 
   if (state.loading) return <Skeleton />;
-  if (state.error !== "") return <ErrorMessage>{state.error}</ErrorMessage>;
+  if (state.error !== "")
+    return <ErrorNotice sentence="Could not read your delegation policy." detail={state.error} />;
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -226,7 +228,9 @@ function DelegationPolicyEditor({
         </p>
       </Field>
 
-      {state.saveError === "" ? null : <ErrorMessage>{state.saveError}</ErrorMessage>}
+      {state.saveError === "" ? null : (
+        <ErrorNotice sentence="The delegation policy was not saved." next="What is on screen is your edit, not what the cluster holds." detail={state.saveError} />
+      )}
 
       <div>
         <Button type="submit" disabled={state.saving}>

@@ -2,17 +2,17 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Band,
   Button,
   Container,
   DataText,
   EmptyState,
+  ErrorNotice,
   Field,
-  PageHeader,
   Select,
   Skeleton,
   TextInput,
@@ -72,21 +72,22 @@ export function DeployablesPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={SITE_CONCEPT_ID}
-          title="Deployables"
-          blurb={
-            isClusterOwner
-              ? "Every hosted surface this cluster's edge answers for, across every user -- the platform's own portal included. You see all of them because you are the cluster owner; everyone else sees their own. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-              : "The things this cluster hosts for you. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-          }
-          actions={
-            <Button size="xs" onClick={reload}>
-              Refresh
-            </Button>
-          }
-        />
+      <AreaFrame
+        area="library"
+        pageId="library.deployables"
+        subtitle="Library"
+        title="Deployables"
+        blurb={
+          isClusterOwner
+            ? "Every hosted surface this cluster's edge answers for, across every user -- the platform's own portal included. You see all of them because you are the cluster owner; everyone else sees their own. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
+            : "The things this cluster hosts for you. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
+        }
+        actions={
+          <Button size="xs" onClick={reload}>
+            Refresh
+          </Button>
+        }
+      >
 
         <Band title="New deployable" meta="created as a draft; deploy a bundle to it from your Library">
           <NewDeployableForm
@@ -99,9 +100,9 @@ export function DeployablesPage(): ReactNode {
 
         <Band title="Deployables" meta={`${rows.length}`} panel>
           {conceptsError ? (
-            <ErrorMessage>Could not read the concept registry: {conceptsError}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the concept registry, so this page cannot be drawn." detail={conceptsError} />
           ) : error ? (
-            <ErrorMessage>Could not read deployables: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read what this cluster hosts." next="Reload the page to read it again." detail={error} />
           ) : rows.length === 0 ? (
             loading || conceptsLoading ? (
               <Skeleton variant="rows" rows={5} />
@@ -119,7 +120,7 @@ export function DeployablesPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </section>
+      </AreaFrame>
     </Container>
   );
 }
@@ -229,12 +230,12 @@ function NewDeployableForm({
 
   return (
     <form onSubmit={submit} className="flex max-w-3xl flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The deployable was not created." next="Check the fields below and try again." detail={error} /> : null}
       {domain === "" ? (
-        <ErrorMessage>
-          This cluster did not tell the console which domain it serves, so a hostname cannot be
-          composed here.
-        </ErrorMessage>
+        <ErrorNotice
+          sentence="This cluster has not told the console which domain it serves, so a hostname cannot be composed here."
+          next="Ask a cluster owner to set the cluster's domain."
+        />
       ) : null}
 
       <div className="flex flex-wrap items-start gap-2">

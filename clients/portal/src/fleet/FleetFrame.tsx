@@ -1,55 +1,43 @@
 import type { ReactNode } from "react";
 
-import { PageHeader, Tabs } from "../ui";
-import { fleetPath, FLEET_SURFACES, type FleetSurface } from "./urls";
+import { AreaFrame } from "../app/AreaFrame";
+import type { FleetSurface } from "./urls";
 
-// The chrome the two Fleet screens share.
+// The chrome the three Fleet screens share.
 //
-// Same grammar as AdminFrame: the header is the shared PageHeader, the surface
-// strip is the shared Tabs idiom, and what changes between screens is the
-// eyebrow. It is NOT AdminFrame itself -- these are not owner-only surfaces,
-// so the eyebrow cannot be a role floor. A person with no special role has
-// machines of their own and workspaces of their own, and the whole point of
-// this pair of screens is that they see them.
+// It is now a thin binding of the shared AreaFrame (memql#4655) rather than
+// its own header + tab strip: the tabs come from the nav definition, so the
+// strip here and the rail row that opens it cannot disagree about what Fleet
+// contains. The strip used to be built from FLEET_SURFACES directly, which
+// was correct and which is exactly how Fleet came to be reachable from two
+// rail captions -- two lists, one area.
 //
-// THE EYEBROW IS THE CONCEPT ID, which is what a predefined view puts there:
-// the address of the rows, and the most useful single fact about the page for
-// anybody who is going to go and query them.
+// THE EYEBROW IS GONE. It carried the concept id, which was the single most
+// useful fact for anybody about to go and query the rows and noise for
+// everybody else. It lives in this page's guide now, under Technical details
+// (decision D5), and the slot above the title carries a word instead.
 
 export function FleetFrame({
   surface,
-  eyebrow,
   actions,
   children,
 }: {
   surface: FleetSurface;
-  eyebrow: ReactNode;
   // Right-aligned, prominent. Absent when the caller can do nothing here.
   actions?: ReactNode;
   children: ReactNode;
 }): ReactNode {
   return (
-    <section className="flex min-h-full flex-col gap-6 pb-8">
-      <PageHeader
-        eyebrow={eyebrow}
-        title={surface.title}
-        blurb={surface.blurb}
-        {...(actions === undefined ? {} : { actions })}
-      />
-
-      <div className="-mt-2">
-        <Tabs
-          label="Fleet"
-          items={FLEET_SURFACES.map((one) => ({
-            to: fleetPath(one.id),
-            label: one.label,
-            end: true,
-          }))}
-        />
-      </div>
-
+    <AreaFrame
+      area="fleet"
+      pageId={`fleet.${surface.id}`}
+      subtitle="Fleet"
+      title={surface.title}
+      blurb={surface.blurb}
+      {...(actions === undefined ? {} : { actions })}
+    >
       {children}
-    </section>
+    </AreaFrame>
   );
 }
 
@@ -65,7 +53,7 @@ export function LiveDegraded({ reason, noun }: { reason: string; noun: string })
   if (reason === "") return null;
   return (
     <p className="rounded border border-warn bg-warn-subtle px-3 py-2 text-xs text-fg">
-      Live updates are off for this page: {reason}. What is listed below is what the last read
+      Live updates are off for this page: {reason}. What is listed is what the last read
       returned -- a {noun} that changed since then will not show it here, and one that has gone
       quiet will still look reachable. Reload to read again.
     </p>

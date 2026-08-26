@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterLabelFor } from "../cluster/endpoint";
-import { MemqlMark } from "../components/MemqlMark";
 import { ErrorMessage } from "../components/StatusMessage";
+import { Constellation } from "../ui";
 
 // The sign-in view.
 //
@@ -41,18 +41,22 @@ export function SignInPage(): ReactNode {
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">
       <div className="w-full max-w-md rounded-lg border border-line bg-surface p-6">
-        <div className="flex items-center gap-2.5">
+        {/* The Constellation is the card's whole header (decision D4). This is
+            one of the four surfaces it is allowed on, and the argument for it
+            is strongest here: sign-in is the first thing anybody sees of this
+            product, and it used to be a 22px glyph beside a word. */}
+        <div className="flex flex-col items-center gap-3 text-center">
           <span className="text-accent">
-            <MemqlMark size={22} />
+            <Constellation size="sm" />
           </span>
           <h1 className="font-display text-xl leading-none tracking-wide">
             MemQL Portal
           </h1>
+          <p className="text-sm text-muted">
+            Sign in to{" "}
+            <span className="font-mono text-fg">{cluster || "this cluster"}</span>.
+          </p>
         </div>
-        <p className="mt-1 text-sm text-muted">
-          Sign in to{" "}
-          <span className="font-mono text-fg">{cluster || "this cluster"}</span>.
-        </p>
 
         {status === "misconfigured" ? (
           <div className="mt-4">

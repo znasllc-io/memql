@@ -1,10 +1,21 @@
 import type { ReactNode } from "react";
 
-// The MemQL mark: the 9-node graph polyhedron from memql.io, traced from
-// memql-mark.png. The geometry is shared verbatim with the VS Code
-// extension's activity-bar glyph (editors/vscode/icons/memql-activity.svg),
-// which a Go test in cmd/memql-lsp validates against the source artwork --
-// so this component inherits a checked trace rather than a re-eyeballed one.
+import {
+  MARK_EDGES,
+  MARK_NODES,
+  MARK_NODE_R,
+  MARK_STROKE_W,
+  MARK_VIEWBOX,
+} from "../ui/markGeometry";
+
+// The MemQL mark: the 9-node graph polyhedron from memql.io.
+//
+// The GEOMETRY moved to ui/markGeometry.ts in memql#4651, when the
+// Constellation became a second renderer of it -- a traced polyhedron
+// re-eyeballed per renderer is two marks. The trace itself is unchanged and
+// is still shared verbatim with the VS Code extension's activity-bar glyph
+// (editors/vscode/icons/memql-activity.svg), which a Go test in cmd/memql-lsp
+// validates against the source artwork.
 //
 // Rendered inline (not an <img>) and in currentColor, for two reasons:
 //   1. it takes the surrounding text colour, so the same component is the
@@ -31,7 +42,7 @@ export function MemqlMark({
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
+      viewBox={`0 0 ${MARK_VIEWBOX} ${MARK_VIEWBOX}`}
       width={size}
       height={size}
       {...(className === undefined ? {} : { className })}
@@ -44,39 +55,29 @@ export function MemqlMark({
         className="mm-edges"
         fill="none"
         stroke="currentColor"
-        strokeWidth="0.78"
+        strokeWidth={MARK_STROKE_W}
         strokeLinecap="round"
       >
-        <line x1="13.09" y1="2.52" x2="4.30" y2="5.32" />
-        <line x1="13.09" y1="2.52" x2="9.45" y2="6.83" />
-        <line x1="13.09" y1="2.52" x2="19.70" y2="8.76" />
-        <line x1="13.09" y1="2.52" x2="2.52" y2="14.24" />
-        <line x1="4.30" y1="5.32" x2="9.45" y2="6.83" />
-        <line x1="4.30" y1="5.32" x2="19.70" y2="8.76" />
-        <line x1="4.30" y1="5.32" x2="2.52" y2="14.24" />
-        <line x1="9.45" y1="6.83" x2="19.70" y2="8.76" />
-        <line x1="9.45" y1="6.83" x2="2.52" y2="14.24" />
-        <line x1="9.45" y1="6.83" x2="13.58" y2="16.07" />
-        <line x1="19.70" y1="8.76" x2="13.58" y2="16.07" />
-        <line x1="19.70" y1="8.76" x2="17.92" y2="17.85" />
-        <line x1="19.70" y1="8.76" x2="9.40" y2="20.70" />
-        <line x1="2.52" y1="14.24" x2="13.58" y2="16.07" />
-        <line x1="2.52" y1="14.24" x2="9.40" y2="20.70" />
-        <line x1="13.58" y1="16.07" x2="17.92" y2="17.85" />
-        <line x1="13.58" y1="16.07" x2="9.40" y2="20.70" />
-        <line x1="17.92" y1="17.85" x2="9.40" y2="20.70" />
-        <line x1="17.92" y1="17.85" x2="21.52" y2="21.48" />
+        {MARK_EDGES.map((edge) => (
+          <line
+            key={`${edge.x1},${edge.y1}-${edge.x2},${edge.y2}`}
+            x1={edge.x1}
+            y1={edge.y1}
+            x2={edge.x2}
+            y2={edge.y2}
+          />
+        ))}
       </g>
       <g fill="currentColor">
-        <circle className="mm-node mm-n1" cx="13.09" cy="2.52" r="1.53" />
-        <circle className="mm-node mm-n2" cx="4.30" cy="5.32" r="1.53" />
-        <circle className="mm-node mm-n3" cx="9.45" cy="6.83" r="1.53" />
-        <circle className="mm-node mm-n4" cx="19.70" cy="8.76" r="1.53" />
-        <circle className="mm-node mm-n5" cx="2.52" cy="14.24" r="1.53" />
-        <circle className="mm-node mm-n6" cx="13.58" cy="16.07" r="1.53" />
-        <circle className="mm-node mm-n7" cx="17.92" cy="17.85" r="1.53" />
-        <circle className="mm-node mm-n8" cx="9.40" cy="20.70" r="1.53" />
-        <circle className="mm-node mm-n9" cx="21.52" cy="21.48" r="1.53" />
+        {MARK_NODES.map((node, index) => (
+          <circle
+            key={`${node.cx},${node.cy}`}
+            className={`mm-node mm-n${index + 1}`}
+            cx={node.cx}
+            cy={node.cy}
+            r={MARK_NODE_R}
+          />
+        ))}
       </g>
     </svg>
   );

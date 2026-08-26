@@ -15,16 +15,20 @@ import { Button } from "./Button";
 // load-bearing -- tests and operators alike read them -- so they are exactly
 // the ones both copies carried.
 
+// THE `error` PROP IS GONE (memql#4653). It rendered the engine's own string
+// into a 12px header line beside a button, where it was unreadable at that
+// size and unusable to whoever read it. The same read's error still renders
+// in full behind ErrorNotice's disclosure, in the page body, where there is
+// room -- so nothing was lost, and callers no longer thread a string here to
+// have it truncated.
 export function PopulationMeta({
   count,
   status,
-  error,
   onLoadMore,
   onRetry,
 }: {
   count: number;
   status: "idle" | "loading" | "ready" | "exhausted" | "failed";
-  error: string;
   onLoadMore: () => void;
   onRetry: () => void;
 }): ReactNode {
@@ -34,8 +38,14 @@ export function PopulationMeta({
         {/* Said in words at full contrast, not in a hue: this sits in a
             header at 12px, below the size where the danger tint alone can
             carry the message. */}
+        {/* THE RAW STRING IS NOT HERE (memql#4653). This sits in a header at
+            12px beside a button; an engine error rendered into it is
+            unreadable at that size and unusable to the person reading it.
+            What survives is the fact and the remedy -- and the same read's
+            error renders in full, behind ErrorNotice's disclosure, in the
+            page body where there is room for it. */}
         <span className="text-xs text-fg">
-          {count > 0 ? `Paging stopped after ${count}` : "Could not read rows"}: {error}
+          {count > 0 ? `Paging stopped after ${count} rows` : "Could not read rows"}.
         </span>
         <Button size="xs" onClick={onRetry}>
           Try again

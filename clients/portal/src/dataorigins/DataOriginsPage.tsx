@@ -1,10 +1,20 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useCluster } from "../cluster/ClusterProvider";
-import { ErrorMessage } from "../components/StatusMessage";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "../modules/ModulesRefused";
-import { Badge, Band, Button, ConfirmDialog, Container, DataText, EmptyState, PageHeader, Skeleton } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  ConfirmDialog,
+  Container,
+  DataText,
+  EmptyState,
+  ErrorNotice,
+  Skeleton,
+} from "../ui";
 import { OriginBadge } from "./OriginBadge";
 import {
   healthFor,
@@ -47,25 +57,27 @@ export function DataOriginsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title="Data origins"
-          blurb="MemQL is the origin of what it owns, a faithful mirror of what it does not, and every concept says which. A mirror is read-only here by construction — change it at the origin."
-          actions={
-            <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
-              Refresh
-            </Button>
-          }
-          meta={
-            <span className="text-xs text-subtle">
-              {connected.length} concept{connected.length === 1 ? "" : "s"} with a connector,{" "}
-              {state.origins.length} declared in all
-            </span>
-          }
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.data-origins"
+        subtitle="Cluster"
+        title="Data origins"
+        blurb="MemQL is the origin of what it owns, a faithful mirror of what it does not, and every concept says which. A mirror is read-only here by construction — change it at the origin."
+        actions={
+          <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
+            Refresh
+          </Button>
+        }
+        meta={
+          <span className="text-xs text-subtle">
+            {connected.length} concept{connected.length === 1 ? "" : "s"} with a connector,{" "}
+            {state.origins.length} declared in all
+          </span>
+        }
+      >
 
         {state.error !== "" ? (
-          <ErrorMessage>Could not read the data origins: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read what this cluster owns and mirrors." detail={state.error} />
         ) : state.loading && state.origins.length === 0 ? (
           <Skeleton variant="rows" rows={6} />
         ) : connected.length === 0 ? (
@@ -85,7 +97,7 @@ export function DataOriginsPage(): ReactNode {
         )}
 
         <DeadLetterBand connectors={connectorsIn(connected)} />
-      </section>
+      </AreaFrame>
     </Container>
   );
 }
@@ -350,7 +362,7 @@ function DeadLetterBand({ connectors }: { connectors: readonly string[] }): Reac
         </span>
       }
     >
-      {error !== "" ? <ErrorMessage>Could not read the queue: {error}</ErrorMessage> : null}
+      {error !== "" ? <ErrorNotice sentence="Could not read the outbound queue." detail={error} /> : null}
       {!loaded ? (
         <p className="text-sm text-muted">Not loaded. The queue is empty on a healthy cluster.</p>
       ) : entries.length === 0 ? (

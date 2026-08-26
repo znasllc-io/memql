@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 
-import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
 import {
   Band,
   Breadcrumbs,
@@ -12,6 +12,7 @@ import {
   ConfirmDialog,
   Container,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -47,7 +48,7 @@ export function ArtifactDetailPage(): ReactNode {
   const [confirmArchive, setConfirmArchive] = useState(false);
 
   if (detail.error) {
-    return <ErrorMessage>Could not read this artifact: {detail.error}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read this artifact." detail={detail.error} />;
   }
   if (detail.loading && detail.artifact === null) {
     return <Skeleton variant="kv" rows={6} />;
@@ -80,7 +81,7 @@ export function ArtifactDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
+          subtitle={
             <Breadcrumbs items={[{ label: "Artifacts", to: artifactsPath() }, { label: title || artifactId }]} />
           }
           title={title || artifactId}
@@ -112,7 +113,7 @@ export function ArtifactDetailPage(): ReactNode {
         ) : null}
 
         {detail.archiveError ? (
-          <ErrorMessage>Could not archive: {detail.archiveError}</ErrorMessage>
+          <ErrorNotice sentence="This artifact was not archived." next="It is still in your Library; try again." detail={detail.archiveError} />
         ) : null}
 
         {summary ? <p className="max-w-2xl text-sm text-muted">{summary}</p> : null}
@@ -138,7 +139,7 @@ export function ArtifactDetailPage(): ReactNode {
           />
           {detail.labelError ? (
             <p className="mt-2">
-              <ErrorMessage>{detail.labelError}</ErrorMessage>
+              <ErrorNotice sentence="The labels were not saved." detail={detail.labelError} />
             </p>
           ) : null}
         </Band>
@@ -291,7 +292,7 @@ function TrainControl({ detail }: { detail: ReturnType<typeof useArtifactDetail>
           ))
         )}
       </p>
-      {detail.trainError ? <ErrorMessage>{detail.trainError}</ErrorMessage> : null}
+      {detail.trainError ? <ErrorNotice sentence="This artifact was not trained into that knowledge domain." next="Nothing was added to the domain; try again." detail={detail.trainError} /> : null}
       <FormRow>
         <Field
           label="Train into a knowledge domain"

@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
-import { Band, Button, Callout, Container, EmptyState, Select, Skeleton } from "../ui";
+import { Band, Button, Container, EmptyState, ErrorNotice, Select, Skeleton } from "../ui";
 import { AddMachine } from "./AddMachine";
-import { WORKER_REGISTRATION_CONCEPT_ID } from "./concepts";
 import { FleetFrame, LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
 import { RoutingPolicyEditor } from "./RoutingPolicyEditor";
@@ -42,7 +42,13 @@ export function MachinesPage(): ReactNode {
   const state = useMachines();
   const now = useNow();
   const { config } = useAuth();
-  const [adding, setAdding] = useState(false);
+  // The command palette's "Add machine" lands here with the form already
+  // open (memql#4656). Read once, as the initial state, rather than watched:
+  // a person who then CLOSES the form must not have it reopened under them by
+  // a re-render, and the address they can still see says where they came
+  // from.
+  const [params] = useSearchParams();
+  const [adding, setAdding] = useState(() => params.get("add") === "1");
 
   const surface = fleetSurfaceById("machines");
   if (surface === undefined) return null;
@@ -58,7 +64,6 @@ export function MachinesPage(): ReactNode {
     <Container>
       <FleetFrame
         surface={surface}
-        eyebrow={WORKER_REGISTRATION_CONCEPT_ID}
         actions={
           <>
             {state.isClusterOwner ? (
@@ -86,9 +91,11 @@ export function MachinesPage(): ReactNode {
         <LiveDegraded reason={state.liveDegraded} noun="machine" />
 
         {state.actionError === "" ? null : (
-          <Callout tone="danger" title="That did not work">
-            {state.actionError}
-          </Callout>
+          <ErrorNotice
+            sentence="That did not work."
+            next="The machine is unchanged; try it again."
+            detail={state.actionError}
+          />
         )}
 
         {showAdd ? (
@@ -106,18 +113,24 @@ export function MachinesPage(): ReactNode {
           }
         >
           {state.error !== "" ? (
-            <Callout tone="danger" title="Could not read the machines">
-              {state.error} Nothing is listed rather than an empty table -- an empty list here
-              would read as &ldquo;you have no machines&rdquo;, which is not what happened.
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read the machines."
+              next="Nothing is listed below. Do not read that as having no machines -- this read failed, so the answer is unknown."
+              detail={state.error}
+            />
           ) : state.loading && state.machines.length === 0 ? (
             <Skeleton variant="rows" rows={3} />
           ) : empty ? (
             <EmptyState
+              // The exemplar first-run empty (memql#4651). `firstRun` is true
+              // only for YOUR OWN list: "no machine has ever registered" on
+              // the all-cluster scope is an operator's observation about a
+              // cluster, not the product introducing itself to a person.
+              firstRun={state.scope !== "all"}
               statement={
                 state.scope === "all"
                   ? "No machine has ever registered against this cluster."
-                  : "You have no machines. Mint a token above and run the command it gives you on the computer you want an agent to be able to reach."
+                  : "You have no machines yet. Add one to run work on a computer you own -- mint a token above and run the command it gives you on that computer."
               }
             />
           ) : (

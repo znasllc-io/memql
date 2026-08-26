@@ -1,11 +1,11 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Badge,
   Band,
   Button,
   Callout,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -52,8 +52,9 @@ import {
 // All five constructs behind this page refuse below cluster owner in Go
 // (component/memql/provider_auth_status_read.go, provider_verify.go,
 // provider_config_write.go). What this file decides is what to OFFER. The tab
-// is ABSENT rather than disabled for a non-owner (adminSurfacesFor), because a
-// greyed-out tab advertises a capability whose only explanation is a refusal.
+// is ABSENT rather than disabled for a non-owner -- src/app/nav.ts carries
+// that as the tab's `access` field -- because a greyed-out tab advertises a
+// capability whose only explanation is a refusal.
 
 const VENDOR_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
@@ -126,13 +127,13 @@ export function ProvidersPage(): ReactNode {
         </div>
         {status.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read provider status: {status.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read which models this cluster can call." detail={status.error} />
           </div>
         )}
         {actions.state.message === "" ? null : (
           <div className="mt-3">
             {actions.state.failed ? (
-              <ErrorMessage>{actions.state.message}</ErrorMessage>
+              <ErrorNotice sentence="That action did not finish." detail={actions.state.message} />
             ) : (
               <Callout tone="ok" title="Done">{actions.state.message}</Callout>
             )}

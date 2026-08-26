@@ -70,6 +70,51 @@ allowlist entry carries its reason. The rule was already written in this file
 before that gate existed, and the drift accumulated anyway -- which is the
 argument for the gate rather than for restating the rule.
 
+## The voice
+
+Every word a person reads in this product follows five rules. They are here
+rather than in a style doc because the kit is where they get broken: a new
+component invents a label, a new page writes a blurb, and neither diff looks
+like a copy decision.
+
+1. **Name what the person controls or sees, never how the engine is built.**
+   "Machines", not `v1:worker:registration`. The engine's own vocabulary is
+   correct and precise and it is for the people who work on the engine.
+2. **Sentence case, plain verbs, no filler.** An action's name states its
+   outcome and stays IDENTICAL through the flow -- the button, the
+   confirmation and the toast all say "Revoke", or none of them do. A verb
+   that changes on the way through reads as two different actions.
+3. **No concept ids, env vars, Go identifiers, node internals or design
+   rationale in user-facing text.** Those live in the page's guide, under
+   "Technical details", where an owner or admin can open them
+   (`src/guides/`, `ui/PageGuide.tsx`). Nothing is deleted -- it is filed
+   where its audience is.
+4. **An error states what happened and what to do next.** Never apologise,
+   never hedge, never "something went wrong". The raw string goes behind
+   `ErrorNotice`'s owner/admin disclosure; the SENTENCE is written from what
+   the call was trying to do, which the call site knows and the error text
+   does not.
+5. **An empty state invites action.** "Add a machine to run work on a
+   computer you own", not "No rows". And it never explains rendering policy:
+   a reader does not need to know why the table is empty, they need to know
+   what to do about it -- or, when a read failed, that the answer is unknown
+   rather than zero.
+
+### Where a concept id may still appear
+
+Three places, and they are all the same case: the value IS the data.
+
+- `PageHeader`'s `eyebrow` (monospace) on a ROW DETAIL page, where the id is
+  the address of the thing on screen. `subtitle` is the plain slot every
+  other page uses.
+- `DataText kind="id"`, which is what the two-voice type scale is for.
+- The concept browser, whose subject is the registry itself.
+
+`portal_copy_voice_test.go` at the repo root fails the build on a
+`v1:<domain>:<concept>` literal in JSX text or props outside a short, named
+allowlist. Its siblings check that no raw error state renders outside
+`ErrorNotice`, and that every rail destination and tab has a guide entry.
+
 ## Composition rules
 
 - Buttons: `Button` -- tones primary / quiet / danger, sizes sm / xs. One

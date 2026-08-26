@@ -9,6 +9,7 @@ import { ConceptRowsPane } from "../pages/ConceptRowsPane";
 import { ConceptSchemaPane } from "../pages/ConceptSchemaPane";
 import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { ViewsGalleryPage } from "../pages/ViewsGalleryPage";
 import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { StoresRoutes } from "../stores/StoresRoutes";
@@ -127,6 +128,14 @@ export function AppRoutes(): ReactNode {
           {/* The console home (memql#4182): cluster identity + live tiles,
               every one a door into its full surface. */}
           <Route index element={<HomePage />} />
+          {/* The Views gallery is the area's own landing (memql#4655): the
+              five built-in views, the caller's composed ones and the door to
+              composing another, which were three separate things in the rail
+              and one kind of thing to the person reading them. Declared
+              BEFORE the :viewId route -- a literal segment and a parameter at
+              the same depth are ranked by the router, and stating the order
+              here makes the intent visible in the diff. */}
+          <Route path={VIEWS_ROUTE_SEGMENT} element={<ViewsGalleryPage />} />
           <Route path={VIEW_ROUTE_PATTERN} element={<ViewPage />} />
           <Route path={`${VIEW_ROUTE_PATTERN}/${VIEW_ROW_CHILD_PATTERN}`} element={<ViewPage />} />
           {/* Renamed in memql#4526: the two directory views took their

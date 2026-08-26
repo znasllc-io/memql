@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { ChevronDown } from "./icons";
 
@@ -131,6 +131,17 @@ export function TextInput({
   // For an input with no visible <label> around it -- a search box whose
   // caption is the button beside it, say. A Field-wrapped input needs none.
   ariaLabel,
+  // A field that DRIVES something with the keyboard: the command palette's
+  // query box moves a selection with the arrows and commits it with Enter
+  // (memql#4656). Optional, and absent everywhere else -- a form field's keys
+  // belong to the form.
+  onKeyDown,
+  autoFocus = false,
+  // The listbox this field steers, when it steers one. Emitting the ARIA trio
+  // here rather than at the call site is what keeps the pattern correct in
+  // the one place it is written down: a bare input over a list of options is
+  // a control a screen reader cannot follow at all.
+  combobox,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -139,6 +150,9 @@ export function TextInput({
   disabled?: boolean;
   list?: string;
   ariaLabel?: string;
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+  autoFocus?: boolean;
+  combobox?: { listId: string; activeId?: string };
 }): ReactNode {
   return (
     <input
@@ -148,6 +162,18 @@ export function TextInput({
       {...(placeholder === undefined ? {} : { placeholder })}
       {...(list === undefined ? {} : { list })}
       {...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel })}
+      {...(onKeyDown === undefined ? {} : { onKeyDown })}
+      {...(autoFocus ? { autoFocus: true } : {})}
+      {...(combobox === undefined
+        ? {}
+        : {
+            role: "combobox",
+            "aria-expanded": true,
+            "aria-controls": combobox.listId,
+            ...(combobox.activeId === undefined
+              ? {}
+              : { "aria-activedescendant": combobox.activeId }),
+          })}
       onChange={(event) => onChange(event.target.value)}
       className={INSET_LINE}
     />

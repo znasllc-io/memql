@@ -528,7 +528,16 @@ describe("the artifacts list", () => {
 
   it("shows an error state when the read fails", async () => {
     renderAt("/artifacts", ARTIFACT_ROWS, { failArtifacts: true });
-    await waitFor(() => expect(screen.getByText(/Could not read artifacts/)).toBeTruthy());
+    // The PLAIN SENTENCE is what everybody gets (memql#4653) ...
+    await waitFor(() => expect(screen.getByText(/Could not read your Library/)).toBeTruthy());
+    // ... and the raw string is filed rather than thrown away. This fixture
+    // signs in as an owner, so the disclosure is in the tree -- collapsed,
+    // which is a rendering fact rather than a DOM one.
+    //
+    // AWAITED, because the role arrives over the connection: ErrorNotice
+    // renders with no disclosure until it does, deliberately, so nothing
+    // flashes internals at somebody mid-handshake.
+    await waitFor(() => expect(screen.getByText("Technical details")).toBeTruthy());
   });
 
   it("drills into a row via RowList's onSelect, landing on the artifact's own URL", async () => {

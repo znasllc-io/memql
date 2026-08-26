@@ -110,7 +110,12 @@ describe("the Constructs page", () => {
     renderNexus(h, PATH);
     fireEvent.click(await screen.findByRole("button", { name: "Promote" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Promote" }));
-    await waitFor(() => expect(screen.getByText(/the write was refused/i)).toBeTruthy());
+    // The plain sentence for everybody; the cluster's own words behind the
+    // owner-only disclosure (memql#4653). This fixture is an owner, so both
+    // are in the tree.
+    await waitFor(() => expect(screen.getByText(/That write was refused/)).toBeTruthy());
+    expect(screen.getByText(/Nothing was saved/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Technical details")).toBeTruthy());
   });
 
   it("says authoring capture is off when a SUCCEEDED goal left no bundle", async () => {

@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { Badge, Callout, Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { Badge, Container, EmptyState, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { NewGoalAction } from "./NewGoalDialog";
 import { RunGoalButton } from "./RunGoal";
 import { toneForStatus } from "./status";
@@ -43,15 +43,18 @@ export function GoalsPage(): ReactNode {
     <Container>
       <section className="flex flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow="nexus"
+          pageId="nexus"
+          subtitle="Nexus"
           title="Goals"
           blurb="Everything you have asked for -- running first, then newest."
           {...(inviting ? {} : { actions: <NewGoalAction tone="primary" /> })}
         />
         {error !== "" ? (
-          <Callout tone="danger" title="Your goals could not be read">
-            {error}
-          </Callout>
+          <ErrorNotice
+            sentence="Could not read your goals."
+            next="Reload the page to read them again."
+            detail={error}
+          />
         ) : loading ? (
           <Skeleton variant="rows" rows={6} />
         ) : goals.length === 0 ? (
