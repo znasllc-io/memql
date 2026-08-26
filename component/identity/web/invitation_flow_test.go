@@ -15,6 +15,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,6 +41,8 @@ type invitationHarness struct {
 	accepted int
 	// acceptErr, when set, is what the accept seam returns.
 	acceptErr error
+	// bindErr, when set, is what the bind seam returns.
+	bindErr error
 	// enrolmentCode is what a successful accept hands back.
 	enrolmentCode string
 }
@@ -59,6 +62,9 @@ func newInvitationHarness(t *testing.T, res InvitationResolution) *invitationHar
 	srv.SetInvitationFlow(
 		func(context.Context, string) (InvitationResolution, error) { return res, nil },
 		func(_ context.Context, invitationId, bindingHash string) error {
+			if h.bindErr != nil {
+				return h.bindErr
+			}
 			h.bound = append(h.bound, invitationId+":"+bindingHash)
 			return nil
 		},
@@ -500,5 +506,47 @@ func TestAcceptRequiresTheCSRFToken(t *testing.T) {
 	}
 	if h.accepted != 0 {
 		t.Error("an invitation was spent by a request carrying no CSRF token")
+	}
+}
+
+// Losing the first-touch race is the control WORKING. It must not be recorded
+// as the same event as a broken write: a run of the first on one invitation is
+// a forwarded email being opened by several people, and a run of the second is
+// infrastructure. An operator greps the trail for exactly that difference.
+func TestLosingTheBindingRaceIsRecordedApartFromABrokenWrite(t *testing.T) {
+	lost := newInvitationHarness(t, validResolution())
+	lost.bindErr = identity.ErrInvitationBoundElsewhere
+	lostRec := lost.get("?code=" + liveInvitation)
+
+	broke := newInvitationHarness(t, validResolution())
+	broke.bindErr = errors.New("the database fell over")
+	brokeRec := broke.get("?code=" + liveInvitation)
+
+	lostEv, brokeEv := lost.audit.events, broke.audit.events
+	if len(lostEv) == 0 || len(brokeEv) == 0 {
+		t.Fatal("one of the two paths emitted no audit event at all")
+	}
+	lostReason := lostEv[0].FailureReason
+	brokeReason := brokeEv[0].FailureReason
+	if lostReason == brokeReason {
+		t.Errorf("both outcomes recorded the same reason %q, so a forwarding incident is indistinguishable from a database wobble", lostReason)
+	}
+	if lostEv[0].Outcome == identity.AuditOutcomeFailure {
+		t.Error("losing the race was recorded as a failure; the control worked")
+	}
+
+	// Neither may hand this browser a binding cookie -- it does not hold one.
+	for name, rec := range map[string]*httptest.ResponseRecorder{"bound-elsewhere": lostRec, "write-failed": brokeRec} {
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == invitationCookieName && strings.TrimSpace(c.Value) != "" {
+				t.Errorf("%s handed out a binding cookie for a binding it does not hold", name)
+			}
+		}
+	}
+
+	// Both still render the page. Somebody who opened their own link twice
+	// should see the invitation, not an error.
+	if lostRec.Code != http.StatusOK || brokeRec.Code != http.StatusOK {
+		t.Errorf("statuses were %d and %d, want 200 for both", lostRec.Code, brokeRec.Code)
 	}
 }

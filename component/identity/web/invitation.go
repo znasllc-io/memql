@@ -56,6 +56,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -307,7 +308,34 @@ func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(res.BindingHash) == "" {
 		nonce := newBindingNonce()
 		if nonce != "" {
-			if err := s.bindInvitation(r.Context(), res.InvitationId, hashBindingNonce(nonce)); err != nil {
+			switch err := s.bindInvitation(r.Context(), res.InvitationId, hashBindingNonce(nonce)); {
+			case err == nil:
+				s.writeBindingCookie(w, invitationCookieName, invitationCookiePath, nonce, time.Until(res.ExpiresAt))
+
+			case errors.Is(err, identity.ErrInvitationBoundElsewhere):
+				// THE CONTROL WORKING, NOT A FAULT -- and the distinction is the
+				// whole reason this is its own branch.
+				//
+				// Somebody else opened this invitation first, between our
+				// resolve and our stamp. That is precisely the event
+				// first-touch binding exists to catch, so it is recorded as a
+				// BLOCKED outcome under its own reason rather than folded into
+				// the failure below. A run of these on one invitation is the
+				// signature of a forwarded email being opened by more than one
+				// person; a run of bind_failed is infrastructure. An operator
+				// grepping the trail must be able to tell those apart, and a
+				// single collapsed reason would make a forwarding incident look
+				// like a database wobble.
+				//
+				// No cookie is set, so this browser cannot accept. It still
+				// gets the page: somebody who genuinely opened their own link
+				// twice should see the invitation rather than an error, and the
+				// accept path has the honest message for the case where their
+				// cookie does not match.
+				s.auditInvitation(r, "invitation_binding_taken", res.InvitationId,
+					identity.AuditOutcomeBlocked, "bound_elsewhere")
+
+			default:
 				// Not fatal. The accept still checks whatever binding the row
 				// ended up with, and refusing to render the page over a failed
 				// stamp would strand an invitee whose invitation is perfectly
@@ -317,8 +345,6 @@ func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 					"error", err.Error(), "invitationId", res.InvitationId)
 				s.auditInvitation(r, "invitation_binding_not_stamped", res.InvitationId,
 					identity.AuditOutcomeFailure, "bind_failed")
-			} else {
-				s.writeBindingCookie(w, invitationCookieName, invitationCookiePath, nonce, time.Until(res.ExpiresAt))
 			}
 		}
 	}
