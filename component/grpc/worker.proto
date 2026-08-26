@@ -34,6 +34,8 @@ message WorkerClientMessage {
     RotationRequest rotation_request = 15;
     AppSessionChunk app_session_chunk = 16;
     AppSessionEnd app_session_end = 17;
+    ModelCallDelta model_call_delta = 18;
+    ModelCallEnd model_call_end = 19;
   }
 }
 
@@ -51,6 +53,8 @@ message WorkerServerMessage {
     RegisterError register_error = 15;
     AppSessionStart app_session_start = 16;
     AppSessionControl app_session_control = 17;
+    ModelCallStart model_call_start = 18;
+    ModelCallCancel model_call_cancel = 19;
   }
 }
 
@@ -356,4 +360,173 @@ message AppSessionUsage {
   int64 output_tokens = 2;
   double cost_usd = 3;
   bool known = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Model calls (epic memql#4676, task memql#4677)
+//
+// A model call is a streamed exchange over the stream the cockpit
+// ALREADY holds open. That is the whole reason the transport is this
+// and not an HTTP endpoint: the engine cannot dial a laptop behind
+// NAT, so the outward stream IS the tunnel -- the same argument that
+// made app sessions ride it (memql#4358).
+//
+// It is shaped like AppSession rather than like ToolDispatch for the
+// same reason app sessions were: a dispatch carries one timeout and
+// returns one result, while a generation emits tokens for as long as
+// it runs. Start / delta / end / cancel, correlated by request_id.
+//
+// THE CHUNK RULE IS INHERITED VERBATIM. `seq` is monotonic per call and
+// out-of-order or duplicate deltas are DROPPED. A generation is a
+// record in exactly the way a transcript is: splicing a replayed delta
+// back into the middle produces text no later reader can tell is wrong.
+//
+// TIMEOUT AND KEEPALIVE LIVE ON THE ENVELOPE (ModelCallLimits), not in
+// the caller's head. A local 8B model on a cold GPU can take twenty
+// seconds to emit its first token, which is indistinguishable from a
+// wedged machine to anyone holding only a wall-clock deadline; so the
+// two are separated -- a whole-call ceiling and an IDLE ceiling -- and
+// the worker is told how often to prove it is alive between deltas.
+// -----------------------------------------------------------------------------
+
+// ModelCallStart opens a call. Server -> worker.
+message ModelCallStart {
+  // request_id correlates every later message. Server-minted.
+  string request_id = 1;
+  // model is the runtime-facing model id the machine advertised as
+  // `model:<id>` -- the router selected on this exact string, so the
+  // worker resolves it without translation.
+  string model = 2;
+  // kind selects what the call IS: "chat" (messages -> text) or
+  // "embedding" (embedding_input -> vectors). One field rather than two
+  // message families because everything else about the exchange --
+  // selection, the chunk rule, limits, usage, cancel -- is identical,
+  // and a second family would be a second place for that to drift.
+  string kind = 3;
+  repeated ModelCallMessage messages = 4;
+  ModelCallParams params = 5;
+  // response_format_schema is a JSON Schema for structured output.
+  // Empty means free text. A worker whose runtime cannot honour a
+  // schema must fail the call rather than return prose: the router only
+  // ever sends this to a machine that advertised the capability, so a
+  // silent downgrade here would defeat the gating that put it there.
+  bytes response_format_schema = 6;
+  // embedding_input is the kind="embedding" payload.
+  repeated string embedding_input = 7;
+  ModelCallLimits limits = 8;
+  // plan_id / task_id attribute the call for the ledger and the portal.
+  string plan_id = 9;
+  string task_id = 10;
+  // purpose names the platform operation this call serves (planner,
+  // conductor, suggest, embeddings). Carried for the ledger and for the
+  // machine's own logs; it steers nothing.
+  string purpose = 11;
+}
+
+// ModelCallMessage is one turn of the conversation handed to the model.
+message ModelCallMessage {
+  // role is "system", "user", "assistant" or "tool".
+  string role = 1;
+  string content = 2;
+}
+
+// ModelCallParams are the generation knobs.
+//
+// Each optional knob carries an explicit *_set companion because zero
+// is a MEANINGFUL value for both of them: temperature 0 is the setting
+// structured-output prompts actually want, and it is not the same
+// request as "the caller expressed no preference". Reading absent as
+// zero would silently pin every unspecified call to greedy decoding.
+message ModelCallParams {
+  double temperature = 1;
+  bool temperature_set = 2;
+  double top_p = 3;
+  bool top_p_set = 4;
+  int64 max_output_tokens = 5;
+  repeated string stop = 6;
+  // seed is a determinism request; runtimes that cannot honour it
+  // ignore it rather than failing.
+  int64 seed = 7;
+  bool seed_set = 8;
+}
+
+// ModelCallLimits are the envelope-owned deadlines.
+message ModelCallLimits {
+  // timeout_seconds is the WHOLE-CALL ceiling; 0 means the server
+  // default rather than "no limit", because an unbounded generation on
+  // somebody's laptop is a resource leak nobody is watching.
+  int64 timeout_seconds = 1;
+  // idle_timeout_seconds bounds the gap BETWEEN deltas, which is the
+  // measurement that actually distinguishes a slow model from a dead
+  // one. A first token twenty seconds after start is a cold GPU; twenty
+  // seconds of silence after the fifth token is a wedge.
+  int64 idle_timeout_seconds = 2;
+  // keepalive_seconds is how often the worker must emit a delta with
+  // keepalive=true when it has no content to send. It is the contract
+  // that makes idle_timeout_seconds enforceable rather than a guess:
+  // without it, silence means both "still thinking" and "gone".
+  int64 keepalive_seconds = 3;
+}
+
+// ModelCallDelta is one piece of generated output. Worker -> server.
+message ModelCallDelta {
+  string request_id = 1;
+  // seq is monotonic per request; the engine drops out-of-order and
+  // duplicate deltas rather than corrupting the generation.
+  uint64 seq = 2;
+  string content = 3;
+  // keepalive marks a delta that carries no content and exists only to
+  // reset the idle timer. It still takes a seq, so a keepalive can
+  // never be confused with a replayed content delta.
+  bool keepalive = 4;
+}
+
+// ModelCallEnd closes a call. Worker -> server.
+message ModelCallEnd {
+  string request_id = 1;
+  // finish_reason is "stop", "length", "cancelled", "timeout" or
+  // "error".
+  string finish_reason = 2;
+  ModelCallUsage usage = 3;
+  // content is the FULL text for a call the worker did not stream. A
+  // worker that streamed deltas leaves this empty; the engine
+  // concatenates the deltas it accepted. Both are supported because a
+  // small embeddings or classification call has no reason to stream.
+  string content = 4;
+  // embeddings are the kind="embedding" result, one vector per input in
+  // input order.
+  repeated ModelCallEmbedding embeddings = 5;
+  // error is empty on a clean end.
+  string error = 6;
+  // error_code is a stable machine-readable tag when error is set.
+  string error_code = 7;
+}
+
+// ModelCallEmbedding is one vector.
+message ModelCallEmbedding {
+  repeated float values = 1;
+}
+
+// ModelCallUsage is what the RUNTIME REPORTED about the call.
+//
+// Never inferred. A runtime that reports nothing sets known=false and
+// leaves the counts at zero, and the ledger records billing "unknown"
+// rather than a confident zero (memql#4681). The distinction is
+// load-bearing in exactly one direction: a local call costs no dollars
+// either way, so the only thing an invented count could corrupt is the
+// loop-cap arithmetic that is supposed to notice a runaway.
+message ModelCallUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  bool known = 3;
+  // model is what the runtime ACTUALLY ran, which is not always what
+  // was asked for (a quantisation alias, a tag resolving to a digest).
+  // A token count without the model it was spent on cannot be read.
+  string model = 4;
+}
+
+// ModelCallCancel stops a running call. Server -> worker.
+message ModelCallCancel {
+  string request_id = 1;
+  string reason = 2;
 }

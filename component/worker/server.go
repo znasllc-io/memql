@@ -170,6 +170,7 @@ func (s *server) admitRegistration(
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
 	w.SetDispatchFunc(session.dispatch, cancel)
 	w.SetAppSessionFunc(session.openAppSession)
+	w.SetModelCallFunc(session.openModelCall)
 	s.registry.Add(w)
 
 	if err := stream.Send(&memqlv1.WorkerServerMessage{
@@ -316,10 +317,14 @@ type streamSession struct {
 	// sessions holds the live app-session handles (memql#4359), under
 	// the same lock and for the same reason chunkSinks is: a session's
 	// lifetime is the stream's, and a disconnect must end every one.
-	sessions  map[string]*AppSessionHandle
-	sendMu    sync.Mutex
-	sendErr   error
-	closeOnce sync.Once
+	sessions map[string]*AppSessionHandle
+	// modelCalls holds the live model-call handles (memql#4677), under
+	// the same lock and for the same reason: a call's lifetime is the
+	// stream's, and a disconnect must end every one.
+	modelCalls map[string]*ModelCallHandle
+	sendMu     sync.Mutex
+	sendErr    error
+	closeOnce  sync.Once
 
 	// lastPersistedAt is the heartbeat timestamp of the most recent
 	// successful lastSeenAt DB flush (memql#1340). Zero until the
@@ -345,6 +350,7 @@ func newStreamSession(
 		pending:    make(map[string]chan *memqlv1.ToolResult),
 		chunkSinks: make(map[string]func(*memqlv1.ToolStream)),
 		sessions:   make(map[string]*AppSessionHandle),
+		modelCalls: make(map[string]*ModelCallHandle),
 	}
 }
 
@@ -370,9 +376,24 @@ func (s *streamSession) close() {
 			liveSessions = append(liveSessions, h)
 		}
 		s.sessions = nil
+		// The same argument for model calls: a caller parked in Wait
+		// would otherwise sit until its own ceiling expired, with
+		// nothing saying the machine had gone.
+		liveCalls := make([]*ModelCallHandle, 0, len(s.modelCalls))
+		for _, h := range s.modelCalls {
+			liveCalls = append(liveCalls, h)
+		}
+		s.modelCalls = nil
 		s.mu.Unlock()
 		for _, h := range liveSessions {
 			h.finish(AppSessionOutcome{Error: "worker_disconnected"}, ErrWorkerDisconnected)
+		}
+		for _, h := range liveCalls {
+			h.finish(ModelCallOutcome{
+				FinishReason: ModelFinishError,
+				Error:        "worker_disconnected",
+				ErrorCode:    "worker_disconnected",
+			}, ErrWorkerDisconnected)
 		}
 		s.clearConnectedNode()
 		// Log disconnect symmetrically to "worker registered" on the
@@ -524,6 +545,10 @@ func (s *streamSession) handle(ctx context.Context, msg *memqlv1.WorkerClientMes
 		s.handleAppSessionChunk(payload.AppSessionChunk)
 	case *memqlv1.WorkerClientMessage_AppSessionEnd:
 		s.handleAppSessionEnd(payload.AppSessionEnd)
+	case *memqlv1.WorkerClientMessage_ModelCallDelta:
+		s.handleModelCallDelta(payload.ModelCallDelta)
+	case *memqlv1.WorkerClientMessage_ModelCallEnd:
+		s.handleModelCallEnd(payload.ModelCallEnd)
 	case *memqlv1.WorkerClientMessage_RotationRequest:
 		s.handleRotationRequest(ctx, payload.RotationRequest)
 	case *memqlv1.WorkerClientMessage_AuditEvent:
@@ -986,6 +1011,185 @@ func (s *streamSession) handleAppSessionEnd(end *memqlv1.AppSessionEnd) {
 	var err error
 	if outcome.Error != "" {
 		err = fmt.Errorf("worker: app session failed: %s", outcome.Error)
+	}
+	handle.finish(outcome, err)
+}
+
+// -----------------------------------------------------------------------------
+// Model calls (epic memql#4676, task memql#4677)
+// -----------------------------------------------------------------------------
+
+// openModelCall is the per-stream hook behind Worker.StartModelCall.
+// It registers the call BEFORE sending Start, so a worker that answers
+// instantly cannot deliver a delta for a call this side has not yet
+// recorded -- the same ordering openAppSession keeps and for the same
+// reason.
+func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest) (*ModelCallHandle, error) {
+	if req.RequestId == "" {
+		return nil, fmt.Errorf("worker: model call requires a request id")
+	}
+	limits := req.Limits.withDefaults()
+	clock := time.Now
+	if s.server != nil && s.server.clock != nil {
+		clock = s.server.clock
+	}
+	handle := &ModelCallHandle{
+		requestId:    req.RequestId,
+		worker:       s.worker,
+		limits:       limits,
+		deltas:       make(chan ModelCallDelta, modelDeltaBuffer),
+		done:         make(chan struct{}),
+		cancelFn:     s.sendModelCallCancel,
+		clock:        clock,
+		lastActivity: clock(),
+	}
+	handle.detach = func() {
+		s.mu.Lock()
+		if s.modelCalls != nil {
+			delete(s.modelCalls, req.RequestId)
+		}
+		s.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	if s.modelCalls == nil {
+		s.mu.Unlock()
+		return nil, ErrWorkerDisconnected
+	}
+	if _, exists := s.modelCalls[req.RequestId]; exists {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("worker: model call %s already open", req.RequestId)
+	}
+	s.modelCalls[req.RequestId] = handle
+	s.mu.Unlock()
+
+	msgs := make([]*memqlv1.ModelCallMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		msgs = append(msgs, &memqlv1.ModelCallMessage{Role: m.Role, Content: m.Content})
+	}
+	start := &memqlv1.ModelCallStart{
+		RequestId:            req.RequestId,
+		Model:                req.Model,
+		Kind:                 req.Kind,
+		Messages:             msgs,
+		ResponseFormatSchema: req.ResponseFormatSchema,
+		EmbeddingInput:       req.EmbeddingInput,
+		Limits:               limits.toProto(),
+		PlanId:               req.PlanId,
+		TaskId:               req.TaskId,
+		Purpose:              req.Purpose,
+		Params: &memqlv1.ModelCallParams{
+			Temperature:     req.Params.Temperature,
+			TemperatureSet:  req.Params.TemperatureSet,
+			TopP:            req.Params.TopP,
+			TopPSet:         req.Params.TopPSet,
+			MaxOutputTokens: req.Params.MaxOutputTokens,
+			Stop:            req.Params.Stop,
+			Seed:            req.Params.Seed,
+			SeedSet:         req.Params.SeedSet,
+		},
+	}
+	if err := s.send(&memqlv1.WorkerServerMessage{
+		Payload: &memqlv1.WorkerServerMessage_ModelCallStart{ModelCallStart: start},
+	}); err != nil {
+		handle.finish(ModelCallOutcome{
+			FinishReason: ModelFinishError,
+			Error:        "start_send_failed",
+			ErrorCode:    "start_send_failed",
+		}, err)
+		return nil, fmt.Errorf("worker: send model call start: %w", err)
+	}
+
+	// A caller context that dies before the call ends cancels the
+	// generation on the machine.
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = handle.Cancel("caller_context_done")
+		case <-handle.done:
+		case <-s.ctx.Done():
+		}
+	}()
+
+	return handle, nil
+}
+
+func (s *streamSession) sendModelCallCancel(cancel *memqlv1.ModelCallCancel) error {
+	if cancel == nil {
+		return nil
+	}
+	return s.send(&memqlv1.WorkerServerMessage{
+		Payload: &memqlv1.WorkerServerMessage_ModelCallCancel{ModelCallCancel: cancel},
+	})
+}
+
+func (s *streamSession) lookupModelCall(requestId string) *ModelCallHandle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.modelCalls == nil {
+		return nil
+	}
+	return s.modelCalls[requestId]
+}
+
+func (s *streamSession) handleModelCallDelta(delta *memqlv1.ModelCallDelta) {
+	if delta == nil || delta.GetRequestId() == "" {
+		return
+	}
+	handle := s.lookupModelCall(delta.GetRequestId())
+	if handle == nil {
+		// A delta for a call this node is not hosting. Logged, not
+		// fatal: a worker that reconnected to a different replica
+		// mid-generation will do exactly this, and dropping it is right.
+		if s.server != nil && s.server.logger != nil {
+			s.server.logger.Debug("worker: model call delta for unknown request",
+				"request_id", delta.GetRequestId(),
+				"registration_id", s.worker.RegistrationId,
+			)
+		}
+		return
+	}
+	handle.deliverDelta(ModelCallDelta{
+		Seq:       delta.GetSeq(),
+		Content:   delta.GetContent(),
+		Keepalive: delta.GetKeepalive(),
+	})
+}
+
+func (s *streamSession) handleModelCallEnd(end *memqlv1.ModelCallEnd) {
+	if end == nil || end.GetRequestId() == "" {
+		return
+	}
+	handle := s.lookupModelCall(end.GetRequestId())
+	if handle == nil {
+		return
+	}
+	usage := ModelCallUsage{}
+	if u := end.GetUsage(); u != nil {
+		usage = ModelCallUsage{
+			InputTokens:  u.GetInputTokens(),
+			OutputTokens: u.GetOutputTokens(),
+			Known:        u.GetKnown(),
+			Model:        u.GetModel(),
+		}
+	}
+	embeddings := make([][]float32, 0, len(end.GetEmbeddings()))
+	for _, e := range end.GetEmbeddings() {
+		embeddings = append(embeddings, e.GetValues())
+	}
+	outcome := ModelCallOutcome{
+		FinishReason: end.GetFinishReason(),
+		Usage:        usage,
+		Content:      end.GetContent(),
+		Error:        end.GetError(),
+		ErrorCode:    end.GetErrorCode(),
+	}
+	if len(embeddings) > 0 {
+		outcome.Embeddings = embeddings
+	}
+	var err error
+	if outcome.Error != "" {
+		err = fmt.Errorf("worker: model call failed: %s", outcome.Error)
 	}
 	handle.finish(outcome, err)
 }

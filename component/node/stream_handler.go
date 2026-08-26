@@ -74,6 +74,15 @@ type WorkbenchForwardResponseSink interface {
 type WorkerForwardHandler interface {
 	HandleForwardedRequest(ctx context.Context, req *nodev1.WorkerForwardRequest, send func(*nodev1.NodeServerMessage) error)
 	CancelForwardedRequest(ctx context.Context, requestId string)
+	// HandleForwardedModelCall is the same hop for a ModelCall (epic
+	// memql#4676). It lives on this interface rather than a parallel one
+	// because it is the same subsystem answering about the same machines
+	// through the same install point -- a second interface would be a
+	// second thing for a node's cluster wiring to forget to install, and
+	// forgetting it presents as "that model is offline" on exactly half
+	// the requests.
+	HandleForwardedModelCall(ctx context.Context, req *nodev1.ModelForwardRequest, send func(*nodev1.NodeServerMessage) error)
+	CancelForwardedModelCall(ctx context.Context, requestId string)
 }
 
 // WorkerForwardResponseSink is the originating replica's receiver for replies
@@ -82,6 +91,9 @@ type WorkerForwardHandler interface {
 type WorkerForwardResponseSink interface {
 	Dispatch(resp *nodev1.WorkerForwardResponse)
 	DispatchStream(chunk *nodev1.WorkerForwardStream)
+	// The ModelCall half of the same hop (epic memql#4676).
+	DispatchModel(resp *nodev1.ModelForwardResponse)
+	DispatchModelDelta(delta *nodev1.ModelForwardDelta)
 }
 
 // DeployControlForwardHandler is the identity-node-side entry point for a
@@ -396,6 +408,12 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_WorkerForwardCancel:
 		s.handleWorkerForwardCancel(peerId, payload.WorkerForwardCancel)
 
+	case *nodev1.NodeClientMessage_ModelForwardRequest:
+		s.handleModelForwardRequest(peerId, payload.ModelForwardRequest, stream)
+
+	case *nodev1.NodeClientMessage_ModelForwardCancel:
+		s.handleModelForwardCancel(peerId, payload.ModelForwardCancel)
+
 	default:
 		s.logger.Debug("unhandled message type from peer",
 			"peer_id", peerId,
@@ -659,6 +677,43 @@ func (s *nodeService) handleWorkerForwardCancel(peerId string, cancel *nodev1.Wo
 	}
 	s.logger.Debug("worker forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
+}
+
+// handleModelForwardRequest dispatches an inbound model call to this replica's
+// local handler (epic memql#4676).
+//
+// The no-handler answer is a REFUSAL THAT SAYS NOTHING RAN, for the reason
+// handleWorkerForwardRequest states -- and here the reading is unambiguous:
+// there is no handler, so nothing was reached.
+func (s *nodeService) handleModelForwardRequest(peerId string, req *nodev1.ModelForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.workerForwardHandler == nil {
+		s.logger.Warn("model forward request received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   id.NewShortId(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_ModelForwardResponse{
+				ModelForwardResponse: &nodev1.ModelForwardResponse{
+					RequestId:          req.GetRequestId(),
+					ErrorCode:          "not_configured",
+					ErrorMessage:       "no worker forward handler on this node",
+					RefusedBeforeStart: true,
+				},
+			},
+		})
+		return
+	}
+	s.workerForwardHandler.HandleForwardedModelCall(stream.Context(), req, stream.Send)
+}
+
+// handleModelForwardCancel stops an in-flight forwarded model call.
+func (s *nodeService) handleModelForwardCancel(peerId string, cancel *nodev1.ModelForwardCancel) {
+	if s.workerForwardHandler == nil {
+		return
+	}
+	s.logger.Debug("model forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.workerForwardHandler.CancelForwardedModelCall(context.Background(), cancel.GetRequestId())
 }
 
 // SetWorkerForwardHandler installs the agent-side handler for inbound worker
