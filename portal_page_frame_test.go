@@ -171,10 +171,24 @@ func TestRoutedPortalPagesUseContainer(t *testing.T) {
 				"the entry -- deliberately, so the deletion is a visible decision.", path, err)
 			continue
 		}
-		if !strings.Contains(string(body), "<Container>") {
-			t.Errorf("%s does not render its body inside <Container>.\n"+
-				"Every routed page does, so the frame is visible in the page's own file\n"+
-				"rather than in a shell nobody opens while editing it.", path)
+		// <Container> or <ArrangedPage>, and the second is not a loophole
+		// (epic memql#4661). ArrangedPage IS the page frame for a converged
+		// page: it renders the Container, the header, the version strip and
+		// the sections, and a page that uses it passes it a MANIFEST -- so
+		// anybody editing that page is holding both files. The rule the
+		// original wording protects is "the frame is not in a shell nobody
+		// opens", and naming ArrangedPage in your own render is not that.
+		//
+		// What is still refused is a page that renders NEITHER: a routed body
+		// with no frame at all is a column of content against the viewport
+		// edge, which is the failure this test has always been about.
+		source := string(body)
+		if !strings.Contains(source, "<Container>") && !strings.Contains(source, "<ArrangedPage") {
+			t.Errorf("%s renders neither <Container> nor <ArrangedPage>.\n"+
+				"Every routed page goes through one of the two, so the frame is visible\n"+
+				"in the page's own file rather than in a shell nobody opens while\n"+
+				"editing it. A converged page hands ArrangedPage a manifest; anything\n"+
+				"else opens a Container itself.", path)
 		}
 	}
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type Dispatch, type ReactNode } from "rea
 import {
   elementCandidates,
   profileConcept,
+  sanitizeArrangement,
   type ConceptProfile,
 } from "@znasllc-io/memql-view-kit";
 
@@ -11,6 +12,8 @@ import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Skeleton } from "../ui";
 import { ArrangementLayout } from "./ArrangementLayout";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
+import { SCENE_IDS } from "../nexus/scene/registry";
+import { WIDGET_IDS } from "../widgets/registry";
 import { Inspector } from "./Inspector";
 import type { ComposerAction, ComposerDraft } from "./composerState";
 import { useArrangementSuggestion, type ArrangementSuggester } from "./suggest";
@@ -76,6 +79,36 @@ export function ComposerSection({
     dispatch({ kind: "seeded", conceptId, profile });
   }, [profile, conceptId, dispatch]);
 
+  // WHAT YOU SEE IS WHAT SHIPS, and it was not (found in the visual QA sweep,
+  // task memql#4675). The preview rendered the DRAFT; a saved view renders the
+  // draft put through sanitizeArrangement. So choosing `split` with no detail
+  // pane drew a split in the composer and a stack everywhere else, and a
+  // `focus` with no hero drew a lead column the saved view would not have.
+  //
+  // The preview is the sanitized value now. A person choosing a layout the
+  // entries cannot honour sees it fall back immediately -- which is the honest
+  // answer and one they can act on, where the old preview was a promise the
+  // save quietly broke.
+  //
+  // The DRAFT is untouched: sanitize repairs the rendered value and never the
+  // stored one, so the layout somebody chose is still what gets written and
+  // becomes live the moment they add the element it needs.
+  //
+  // ABOVE the early returns, deliberately: a hook after a conditional return
+  // changes the hook COUNT between renders, which React answers by discarding
+  // the subtree -- the composer rendered nothing at all until this moved.
+  const draftArrangement = draft.arrangements[conceptId];
+  const preview = useMemo(
+    () =>
+      draftArrangement === undefined || profile === undefined
+        ? undefined
+        : sanitizeArrangement(draftArrangement, profile, {
+            scenes: SCENE_IDS,
+            widgets: WIDGET_IDS,
+          }),
+    [draftArrangement, profile],
+  );
+
   const suggestion = useArrangementSuggestion(profile, suggester);
   // Which entry the inspector is on. Held HERE rather than in the draft: it is
   // a property of looking at a view, not of the view, and putting it in the
@@ -104,8 +137,9 @@ export function ComposerSection({
     );
   }
 
-  const arrangement = draft.arrangements[conceptId];
+  const arrangement = draftArrangement;
   const candidates = elementCandidates(profile);
+
 
   return (
     <section className="flex min-w-0 flex-col gap-5">
@@ -172,13 +206,13 @@ export function ComposerSection({
           controls sit on it, because the thing a person is judging should not
           be covered in the buttons they are judging it with. Everything that
           edits is in the inspector. */}
-      {arrangement === undefined ? (
+      {arrangement === undefined || preview === undefined ? (
         <Skeleton variant="rows" rows={4} />
       ) : (
         <div className="flex min-w-0 flex-col gap-6 xl:flex-row xl:items-start">
           <div className="min-w-0 flex-1">
             <ArrangementLayout
-              arrangement={arrangement}
+              arrangement={preview}
               concept={concept}
               rows={data.rows}
               onSelectEntry={setSelected}

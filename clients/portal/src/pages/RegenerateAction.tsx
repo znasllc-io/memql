@@ -1,6 +1,6 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 
-import { Button } from "../ui";
+import { Button, TextInput } from "../ui";
 import { ErrorMessage } from "../components/StatusMessage";
 
 // "Regenerate this view" (epic memql#4661, task memql#4669).
@@ -91,16 +91,14 @@ export function RegenerateAction({
 
       {open && !busy ? (
         <form onSubmit={submit} className="flex items-center gap-2">
-          <label className="sr-only" htmlFor="regenerate-hint">
-            What should change about this page
-          </label>
-          <input
-            id="regenerate-hint"
+          {/* The kit's TextInput, not a bare <input>: it carries the shared
+              control height, the focus ring and the disabled treatment, which
+              is what lets it share a row with the button beside it. */}
+          <TextInput
             value={hint}
-            onChange={(e) => setHint(e.target.value)}
+            onChange={setHint}
             placeholder="more visual, lead with the chart"
-            className="w-64 rounded border border-line bg-surface px-2 py-1 text-xs text-fg"
-            autoFocus
+            ariaLabel="What should change about this page"
           />
           <Button size="xs" tone="primary" onClick={() => onRun(hint.trim())}>
             Go
@@ -111,10 +109,12 @@ export function RegenerateAction({
       {error !== "" ? (
         <div className="max-w-md">
           <ErrorMessage>
-            {error} The page below is unchanged.{" "}
-            <button type="button" onClick={onDismiss} className="underline">
-              Dismiss
-            </button>
+            {error} The page below is unchanged.
+            <span className="ml-2 inline-block">
+              <Button size="xs" onClick={onDismiss}>
+                Dismiss
+              </Button>
+            </span>
           </ErrorMessage>
         </div>
       ) : null}

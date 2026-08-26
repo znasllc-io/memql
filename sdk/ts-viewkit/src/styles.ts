@@ -1025,6 +1025,18 @@ const elementStyles = `
   padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--vk-border, currentColor);
+  /* A WASH AS WELL AS A BORDER, found in the visual QA sweep (task
+     memql#4675). The border alone is --vk-border, and a host is free to make
+     that very quiet: in the portal's dark theme it resolves to about 1.5:1
+     against the ground, at which point a pill reads as plain text and the
+     "this is one of a closed set" signal is gone.
+
+     Derived from currentColor rather than from a token, so it needs no new
+     variable and is correct in both themes by construction -- 8% of the text
+     colour is a faint lift on a light ground and a faint lift on a dark one.
+     A fixed rgba() would have had to pick a direction and would be wrong in
+     one of them. */
+  background: color-mix(in srgb, currentColor 8%, transparent);
   font-size: 0.85em;
   line-height: 1.5;
   white-space: nowrap;
