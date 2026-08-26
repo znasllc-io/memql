@@ -2864,6 +2864,22 @@ func toAnthropicMessages(messages []common.ChatMessage) ([]anthropic.MessagePara
 		}
 	}
 
+	// Anthropic REQUIRES at least one entry in messages -- system content is
+	// a top-level parameter, not a turn -- so a system-only conversation
+	// (the shape InvokeAIStructured's last-resort fallback builds) would
+	// otherwise go out with an empty list and come back
+	// 400 invalid_request_error "messages: Field required". OpenAI accepts a
+	// system-only list, which is why every structured prompt worked until
+	// the first Claude-only cluster ran one. Synthesize the missing user
+	// turn instead of failing the call: the instructions are all in the
+	// system blocks, so a minimal directive is the whole turn.
+	if len(anthropicMessages) == 0 {
+		anthropicMessages = append(anthropicMessages, anthropic.MessageParam{
+			Role:    anthropic.MessageParamRoleUser,
+			Content: []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock("Proceed as instructed.")},
+		})
+	}
+
 	return anthropicMessages, systemBlocks
 }
 
