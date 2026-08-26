@@ -377,16 +377,26 @@ func (s *Server) requireUserForDevice(w http.ResponseWriter, r *http.Request) (*
 		s.renderError(w, r, http.StatusServiceUnavailable, "Device sign-in is temporarily unavailable.")
 		return nil, false
 	}
-	// The per-IP limit is checked BEFORE the session check, and on both
-	// verbs, because both are reachable without one: an unauthenticated
-	// caller can still burn budget probing this endpoint, and the
-	// page's whole job is to answer questions about a 40-bit code.
-	if allowed, retryAfter := s.verifyLimiter().Allow(clientIP(r)); !allowed {
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-		s.renderError(w, r, http.StatusTooManyRequests,
-			"Too many attempts from this address. Wait a little and try again.")
-		return nil, false
-	}
+	// THE BUDGET IS SPENT ON ORACLE QUERIES, NOT ON BOUNCES (memql#4626).
+	//
+	// This limit exists because the page is a code ORACLE: a submission tells
+	// the caller whether a given user_code exists and what state it is in, so
+	// the 40-bit code space is only as strong as the number of guesses allowed
+	// against it. That reasoning applies to a request that gets an ANSWER.
+	//
+	// It used to be checked before the session check, on both verbs, which
+	// charged a token for requests that answer nothing: a signed-out visitor
+	// is redirected to /login and learns exactly as much about any user_code
+	// as they knew before. One approval therefore cost two or three tokens --
+	// the bounce, the return, the POST -- and behind a corporate NAT, where an
+	// office shares one address, 120/h ran out as a spurious HTML 429 on a
+	// legitimate sign-in.
+	//
+	// So the check moved BELOW authentication. Every request that can learn
+	// something still costs exactly one token, which is the property the limit
+	// was for; a bounce costs nothing, because it reveals nothing. An
+	// unauthenticated flood is a plain redirect and is a DoS concern for the
+	// front door rather than an oracle concern for this budget.
 	raw := extractUserToken(r)
 	if raw == "" {
 		s.bounceToLoginForDevice(w, r)
@@ -395,6 +405,13 @@ func (s *Server) requireUserForDevice(w http.ResponseWriter, r *http.Request) (*
 	claims, err := s.deviceFlow.Issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil || claims == nil {
 		s.bounceToLoginForDevice(w, r)
+		return nil, false
+	}
+	// Authenticated: this request can learn something, so it costs a token.
+	if allowed, retryAfter := s.verifyLimiter().Allow(clientIP(r)); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		s.renderError(w, r, http.StatusTooManyRequests,
+			"Too many attempts from this address. Wait a little and try again.")
 		return nil, false
 	}
 	return claims, true

@@ -98,8 +98,21 @@ func (s *Server) handleDeviceCode(w http.ResponseWriter, r *http.Request) {
 	sourceIP := clientIP(r)
 
 	if allowed, retryAfter := deviceCodeLimiter(s).Allow(sourceIP); !allowed {
+		// NOT slow_down (memql#4626). RFC 8628 §3.5 gives `slow_down` ONE
+		// meaning -- "you are polling the TOKEN endpoint faster than the
+		// interval, and the interval has been raised" -- and token_device.go
+		// returns exactly that, as an HTTP 400. Reusing the same code here for
+		// an HTTP 429 address rate limit gave one error string two meanings
+		// across two statuses. A client that checks the status first is fine;
+		// a stock OAuth library keying on the `error` field alone reads a rate
+		// limit as a poll-interval bump and retries into the same wall.
+		//
+		// `temporarily_unavailable` is RFC 6749 §4.1.2.1 and says the thing
+		// that is true: come back later, nothing about your request was wrong.
+		// Retry-After carries the how-long.
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-		s.writeJSONError(w, http.StatusTooManyRequests, "slow_down", "too many device authorization requests from this address")
+		s.writeJSONError(w, http.StatusTooManyRequests, "temporarily_unavailable",
+			"too many device authorization requests from this address; retry after the Retry-After interval")
 		return
 	}
 
@@ -263,8 +276,20 @@ func validateDevicePKCE(challenge, method string) error {
 		return nil
 	}
 	switch method {
-	case "", "S256", "plain":
+	case "", "S256":
 		return nil
+	case "plain":
+		// REFUSED HERE BECAUSE IT IS REFUSED AT REDEMPTION (memql#4626).
+		// verifyPKCE has rejected `plain` since memql#4303 -- it puts the
+		// verifier in the challenge, so anyone who can read the authorization
+		// request can redeem the code, and RFC 7636 §7.2 says a server SHOULD
+		// reject it. Accepting it here meant a client spent the ENTIRE human
+		// round trip -- open the page, approve on another device -- before
+		// learning the grant could never be redeemed, which is precisely the
+		// failure a request-time validator exists to prevent. A validator that
+		// admits what redemption refuses is worse than no validator: it moves
+		// the error to the point where it costs the most.
+		return errDevicePKCEPlainNotAllowed
 	default:
 		return errDevicePKCEUnsupportedMethod
 	}
@@ -272,7 +297,8 @@ func validateDevicePKCE(challenge, method string) error {
 
 var (
 	errDevicePKCEMethodWithoutChallenge = deviceError("code_challenge_method supplied without a code_challenge")
-	errDevicePKCEUnsupportedMethod      = deviceError("unsupported code_challenge_method; use S256 or plain")
+	errDevicePKCEUnsupportedMethod      = deviceError("unsupported code_challenge_method; use S256")
+	errDevicePKCEPlainNotAllowed        = deviceError("code_challenge_method=plain is not accepted; use S256")
 )
 
 type deviceError string

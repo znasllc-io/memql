@@ -379,3 +379,39 @@ func TestDevicePageIsRateLimitedPerIP(t *testing.T) {
 		t.Error("a 429 must carry Retry-After so a client knows when to come back")
 	}
 }
+
+// A BOUNCE COSTS NO BUDGET (memql#4626). The limit protects a code ORACLE --
+// a submission tells the caller whether a user_code exists and what state it is
+// in, so the 40-bit space is only as strong as the guesses allowed against it.
+// A signed-out visitor gets a redirect to /login and learns nothing, so
+// charging it a token protected nothing and cost a real one.
+//
+// It cost two or three per approval -- the bounce, the return, the POST -- and
+// behind a corporate NAT, where an office shares one address, that ran the
+// budget out as a spurious HTML 429 on a legitimate sign-in.
+func TestDeviceBouncesDoNotSpendTheOracleBudget(t *testing.T) {
+	t.Setenv(envDeviceVerifyPerHour, "3")
+	s, _, token := newDeviceWebServer(t)
+
+	// Ten signed-out visits: every one is a bounce, so none may be charged.
+	for i := 0; i < 10; i++ {
+		rec := deviceGet(s, "", "?user_code="+url.QueryEscape(deviceTestUserCode))
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("signed-out request %d: status = %d, want 303. A bounce answers nothing about\n"+
+				"any user_code, so it must never be the thing that exhausts the budget.", i, rec.Code)
+		}
+	}
+
+	// The authenticated budget must be untouched: all three still available.
+	for i := 0; i < 3; i++ {
+		if rec := deviceGet(s, token, ""); rec.Code != http.StatusOK {
+			t.Fatalf("authenticated request %d: status = %d, want 200. Ten bounces spent budget that\n"+
+				"belongs to requests which can actually learn something (memql#4626).", i, rec.Code)
+		}
+	}
+	// And the fourth is still refused -- moving the check must not remove it.
+	if rec := deviceGet(s, token, ""); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429. The oracle limit still has to bite; what changed is WHICH\n"+
+			"requests it counts, not whether it counts.", rec.Code)
+	}
+}

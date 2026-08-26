@@ -823,9 +823,78 @@ func TestDeviceAuthorizationRequestIsRateLimitedPerIP(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("a 429 must carry Retry-After so a client knows when to come back")
 	}
-	// RFC 8628 clients already understand slow_down as "back off", so
-	// that is the code a throttled device authorization returns.
-	if got := errorCode(t, rec.Body.Bytes()); got != "slow_down" {
-		t.Fatalf("error = %q, want slow_down", got)
+	// NOT slow_down (memql#4626). This expectation used to say slow_down, and
+	// it was the assertion that certified the overload: RFC 8628 §3.5 gives
+	// that code ONE meaning -- "you are polling the TOKEN endpoint faster than
+	// the interval, and the interval has been raised" -- which token_device.go
+	// returns as an HTTP 400. Using it here for an HTTP 429 address rate limit
+	// gave one error string two meanings across two statuses, and a stock
+	// OAuth library keying on the `error` field alone reads a rate limit as a
+	// poll-interval bump and retries into the same wall.
+	if got := errorCode(t, rec.Body.Bytes()); got != "temporarily_unavailable" {
+		t.Fatalf("error = %q, want temporarily_unavailable", got)
+	}
+	// And the two must stay distinguishable. slow_down belongs to the token
+	// endpoint's poll floor and to nothing else.
+	if got := errorCode(t, rec.Body.Bytes()); got == "slow_down" {
+		t.Fatal("the device-authorization rate limit is using slow_down again, which the token " +
+			"endpoint's poll floor already means (memql#4626)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// memql#4626 -- the request-time validator must agree with redemption
+// ---------------------------------------------------------------------------
+
+// THE VALIDATOR EXISTS TO MOVE AN ERROR EARLIER. validateDevicePKCE's whole
+// stated purpose is that "a device that mistypes its method would otherwise
+// complete the whole human round trip before discovering the grant can never be
+// redeemed". Accepting `plain` here while verifyPKCE refuses it (memql#4303)
+// inverted that: the client spent the entire round trip -- open the page,
+// approve on another device -- and only then learned the flow was dead.
+//
+// A validator that admits what redemption refuses is worse than no validator,
+// because it moves the error to the point where it costs the most.
+func TestDevicePKCEValidatorAgreesWithRedemption(t *testing.T) {
+	cases := []struct {
+		method  string
+		wantErr bool
+		why     string
+	}{
+		{method: "", wantErr: false, why: "absent means S256 (RFC 7636 §4.3)"},
+		{method: "S256", wantErr: false, why: "the only method any MemQL client uses"},
+		{method: "plain", wantErr: true, why: "verifyPKCE refuses it, so accepting it here strands the client after the human round trip"},
+		{method: "S512", wantErr: true, why: "unsupported"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run("method="+tc.method, func(t *testing.T) {
+			err := validateDevicePKCE("a-challenge", tc.method)
+			if tc.wantErr && err == nil {
+				t.Fatalf("code_challenge_method=%q accepted at /device/code; %s", tc.method, tc.why)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("code_challenge_method=%q refused at /device/code (%v); %s", tc.method, err, tc.why)
+			}
+		})
+	}
+
+	// And the error must not advertise the method it now refuses. The old text
+	// literally read "use S256 or plain".
+	if msg := errDevicePKCEUnsupportedMethod.Error(); strings.Contains(msg, "plain") {
+		t.Errorf("the unsupported-method error still offers plain: %q", msg)
+	}
+}
+
+// The two grants must refuse `plain` for the same reason, so the request-time
+// answer and the redemption answer cannot drift apart again. Asserted as a
+// PAIR, because each half was correct in isolation and the seam between them
+// was what nothing tested -- the same shape as memql#4601 and memql#4629.
+func TestPlainPKCEIsRefusedAtBothEnds(t *testing.T) {
+	if err := validateDevicePKCE("challenge", "plain"); err == nil {
+		t.Error("/device/code accepts code_challenge_method=plain")
+	}
+	if err := verifyPKCE("challenge", "verifier", "plain"); err == nil {
+		t.Error("redemption accepts code_challenge_method=plain")
 	}
 }
