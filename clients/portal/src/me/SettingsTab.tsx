@@ -10,6 +10,7 @@ import {
   Callout,
   Checkbox,
   ConfirmDialog,
+  ErrorNotice,
   Field,
   Panel,
   Select,
@@ -74,9 +75,11 @@ export function SettingsTab({ me }: { me: MeState }): ReactNode {
 
   if (me.error !== "") {
     return (
-      <Callout tone="danger" title="We could not read your settings">
-        {me.error}
-      </Callout>
+      <ErrorNotice
+        sentence="Could not read your settings."
+        next="Reload the page to read them again."
+        detail={me.error}
+      />
     );
   }
   if (account === null) {

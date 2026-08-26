@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Button, Dialog, Panel, Skeleton } from "../ui";
-import { Empty, ErrorMessage } from "./StatusMessage";
+import { Button, Dialog, ErrorNotice, Panel, Skeleton } from "../ui";
+import { Empty } from "./StatusMessage";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { RowDetail } from "./RowDetail";
 
@@ -51,7 +51,7 @@ export function RowDetailDialog({
         <p className="font-mono text-xs break-all text-subtle">{rowId}</p>
         <Panel>
           {error ? (
-            <ErrorMessage>Failed to read the row: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this row." detail={error} />
           ) : loading ? (
             <Skeleton variant="kv" rows={4} />
           ) : missing ? (

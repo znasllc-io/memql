@@ -1,6 +1,16 @@
 import { useRef, useState, type ReactNode } from "react";
 
-import { Button, Callout, Field, FormRow, LabelChips, Panel, Select, Skeleton } from "../ui";
+import {
+  Button,
+  Callout,
+  ErrorNotice,
+  Field,
+  FormRow,
+  LabelChips,
+  Panel,
+  Select,
+  Skeleton,
+} from "../ui";
 import { chipsFromMap, mapFromChips, parseLabelChip } from "./labels";
 import {
   FALLBACK_BLURB,
@@ -11,6 +21,7 @@ import {
   type RoutingStrategy,
 } from "./rows";
 import { useRoutingPolicy } from "./useRoutingPolicy";
+import { SynapseSection, type SynapsePatch } from "../synapse";
 
 // The routing policy editor: which of your machines a piece of work lands on.
 //
@@ -94,20 +105,59 @@ export function RoutingPolicyEditor(): ReactNode {
     );
   }
 
+  // Two enum fields (memql#4658). The label chips are deliberately NOT in the
+  // scope: they are a list a person builds one at a time and each entry has
+  // to match a machine EXACTLY, so a model guessing at them would produce a
+  // policy that silently matches nothing -- the failure mode this surface is
+  // least able to show.
+  const synapseFields = [
+    {
+      name: "strategy",
+      type: "enum" as const,
+      label: "Strategy",
+      value: strategy,
+      options: ROUTING_STRATEGIES as readonly string[],
+    },
+    {
+      name: "fallback",
+      type: "enum" as const,
+      label: "When the chosen machine refuses",
+      value: fallback,
+      options: ROUTING_FALLBACKS as readonly string[],
+    },
+  ];
+
+  function applySynapse(patches: readonly SynapsePatch[]): void {
+    for (const patch of patches) {
+      if (typeof patch.value !== "string") continue;
+      if (patch.field === "strategy") setStrategy(patch.value);
+      if (patch.field === "fallback") setFallback(patch.value);
+    }
+  }
+
   return (
+    <SynapseSection
+      id="fleet.routingPolicy"
+      label="Routing policy"
+      fields={synapseFields}
+      apply={applySynapse}
+    >
     <Panel>
       <div className="flex flex-col gap-4">
         {state.error === "" ? null : (
-          <Callout tone="danger" title="Could not read your routing policy">
-            {state.error} The router is unaffected by this -- it reads the policy itself, and
-            what is shown below is only this page&rsquo;s copy.
-          </Callout>
+          <ErrorNotice
+            sentence="Could not read your routing policy."
+            next="Your work still routes the way you set it -- this page could not read the setting, not change it."
+            detail={state.error}
+          />
         )}
 
         {state.saveError === "" ? null : (
-          <Callout tone="danger" title="The policy was not saved">
-            {state.saveError}
-          </Callout>
+          <ErrorNotice
+            sentence="The policy was not saved."
+            next="What is on screen is your edit, not what the cluster holds."
+            detail={state.saveError}
+          />
         )}
 
         {policy === null ? (
@@ -120,6 +170,7 @@ export function RoutingPolicyEditor(): ReactNode {
 
         <FormRow>
           <Field label="Strategy" hint={STRATEGY_BLURB[strategy as RoutingStrategy] ?? ""}>
+            <div data-synapse-field="strategy">
             <Select value={strategy} onChange={setStrategy} ariaLabel="Strategy">
               {ROUTING_STRATEGIES.map((one) => (
                 <option key={one} value={one}>
@@ -127,11 +178,13 @@ export function RoutingPolicyEditor(): ReactNode {
                 </option>
               ))}
             </Select>
+            </div>
           </Field>
           <Field
             label="When the chosen machine refuses"
             hint={FALLBACK_BLURB[fallback as RoutingFallback] ?? ""}
           >
+            <div data-synapse-field="fallback">
             <Select value={fallback} onChange={setFallback} ariaLabel="Fallback">
               {ROUTING_FALLBACKS.map((one) => (
                 <option key={one} value={one}>
@@ -139,6 +192,7 @@ export function RoutingPolicyEditor(): ReactNode {
                 </option>
               ))}
             </Select>
+            </div>
           </Field>
         </FormRow>
 
@@ -187,5 +241,6 @@ export function RoutingPolicyEditor(): ReactNode {
         </div>
       </div>
     </Panel>
+    </SynapseSection>
   );
 }

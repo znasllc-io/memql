@@ -1,7 +1,7 @@
 import { Outlet, useOutletContext, useParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { Badge, Callout, Container, PageHeader, Skeleton, Tabs } from "../ui";
+import { Badge, Callout, Container, ErrorNotice, PageHeader, Skeleton, Tabs } from "../ui";
 import { useGoalWorld } from "./feed/useGoalWorld";
 import { GoalPicker } from "./GoalPicker";
 import { NewGoalAction } from "./NewGoalDialog";
@@ -65,13 +65,12 @@ export function GoalLayout(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
-            <>
-              nexus
-              <span aria-hidden="true"> · </span>
-              {planId}
-            </>
-          }
+          pageId="nexus"
+          subtitle="Nexus"
+          // The plan id stays in the MONO slot, which is the one case that
+          // slot is for: this is a row's own address, and it is what an
+          // operator pastes into a query or quotes in a thread.
+          eyebrow={planId}
           title={plan === null ? (loading ? "Loading the goal" : "Goal") : plan.goal || planId}
           blurb="A goal's world, as the system works on it."
           // The picker is the LIST; this is the VERB. Both in the header
@@ -137,9 +136,7 @@ export function GoalLayout(): ReactNode {
             may name a goal from another cluster.
           </Callout>
         ) : error !== "" ? (
-          <Callout tone="danger" title="The goal could not be read">
-            {error}
-          </Callout>
+          <ErrorNotice sentence="Could not read this goal." detail={error} />
         ) : loading && plan === null ? (
           <Skeleton variant="rows" rows={6} />
         ) : (

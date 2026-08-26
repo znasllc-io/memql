@@ -2,9 +2,9 @@ import { useState, type DragEvent, type FormEvent, type ReactNode } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Band,
   Button,
@@ -13,10 +13,10 @@ import {
   Container,
   DataText,
   EmptyState,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
-  PageHeader,
   Skeleton,
   Textarea,
   TextInput,
@@ -25,6 +25,7 @@ import { Download, Search, Upload } from "../ui/icons";
 import { ARTIFACT_CONCEPT_ID } from "./concepts";
 import { artifactContentUrl } from "./transport";
 import { ARCHIVED_PARAM, ARCHIVED_VALUE, LABEL_PARAM, SEARCH_PARAM, artifactPath } from "./urls";
+import { SynapseSection, type SynapsePatch } from "../synapse";
 import {
   useArtifactSearch,
   useArtifacts,
@@ -119,17 +120,18 @@ export function ArtifactsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={ARTIFACT_CONCEPT_ID}
-          title="Artifacts"
-          blurb="Everything this cluster's Library has indexed for you -- files you uploaded, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
-          actions={
-            <Button size="xs" onClick={reload}>
-              Refresh
-            </Button>
-          }
-        />
+      <AreaFrame
+        area="library"
+        pageId="library.artifacts"
+        subtitle="Library"
+        title="Artifacts"
+        blurb="Everything this cluster's Library has indexed for you -- files you uploaded, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
+        actions={
+          <Button size="xs" onClick={reload}>
+            Refresh
+          </Button>
+        }
+      >
 
         <Band
           title="Upload a file"
@@ -193,14 +195,14 @@ export function ArtifactsPage(): ReactNode {
             </span>
           </div>
 
-          {archiveError ? <ErrorMessage>Could not archive: {archiveError}</ErrorMessage> : null}
+          {archiveError ? <ErrorNotice sentence="That artifact was not archived." next="It is still in your Library; try again." detail={archiveError} /> : null}
 
           {search ? (
             <SearchResults state={searchState} hits={hits} label={label} onSelect={select} />
           ) : conceptsError ? (
-            <ErrorMessage>Could not read the concept registry: {conceptsError}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the concept registry, so the Library cannot be drawn." detail={conceptsError} />
           ) : error ? (
-            <ErrorMessage>Could not read artifacts: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read your Library." next="Reload the page to read it again." detail={error} />
           ) : rows.length === 0 ? (
             loading || conceptsLoading ? (
               <Skeleton variant="rows" rows={5} />
@@ -227,7 +229,7 @@ export function ArtifactsPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </section>
+      </AreaFrame>
 
       <ConfirmDialog
         open={pendingArchive !== null}
@@ -321,7 +323,7 @@ function SearchResults({
   label: string;
   onSelect: (rowId: string) => void;
 }): ReactNode {
-  if (state.error) return <ErrorMessage>Could not search: {state.error}</ErrorMessage>;
+  if (state.error) return <ErrorNotice sentence="The search did not run." next="Try it again, or narrow what you asked for." detail={state.error} />;
   if (state.loading && hits.length === 0) return <Skeleton variant="rows" rows={3} />;
   if (hits.length === 0) {
     if (!state.searched) return <Skeleton variant="rows" rows={3} />;
@@ -447,7 +449,7 @@ function UploadDropZone({
 
   return (
     <div className="flex flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The upload did not finish." next="Nothing was added to your Library; try the file again." detail={error} /> : null}
       {message ? (
         <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
           {message}
@@ -524,9 +526,36 @@ function NewArtifactForm({
     setBody("");
   }
 
+  const synapseFields = [
+    { name: "title", type: "text" as const, label: "Title", value: title },
+    {
+      name: "summary",
+      type: "text" as const,
+      label: "Summary",
+      value: summary,
+      constraints: "one short line, shown on the list row",
+    },
+    { name: "body", type: "text" as const, label: "Body", value: body, constraints: "markdown" },
+  ];
+
+  function applySynapse(patches: readonly SynapsePatch[]): void {
+    for (const patch of patches) {
+      if (typeof patch.value !== "string") continue;
+      if (patch.field === "title") setTitle(patch.value);
+      if (patch.field === "summary") setSummary(patch.value);
+      if (patch.field === "body") setBody(patch.value);
+    }
+  }
+
   return (
+    <SynapseSection
+      id="library.newArtifact"
+      label="New artifact"
+      fields={synapseFields}
+      apply={applySynapse}
+    >
     <form onSubmit={submit} className="flex flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The artifact was not recorded." next="Check the fields above and try again." detail={error} /> : null}
       {message ? (
         <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
           {message}
@@ -534,14 +563,20 @@ function NewArtifactForm({
       ) : null}
       <FormRow>
         <Field label="Title" grow>
-          <TextInput value={title} onChange={setTitle} placeholder="Ten most beautiful birds" />
+          <div data-synapse-field="title">
+            <TextInput value={title} onChange={setTitle} placeholder="Ten most beautiful birds" />
+          </div>
         </Field>
         <Field label="Summary" grow hint="Optional. Shown on the list row.">
-          <TextInput value={summary} onChange={setSummary} placeholder="A short description" />
+          <div data-synapse-field="summary">
+            <TextInput value={summary} onChange={setSummary} placeholder="A short description" />
+          </div>
         </Field>
       </FormRow>
       <Field label="Body" grow hint="Optional. Markdown, rendered in the artifact's viewer.">
-        <Textarea value={body} onChange={setBody} rows={4} placeholder="# Ten most beautiful birds…" />
+        <div data-synapse-field="body">
+          <Textarea value={body} onChange={setBody} rows={4} placeholder="# Ten most beautiful birds…" />
+        </div>
       </Field>
       <div>
         <Button type="submit" busy={busy} busyLabel="Working…" disabled={title.trim() === ""}>
@@ -549,5 +584,6 @@ function NewArtifactForm({
         </Button>
       </div>
     </form>
+    </SynapseSection>
   );
 }

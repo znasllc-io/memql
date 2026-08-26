@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import type { ModuleDetail, ModuleEnvVar } from "@znasllc-io/memql-sdk-core/client";
 
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Badge,
   Band,
@@ -11,6 +10,7 @@ import {
   ConfirmDialog,
   Container,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -49,7 +49,7 @@ export function ModuleDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
+          subtitle={
             <Breadcrumbs items={[{ label: "Modules", to: MODULES_ROOT }, { label: name }]} />
           }
           title={name}
@@ -73,7 +73,7 @@ export function ModuleDetailPage(): ReactNode {
         />
 
         {state.error !== "" ? (
-          <ErrorMessage>Could not read this module: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read this module." detail={state.error} />
         ) : detail === null ? (
           <Skeleton variant="kv" rows={6} />
         ) : (
@@ -217,7 +217,7 @@ function PackToggle({
             ? "Enabled: every node loads this pack's behavior at boot."
             : "Disabled: the pack is mounted inert -- its concepts and rows stay readable, its tools, queries and automations are absent."}
         </p>
-        {flip.error !== "" ? <ErrorMessage>{flip.error}</ErrorMessage> : null}
+        {flip.error !== "" ? <ErrorNotice sentence="This module was not enabled or disabled." next="It is still in the state shown above; try again." detail={flip.error} /> : null}
         {flip.outcome ? (
           <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
             Saved: {flip.outcome.packDomain} is now{" "}

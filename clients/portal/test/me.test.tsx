@@ -252,7 +252,7 @@ describe("/me -- Account (memql#4318, #4319)", () => {
 
   it("says the read failed rather than rendering an empty account", async () => {
     renderMe("/me", { failReads: true });
-    await waitFor(() => expect(screen.getByText(/could not read your account/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read your account/)).toBeTruthy());
     expect(screen.queryByText("Display name")).toBeNull();
   });
 });
@@ -383,7 +383,10 @@ describe("/me/sessions (memql#4319)", () => {
 
   it("says the read failed rather than showing an empty table", async () => {
     renderMe("/me/sessions", { failReads: true });
-    await waitFor(() => expect(screen.getByText(/could not read your sessions/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read your sessions/)).toBeTruthy());
+    // The rationale that used to be in the callout is now a NEXT STEP written
+    // for the reader rather than about the interface (memql#4657).
+    expect(screen.getByText(/the answer is unknown/)).toBeTruthy();
     // An empty table here reads as "no other device can reach your account",
     // which is the one wrong answer that reassures -- and neither the table
     // nor the revoke band may render.

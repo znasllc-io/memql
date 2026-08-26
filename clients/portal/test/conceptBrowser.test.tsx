@@ -386,7 +386,13 @@ describe("one concept's rows", () => {
   it("does not claim a concept is empty when the FIRST page failed", async () => {
     const h = harness({ failOnce: [""] });
     renderBrowser(h, `/concepts/${NODE}`);
-    await waitFor(() => expect(screen.getByText(/Could not read rows/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/Could not read this concept's rows/)).toBeTruthy(),
+    );
+    // No role resolved on this harness's connection, so the raw string is NOT
+    // offered -- which is the gate doing its job rather than the error being
+    // swallowed.
+    expect(screen.queryByText("Technical details")).toBeNull();
     // "No rows for node." next to "could not read rows" is two contradictory
     // answers to the same question.
     expect(screen.queryByText("No rows for node.")).toBeNull();

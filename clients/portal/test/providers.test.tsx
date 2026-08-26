@@ -15,7 +15,7 @@ import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
-import { adminSurfacesFor } from "../src/admin/urls";
+import { destinationById, visibleTabs } from "../src/app/nav";
 import { summarize, toProviderRows } from "../src/admin/useProviders";
 import { asQueryClient } from "./support/queryFake";
 
@@ -168,14 +168,21 @@ function renderAt(
 
 describe("the surface is owner-only, and absent rather than disabled", () => {
   it("offers the tab to an owner and to nobody else", () => {
-    const owner = adminSurfacesFor("owner").map((s) => s.id);
-    expect(owner).toContain("providers");
+    // Read off the NAV DEFINITION since memql#4655: these are tabs on the
+    // Cluster destination now, and their visibility is one `access` field
+    // each. The filter used to live in admin/urls.ts, which meant the tab
+    // strip and the rail row that opens it each had their own copy of it.
+    const cluster = destinationById("cluster");
+    expect(cluster).toBeTruthy();
+    const tabsFor = (role: string) => visibleTabs(cluster!, role).map((t) => t.id);
+
+    expect(tabsFor("owner")).toContain("cluster.providers");
     for (const role of ["admin", "developer", "writer", "reader", ""]) {
-      expect(adminSurfacesFor(role).map((s) => s.id)).not.toContain("providers");
-      // The reachable positive: the OTHER admin tabs are still offered, so
-      // this is a filter on one surface rather than an empty strip.
-      expect(adminSurfacesFor(role).map((s) => s.id)).toContain("settings");
+      expect(tabsFor(role)).not.toContain("cluster.providers");
     }
+    // The reachable positive: the OTHER admin tabs are still offered to an
+    // admin, so this is a filter on one surface rather than an empty strip.
+    expect(tabsFor("admin")).toContain("cluster.settings");
   });
 
   it("refuses an admin at the page, naming the floor", async () => {

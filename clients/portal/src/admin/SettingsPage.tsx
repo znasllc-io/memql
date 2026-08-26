@@ -5,8 +5,7 @@ import type { ClusterSettingsEdit } from "@znasllc-io/memql-sdk-core/identityadm
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Field, Select, TextInput } from "../ui";
+import { Band, Button, ErrorNotice, Field, Select, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { brandAssetSummary, settingRows, SETTING_CONCEPT } from "./rows";
@@ -88,7 +87,7 @@ export function SettingsPage(): ReactNode {
         </div>
         {settings.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read the settings: {settings.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this cluster's settings." detail={settings.error} />
           </div>
         )}
         <WriteOutcome state={writes} />

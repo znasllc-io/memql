@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Module } from "@znasllc-io/memql-sdk-core/client";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Button, Container, DataText, PageHeader, Skeleton } from "../ui";
+import { Badge, Band, Button, Container, DataText, ErrorNotice, Skeleton } from "../ui";
+import { AreaFrame } from "../app/AreaFrame";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "./ModulesRefused";
 import { groupByKind, KIND_BLURBS, KIND_LABELS, stateTone, useModulesInventory } from "./useModules";
@@ -30,27 +30,29 @@ export function ModulesPage(): ReactNode {
   const inventory = state.inventory;
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title="Modules"
-          blurb="Everything this cluster runs, by kind, with the switch each kind actually has. Packs flip per instance; integrations follow their configuration; node types scale; components are the engine itself."
-          actions={
-            <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
-              Refresh
-            </Button>
-          }
-          meta={
-            inventory ? (
-              <span className="text-xs text-subtle">
-                answered by <DataText kind="id">{inventory.reportingNodeId || "unknown"}</DataText>
-                {inventory.reportingNodeType ? ` (${inventory.reportingNodeType})` : ""}
-              </span>
-            ) : undefined
-          }
-        />
+      <AreaFrame
+        area="concepts"
+        pageId="concepts.modules"
+        subtitle="Concepts"
+        title="Modules"
+        blurb="Everything this cluster runs, by kind, with the switch each kind actually has. Packs flip per instance; integrations follow their configuration; node types scale; components are the engine itself."
+        actions={
+          <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
+            Refresh
+          </Button>
+        }
+        meta={
+          inventory ? (
+            <span className="text-xs text-subtle">
+              answered by <DataText kind="id">{inventory.reportingNodeId || "unknown"}</DataText>
+              {inventory.reportingNodeType ? ` (${inventory.reportingNodeType})` : ""}
+            </span>
+          ) : undefined
+        }
+      >
 
         {state.error !== "" ? (
-          <ErrorMessage>Could not read the module inventory: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read this cluster's modules." detail={state.error} />
         ) : inventory === null ? (
           <Skeleton variant="rows" rows={8} />
         ) : (
@@ -69,7 +71,7 @@ export function ModulesPage(): ReactNode {
             </Band>
           ))
         )}
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

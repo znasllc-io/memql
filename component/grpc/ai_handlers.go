@@ -407,7 +407,13 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		// optional post-process pass. A *SuggestValidationError maps to the
 		// same codes.InvalidArgument "X is required in payload" error the old
 		// per-domain checks emitted; any other error is an internal failure.
-		plan, err := handler(memqlengine.SuggestContext{Payload: payload})
+		plan, err := handler(memqlengine.SuggestContext{
+			Payload: payload,
+			// So a domain can keep its instruction in .memql rather than in a
+			// Go string literal (memql#4654). The handler gets the render
+			// function and nothing else -- not the engine, not the session.
+			RenderPrompt: s.service.engine.RenderPrompt,
+		})
 		if err != nil {
 			var ve *memqlengine.SuggestValidationError
 			if errors.As(err, &ve) {

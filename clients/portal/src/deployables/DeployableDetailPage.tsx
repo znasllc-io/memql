@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { rowBool, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { ARTIFACTS_ROOT } from "../artifacts/urls";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
 import {
   Band,
   Breadcrumbs,
@@ -12,6 +12,7 @@ import {
   ConfirmDialog,
   Container,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -69,7 +70,7 @@ export function DeployableDetailPage(): ReactNode {
   }, [detail.deleted, navigate]);
 
   if (detail.error) {
-    return <ErrorMessage>Could not read this deployable: {detail.error}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read this deployable." detail={detail.error} />;
   }
   if (detail.loading && detail.site === null) {
     return <Skeleton variant="kv" rows={6} />;
@@ -108,7 +109,7 @@ export function DeployableDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={
+          subtitle={
             <Breadcrumbs
               items={[{ label: "Deployables", to: deployablesPath() }, { label: title || hostname }]}
             />
@@ -142,7 +143,7 @@ export function DeployableDetailPage(): ReactNode {
           </p>
         ) : null}
 
-        {detail.actionError ? <ErrorMessage>{detail.actionError}</ErrorMessage> : null}
+        {detail.actionError ? <ErrorNotice sentence="That action did not run." next="This deployable is unchanged; try it again." detail={detail.actionError} /> : null}
         {detail.actionMessage ? (
           <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
             {detail.actionMessage}
@@ -208,7 +209,7 @@ export function DeployableDetailPage(): ReactNode {
           {history.loading ? (
             <Skeleton variant="rows" rows={4} />
           ) : history.error ? (
-            <ErrorMessage>Could not read version history: {history.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this deployable's version history." detail={history.error} />
           ) : history.versions.length === 0 ? (
             <Empty>No version history yet.</Empty>
           ) : (
@@ -326,7 +327,7 @@ function DeployFromLibrary({
   busy: boolean;
   onDeploy: () => void;
 }): ReactNode {
-  if (error) return <ErrorMessage>Could not read your Library: {error}</ErrorMessage>;
+  if (error) return <ErrorNotice sentence="Could not read your Library, so there is nothing here to deploy from." detail={error} />;
   if (loading) return <Skeleton variant="rows" rows={2} />;
   if (artifacts.length === 0) {
     return (

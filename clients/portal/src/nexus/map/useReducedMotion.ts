@@ -1,7 +1,3 @@
-import { useEffect, useState } from "react";
-
-import { prefersReducedMotion } from "./webgl";
-
 // The reduced-motion preference, and changes to it.
 //
 // Design D7: the scene reads the preference itself, because the portal's CSS
@@ -10,29 +6,9 @@ import { prefersReducedMotion } from "./webgl";
 // ON is often doing it BECAUSE of what is currently moving on their screen,
 // and a scene that keeps animating until the next navigation has ignored them
 // at the exact moment they asked.
-export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(prefersReducedMotion);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    let query: MediaQueryList;
-    try {
-      query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    } catch {
-      return;
-    }
-    const onChange = (): void => setReduced(query.matches);
-    setReduced(query.matches);
-    // addEventListener is the modern form; addListener is what older Safari
-    // has. Both are guarded because jsdom's MediaQueryList has neither unless
-    // the test stubs matchMedia, and a throw here would take the page down
-    // over a preference.
-    if (typeof query.addEventListener === "function") {
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    }
-    return undefined;
-  }, []);
-
-  return reduced;
-}
+//
+// The IMPLEMENTATION moved to ui/motion.ts in memql#4651, when the
+// Constellation became a second consumer of the identical hook. This module
+// stays as the name the map's own files import, so the scene keeps reading as
+// a self-contained surface.
+export { useReducedMotion } from "../../ui/motion";

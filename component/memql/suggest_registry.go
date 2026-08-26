@@ -53,6 +53,19 @@ type SuggestContext struct {
 	// Payload is the deserialized AiSuggestMsg payload (Struct.AsMap()),
 	// never nil. Each domain pulls its own required fields out of it.
 	Payload map[string]any
+
+	// RenderPrompt renders a DSL prompt template by id, for a domain whose
+	// instruction lives in .memql rather than in a Go string literal
+	// (memql#4654). It is the engine's own MemQLEngine.RenderPrompt, handed
+	// in by the caller so a handler still cannot reach the engine, the
+	// stream session, or the database.
+	//
+	// NIL IS A REAL STATE and a handler must say so rather than guess: an
+	// engine with no AI runtime configured, or a caller that predates this
+	// field. Returning a plain error there is right -- a suggestion is
+	// always optional at the call site, and silently substituting a
+	// hardcoded prompt would make the .memql file a decoration.
+	RenderPrompt func(templateId string, data map[string]any) (string, error)
 }
 
 // String returns the string value at key, or "" when missing / non-string.
