@@ -25,6 +25,7 @@ import { Download, Search, Upload } from "../ui/icons";
 import { ARTIFACT_CONCEPT_ID } from "./concepts";
 import { artifactContentUrl } from "./transport";
 import { ARCHIVED_PARAM, ARCHIVED_VALUE, LABEL_PARAM, SEARCH_PARAM, artifactPath } from "./urls";
+import { SynapseSection, type SynapsePatch } from "../synapse";
 import {
   useArtifactSearch,
   useArtifacts,
@@ -525,7 +526,34 @@ function NewArtifactForm({
     setBody("");
   }
 
+  const synapseFields = [
+    { name: "title", type: "text" as const, label: "Title", value: title },
+    {
+      name: "summary",
+      type: "text" as const,
+      label: "Summary",
+      value: summary,
+      constraints: "one short line, shown on the list row",
+    },
+    { name: "body", type: "text" as const, label: "Body", value: body, constraints: "markdown" },
+  ];
+
+  function applySynapse(patches: readonly SynapsePatch[]): void {
+    for (const patch of patches) {
+      if (typeof patch.value !== "string") continue;
+      if (patch.field === "title") setTitle(patch.value);
+      if (patch.field === "summary") setSummary(patch.value);
+      if (patch.field === "body") setBody(patch.value);
+    }
+  }
+
   return (
+    <SynapseSection
+      id="library.newArtifact"
+      label="New artifact"
+      fields={synapseFields}
+      apply={applySynapse}
+    >
     <form onSubmit={submit} className="flex flex-col gap-2">
       {error ? <ErrorNotice sentence="The artifact was not recorded." next="Check the fields above and try again." detail={error} /> : null}
       {message ? (
@@ -535,14 +563,20 @@ function NewArtifactForm({
       ) : null}
       <FormRow>
         <Field label="Title" grow>
-          <TextInput value={title} onChange={setTitle} placeholder="Ten most beautiful birds" />
+          <div data-synapse-field="title">
+            <TextInput value={title} onChange={setTitle} placeholder="Ten most beautiful birds" />
+          </div>
         </Field>
         <Field label="Summary" grow hint="Optional. Shown on the list row.">
-          <TextInput value={summary} onChange={setSummary} placeholder="A short description" />
+          <div data-synapse-field="summary">
+            <TextInput value={summary} onChange={setSummary} placeholder="A short description" />
+          </div>
         </Field>
       </FormRow>
       <Field label="Body" grow hint="Optional. Markdown, rendered in the artifact's viewer.">
-        <Textarea value={body} onChange={setBody} rows={4} placeholder="# Ten most beautiful birds…" />
+        <div data-synapse-field="body">
+          <Textarea value={body} onChange={setBody} rows={4} placeholder="# Ten most beautiful birds…" />
+        </div>
       </Field>
       <div>
         <Button type="submit" busy={busy} busyLabel="Working…" disabled={title.trim() === ""}>
@@ -550,5 +584,6 @@ function NewArtifactForm({
         </Button>
       </div>
     </form>
+    </SynapseSection>
   );
 }

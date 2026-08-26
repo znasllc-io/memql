@@ -9,6 +9,7 @@ import { RailStatus } from "../components/RailStatus";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { CommandPalette } from "../palette/CommandPalette";
+import { SynapseButton, SynapseProvider } from "../synapse";
 import { Outlet } from "react-router-dom";
 import {
   DESTINATIONS,
@@ -130,6 +131,10 @@ export function AppShell(): ReactNode {
   }
 
   return (
+    // SynapseProvider wraps the WHOLE shell so a scope registered by a page
+    // and the button that acts on it share one registry (memql#4658). It
+    // renders nothing of its own.
+    <SynapseProvider>
     <div className="flex h-full flex-col bg-bg text-fg">
       {/* Named, because a page renders its own <header> too and "the chrome
           header" should be addressable by what it IS rather than by which
@@ -223,6 +228,13 @@ export function AppShell(): ReactNode {
           page, and rendering nothing until it is opened. It is what makes the
           seven-item rail safe rather than lossy (memql#4656). */}
       <CommandPalette />
+
+      {/* Bottom-right of the viewport rather than of <main>: main is the
+          scroll region, so an absolutely-positioned child of it would sit at
+          the bottom of the scrolled CONTENT and only appear when a person
+          scrolled to the end of a long page. */}
+      <SynapseButton />
     </div>
+    </SynapseProvider>
   );
 }

@@ -247,6 +247,136 @@
     animation: dialog-settle var(--memql-motion-dur) var(--memql-motion-ease);
   }
 
+  /* ------------------------------------------------------------------
+   * Synapse (memql#4658).
+   *
+   * THE BUTTON IDLES STILL. The ring animates in exactly three states, all
+   * of them caused by the person: hover, listening, and a request in
+   * flight. At rest it is a mark on a page.
+   */
+  @keyframes synapse-ring {
+    0% {
+      transform: scale(0.86);
+      opacity: 0.9;
+    }
+    70% {
+      transform: scale(1.25);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1.25);
+      opacity: 0;
+    }
+  }
+
+  .synapse-button .synapse-ring {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .synapse-button:hover .synapse-ring,
+  .synapse-button[data-synapse-phase="listening"] .synapse-ring,
+  .synapse-button[data-synapse-phase="transcribing"] .synapse-ring,
+  .synapse-button[data-synapse-phase="running"] .synapse-ring {
+    animation: synapse-ring 1.4s ease-out infinite;
+  }
+
+  /* Listening is the one state that also colours: a recording microphone is
+     a fact worth making unmistakable. */
+  .synapse-button[data-synapse-phase="listening"] {
+    color: var(--memql-danger);
+    border-color: var(--memql-danger);
+  }
+
+  /* The token float: a number that rises off the button and dissipates.
+     ~950ms, which is long enough to read a three-digit number and short
+     enough not to sit on the screen. */
+  @keyframes synapse-float {
+    0% {
+      transform: translateY(0);
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-18px);
+      opacity: 0;
+    }
+  }
+
+  .synapse-float {
+    animation: synapse-float 950ms var(--memql-motion-ease) forwards;
+  }
+
+  /* Reduced motion gets the same fact without the rise. It still ENDS --
+     the element is removed on animationend, so a fade that never fired
+     would leave the number on screen for good. */
+  @keyframes synapse-float-static {
+    0% {
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  .synapse-float-static {
+    animation: synapse-float-static 950ms linear forwards;
+  }
+
+  /* The active scope: an accent ring and a small tag, so the section the
+     button is pointing at is obvious from where your eyes already are. */
+  .synapse-scope {
+    position: relative;
+    outline: 2px solid transparent;
+    outline-offset: 4px;
+    transition: outline-color var(--memql-motion-dur) var(--memql-motion-ease);
+  }
+
+  .synapse-scope[data-synapse-active="true"] {
+    outline-color: var(--memql-accent);
+  }
+
+  .synapse-tag {
+    position: absolute;
+    top: -0.65rem;
+    right: 0.5rem;
+    border-radius: 9999px;
+    background-color: var(--memql-accent);
+    color: var(--memql-accent-fg);
+    padding: 0 0.4rem;
+    font-size: 0.625rem;
+    line-height: 1rem;
+    letter-spacing: 0.02em;
+  }
+
+  /* A field Synapse just filled. Staggered by the section in the order the
+     patches arrived, so it reads as a fill rather than as a reload. */
+  @keyframes synapse-wash {
+    from {
+      outline-color: var(--memql-accent);
+    }
+    to {
+      outline-color: transparent;
+    }
+  }
+
+  /* An OUTLINE flash rather than a background one. A form control paints its
+     own opaque ground, so a background animation on the element around it is
+     invisible -- and colouring the control itself would fight the inset
+     recipe the whole kit shares. The outline also matches the ring the active
+     scope wears, so "Synapse touched this" reads as one visual language. */
+  .synapse-washed {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    border-radius: var(--memql-radius);
+    animation: synapse-wash 700ms ease-out;
+  }
+
   /* Reduced motion: static colour/opacity states only. The offline dimming
      stays (it is not motion); everything that moves stops.
 
@@ -260,6 +390,8 @@
     .mark-connection .mm-node,
     .mark-connection svg,
     .row-wash,
+    .synapse-washed,
+    .synapse-button .synapse-ring,
     .constellation .cn-node,
     .constellation .cn-edges line,
     .list-rise > *,
