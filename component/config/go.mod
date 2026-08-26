@@ -11,7 +11,7 @@ require (
 	github.com/znasllc-io/memql/core v0.0.0
 )
 
-require google.golang.org/protobuf v1.36.11 // indirect
+require google.golang.org/protobuf v1.36.12 // indirect
 
 replace github.com/znasllc-io/memql/component/bus/gen => ../bus/gen
 

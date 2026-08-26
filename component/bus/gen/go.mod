@@ -11,4 +11,4 @@ go 1.26.1
 
 toolchain go1.26.6
 
-require google.golang.org/protobuf v1.36.11
+require google.golang.org/protobuf v1.36.12
