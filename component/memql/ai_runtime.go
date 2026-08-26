@@ -101,8 +101,22 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		return nil, err
 	}
 
-	entry, ok := r.providers.Entry(providerName)
+	// EntryForContext, not Entry: a `fleet:<modelId>` provider resolves
+	// against the ACTING USER'S machines (epic memql#4676), and the caller's
+	// actor is on ctx. Resolving it context-free would answer for the
+	// shared-inference set instead -- reporting a user's own awake laptop as
+	// unavailable.
+	entry, ok := r.providers.EntryForContext(ctx, providerName)
 	if !ok || entry == nil || !entry.Available || entry.Client == nil {
+		// A FLEET provider that is unavailable is the TYPED refusal, not a
+		// generic one. The difference is the whole of design D2 on this path:
+		// a planner Task PARKS on `no_local_model_available` and resumes when
+		// a machine wakes, where a generic error FAILS the plan and makes the
+		// user start over for a laptop that was merely asleep. errors.As is
+		// what the planner matches on, so the shape has to survive here.
+		if modelId, isFleet := IsFleetReference(providerName); isFleet {
+			return nil, r.providers.FleetRefusal(ctx, actingUserFromContext(ctx), modelId)
+		}
 		return nil, fmt.Errorf("provider %q not available", providerName)
 	}
 

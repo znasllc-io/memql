@@ -58,7 +58,7 @@ func findDanglingPromptProviders(prompts *PromptRegistry, providers *ProviderReg
 			// No @defaultProvider: the runtime default applies. Fine.
 			continue
 		}
-		if providers.Declared(name) {
+		if providers.Declared(name) || isFleetDefaultProvider(name) {
 			continue
 		}
 		out = append(out, danglingPromptProvider{Prompt: p.Name, Provider: name})
@@ -73,6 +73,19 @@ func findDanglingPromptProviders(prompts *PromptRegistry, providers *ProviderReg
 // Called from engine bootstrap AFTER both registries are populated --
 // prompts load before providers, so this cannot live inside the prompt
 // loader.
+// A `fleet:<modelId>` default provider is exempt from the declared-name check
+// (epic memql#4676): a fleet model is not declared anywhere, because it exists
+// only while a machine hosting it is awake. Refusing one at load would make an
+// asleep fleet refuse BOOT, which is the failure the whole selection-time
+// resolution exists to avoid. The name still cannot be a typo in the way this
+// gate protects against -- an unrecognised model resolves to an UNAVAILABLE
+// provider and produces the typed no_local_model_available refusal naming it,
+// rather than silently falling through to the default.
+func isFleetDefaultProvider(name string) bool {
+	_, ok := IsFleetReference(name)
+	return ok
+}
+
 func ValidatePromptDefaultProviders(prompts *PromptRegistry, providers *ProviderRegistry) error {
 	dangling := findDanglingPromptProviders(prompts, providers)
 	if len(dangling) == 0 {

@@ -246,3 +246,66 @@ func TestTheFleetProviderHasNoStaticPerModelChildren(t *testing.T) {
 		t.Fatalf("the refusal must name the syntax that works, got %v", err)
 	}
 }
+
+// A prompt whose @defaultProvider is a fleet model must not refuse BOOT. A
+// fleet model is not declared anywhere, because it exists only while a machine
+// hosting it is awake -- which is the whole reason selection-time resolution
+// exists.
+func TestAFleetDefaultProviderDoesNotRefuseBoot(t *testing.T) {
+	prompts := newPromptRegistryForTest(map[string]string{
+		"plannerAgent": "fleet:llama3.1:8b",
+		"conductor":    "streamClaudeSonnet",
+	})
+	providers := newProviderRegistry("")
+	providers.markDeclared("streamClaudeSonnet")
+
+	if err := ValidatePromptDefaultProviders(prompts, providers); err != nil {
+		t.Fatalf("a fleet default provider must load: %v", err)
+	}
+}
+
+// The exemption is for the `fleet:` prefix only. A genuine typo still refuses,
+// which is what this gate exists for.
+func TestATypoedDefaultProviderStillRefusesBoot(t *testing.T) {
+	prompts := newPromptRegistryForTest(map[string]string{"conductor": "streamCloudeSonnet"})
+	providers := newProviderRegistry("")
+	providers.markDeclared("streamClaudeSonnet")
+
+	if err := ValidatePromptDefaultProviders(prompts, providers); err == nil {
+		t.Fatal("a misspelled provider name must still refuse the load")
+	}
+}
+
+// THE PARK PATH ON THE PROMPT SEAM (memql#4682). An unavailable fleet model
+// reached through InvokeAI must produce the TYPED refusal, because that is
+// what the planner matches on: a generic error FAILS the plan where the typed
+// one parks it and resumes when a machine wakes.
+func TestAnUnavailableFleetPromptProviderYieldsTheTypedRefusal(t *testing.T) {
+	offline := onlineModel("llama3.1:8b", true)
+	offline.Machines[0].Online = false
+	r := newProviderRegistry("")
+	r.SetFleetInference(&stubFleet{models: []FleetModel{offline}})
+
+	refusal := r.FleetRefusal(userCtx("alice"), "alice", "llama3.1:8b")
+	if refusal == nil {
+		t.Fatal("expected a refusal")
+	}
+	if refusal.Code() != FeedbackReasonNoLocalModel {
+		t.Fatalf("code = %q", refusal.Code())
+	}
+	if refusal.Considered["laptop"] != "offline" {
+		t.Fatalf("the refusal must name the machine and why: %v", refusal.Considered)
+	}
+	if !errors.Is(error(refusal), ErrFleetUnavailable) {
+		t.Fatal("the refusal must read as unavailable")
+	}
+}
+
+// newPromptRegistryForTest builds a registry from name -> @defaultProvider.
+func newPromptRegistryForTest(defaults map[string]string) *PromptRegistry {
+	r := newPromptRegistry()
+	for name, provider := range defaults {
+		r.byName[name] = &PromptTemplate{Name: name, DefaultProvider: provider}
+	}
+	return r
+}
