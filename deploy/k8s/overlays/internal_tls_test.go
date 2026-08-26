@@ -50,12 +50,12 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 	// so a chain that renders three of four fails HERE rather than as pods in
 	// ContainerCreating.
 	want := map[string]string{
-		"Issuer/memql-internal-selfsigned": "the self-signed issuer the ROOT is minted from",
-		"Certificate/memql-internal-root":  "the root; its secretName IS the memql-ca anchor contract",
-		"Issuer/memql-internal-root":       "the issuer that signs the intermediate from the root Secret",
-		"Certificate/memql-internal-ca":    "the intermediate; the tier allowed to rotate",
-		"Issuer/memql-internal-ca":         "the issuer that signs leaves from the INTERMEDIATE Secret",
-		"Certificate/identity-tls":         "identity's serving certificate",
+		"Issuer/memql-internal-selfsigned":  "the self-signed issuer the ROOT is minted from",
+		"Certificate/memql-internal-ca":     "the root; its secretName IS the memql-ca anchor contract",
+		"Issuer/memql-internal-ca":          "the issuer that signs the intermediate from the root Secret",
+		"Certificate/memql-internal-issuer": "the intermediate; the tier allowed to rotate",
+		"Issuer/memql-internal-issuer":      "the issuer that signs leaves from the INTERMEDIATE Secret",
+		"Certificate/identity-tls":          "identity's serving certificate",
 	}
 
 	for _, overlay := range internalTLSOverlays {
@@ -79,12 +79,19 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 			// The two Secret names are the contract the Deployments name.
 			for _, c := range certificatesIn(t, rendered) {
 				switch c.Name {
-				case "memql-internal-root":
+				case "memql-internal-ca":
+					// THE ROOT, AND IT MUST KEEP THE SECRET IT ALREADY OWNS.
+					// Moving this Certificate onto a different Secret is what
+					// deadlocks adoption: cert-manager stamps
+					// cert-manager.io/certificate-name on the Secret, so a
+					// second Certificate cannot claim memql-ca until this one
+					// releases it (memql#4599, measured 2026-08-26).
 					if c.SecretName != "memql-ca" {
 						t.Errorf("%s: the ROOT Certificate writes %q, but ten Deployments mount "+
-							"\"memql-ca\"", overlay, c.SecretName)
+							"\"memql-ca\" -- and moving this Certificate off that Secret turns an "+
+							"additive adoption into a trust-anchor replacement", overlay, c.SecretName)
 					}
-				case "memql-internal-ca":
+				case "memql-internal-issuer":
 					if c.SecretName == "memql-ca" {
 						t.Errorf("%s: the INTERMEDIATE writes \"memql-ca\", which is the anchor ten "+
 							"Deployments mount. That is exactly the coupling memql#4599 removed: "+
@@ -92,10 +99,10 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 							"bundle under every running pod. It must write its own Secret", overlay)
 					}
 					if c.SecretName != "memql-ca-issuer" {
-						t.Errorf("%s: the intermediate writes %q; Issuer/memql-internal-ca reads "+
+						t.Errorf("%s: the intermediate writes %q; Issuer/memql-internal-issuer reads "+
 							"\"memql-ca-issuer\"", overlay, c.SecretName)
 					}
-					if c.IssuerName != "memql-internal-root" {
+					if c.IssuerName != "memql-internal-ca" {
 						t.Errorf("%s: the intermediate is issued by %q rather than the root, so it "+
 							"is not chained to the anchor the mesh trusts", overlay, c.IssuerName)
 					}
@@ -104,10 +111,10 @@ func TestCloudOverlaysRenderTheInternalTLSChain(t *testing.T) {
 						t.Errorf("%s: identity's Certificate writes %q, but identity mounts "+
 							"\"identity-tls\"", overlay, c.SecretName)
 					}
-					if c.IssuerName != "memql-internal-ca" {
-						t.Errorf("%s: identity-tls is issued by %q rather than the internal CA. "+
-							"A leaf signed by anything else is not verifiable against the ca.crt "+
-							"the mesh mounts", overlay, c.IssuerName)
+					if c.IssuerName != "memql-internal-issuer" {
+						t.Errorf("%s: identity-tls is issued by %q rather than the INTERMEDIATE. "+
+							"Issuing it from the root puts the anchor and the signer back on one "+
+							"Secret, which is the memql#4599 coupling", overlay, c.IssuerName)
 					}
 				}
 			}
@@ -278,33 +285,37 @@ func TestTheAnchorIsNotTheSigningSecret(t *testing.T) {
 }
 
 // TestTheChainLandsBeforeTheWorkloadsThatMountIt gates the ordering half of
-// memql#4599. cert-manager guarantees nothing about whether a CA settles before
-// a leaf naming it; ArgoCD sync waves do, and they are the only ordering this
-// component can express.
+// memql#4599, and the shape of that gate is itself a finding.
 //
-// The waves must be NEGATIVE, and that is not stylistic. Everything else in the
-// Application is wave 0, including the ten Deployments that mount these Secrets.
-// Positive waves would deadlock: ArgoCD waits for each wave to go Healthy, the
-// Deployments would be created first, and they would sit in ContainerCreating
-// on a Secret whose wave had not run -- so wave 0 never goes Healthy and the
-// later waves never start.
+// THE WAVES EXIST FOR ONE REASON: the whole chain must land before the
+// default-wave workloads that mount these Secrets. Everything else in the
+// Application is wave 0, including the ten Deployments; if any of these were
+// wave 0 too, a Deployment could be created alongside a Secret that does not
+// exist yet and sit in ContainerCreating forever. Hence negative.
+//
+// THEY ARE NOT A DEPENDENCY ORDERING BETWEEN THE OBJECTS HERE, and the first
+// attempt at this change assumed they were. Grading them -3 / -2 / -1 renders
+// correctly, passes every other gate, and DEADLOCKS on adoption -- measured on
+// a live cluster, 2026-08-26:
+//
+//	Certificate/memql-internal-root  False
+//	  "Secret was issued for "memql-internal-ca". If this message is not
+//	   transient, you might have two conflicting Certificates pointing to the
+//	   same secret."
+//
+// ArgoCD will not start a wave until the previous one is Healthy, and the
+// object that RELEASES the contested Secret was in the later wave. Circular,
+// and invisible to every render-time check.
+//
+// So the invariant is EQUALITY, not order: cert-manager retries until the chain
+// converges, and any grading here is a claim that ArgoCD should sequence what
+// cert-manager already reconciles.
 func TestTheChainLandsBeforeTheWorkloadsThatMountIt(t *testing.T) {
-	// Tier order: each object must land no later than the one that depends on
-	// it. Equal waves are fine (ArgoCD applies a wave together); inversions are
-	// not.
-	dependsOn := []struct{ earlier, later string }{
-		{"Issuer/memql-internal-selfsigned", "Certificate/memql-internal-root"},
-		{"Certificate/memql-internal-root", "Issuer/memql-internal-root"},
-		{"Issuer/memql-internal-root", "Certificate/memql-internal-ca"},
-		{"Certificate/memql-internal-ca", "Issuer/memql-internal-ca"},
-		{"Issuer/memql-internal-ca", "Certificate/identity-tls"},
-	}
-
 	for _, overlay := range internalTLSOverlays {
 		t.Run(overlay, func(t *testing.T) {
 			rendered := render(t, overlay)
 
-			wave := map[string]int{}
+			waves := map[string]int{}
 			for _, r := range parse(t, rendered) {
 				if r.Kind != "Issuer" && r.Kind != "Certificate" {
 					continue
@@ -316,8 +327,8 @@ func TestTheChainLandsBeforeTheWorkloadsThatMountIt(t *testing.T) {
 				raw, ok := r.Metadata.Annotations["argocd.argoproj.io/sync-wave"]
 				if !ok {
 					t.Errorf("%s: %s carries no argocd.argoproj.io/sync-wave. Without one it lands "+
-						"in wave 0 alongside the Deployments that mount it, and cert-manager "+
-						"provides no ordering of its own", overlay, key)
+						"in wave 0 alongside the Deployments that mount it, and a Deployment can "+
+						"then be created before the Secret it mounts exists", overlay, key)
 					continue
 				}
 				n, err := strconv.Atoi(raw)
@@ -326,27 +337,40 @@ func TestTheChainLandsBeforeTheWorkloadsThatMountIt(t *testing.T) {
 					continue
 				}
 				if n >= 0 {
-					t.Errorf("%s: %s is in wave %d. The whole chain must be NEGATIVE so it lands "+
-						"before the default-wave workloads that mount these Secrets -- a "+
-						"non-negative wave deadlocks the sync, because the Deployments hang in "+
-						"ContainerCreating and wave 0 never reports Healthy", overlay, key, n)
+					t.Errorf("%s: %s is in wave %d. The chain must be NEGATIVE so it lands before "+
+						"the default-wave workloads that mount these Secrets", overlay, key, n)
 				}
-				wave[key] = n
+				waves[key] = n
 			}
 
-			for _, d := range dependsOn {
-				e, okE := wave[d.earlier]
-				l, okL := wave[d.later]
-				if !okE || !okL {
-					continue // the render gate above already reported the absence
-				}
-				if e > l {
-					t.Errorf("%s: %s is in wave %d but %s, which depends on it, is in wave %d. "+
-						"ArgoCD would create the dependant first and cert-manager would mint it "+
-						"against material that is about to be replaced -- which is precisely the "+
-						"one-second race memql#4599 records", overlay, d.earlier, e, d.later, l)
+			if len(waves) == 0 {
+				t.Fatalf("%s: found no chain object carrying a sync-wave -- this gate is watching "+
+					"nothing", overlay)
+			}
+
+			// EQUAL, not merely ordered. See the comment above: grading these
+			// is what produced the adoption deadlock.
+			var first string
+			for k := range waves {
+				if first == "" || k < first {
+					first = k
 				}
 			}
+			want := waves[first]
+			for key, got := range waves {
+				if got != want {
+					t.Errorf("%s: %s is in wave %d but %s is in wave %d. The internal-tls chain must "+
+						"be in ONE wave.\n\n"+
+						"Grading these looks like a dependency ordering and is not one: cert-manager "+
+						"retries until the chain converges, whereas ArgoCD refuses to start a wave "+
+						"until the previous is Healthy. On adoption that is a DEADLOCK -- the "+
+						"Certificate that releases the contested Secret sits in a later wave than "+
+						"the one trying to claim it, and cert-manager reports \"Secret was issued "+
+						"for ...\" forever (memql#4599).",
+						overlay, key, got, first, want)
+				}
+			}
+			t.Logf("%s: %d chain object(s), all in wave %d", overlay, len(waves), want)
 		})
 	}
 }
