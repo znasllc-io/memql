@@ -91,3 +91,66 @@ policy backgroundExecution { }
 @fallback("stream54Pro")
 @maxLatencyMs(120000)
 policy backgroundEscalation { }
+
+// ---- policies/v1/fleet/localPlanner.memql ----
+
+// LOCAL-FIRST DEFAULTS (epic memql#4676, design D2/D3).
+//
+// The four policies below are the platform's own operations -- planning,
+// conductor/routing, suggestions, embeddings -- and every one of them names a
+// fleet model as @primary with NO cloud @fallback.
+//
+// THE MISSING @fallback IS THE FEATURE. A chain that reaches a cloud provider
+// is a chain that spends money the moment a laptop closes, and it would do so
+// silently: nothing about a working reply says which vendor produced it. With
+// no fallback authored, an idle fleet PARKS the work and says why, naming the
+// machines it considered (memql#4682). Adding a fallback here is a legitimate
+// operator decision -- but it must be a DECISION, written down, not a default
+// nobody chose.
+//
+// The cloud-quality policies above (balancedChat, strongReasoning,
+// cheapestCapable, ...) are unchanged and remain available: a purpose that
+// genuinely needs a stronger model is wired to one of them explicitly, per
+// purpose. That is design D3 -- quality tiers are authored, exactly as they
+// are for cloud providers today.
+//
+// The model floor is a 7-8B instruct model with structured output
+// (llama3.1:8b / qwen2.5:7b class) plus a small embeddings model. It is what
+// onboarding RECOMMENDS installing; what ENFORCES it per call is the catalog's
+// capability gating (memql#4679), which will not route a structured prompt to
+// a model that never advertised structured output.
+
+/// Planner, locally. The Planner Agent's decompose / dispatch / escalate loop runs on the user's
+/// own hardware. No cloud fallback: an idle fleet parks the plan with the machines it considered,
+/// rather than quietly billing a key for work the user expected to be free.
+@primary("fleet:llama3.1:8b")
+@maxLatencyMs(120000)
+policy localPlanner { }
+
+// ---- policies/v1/fleet/localConductor.memql ----
+
+/// Conductor + routing, locally. The single-brain conductor call that decides whether and which
+/// agent responds. Latency-sensitive, structured-output, and run on every utterance -- which is
+/// exactly the shape that makes a local model worth having.
+@primary("fleet:llama3.1:8b")
+@maxTimeToFirstTokenMs(2000)
+@maxLatencyMs(30000)
+policy localConductor { }
+
+// ---- policies/v1/fleet/localSuggest.memql ----
+
+/// Suggestions, locally. The lightweight one-line paths (space titles, group descriptions, card
+/// summaries) and the richer suggest domains. Highest-volume, lowest-stakes LLM traffic in the
+/// product, and the first thing anyone would want off a metered key.
+@primary("fleet:llama3.1:8b")
+@maxLatencyMs(30000)
+policy localSuggest { }
+
+// ---- policies/v1/fleet/localEmbeddings.memql ----
+
+/// Embeddings, locally. A small embeddings model on the user's machine. Routed only to catalog
+/// entries advertising embeddings capability, so a fleet running only a chat model reports this
+/// purpose as unavailable rather than returning something that is not a vector.
+@primary("fleet:nomic-embed-text")
+@maxLatencyMs(60000)
+policy localEmbeddings { }
