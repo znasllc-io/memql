@@ -719,3 +719,30 @@ provider whisper1 {
     sampleRate 16000
   }
 }
+
+// ---- providers/v1/fleet/fleet.memql ----
+
+/// The user's own machines (epic memql#4676). One base provider, and
+/// DELIBERATELY NO per-model children.
+///
+/// Every other provider in this file is a record somebody wrote down: a
+/// vendor, a model id, a price. A fleet model is none of those. It exists
+/// while a laptop is awake and stops existing when the lid closes, and WHICH
+/// laptop is a different answer for every user -- so a static child would be a
+/// claim this file cannot keep. Models are named from a policy as
+/// `fleet:<modelId>` (`@primary("fleet:llama3.1:8b")`) and resolved against
+/// the live catalog at SELECTION time, never at load: an asleep fleet must not
+/// refuse boot, and a machine waking up must not need a reload to be usable.
+///
+/// UNAVAILABLE IS A NORMAL STATE HERE, and it is the same answer for two
+/// situations -- no machine offers the model, and none that offers it can do
+/// what this prompt needs (structured output, embeddings). Both mean the
+/// provider cannot serve the call, which is what an authored `@fallback`
+/// responds to. With no fallback authored the work PARKS rather than quietly
+/// running on a paid API (design D2, memql#4682).
+///
+/// There is no `auth` block, and that is the point of the whole epic: the
+/// credential for a local model is owning the machine.
+@base
+@type("Fleet")
+provider fleet { }

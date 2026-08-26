@@ -300,6 +300,10 @@ type ProviderRegistry struct {
 	// "named nowhere in the tree" is a typo. Only the second is a load
 	// failure -- see ValidatePromptDefaultProviders.
 	declared map[string]bool
+	// fleet is the local-model seam (epic memql#4676). Nil on every build
+	// with no worker service, which is an UNAVAILABLE fleet rather than a
+	// broken one -- see fleet_provider.go.
+	fleet FleetInference
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
@@ -518,7 +522,22 @@ func (r *ProviderRegistry) Default() string {
 }
 
 // Entry retrieves a provider configuration entry by name.
+//
+// A `fleet:<modelId>` name is resolved DYNAMICALLY against the live catalog
+// (epic memql#4676). It is done here rather than at load because a fleet model
+// exists while a laptop is awake: resolving at load would refuse boot on an
+// asleep fleet, and a machine waking up would need a reload to become usable.
+// Every accessor in this file goes through Entry, so the fleet reaches the
+// whole policy-chain machinery with no second lookup path -- and an
+// unavailable fleet model behaves exactly like a disabled provider, which is
+// what makes an authored @fallback fire without a special case.
 func (r *ProviderRegistry) Entry(name string) (*ProviderConfigEntry, bool) {
+	return r.EntryForContext(context.Background(), name)
+}
+
+// EntryForContext is Entry with the call's context, which is what a fleet
+// lookup needs: the acting user decides whose machines are eligible.
+func (r *ProviderRegistry) EntryForContext(ctx context.Context, name string) (*ProviderConfigEntry, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -527,9 +546,15 @@ func (r *ProviderRegistry) Entry(name string) (*ProviderConfigEntry, bool) {
 		return nil, false
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	entry, ok := r.byName[key]
-	return entry, ok
+	r.mu.RUnlock()
+	if ok {
+		return entry, true
+	}
+	if modelId, isFleet := IsFleetReference(key); isFleet {
+		return r.fleetEntry(ctx, modelId)
+	}
+	return nil, false
 }
 
 // providerByName looks up an available named entry, applies an optional
@@ -1209,6 +1234,17 @@ func newAIProvider(cfg ProviderConfig) (AIProvider, error) {
 		return newOpenAIPlaceholderProvider(cfg, "search")
 	case "openaideepresearch":
 		return newOpenAIPlaceholderProvider(cfg, "deep-research")
+	case "fleet":
+		// The base `fleet` provider is @base and never reaches this switch.
+		// Anything that DOES reach it is a static per-model child, which the
+		// design does not have (epic memql#4676): a fleet model exists while a
+		// laptop is awake, so a registry entry written at load would be a claim
+		// nothing can keep. Refused with the alternative named, because
+		// "unsupported provider type Fleet" would send the author looking for a
+		// missing Go client rather than for the policy syntax that works.
+		return nil, fmt.Errorf(
+			"the fleet provider has no static per-model children; name the model from a "+
+				"policy instead, as @primary(%q)", FleetReferencePrefix+cfg.Model)
 	default:
 		return nil, fmt.Errorf("unsupported provider type %q", cfg.Type)
 	}

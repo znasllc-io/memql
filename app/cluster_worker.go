@@ -87,6 +87,21 @@ func (a *App) wireWorkerForwarding(
 		a.Dependencies = append(a.Dependencies, dialer)
 	}
 	integ.Dispatcher().SetRemoteDispatcher(forwarder)
+
+	// LOCAL INFERENCE (epic memql#4676). Installed here rather than in
+	// integrations_worker_agent.go because it needs the FORWARD: a model call
+	// must reach a machine held by a sibling replica, and a fleet that could
+	// only see this node's own streams would report half the user's machines
+	// as having no models -- which is indistinguishable at the surface from
+	// `no_local_model_available`, the refusal that means "your fleet is
+	// asleep". A user looking at a laptop they can see is on would be told to
+	// wake it up.
+	if providers := a.engine.Providers(); providers != nil {
+		providers.SetFleetInference(agentworker.NewFleetInference(integ.Dispatcher(), forwarder, a.Logger))
+		a.Logger.Info("fleet inference: this replica can run models on the user's machines",
+			"node_id", nodeIdentity.ID)
+	}
+
 	a.Logger.Info("worker forwarding: this replica can reach machines held by its peers",
 		"node_id", nodeIdentity.ID)
 }
