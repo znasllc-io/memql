@@ -20,6 +20,13 @@ query view composedViews {
     status     enum("active", "archived")
     conceptId  string
   }
+  // `kind!="override"` and NOT `kind=="composed"`, and the difference is the
+  // whole compatibility story. Every row written before epic memql#4661 has no
+  // `kind` field at all, and MemQL's `!=` is null-safe against a non-empty
+  // string (memql#1685, pinned by absent_field_comparison_test.go): an ABSENT
+  // field MATCHES, so those rows stay in this list. `kind=="composed"` would
+  // not match an absent field and would empty every existing person's saved
+  // views on the release that added the field.
   filter   ownerUserId==actor.userId && kind!="override" && when(args.status) { status==args.status } && when(args.conceptId) { args.conceptId in conceptIds }
   sort     "row.createdAt", "desc"
   paginate 50
