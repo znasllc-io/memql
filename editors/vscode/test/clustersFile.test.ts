@@ -417,6 +417,64 @@ test("addCluster still refuses an empty name", async () => {
   await assert.rejects(() => addCluster(f, { name: "", endpoint: "x:443" }), /name is required/);
 });
 
+// --- an add selects what it added (memql#4621) -------------------------------
+//
+// A SUCCESSFUL SIGN-IN USED TO READ AS A FAILURE. `runSignInToCluster`
+// reconnects ONLY the selected cluster -- deliberately, since exactly one
+// connection exists at a time -- by comparing `selectedCluster` with the cluster
+// it just signed into. A cluster registered through the connect form was never
+// selected, so that comparison was false, nothing dialled, and the operator was
+// told "signed in" by an editor that was not talking to the cluster.
+//
+// The install path has always selected the cluster it registered
+// (`HandoffEffects.select`). These cases are the same rule for the registration
+// path, asserted where it can be: on the bytes.
+
+test("addCluster selects the cluster it added", async () => {
+  const f = await tempFile(SAMPLE);
+  await addCluster(f, {
+    name: "prod",
+    endpoint: "api.prod.example.com:443",
+    domain: "prod.example.com",
+  });
+  const parsed = await readClustersFile(f);
+  assert.equal(
+    parsed.selectedCluster,
+    "prod",
+    "a sign-in reconnects only the SELECTED cluster, so an add that does not select leaves the operator signed in and unconnected",
+  );
+});
+
+test("an add selects even when another cluster was already selected", async () => {
+  // SAMPLE already selects `local`. The registration is the cluster the operator
+  // just asked for, and the write is only a pointer in the file -- nothing here
+  // dials, so the selection cannot switch a live connection out from under a
+  // view. `memql.clusters.select` remains the only thing that connects.
+  const f = await tempFile(SAMPLE);
+  assert.equal((await readClustersFile(f)).selectedCluster, "local");
+  await addCluster(f, { name: "prod", endpoint: "api.prod.example.com:443" });
+  assert.equal((await readClustersFile(f)).selectedCluster, "prod");
+});
+
+test("a refused add does not move the selection", async () => {
+  // The duplicate-name refusal is a wall, and a wall that moved the selection on
+  // its way to refusing would point at a cluster the operator did not add.
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(() =>
+    addCluster(f, { name: "staging", endpoint: "api.example.com:443" }),
+  );
+  assert.equal((await readClustersFile(f)).selectedCluster, "local");
+});
+
+test("an add refused for an empty name leaves no selection behind either", async () => {
+  // upsertCluster refuses the empty name, so the selection must not have been
+  // written first -- it would survive as a pointer at a cluster the file does
+  // not contain, which is the orphaning removeCluster's own branch guards.
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(() => addCluster(f, { name: "", endpoint: "x:443" }), /name is required/);
+  assert.equal((await readClustersFile(f)).selectedCluster, "local");
+});
+
 // --- the refresh token round trip (memql#3385) ------------------------------
 //
 // `refresh_token:` in the shared file is an INGEST path, not storage: the

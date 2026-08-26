@@ -318,6 +318,34 @@ test("a refresh failure on a token that is merely NEARING expiry falls back to t
   assert.deepEqual(result, { ok: true, bearer: token });
 });
 
+test("a refresh that cannot reach identity names the transport cause, not just \"fetch failed\"", async () => {
+  // memql#4619. This module had its OWN copy of errorText, so the renderer
+  // that learned to read undici's `.cause` on the sign-in path would have left
+  // the refresh path still reporting the bare wrapper. A cluster that is
+  // simply not running has to say so on both, and the shared renderer in
+  // src/auth/errors.ts is what makes that structural rather than remembered.
+  const unreachable: FakeHttp = {
+    calls: [],
+    fetch: async () => {
+      const cause = new Error("connect ECONNREFUSED 127.0.0.1:443");
+      (cause as { code?: string }).code = "ECONNREFUSED";
+      const wrapper = new TypeError("fetch failed");
+      (wrapper as { cause?: unknown }).cause = cause;
+      throw wrapper;
+    },
+  };
+
+  const result = await resolver({ http: unreachable }).resolve(
+    cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-1" }),
+  );
+
+  assert.equal(result.ok === false ? result.reason : "", "credentialExpired");
+  const message = result.ok === false ? result.message : "";
+  assert.match(message, /ECONNREFUSED/);
+  assert.match(message, /127\.0\.0\.1:443/);
+  assert.doesNotMatch(message, /\(fetch failed\)/, "the bare undici wrapper reached the operator");
+});
+
 test("a cluster with a refresh token but no identity URL says WHICH field is missing", async () => {
   const http = okHttp();
   const result = await resolver({ http }).resolve({

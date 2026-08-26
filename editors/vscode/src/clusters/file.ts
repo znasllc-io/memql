@@ -339,6 +339,27 @@ export async function upsertCluster(
 // read-modify-write against the bytes on disk at write time (the cockpit
 // writes this file too), so no read is authoritative for longer than the call
 // that made it, and caching one would not make the check any less racy.
+//
+// AN ADD SELECTS WHAT IT ADDED (memql#4621), and the omission is what made a
+// successful sign-in read as a failure. `runSignInToCluster` reconnects ONLY the
+// SELECTED cluster -- deliberately, since exactly one connection exists at a
+// time and dialling a cluster the operator merely signed into would switch what
+// every other view is showing. A cluster registered through the connect form was
+// never selected, so `selectedCluster === cluster.name` was false, nothing
+// dialled, and the operator was told "signed in" by an editor that was not
+// talking to the cluster. The install path has always done this
+// (`HandoffEffects.select`); this is the same rule for the registration path.
+//
+// SAFE FOR EVERY CALLER, because the write and the DIAL are separate acts.
+// `selected_cluster` is a pointer in a file the cockpit shares; nothing here
+// opens a connection, and `memql.clusters.select` remains the only thing that
+// dials. So the worst this can do is point the selection at the entry the
+// operator just asked to be added, which is the entry they were about to pick.
+//
+// It is a SECOND write rather than a key folded into upsertCluster's node,
+// because `selected_cluster` is a top-level document key and not a field of the
+// entry -- and because upsertCluster is also the EDIT path, which must not
+// re-point the selection at whatever row was edited.
 export async function addCluster(file: string, cluster: ClusterUpdate): Promise<void> {
   const existing = await readClustersFile(file);
   if (existing.clusters.some((c) => c.name === cluster.name)) {
@@ -347,6 +368,10 @@ export async function addCluster(file: string, cluster: ClusterUpdate): Promise<
     );
   }
   await upsertCluster(file, cluster);
+  // AFTER the upsert, never before: upsertCluster refuses an empty name, and a
+  // selection written first would survive that refusal as a pointer at a
+  // cluster the file does not contain.
+  await setSelectedCluster(file, cluster.name);
 }
 
 // removeCluster deletes one entry and returns what it deleted.

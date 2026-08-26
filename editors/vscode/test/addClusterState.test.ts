@@ -1048,3 +1048,142 @@ test("a second run starts with no key from the first", () => {
   assert.equal(s.revealedRecoveryKey, "", "beginRun must clear the previous run's key");
   assert.equal(s.recoveryKeyState, "none");
 });
+
+// -----------------------------------------------------------------------------
+// the reveal guard's lifetime, and the copy that decides whether Back is safe
+// (memql#4616, memql#4615)
+// -----------------------------------------------------------------------------
+
+test("the reveal guard re-arms every time the key is let go of", () => {
+  // THE DEFECT (memql#4616). The click-to-reveal guard memql#4194 added lived
+  // on the PANEL, where nothing ever reset it -- so it worked exactly once per
+  // panel lifetime. Install, reveal, Back, repair, and the done screen rendered
+  // the NEW plaintext with no click at all, defeating the guard at precisely
+  // the moment a screen is most likely to be shared.
+  const s = new AddClusterState();
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+  assert.equal(s.recoveryKeyRevealed, false, "a fresh key starts hidden");
+
+  s.revealRecoveryKey();
+  assert.equal(s.recoveryKeyRevealed, true);
+
+  s.back();
+  assert.equal(
+    s.recoveryKeyRevealed,
+    false,
+    "leaving the screen re-arms the guard: the next key must be clicked for too",
+  );
+});
+
+test("a second run's key is hidden until it is asked for", () => {
+  // The same guard across a REPAIR rather than across Back, which is the path
+  // memql#4616 describes: the second run's plaintext is a different secret, and
+  // a flag left true by the first run reveals it to whoever is watching.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.localhost");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  s.setInput("provider", "anthropic");
+  s.setInput("providerKeyFile", "/tmp/provider-key");
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+  s.revealRecoveryKey();
+
+  assert.equal(s.beginRun(), true);
+  assert.equal(s.recoveryKeyRevealed, false, "beginRun must re-arm the reveal guard");
+});
+
+test("a claimed key nobody copied is what Back has to ask about", () => {
+  // THE DEFECT (memql#4615). Back deliberately destroys the plaintext, and the
+  // done screen renders it as an ordinary secondary button in the same row as
+  // the credential buttons. One misclick permanently destroys the cluster's
+  // break-glass credential, because only its hash was ever stored.
+  //
+  // This getter is the question the panel asks before it lets that happen, and
+  // it is HERE rather than in the panel for the reason `primaryHandoffAction`
+  // is: `addClusterPanel.ts` imports `vscode`, so a decision written into it is
+  // a decision nothing under `node --test` can reach.
+  const s = new AddClusterState();
+  assert.equal(s.recoveryKeyWouldBeLost, false, "no key, nothing to lose");
+
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+  assert.equal(s.recoveryKeyWouldBeLost, true, "a claimed key nobody copied is one Back destroys");
+
+  s.recordRecoveryKeyCopied();
+  assert.equal(
+    s.recoveryKeyWouldBeLost,
+    false,
+    "a key the clipboard took is one the operator still has after Back",
+  );
+});
+
+test("the no-key recovery states have nothing for Back to destroy", () => {
+  // `alreadyClaimed` and `awaitingOwner` are the two states that render a
+  // single line and no plaintext. Asking an operator to confirm leaving a
+  // screen that is holding nothing would train them to click through the one
+  // prompt on this surface that matters.
+  const s = new AddClusterState();
+  for (const state of ["alreadyClaimed", "awaitingOwner", "none"] as const) {
+    s.setRecoveryKey("", state);
+    assert.equal(s.recoveryKeyWouldBeLost, false, `${state} holds no plaintext`);
+  }
+});
+
+test("copying one run's key does not vouch for the next run's", () => {
+  // The copy is a fact about a SPECIFIC secret. Carrying it forward would mean
+  // a repair's freshly rotated key inherited "already copied" from the install
+  // before it, and Back would then destroy it without a word -- the same defect
+  // as memql#4616's, one flag along.
+  const s = new AddClusterState();
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+  s.recordRecoveryKeyCopied();
+  assert.equal(s.recoveryKeyCopied, true);
+
+  s.setRecoveryKey(`${STATE_TEST_KEY}2`, "claimed");
+  assert.equal(s.recoveryKeyCopied, false, "a new secret has not been copied by anybody");
+  assert.equal(s.recoveryKeyWouldBeLost, true);
+});
+
+// -----------------------------------------------------------------------------
+// the owner magic link's lifetime (memql#4617)
+// -----------------------------------------------------------------------------
+
+const STATE_TEST_CLAIM_URL = "https://identity.memql.localhost/auth/complete?ml=spent";
+
+test("a spent owner magic link does not survive Back", () => {
+  // THE DEFECT (memql#4617), and it is memql#3906's defect surviving in the
+  // one credential on this screen that authenticates as the cluster OWNER.
+  // Every sibling is let go of on the way off the done screen; `claimLink` was
+  // not, so an operator who installed, claimed in the browser (consuming the
+  // link), went Back and repaired was offered "Claim this cluster" again --
+  // wired to the spent URL, landing on an error page.
+  const s = new AddClusterState();
+  s.setClaimUrl(STATE_TEST_CLAIM_URL);
+  assert.equal(s.hasClaimLink, true);
+
+  s.back();
+  assert.equal(s.hasClaimLink, false, "leaving the done screen lets go of the magic link");
+  assert.equal(s.claimUrl, "");
+});
+
+test("a second run starts with no magic link from the first", () => {
+  // The mirror of "a second run starts with no key from the first", for the
+  // credential that was missed. A repair correctly reports `linkState=none` --
+  // identity only logs a link that was REQUESTED -- so without this the repair
+  // renders the INSTALL's link, and a 24h log window keeps it "recoverable"
+  // long after it was consumed.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.localhost");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  s.setInput("provider", "anthropic");
+  s.setInput("providerKeyFile", "/tmp/provider-key");
+  s.setClaimUrl(STATE_TEST_CLAIM_URL);
+
+  assert.equal(s.beginRun(), true);
+  assert.equal(s.hasClaimLink, false, "beginRun must clear the previous run's magic link");
+  assert.equal(s.claimUrl, "");
+});

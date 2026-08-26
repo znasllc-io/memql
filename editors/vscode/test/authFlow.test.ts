@@ -80,7 +80,10 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
 
 interface FakeBrowser {
   resolveExternalUri: (url: string) => Promise<string>;
-  openExternal: (url: string) => Promise<void>;
+  // `boolean | void`, because what this stands in for -- env.openExternal --
+  // resolves a boolean, and a fake that could only resolve void cannot express
+  // the way most hosts actually refuse (memql#4618).
+  openExternal: (url: string) => Promise<boolean | void>;
   /** Every URL handed to asExternalUri. */
   resolved: string[];
   /** Every URL actually opened -- i.e. the asExternalUri OUTPUT. */
@@ -392,6 +395,70 @@ test("a host whose openExternal fails reports browserUnavailable, not cancelled"
   );
 });
 
+// The OTHER way a host says no (memql#4618).
+//
+// env.openExternal returns Thenable<boolean> and signals failure BOTH ways --
+// by rejecting, and by resolving false -- and the false is the way most hosts
+// actually answer. A handler for only the rejection left this flow believing a
+// browser had opened: it went on to wait out the full callback deadline, which
+// is precisely the headless host the device-code fallback exists to rescue,
+// stranded for ten minutes and then told it had timed out. deviceCodeUi.ts
+// already handles both (98002a9f); this is the sibling that was left behind.
+test("an openExternal that RESOLVES false reports browserUnavailable, not a wait", async () => {
+  const net = identity();
+  const ui: FakeBrowser = {
+    resolved: [],
+    opened: [],
+    resolveExternalUri: async (url) => url,
+    // No throw. Just "no" -- which is what a host with nothing to launch
+    // returns, and what the old code read as success.
+    openExternal: async () => false,
+  };
+
+  const started = Date.now();
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui, { timeoutMs: 30_000 })),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(err.kind, "browserUnavailable");
+      // NOT `cancelled`: nobody declined anything, and the fallback triggers on
+      // one of those kinds and deliberately not on the other.
+      assert.notEqual(err.kind, "cancelled");
+      return true;
+    },
+  );
+  assert.ok(
+    Date.now() - started < 2_000,
+    "the flow sat on a callback that can never arrive instead of reporting the refusal",
+  );
+  assert.equal(net.calls.length, 0, "nothing was redeemed for a sign-in that never opened");
+});
+
+test("only an explicit false is a refusal: true, and void, are browsers that opened", async () => {
+  // VS Code's own opener resolves true; every other binding in this tree
+  // resolves undefined. Treating either as a refusal would divert a working
+  // browser sign-in to a device code, which is the same defect pointing the
+  // other way.
+  const voidNet = identity();
+  const voidUi = browser();
+  assert.equal((await runAuthorizationFlow(cluster(), deps(voidNet, voidUi))).accessToken, "ACCESS");
+
+  const trueNet = identity();
+  const trueUi = browser();
+  const follow = trueUi.openExternal;
+  const trueTokens = await runAuthorizationFlow(
+    cluster(),
+    deps(trueNet, {
+      ...trueUi,
+      openExternal: async (url) => {
+        await follow(url);
+        return true;
+      },
+    }),
+  );
+  assert.equal(trueTokens.accessToken, "ACCESS");
+});
+
 test("browserUnavailable fails fast rather than sitting out the callback deadline", async () => {
   const net = identity();
   const ui: FakeBrowser = {
@@ -408,6 +475,37 @@ test("browserUnavailable fails fast rather than sitting out the callback deadlin
   const started = Date.now();
   await assert.rejects(() => runAuthorizationFlow(cluster(), deps(net, ui, { timeoutMs: 30_000 })));
   assert.ok(Date.now() - started < 2_000, "the flow waited for a callback that can never arrive");
+});
+
+// memql#4619: an unreachable identity service is the OTHER half of a failed
+// exchange, and until this test existed nothing in src/auth/ was exercised
+// against a throwing fetch at all. undici's TypeError carries the real reason
+// in `.cause`, so the assertion is that the reason reaches the sentence an
+// operator reads -- not merely that the flow rejected.
+test("a transport failure names the cause, not just \"fetch failed\"", async () => {
+  const ui = browser();
+  const net: FakeIdentity = {
+    calls: [],
+    urls: () => [],
+    fetch: async () => {
+      const cause = new Error("getaddrinfo ENOTFOUND identity.memql.localhost");
+      (cause as { code?: string }).code = "ENOTFOUND";
+      const wrapper = new TypeError("fetch failed");
+      (wrapper as { cause?: unknown }).cause = cause;
+      throw wrapper;
+    },
+  };
+
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui)),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(err.kind, "exchangeRejected");
+      assert.match(err.message, /ENOTFOUND/);
+      assert.match(err.message, /identity\.memql\.localhost/);
+      return true;
+    },
+  );
 });
 
 test("a refused token exchange reports exchangeRejected with the server's sentence", async () => {

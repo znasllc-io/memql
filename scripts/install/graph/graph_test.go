@@ -559,13 +559,21 @@ func mustJSON(v any) string {
 
 // TestEnrolmentIsNotVerifiedOnALinkThatCannotExist -- znasllc-io/memql#3591.
 //
-// The install's last step verified `result.enrolUrl`, and on a fresh cluster no
-// such link can exist: an enrolment token names a user, `attemptAutoBootstrap`
-// creates none, and the owner is created by `CreateUserOnFirstLogin` when the
-// magic link is verified. So every install ended in a failed step while the
-// cluster it had just built was complete and working.
+// The install's last step verified `result.enrolUrl`, and on a cluster with no
+// owner account no such link can exist: an enrolment token names a user, and on
+// a cluster that seeded no bootstrap values the owner is created by
+// `CreateUserOnFirstLogin` when the magic link is verified. So an install could
+// end in a failed step while the cluster it had just built was complete and
+// working.
 //
-// The step now reports `enrolmentState` -- `minted` or `awaitingFirstSignIn` --
+// `attemptAutoBootstrap` NOW NAMES THE OWNER ITSELF (`provisionBootstrapOwner`,
+// the same memql#3591), so the seeded install this extension performs reaches
+// `minted` and the empty-link case is the exception rather than the rule. The
+// verify field must still not be `result.enrolUrl`: the exception is reachable,
+// and a verify that only holds on the common path is a verify that fails on the
+// day it is read.
+//
+// The step reports `enrolmentState` -- `minted` or `awaitingFirstSignIn` --
 // which is answerable in both states, and the graph verifies that instead. This
 // pins the choice, because the failure it prevents looks like a broken installer
 // and is a bad afternoon to re-diagnose.
@@ -576,9 +584,9 @@ func TestEnrolmentIsNotVerifiedOnALinkThatCannotExist(t *testing.T) {
 			continue
 		}
 		if step.Verify.Field == "result.enrolUrl" {
-			t.Errorf("enrolmentLink verifies %q, which is empty on every cluster nobody has signed\n"+
-				"into yet -- there is no account to enrol until the first sign-in creates one, so this\n"+
-				"makes a complete install report a failed step (memql#3591)", step.Verify.Field)
+			t.Errorf("enrolmentLink verifies %q, which is empty on any cluster with no owner\n"+
+				"account -- there is nobody to enrol until one exists, so this makes a complete\n"+
+				"install report a failed step (memql#3591)", step.Verify.Field)
 		}
 		if step.Verify.Field != "result.enrolmentState" {
 			t.Errorf("enrolmentLink verifies %q; the field that is answerable in both states is\n"+

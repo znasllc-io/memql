@@ -46,6 +46,7 @@ import {
   deviceCodeProgressLine,
   showDeviceCodeActions,
 } from './auth/deviceCodeUi.js';
+import { isAuthFlowError } from './auth/errors.js';
 import {
   canSignIn,
   describeSignInFailure,
@@ -73,13 +74,23 @@ import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from '.
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
 import { clusterRowText } from './clusters/status.js';
 import { ClusterPresence } from './clusters/presence.js';
-import { probeClaimState, setupUrl } from './clusters/claimState.js';
+import {
+  claimProbeSignal,
+  probeClaimStateForCluster,
+  setupUrlForCluster,
+} from './clusters/claimState.js';
 import {
   isFirstCredentialPending,
   receiptNamesAnotherCluster,
   resolveOwnershipRoute,
   type OwnershipRoute,
 } from './clusters/ownershipRoute.js';
+import {
+  SIGN_IN_DEVICE_CODE,
+  SIGN_IN_EDIT_CLUSTER,
+  SIGN_IN_RETRY,
+  signInRecoveryActions,
+} from './clusters/signInRecovery.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { currentEditorKind } from './webview/theme.js';
@@ -151,7 +162,7 @@ import {
 } from './state/diagnostics.js';
 import { runCapabilityScript } from './install/runner.js';
 import { EnrolmentError, openEnrolmentLink } from './install/enrolment.js';
-import { OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
+import { OWNERSHIP_LINK_TTL, OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
 import { defaultRunsDir, reconcileOrphanedRuns } from './state/runLog.js';
 import {
   DEPLOYMENT_CONCEPT,
@@ -287,6 +298,43 @@ async function offerDetails(
     return undefined;
   }
   return choice;
+}
+
+/** The action an enrolment failure toast carries when the link survives it. */
+const COPY_ENROLMENT_LINK = 'Copy link';
+
+/**
+ * Puts a minted enrolment link on the clipboard (memql#4618).
+ *
+ * The shape `copyRecoveryKey` established for the one-time recovery key
+ * (webview/addClusterPanel.ts): copy, then say plainly whether it worked. Loud
+ * on failure, because an operator who believes they copied a credential they did
+ * not is worse off than one who was told to get it another way.
+ *
+ * THE LINK IS NEVER LOGGED. install/enrolment.ts states the rule -- it goes from
+ * the mint to the opener and is written nowhere -- and the clipboard is where
+ * the operator just asked for it, which a diagnostic channel is not. So the
+ * failure record below carries the clipboard error and not the link.
+ */
+async function copyEnrolmentLink(url: string): Promise<void> {
+  try {
+    await env.clipboard.writeText(url);
+  } catch (err) {
+    noteDiagnostic(
+      connectionOutput,
+      'copying the enrolment link failed',
+      err instanceof Error ? err.message : String(err)
+    );
+    void offerDetails(
+      'error',
+      connectionOutput,
+      'MemQL: the enrolment link could not be copied to the clipboard.'
+    );
+    return;
+  }
+  void window.showInformationMessage(
+    `MemQL: enrolment link copied. Open it in a browser on a machine that can reach this cluster -- it is single-use and expires in ${OWNERSHIP_LINK_TTL}.`
+  );
 }
 
 // Which clusters will not get the passkey offer this session: those the
@@ -1951,12 +1999,48 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // So local evidence -- the receipt's recorded owner, and whether a
       // credential is stored -- is consulted first, and the network only for
       // what it cannot settle. `claim` is then reachable only on a real 200.
-      const route = await ownershipRouteFor(target.cluster);
+      //
+      // AND IT RUNS INSIDE A PROGRESS NOTIFICATION (memql#4620). This used to be
+      // awaited bare, before anything was drawn. The probe is a network GET, and
+      // Node's fetch binds undici's 300-second headers timeout -- so a cluster
+      // whose host does not route left `MemQL: Sign In` looking like a command
+      // that did nothing at all, with no spinner to say otherwise and no way to
+      // give up. There is now both, on top of the five-second deadline
+      // `claimProbeSignal` imposes.
+      const route = await window.withProgress(
+        {
+          location: ProgressLocation.Notification,
+          title: `MemQL: checking what "${displayLabel(target.cluster)}" needs...`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const aborter = new AbortController();
+          const subscription = token.onCancellationRequested(() => aborter.abort());
+          try {
+            const resolved = await ownershipRouteFor(target.cluster, aborter.signal);
+            // Cancelling ends the COMMAND, not merely the probe. A cancelled
+            // probe answers `unknown`, `unknown` routes to sign-in, and opening
+            // a sign-in is not an honest answer to a person who just pressed
+            // Cancel on the step before it.
+            return token.isCancellationRequested ? undefined : resolved;
+          } finally {
+            subscription.dispose();
+          }
+        }
+      );
+      if (route === undefined) return;
 
       if (route === 'claim') {
-        const wizard = setupUrl(target.cluster.issuer);
+        const wizard = setupUrlForCluster(target.cluster);
+        // THE SENTENCE, CORRECTED NOW THAT IT IS REACHABLE (memql#4622). It said
+        // "a cluster is claimed by its first sign-in", which is the bootstrap
+        // model this product no longer has: an install writes the owner ROW at
+        // identity boot, and what mints the first owner on a cluster that has
+        // none is the WIZARD. That copy cost nothing while memql#4620 kept this
+        // branch unreachable, and the moment the branch works it is the first
+        // thing an operator reads. clusters/ownershipRoute.ts carries the model.
         const choice = await window.showInformationMessage(
-          `MemQL: "${displayLabel(target.cluster)}" has no owner yet. A cluster is claimed by its first sign-in, so there is no account to sign in to -- claim it first.`,
+          `MemQL: "${displayLabel(target.cluster)}" has no owner account, so there is nothing to sign in to. Its ownership wizard is open and mints the first owner -- claim it first.`,
           'Claim this cluster',
           'Sign in anyway'
         );
@@ -2063,7 +2147,31 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       } catch (err) {
         const detail = err instanceof EnrolmentError ? err.message : String(err);
         noteDiagnostic(connectionOutput, 'opening the enrolment link failed', detail);
-        void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(detail)}`);
+        // `browserUnavailable` IS A DESIGNED-RECOVERABLE KIND, AND THIS IS THE
+        // CALLER IT WAS DESIGNED FOR (memql#4618). install/enrolment.ts says the
+        // kind exists as its own reason "because 'this machine has no browser'
+        // is a real, recoverable state -- the caller can fall back to showing
+        // the link". This caller did not: it raised an error toast and returned,
+        // throwing away a live credential the mint had just produced. On a
+        // headless host, a container with no desktop session, or an SSH session
+        // with nothing to hand a URL to, that is the whole product of the step
+        // discarded because of how it usually travels.
+        //
+        // ONLY ON THAT REASON. `malformed` means the value is not an https
+        // /enroll?code= URL -- precisely the value not to put on somebody's
+        // clipboard, since offering to copy it would hand them whatever the mint
+        // actually printed and invite them to open it.
+        const recoverable = err instanceof EnrolmentError && err.reason === 'browserUnavailable';
+        const headline = `MemQL: ${briefMessage(detail)}`;
+        // DETACHED, the shape this file uses wherever a toast carries a button
+        // (memql#4079): a non-modal notification with an action does not time
+        // out, so awaiting one holds the command open until somebody answers it.
+        void (async () => {
+          const choice = recoverable
+            ? await offerDetails('error', connectionOutput, headline, COPY_ENROLMENT_LINK)
+            : await offerDetails('error', connectionOutput, headline);
+          if (choice === COPY_ENROLMENT_LINK) await copyEnrolmentLink(url);
+        })();
         return;
       }
       // THE REST OF THE WALK, offered rather than assumed (memql#3906).
@@ -3659,8 +3767,16 @@ interface SignInDeps {
  * The receipt is read at the moment of use, not cached: an install or repair
  * can rewrite it between two clicks, and the owner it names is the value the
  * mint will carry.
+ *
+ * `cancel` is the progress notification's cancellation token, bridged. It bounds
+ * only the PROBE -- the receipt read is local and cannot hang -- and a cancelled
+ * probe answers `unknown` like any other unreachable one, so cancelling costs
+ * the claim branch and nothing else.
  */
-async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute> {
+async function ownershipRouteFor(
+  cluster: ClusterConfig,
+  cancel?: AbortSignal
+): Promise<OwnershipRoute> {
   const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
   return resolveOwnershipRoute(
     {
@@ -3676,7 +3792,26 @@ async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute
     // operator may have claimed the cluster in a browser this extension never
     // saw, and acting on a stale "unclaimed" would send them to a wizard that
     // has since sealed.
-    () => probeClaimState(cluster.issuer, { fetch: globalThis.fetch })
+    //
+    // THE CLUSTER, NOT `cluster.issuer` (memql#4620). This passed the raw field,
+    // and NOTHING in this extension ever writes it -- the connect form's
+    // registration shape has no such key and the install path omits it on
+    // purpose. So the probe was handed `undefined` on every cluster the editor
+    // can produce, short-circuited to `unknown`, and `unknown` maps to sign-in:
+    // the `claim` branch below was unreachable in the shipped product, and an
+    // operator connecting to a genuinely unclaimed remote cluster was sent to
+    // authenticate against an account that does not exist. Which field names the
+    // identity service is `identityBaseUrlFor`'s decision, and
+    // probeClaimStateForCluster is where it is now made -- somewhere a test can
+    // reach, which this file is not.
+    //
+    // AND UNDER A DEADLINE. Node's fetch binds undici's 300-second headers
+    // timeout, so an unroutable host used to hang this command for five minutes.
+    () =>
+      probeClaimStateForCluster(cluster, {
+        fetch: globalThis.fetch,
+        signal: claimProbeSignal(cancel),
+      })
   );
 }
 
@@ -3853,10 +3988,44 @@ async function runSignInToCluster(
           fallbackFired && report.level !== 'silent'
             ? `${briefMessage(report.message)} (A browser sign-in was not possible on this host, so a device code was tried; the reason is in the MemQL Connection output.)`
             : briefMessage(report.message);
-        if (report.level === 'error') {
-          void offerDetails('error', connectionOutput, shown);
-        } else if (report.level === 'warning') {
-          void offerDetails('warning', connectionOutput, shown);
+        // WHAT `retryable` WAS COMPUTED FOR (memql#4621). describeSignInFailure
+        // returns it and documents it -- "A UI may offer a retry affordance on
+        // true; it must not on false" -- and this call site read `level` and
+        // `message` and discarded it, raising every failure toast with NO
+        // actions. So after the browser flow ran out its ten-minute deadline the
+        // operator read a sentence naming `MemQL: Sign In With a Device Code`
+        // and had to open the palette and type it: a command name in prose,
+        // where a button was already justified by a field two files away.
+        //
+        // WHICH buttons is signInRecoveryActions' decision, in a module a test
+        // can reach. This binds each returned label to a command and branches on
+        // nothing else -- the kinds are the contract, and a second opinion about
+        // them here is how the two come to disagree.
+        const actions = signInRecoveryActions({
+          retryable: report.retryable,
+          kind: isAuthFlowError(err) ? err.kind : undefined,
+          flow,
+        });
+        if (report.level !== 'silent') {
+          const severity = report.level;
+          // STILL NOT AWAITED, for the reason this function's header gives: the
+          // command settles now, and the handler runs afterwards. That ordering
+          // is also what makes `Try again` work -- by the time a person clicks,
+          // this flow has settled and the single-flight entry has cleared, so
+          // the retry is a fresh flow rather than a joiner told one is already
+          // in progress.
+          void (async () => {
+            const choice = await offerDetails(severity, connectionOutput, shown, ...actions);
+            if (choice === SIGN_IN_RETRY) {
+              await signInToCluster(cluster, deps, flow);
+            } else if (choice === SIGN_IN_DEVICE_CODE) {
+              await signInToCluster(cluster, deps, 'deviceCode');
+            } else if (choice === SIGN_IN_EDIT_CLUSTER) {
+              // The edit command reads only `cluster` off the node; `selected`
+              // is the tree's own marker and nothing on this path knows it.
+              await commands.executeCommand('memql.clusters.edit', { cluster, selected: false });
+            }
+          })();
         }
         return false;
       } finally {

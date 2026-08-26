@@ -64,8 +64,22 @@ import { resolveClientId } from "./wellKnownClient.js";
 /** Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL string. */
 export type ExternalUriResolver = (url: string) => string | Promise<string>;
 
-/** Binds to `vscode.env.openExternal`. The return value is ignored. */
-export type ExternalOpener = (url: string) => unknown | Promise<unknown>;
+/**
+ * Binds to `vscode.env.openExternal`. THE RETURN VALUE IS NOT IGNORED.
+ *
+ * env.openExternal signals failure BOTH ways -- by rejecting, and by resolving
+ * `false` -- and a handler for only the rejection misses the way most hosts
+ * actually say no (memql#4618). This type used to be `unknown`, which is what
+ * made discarding the answer read as deliberate rather than as an oversight.
+ *
+ * `PromiseLike`, not `Promise`, because the editor's own signature returns
+ * `Thenable<boolean>` (interface Thenable<T> extends PromiseLike<T>): an
+ * adapter that hands env.openExternal straight through would not typecheck
+ * against `Promise`. `void` stays in the union because most bindings and every
+ * test double resolve nothing at all, and only an EXPLICIT `false` is a
+ * refusal.
+ */
+export type ExternalOpener = (url: string) => boolean | void | PromiseLike<boolean | void>;
 
 /** Injected so a test can drive the listener without binding a real socket. */
 export type LoopbackStarter = (options: LoopbackOptions) => Promise<LoopbackListener>;
@@ -245,13 +259,31 @@ async function openInBrowser(authorizeUrl: string, deps: AuthFlowDeps): Promise<
       { cause: err },
     );
   }
+  // BOTH ways of saying no, not just the throw (memql#4618). env.openExternal
+  // returns Thenable<boolean> and a host with nothing to launch typically
+  // RESOLVES FALSE rather than rejecting -- the sibling file learned this
+  // already (deviceCodeUi.ts, 98002a9f) and this one was left behind. Reading
+  // only the rejection meant the flow believed a browser had opened and went
+  // on to wait out the full callback deadline, so `browserUnavailable` never
+  // fired, the device-code fallback never triggered, and the headless user the
+  // fallback exists for sat through ten minutes before being told it timed out.
+  let opened: boolean | void;
   try {
-    await deps.openExternal(external);
+    opened = await deps.openExternal(external);
   } catch (err) {
     throw new AuthFlowError(
       "browserUnavailable",
       `A browser could not be opened for sign-in (${errorText(err)}). This machine may have no browser available.`,
       { cause: err },
+    );
+  }
+  // `=== false` and nothing looser: a binding that resolves undefined (most of
+  // them, and every test double) opened a browser perfectly well, and treating
+  // that as a refusal would divert a working sign-in to a device code.
+  if (opened === false) {
+    throw new AuthFlowError(
+      "browserUnavailable",
+      "A browser could not be opened for sign-in: this host answered the request to open one with `false`. This machine may have no browser available.",
     );
   }
 }
