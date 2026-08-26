@@ -2,14 +2,11 @@ package memql
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // loadFullCognitionEngine boots the engine against the entire embedded
@@ -18,18 +15,11 @@ import (
 // an inlined copy that could drift from what ships.
 func loadFullCognitionEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	require.NotNil(t, registry)
-	eng, err := New(nil)
-	require.NoError(t, err)
-	// The provider loader WARNs once per provider with no DB/secrets; not
-	// what these tests check.
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(registry))
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). This helper used
+	// to boot its own -- LoadUnifiedConcepts + New(nil) + Init, ~1.4s -- and
+	// every test calling it paid for an identical one. Read-only, so sharing is
+	// safe; see shared_dbless_engine_test.go for which tests may not.
+	return sharedDblessEngine(t)
 }
 
 func mustLoadFn(t *testing.T, eng *MemQLEngine, name string) *Function {

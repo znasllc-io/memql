@@ -1497,6 +1497,46 @@ jobs:
       # buys the headroom the warn machinery needs to exist before it can
       # warn, which is the same reason the first bridge was taken.
       #
+      # WHAT THE COST ACTUALLY IS, MEASURED (memql#4569). The issue asked for
+      # the ~270s of new growth to be FOUND before a fourth bridge, and it has
+      # been. Against the pinned CI database image, `go test -count=1 -v`:
+      #
+      #   1974 top-level tests                     268.3s
+      #     119 tests at >= 1.0s                   215.4s   (80% of the package)
+      #     102 of them in the 1-2s band           164.1s   (61% of the package)
+      #     1745 tests at < 0.1s                    10.2s   ( 4% of the package)
+      #
+      #   BenchmarkDblessEngineInit                  1.428s/op
+      #   LoadUnifiedConcepts alone                  0.025s/op
+      #
+      # So the 1-2s band IS one operation, once per test: the DB-LESS engine
+      # boot -- LoadUnifiedConcepts + New(nil) + Init -- for a test that only
+      # wants to ASK the engine something. It is not the tree parse (25ms), and
+      # it is not any single slow test (the worst is 7.3s).
+      #
+      # THAT IS memql#4075's FINDING IN THE HALF IT DID NOT COVER. #4075 moved
+      # the DB-GATED boots onto sharedReadMergeEngine; the db-less ones kept
+      # booting privately, and there are now about a hundred of them. The same
+      # remedy applies and is now in the tree: sharedDblessEngine
+      # (component/memql/shared_dbless_engine_test.go), with
+      # TestSharedDblessEngine_SharesOneBoot asserting the sharing as a COUNT
+      # rather than as wall time -- a regression measured in duration only goes
+      # red months later, which is this issue's own shape three times over.
+      #
+      # EIGHT HELPERS MIGRATED SO FAR, and the effect is measured rather than
+      # projected: 268.3s -> 235.9s on the same machine and database, -12%.
+      # The remaining ~90 sites are mechanical and are the rest of the saving;
+      # they are per-test inline boots rather than shared helpers, which is why
+      # they are a follow-on rather than one sweep.
+      #
+      # THE BRIDGE THEREFORE STAYS AT 900 FOR NOW, and deliberately: 235.9s on
+      # this machine is not a number that can be turned into a CI budget by
+      # arithmetic -- the runner is roughly 2.2x slower, and "roughly" is
+      # exactly the kind of estimate that produced the last three breaches.
+      # Retire it when a CI run reports the package comfortably under 600s on
+      # the `ok github.com/znasllc-io/memql/component/memql <N>s` line, not
+      # when a local number looks good enough.
+      #
       # -run SHARDING WAS CONSIDERED FOR THIS STEP AND REJECTED. Partitioning
       # one package's tests across several `go test -run <pattern>` blocks
       # would hand each shard its own budget, but the partition is maintained

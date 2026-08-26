@@ -3,15 +3,12 @@ package memql
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/znasllc-io/memql/component/auth"
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -47,16 +44,10 @@ import (
 // their own rows.
 func selfScopeEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	require.NotNil(t, registry)
-	eng, err := New(nil)
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(registry))
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). Read-only, so
+	// sharing is safe; shared_dbless_engine_test.go names the tests that may
+	// not, and why.
+	return sharedDblessEngine(t)
 }
 
 // identityRowNode builds a v1:identity:identity row owned by userId, carrying
