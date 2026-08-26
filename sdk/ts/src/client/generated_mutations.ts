@@ -5556,6 +5556,11 @@ QueryClient.prototype.recordPasskeyAssertion = function (this: QueryClient, args
 export interface RecordPlannerInvocationArgs {
   planId: string;
   tokenSpent?: number;
+  /** Tokens the call spent through an app the user already pays for (memql#4362). Off the dollar ceiling, on the loop caps. */
+  tokenSpentSubscription?: number;
+  /** Tokens the call spent on a model hosted by one of the user's own machines (memql#4681). Same two-caps split as the field above. */
+  /** ABSENT IS NOT ZERO: a runtime that reported no usage leaves this unpassed, so the counter keeps the total it had. Passing 0 would be indistinguishable from a call that genuinely spent nothing, and update{} is a read-merge, so an omitted field is exactly the right way to say "nobody counted". */
+  tokenSpentLocal?: number;
   metrics?: Record<string, unknown>;
 }
 
@@ -5563,6 +5568,8 @@ export function buildRecordPlannerInvocation(args: RecordPlannerInvocationArgs):
   const parts: string[] = [];
   parts.push("planId: " + renderMemQLValue(args.planId));
   if (args.tokenSpent !== undefined) parts.push("tokenSpent: " + renderMemQLValue(args.tokenSpent));
+  if (args.tokenSpentSubscription !== undefined) parts.push("tokenSpentSubscription: " + renderMemQLValue(args.tokenSpentSubscription));
+  if (args.tokenSpentLocal !== undefined) parts.push("tokenSpentLocal: " + renderMemQLValue(args.tokenSpentLocal));
   if (args.metrics !== undefined) parts.push("metrics: " + renderMemQLValue(args.metrics));
   return "mutation recordPlannerInvocation(" + parts.join(", ") + ")";
 }
@@ -5701,8 +5708,8 @@ export interface RecordRouterCallArgs {
   errorCategory?: string;
   errorMessage?: string;
   fallbackFromModel?: string;
-  /** Who paid: metered | subscription | unknown. Absent reads as metered. */
-  // Enum: metered | subscription | unknown
+  /** Who paid: metered | subscription | local | unknown. Absent reads as metered. */
+  // Enum: metered | subscription | local | unknown
   billing?: string;
   /** Where the call ran; empty for MemQL's own provider calls. */
   executionSurface?: string;
@@ -8823,6 +8830,8 @@ export interface UpdatePlanStatusArgs {
   estimate?: Record<string, unknown>;
   estimatedAt?: string;
   tokenSpent?: number;
+  tokenSpentSubscription?: number;
+  tokenSpentLocal?: number;
   tokenAllocatedToChildren?: number;
   metrics?: Record<string, unknown>;
   computerUseScope?: string;
@@ -8848,6 +8857,8 @@ export function buildUpdatePlanStatus(args: UpdatePlanStatusArgs): string {
   if (args.estimate !== undefined) parts.push("estimate: " + renderMemQLValue(args.estimate));
   if (args.estimatedAt !== undefined) parts.push("estimatedAt: " + renderMemQLValue(args.estimatedAt));
   if (args.tokenSpent !== undefined) parts.push("tokenSpent: " + renderMemQLValue(args.tokenSpent));
+  if (args.tokenSpentSubscription !== undefined) parts.push("tokenSpentSubscription: " + renderMemQLValue(args.tokenSpentSubscription));
+  if (args.tokenSpentLocal !== undefined) parts.push("tokenSpentLocal: " + renderMemQLValue(args.tokenSpentLocal));
   if (args.tokenAllocatedToChildren !== undefined) parts.push("tokenAllocatedToChildren: " + renderMemQLValue(args.tokenAllocatedToChildren));
   if (args.metrics !== undefined) parts.push("metrics: " + renderMemQLValue(args.metrics));
   if (args.computerUseScope !== undefined) parts.push("computerUseScope: " + renderMemQLValue(args.computerUseScope));

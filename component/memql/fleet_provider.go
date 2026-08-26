@@ -344,6 +344,16 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 	}
 	req.ModelId = p.modelId
 	req.ActingUserId = actingUserFromContext(ctx)
+
+	// THE GUARDS (memql#4680). This is the one seam every fleet call passes,
+	// and it is where the chokepoint moved to: a local call has no
+	// *http.Client, so guardedTransport -- which the whole defense-in-depth
+	// story was written around -- never sees it. Same four checks, same
+	// shared state, zero dollars.
+	if err := GuardLocalModelCall(ctx, FleetCallFingerprint(req)); err != nil {
+		return FleetCallResult{}, err
+	}
+
 	res, err := f.Call(ctx, req)
 	if err != nil {
 		return res, err

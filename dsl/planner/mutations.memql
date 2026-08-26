@@ -518,12 +518,14 @@ mutate plan updatePlanStatus {
     estimate                  object
     estimatedAt               string
     tokenSpent                int
+    tokenSpentSubscription    int
+    tokenSpentLocal           int
     tokenAllocatedToChildren  int
     metrics                   object
     computerUseScope          string
   }
   update {
-    accept { status, ownerAgentId, output, errorMessage, startedAt, completedAt, cancelledBy, pausedAt, totalPausedMs, feedbackRequest, feedbackResponse, feedbackReason, recommendationCardId, phases, estimate, estimatedAt, tokenSpent, tokenAllocatedToChildren, metrics, computerUseScope }
+    accept { status, ownerAgentId, output, errorMessage, startedAt, completedAt, cancelledBy, pausedAt, totalPausedMs, feedbackRequest, feedbackResponse, feedbackReason, recommendationCardId, phases, estimate, estimatedAt, tokenSpent, tokenSpentSubscription, tokenSpentLocal, tokenAllocatedToChildren, metrics, computerUseScope }
     stamp {
       id: args.planId
     }
@@ -541,12 +543,24 @@ mutate plan updatePlanStatus {
 /// without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
 mutate plan recordPlannerInvocation {
   args {
-    planId      string!
-    tokenSpent  int
-    metrics     object
+    planId                  string!
+    tokenSpent              int
+    /// Tokens the call spent through an app the user already pays for
+    /// (memql#4362). Off the dollar ceiling, on the loop caps.
+    tokenSpentSubscription  int
+    /// Tokens the call spent on a model hosted by one of the user's own
+    /// machines (memql#4681). Same two-caps split as the field above.
+    ///
+    /// ABSENT IS NOT ZERO: a runtime that reported no usage leaves this
+    /// unpassed, so the counter keeps the total it had. Passing 0 would
+    /// be indistinguishable from a call that genuinely spent nothing,
+    /// and update{} is a read-merge, so an omitted field is exactly the
+    /// right way to say "nobody counted".
+    tokenSpentLocal         int
+    metrics                 object
   }
   update {
-    accept { tokenSpent, metrics }
+    accept { tokenSpent, tokenSpentSubscription, tokenSpentLocal, metrics }
     stamp {
       id: args.planId
     }

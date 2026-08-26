@@ -530,13 +530,36 @@ func (g *llmGuard) killed() (reason string, dead bool) {
 // the cheaper guards already blocked never reached the vendor, so they must
 // not count against any cumulative budget.
 func (g *llmGuard) recordAndMaybeLatch(scopeIds []string, body []byte) (reason string, blocked bool) {
+	if g == nil {
+		return "", false
+	}
+	return g.recordAndMaybeLatchCost(scopeIds, estimateRequestCostUSD(body, g.costInPerMillion, g.costOutPerMillion))
+}
+
+// recordAndMaybeLatchCost is recordAndMaybeLatch with the dollar figure
+// supplied rather than estimated from a request body.
+//
+// The split exists for local models (epic memql#4676, tasks memql#4680 and
+// memql#4681). The two caps want OPPOSITE answers about a free call, and the
+// reason each wants what it wants is different:
+//
+//   - The DOLLAR ceiling must exclude it. Nobody was billed, so charging it
+//     parks work over money that was never spent -- and the more a user leans
+//     on hardware they already own, the sooner their plans would stop. That is
+//     the local half of the argument memql#4362 made about subscription spend.
+//   - The CALL ceiling must include it. A runaway loop on a free model is
+//     still a runaway loop: it burns a laptop's battery, occupies the machine
+//     the user is trying to work on, and converges on nothing.
+//
+// So a fleet call arrives here with cost 0 and still increments every call
+// tally, process-wide and per-scope.
+func (g *llmGuard) recordAndMaybeLatchCost(scopeIds []string, cost float64) (reason string, blocked bool) {
 	if g == nil || (!g.killSwitchEnabled && !g.scopeEnabled) {
 		return "", false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
-	cost := estimateRequestCostUSD(body, g.costInPerMillion, g.costOutPerMillion)
 
 	// --- process-wide kill-switch (check, no charge yet) ---
 	if g.killSwitchEnabled {

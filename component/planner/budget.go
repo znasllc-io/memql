@@ -62,6 +62,24 @@ type TokenState struct {
 	// counted by CallsMade, which the planner loop reads.
 	SpentSubscription int
 
+	// SpentLocal is Plan.tokenSpentLocal: tokens spent on a model
+	// running on one of the USER'S OWN MACHINES (epic memql#4676).
+	//
+	// It mirrors SpentSubscription exactly, including why it is a
+	// separate field rather than an addition to Spent -- the dollar
+	// ceiling must exclude it and the loop caps must include it -- and
+	// the local case makes the first half sharper: the whole point of
+	// running a model on hardware the user already owns is that it
+	// costs nothing, so charging it to a dollar budget would mean the
+	// more someone used their own machine, the sooner their plans
+	// stopped.
+	//
+	// ABSENT IS NOT ZERO. A runtime that reports no usage leaves this
+	// untouched rather than adding 0, because "the model ran and used
+	// nothing" and "the model ran and nobody counted" are different
+	// facts, and only one of them is ever true.
+	SpentLocal int
+
 	// CallsMade is the Plan's cumulative LLM/executor call count,
 	// every billing kind included. The loop cap reads this.
 	CallsMade int
@@ -110,9 +128,10 @@ func (b *EngineTokenBudget) CheckCall(ctx context.Context, planId string, estima
 		return nil
 	}
 	// The ceiling is a DOLLAR ceiling, so it counts only what MemQL
-	// paid for. state.SpentSubscription is deliberately absent from
-	// this arithmetic (memql#4362) -- see the field's comment for why
-	// including it would park plans over money nobody was charged.
+	// paid for. state.SpentSubscription and state.SpentLocal are
+	// deliberately absent from this arithmetic (memql#4362, memql#4681)
+	// -- see the fields' comments for why including them would park
+	// plans over money nobody was charged.
 	available := budget - state.Spent - state.AllocatedToCh
 	if estimatedCallTokens > available {
 		return fmt.Errorf("planner: tokenBudgetExceeded for plan %s -- %d estimated, %d available",
@@ -121,18 +140,39 @@ func (b *EngineTokenBudget) CheckCall(ctx context.Context, planId string, estima
 	return nil
 }
 
+// Spend is where one executor's tokens land: exactly one of the three
+// counters is non-zero.
+type Spend struct {
+	// Metered is Plan.tokenSpent -- MemQL's own vendor spend, the only
+	// one the dollar ceiling reads.
+	Metered int
+	// Subscription is Plan.tokenSpentSubscription (memql#4362).
+	Subscription int
+	// Local is Plan.tokenSpentLocal (memql#4681).
+	Local int
+}
+
 // SplitSpend routes a completed executor's token spend to the right
-// counter (memql#4362). Returns the amounts to add to Plan.tokenSpent
-// and Plan.tokenSpentSubscription respectively; exactly one is
-// non-zero.
+// counter (memql#4362, memql#4681).
 //
 // An executor that reports no billing is treated as METERED, the
 // conservative direction: unattributed spend counts against the
-// ceiling rather than vanishing into the covered bucket, where it
-// would be invisible to the one control that stops runaway cost.
-func SplitSpend(result ExecutorResult) (metered int, subscription int) {
-	if result.CountsAgainstDollarCeiling() {
-		return result.TokensSpent, 0
+// ceiling rather than vanishing into a covered bucket, where it would
+// be invisible to the one control that stops runaway cost.
+//
+// `unknown` lands in Subscription rather than getting a counter of its
+// own, and that is not sloppiness: the counters exist to answer "what
+// did this cost us", and the honest answer for unknown is "we could
+// not tell, so we are not charging you for it" -- the same treatment
+// subscription gets. What must NOT happen is unknown being recorded as
+// local, because that would claim the work ran on the user's hardware.
+func SplitSpend(result ExecutorResult) Spend {
+	switch result.EffectiveBilling() {
+	case BillingLocal:
+		return Spend{Local: result.TokensSpent}
+	case BillingMetered:
+		return Spend{Metered: result.TokensSpent}
+	default:
+		return Spend{Subscription: result.TokensSpent}
 	}
-	return 0, result.TokensSpent
 }

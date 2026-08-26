@@ -10190,7 +10190,12 @@ func RecordPasskeyAssertionBuild(args RecordPasskeyAssertionArgs) string {
 type RecordPlannerInvocationArgs struct {
 	PlanId     string
 	TokenSpent int
-	Metrics    map[string]any
+	// Tokens the call spent through an app the user already pays for (memql#4362). Off the dollar ceiling, on the loop caps.
+	TokenSpentSubscription int
+	// Tokens the call spent on a model hosted by one of the user's own machines (memql#4681). Same two-caps split as the field above.
+	// ABSENT IS NOT ZERO: a runtime that reported no usage leaves this unpassed, so the counter keeps the total it had. Passing 0 would be indistinguishable from a call that genuinely spent nothing, and update{} is a read-merge, so an omitted field is exactly the right way to say "nobody counted".
+	TokenSpentLocal int
+	Metrics         map[string]any
 }
 
 // RecordPlannerInvocation calls the engine mutation recordPlannerInvocation.
@@ -10210,6 +10215,20 @@ func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
+	}
+	if args.TokenSpentSubscription != 0 {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenSpentSubscription: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenSpentSubscription))
+	}
+	if args.TokenSpentLocal != 0 {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenSpentLocal: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenSpentLocal))
 	}
 	if args.Metrics != nil {
 		if b.Len() > 33 {
@@ -10418,8 +10437,8 @@ type RecordRouterCallArgs struct {
 	ErrorCategory        string
 	ErrorMessage         string
 	FallbackFromModel    string
-	// Who paid: metered | subscription | unknown. Absent reads as metered.
-	// Enum: metered | subscription | unknown
+	// Who paid: metered | subscription | local | unknown. Absent reads as metered.
+	// Enum: metered | subscription | local | unknown
 	Billing string
 	// Where the call ran; empty for MemQL's own provider calls.
 	ExecutionSurface string
@@ -15395,6 +15414,8 @@ type UpdatePlanStatusArgs struct {
 	Estimate                 map[string]any
 	EstimatedAt              string
 	TokenSpent               int
+	TokenSpentSubscription   int
+	TokenSpentLocal          int
 	TokenAllocatedToChildren int
 	Metrics                  map[string]any
 	ComputerUseScope         string
@@ -15527,6 +15548,20 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
+	}
+	if args.TokenSpentSubscription != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenSpentSubscription: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenSpentSubscription))
+	}
+	if args.TokenSpentLocal != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenSpentLocal: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenSpentLocal))
 	}
 	if args.TokenAllocatedToChildren != 0 {
 		if b.Len() > 26 {

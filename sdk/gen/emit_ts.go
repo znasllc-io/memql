@@ -119,7 +119,13 @@ func emitTSConstruct(buf *bytes.Buffer, c Construct, kindLabel, augModule string
 
 func emitTSArgField(buf *bytes.Buffer, a ArgField) {
 	if a.Description != "" {
-		fmt.Fprintf(buf, "  /** %s */\n", escapeJSDoc(a.Description))
+		// A single-line /** */ per line, for the reason writeArgField in
+		// emit_go.go states: a multi-paragraph description arrives with
+		// newlines, and a raw newline inside a one-line JSDoc block reads as
+		// unterminated to a human even where the parser tolerates it.
+		for _, line := range strings.Split(a.Description, "\n") {
+			fmt.Fprintf(buf, "  /** %s */\n", escapeJSDoc(strings.TrimSpace(line)))
+		}
 	}
 	if len(a.Enum) > 0 {
 		fmt.Fprintf(buf, "  // Enum: %s\n", strings.Join(a.Enum, " | "))
