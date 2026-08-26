@@ -90,10 +90,16 @@ export function ArrangedSection({
   const onRowAction = useCallback((_action: string, rowId: string) => setActionRowId(rowId), []);
   const closeAction = useCallback(() => setActionRowId(""), []);
   const actionDetail = useRowDetail(section.conceptId, actionRowId);
+  // Keyed on `data.retry` rather than on `data`, which useViewRows rebuilds
+  // every render: depending on the object made this callback -- and therefore
+  // renderModule, and therefore every widget below it -- a new identity on
+  // every paint. `retry` is a stable useCallback (useConceptRows:301), so this
+  // one is stable too.
+  const retry = data.retry;
   const onChanged = useCallback(() => {
-    data.retry();
+    retry();
     setNonce((n) => n + 1);
-  }, [data]);
+  }, [retry]);
 
   // Lookup columns: relationship pointers resolved to the row they name, in
   // batches (task memql#4671). Pure at render -- a cell cannot await -- so the
