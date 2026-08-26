@@ -99,7 +99,18 @@ type ExecutorResult struct {
 const (
 	BillingMetered      = "metered"
 	BillingSubscription = "subscription"
-	BillingUnknown      = "unknown"
+	// BillingLocal is a call served by a model on one of the USER'S OWN
+	// MACHINES (epic memql#4676). Not "free" -- the tokens are real and the
+	// laptop's battery is real -- but nobody was billed, so it is outside
+	// the dollar ceiling and inside the loop caps, exactly as subscription
+	// spend is and for the same two reasons stated on TokenState.
+	//
+	// It must be STAMPED EXPLICITLY by the fleet path and is never inferred.
+	// Absent still reads as metered, the conservative direction: a surface
+	// that says nothing has its spend counted against the ceiling rather
+	// than disappearing into a bucket the ceiling cannot see.
+	BillingLocal   = "local"
+	BillingUnknown = "unknown"
 )
 
 // EffectiveBilling normalizes a result's billing for accounting. An
@@ -108,17 +119,17 @@ const (
 // the direction that fails safe.
 func (r ExecutorResult) EffectiveBilling() string {
 	switch r.Billing {
-	case BillingSubscription, BillingUnknown:
+	case BillingSubscription, BillingLocal, BillingUnknown:
 		return r.Billing
 	}
 	return BillingMetered
 }
 
 // CountsAgainstDollarCeiling reports whether this result's tokens
-// should be charged to the Plan's dollar budget. Subscription and
-// unknown spend does not: MemQL was not billed for it, so stopping a
-// plan over it would stop work for money nobody was charged. Both
-// still count in the loop caps -- see budget.go.
+// should be charged to the Plan's dollar budget. Subscription, LOCAL
+// and unknown spend does not: MemQL was not billed for it, so stopping
+// a plan over it would stop work for money nobody was charged. All
+// three still count in the loop caps -- see budget.go.
 func (r ExecutorResult) CountsAgainstDollarCeiling() bool {
 	return r.EffectiveBilling() == BillingMetered
 }

@@ -425,6 +425,19 @@ const (
 	// ever in the payload. Owner-gated in Go. See
 	// provider_auth_status_read.go.
 	BuiltinExecutorProviderAuthStatus = "providerAuthStatus"
+	// BuiltinExecutorFleetModels projects the LIVE model catalog -- every
+	// model the caller's machines (plus the shared-inference set) advertise
+	// right now (epic memql#4676). Virtual: no row is persisted, because the
+	// answer is which laptops are awake and a stored copy's staleness would
+	// be indistinguishable from the condition it describes. See
+	// fleet_catalog_read.go.
+	BuiltinExecutorFleetModels = "fleetModels"
+	// BuiltinExecutorInferenceStatus answers, in ONE row, whether this caller
+	// can get inference at all and through which of the three doors (epic
+	// memql#4676). The portal's first-run gate reads it, from the same
+	// catalog and registry the router reads -- eligibility gets no second
+	// implementation. See fleet_catalog_read.go.
+	BuiltinExecutorInferenceStatus = "inferenceStatus"
 	// BuiltinExecutorProvidersReload re-resolves provider auth on EVERY node
 	// (epic memql#4440). Owner-gated in Go; writes an audit line; broadcasts
 	// over the mesh. See provider_reload_propagate.go.

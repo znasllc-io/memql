@@ -44,6 +44,8 @@ message NodeClientMessage {
     DeployControlForwardRequest deploy_control_forward_request = 90;
     WorkerForwardRequest worker_forward_request = 100;
     WorkerForwardCancel worker_forward_cancel = 101;
+    ModelForwardRequest model_forward_request = 102;
+    ModelForwardCancel model_forward_cancel = 103;
   }
 }
 
@@ -72,6 +74,8 @@ message NodeServerMessage {
     DeployControlForwardResponse deploy_control_forward_response = 90;
     WorkerForwardResponse worker_forward_response = 100;
     WorkerForwardStream worker_forward_stream = 101;
+    ModelForwardResponse model_forward_response = 102;
+    ModelForwardDelta model_forward_delta = 103;
   }
 }
 
@@ -575,4 +579,75 @@ message WorkerForwardStream {
 // work for the request_id and frees the concurrency slot.
 message WorkerForwardCancel {
   string request_id = 1;
+}
+
+// ModelForwardRequest carries a ModelCall to the replica holding the machine's
+// WorkerService stream (epic memql#4676, task memql#4677).
+//
+// It is the WorkerForward shape and not a reuse of it. A dispatch and a
+// generation share the MECHANICS -- stamp a request id, park on a channel,
+// send to the replica named by connectedNodeId, route the answer back by id --
+// and share nothing else: there is no tool, no action, no args map, and the
+// answer is a token stream rather than one result. Packing a ModelCallStart
+// into args_json would have made `tool` and `capability` lies on the wire and
+// put a second meaning inside a field the receiver already switches on.
+//
+// The authority rule is inherited verbatim, and here it is doing MORE work
+// than it does for a dispatch: this envelope carries the acting user's
+// PROMPTS. The receiver checks the machine against the verified
+// ForwardedAuthority's subject, never against owner_user_id, which is a hint
+// used only to read the fleet. That check is what makes the ownership boundary
+// (memql#4678) hold across the hop rather than only on the sender.
+message ModelForwardRequest {
+  string request_id = 1;
+  string registration_id = 2;
+  // A HINT for the fleet read only. The owner that DECIDES is the subject of
+  // `authority`.
+  string owner_user_id = 3;
+  // The ModelCallStart to run, serialized. The receiver re-stamps request_id
+  // to its own local call id and maps the answer back by this envelope's id,
+  // so the two id spaces never have to agree.
+  bytes model_call_start_json = 4;
+  // Optional timeout hint; the receiver clamps to its own caps.
+  int32 timeout_sec = 5;
+  ForwardedAuthority authority = 6;
+}
+
+// ModelForwardResponse is the terminal answer for one request_id.
+message ModelForwardResponse {
+  string request_id = 1;
+  bool ok = 2;
+  // The ModelCallEnd, serialized.
+  bytes model_call_end_json = 3;
+  string error_code = 4;
+  string error_message = 5;
+  // refused_before_start IS THE RE-PICK PREDICATE, with the same meaning it
+  // carries on WorkerForwardResponse and the same prohibition on guessing it.
+  //
+  // The trade is gentler here than for an exec -- re-running a generation
+  // spends tokens rather than repeating a side effect -- but it is not free,
+  // and "the same generation twice" is exactly what the loop caps and the
+  // identical-request breaker (memql#4680) exist to notice. So the rule stands
+  // unchanged: true only when the receiver is CERTAIN nothing reached the
+  // machine.
+  bool refused_before_start = 6;
+}
+
+// ModelForwardDelta relays one ModelCallDelta across the hop.
+//
+// `seq` rides through UNTOUCHED. The de-duplication decision belongs to the
+// originating replica -- it is the one assembling the text -- and re-numbering
+// here would make the receiving side's ordering the one that mattered while
+// the reader that could detect a gap kept looking at a different sequence.
+message ModelForwardDelta {
+  string request_id = 1;
+  uint64 seq = 2;
+  string content = 3;
+  bool keepalive = 4;
+}
+
+// ModelForwardCancel stops a forwarded model call.
+message ModelForwardCancel {
+  string request_id = 1;
+  string reason = 2;
 }

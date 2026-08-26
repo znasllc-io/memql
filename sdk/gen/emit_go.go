@@ -96,7 +96,15 @@ func emitConstruct(buf *bytes.Buffer, c Construct, kindLabel string) {
 
 func writeArgField(buf *bytes.Buffer, a ArgField) {
 	if a.Description != "" {
-		fmt.Fprintf(buf, "\t// %s\n", a.Description)
+		// EVERY line gets its own `//`. A `///` doc comment spanning more
+		// than one paragraph arrives here with newlines in it, and prefixing
+		// only the first line emitted bare prose into a struct body -- Go
+		// that does not compile, from a generator whose own check step
+		// (`make sdk-gen-check`) only DIFFS the output and therefore reported
+		// the drift as absent while the file was unbuildable.
+		for _, line := range strings.Split(a.Description, "\n") {
+			fmt.Fprintf(buf, "\t// %s\n", strings.TrimSpace(line))
+		}
 	}
 	if len(a.Enum) > 0 {
 		fmt.Fprintf(buf, "\t// Enum: %s\n", strings.Join(a.Enum, " | "))

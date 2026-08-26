@@ -87,35 +87,67 @@ func TestLookupResolvesTheBaseName(t *testing.T) {
 	}
 }
 
-// TestSplitSpendKeepsSubscriptionOffTheDollarCeiling is memql#4362's
-// accounting rule. The two caps want opposite answers about
-// subscription tokens, so they are counted in different places.
-func TestSplitSpendKeepsSubscriptionOffTheDollarCeiling(t *testing.T) {
-	metered, subscription := SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingSubscription})
-	if metered != 0 || subscription != 100 {
-		t.Fatalf("subscription spend = (%d metered, %d subscription), want (0, 100)", metered, subscription)
+// TestSplitSpendKeepsUnbilledTokensOffTheDollarCeiling is memql#4362's
+// accounting rule, extended to local models by memql#4681. The two caps
+// want opposite answers about tokens MemQL was not billed for, so they
+// are counted in different places.
+func TestSplitSpendKeepsUnbilledTokensOffTheDollarCeiling(t *testing.T) {
+	got := SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingSubscription})
+	if (got != Spend{Subscription: 100}) {
+		t.Fatalf("subscription spend = %+v, want it entirely on the subscription counter", got)
 	}
 
-	metered, subscription = SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingMetered})
-	if metered != 100 || subscription != 0 {
-		t.Fatalf("metered spend = (%d, %d), want (100, 0)", metered, subscription)
+	got = SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingMetered})
+	if (got != Spend{Metered: 100}) {
+		t.Fatalf("metered spend = %+v, want it entirely on the metered counter", got)
 	}
 
-	// Unknown is NOT metered for the ceiling -- MemQL was not billed
-	// -- but it is visible as unknown rather than folded into either
-	// side, which is the whole reason the enum has three values.
-	metered, subscription = SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingUnknown})
-	if metered != 0 || subscription != 100 {
-		t.Fatalf("unknown spend = (%d, %d), want (0, 100)", metered, subscription)
+	// A local model runs on hardware the user already owns. The tokens are
+	// real; the bill is not.
+	got = SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingLocal})
+	if (got != Spend{Local: 100}) {
+		t.Fatalf("local spend = %+v, want it entirely on the local counter -- charging it to a "+
+			"dollar budget would mean the more someone used their own machine, the sooner "+
+			"their plans stopped", got)
 	}
 
-	// An executor that says NOTHING is metered: unattributed spend
-	// counts against the ceiling rather than vanishing into the
-	// covered bucket, where it would be invisible to the one control
-	// that stops runaway cost.
-	metered, subscription = SplitSpend(ExecutorResult{TokensSpent: 100})
-	if metered != 100 || subscription != 0 {
-		t.Fatalf("unreported billing = (%d, %d), want (100, 0)", metered, subscription)
+	// Unknown is not metered for the ceiling -- MemQL was not billed -- and
+	// it must NOT land on the local counter either, which would claim the
+	// work ran on the user's hardware.
+	got = SplitSpend(ExecutorResult{TokensSpent: 100, Billing: BillingUnknown})
+	if got.Local != 0 {
+		t.Fatalf("unknown spend = %+v; recording it as local would claim it ran on the user's "+
+			"machine, which is a fact nobody established", got)
+	}
+	if got.Metered != 0 || got.Subscription != 100 {
+		t.Fatalf("unknown spend = %+v, want it off the dollar ceiling", got)
+	}
+
+	// An executor that says NOTHING is metered: unattributed spend counts
+	// against the ceiling rather than vanishing into a covered bucket,
+	// where it would be invisible to the one control that stops runaway
+	// cost.
+	got = SplitSpend(ExecutorResult{TokensSpent: 100})
+	if (got != Spend{Metered: 100}) {
+		t.Fatalf("unreported billing = %+v, want it counted against the ceiling", got)
+	}
+}
+
+// The dollar ceiling reads Spent alone. Local and subscription tokens sit
+// beside it and must not shrink the budget.
+func TestTheDollarCeilingIgnoresLocalAndSubscriptionSpend(t *testing.T) {
+	b := NewEngineTokenBudget(stubLookup{state: TokenState{
+		Budget:            1000,
+		Spent:             100,
+		SpentSubscription: 5000,
+		SpentLocal:        5000,
+	}}, 0)
+	if err := b.CheckCall(context.Background(), "p1", 500); err != nil {
+		t.Fatalf("a plan with 900 metered tokens left must admit a 500-token call even after "+
+			"10000 unbilled ones: %v", err)
+	}
+	if err := b.CheckCall(context.Background(), "p1", 901); err == nil {
+		t.Fatal("the ceiling must still stop a call that does not fit the METERED budget")
 	}
 }
 
@@ -126,7 +158,7 @@ func (s stubLookup) GetPlanTokenState(context.Context, string) (TokenState, erro
 }
 
 // TestDollarCeilingIgnoresSubscriptionSpend: a plan that leaned
-// heavily on the user's own subscription must not be parked over
+// heavily on the user's own spend.Subscription must not be parked over
 // money nobody charged. The more they use what they already pay for,
 // the sooner their plans would stop -- exactly backwards.
 func TestDollarCeilingIgnoresSubscriptionSpend(t *testing.T) {
@@ -136,12 +168,12 @@ func TestDollarCeilingIgnoresSubscriptionSpend(t *testing.T) {
 		SpentSubscription: 900_000,
 	}}}
 	if err := budget.CheckCall(context.Background(), "plan-1", 500); err != nil {
-		t.Fatalf("subscription spend must not exhaust the dollar ceiling: %v", err)
+		t.Fatalf("spend.Subscription spend must not exhaust the dollar ceiling: %v", err)
 	}
 
 	// Metered spend still does.
 	budget = &EngineTokenBudget{Lookup: stubLookup{state: TokenState{Budget: 1000, Spent: 900}}}
 	if err := budget.CheckCall(context.Background(), "plan-1", 500); err == nil {
-		t.Fatal("metered spend past the ceiling must still be refused")
+		t.Fatal("spend.Metered spend past the ceiling must still be refused")
 	}
 }

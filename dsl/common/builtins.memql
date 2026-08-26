@@ -719,6 +719,28 @@ builtin dataOrigins { }
 // rather than a gate. See component/memql/provider_auth_status_read.go and
 // provider_verify.go, where the refusals actually are.
 
+// ---- Local models on the fleet (epic memql#4676) ----
+//
+// Here with the other registry-projecting readers; the row SHAPES live in
+// platform, exactly as dataOrigins' and providerAuthStatus's do.
+//
+// NEITHER IS OWNER-GATED, and that is the difference from the three above.
+// Those project the CLUSTER'S vendor configuration, which is reconnaissance
+// and nobody's business but the operator's. These two answer "what can I run",
+// scoped to the caller's own machines plus the shared-inference set -- a
+// question every user of the portal has to be able to ask, because the
+// first-run gate asks it on their behalf before they have reached anything.
+
+@sdk
+@executor("fleetModels")
+@description("List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the shared-inference set; a model call carries the caller's prompts and routes only to their machines. Feeds the portal's Providers page and the fleet machine cards.")
+builtin fleetModels { }
+
+@sdk
+@executor("inferenceStatus")
+@description("Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate.")
+builtin inferenceStatus { }
+
 @sdk
 @executor("providerAuthStatus")
 @description("List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.")

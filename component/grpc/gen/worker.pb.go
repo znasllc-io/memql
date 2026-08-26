@@ -38,6 +38,8 @@ type WorkerClientMessage struct {
 	//	*WorkerClientMessage_RotationRequest
 	//	*WorkerClientMessage_AppSessionChunk
 	//	*WorkerClientMessage_AppSessionEnd
+	//	*WorkerClientMessage_ModelCallDelta
+	//	*WorkerClientMessage_ModelCallEnd
 	Payload       isWorkerClientMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -173,6 +175,24 @@ func (x *WorkerClientMessage) GetAppSessionEnd() *AppSessionEnd {
 	return nil
 }
 
+func (x *WorkerClientMessage) GetModelCallDelta() *ModelCallDelta {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerClientMessage_ModelCallDelta); ok {
+			return x.ModelCallDelta
+		}
+	}
+	return nil
+}
+
+func (x *WorkerClientMessage) GetModelCallEnd() *ModelCallEnd {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerClientMessage_ModelCallEnd); ok {
+			return x.ModelCallEnd
+		}
+	}
+	return nil
+}
+
 type isWorkerClientMessage_Payload interface {
 	isWorkerClientMessage_Payload()
 }
@@ -209,6 +229,14 @@ type WorkerClientMessage_AppSessionEnd struct {
 	AppSessionEnd *AppSessionEnd `protobuf:"bytes,17,opt,name=app_session_end,json=appSessionEnd,proto3,oneof"`
 }
 
+type WorkerClientMessage_ModelCallDelta struct {
+	ModelCallDelta *ModelCallDelta `protobuf:"bytes,18,opt,name=model_call_delta,json=modelCallDelta,proto3,oneof"`
+}
+
+type WorkerClientMessage_ModelCallEnd struct {
+	ModelCallEnd *ModelCallEnd `protobuf:"bytes,19,opt,name=model_call_end,json=modelCallEnd,proto3,oneof"`
+}
+
 func (*WorkerClientMessage_Register) isWorkerClientMessage_Payload() {}
 
 func (*WorkerClientMessage_Heartbeat) isWorkerClientMessage_Payload() {}
@@ -225,6 +253,10 @@ func (*WorkerClientMessage_AppSessionChunk) isWorkerClientMessage_Payload() {}
 
 func (*WorkerClientMessage_AppSessionEnd) isWorkerClientMessage_Payload() {}
 
+func (*WorkerClientMessage_ModelCallDelta) isWorkerClientMessage_Payload() {}
+
+func (*WorkerClientMessage_ModelCallEnd) isWorkerClientMessage_Payload() {}
+
 type WorkerServerMessage struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	MessageId   string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -240,6 +272,8 @@ type WorkerServerMessage struct {
 	//	*WorkerServerMessage_RegisterError
 	//	*WorkerServerMessage_AppSessionStart
 	//	*WorkerServerMessage_AppSessionControl
+	//	*WorkerServerMessage_ModelCallStart
+	//	*WorkerServerMessage_ModelCallCancel
 	Payload       isWorkerServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -375,6 +409,24 @@ func (x *WorkerServerMessage) GetAppSessionControl() *AppSessionControl {
 	return nil
 }
 
+func (x *WorkerServerMessage) GetModelCallStart() *ModelCallStart {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerServerMessage_ModelCallStart); ok {
+			return x.ModelCallStart
+		}
+	}
+	return nil
+}
+
+func (x *WorkerServerMessage) GetModelCallCancel() *ModelCallCancel {
+	if x != nil {
+		if x, ok := x.Payload.(*WorkerServerMessage_ModelCallCancel); ok {
+			return x.ModelCallCancel
+		}
+	}
+	return nil
+}
+
 type isWorkerServerMessage_Payload interface {
 	isWorkerServerMessage_Payload()
 }
@@ -411,6 +463,14 @@ type WorkerServerMessage_AppSessionControl struct {
 	AppSessionControl *AppSessionControl `protobuf:"bytes,17,opt,name=app_session_control,json=appSessionControl,proto3,oneof"`
 }
 
+type WorkerServerMessage_ModelCallStart struct {
+	ModelCallStart *ModelCallStart `protobuf:"bytes,18,opt,name=model_call_start,json=modelCallStart,proto3,oneof"`
+}
+
+type WorkerServerMessage_ModelCallCancel struct {
+	ModelCallCancel *ModelCallCancel `protobuf:"bytes,19,opt,name=model_call_cancel,json=modelCallCancel,proto3,oneof"`
+}
+
 func (*WorkerServerMessage_RegisterAck) isWorkerServerMessage_Payload() {}
 
 func (*WorkerServerMessage_ToolDispatch) isWorkerServerMessage_Payload() {}
@@ -426,6 +486,10 @@ func (*WorkerServerMessage_RegisterError) isWorkerServerMessage_Payload() {}
 func (*WorkerServerMessage_AppSessionStart) isWorkerServerMessage_Payload() {}
 
 func (*WorkerServerMessage_AppSessionControl) isWorkerServerMessage_Payload() {}
+
+func (*WorkerServerMessage_ModelCallStart) isWorkerServerMessage_Payload() {}
+
+func (*WorkerServerMessage_ModelCallCancel) isWorkerServerMessage_Payload() {}
 
 type Register struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2196,11 +2260,744 @@ func (x *AppSessionUsage) GetKnown() bool {
 	return false
 }
 
+// ModelCallStart opens a call. Server -> worker.
+type ModelCallStart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// request_id correlates every later message. Server-minted.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// model is the runtime-facing model id the machine advertised as
+	// `model:<id>` -- the router selected on this exact string, so the
+	// worker resolves it without translation.
+	Model string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	// kind selects what the call IS: "chat" (messages -> text) or
+	// "embedding" (embedding_input -> vectors). One field rather than two
+	// message families because everything else about the exchange --
+	// selection, the chunk rule, limits, usage, cancel -- is identical,
+	// and a second family would be a second place for that to drift.
+	Kind     string              `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Messages []*ModelCallMessage `protobuf:"bytes,4,rep,name=messages,proto3" json:"messages,omitempty"`
+	Params   *ModelCallParams    `protobuf:"bytes,5,opt,name=params,proto3" json:"params,omitempty"`
+	// response_format_schema is a JSON Schema for structured output.
+	// Empty means free text. A worker whose runtime cannot honour a
+	// schema must fail the call rather than return prose: the router only
+	// ever sends this to a machine that advertised the capability, so a
+	// silent downgrade here would defeat the gating that put it there.
+	ResponseFormatSchema []byte `protobuf:"bytes,6,opt,name=response_format_schema,json=responseFormatSchema,proto3" json:"response_format_schema,omitempty"`
+	// embedding_input is the kind="embedding" payload.
+	EmbeddingInput []string         `protobuf:"bytes,7,rep,name=embedding_input,json=embeddingInput,proto3" json:"embedding_input,omitempty"`
+	Limits         *ModelCallLimits `protobuf:"bytes,8,opt,name=limits,proto3" json:"limits,omitempty"`
+	// plan_id / task_id attribute the call for the ledger and the portal.
+	PlanId string `protobuf:"bytes,9,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	TaskId string `protobuf:"bytes,10,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// purpose names the platform operation this call serves (planner,
+	// conductor, suggest, embeddings). Carried for the ledger and for the
+	// machine's own logs; it steers nothing.
+	Purpose       string `protobuf:"bytes,11,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallStart) Reset() {
+	*x = ModelCallStart{}
+	mi := &file_worker_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallStart) ProtoMessage() {}
+
+func (x *ModelCallStart) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallStart.ProtoReflect.Descriptor instead.
+func (*ModelCallStart) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ModelCallStart) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetMessages() []*ModelCallMessage {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
+func (x *ModelCallStart) GetParams() *ModelCallParams {
+	if x != nil {
+		return x.Params
+	}
+	return nil
+}
+
+func (x *ModelCallStart) GetResponseFormatSchema() []byte {
+	if x != nil {
+		return x.ResponseFormatSchema
+	}
+	return nil
+}
+
+func (x *ModelCallStart) GetEmbeddingInput() []string {
+	if x != nil {
+		return x.EmbeddingInput
+	}
+	return nil
+}
+
+func (x *ModelCallStart) GetLimits() *ModelCallLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+func (x *ModelCallStart) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+// ModelCallMessage is one turn of the conversation handed to the model.
+type ModelCallMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// role is "system", "user", "assistant" or "tool".
+	Role          string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Content       string `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallMessage) Reset() {
+	*x = ModelCallMessage{}
+	mi := &file_worker_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallMessage) ProtoMessage() {}
+
+func (x *ModelCallMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallMessage.ProtoReflect.Descriptor instead.
+func (*ModelCallMessage) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ModelCallMessage) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *ModelCallMessage) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+// ModelCallParams are the generation knobs.
+//
+// Each optional knob carries an explicit *_set companion because zero
+// is a MEANINGFUL value for both of them: temperature 0 is the setting
+// structured-output prompts actually want, and it is not the same
+// request as "the caller expressed no preference". Reading absent as
+// zero would silently pin every unspecified call to greedy decoding.
+type ModelCallParams struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Temperature     float64                `protobuf:"fixed64,1,opt,name=temperature,proto3" json:"temperature,omitempty"`
+	TemperatureSet  bool                   `protobuf:"varint,2,opt,name=temperature_set,json=temperatureSet,proto3" json:"temperature_set,omitempty"`
+	TopP            float64                `protobuf:"fixed64,3,opt,name=top_p,json=topP,proto3" json:"top_p,omitempty"`
+	TopPSet         bool                   `protobuf:"varint,4,opt,name=top_p_set,json=topPSet,proto3" json:"top_p_set,omitempty"`
+	MaxOutputTokens int64                  `protobuf:"varint,5,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"`
+	Stop            []string               `protobuf:"bytes,6,rep,name=stop,proto3" json:"stop,omitempty"`
+	// seed is a determinism request; runtimes that cannot honour it
+	// ignore it rather than failing.
+	Seed          int64 `protobuf:"varint,7,opt,name=seed,proto3" json:"seed,omitempty"`
+	SeedSet       bool  `protobuf:"varint,8,opt,name=seed_set,json=seedSet,proto3" json:"seed_set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallParams) Reset() {
+	*x = ModelCallParams{}
+	mi := &file_worker_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallParams) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallParams) ProtoMessage() {}
+
+func (x *ModelCallParams) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallParams.ProtoReflect.Descriptor instead.
+func (*ModelCallParams) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ModelCallParams) GetTemperature() float64 {
+	if x != nil {
+		return x.Temperature
+	}
+	return 0
+}
+
+func (x *ModelCallParams) GetTemperatureSet() bool {
+	if x != nil {
+		return x.TemperatureSet
+	}
+	return false
+}
+
+func (x *ModelCallParams) GetTopP() float64 {
+	if x != nil {
+		return x.TopP
+	}
+	return 0
+}
+
+func (x *ModelCallParams) GetTopPSet() bool {
+	if x != nil {
+		return x.TopPSet
+	}
+	return false
+}
+
+func (x *ModelCallParams) GetMaxOutputTokens() int64 {
+	if x != nil {
+		return x.MaxOutputTokens
+	}
+	return 0
+}
+
+func (x *ModelCallParams) GetStop() []string {
+	if x != nil {
+		return x.Stop
+	}
+	return nil
+}
+
+func (x *ModelCallParams) GetSeed() int64 {
+	if x != nil {
+		return x.Seed
+	}
+	return 0
+}
+
+func (x *ModelCallParams) GetSeedSet() bool {
+	if x != nil {
+		return x.SeedSet
+	}
+	return false
+}
+
+// ModelCallLimits are the envelope-owned deadlines.
+type ModelCallLimits struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// timeout_seconds is the WHOLE-CALL ceiling; 0 means the server
+	// default rather than "no limit", because an unbounded generation on
+	// somebody's laptop is a resource leak nobody is watching.
+	TimeoutSeconds int64 `protobuf:"varint,1,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	// idle_timeout_seconds bounds the gap BETWEEN deltas, which is the
+	// measurement that actually distinguishes a slow model from a dead
+	// one. A first token twenty seconds after start is a cold GPU; twenty
+	// seconds of silence after the fifth token is a wedge.
+	IdleTimeoutSeconds int64 `protobuf:"varint,2,opt,name=idle_timeout_seconds,json=idleTimeoutSeconds,proto3" json:"idle_timeout_seconds,omitempty"`
+	// keepalive_seconds is how often the worker must emit a delta with
+	// keepalive=true when it has no content to send. It is the contract
+	// that makes idle_timeout_seconds enforceable rather than a guess:
+	// without it, silence means both "still thinking" and "gone".
+	KeepaliveSeconds int64 `protobuf:"varint,3,opt,name=keepalive_seconds,json=keepaliveSeconds,proto3" json:"keepalive_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ModelCallLimits) Reset() {
+	*x = ModelCallLimits{}
+	mi := &file_worker_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallLimits) ProtoMessage() {}
+
+func (x *ModelCallLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallLimits.ProtoReflect.Descriptor instead.
+func (*ModelCallLimits) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ModelCallLimits) GetTimeoutSeconds() int64 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *ModelCallLimits) GetIdleTimeoutSeconds() int64 {
+	if x != nil {
+		return x.IdleTimeoutSeconds
+	}
+	return 0
+}
+
+func (x *ModelCallLimits) GetKeepaliveSeconds() int64 {
+	if x != nil {
+		return x.KeepaliveSeconds
+	}
+	return 0
+}
+
+// ModelCallDelta is one piece of generated output. Worker -> server.
+type ModelCallDelta struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// seq is monotonic per request; the engine drops out-of-order and
+	// duplicate deltas rather than corrupting the generation.
+	Seq     uint64 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	Content string `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	// keepalive marks a delta that carries no content and exists only to
+	// reset the idle timer. It still takes a seq, so a keepalive can
+	// never be confused with a replayed content delta.
+	Keepalive     bool `protobuf:"varint,4,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallDelta) Reset() {
+	*x = ModelCallDelta{}
+	mi := &file_worker_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallDelta) ProtoMessage() {}
+
+func (x *ModelCallDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallDelta.ProtoReflect.Descriptor instead.
+func (*ModelCallDelta) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ModelCallDelta) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelCallDelta) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *ModelCallDelta) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ModelCallDelta) GetKeepalive() bool {
+	if x != nil {
+		return x.Keepalive
+	}
+	return false
+}
+
+// ModelCallEnd closes a call. Worker -> server.
+type ModelCallEnd struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// finish_reason is "stop", "length", "cancelled", "timeout" or
+	// "error".
+	FinishReason string          `protobuf:"bytes,2,opt,name=finish_reason,json=finishReason,proto3" json:"finish_reason,omitempty"`
+	Usage        *ModelCallUsage `protobuf:"bytes,3,opt,name=usage,proto3" json:"usage,omitempty"`
+	// content is the FULL text for a call the worker did not stream. A
+	// worker that streamed deltas leaves this empty; the engine
+	// concatenates the deltas it accepted. Both are supported because a
+	// small embeddings or classification call has no reason to stream.
+	Content string `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	// embeddings are the kind="embedding" result, one vector per input in
+	// input order.
+	Embeddings []*ModelCallEmbedding `protobuf:"bytes,5,rep,name=embeddings,proto3" json:"embeddings,omitempty"`
+	// error is empty on a clean end.
+	Error string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	// error_code is a stable machine-readable tag when error is set.
+	ErrorCode     string `protobuf:"bytes,7,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallEnd) Reset() {
+	*x = ModelCallEnd{}
+	mi := &file_worker_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallEnd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallEnd) ProtoMessage() {}
+
+func (x *ModelCallEnd) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallEnd.ProtoReflect.Descriptor instead.
+func (*ModelCallEnd) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ModelCallEnd) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelCallEnd) GetFinishReason() string {
+	if x != nil {
+		return x.FinishReason
+	}
+	return ""
+}
+
+func (x *ModelCallEnd) GetUsage() *ModelCallUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *ModelCallEnd) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ModelCallEnd) GetEmbeddings() []*ModelCallEmbedding {
+	if x != nil {
+		return x.Embeddings
+	}
+	return nil
+}
+
+func (x *ModelCallEnd) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ModelCallEnd) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+// ModelCallEmbedding is one vector.
+type ModelCallEmbedding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Values        []float32              `protobuf:"fixed32,1,rep,packed,name=values,proto3" json:"values,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallEmbedding) Reset() {
+	*x = ModelCallEmbedding{}
+	mi := &file_worker_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallEmbedding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallEmbedding) ProtoMessage() {}
+
+func (x *ModelCallEmbedding) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallEmbedding.ProtoReflect.Descriptor instead.
+func (*ModelCallEmbedding) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ModelCallEmbedding) GetValues() []float32 {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+// ModelCallUsage is what the RUNTIME REPORTED about the call.
+//
+// Never inferred. A runtime that reports nothing sets known=false and
+// leaves the counts at zero, and the ledger records billing "unknown"
+// rather than a confident zero (memql#4681). The distinction is
+// load-bearing in exactly one direction: a local call costs no dollars
+// either way, so the only thing an invented count could corrupt is the
+// loop-cap arithmetic that is supposed to notice a runaway.
+type ModelCallUsage struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	InputTokens  int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int64                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	Known        bool                   `protobuf:"varint,3,opt,name=known,proto3" json:"known,omitempty"`
+	// model is what the runtime ACTUALLY ran, which is not always what
+	// was asked for (a quantisation alias, a tag resolving to a digest).
+	// A token count without the model it was spent on cannot be read.
+	Model         string `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallUsage) Reset() {
+	*x = ModelCallUsage{}
+	mi := &file_worker_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallUsage) ProtoMessage() {}
+
+func (x *ModelCallUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallUsage.ProtoReflect.Descriptor instead.
+func (*ModelCallUsage) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ModelCallUsage) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *ModelCallUsage) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *ModelCallUsage) GetKnown() bool {
+	if x != nil {
+		return x.Known
+	}
+	return false
+}
+
+func (x *ModelCallUsage) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+// ModelCallCancel stops a running call. Server -> worker.
+type ModelCallCancel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCallCancel) Reset() {
+	*x = ModelCallCancel{}
+	mi := &file_worker_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCallCancel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCallCancel) ProtoMessage() {}
+
+func (x *ModelCallCancel) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCallCancel.ProtoReflect.Descriptor instead.
+func (*ModelCallCancel) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ModelCallCancel) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelCallCancel) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"\fworker.proto\x12\x17znasllc.memql.worker.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xd5\x06\n" +
+	"\fworker.proto\x12\x17znasllc.memql.worker.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xf9\a\n" +
 	"\x13WorkerClientMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -2217,11 +3014,13 @@ const file_worker_proto_rawDesc = "" +
 	"auditEvent\x12U\n" +
 	"\x10rotation_request\x18\x0f \x01(\v2(.znasllc.memql.worker.v1.RotationRequestH\x00R\x0frotationRequest\x12V\n" +
 	"\x11app_session_chunk\x18\x10 \x01(\v2(.znasllc.memql.worker.v1.AppSessionChunkH\x00R\x0fappSessionChunk\x12P\n" +
-	"\x0fapp_session_end\x18\x11 \x01(\v2&.znasllc.memql.worker.v1.AppSessionEndH\x00R\rappSessionEnd\x1a;\n" +
+	"\x0fapp_session_end\x18\x11 \x01(\v2&.znasllc.memql.worker.v1.AppSessionEndH\x00R\rappSessionEnd\x12S\n" +
+	"\x10model_call_delta\x18\x12 \x01(\v2'.znasllc.memql.worker.v1.ModelCallDeltaH\x00R\x0emodelCallDelta\x12M\n" +
+	"\x0emodel_call_end\x18\x13 \x01(\v2%.znasllc.memql.worker.v1.ModelCallEndH\x00R\fmodelCallEnd\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayload\"\xf1\x06\n" +
+	"\apayload\"\x9e\b\n" +
 	"\x13WorkerServerMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -2236,7 +3035,9 @@ const file_worker_proto_rawDesc = "" +
 	"\x11rotation_response\x18\x0e \x01(\v2).znasllc.memql.worker.v1.RotationResponseH\x00R\x10rotationResponse\x12O\n" +
 	"\x0eregister_error\x18\x0f \x01(\v2&.znasllc.memql.worker.v1.RegisterErrorH\x00R\rregisterError\x12V\n" +
 	"\x11app_session_start\x18\x10 \x01(\v2(.znasllc.memql.worker.v1.AppSessionStartH\x00R\x0fappSessionStart\x12\\\n" +
-	"\x13app_session_control\x18\x11 \x01(\v2*.znasllc.memql.worker.v1.AppSessionControlH\x00R\x11appSessionControl\x1a;\n" +
+	"\x13app_session_control\x18\x11 \x01(\v2*.znasllc.memql.worker.v1.AppSessionControlH\x00R\x11appSessionControl\x12S\n" +
+	"\x10model_call_start\x18\x12 \x01(\v2'.znasllc.memql.worker.v1.ModelCallStartH\x00R\x0emodelCallStart\x12V\n" +
+	"\x11model_call_cancel\x18\x13 \x01(\v2(.znasllc.memql.worker.v1.ModelCallCancelH\x00R\x0fmodelCallCancel\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
@@ -2389,7 +3190,66 @@ const file_worker_proto_rawDesc = "" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x19\n" +
 	"\bcost_usd\x18\x03 \x01(\x01R\acostUsd\x12\x14\n" +
-	"\x05known\x18\x04 \x01(\bR\x05known2y\n" +
+	"\x05known\x18\x04 \x01(\bR\x05known\"\xcf\x03\n" +
+	"\x0eModelCallStart\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12E\n" +
+	"\bmessages\x18\x04 \x03(\v2).znasllc.memql.worker.v1.ModelCallMessageR\bmessages\x12@\n" +
+	"\x06params\x18\x05 \x01(\v2(.znasllc.memql.worker.v1.ModelCallParamsR\x06params\x124\n" +
+	"\x16response_format_schema\x18\x06 \x01(\fR\x14responseFormatSchema\x12'\n" +
+	"\x0fembedding_input\x18\a \x03(\tR\x0eembeddingInput\x12@\n" +
+	"\x06limits\x18\b \x01(\v2(.znasllc.memql.worker.v1.ModelCallLimitsR\x06limits\x12\x17\n" +
+	"\aplan_id\x18\t \x01(\tR\x06planId\x12\x17\n" +
+	"\atask_id\x18\n" +
+	" \x01(\tR\x06taskId\x12\x18\n" +
+	"\apurpose\x18\v \x01(\tR\apurpose\"@\n" +
+	"\x10ModelCallMessage\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\"\xfc\x01\n" +
+	"\x0fModelCallParams\x12 \n" +
+	"\vtemperature\x18\x01 \x01(\x01R\vtemperature\x12'\n" +
+	"\x0ftemperature_set\x18\x02 \x01(\bR\x0etemperatureSet\x12\x13\n" +
+	"\x05top_p\x18\x03 \x01(\x01R\x04topP\x12\x1a\n" +
+	"\ttop_p_set\x18\x04 \x01(\bR\atopPSet\x12*\n" +
+	"\x11max_output_tokens\x18\x05 \x01(\x03R\x0fmaxOutputTokens\x12\x12\n" +
+	"\x04stop\x18\x06 \x03(\tR\x04stop\x12\x12\n" +
+	"\x04seed\x18\a \x01(\x03R\x04seed\x12\x19\n" +
+	"\bseed_set\x18\b \x01(\bR\aseedSet\"\x99\x01\n" +
+	"\x0fModelCallLimits\x12'\n" +
+	"\x0ftimeout_seconds\x18\x01 \x01(\x03R\x0etimeoutSeconds\x120\n" +
+	"\x14idle_timeout_seconds\x18\x02 \x01(\x03R\x12idleTimeoutSeconds\x12+\n" +
+	"\x11keepalive_seconds\x18\x03 \x01(\x03R\x10keepaliveSeconds\"y\n" +
+	"\x0eModelCallDelta\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\tR\acontent\x12\x1c\n" +
+	"\tkeepalive\x18\x04 \x01(\bR\tkeepalive\"\xad\x02\n" +
+	"\fModelCallEnd\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12#\n" +
+	"\rfinish_reason\x18\x02 \x01(\tR\ffinishReason\x12=\n" +
+	"\x05usage\x18\x03 \x01(\v2'.znasllc.memql.worker.v1.ModelCallUsageR\x05usage\x12\x18\n" +
+	"\acontent\x18\x04 \x01(\tR\acontent\x12K\n" +
+	"\n" +
+	"embeddings\x18\x05 \x03(\v2+.znasllc.memql.worker.v1.ModelCallEmbeddingR\n" +
+	"embeddings\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\a \x01(\tR\terrorCode\",\n" +
+	"\x12ModelCallEmbedding\x12\x16\n" +
+	"\x06values\x18\x01 \x03(\x02R\x06values\"\x84\x01\n" +
+	"\x0eModelCallUsage\x12!\n" +
+	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x14\n" +
+	"\x05known\x18\x03 \x01(\bR\x05known\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\"H\n" +
+	"\x0fModelCallCancel\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason2y\n" +
 	"\rWorkerService\x12h\n" +
 	"\x06Stream\x12,.znasllc.memql.worker.v1.WorkerClientMessage\x1a,.znasllc.memql.worker.v1.WorkerServerMessage(\x010\x01B8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
@@ -2405,7 +3265,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 	return file_worker_proto_rawDescData
 }
 
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_worker_proto_goTypes = []any{
 	(*WorkerClientMessage)(nil),   // 0: znasllc.memql.worker.v1.WorkerClientMessage
 	(*WorkerServerMessage)(nil),   // 1: znasllc.memql.worker.v1.WorkerServerMessage
@@ -2432,16 +3292,25 @@ var file_worker_proto_goTypes = []any{
 	(*AppSessionChunk)(nil),       // 22: znasllc.memql.worker.v1.AppSessionChunk
 	(*AppSessionEnd)(nil),         // 23: znasllc.memql.worker.v1.AppSessionEnd
 	(*AppSessionUsage)(nil),       // 24: znasllc.memql.worker.v1.AppSessionUsage
-	nil,                           // 25: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
-	nil,                           // 26: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
-	nil,                           // 27: znasllc.memql.worker.v1.Register.LabelsEntry
-	nil,                           // 28: znasllc.memql.worker.v1.Register.ConcurrencyEntry
-	nil,                           // 29: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	(*timestamppb.Timestamp)(nil), // 30: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 31: google.protobuf.Duration
+	(*ModelCallStart)(nil),        // 25: znasllc.memql.worker.v1.ModelCallStart
+	(*ModelCallMessage)(nil),      // 26: znasllc.memql.worker.v1.ModelCallMessage
+	(*ModelCallParams)(nil),       // 27: znasllc.memql.worker.v1.ModelCallParams
+	(*ModelCallLimits)(nil),       // 28: znasllc.memql.worker.v1.ModelCallLimits
+	(*ModelCallDelta)(nil),        // 29: znasllc.memql.worker.v1.ModelCallDelta
+	(*ModelCallEnd)(nil),          // 30: znasllc.memql.worker.v1.ModelCallEnd
+	(*ModelCallEmbedding)(nil),    // 31: znasllc.memql.worker.v1.ModelCallEmbedding
+	(*ModelCallUsage)(nil),        // 32: znasllc.memql.worker.v1.ModelCallUsage
+	(*ModelCallCancel)(nil),       // 33: znasllc.memql.worker.v1.ModelCallCancel
+	nil,                           // 34: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	nil,                           // 35: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	nil,                           // 36: znasllc.memql.worker.v1.Register.LabelsEntry
+	nil,                           // 37: znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	nil,                           // 38: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	(*timestamppb.Timestamp)(nil), // 39: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 40: google.protobuf.Duration
 }
 var file_worker_proto_depIdxs = []int32{
-	25, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	34, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
 	2,  // 1: znasllc.memql.worker.v1.WorkerClientMessage.register:type_name -> znasllc.memql.worker.v1.Register
 	8,  // 2: znasllc.memql.worker.v1.WorkerClientMessage.heartbeat:type_name -> znasllc.memql.worker.v1.Heartbeat
 	13, // 3: znasllc.memql.worker.v1.WorkerClientMessage.tool_result:type_name -> znasllc.memql.worker.v1.ToolResult
@@ -2450,39 +3319,48 @@ var file_worker_proto_depIdxs = []int32{
 	16, // 6: znasllc.memql.worker.v1.WorkerClientMessage.rotation_request:type_name -> znasllc.memql.worker.v1.RotationRequest
 	22, // 7: znasllc.memql.worker.v1.WorkerClientMessage.app_session_chunk:type_name -> znasllc.memql.worker.v1.AppSessionChunk
 	23, // 8: znasllc.memql.worker.v1.WorkerClientMessage.app_session_end:type_name -> znasllc.memql.worker.v1.AppSessionEnd
-	26, // 9: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
-	6,  // 10: znasllc.memql.worker.v1.WorkerServerMessage.register_ack:type_name -> znasllc.memql.worker.v1.RegisterAck
-	9,  // 11: znasllc.memql.worker.v1.WorkerServerMessage.tool_dispatch:type_name -> znasllc.memql.worker.v1.ToolDispatch
-	10, // 12: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
-	11, // 13: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
-	17, // 14: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
-	7,  // 15: znasllc.memql.worker.v1.WorkerServerMessage.register_error:type_name -> znasllc.memql.worker.v1.RegisterError
-	19, // 16: znasllc.memql.worker.v1.WorkerServerMessage.app_session_start:type_name -> znasllc.memql.worker.v1.AppSessionStart
-	21, // 17: znasllc.memql.worker.v1.WorkerServerMessage.app_session_control:type_name -> znasllc.memql.worker.v1.AppSessionControl
-	27, // 18: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
-	28, // 19: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
-	4,  // 20: znasllc.memql.worker.v1.Register.platform:type_name -> znasllc.memql.worker.v1.PlatformInfo
-	5,  // 21: znasllc.memql.worker.v1.Register.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
-	3,  // 22: znasllc.memql.worker.v1.Register.apps:type_name -> znasllc.memql.worker.v1.AppInfo
-	30, // 23: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
-	30, // 24: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
-	29, // 25: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	3,  // 26: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
-	31, // 27: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
-	14, // 28: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
-	15, // 29: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
-	30, // 30: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
-	30, // 31: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
-	30, // 32: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
-	20, // 33: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
-	24, // 34: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
-	0,  // 35: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
-	1,  // 36: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
-	36, // [36:37] is the sub-list for method output_type
-	35, // [35:36] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	29, // 9: znasllc.memql.worker.v1.WorkerClientMessage.model_call_delta:type_name -> znasllc.memql.worker.v1.ModelCallDelta
+	30, // 10: znasllc.memql.worker.v1.WorkerClientMessage.model_call_end:type_name -> znasllc.memql.worker.v1.ModelCallEnd
+	35, // 11: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	6,  // 12: znasllc.memql.worker.v1.WorkerServerMessage.register_ack:type_name -> znasllc.memql.worker.v1.RegisterAck
+	9,  // 13: znasllc.memql.worker.v1.WorkerServerMessage.tool_dispatch:type_name -> znasllc.memql.worker.v1.ToolDispatch
+	10, // 14: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
+	11, // 15: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
+	17, // 16: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
+	7,  // 17: znasllc.memql.worker.v1.WorkerServerMessage.register_error:type_name -> znasllc.memql.worker.v1.RegisterError
+	19, // 18: znasllc.memql.worker.v1.WorkerServerMessage.app_session_start:type_name -> znasllc.memql.worker.v1.AppSessionStart
+	21, // 19: znasllc.memql.worker.v1.WorkerServerMessage.app_session_control:type_name -> znasllc.memql.worker.v1.AppSessionControl
+	25, // 20: znasllc.memql.worker.v1.WorkerServerMessage.model_call_start:type_name -> znasllc.memql.worker.v1.ModelCallStart
+	33, // 21: znasllc.memql.worker.v1.WorkerServerMessage.model_call_cancel:type_name -> znasllc.memql.worker.v1.ModelCallCancel
+	36, // 22: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
+	37, // 23: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	4,  // 24: znasllc.memql.worker.v1.Register.platform:type_name -> znasllc.memql.worker.v1.PlatformInfo
+	5,  // 25: znasllc.memql.worker.v1.Register.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
+	3,  // 26: znasllc.memql.worker.v1.Register.apps:type_name -> znasllc.memql.worker.v1.AppInfo
+	39, // 27: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
+	39, // 28: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
+	38, // 29: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	3,  // 30: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
+	40, // 31: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
+	14, // 32: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
+	15, // 33: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
+	39, // 34: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
+	39, // 35: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
+	39, // 36: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
+	20, // 37: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
+	24, // 38: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
+	26, // 39: znasllc.memql.worker.v1.ModelCallStart.messages:type_name -> znasllc.memql.worker.v1.ModelCallMessage
+	27, // 40: znasllc.memql.worker.v1.ModelCallStart.params:type_name -> znasllc.memql.worker.v1.ModelCallParams
+	28, // 41: znasllc.memql.worker.v1.ModelCallStart.limits:type_name -> znasllc.memql.worker.v1.ModelCallLimits
+	32, // 42: znasllc.memql.worker.v1.ModelCallEnd.usage:type_name -> znasllc.memql.worker.v1.ModelCallUsage
+	31, // 43: znasllc.memql.worker.v1.ModelCallEnd.embeddings:type_name -> znasllc.memql.worker.v1.ModelCallEmbedding
+	0,  // 44: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
+	1,  // 45: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
+	45, // [45:46] is the sub-list for method output_type
+	44, // [44:45] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }
@@ -2499,6 +3377,8 @@ func file_worker_proto_init() {
 		(*WorkerClientMessage_RotationRequest)(nil),
 		(*WorkerClientMessage_AppSessionChunk)(nil),
 		(*WorkerClientMessage_AppSessionEnd)(nil),
+		(*WorkerClientMessage_ModelCallDelta)(nil),
+		(*WorkerClientMessage_ModelCallEnd)(nil),
 	}
 	file_worker_proto_msgTypes[1].OneofWrappers = []any{
 		(*WorkerServerMessage_RegisterAck)(nil),
@@ -2509,6 +3389,8 @@ func file_worker_proto_init() {
 		(*WorkerServerMessage_RegisterError)(nil),
 		(*WorkerServerMessage_AppSessionStart)(nil),
 		(*WorkerServerMessage_AppSessionControl)(nil),
+		(*WorkerServerMessage_ModelCallStart)(nil),
+		(*WorkerServerMessage_ModelCallCancel)(nil),
 	}
 	file_worker_proto_msgTypes[12].OneofWrappers = []any{
 		(*ToolStream_StdoutChunk)(nil),
@@ -2525,7 +3407,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -379,6 +379,9 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "install.updateStack": "scripts/install/update-stack.sh",
   "install.seedBootstrap": "scripts/install/seed-bootstrap.sh",
   "install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
+  // The local-model probe (epic memql#4676). "Found nothing" is a SUCCESS
+  // here: install, uninstall, repair and update never require inference.
+  "install.detectOllama": "scripts/install/detect-ollama.sh",
   "install.verifyFrontDoor": "scripts/install/verify-frontdoor.sh",
   "install.magicLink": "scripts/install/magic-link.sh",
   "install.enrolmentLink": "scripts/install/enrolment-link.sh",

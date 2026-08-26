@@ -152,11 +152,17 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.updateStack":       "scripts/install/update-stack.sh",
 	"install.seedBootstrap":     "scripts/install/seed-bootstrap.sh",
 	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
-	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
-	"install.magicLink":         "scripts/install/magic-link.sh",
-	"install.enrolmentLink":     "scripts/install/enrolment-link.sh",
-	"install.recoveryKey":       "scripts/install/recovery-key.sh",
-	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
+	// The local-model probe (epic memql#4676). It is the one install
+	// capability whose "found nothing" answer is a SUCCESS: install,
+	// uninstall, repair and update never require inference (design D8), so a
+	// machine with no model runtime is a perfectly good outcome rather than a
+	// prerequisite failure.
+	"install.detectOllama":    "scripts/install/detect-ollama.sh",
+	"install.verifyFrontDoor": "scripts/install/verify-frontdoor.sh",
+	"install.magicLink":       "scripts/install/magic-link.sh",
+	"install.enrolmentLink":   "scripts/install/enrolment-link.sh",
+	"install.recoveryKey":     "scripts/install/recovery-key.sh",
+	"install.removeArtifact":  "scripts/install/remove-artifact.sh",
 
 	// Tenant lifecycle (epic memql#3852, task memql#3853). The deterministic
 	// backends behind the fleet control plane's provisioning actions.

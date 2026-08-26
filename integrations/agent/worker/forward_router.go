@@ -65,6 +65,13 @@ type ForwardRouter struct {
 
 	mu       sync.Mutex
 	inflight map[string]*forwardCall
+
+	// Model calls park in their own table under their own lock. Separate
+	// because they are a different payload with a different lifetime, and
+	// sharing one map would make an id collision between the two families a
+	// silent cross-delivery rather than a miss.
+	modelMu       sync.Mutex
+	modelInflight map[string]*modelForwardCall
 }
 
 // peerManagerSender is the production PeerSender: look the replica up by node
@@ -111,10 +118,11 @@ func newForwardRouter(sender PeerSender, self func() (string, string), logger *s
 		self = func() (string, string) { return "", "" }
 	}
 	return &ForwardRouter{
-		sender:   sender,
-		self:     self,
-		logger:   logger,
-		inflight: make(map[string]*forwardCall),
+		sender:        sender,
+		self:          self,
+		logger:        logger,
+		inflight:      make(map[string]*forwardCall),
+		modelInflight: make(map[string]*modelForwardCall),
 	}
 }
 

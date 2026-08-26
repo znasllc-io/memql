@@ -344,6 +344,24 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 			ssink.DispatchStream(payload.WorkerForwardStream)
 		}
 
+	case *nodev1.NodeServerMessage_ModelForwardResponse:
+		// Terminal answer for a model call this node forwarded (memql#4676).
+		pc.mu.Lock()
+		msink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if msink != nil {
+			msink.DispatchModel(payload.ModelForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_ModelForwardDelta:
+		// Generated tokens from that machine, relayed across the hop.
+		pc.mu.Lock()
+		dsink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if dsink != nil {
+			dsink.DispatchModelDelta(payload.ModelForwardDelta)
+		}
+
 	case *nodev1.NodeServerMessage_DeployControlForwardResponse:
 		// Reply to a deploy-control forward this node originated. Set on the
 		// bff; no-op otherwise.

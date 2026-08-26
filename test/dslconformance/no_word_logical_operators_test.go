@@ -23,7 +23,24 @@ func blankQuotedAndComments(line string) string {
 	var b strings.Builder
 	inDouble := false
 	inSingle := false
+	// ESCAPES ARE HONOURED, and they have to be. Without this a `\"` inside a
+	// description closed the string, so the REST of the line was scanned as
+	// code -- and any ordinary prose after a quoted phrase ("... and ...") was
+	// reported as an infix boolean operator. A false positive here is worse
+	// than a miss: it teaches an author that quoting a phrase in a description
+	// is forbidden, which is not a rule this repo has.
+	escaped := false
 	for _, r := range line {
+		if escaped {
+			escaped = false
+			b.WriteRune(' ')
+			continue
+		}
+		if r == '\\' && (inDouble || inSingle) {
+			escaped = true
+			b.WriteRune(' ')
+			continue
+		}
 		switch r {
 		case '"':
 			if !inSingle {

@@ -36,6 +36,7 @@ automatically.
 | Layer | Mechanism | Scope | Self-heals? | Where |
 |---|---|---|---|---|
 | **0. Kill-switch** | cumulative call + est-$ **latch** → terminal 402, never drains | process (per-scope: #1144) | **No (latches)** | `component/memql/ai_guard.go` |
+| 0b. Same layers, local models | the four checks above, applied to fleet calls at the provider seam | process + per-scope, **shared state** | as above | `component/memql/ai_guard_fleet.go` |
 | 1. Rate ceiling | calls/window → synthetic 429 | process, per-lane | yes (drains) | `ai_guard.go` |
 | 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `ai_guard.go` |
 | 2. Automation budget | executions/window → skip; bounded fail-open | process, per-automation | yes (window) | `component/automations/budget.go`, `cluster_guard.go` |
@@ -45,6 +46,47 @@ automatically.
 Layer 0 is the backstop **behind** every other layer: even when a higher
 layer is generous or a loop's terminal condition is loose, the cumulative
 kill-switch caps total spend.
+
+## Where the chokepoint is (and why it moved)
+
+Every layer below is described in terms of a single point every LLM call
+passes. Until local models landed that point was the HTTP transport, and the
+statement "every chat/messages completion leaves the process through one
+`guardedTransport`" was complete — the guard was path-agnostic precisely
+because there was exactly one way out of the process.
+
+A **fleet call has no `*http.Client` at all**. It leaves over the
+WorkerService stream to a model on one of the user's own machines
+(epic [memql#4676](https://github.com/znasllc-io/memql/issues/4676)), so it
+would have passed no gate whatever. A runaway loop on a free model is still a
+runaway loop: it burns a laptop's battery, occupies the machine its owner is
+trying to work on, and converges on nothing.
+
+So there are now **two entry points into the same guard**, not two guards:
+
+| Path | Entry point | State |
+|---|---|---|
+| Vendor HTTP (OpenAI, Anthropic) | `guardedTransport.RoundTrip` | the shared `llmGuard` |
+| Fleet / local models | `GuardLocalModelCall`, called from the fleet provider's one call seam (`fleet_provider.go`) | **the same** shared `llmGuard` |
+
+Both run the same four checks in the same order — latch, loop breaker, rate
+ceiling, cumulative accounting — and both read and write the same counters.
+That shared state is what stops the two paths from disagreeing about how many
+calls a runaway has made. `TestTheFleetProviderItselfPassesTheGuard` holds
+that a call placed through the registered fleet provider passes the guard.
+
+**One thing differs, and only this: the dollar figure is zero.** Nobody was
+billed for a local call, so charging it would park work over money that was
+never spent — and the more someone leans on hardware they already own, the
+sooner their plans would stop, which is exactly backwards. The **call**
+tallies are unchanged, process-wide and per-scope. This is the same split
+memql#4362 made for subscription spend, arriving for a second reason; see
+`recordAndMaybeLatchCost` and `TokenState.SpentLocal`.
+
+The fleet fingerprint (`FleetCallFingerprint`) keys on the model and the exact
+conversation, deliberately **not** on the plan id, task id or purpose: those
+vary across a genuine loop, and folding one in would make every repetition
+look novel — defeating the cheap catch the breaker exists to be.
 
 ## Layer 0 — the kill-switch (`ai_guard.go`)
 

@@ -293,7 +293,12 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			// The merge happens HERE, once, on the way out of the store --
 			// so no caller can accidentally match on the cockpit's map alone
 			// and quietly ignore the labels the owner set.
-			Labels:          MergeLabels(rowStringMap(row, "labels"), rowStringMap(row, "operatorLabels")),
+			Labels: MergeLabels(rowStringMap(row, "labels"), rowStringMap(row, "operatorLabels")),
+			// Read from operatorLabels ALONE, deliberately not from the
+			// merge one line above (epic memql#4676): the cockpit rewrites
+			// `labels` on every reconnect, so an opt-in found there was
+			// granted by the machine rather than by its owner.
+			SharedInference: parseAdvertisedBool(rowStringMap(row, "operatorLabels")[SharedInferenceLabel]),
 			Concurrency:     rowUint32Map(row, "concurrency"),
 			ActiveCount:     rowInt(row, "activeCount"),
 			ConnectedNodeId: rowString(row, "connectedNodeId"),
@@ -585,4 +590,73 @@ func stringsFrom(v any) []string {
 		}
 	}
 	return out
+}
+
+// SharedInferenceWorkers returns every machine in the cluster, with the
+// owner's shared-inference opt-in resolved (epic memql#4676, task memql#4678).
+//
+// THE ONE CROSS-OWNER READ IN THIS PACKAGE, and it runs under the ENGINE'S OWN
+// operator identity -- the campaigns precedent (component/campaigns/worker.go
+// systemActorContext), for the reason stated there: v1:worker:registration
+// declares the composite clusterOwner tier, the read gate resolves that tier
+// through auth.IsClusterOwner() and has no other way in, and an escape hatch
+// in the enforcement layer would be available to every caller that can reach
+// it where an identity is only as powerful as the queries it is used for.
+//
+// It exists to serve calls with NO ACTING USER. Every user-scoped call routes
+// through WorkersForOwner, which cannot see another user's machines at all,
+// and that is the property this method must not undermine: it is deliberately
+// on a second interface (SharedFleetStore) so the user-scoped code paths do
+// not have it in reach.
+func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	res, err := s.Engine.Execute(systemFleetContext(ctx), `query allWorkersWithStatus()`)
+	if err != nil {
+		return nil, fmt.Errorf("shared fleet read: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	rows := outputPayloadRows(res.OutputPayload())
+	out := make([]Candidate, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		id := rowString(row, "id")
+		if id == "" {
+			continue
+		}
+		operator := rowStringMap(row, "operatorLabels")
+		out = append(out, Candidate{
+			RegistrationId:  id,
+			Name:            rowString(row, "name"),
+			DisplayName:     rowString(row, "displayName"),
+			Capabilities:    rowStringList(row, "capabilities"),
+			Labels:          MergeLabels(rowStringMap(row, "labels"), operator),
+			SharedInference: parseAdvertisedBool(operator[SharedInferenceLabel]),
+			Concurrency:     rowUint32Map(row, "concurrency"),
+			ActiveCount:     rowInt(row, "activeCount"),
+			ConnectedNodeId: rowString(row, "connectedNodeId"),
+			LastSelectedAt:  rowTime(row, "lastSelectedAt"),
+			LastSeenAt:      rowTime(row, "lastSeenAt"),
+			RevokedAt:       rowTime(row, "revokedAt"),
+			OwnerUserId:     rowString(row, "ownerUserId"),
+		})
+	}
+	return out, nil
+}
+
+// systemFleetActor is the subject the cluster's own model calls act as. It is
+// not a user id and resolves to no identity row; its only purpose is to be a
+// legible `sub` in an audit line.
+const systemFleetActor = "system:fleet-inference"
+
+func systemFleetContext(ctx context.Context) context.Context {
+	claims := map[string]any{"sub": systemFleetActor, "role": "owner"}
+	ctx = auth.ContextWithClaims(ctx, claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: systemFleetActor, Role: auth.RoleOwner})
 }

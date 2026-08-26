@@ -230,8 +230,8 @@ func TestDelegationProbeAgreesWithSelection(t *testing.T) {
 	}
 }
 
-// TestAppVendorIsNamed: the ledger groups by vendor across metered and
-// subscription spend, so an app whose vendor is unknown must say so
+// TestAppVendorIsNamed: the ledger groups by vendor across spend.Metered and
+// spend.Subscription spend, so an app whose vendor is unknown must say so
 // rather than borrowing somebody else's name.
 func TestAppVendorIsNamed(t *testing.T) {
 	for app, want := range map[string]string{
@@ -246,7 +246,7 @@ func TestAppVendorIsNamed(t *testing.T) {
 }
 
 // TestCockpitAppMapsAFixtureSessionToAnExecutorResult is design §9.2: a
-// finished session becomes an ExecutorResult carrying subscription billing
+// finished session becomes an ExecutorResult carrying spend.Subscription billing
 // and the artifact ids, so the planner sees what the run cost and what it
 // produced without knowing anything about app sessions.
 func TestCockpitAppMapsAFixtureSessionToAnExecutorResult(t *testing.T) {
@@ -291,11 +291,11 @@ func TestCockpitAppMapsAFixtureSessionToAnExecutorResult(t *testing.T) {
 	// The accounting consequence, which is the point of carrying billing at
 	// all: this spend does NOT burn the plan's dollar ceiling.
 	if got.CountsAgainstDollarCeiling() {
-		t.Fatal("subscription spend must not count against the dollar ceiling")
+		t.Fatal("spend.Subscription spend must not count against the dollar ceiling")
 	}
-	metered, subscription := planner.SplitSpend(got)
-	if metered != 0 || subscription != 1250 {
-		t.Fatalf("split = (%d metered, %d subscription), want (0, 1250)", metered, subscription)
+	spend := planner.SplitSpend(got)
+	if spend.Metered != 0 || spend.Subscription != 1250 {
+		t.Fatalf("split = (%d spend.Metered, %d spend.Subscription), want (0, 1250)", spend.Metered, spend.Subscription)
 	}
 }
 
@@ -314,11 +314,11 @@ func TestBillingVocabularyIsOneVocabulary(t *testing.T) {
 	}
 	// And the mapper agrees with both.
 	if billingOrUnknown(workerservice.BillingSubscription) != planner.BillingSubscription {
-		t.Error("billingOrUnknown does not map subscription through")
+		t.Error("billingOrUnknown does not map spend.Subscription through")
 	}
 	if billingOrUnknown("something-else") != planner.BillingUnknown {
-		t.Error("an unrecognised billing value must map to unknown, not to metered -- the " +
-			"executor seam defaults empty to metered on its own, and doing it twice would " +
+		t.Error("an unrecognised billing value must map to unknown, not to spend.Metered -- the " +
+			"executor seam defaults empty to spend.Metered on its own, and doing it twice would " +
 			"hide a genuinely unknown value behind the fail-safe")
 	}
 }

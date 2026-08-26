@@ -69,6 +69,17 @@ func (l *meshLink) Send(nodeId string, msg *nodev1.NodeClientMessage) bool {
 		l.cancels = append(l.cancels, payload.WorkerForwardCancel.GetRequestId())
 		l.mu.Unlock()
 		l.handler.CancelForwardedRequest(context.Background(), payload.WorkerForwardCancel.GetRequestId())
+	case *nodev1.NodeClientMessage_ModelForwardRequest:
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			l.handler.HandleForwardedModelCall(context.Background(), payload.ModelForwardRequest, l.back)
+		}()
+	case *nodev1.NodeClientMessage_ModelForwardCancel:
+		l.mu.Lock()
+		l.cancels = append(l.cancels, payload.ModelForwardCancel.GetRequestId())
+		l.mu.Unlock()
+		l.handler.CancelForwardedModelCall(context.Background(), payload.ModelForwardCancel.GetRequestId())
 	}
 	return true
 }
@@ -80,6 +91,10 @@ func (l *meshLink) back(msg *nodev1.NodeServerMessage) error {
 		l.router.Dispatch(payload.WorkerForwardResponse)
 	case *nodev1.NodeServerMessage_WorkerForwardStream:
 		l.router.DispatchStream(payload.WorkerForwardStream)
+	case *nodev1.NodeServerMessage_ModelForwardResponse:
+		l.router.DispatchModel(payload.ModelForwardResponse)
+	case *nodev1.NodeServerMessage_ModelForwardDelta:
+		l.router.DispatchModelDelta(payload.ModelForwardDelta)
 	}
 	return nil
 }

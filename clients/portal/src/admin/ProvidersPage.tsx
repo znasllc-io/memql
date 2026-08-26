@@ -12,6 +12,8 @@ import {
   Select,
   TextInput,
 } from "../ui";
+import { LocalModelsPanel } from "../fleet/LocalModelsPanel";
+import { useFleetModels } from "../fleet/useFleetModels";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { surfaceById } from "./urls";
 import { useAdminAccess } from "./useAdminConsole";
@@ -83,6 +85,11 @@ export function ProvidersPage(): ReactNode {
   const isOwner = role === "owner";
   const status = useProviderStatus(isOwner);
   const actions = useProviderActions(status.reload);
+  // ABOVE the early returns, and gated by `isOwner` the way useProviderStatus
+  // is rather than by position: a hook after a conditional return is called on
+  // some renders and not others, which React reports as "rendered more hooks
+  // than during the previous render" and which unmounts the whole subtree.
+  const fleet = useFleetModels(isOwner);
 
   if (surface === undefined) return null;
   if (!isOwner) {
@@ -132,6 +139,24 @@ export function ProvidersPage(): ReactNode {
             )}
           </div>
         )}
+      </Band>
+
+      {/* Local models FIRST (epic memql#4676). The ordering is the
+          recommendation, the same way federation leads Anthropic's block
+          below: a model on a machine the user already owns costs nothing per
+          token and sends no prompt to a vendor. Listing it under the cloud
+          providers would describe a neutrality this product does not have. */}
+      <Band
+        title="Local models"
+        meta="Live: what your machines are offering right now, not what they offered when this page loaded"
+      >
+        <LocalModelsPanel
+          models={fleet.models}
+          cloudConfigured={status.rows.some((row) => row.available)}
+          loading={fleet.loading}
+          error={fleet.error}
+          onReload={fleet.reload}
+        />
       </Band>
 
       <Band

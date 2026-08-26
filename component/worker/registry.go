@@ -61,6 +61,7 @@ type Worker struct {
 
 	dispatchFn   DispatchFunc
 	appSessionFn AppSessionFunc
+	modelCallFn  ModelCallFunc
 	cancelStream func()
 
 	mu           sync.Mutex

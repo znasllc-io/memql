@@ -62,6 +62,21 @@ type ResolveRequest struct {
 	// Leave empty to use the engine's current-partition default.
 	Partition string
 
+	// CloudConsent is an explicit, human decision to let this call reach a
+	// paid provider when the local one is unavailable (epic memql#4676,
+	// design D2).
+	//
+	// It exists because "park, never fall back" needs a way for a person to
+	// say yes -- and a way that is legible as a decision. It is a REQUEST
+	// FIELD rather than ambient state so it reaches exactly the calls the
+	// consenting surface makes: a stored flag would have to be expired by
+	// somebody, and the somebody is what gets forgotten, leaving a cluster
+	// that "asked once" quietly billing forever.
+	//
+	// Absent is the default everywhere, which is the direction that cannot
+	// spend money by omission.
+	CloudConsent bool
+
 	// ExplicitProvider names a specific provider registry entry
 	// (e.g. "stream54Mini", "streamClaudeSonnet"). Takes precedence
 	// over PolicyName and DefaultProvider when set.
@@ -154,5 +169,8 @@ type CallRecord struct {
 const (
 	BillingMetered      = "metered"
 	BillingSubscription = "subscription"
-	BillingUnknown      = "unknown"
+	// BillingLocal is a call served by a model on one of the user's own
+	// machines (epic memql#4676). Real tokens, no bill.
+	BillingLocal   = "local"
+	BillingUnknown = "unknown"
 )

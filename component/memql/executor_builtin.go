@@ -58,6 +58,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorProviderAuthStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateProviderAuthStatusExpression(ctx)
 		},
+		BuiltinExecutorFleetModels: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetModelsExpression(ctx)
+		},
+		BuiltinExecutorInferenceStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateInferenceStatusExpression(ctx)
+		},
 		BuiltinExecutorProvidersReload: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateProvidersReloadExpression(ctx, args)
 		},

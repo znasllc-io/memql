@@ -48,6 +48,48 @@ export function asQueryClient<T extends object>(stub: T): QueryClient & T {
   // Custom section with them -- duplicating that test's fixture text into the
   // chrome and breaking assertions that have nothing to do with the composer.
   //
+  // THE FIRST-RUN GATE reads inferenceStatus on every authenticated render
+  // (epic memql#4676), for the same reason composedViews is defaulted below:
+  // a call the SHELL makes must not be every test's problem. Left to the
+  // prototype it would dispatch into the test's own executeNamed, and a fake
+  // answering every call with the same rows would decide the gate from a
+  // fixture about something else entirely.
+  //
+  // The default is ELIGIBLE, which is what puts a test straight into the
+  // console it is actually about. A test ABOUT the gate provides its own --
+  // and the gate's own behaviour is tested directly against gateStep, which
+  // needs no fake at all.
+  if (typeof s.inferenceStatus !== "function") {
+    s.inferenceStatus = async () => ({
+      rows: () => [
+        {
+          eligible: true,
+          doorsOpen: ["local"],
+          localEligible: true,
+          localModelCount: 1,
+          eligibleModelIds: ["llama3.1:8b"],
+          cloudConfigured: false,
+          federationConfigured: false,
+          fleetInferenceInstalled: true,
+          minimumContextWindow: 8192,
+        },
+      ],
+      rawNodes: () => [],
+      single: () => null,
+      meta: () => null,
+    });
+  }
+  // fleetModels is read by the Providers page (epic memql#4676). Defaulted to
+  // an EMPTY catalog -- a cluster with no machines paired, which is what every
+  // test that is not about local models is describing.
+  if (typeof s.fleetModels !== "function") {
+    s.fleetModels = async () => ({
+      rows: () => [],
+      rawNodes: () => [],
+      single: () => null,
+      meta: () => null,
+    });
+  }
   // So the default is an EMPTY list. A test about saved views provides its own.
   if (typeof s.composedViews !== "function") {
     s.composedViews = async () => ({

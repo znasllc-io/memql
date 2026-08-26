@@ -280,6 +280,57 @@ concept providerAuthStatus {
   reason      string   @description("Why it cannot be called, in the words of the constructor that refused -- which already names the missing variable or the half-configured federation set. Empty when available.")
 }
 
+/// Virtual projection of ONE MODEL the caller's fleet can run right now (epic memql#4676). Never
+/// persisted -- rows are produced at query time by the `fleetModels` builtin from live worker
+/// registrations, the same shape as v1:platform:dataOrigin and v1:router:modelCatalog.
+///
+/// NEVER PERSISTED, and here the reason is at its sharpest. The answer is which machines are AWAKE
+/// right now, so a stored copy could only ever be a second, staler answer -- and its staleness
+/// would be indistinguishable from the very condition it describes. A row written four minutes ago
+/// saying "llama3.1:8b is available" describes a closed laptop exactly as confidently as an open
+/// one.
+///
+/// SCOPED TO THE CALLER. A model call carries the caller's prompts and routes only to their own
+/// machines (memql#4678), so a catalog showing somebody else's would promise a model the router
+/// will never use -- and would enumerate another user's hardware besides. What this read returns is
+/// the caller's own machines PLUS the shared-inference set, which every user may legitimately reach
+/// for cluster work because their owners opted them in.
+///
+/// ATTRIBUTES ARE THE UNION over the machines behind a model: if one machine can do structured
+/// output, the model can, because a call needing it routes there. The intersection would hide a
+/// capability the fleet actually has whenever one machine under-reports.
+@displayCard(primary="modelId", secondary="machineCount", tertiary="contextWindow", status="online")
+concept fleetModel {
+  modelId           string!  @description("The runtime-facing model id, exactly as the machine advertised it (llama3.1:8b). Also the row id -- there is one row per model and the model is what it is about. The router selected on this exact string, so no translation happens anywhere between the cockpit and a policy naming fleet:<modelId>.")
+  contextWindow     int      @description("Largest context window any machine behind this model advertises, in tokens. Zero means no machine said, which does not meet any floor -- the fail-closed direction, because a guessed window fails as a truncation three layers away that names nothing.")
+  structuredOutput  bool!    @description("Whether at least one machine can honour a response schema for this model. False is what keeps a conductor or planner turn away from a model that would answer prose to a structured prompt -- a parse failure with no readable cause.")
+  embeddings        bool!    @description("Whether at least one machine produces vectors for this model.")
+  online            bool!    @description("Whether at least one machine behind this model is reachable now. A model whose only machine is asleep stays LISTED and reports false: the operator's question is why it is not being used, and an entry that vanished answers with silence.")
+  machineCount      int!     @description("How many machines advertise this model at all.")
+  onlineCount       int!     @description("How many of them are reachable now.")
+  machines          []object @description("One entry per machine: {registrationId, name, displayName, runtimes[], online, busy, activeCount, maxConcurrent}. `busy` is against the ceiling the machine DECLARED for this model; a machine that declared none is never busy, because it asked for no limit and the limit is not the thing to describe it by.")
+}
+
+/// Virtual SINGLE-ROW answer to "can this caller get inference at all, and through which door"
+/// (epic memql#4676, design G). Never persisted. The portal's first-run gate reads it.
+///
+/// ONE ROW BECAUSE IT ANSWERS ONE QUESTION. The gate needs an answer, not material to compute one
+/// -- and eligibility computed in a client is a second implementation that drifts from the one the
+/// router actually applies. Every input is named on the row anyway, so a person looking at a gate
+/// they do not understand can see exactly what it read.
+@displayCard(primary="eligible", secondary="localModelCount", tertiary="minimumContextWindow")
+concept inferenceStatus {
+  eligible                 bool!    @description("Whether ANY of the three doors is open. This is what the first-run gate branches on.")
+  doorsOpen                []string @description("Which of local | federation | apiKey are currently usable, in that order of preference. Empty means the gate has something to ask for.")
+  localEligible            bool!    @description("Whether an online fleet machine advertises a model meeting the MINIMUM CAPABILITY PROFILE: structured output plus the context floor. Deliberately not 'any model at all' -- a fleet whose only model cannot do structured output would pass a naive gate and then refuse every conductor turn, which is a worse place to put a person than the door they were on.")
+  localModelCount          int!     @description("How many models the caller's fleet offers, eligible or not. Separates 'you have no machines' from 'your machines run nothing that qualifies'.")
+  eligibleModelIds         []string @description("The models that met the profile, so the gate can say which one it is about to use.")
+  cloudConfigured          bool!    @description("Whether any paid provider is configured and callable on this node.")
+  federationConfigured     bool!    @description("Whether Anthropic workload identity federation is fully configured (memql#4333). Read through the same predicate the AI providers page reads, so the two cannot disagree about whether a door is open.")
+  fleetInferenceInstalled  bool!    @description("Whether the node answering this request can place fleet model calls at all. Distinguishes 'your machines are asleep' from 'this node has no worker service' -- identical from a page, entirely different fixes.")
+  minimumContextWindow     int!     @description("The context floor localEligible applied, published so the gate's recommendation and its check cannot drift. It is a floor for the GATE; what enforces capability per CALL is the catalog gating the router applies.")
+}
+
 /// Virtual single-row RESULT of an owner-only `providersReload` (epic memql#4440). Never persisted:
 /// an action's outcome is a reply, not a record. What IS recorded is the v1:identity:auditEvent line
 /// naming who asked.

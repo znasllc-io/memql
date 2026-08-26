@@ -52,6 +52,13 @@ func fleetCallSites() []struct {
 		// owner argument, which is the point of memql#4351's collapse.
 		{"myWorkersWithStatus", nil, "agent/worker/store.go WorkersForOwner"},
 		{"routingPolicyForOwner", nil, "agent/worker/store.go RoutingPolicyForOwner"},
+		// The one CROSS-OWNER read in the package (epic memql#4676): the
+		// machines whose owners opted in to cluster system work. It takes no
+		// ownerUserId argument -- the narrowing it needs is not "one owner"
+		// but "every owner who opted in", which is resolved in Go from
+		// operatorLabels, so the query is the unnarrowed cluster-owner read
+		// and runs under the engine's own operator identity.
+		{"allWorkersWithStatus", nil, "agent/worker/store.go SharedInferenceWorkers"},
 		{"touchWorkerSelected", []string{"registrationId"}, "agent/worker/store.go TouchWorkerSelected"},
 		// ownerUserId is ABSENT, and that absence is the memql#4406 change:
 		// v1:worker:invocation declares the composite owner tier and marks the
@@ -163,15 +170,36 @@ func TestFleetCallSitesResolveAndDeclareTheirArguments(t *testing.T) {
 			continue
 		}
 		declared := map[string]bool{}
+		var required []string
 		if fn.ArgsSchema != nil {
 			for _, f := range fn.ArgsSchema.Fields {
 				declared[f.Name] = true
+				if !f.Optional {
+					required = append(required, f.Name)
+				}
 			}
 		}
-		if len(site.args) == 0 && len(declared) > 0 {
-			t.Errorf("%s (%s): the caller passes no arguments, but the construct declares %d. "+
+		// The check is about REQUIRED fields, which is what the message has
+		// always said. It used to compare against the DECLARED count, which
+		// made an optional-only args block indistinguishable from a caller
+		// that forgot everything -- and allWorkersWithStatus has exactly that
+		// shape: one optional `ownerUserId` that narrows the cluster-owner
+		// read to a single owner, deliberately unpassed by the caller that
+		// wants every owner (epic memql#4676).
+		passed := map[string]bool{}
+		for _, name := range site.args {
+			passed[name] = true
+		}
+		missing := make([]string, 0, len(required))
+		for _, name := range required {
+			if !passed[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			t.Errorf("%s (%s): the caller does not pass required field(s) %v. "+
 				"A required field left unpassed is not refused here -- check the caller.",
-				site.fn, site.where, len(declared))
+				site.fn, site.where, missing)
 			continue
 		}
 		for _, name := range site.args {

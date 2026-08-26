@@ -479,6 +479,21 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	return b.String()
 }
 
+// FleetModels -- List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the shared-inference set; a model call carries the caller's prompts and routes only to their machines. Feeds the portal's Providers page and the fleet machine cards.
+type FleetModelsArgs struct {
+}
+
+// FleetModels calls the engine builtin fleetModels.
+func (qc *QueryClient) FleetModels(ctx context.Context, args FleetModelsArgs) (*Result, error) {
+	call := FleetModelsBuild(args)
+	return qc.executeNamed(ctx, "fleetModels", call)
+}
+
+func FleetModelsBuild(args FleetModelsArgs) string {
+	_ = args
+	return "builtin fleetModels()"
+}
+
 // HarnessTrace -- Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142).
 type HarnessTraceArgs struct {
 	PlanId string
@@ -497,6 +512,21 @@ func HarnessTraceBuild(args HarnessTraceArgs) string {
 	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// InferenceStatus -- Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate.
+type InferenceStatusArgs struct {
+}
+
+// InferenceStatus calls the engine builtin inferenceStatus.
+func (qc *QueryClient) InferenceStatus(ctx context.Context, args InferenceStatusArgs) (*Result, error) {
+	call := InferenceStatusBuild(args)
+	return qc.executeNamed(ctx, "inferenceStatus", call)
+}
+
+func InferenceStatusBuild(args InferenceStatusArgs) string {
+	_ = args
+	return "builtin inferenceStatus()"
 }
 
 // IntegrationStatus -- Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only.
