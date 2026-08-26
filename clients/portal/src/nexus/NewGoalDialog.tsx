@@ -12,11 +12,11 @@ import { nexusPath } from "./urls";
 // ===========================================================================
 // THIS REVERSES A DECISION THIS FILE'S NEIGHBOURS USED TO STATE
 // ===========================================================================
-// NexusIndexPage's header said "NOTHING IN THIS CONSOLE CREATES ONE" and its
-// empty state told the reader goals come from asking an agent. That was true
-// and it is not any more; both have been rewritten rather than left standing,
-// because a superseded argument sitting beside its replacement reads as the
-// live one.
+// The index page's header (GoalsPage today) said "NOTHING IN THIS CONSOLE
+// CREATES ONE" and its empty state told the reader goals come from asking an
+// agent. That was true and it is not any more; both have been rewritten
+// rather than left standing, because a superseded argument sitting beside its
+// replacement reads as the live one.
 //
 // ===========================================================================
 // NO NEW WIRE SURFACE
@@ -34,6 +34,12 @@ import { nexusPath } from "./urls";
 // spent, and a goal over the threshold parks in awaitingFeedback for the
 // person who asked. Adding startPlan would step over all of that from a
 // button, which is exactly the bypass that doc exists to prevent.
+//
+// The startPlan click DOES exist -- one lifecycle stage later. A goal whose
+// planning finished parks at `queued`, which the concept defines as "waiting
+// for a human to click Run", and RunGoal.tsx renders exactly that click,
+// exactly there. Two buttons, two stages: this one starts sizing, that one
+// starts spend.
 //
 // ===========================================================================
 // THE PICKUP, VERIFIED AGAINST CODE RATHER THAN AGAINST THE COMMENT

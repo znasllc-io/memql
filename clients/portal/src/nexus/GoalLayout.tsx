@@ -5,6 +5,8 @@ import { Badge, Callout, Container, PageHeader, Skeleton, Tabs } from "../ui";
 import { useGoalWorld } from "./feed/useGoalWorld";
 import { GoalPicker } from "./GoalPicker";
 import { NewGoalAction } from "./NewGoalDialog";
+import { RunGoalButton } from "./RunGoal";
+import { toneForStatus } from "./status";
 import { useGoals, type Goal } from "./useGoals";
 import { NEXUS_SURFACES, surfacePath } from "./urls";
 import type { GoalWorld } from "./scene/world";
@@ -87,7 +89,18 @@ export function GoalLayout(): ReactNode {
               </div>
             </>
           }
-          meta={status === "" ? undefined : <Badge tone={toneForStatus(status)}>{status}</Badge>}
+          meta={
+            status === "" ? undefined : (
+              <span className="inline-flex items-center gap-2">
+                <Badge tone={toneForStatus(status)}>{status}</Badge>
+                {/* The Run a queued goal is, by definition, waiting for --
+                    dsl/planner/concepts.memql: "planning complete, tasks
+                    emitted, waiting for a human to click Run". RunGoal.tsx's
+                    header says why it renders here and nowhere else. */}
+                {status === "queued" ? <RunGoalButton planId={planId} /> : null}
+              </span>
+            )
+          }
         />
 
         <div className="-mt-2">
@@ -137,27 +150,8 @@ export function GoalLayout(): ReactNode {
   );
 }
 
-// The plan's own status vocabulary, in the portal's tones. Not a general
-// status mapper -- `awaitingFeedback` is a WARN here because it is waiting on
-// the person reading the page, which is a different thing from a task that
-// happens to be running.
-export function toneForStatus(status: string): "ok" | "warn" | "danger" | "neutral" {
-  switch (status) {
-    case "succeeded":
-      return "ok";
-    case "failed":
-      return "danger";
-    case "running":
-    case "routing":
-    case "planning":
-    case "awaitingFeedback":
-    case "needsAgent":
-      return "warn";
-    default:
-      return "neutral";
-  }
-}
+// toneForStatus moved to ./status: the goals list and the recent-goals strip
+// read it too, and both sit across the GoalLayout -> GoalPicker import edge.
 
-// A goal the picker knows about but the feed has not read yet. Exported for
-// the index page, which redirects on it.
+// A goal the picker knows about but the feed has not read yet.
 export type { Goal };

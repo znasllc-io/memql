@@ -5,7 +5,8 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useLive } from "../cluster/useLive";
 import { useMyAccess } from "../cluster/useMyAccess";
 
-// The caller's goals, for the picker and the recent-goals strip.
+// The caller's goals, for the goals list, the picker and the recent-goals
+// strip.
 //
 // ONE READ: `plansForUser` (dsl/planner/queries.memql), owner-scoped by
 // `requestedBy==actor.userId` server-side. Its own header says why it had to
@@ -50,9 +51,6 @@ export interface GoalsState {
   goals: Goal[];
   loading: boolean;
   error: string;
-  // The goal `/nexus` opens: the running one if there is one, otherwise the
-  // most recent. "" when the caller has no goals at all.
-  mostRecentId: string;
   reload: () => void;
 }
 
@@ -142,7 +140,6 @@ export function useGoals(): GoalsState {
     // sentence on screen for one frame on every load.
     loading: !connected || live.state === "seeding",
     error: live.error,
-    mostRecentId: goals[0]?.id ?? "",
     reload: live.reload,
   };
 }

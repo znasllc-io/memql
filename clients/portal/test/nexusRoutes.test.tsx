@@ -87,19 +87,25 @@ describe("the Nexus section", () => {
     expect(await screen.findByRole("heading", { name: /row detail/i })).toBeTruthy();
   });
 
-  it("redirects /nexus to the caller's most recent goal, running first", async () => {
+  it("lists the caller's goals at /nexus, running first, statuses shown", async () => {
     const h = nexusHarness({
       goals: [
-        goalRow("plan-old", "An older goal", "succeeded", "2026-08-01T09:00:00Z"),
+        goalRow("plan-old", "An older goal", "failed", "2026-08-01T09:00:00Z"),
         goalRow("plan-spring", "Build a spring catalog", "running", "2026-07-01T09:00:00Z"),
       ],
     });
     renderNexus(h, "/nexus");
-    // The RUNNING goal wins even though it is older -- that is the ordering
-    // the design asks for, and the trap is that a plain newest-first sort
-    // would pick the other one.
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /build a spring catalog/i })).toBeTruthy(),
+    const list = within(await screen.findByRole("list", { name: /your goals/i }));
+    const [first, second] = list.getAllByRole("listitem");
+    if (first === undefined || second === undefined) throw new Error("expected two goal rows");
+    // The RUNNING goal is pinned on top even though it is older -- the same
+    // ordering the redirect used to encode, now visible instead of implied.
+    expect(within(first).getByRole("link", { name: /build a spring catalog/i })).toBeTruthy();
+    // ...and the older goal SAYS it failed. Three failed goals all reading as
+    // "planning" in a status-less <select> is the incident this page is for.
+    expect(within(second).getByText("failed")).toBeTruthy();
+    expect(within(second).getByRole("link", { name: /an older goal/i }).getAttribute("href")).toBe(
+      "/nexus/plan-old",
     );
   });
 
