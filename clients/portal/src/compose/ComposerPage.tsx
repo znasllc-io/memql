@@ -3,8 +3,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton, TextInput } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { ErrorNotice, Skeleton, TextInput } from "../ui";
 import { ComposeButton } from "./ComposeLayout";
 import { ComposerSection } from "./ComposerSection";
 import {
@@ -73,7 +73,7 @@ export function ComposerEditPage(): ReactNode {
   const { viewId = "" } = useParams<{ viewId: string }>();
   const { view, loading, error, missing } = useSavedView(viewId);
 
-  if (error) return <ErrorMessage>Failed to read the view: {error}</ErrorMessage>;
+  if (error) return <ErrorNotice sentence="Could not read this view." detail={error} />;
   if (loading) return <Skeleton variant="rows" rows={5} />;
   if (missing || view === null) {
     return <Empty>You have no saved view with that id.</Empty>;
@@ -178,7 +178,7 @@ function Composer({
       </header>
 
       {saveFailed || saveError ? (
-        <ErrorMessage>Could not save the view: {saveFailed || saveError}</ErrorMessage>
+        <ErrorNotice sentence="The view was not saved." next="Your arrangement is still here; try saving again." detail={saveFailed || saveError} />
       ) : null}
 
       {draft.conceptIds.map((conceptId) => (

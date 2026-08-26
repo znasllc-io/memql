@@ -1,10 +1,20 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { ErrorMessage } from "../components/StatusMessage";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "../modules/ModulesRefused";
-import { Badge, Band, Button, ConfirmDialog, Container, DataText, EmptyState, PageHeader, Skeleton } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  ConfirmDialog,
+  Container,
+  DataText,
+  EmptyState,
+  ErrorNotice,
+  PageHeader,
+  Skeleton,
+} from "../ui";
 import { OriginBadge } from "./OriginBadge";
 import {
   healthFor,
@@ -65,7 +75,7 @@ export function DataOriginsPage(): ReactNode {
         />
 
         {state.error !== "" ? (
-          <ErrorMessage>Could not read the data origins: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read what this cluster owns and mirrors." detail={state.error} />
         ) : state.loading && state.origins.length === 0 ? (
           <Skeleton variant="rows" rows={6} />
         ) : connected.length === 0 ? (
@@ -350,7 +360,7 @@ function DeadLetterBand({ connectors }: { connectors: readonly string[] }): Reac
         </span>
       }
     >
-      {error !== "" ? <ErrorMessage>Could not read the queue: {error}</ErrorMessage> : null}
+      {error !== "" ? <ErrorNotice sentence="Could not read the outbound queue." detail={error} /> : null}
       {!loaded ? (
         <p className="text-sm text-muted">Not loaded. The queue is empty on a healthy cluster.</p>
       ) : entries.length === 0 ? (

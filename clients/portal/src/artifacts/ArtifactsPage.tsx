@@ -4,7 +4,6 @@ import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/cl
 
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Band,
   Button,
@@ -13,6 +12,7 @@ import {
   Container,
   DataText,
   EmptyState,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -193,14 +193,14 @@ export function ArtifactsPage(): ReactNode {
             </span>
           </div>
 
-          {archiveError ? <ErrorMessage>Could not archive: {archiveError}</ErrorMessage> : null}
+          {archiveError ? <ErrorNotice sentence="That artifact was not archived." next="It is still in your Library; try again." detail={archiveError} /> : null}
 
           {search ? (
             <SearchResults state={searchState} hits={hits} label={label} onSelect={select} />
           ) : conceptsError ? (
-            <ErrorMessage>Could not read the concept registry: {conceptsError}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the concept registry, so the Library cannot be drawn." detail={conceptsError} />
           ) : error ? (
-            <ErrorMessage>Could not read artifacts: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read your Library." next="Reload the page to read it again." detail={error} />
           ) : rows.length === 0 ? (
             loading || conceptsLoading ? (
               <Skeleton variant="rows" rows={5} />
@@ -321,7 +321,7 @@ function SearchResults({
   label: string;
   onSelect: (rowId: string) => void;
 }): ReactNode {
-  if (state.error) return <ErrorMessage>Could not search: {state.error}</ErrorMessage>;
+  if (state.error) return <ErrorNotice sentence="The search did not run." next="Try it again, or narrow what you asked for." detail={state.error} />;
   if (state.loading && hits.length === 0) return <Skeleton variant="rows" rows={3} />;
   if (hits.length === 0) {
     if (!state.searched) return <Skeleton variant="rows" rows={3} />;
@@ -447,7 +447,7 @@ function UploadDropZone({
 
   return (
     <div className="flex flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The upload did not finish." next="Nothing was added to your Library; try the file again." detail={error} /> : null}
       {message ? (
         <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
           {message}
@@ -526,7 +526,7 @@ function NewArtifactForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The artifact was not recorded." next="Check the fields above and try again." detail={error} /> : null}
       {message ? (
         <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
           {message}

@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Badge,
   Band,
@@ -10,6 +9,7 @@ import {
   Checkbox,
   Container,
   EmptyState,
+  ErrorNotice,
   Field,
   PageHeader,
   Select,
@@ -67,7 +67,7 @@ export function LocalAppsPage(): ReactNode {
           {sessions.loading ? (
             <Skeleton />
           ) : sessions.error !== "" ? (
-            <ErrorMessage>{sessions.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the delegated runs." next="Reload the page to read them again." detail={sessions.error} />
           ) : sessions.sessions.length === 0 ? (
             <EmptyState statement="No app session has run yet. One appears here the first time the planner hands a task to a local app." />
           ) : (
@@ -133,7 +133,8 @@ function DelegationPolicyEditor({
   }, [state.policy]);
 
   if (state.loading) return <Skeleton />;
-  if (state.error !== "") return <ErrorMessage>{state.error}</ErrorMessage>;
+  if (state.error !== "")
+    return <ErrorNotice sentence="Could not read your delegation policy." detail={state.error} />;
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -226,7 +227,9 @@ function DelegationPolicyEditor({
         </p>
       </Field>
 
-      {state.saveError === "" ? null : <ErrorMessage>{state.saveError}</ErrorMessage>}
+      {state.saveError === "" ? null : (
+        <ErrorNotice sentence="The delegation policy was not saved." next="What is on screen is your edit, not what the cluster holds." detail={state.saveError} />
+      )}
 
       <div>
         <Button type="submit" disabled={state.saving}>

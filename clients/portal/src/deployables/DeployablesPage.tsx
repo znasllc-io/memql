@@ -4,13 +4,13 @@ import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/cl
 
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Band,
   Button,
   Container,
   DataText,
   EmptyState,
+  ErrorNotice,
   Field,
   PageHeader,
   Select,
@@ -99,9 +99,9 @@ export function DeployablesPage(): ReactNode {
 
         <Band title="Deployables" meta={`${rows.length}`} panel>
           {conceptsError ? (
-            <ErrorMessage>Could not read the concept registry: {conceptsError}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the concept registry, so this page cannot be drawn." detail={conceptsError} />
           ) : error ? (
-            <ErrorMessage>Could not read deployables: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read what this cluster hosts." next="Reload the page to read it again." detail={error} />
           ) : rows.length === 0 ? (
             loading || conceptsLoading ? (
               <Skeleton variant="rows" rows={5} />
@@ -229,12 +229,12 @@ function NewDeployableForm({
 
   return (
     <form onSubmit={submit} className="flex max-w-3xl flex-col gap-2">
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The deployable was not created." next="Check the fields below and try again." detail={error} /> : null}
       {domain === "" ? (
-        <ErrorMessage>
-          This cluster did not tell the console which domain it serves, so a hostname cannot be
-          composed here.
-        </ErrorMessage>
+        <ErrorNotice
+          sentence="This cluster has not told the console which domain it serves, so a hostname cannot be composed here."
+          next="Ask a cluster owner to set the cluster's domain."
+        />
       ) : null}
 
       <div className="flex flex-wrap items-start gap-2">

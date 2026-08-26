@@ -2,8 +2,20 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { Link, useParams } from "react-router-dom";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Breadcrumbs, Button, ConfirmDialog, Container, Field, PageHeader, Select, Skeleton, TextInput } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import {
+  Band,
+  Breadcrumbs,
+  Button,
+  ConfirmDialog,
+  Container,
+  ErrorNotice,
+  Field,
+  PageHeader,
+  Select,
+  Skeleton,
+  TextInput,
+} from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useCampaignDetail, useCampaigns } from "./useCampaigns";
 import {
@@ -114,7 +126,7 @@ export function CampaignEditorPage(): ReactNode {
   }
 
   if (error) {
-    return <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read your campaigns." next="Reload the page to read them again." detail={error} />;
   }
   if (!creating && !existing && loading) {
     return <Skeleton variant="kv" rows={6} />;
@@ -151,7 +163,7 @@ export function CampaignEditorPage(): ReactNode {
           }
         />
 
-        {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
+        {actionError ? <ErrorNotice sentence="That action did not run." next="The campaign is unchanged; try it again." detail={actionError} /> : null}
         {actionMessage ? (
           <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
             {actionMessage}
@@ -253,7 +265,7 @@ export function CampaignEditorPage(): ReactNode {
         {creating ? null : (
           <Band title="Per-recipient outcomes" meta="one row per recipient, filled in as the send runs">
             {detail.error ? (
-              <ErrorMessage>Could not read delivery records: {detail.error}</ErrorMessage>
+              <ErrorNotice sentence="Could not read this campaign's deliveries." detail={detail.error} />
             ) : detail.deliveries.length === 0 ? (
               <Empty>
                 {status === "sending"

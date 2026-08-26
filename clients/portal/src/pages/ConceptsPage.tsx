@@ -1,10 +1,10 @@
-import { Container, Skeleton, TextInput } from "../ui";
+import { Container, ErrorNotice, Skeleton, TextInput } from "../ui";
 import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
 import {
   domainSummaries,
   filterConcepts,
@@ -118,7 +118,7 @@ export function ConceptsPage(): ReactNode {
         </div>
 
         {error ? (
-          <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read the concept registry." next="Reload the page to read it again." detail={error} />
         ) : loading && concepts.length === 0 ? (
           <Skeleton variant="rows" rows={6} />
         ) : concepts.length === 0 ? (

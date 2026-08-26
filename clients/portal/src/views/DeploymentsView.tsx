@@ -23,8 +23,7 @@ import { useDeployConsole } from "../deploy/useDeployConsole";
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { overlayAbsenceOf, overlayAbsenceStatement } from "../deploy/noOverlay";
-import { ErrorMessage } from "../components/StatusMessage";
-import { DataText } from "../ui";
+import { DataText, ErrorNotice } from "../ui";
 import { ViewElement } from "./ViewElement";
 import { Band, type ViewProps } from "./ViewLayout";
 
@@ -133,15 +132,16 @@ export function DeploymentsView({
           </p>
         ) : error ? (
           <div className="mt-3">
-            <ErrorMessage>Could not read the deployment: {error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this deployment." detail={error} />
           </div>
         ) : null}
         {actionError ? (
           <div className="mt-3">
-            <ErrorMessage>
-              {actionError}
-              <RefusalAuditLink id={actionAuditEventId} />
-            </ErrorMessage>
+            <ErrorNotice
+              sentence="That deployment action did not run."
+              next={<RefusalAuditLink id={actionAuditEventId} />}
+              detail={actionError}
+            />
           </div>
         ) : null}
         {actionMessage ? (

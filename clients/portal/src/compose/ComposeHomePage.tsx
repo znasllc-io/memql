@@ -2,8 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useConcepts } from "../cluster/useConcepts";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Checkbox, Skeleton, TextInput } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Checkbox, ErrorNotice, Skeleton, TextInput } from "../ui";
 import { filterConcepts } from "../concepts/registry";
 import { VIEWS } from "../views/registry";
 import { ComposeButton } from "./ComposeLayout";
@@ -63,7 +63,7 @@ export function ComposeHomePage(): ReactNode {
           Your views
         </h2>
         {saved.error ? (
-          <ErrorMessage>Failed to read your views: {saved.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read your saved views." next="Reload the page to read them again." detail={saved.error} />
         ) : saved.loading ? (
           <Skeleton variant="rows" rows={4} />
         ) : saved.views.length === 0 ? (
@@ -120,7 +120,7 @@ export function ComposeHomePage(): ReactNode {
         </div>
 
         {error ? (
-          <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read the concept registry, so there is nothing to compose over yet." detail={error} />
         ) : loading ? (
           <Skeleton variant="rows" rows={4} />
         ) : matches.length === 0 ? (

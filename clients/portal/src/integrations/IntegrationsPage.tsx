@@ -8,8 +8,8 @@ import {
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Container, PageHeader, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Band, Button, Container, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
@@ -99,7 +99,7 @@ export function IntegrationsPage(): ReactNode {
             page is only declining to ask.
           </Empty>
         ) : error ? (
-          <ErrorMessage>Could not read the integration registry: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read what this cluster has wired to the outside world." detail={error} />
         ) : loading && status === null ? (
           <Skeleton variant="rows" rows={4} />
         ) : reports.length === 0 ? (
@@ -107,7 +107,7 @@ export function IntegrationsPage(): ReactNode {
         ) : (
           <>
             {probeError ? (
-              <ErrorMessage>The live check could not run: {probeError}</ErrorMessage>
+              <ErrorNotice sentence="The live check did not run, so what is listed is registration rather than health." detail={probeError} />
             ) : null}
 
             <Band title="Configured" meta="registration is not configuration">

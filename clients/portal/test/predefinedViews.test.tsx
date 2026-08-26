@@ -606,7 +606,7 @@ describe("the Deployments view", () => {
 
   it("says the read failed rather than showing a stale-looking blank", async () => {
     renderView({ role: "owner", deployFails: true }, "/views/deployments");
-    await waitFor(() => expect(screen.getByText(/Could not read the deployment/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read this deployment/)).toBeTruthy());
   });
 
   it("keeps deploy selection on history click and opens the row dialog from View", async () => {

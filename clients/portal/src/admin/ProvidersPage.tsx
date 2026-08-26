@@ -1,11 +1,11 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 
-import { ErrorMessage } from "../components/StatusMessage";
 import {
   Badge,
   Band,
   Button,
   Callout,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -119,13 +119,13 @@ export function ProvidersPage(): ReactNode {
         </div>
         {status.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read provider status: {status.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read which models this cluster can call." detail={status.error} />
           </div>
         )}
         {actions.state.message === "" ? null : (
           <div className="mt-3">
             {actions.state.failed ? (
-              <ErrorMessage>{actions.state.message}</ErrorMessage>
+              <ErrorNotice sentence="That action did not finish." detail={actions.state.message} />
             ) : (
               <Callout tone="ok" title="Done">{actions.state.message}</Callout>
             )}

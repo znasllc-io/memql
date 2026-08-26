@@ -5,13 +5,13 @@ import {
   Checkbox,
   ConfirmDialog,
   DataText,
+  ErrorNotice,
   Field,
   FormRow,
   RadioGroup,
   Textarea,
   TextInput,
 } from "../../ui";
-import { ErrorMessage } from "../../components/StatusMessage";
 import type { CheckResult, ReleaseRow, ReleasesState } from "./useReleases";
 
 // The Releases card: cutting a version of MemQL itself, and the history of
@@ -78,12 +78,12 @@ export function ReleasesCard({ state }: { state: ReleasesState }): ReactNode {
     <>
       {state.error ? (
         <div className="mb-3">
-          <ErrorMessage>Could not read the release state: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read the release state." detail={state.error} />
         </div>
       ) : null}
       {state.actionError ? (
         <div className="mb-3">
-          <ErrorMessage>{state.actionError}</ErrorMessage>
+          <ErrorNotice sentence="That release action did not run." next="Nothing was cut or published; try it again." detail={state.actionError} />
         </div>
       ) : null}
       {state.lastCut ? (

@@ -2,8 +2,16 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Module } from "@znasllc-io/memql-sdk-core/client";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Button, Container, DataText, PageHeader, Skeleton } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  Container,
+  DataText,
+  ErrorNotice,
+  PageHeader,
+  Skeleton,
+} from "../ui";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "./ModulesRefused";
 import { groupByKind, KIND_BLURBS, KIND_LABELS, stateTone, useModulesInventory } from "./useModules";
@@ -50,7 +58,7 @@ export function ModulesPage(): ReactNode {
         />
 
         {state.error !== "" ? (
-          <ErrorMessage>Could not read the module inventory: {state.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read this cluster's modules." detail={state.error} />
         ) : inventory === null ? (
           <Skeleton variant="rows" rows={8} />
         ) : (

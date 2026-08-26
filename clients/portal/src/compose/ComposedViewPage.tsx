@@ -7,8 +7,8 @@ import { useRowDetail } from "../cluster/useConceptRows";
 import { useViewRows } from "../cluster/useViewRows";
 import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { RowDetailDialog } from "../components/RowDetailDialog";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Container, EmptyState, PageHeader, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Container, EmptyState, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
 import { ArrangementBands } from "./ArrangementBands";
 import { PopulationMeta, SectionHeader } from "./ComposeLayout";
@@ -38,7 +38,7 @@ export function ComposedViewPage(): ReactNode {
   const { viewId = "" } = useParams<{ viewId: string }>();
   const { view, loading, error, missing } = useSavedView(viewId);
 
-  if (error) return <ErrorMessage>Failed to read the view: {error}</ErrorMessage>;
+  if (error) return <ErrorNotice sentence="Could not read this view." detail={error} />;
   if (loading) return <Skeleton variant="rows" rows={4} />;
   if (missing || view === null) {
     return (
@@ -112,7 +112,7 @@ function SavedSection({
   const detail = useRowDetail(arrangement.conceptId, rowId);
 
   if (data.registryError) {
-    return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read the concept registry, so this view cannot be drawn." detail={data.registryError} />;
   }
   if (concept === undefined) {
     if (status !== "connected") {

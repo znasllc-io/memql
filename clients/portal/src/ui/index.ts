@@ -15,6 +15,7 @@ export { Container } from "./Container";
 export { DataText, type DataKind } from "./DataText";
 export { ConfirmDialog, Dialog, type DialogSize } from "./Dialog";
 export { EmptyState } from "./EmptyState";
+export { ErrorNotice } from "./ErrorNotice";
 export { Field, Select, TextInput, Textarea } from "./Field";
 export { FormActions, FormRow } from "./FormRow";
 export { LabelChips } from "./LabelChips";

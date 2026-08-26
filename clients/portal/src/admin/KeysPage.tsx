@@ -3,13 +3,13 @@ import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { ErrorMessage } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Elsewhere, Reading, Refused } from "./AdminLayout";
 import { signingKeyRows, SIGNING_KEY_CONCEPT } from "./rows";
 import { surfaceById } from "./urls";
 import { lastRotation, useAdminAccess, useAuditTrail, useSigningKeys } from "./useAdminConsole";
+import { ErrorNotice } from "../ui";
 
 // Signing keys.
 //
@@ -91,7 +91,7 @@ export function KeysPage(): ReactNode {
         ) : null}
         {keys.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read the key feed: {keys.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this cluster's signing keys." detail={keys.error} />
           </div>
         )}
       </Band>
