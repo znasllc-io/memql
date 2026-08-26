@@ -266,7 +266,7 @@ function main() {
     local timeout
     timeout="$(cap_param timeout "900")"
     RECOVERY_TARGET="$(cap_param recoveryTarget "")"
-    KEEP="$(cap_param keep "false")"
+    KEEP="$(cap_bool_str keep false)"
 
     DRILL="${CLUSTER}-drill"
     [[ "$SCRATCH_NS" == "$SRC_NS" ]] && SAME_NS=true || SAME_NS=false

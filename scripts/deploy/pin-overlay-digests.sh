@@ -33,7 +33,7 @@ function main() {
     local overlayPath digests dry count
     overlayPath="$(cap_param overlayPath "")"
     digests="$(cap_param digests "{}")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require overlayPath "$overlayPath"
 
     # Count the digest entries deterministically (jq when present; else a

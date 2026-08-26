@@ -65,6 +65,28 @@ the executor can drive it and record its result without scraping human prose.
    `CAP_PARAMS_STDIN` env opt-in) -- a multi-key JSON object resolves every
    key, regardless of how many `cap_param` reads follow (#2508).
 
+   **Booleans have one spelling and one reader (#4629 / #4631).** A bare
+   `--dryRun` and `--dryRun=true` resolve to the SAME value, `"true"`; `"1"`,
+   `"yes"`, `"y"` and `"on"` are accepted as truthy too (case-insensitively),
+   and `""` / `"false"` / `"0"` / `"no"` / `"n"` / `"off"` as falsey. Anything
+   else is **refused** with exit 2 rather than guessed, because a reader cannot
+   know a flag's polarity — `--dryRun` is safe when true, `--purgeKeyVault` is
+   safe when false — so there is no default for a typo that fails closed in
+   both directions.
+
+   `cap_bool <name> [default]` (branch form) and `cap_bool_str <name>
+   [default]` (value form) are the **only** sanctioned readers. A boolean guard
+   must fail **closed**, and a hand-rolled `[[ "$DRY_RUN" == "true" ]]` is what
+   made one fail open: the parser wrote `"1"`, every consumer tested `"true"`,
+   and `scripts/release/release-engine.sh --dryRun` published a public GitHub
+   release while its own `--help` said it would create nothing. The rule is
+   enforced, not merely stated —
+   `TestNoCapabilityScriptHandRollsABooleanComparison` fails the build on any
+   capability script that compares a `cap_param` result to a boolean literal,
+   and `TestCapBoolPairsParserAndConsumer` drives the parser and a consumer
+   **together**, which is the pairing whose absence let the original defect sit
+   behind a green gate.
+
 5. **Structured result out.** On **stdout**, the script emits **exactly one**
    JSON envelope (its result) and **nothing else**. All human-readable logging
    goes to **stderr**. This is the rule that lets one stream feed a machine and

@@ -102,8 +102,8 @@ function main() {
     pg="$(cap_param pgMajor "16")"
     ts="$(cap_param timescaledb "2.29.1")"
     tsPrev="$(cap_param timescaledbPrevious "2.28.3")"
-    smoke="$(cap_param smokeTest "true")"
-    doImport="$(cap_param import "false")"
+    smoke="$(cap_bool_str smokeTest true)"
+    doImport="$(cap_bool_str import false)"
     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
 
     image="memql-db:${tag}"

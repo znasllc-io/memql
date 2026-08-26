@@ -99,8 +99,15 @@ func rkRun(t *testing.T, env []string, args ...string) (stdout string, code int)
 		}
 	}
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, out.String(), errb.String())
+	rkLastStderr = errb.String()
 	return out.String(), code
 }
+
+// rkLastStderr holds the stderr of the most recent rkRun. The operator-facing
+// prose goes to stderr by contract rule 5 (stdout carries the envelope and
+// nothing else), so a test asserting on what an operator READS has to look
+// here rather than at the envelope.
+var rkLastStderr string
 
 func rkParse(t *testing.T, stdout string) (rkEnvelope, rkResult) {
 	t.Helper()
@@ -356,4 +363,79 @@ func shellConstant(t *testing.T, script, name string) string {
 		return value[:end]
 	}
 	return ""
+}
+
+// -----------------------------------------------------------------------
+// memql#4628 -- a claim whose value never reached this step
+// -----------------------------------------------------------------------
+
+// THE FOURTH STATE. Exit 0 with nothing matching RECOVERY_KEY_RE used to be
+// reported as "the claim reported success but emitted no recovery key", which
+// is wrong in the way that matters: the claim did not fail to emit, it
+// SUCCEEDED and rotated. The step reported a failed install while the
+// cluster's break-glass credential had already been consumed and shown to
+// nobody -- and every later run then said the operator still held it.
+//
+// `alreadyClaimed` was doing duty for two facts that need separating: "you
+// were handed this and still have it" and "this was consumed and you never saw
+// it". This is the second one.
+func TestRecoveryKeyReportsAClaimWhoseValueNeverArrived(t *testing.T) {
+	// Exit 0 -- the claim SUCCEEDED -- but stdout carried no key.
+	env := []string{"FAKE_EXIT=0", "FAKE_STDOUT="}
+	stdout, code := rkRun(t, env, rkArgs()...)
+
+	if code == 0 {
+		t.Fatalf("exit 0, but this run has no key to hand the operator; it must not report success: %s", stdout)
+	}
+	_, res := rkParse(t, stdout)
+
+	if res.RecoveryKeyState != "claimedNotCaptured" {
+		t.Errorf("recoveryKeyState = %q, want \"claimedNotCaptured\" -- this must be distinguishable\n"+
+			"from alreadyClaimed, which asserts the operator HOLDS the key. Here nobody does.",
+			res.RecoveryKeyState)
+	}
+	if res.RecoveryKey != "" {
+		t.Errorf("recoveryKey = %q, want empty", res.RecoveryKey)
+	}
+	// The remedy must be named, and it is the one the alreadyClaimed copy
+	// steers people away from.
+	if !strings.Contains(stdout+rkLastStderr, "--reclaim") {
+		t.Errorf("does not name --reclaim, which is the only way back to a key the operator\n"+
+			"can actually store:\n%s\n%s", stdout, rkLastStderr)
+	}
+	// And it must stop blaming a mint failure that did not happen. Matched on
+	// the old wrong sentences rather than on the words "mint failure", because
+	// the corrected copy says "This is NOT a mint failure" and must be allowed
+	// to.
+	for _, wrong := range []string{
+		"emitted no recovery key",
+		"check the identity workload's logs for a mint failure",
+	} {
+		if strings.Contains(stdout+rkLastStderr, wrong) {
+			t.Errorf("still says %q; the claim did not fail to emit -- it SUCCEEDED and rotated:\n%s\n%s",
+				wrong, stdout, rkLastStderr)
+		}
+	}
+}
+
+// The alreadyClaimed copy must not assert the operator holds the key. The
+// cluster records that a claim happened; it cannot know the value reached a
+// human, and asserting it did is what made the #4628 state permanent.
+func TestRecoveryKeyDoesNotAssertTheOperatorHoldsAnAlreadyClaimedKey(t *testing.T) {
+	env := []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrAlreadyClaimed}
+	stdout, code := rkRun(t, env, rkArgs()...)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stdout)
+	}
+	// The sentence that was wrong: an unconditional claim of possession.
+	if strings.Contains(rkLastStderr, "If you still hold it") {
+		t.Errorf("still says \"If you still hold it, keep it -- it is the live key\", which asserts\n" +
+			"possession the cluster cannot verify (memql#4628)")
+	}
+	if !strings.Contains(rkLastStderr, "cannot know whether the value reached you") {
+		t.Errorf("does not say the cluster cannot know whether the value reached the operator:\n%s", rkLastStderr)
+	}
+	if !strings.Contains(stdout+rkLastStderr, "--reclaim") {
+		t.Errorf("does not name --reclaim as the remedy:\n%s", rkLastStderr)
+	}
 }

@@ -80,7 +80,7 @@ NODE_COUNT="$(cap_param nodeCount "")"
 REPLICAS="$(cap_param replicas "")"
 NAMESPACE="$(cap_param namespace "memql")"
 DEPLOYMENTS="$(cap_param deployments "")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 # The mesh set: every node-type Deployment that carries request traffic. The
 # database is NOT here -- it is a CNPG Cluster, whose instance count is a

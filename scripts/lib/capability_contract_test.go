@@ -474,7 +474,13 @@ func TestCapParseFlagsUnknownFlagSemantics(t *testing.T) {
 		wantVal  string // asserted only on success
 	}{
 		{name: "declared flag parses", args: []string{"--declared=x"}, wantExit: 0, wantVal: "x"},
-		{name: "declared bare flag parses", args: []string{"--declared"}, wantExit: 0, wantVal: "1"},
+		// A bare declared flag resolves to "true", NOT "1". This expectation was
+		// the assertion that CERTIFIED znasllc-io/memql#4629: the parser was
+		// tested in isolation against the one value no consumer accepted, so the
+		// gate stayed green while every `--dryRun` ran the destructive branch.
+		// Changed deliberately -- see TestCapBoolPairsParserAndConsumer, which
+		// tests the parser and a consumer together so this cannot recur.
+		{name: "declared bare flag parses as true", args: []string{"--declared"}, wantExit: 0, wantVal: "true"},
 		{name: "meta params-stdin needs no declaration", args: []string{"--params-stdin"}, wantExit: 0, wantVal: "defval"},
 		{name: "undeclared k=v flag exits 2", args: []string{"--produkt=x"}, wantExit: 2},
 		{name: "undeclared bare flag exits 2", args: []string{"--produkt"}, wantExit: 2},
@@ -581,4 +587,168 @@ func TestCapParamStdinMultiParam(t *testing.T) {
 	t.Run("env opt-in CAP_PARAMS_STDIN=1", func(t *testing.T) {
 		assert(t, run(t, nil, []string{"CAP_PARAMS_STDIN=1"}))
 	})
+}
+
+// TestCapBoolPairsParserAndConsumer is the gate for znasllc-io/memql#4629 /
+// #4631: a bare `--dryRun` used to parse to the string "1" while every
+// consumer compared against "true", so the guard was skipped and the
+// destructive branch ran. The safety flag failed OPEN.
+//
+// Nothing caught it because nothing tested the parser and a consumer
+// TOGETHER -- TestCapParseFlagsUnknownFlagSemantics asserted the parser's
+// value in isolation, and asserted the harmful one. This test closes that
+// gap by driving a fixture script end to end: a `dryRun` param, a side
+// effect guarded by cap_bool, and an assertion that every truthy spelling
+// reaches the SAME branch.
+//
+// It fails against the pre-fix parser (bare --dryRun took the destructive
+// branch), which is the property that makes it a gate rather than a
+// restatement.
+func TestCapBoolPairsParserAndConsumer(t *testing.T) {
+	root := repoRoot(t)
+	lib := filepath.Join(root, "scripts", "lib", "capability.sh")
+
+	harness := filepath.Join(t.TempDir(), "capbool_harness.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.capBool\" \"cap_bool pairing harness\"\n" +
+		"cap_spec_param \"dryRun\" \"report without acting\"\n" +
+		"cap_parse_flags \"$@\"\n" +
+		// The shape every capability script uses: a destructive branch the
+		// boolean is supposed to guard.
+		"if cap_bool dryRun; then\n" +
+		"    printf 'RESULT=%s\\n' \"dry\"\n" +
+		"else\n" +
+		"    printf 'RESULT=%s\\n' \"destructive\"\n" +
+		"fi\n" +
+		"cap_ok '{}'\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		args     []string
+		wantExit int
+		want     string
+	}{
+		// The three spellings that must be INDISTINGUISHABLE. The first is
+		// the one a human types and the only one that was broken.
+		{name: "bare flag is truthy", args: []string{"--dryRun"}, want: "dry"},
+		{name: "explicit true is truthy", args: []string{"--dryRun=true"}, want: "dry"},
+		{name: "legacy 1 is truthy", args: []string{"--dryRun=1"}, want: "dry"},
+		{name: "yes is truthy", args: []string{"--dryRun=yes"}, want: "dry"},
+		{name: "case is ignored", args: []string{"--dryRun=TRUE"}, want: "dry"},
+
+		// And the falsey spellings must reach the other branch.
+		{name: "omitted is falsey", args: nil, want: "destructive"},
+		{name: "explicit false is falsey", args: []string{"--dryRun=false"}, want: "destructive"},
+		{name: "zero is falsey", args: []string{"--dryRun=0"}, want: "destructive"},
+		{name: "empty is falsey", args: []string{"--dryRun="}, want: "destructive"},
+
+		// A value that is neither is REFUSED rather than silently taking a
+		// branch. cap_bool cannot know a flag's polarity, so it cannot pick a
+		// safe default for a typo; exit 2 (bad param) is the only answer that
+		// fails closed regardless of which branch is the dangerous one.
+		{name: "typo is refused, not guessed", args: []string{"--dryRun=ture"}, wantExit: 2},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", append([]string{harness}, tc.args...)...)
+			cmd.Stdin = nil
+			out, err := cmd.CombinedOutput()
+
+			if tc.wantExit != 0 {
+				if err == nil {
+					t.Fatalf("expected exit %d, got success\noutput:\n%s", tc.wantExit, out)
+				}
+				if code := exitCode(err); code != tc.wantExit {
+					t.Errorf("exit %d, want %d\noutput:\n%s", code, tc.wantExit, out)
+				}
+				line := lastJSONLine(string(out))
+				var env envelope
+				if line == "" || json.Unmarshal([]byte(line), &env) != nil {
+					t.Fatalf("no valid failure envelope\noutput:\n%s", out)
+				}
+				if env.OK || env.Error == nil || env.Error.Code != tc.wantExit {
+					t.Errorf("envelope should carry ok=false error.code=%d; got: %s", tc.wantExit, line)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("harness failed: %v\noutput:\n%s", err, out)
+			}
+			got := parseResult(string(out))
+			if got != tc.want {
+				t.Errorf("took the %q branch, want %q -- a boolean flag whose spelling changes "+
+					"which branch runs is the #4629 defect\noutput:\n%s", got, tc.want, out)
+			}
+		})
+	}
+}
+
+// reCapParamStringCompare matches a capability script comparing a value
+// against a bare boolean string literal -- `[[ "$DRY_RUN" == "true" ]]`,
+// `[ "$KEEP" = "1" ]`, and the negated forms. That hand-rolled comparison IS
+// the #4629 defect: it is the half of the pair that disagreed with the
+// parser, and re-introducing one anywhere re-opens the class.
+// Capture group 1 is the variable NAME being compared, so the finding is
+// attributed to that variable and not to some unrelated one that happens to
+// share the line.
+var reCapParamStringCompare = regexp.MustCompile(
+	`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"?\s*[!=]=\s*"?(?:true|false|1|yes|no)"?`)
+
+// TestNoCapabilityScriptHandRollsABooleanComparison keeps #4629 closed as a
+// CLASS rather than as an instance. The parser fix alone leaves the next
+// boolean param to rediscover the same disagreement; this sweep is what makes
+// cap_bool the only sanctioned reader.
+//
+// It only inspects variables that were sourced from cap_param/cap_flag, since
+// a script comparing some unrelated local against "true" is not this bug.
+func TestNoCapabilityScriptHandRollsABooleanComparison(t *testing.T) {
+	scripts := capabilityScripts(t)
+	if len(scripts) == 0 {
+		t.Fatal("no capability scripts discovered")
+	}
+	// var name -> sourced from cap_param/cap_flag, e.g. DRY_RUN="$(cap_param dryRun ...)"
+	reSourced := regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)=\"?\$\((cap_param|cap_flag)\s`)
+
+	for _, path := range scripts {
+		path := path
+		rel, _ := filepath.Rel(repoRoot(t), path)
+		t.Run(rel, func(t *testing.T) {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			src := string(b)
+
+			sourced := map[string]bool{}
+			for _, m := range reSourced.FindAllStringSubmatch(src, -1) {
+				sourced[m[1]] = true
+			}
+			if len(sourced) == 0 {
+				return
+			}
+
+			for i, line := range strings.Split(src, "\n") {
+				for _, m := range reCapParamStringCompare.FindAllStringSubmatch(line, -1) {
+					name := m[1]
+					if !sourced[name] {
+						continue
+					}
+					t.Errorf("%s:%d compares %s (a cap_param value) against a boolean string literal:\n"+
+						"    %s\n"+
+						"Use `if cap_bool <param>; then` instead. A hand-rolled comparison is what\n"+
+						"made a bare --dryRun fail open (znasllc-io/memql#4629): the parser and the\n"+
+						"consumer disagreed on the spelling of true.",
+						rel, i+1, name, strings.TrimSpace(line))
+				}
+			}
+		})
+	}
 }

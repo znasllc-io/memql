@@ -71,9 +71,9 @@ CONFIRM="$(cap_param confirm "")"
 CLUSTER_NAME="$(cap_param clusterName "")"
 KEY_VAULT_NAME="$(cap_param keyVaultName "")"
 BACKUP_STORAGE="$(cap_param backupStorageAccount "")"
-DELETE_STORES="$(cap_param deleteStores "false")"
-PURGE_KEY_VAULT="$(cap_param purgeKeyVault "false")"
-DRY_RUN="$(cap_param dryRun "false")"
+DELETE_STORES="$(cap_bool_str deleteStores false)"
+PURGE_KEY_VAULT="$(cap_bool_str purgeKeyVault false)"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 DELETED=""
 

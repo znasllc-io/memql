@@ -39,10 +39,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
@@ -179,7 +181,10 @@ func runRecoveryKeyClaim(args []string) int {
 		return 1
 	}
 
+	// claimId is stamped claimed only AFTER the plaintext has been successfully
+	// revealed -- see the reveal-before-commit block below (#4628).
 	plain := ""
+	claimId := ""
 	if row.IsClaimed() {
 		// --reclaim: rotate. The predecessor is deactivated and a fresh key
 		// takes its place, with rotatedFrom recording the lineage. This is the
@@ -208,11 +213,8 @@ func runRecoveryKeyClaim(args []string) int {
 			fmt.Fprintf(os.Stderr, "recovery-key claim: retire previous key: %v\n", err)
 			return 1
 		}
-		if err := recStore.Claim(ctx, newId, "", time.Now().UTC()); err != nil {
-			fmt.Fprintf(os.Stderr, "recovery-key claim: stamp claimed: %v\n", err)
-			return 1
-		}
 		plain = newPlain
+		claimId = newId
 		fmt.Fprintf(os.Stderr, "recovery-key claim: rotated -- retired %s, minted %s for %s\n",
 			recoverykey.CanonicalId(row.ID), recoverykey.CanonicalId(newId), owner)
 	} else {
@@ -244,19 +246,66 @@ func runRecoveryKeyClaim(args []string) int {
 			fmt.Fprintf(os.Stderr, "recovery-key claim: retire the unclaimed placeholder: %v\n", err)
 			return 1
 		}
-		if err := recStore.Claim(ctx, newId, "", time.Now().UTC()); err != nil {
-			fmt.Fprintf(os.Stderr, "recovery-key claim: stamp claimed: %v\n", err)
-			return 1
-		}
 		plain = newPlain
-		fmt.Fprintf(os.Stderr, "recovery-key claim: claimed %s for %s\n",
+		claimId = newId
+		fmt.Fprintf(os.Stderr, "recovery-key claim: minted %s for %s\n",
 			recoverykey.CanonicalId(newId), owner)
 	}
 
+	// REVEAL BEFORE COMMIT (memql#4628). The rotation used to be stamped
+	// claimed BEFORE the plaintext left the process, so between the stamp and
+	// the write the credential was irreversibly spent while its only copy was
+	// a local variable. Anything that lost that write -- a broken pipe, a
+	// closed capture, a transport hiccup mid-stream -- left the cluster
+	// asserting an operator held a break-glass key that had been shown to
+	// nobody, and every later run then said "the key claimed earlier is still
+	// the live one".
+	//
+	// Writing first inverts which failure is possible. What this order can
+	// leave behind is a key that was REVEALED but not stamped -- and that is a
+	// state the invariant already tolerates, because an unclaimed live key is
+	// exactly what recoverykey.EnsureForAllOwners leaves on every boot. The
+	// operator has a working credential either way.
+	//
 	// The ONE line on real stdout. Nothing else is written here, so
 	// `KEY=$(kubectl exec ... -- /app/memql recovery-key claim)` holds the key
 	// and only the key.
-	fmt.Fprintln(realStdout, plain)
+	if _, err := fmt.Fprintln(realStdout, plain); err != nil {
+		// NOT stamped, so nothing was spent. Say that plainly: the remedy is
+		// to run the same command again, not --reclaim.
+		fmt.Fprintf(os.Stderr, "recovery-key claim: the key could not be written to stdout: %v\n", err)
+		fmt.Fprintln(os.Stderr, "recovery-key claim: it was NOT stamped claimed, so it is still the "+
+			"live unclaimed key. Run this again to reveal it; --reclaim is not needed.")
+		return 1
+	}
+	// Confirm the write actually landed before spending the key. A pipe or a
+	// tty answers Sync with EINVAL / ENOTTY / ENODEV -- there is nothing to
+	// flush and that is not a failure -- so only a real error counts. This is
+	// the file-redirect case; for the `kubectl exec` pipe the write error above
+	// is the signal.
+	if err := realStdout.Sync(); err != nil &&
+		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTTY) && !errors.Is(err, syscall.ENODEV) {
+		fmt.Fprintf(os.Stderr, "recovery-key claim: the key could not be flushed to stdout: %v\n", err)
+		fmt.Fprintln(os.Stderr, "recovery-key claim: it was NOT stamped claimed, so it is still the "+
+			"live unclaimed key. Run this again to reveal it; --reclaim is not needed.")
+		return 1
+	}
+
+	if err := recStore.Claim(ctx, claimId, "", time.Now().UTC()); err != nil {
+		// The key above IS the live key and the operator now holds it; only
+		// the claimed stamp is missing. Exiting non-zero here would discard a
+		// credential that works, so this reports and succeeds -- and names the
+		// one consequence, which is that a later run treats the key as
+		// unclaimed and rotates it.
+		fmt.Fprintf(os.Stderr, "recovery-key claim: the key above is live and yours, but stamping it "+
+			"claimed failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, "recovery-key claim: store it now. Because the stamp is missing, a "+
+			"later run of this command will mint a REPLACEMENT and this one will stop working.")
+		return 0
+	}
+
+	fmt.Fprintf(os.Stderr, "recovery-key claim: claimed %s for %s\n",
+		recoverykey.CanonicalId(claimId), owner)
 	fmt.Fprintln(os.Stderr, "recovery-key claim: store this somewhere the cluster is not. It is shown "+
 		"once, it is refused while the owner can still sign in normally, and it works exactly once.")
 	return 0

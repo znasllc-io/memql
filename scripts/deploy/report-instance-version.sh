@@ -72,7 +72,7 @@ NAMESPACE="$(cap_param namespace "memql")"
 OVERLAY_PATH="$(cap_param overlayPath "")"
 PRODUCT_ENV="$(cap_param productEnv "")"
 DECLARED_REF="$(cap_param declaredRef "")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 RENDERED_REF=""
 RUNNING_IMAGES=""

@@ -55,7 +55,7 @@ function main() {
     tenant="$(cap_param tenant "")"
     db_instances="$(cap_param dbInstances "1")"
     argons="$(cap_param argocdNamespace "argocd")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require tenant "$tenant"
 
     if [[ ! "$db_instances" =~ ^[1-9][0-9]*$ ]]; then

@@ -106,7 +106,7 @@ DB_NODE_SIZE="$(cap_param dbNodeSize "Standard_D2as_v4")"
 ESO_IDENTITY="$(cap_param esoIdentityName "id-eso-memql")"
 DB_IDENTITY="$(cap_param dbIdentityName "id-memql-db")"
 NAMESPACE="$(cap_param namespace "memql")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 : "${REGISTRY_RG:=$RESOURCE_GROUP}"
 : "${BACKUP_RG:=$RESOURCE_GROUP}"
