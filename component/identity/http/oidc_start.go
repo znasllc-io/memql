@@ -106,6 +106,15 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SECURE IS COMPUTED, NOT LITERAL, and CodeQL flags that
+	// (go/cookie-secure-not-set) because it cannot prove the value. The
+	// computation is the correct one and matches the identical pattern in
+	// component/identity/web/invitation.go, which carries the same alert:
+	// this service is reachable over http ONLY under the documented
+	// insecure-transport escape, and a Secure cookie over http is never sent
+	// back -- so hard-coding true would not harden anything, it would break
+	// local development while leaving every real deployment unchanged.
+	// requireSecureRequest above is the control; this follows the transport.
 	http.SetCookie(w, &http.Cookie{
 		Name:     oidcStateCookie,
 		Value:    strings.Join([]string{state, nonce, verifier}, "|"),
@@ -164,6 +173,9 @@ func readOIDCStateCookie(r *http.Request) (string, string, string, bool) {
 // outcome: a verifier that outlives its use is a second chance at a code that
 // should have exactly one.
 func (s *Server) clearOIDCStateCookie(w http.ResponseWriter) {
+	// Secure computed for the reason given at the set site above; an expiry
+	// cookie must carry the same attributes as the one it retires or the
+	// browser keeps both.
 	http.SetCookie(w, &http.Cookie{
 		Name:     oidcStateCookie,
 		Value:    "",
