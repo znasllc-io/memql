@@ -133,3 +133,40 @@ export function mapFromChips(chips: readonly string[]): LabelMap {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Model advertisement labels (epic memql#4676)
+// ---------------------------------------------------------------------------
+//
+// A machine advertises what it can serve as `model:<modelId>` and
+// `runtime:<name>` in its REPORTED labels. Both helpers below read only that
+// half, deliberately: an operator-set `model:` label would be a claim the
+// machine never made, and the router -- which matches on what the machine
+// reports -- would refuse the call it implied.
+//
+// The model id itself contains a colon (`llama3.1:8b`), which is why these
+// parse by PREFIX rather than splitting on the separator. A naive split eats
+// the tag and leaves "llama3.1", which is not a model anything hosts.
+
+const MODEL_PREFIX = "model:";
+const RUNTIME_PREFIX = "runtime:";
+
+export function modelsFromLabels(reported: LabelMap): string[] {
+  const out: string[] = [];
+  for (const key of Object.keys(reported ?? {})) {
+    if (!key.startsWith(MODEL_PREFIX)) continue;
+    const id = key.slice(MODEL_PREFIX.length).trim();
+    if (id !== "") out.push(id);
+  }
+  return out.sort();
+}
+
+export function runtimesFromLabels(reported: LabelMap): string[] {
+  const out: string[] = [];
+  for (const key of Object.keys(reported ?? {})) {
+    if (!key.startsWith(RUNTIME_PREFIX)) continue;
+    const name = key.slice(RUNTIME_PREFIX.length).trim();
+    if (name !== "") out.push(name);
+  }
+  return out.sort();
+}

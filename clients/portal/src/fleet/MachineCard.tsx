@@ -12,7 +12,14 @@ import {
   TextInput,
 } from "../ui";
 import { formatFreshness, formatMoment } from "./format";
-import { chipsFromMap, mapFromChips, parseLabelChip, type MergedLabel } from "./labels";
+import {
+  chipsFromMap,
+  mapFromChips,
+  modelsFromLabels,
+  parseLabelChip,
+  runtimesFromLabels,
+  type MergedLabel,
+} from "./labels";
 import { MachineActivity } from "./MachineActivity";
 import { isWorkerOnline, ONLINE_WINDOW_SECONDS } from "./online";
 import type { Machine, MachineApp } from "./rows";
@@ -276,6 +283,16 @@ export function MachineCard({
           <AppList apps={machine.apps} />
         </div>
 
+        {/* Local models (epic memql#4676). Read from the machine's own
+            reported labels rather than from the catalog: this card is about
+            THIS machine, and a catalog entry is about a model across
+            several. The catalog's view -- who else offers it, whether any of
+            them is awake -- is the Providers page's job. */}
+        <div className="space-y-1 border-t border-line pt-3">
+          <h4 className="text-xs font-medium text-fg">Local models</h4>
+          <ModelChips machine={machine} />
+        </div>
+
         {/* Verbs */}
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <Button size="xs" pressed={expanded} onClick={() => setExpanded((open) => !open)}>
@@ -415,5 +432,42 @@ function AppList({ apps }: { apps: readonly MachineApp[] }): ReactNode {
         </li>
       ))}
     </ul>
+  );
+}
+
+// ModelChips renders the models this machine advertises, from its own
+// reported labels (epic memql#4676).
+//
+// THE SOURCE IS THE REPORTED HALF, and only that half. A model an operator
+// typed into operatorLabels would be a claim the machine never made, and the
+// router would refuse the call it implied -- so a chip for one would be a lie
+// the page told on the machine's behalf. `modelsFromLabels` reads
+// machine.reportedLabels for exactly that reason.
+function ModelChips({ machine }: { machine: Machine }): ReactNode {
+  const models = modelsFromLabels(machine.reportedLabels);
+  const runtimes = runtimesFromLabels(machine.reportedLabels);
+
+  if (models.length === 0) {
+    return (
+      <p className="text-xs text-muted">
+        This machine reports no local models. A cockpit older than the model
+        protocol reports none either, so this is not the same as having none
+        installed.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {models.map((model) => (
+          <Badge key={model} tone="neutral">
+            {model}
+          </Badge>
+        ))}
+      </div>
+      {runtimes.length > 0 ? (
+        <p className="text-xs text-muted">served by {runtimes.join(", ")}</p>
+      ) : null}
+    </div>
   );
 }

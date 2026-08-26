@@ -93,7 +93,7 @@ function SessionRow({ session }: { session: AppSessionCard }): ReactNode {
         <Badge tone={statusTone(session.status)}>{session.status}</Badge>
         <Badge tone={session.billing === "subscription" ? "ok" : "neutral"}>{session.billing}</Badge>
       </span>
-      <span className="text-fg-muted">
+      <span className="text-muted">
         {session.usage.known
           ? `${session.usage.inputTokens + session.usage.outputTokens} tokens`
           : "usage not reported"}
@@ -172,7 +172,7 @@ function DelegationPolicyEditor({
             />
           ))}
         </div>
-        <p className="mt-1 text-xs text-fg-muted">
+        <p className="mt-1 text-xs text-muted">
           The first app on this list that a machine actually has wins. An app
           you do not list is never selected, even on a machine that has it --
           the list is how you say which of your subscriptions to spend.
@@ -192,7 +192,7 @@ function DelegationPolicyEditor({
             />
           ))}
         </div>
-        <p className="mt-1 text-xs text-fg-muted">
+        <p className="mt-1 text-xs text-muted">
           Nothing is delegated by kind unless you list it here. Turning
           delegation on does not silently opt every kind of work in with it.
         </p>
@@ -219,7 +219,7 @@ function DelegationPolicyEditor({
           placeholder="/Users/you/memql-workspaces"
           onChange={(next) => setDraft({ ...draft, workspaceRoot: next })}
         />
-        <p className="mt-1 text-xs text-fg-muted">
+        <p className="mt-1 text-xs text-muted">
           Each run gets its own directory under this root. The cockpit refuses
           a workspace outside its own policy roots, so this is a preference the
           machine still gets to veto.

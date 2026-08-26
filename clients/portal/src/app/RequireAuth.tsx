@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
+import { FirstRunGate } from "../fleet/FirstRunGate";
 import { SignInPage } from "../pages/SignInPage";
 import { Skeleton } from "../ui";
 
@@ -43,8 +44,16 @@ export function RequireAuth(): ReactNode {
   // synthetic local-dev cluster owner, so there is no sign-in to perform and a
   // wall here would be unpassable. The header says so out loud rather than
   // letting an operator assume they authenticated.
+  // FirstRunGate is INSIDE this branch, not around it: a person who is not
+  // signed in has nothing to configure yet, and asking them to pick an
+  // inference source before they have an identity would be asking a question
+  // whose answer is stored against nobody (epic memql#4676, design D9).
   if (status === "signedIn" || status === "authDisabled") {
-    return <Outlet />;
+    return (
+      <FirstRunGate>
+        <Outlet />
+      </FirstRunGate>
+    );
   }
 
   return <SignInPage />;

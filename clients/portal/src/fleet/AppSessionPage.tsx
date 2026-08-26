@@ -53,7 +53,7 @@ export function AppSessionPage(): ReactNode {
               <Badge tone={session.status === "failed" ? "danger" : session.status === "ended" ? "ok" : "neutral"}>
                 {session.status}
               </Badge>
-              {polling ? <span className="ml-2 text-fg-muted">refreshing</span> : null}
+              {polling ? <span className="ml-2 text-muted">refreshing</span> : null}
             </Fact>
             <Fact label="Billing">
               <Badge tone={session.billing === "subscription" ? "ok" : "neutral"}>{session.billing}</Badge>
@@ -75,7 +75,7 @@ export function AppSessionPage(): ReactNode {
             <Fact label="Task">{session.taskId || "none"}</Fact>
           </dl>
           {session.usage.known ? null : (
-            <p className="mt-3 text-xs text-fg-muted">
+            <p className="mt-3 text-xs text-muted">
               This app reported no usage, so the run is billed as
               <span className="font-medium"> unknown</span> rather than as free.
               MemQL records what an app reports and never infers the rest.
@@ -95,7 +95,7 @@ export function AppSessionPage(): ReactNode {
         <Band
           title="Transcript"
           meta={
-            <span className="text-xs text-fg-muted">
+            <span className="text-xs text-muted">
               {session.transcriptBytes} bytes
               {session.transcriptTruncated ? " (truncated)" : ""}
             </span>
@@ -109,7 +109,7 @@ export function AppSessionPage(): ReactNode {
               artifacts below.
             </p>
           ) : null}
-          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded bg-surface-sunken p-3 font-mono text-[11px] leading-relaxed text-fg">
+          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded bg-bg p-3 font-mono text-[11px] leading-relaxed text-fg">
             {session.transcript === ""
               ? isLive(session.status)
                 ? "Waiting for the first output..."
@@ -137,7 +137,7 @@ export function AppSessionPage(): ReactNode {
 function Fact({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
     <div>
-      <dt className="text-fg-muted">{label}</dt>
+      <dt className="text-muted">{label}</dt>
       <dd className="mt-0.5 text-fg">{children}</dd>
     </div>
   );

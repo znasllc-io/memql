@@ -349,6 +349,25 @@ QueryClient.prototype.editDocument = function (this: QueryClient, args: EditDocu
   return this.executeNamed("editDocument", buildEditDocument(args), opts);
 };
 
+/** List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the shared-inference set; a model call carries the caller's prompts and routes only to their machines. Feeds the portal's Providers page and the fleet machine cards. */
+export interface FleetModelsArgs {
+}
+
+export function buildFleetModels(args: FleetModelsArgs): string {
+  void args;
+  return "builtin fleetModels()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetModels(args?: FleetModelsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetModels = function (this: QueryClient, args: FleetModelsArgs = {} as FleetModelsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetModels", buildFleetModels(args), opts);
+};
+
 /** Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142). */
 export interface HarnessTraceArgs {
   planId: string;
@@ -368,6 +387,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.harnessTrace = function (this: QueryClient, args: HarnessTraceArgs = {} as HarnessTraceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("harnessTrace", buildHarnessTrace(args), opts);
+};
+
+/** Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate. */
+export interface InferenceStatusArgs {
+}
+
+export function buildInferenceStatus(args: InferenceStatusArgs): string {
+  void args;
+  return "builtin inferenceStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inferenceStatus(args?: InferenceStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inferenceStatus = function (this: QueryClient, args: InferenceStatusArgs = {} as InferenceStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inferenceStatus", buildInferenceStatus(args), opts);
 };
 
 /** Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only. */
