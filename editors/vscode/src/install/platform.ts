@@ -55,7 +55,7 @@ export const PLATFORM_DETECT_STEP: Step = {
   id: "detect",
   script: "install.detect",
   description:
-    "Checking this machine can run a cluster: a supported system, Docker running, the ports free, and enough disk space.",
+    "Taking stock of this machine before anything is installed: what system it is, which supporting tools are already here, whether Docker is answering, whether the ports a cluster needs are free, and how much disk is left. Only a system MemQL cannot support stops the install here; the rest is reported for you to read.",
   readOnly: true,
   elevation: "none",
   retained: false,

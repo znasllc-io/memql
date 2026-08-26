@@ -40,6 +40,13 @@ export const ENROLMENT_STEP_ID = "enrolmentLink";
  * cheapest honest answer to "is there anything here to enrol against" -- the
  * script has just asked the cluster, from inside it, with the only authority
  * that exists before anyone holds a credential.
+ *
+ * THE NAME OVERSTATES WHAT IT MEANS, so read it as this doc says and not as it
+ * is spelled. An install that seeds the bootstrap values gets its owner ROW at
+ * identity boot (memql#3591), so `ownerClaimed` is true on a cluster nobody has
+ * signed into -- an account exists, no credential does, and the cluster is not
+ * claimed in the sense `Store.HasClaimedOwner` means. Reading it as "somebody
+ * has signed in" is wrong in exactly the window this extension operates in.
  */
 export const OWNER_CLAIMED_FIELD = "ownerClaimed";
 

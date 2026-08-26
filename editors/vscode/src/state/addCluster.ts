@@ -659,6 +659,27 @@ export class AddClusterState {
   // What the claim reported, for the block's no-key renderings. `none` renders
   // nothing at all -- an uninstall, a failed run, an old receipt.
   private recoveryState: RecoveryKeyState = "none";
+  // WHETHER THE OPERATOR HAS CLICKED THROUGH TO THE PLAINTEXT (memql#4194).
+  //
+  // HERE RATHER THAN ON THE PANEL, and that placement is the whole of
+  // memql#4616. This flag used to be a field on `AddClusterPanel`, where
+  // nothing ever reset it -- so the click-to-reveal screen-share guard worked
+  // exactly ONCE per panel lifetime. Install, reveal, Back, repair, and the
+  // done screen rendered the NEW plaintext with no click at all, defeating the
+  // guard at precisely the moment a screen is most likely to be shared.
+  // Sitting beside the value it describes, it is let go of in the same three
+  // places the key is -- `setRecoveryKey`, `back` and `beginRun` -- so a future
+  // clearing path cannot take the credential and leave a flag about it behind.
+  private keyRevealed = false;
+  // WHETHER THE CLIPBOARD ACTUALLY TOOK IT (memql#4615).
+  //
+  // A claim about the CLIPBOARD, not about the click: the panel records it only
+  // after `env.clipboard.writeText` resolved, because an operator who believes
+  // they copied a key they did not is worse off than one who was told to select
+  // it by hand -- the same reason the copy path is loud on failure. It is what
+  // `recoveryKeyWouldBeLost` reads, and therefore the only thing standing
+  // between a misclick on Back and a destroyed break-glass credential.
+  private keyCopied = false;
 
   // WHETHER THE LOG PANE IS OPEN, AND WHETHER IT IS STILL FOLLOWING THE TAIL
   // (memql#4455).
@@ -799,6 +820,72 @@ export class AddClusterState {
   setRecoveryKey(key: string, state: RecoveryKeyState): void {
     this.revealedKey = key;
     this.recoveryState = state;
+    // A NEW VALUE IS A NEW SECRET (memql#4616, memql#4615). `beginRun` has
+    // already re-armed both flags by the time a run reaches this call, which
+    // makes these two lines belt to that brace -- and the belt is what a second
+    // writer of this setter (a reconnect, a receipt read, whatever the next
+    // screen needs) gets for free rather than has to remember. Inheriting
+    // "already revealed" would put a rotated key on screen unasked; inheriting
+    // "already copied" would let Back destroy one nobody has.
+    this.keyRevealed = false;
+    this.keyCopied = false;
+  }
+
+  /**
+   * Whether the operator has clicked through the reveal (memql#4194).
+   *
+   * The done screen renders a button rather than the value until this is true,
+   * so the screen can sit open -- in a share, on a projector -- with the
+   * plaintext out of the DOM entirely rather than merely styled away.
+   */
+  get recoveryKeyRevealed(): boolean {
+    return this.keyRevealed;
+  }
+
+  /** Whether the clipboard took the key, as opposed to being asked to. */
+  get recoveryKeyCopied(): boolean {
+    return this.keyCopied;
+  }
+
+  /**
+   * Whether leaving this screen right now would destroy the key for good
+   * (memql#4615).
+   *
+   * THE QUESTION BACK HAS TO ASK. `back()` deliberately lets go of the
+   * plaintext, only the key's HASH was ever stored, and the done screen renders
+   * Back as an ordinary secondary button in the same row as the credential
+   * buttons -- so one misclick permanently destroys the cluster's break-glass
+   * credential, and the screen's own copy ("closing this screen is goodbye")
+   * knew the stakes while doing nothing about them.
+   *
+   * A GETTER HERE, not a condition in the panel, for the reason
+   * `primaryHandoffAction` gives: `addClusterPanel.ts` imports `vscode`, so a
+   * decision written into it is a decision nothing under `node --test` can
+   * reach -- and this one decides whether a credential survives.
+   *
+   * `claimed` with a non-empty key is the ONLY state holding a plaintext.
+   * `alreadyClaimed` and `awaitingOwner` render one line and no value, and
+   * prompting over those would train an operator to click through the one
+   * prompt on this surface that matters.
+   */
+  get recoveryKeyWouldBeLost(): boolean {
+    return this.recoveryState === "claimed" && this.revealedKey !== "" && !this.keyCopied;
+  }
+
+  /** The reveal was clicked. One way only; `setRecoveryKey` re-arms it. */
+  revealRecoveryKey(): void {
+    this.keyRevealed = true;
+  }
+
+  /**
+   * The clipboard took the key.
+   *
+   * Called from the panel's SUCCESS path alone. A failed write leaves this
+   * false, which is what keeps the Back prompt in front of an operator whose
+   * copy silently did not happen.
+   */
+  recordRecoveryKeyCopied(): void {
+    this.keyCopied = true;
   }
 
   /** Whether the run's output is disclosed. */
@@ -920,8 +1007,33 @@ export class AddClusterState {
     // Back is the only way off it short of closing the panel, so leaving lets
     // go of the plaintext; what was typed into forms stays, a credential does
     // not.
+    //
+    // THE PANEL ASKS FIRST NOW (memql#4615). This method destroys a credential
+    // that only ever existed here -- only its hash was stored -- so the adapter
+    // consults `recoveryKeyWouldBeLost` before calling it and puts a modal in
+    // the way of a misclick. That guard is deliberately NOT in here: this
+    // module is what the CLI and any future front end drive too, and a state
+    // machine that refused a transition on its own would make "go back" mean
+    // different things on different surfaces.
     this.revealedKey = "";
     this.recoveryState = "none";
+    // AND THE FLAGS ABOUT IT (memql#4616). Leaving re-arms the reveal, so the
+    // next key has to be clicked for as well; and re-arms the copy, so nobody
+    // inherits "already copied" from a secret that no longer exists.
+    this.keyRevealed = false;
+    this.keyCopied = false;
+    // THE OWNER MAGIC LINK GOES TOO, and until memql#4617 it was the one
+    // credential on this screen that survived Back.
+    //
+    // It is also the most dangerous one: it authenticates as the cluster OWNER
+    // and is issued UNBOUND -- whoever opens it completes it. An operator who
+    // installed, claimed in the browser (which CONSUMES the link), came back
+    // and repaired was offered "Claim this cluster" again, wired to the spent
+    // URL and landing on an error page. `magic-link.sh` reads a 24h log window,
+    // so the spent link keeps being "recoverable" long after it stopped
+    // working. Exactly the failure memql#3906 removed for the enrolment link,
+    // which this line finally removes for its more dangerous sibling.
+    this.claimLink = "";
     // The problems go, what was TYPED stays. Back is one click away from every
     // form on this page, and an operator who lands on the cards by accident
     // must not have to retype four fields to get where they were.
@@ -1089,6 +1201,17 @@ export class AddClusterState {
     // showing through that would be a stale reveal (memql#4079).
     this.revealedKey = "";
     this.recoveryState = "none";
+    // With the two flags about it, so the next run's key is hidden until it is
+    // asked for and is not treated as one somebody already has (memql#4616,
+    // memql#4615).
+    this.keyRevealed = false;
+    this.keyCopied = false;
+    // And the previous run's magic link (memql#4617). A repair correctly
+    // reports `linkState=none` -- identity only logs a link that was REQUESTED
+    // -- so without this line the repair's done screen offers the INSTALL's
+    // link, which the operator has almost certainly already spent. Every
+    // sibling above was already cleared here; this one was missed.
+    this.claimLink = "";
     // A NEW RUN STARTS CLOSED. The disclosure being open is a fact about the
     // failure the operator was just reading, not a preference that should
     // outlive it -- and carrying it forward would open a pane onto the previous

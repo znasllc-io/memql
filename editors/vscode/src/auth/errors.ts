@@ -141,7 +141,147 @@ export function isAuthFlowError(err: unknown): err is AuthFlowError {
   return candidate.name === "AuthFlowError" && typeof candidate.kind === "string";
 }
 
-/** errorText renders an unknown thrown value as a sentence fragment. */
+// -----------------------------------------------------------------------------
+// WHY errorText WALKS THE CAUSE CHAIN (memql#4619)
+// -----------------------------------------------------------------------------
+//
+// This extension targets Node 20 (esbuild.js), whose global `fetch` is undici,
+// and undici reports EVERY transport failure the same way: it throws
+// `TypeError: fetch failed` and puts the reason -- the DNS, socket or TLS error
+// -- in `.cause`. Rendering `err.message` alone therefore reduced a wrong
+// hostname, a firewall, an expired certificate and an unknown CA to one
+// identical sentence on every sign-in surface at once:
+//
+//   The identity service at https://identity.example.com could not be reached
+//   to start a device sign-in (fetch failed).
+//
+// Four problems with four different fixes, and a sentence that distinguishes
+// none of them. So the chain is walked to the first link that names a `code`,
+// and that code is what gets appended. `.errors` is walked as well as `.cause`,
+// because a host that resolves to several addresses fails on each and undici
+// wraps the set in an AggregateError whose OWN message is EMPTY -- which is the
+// ordinary shape of "the local cluster is not running", and the one a
+// cause-only walk reports as nothing at all.
+//
+// THE TLS CODES GET A SENTENCE OF THEIR OWN, because their fix is not guessable
+// from the code and the most confusing one is the most common one: Node does
+// not read the operating system trust store. A CA that the browser and curl on
+// the very same machine already trust -- mkcert's local root, a corporate root
+// -- is unknown to the extension host, so a perfectly good local cluster
+// produces a certificate error that reads like a server problem when it is a
+// client configuration one. An expired certificate and a wrong-hostname
+// certificate are NOT that problem and deliberately get different sentences:
+// offering NODE_EXTRA_CA_CERTS for either would send an operator to edit a
+// setting that cannot help them.
+//
+// This is the ONE renderer. src/connection/credentials.ts imports it rather
+// than keeping the identical copy it used to have, because two copies of the
+// same prose is exactly how a fix to one of them leaves the refresh path still
+// reporting a bare "fetch failed" while the sign-in path reports the truth.
+// The copies in src/install/ and src/webview/ are the same hazard and are not
+// this file's to remove (memql#4619 names them).
+
+/**
+ * How far down a `cause`/`errors` chain to look. Deep enough for undici's real
+ * shape (TypeError -> AggregateError -> system error), shallow enough that an
+ * error whose cause points back at itself cannot spin.
+ */
+const MAX_CAUSE_DEPTH = 6;
+
+/** How many entries of an AggregateError to read. The first names the fault. */
+const MAX_AGGREGATED = 4;
+
+const TRUST_STORE_ADVICE =
+  "Node does not read the operating system trust store, so a CA this machine's browser and curl already trust (a mkcert or corporate root) is still unknown to the editor: point NODE_EXTRA_CA_CERTS at the CA file and restart VS Code.";
+
+/** The codes whose fix cannot be read off the code itself. */
+const TLS_ADVICE: Record<string, string> = {
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: TRUST_STORE_ADVICE,
+  UNABLE_TO_GET_ISSUER_CERT: TRUST_STORE_ADVICE,
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: TRUST_STORE_ADVICE,
+  SELF_SIGNED_CERT_IN_CHAIN: TRUST_STORE_ADVICE,
+  DEPTH_ZERO_SELF_SIGNED_CERT: TRUST_STORE_ADVICE,
+  CERT_HAS_EXPIRED:
+    "The server's certificate is past its expiry date and must be reissued -- for a local cluster, regenerate the mkcert certificate. Node checks the date itself, so no trust setting makes an expired certificate acceptable.",
+  ERR_TLS_CERT_ALTNAME_INVALID:
+    "The certificate is valid but was not issued for this hostname, so check the `endpoint` or `domain` this cluster names, or reissue the certificate to cover that name.",
+};
+
+/**
+ * errorText renders an unknown thrown value as a sentence fragment, including
+ * the transport reason undici hides in `.cause` (memql#4619).
+ */
 export function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  let text = err instanceof Error ? err.message : String(err);
+
+  const chain = causeChain(err);
+  // The first link that names a `code` is the one that says what went wrong;
+  // everything above it is undici's wrapper.
+  const carrier = chain.find((link) => errorCode(link) !== "");
+  const code = carrier === undefined ? "" : errorCode(carrier);
+
+  if (carrier === undefined) {
+    // No code anywhere -- but a wrapper plus an inner message still says more
+    // than the wrapper alone ("fetch failed: socket hang up").
+    const inner = chain
+      .slice(1)
+      .map((link) => errorMessage(link))
+      .find((message) => message !== "" && !text.includes(message));
+    if (inner !== undefined) text = `${text}: ${inner}`;
+  } else if (carrier === err) {
+    // The thrown value IS the system error: its message is already the head, so
+    // only the code is missing.
+    if (code !== "" && !text.includes(code)) text = `${text} (${code})`;
+  } else {
+    const detail = withCode(code, errorMessage(carrier));
+    if (detail !== "" && !text.includes(detail)) text = `${text}: ${detail}`;
+  }
+
+  const advice = code === "" ? undefined : TLS_ADVICE[code];
+  if (advice === undefined) return text;
+  return `${text.endsWith(".") ? text : `${text}.`} ${advice}`;
+}
+
+/**
+ * causeChain flattens a thrown value into itself plus everything it blames:
+ * `.cause` all the way down, and the entries of an AggregateError on the way.
+ * Depth-capped rather than cycle-detected -- the cap is what makes a
+ * self-referential cause terminate, and it is cheaper than tracking identity.
+ */
+function causeChain(err: unknown, depth = 0): unknown[] {
+  if (depth >= MAX_CAUSE_DEPTH || err === null || typeof err !== "object") return [];
+  const link = err as { cause?: unknown; errors?: unknown };
+  const aggregated = Array.isArray(link.errors) ? link.errors.slice(0, MAX_AGGREGATED) : [];
+  return [
+    err,
+    ...aggregated.flatMap((inner: unknown) => causeChain(inner, depth + 1)),
+    ...causeChain(link.cause, depth + 1),
+  ];
+}
+
+/** errorCode reads a Node system error's `code`, or "" if it carries none. */
+function errorCode(err: unknown): string {
+  if (err === null || typeof err !== "object") return "";
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" ? code.trim() : "";
+}
+
+/** errorMessage reads a link's message whether or not it is a real Error. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message.trim();
+  if (err === null || typeof err !== "object") return "";
+  const message = (err as { message?: unknown }).message;
+  return typeof message === "string" ? message.trim() : "";
+}
+
+/**
+ * withCode prefixes a message with its code -- unless the message already
+ * names it. Node's socket errors read "getaddrinfo ENOTFOUND host", and
+ * "ENOTFOUND -- getaddrinfo ENOTFOUND host" is noise an operator has to read
+ * past to reach the hostname that actually failed.
+ */
+function withCode(code: string, message: string): string {
+  if (message === "") return code;
+  if (code === "" || message.includes(code)) return message;
+  return `${code} -- ${message}`;
 }

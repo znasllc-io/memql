@@ -305,6 +305,22 @@ export async function probeClusterOverHttps(
   }
 }
 
+/**
+ * What a modal has to say before something irreversible happens.
+ *
+ * THREE STRINGS RATHER THAN ONE, because a VS Code modal has three slots and
+ * collapsing them changes what an operator reads: `message` is the bold
+ * headline, `detail` the smaller paragraph under it, and `proceed` the label on
+ * the button that goes through with it. A prompt whose button says "OK" is a
+ * prompt nobody has read -- the label is where the consequence gets stated a
+ * second time, in the operator's own hand.
+ */
+export interface DestructiveConfirmation {
+  message: string;
+  detail: string;
+  proceed: string;
+}
+
 export interface AddClusterDeps {
   /** ~/.memql/clusters.yaml, resolved once at activation. */
   clustersPath: string;
@@ -395,6 +411,20 @@ export interface AddClusterDeps {
    * can point a run at a temp directory without a real HOME.
    */
   runsDir?: string;
+  /**
+   * Asks the operator to confirm something irreversible; a modal
+   * `window.showWarningMessage` when absent (memql#4615).
+   *
+   * INJECTED RATHER THAN CALLED INLINE, and the distinction is not stylistic.
+   * This file already reaches for `window.showErrorMessage` and
+   * `showInformationMessage` directly, because it is on the `vscode` allow-list
+   * (cmd/memql-lsp/vscodeimportrule_test.go) and because nothing depends on
+   * what those two ANSWER -- they are notifications. This one's answer decides
+   * whether a break-glass credential survives, which makes it the same shape as
+   * `sudoIsFree` and `sudoAccepts`: a host effect whose reply drives a branch,
+   * and therefore a branch a test has to be able to drive both ways.
+   */
+  confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
 }
 
 export class AddClusterPanel {
@@ -429,13 +459,6 @@ export class AddClusterPanel {
    * for one) with no run in flight to read either from again.
    */
   private doneReceipt: Receipt | null = null;
-  /**
-   * Whether the operator has clicked through the recovery-key reveal
-   * (memql#4194, audit 1). The plaintext renders only after a deliberate
-   * click, so the done screen can sit open -- in a screen share, on a
-   * projector -- without the key on it.
-   */
-  private recoveryKeyRevealed = false;
   /** The "Before it runs" checklist for the collect screen (memql#4195). */
   private preflight: PreflightItem[] | undefined;
 
@@ -648,8 +671,7 @@ export class AddClusterPanel {
       }
     }
     if (type === "back") {
-      this.state.back();
-      this.render();
+      void this.leaveScreen();
       return;
     }
     // THE LOG DISCLOSURE (memql#4455). A repaint is exactly what this one
@@ -793,7 +815,13 @@ export class AddClusterPanel {
       void this.copyRecoveryKey();
     }
     if (type === "revealRecoveryKey") {
-      this.recoveryKeyRevealed = true;
+      // THE FLAG LIVES ON THE STATE MACHINE, not here (memql#4616). It was a
+      // panel field, where nothing reset it -- so the screen-share guard
+      // memql#4194 added worked exactly once per panel lifetime, and a repair
+      // after a Back rendered the NEW plaintext with no click at all. Beside
+      // the key it guards, it is let go of by the same lines that let go of the
+      // key, which is the only arrangement in which the two cannot drift.
+      this.state.revealRecoveryKey();
       this.render();
     }
     // The uninstall screen's own channel (memql#3476), recognised against
@@ -1231,22 +1259,42 @@ export class AddClusterPanel {
     // `report` is local to this method and the screen re-renders many times.
     if (report !== undefined) this.state.setOwnerAccountExists(ownerAccountExistsFrom(report));
 
-    // THE MAGIC LINK, and on a fresh install it is the ONLY one of the two that
-    // exists (memql#3884).
+    // THE MAGIC LINK, the SECOND of the two routes in (memql#3884, and the
+    // model here corrected by memql#4622).
     //
-    // The paragraph above describes the enrolment link as the thing an install
-    // has just created for this operator. That is true of a re-run against a
-    // cluster somebody already claimed, and false of every first install: a
-    // cluster is claimed by its FIRST SIGN-IN, so at `enrolmentLink` time there
-    // is no account to enrol a passkey for and the step correctly returns
-    // nothing, reporting `enrolmentState=awaitingFirstSignIn` and telling the
-    // operator to sign in with the magic link this install recovered.
+    // WHAT THIS COMMENT USED TO SAY. That a cluster is claimed by its FIRST
+    // SIGN-IN, so on every first install there is no account to enrol a passkey
+    // for, `enrolmentLink` correctly returns nothing and reports
+    // `enrolmentState=awaitingFirstSignIn`, and the magic link is therefore
+    // "the ONLY one of the two that exists". That was a fair description of an
+    // earlier bootstrap, and it is no longer what this installer builds -- it
+    // had this file contradicting `src/clusters/ownershipRoute.ts` and
+    // `state/addCluster.ts`'s `primaryHandoffAction`, both of which already
+    // carry the current model. Two contradictory models in one repository is
+    // how the next regression gets written.
     //
-    // That link was recovered, put on the `magicLink` step's result, and then
-    // read by nothing at all -- so the install ended by naming a credential it
-    // had thrown away, and offered "Sign in as owner" for an account that did
-    // not exist. The sign-in then times out and falls back to a device code
-    // which cannot complete either, because there is still no account.
+    // WHAT ACTUALLY HAPPENS. `seedBootstrap` writes the owner ROW at identity
+    // boot from the values the install seeds, so a cluster this extension
+    // installed HAS an owner account before the operator opens a browser --
+    // verified from the other side in ownershipRoute.ts, where `/setup` is
+    // gated on `Store.HasOwnerUser` and answers 404 on a freshly installed
+    // cluster. On a fresh install `enrolmentLink` therefore MINTS
+    // (`enrolmentState=minted`, `ownerClaimed=true`), `canEnrol` is true, the
+    // done screen leads with "Set up a passkey", and `recoveryKey` claims a key
+    // that IS revealed on this screen. `awaitingFirstSignIn` and
+    // `awaitingOwner` remain real states -- they describe the HAND-ROLLED
+    // cluster, brought up with no bootstrap env, which is precisely the case
+    // `primaryHandoffAction` leads with `claim`.
+    //
+    // SO WHY THE LINK IS STILL WORTH RECOVERING. The owner row exists with no
+    // HUMAN credential on it, and the magic link is the one route that signs
+    // that account in without one -- the fallback for a run whose enrolment
+    // mint produced nothing, where the alternative offer, "Sign in as owner",
+    // times out and falls back to a device code that cannot complete either.
+    // It is single-use and authenticates as the OWNER, which is why it is
+    // passed from the envelope to the opener and never rendered, and why
+    // `back()` and `beginRun()` now let go of it (memql#4617): a spent link
+    // re-offered on a repair lands the operator on an error page.
     if (report !== undefined) this.state.setClaimUrl(claimUrlFrom(report));
 
     // THE RECOVERY KEY, the run's third and most perishable product
@@ -1660,6 +1708,13 @@ export class AddClusterPanel {
     } finally {
       this.uninstalling = false;
       this.uninstallAbort = undefined;
+      // The run is over either way; the password has no further use. The same
+      // line the install run has always had, and the other half of memql#4614's
+      // teardown ordering: `dispose()` now DEFERS the release while either run
+      // is in flight, which is only correct if both runs release their own
+      // agent when they come to rest. Without this the agent would outlive a
+      // panel closed mid-uninstall.
+      await this.releaseSudoAgent();
       // `preserved` reaches the record UNTRANSLATED, which is the point: it
       // says the uninstall KEPT something the operator already had, and a
       // history that rounded it to "ok" would report an artifact as gone while
@@ -2709,6 +2764,79 @@ ${followUp}`,
     }
   }
 
+  /**
+   * Back, with the one-time recovery key standing in the way (memql#4615).
+   *
+   * THE DEFECT. `state.back()` deliberately lets go of the plaintext -- the
+   * key's display lifetime IS the done screen -- and the done screen rendered
+   * Back as an ordinary secondary button in the same actions row as "Set up a
+   * passkey" and "Claim this cluster". Only the key's HASH is stored, so one
+   * misclick permanently destroyed the cluster's break-glass credential, with
+   * no confirmation and no "you have not copied this yet". The screen's own
+   * copy already said "closing this screen is goodbye": the design knew the
+   * stakes and did nothing about them.
+   *
+   * ASKED ONLY WHEN THERE IS SOMETHING TO LOSE. `recoveryKeyWouldBeLost` is
+   * false for every screen that is not holding a plaintext and false once the
+   * clipboard has taken it, so the prompt cannot become the thing an operator
+   * clicks through on the way to somewhere else -- which is how a prompt stops
+   * being read.
+   *
+   * A REFUSAL IS A NO-OP, deliberately: the operator stays exactly where they
+   * were, with the key still on screen and the Copy button still under it.
+   * There is nothing to undo because nothing was done.
+   */
+  private async leaveScreen(): Promise<void> {
+    if (this.state.recoveryKeyWouldBeLost) {
+      const proceed = await this.confirmDestructive({
+        message: "Go back without keeping this cluster's recovery key?",
+        detail:
+          "The key is shown exactly once and only its hash is stored, so going back destroys " +
+          "this copy of it for good. If you have not put it somewhere safe yet, copy it first " +
+          "-- otherwise the only way to get one again is to rotate the key from the portal.",
+        proceed: "Go back and lose the key",
+      });
+      // The panel can be closed while a modal is up, and `state.back()` on a
+      // dead panel would be a transition nobody can see.
+      if (!proceed || this.disposed) return;
+    }
+    this.state.back();
+    this.render();
+  }
+
+  /**
+   * The modal, or whatever a test injected in its place.
+   *
+   * `{ modal: true }` is not decoration. A notification toast can be answered
+   * by ignoring it, and an ignored toast here reads as a Back that did nothing:
+   * the operator presses it again, and again, while the answer they never gave
+   * is the thing holding the transition. A modal is the one shape where being
+   * asked and answering are the same event, which is what a question standing
+   * in front of an irreversible act has to be.
+   *
+   * `isCloseAffordance` on the cancel item is what makes Escape and the window
+   * chrome mean "keep the key" rather than "unanswered" -- an operator who
+   * dismisses this without reading it must end up with their key, and
+   * `undefined` is what a dismissal answers.
+   */
+  private async confirmDestructive(prompt: DestructiveConfirmation): Promise<boolean> {
+    const inject = this.deps.confirmDestructive;
+    if (inject !== undefined) return inject(prompt);
+    const go: vscode.MessageItem = { title: prompt.proceed };
+    const keep: vscode.MessageItem = { title: "Cancel", isCloseAffordance: true };
+    const chosen = await vscode.window.showWarningMessage<vscode.MessageItem>(
+      prompt.message,
+      { modal: true, detail: prompt.detail },
+      go,
+      keep,
+    );
+    // Identity, not the title string: a dismissed modal answers `undefined`,
+    // and `undefined` has to mean KEEP THE KEY. Comparing titles would give the
+    // same answer today and quietly become a bug the first time a label is
+    // reworded in one of the two places.
+    return chosen === go;
+  }
+
   /** Reaches the existing sign-in flow. No new credential path (#3401). */
   /**
    * Copies the revealed recovery key (memql#4079).
@@ -2739,6 +2867,12 @@ ${followUp}`,
       );
       return;
     }
+    // RECORDED ONLY ON THE SUCCESS PATH (memql#4615). This is what tells Back
+    // and the panel-close warning that the operator actually has the key, so a
+    // failed write must leave it false -- every refusal above returns before
+    // reaching here. Marking it on the CLICK instead would put the prompt away
+    // for exactly the operator who needs it: the one whose copy did not happen.
+    this.state.recordRecoveryKeyCopied();
     vscode.window.showInformationMessage(
       "MemQL: recovery key copied. Put it somewhere this machine is not -- it will not be shown again.",
     );
@@ -2968,7 +3102,7 @@ ${providers}`,
   private recoveryKeyBlock(): string {
     const state = this.state.recoveryKeyState;
     const key = this.state.revealedRecoveryKey;
-    if (state === "claimed" && key !== "" && !this.recoveryKeyRevealed) {
+    if (state === "claimed" && key !== "" && !this.state.recoveryKeyRevealed) {
       // THE REVEAL IS A CLICK, NOT A DEFAULT (memql#4194, audit 1). The value
       // stays out of the DOM entirely until asked for -- this branch renders a
       // button, not a hidden element a style could unhide.
@@ -3009,12 +3143,61 @@ ${providers}`,
   private dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    // ABORT EVERY RUN IN FLIGHT, FIRST (memql#4614).
+    //
+    // THE DEFECT. This method released the sudo agent and never touched
+    // `runAbort` -- compare the Cancel handler, which has aborted first and
+    // transitioned second since the beginning. Closing the tab during a
+    // twenty-minute install therefore left the graph running HEADLESS: k3d
+    // still built a cluster, `seedBootstrap` still bootstrapped an owner,
+    // `recoveryKey` still ROTATED the break-glass credential and revealed the
+    // new plaintext into a report nobody would ever read. Then the
+    // `if (this.disposed) return` guards further up skipped the hand-off, so no
+    // registry entry was written either -- and reopening the page constructs a
+    // fresh panel with empty state. The operator was left with a real cluster
+    // on their machine that the editor did not know about, and whose recovery
+    // key had been generated and thrown away.
+    //
+    // Aborting is safe to do at any point for the reason Cancel gives: the
+    // executor stops at the next wave boundary and the receipt has been written
+    // after every step that ran, so what was built remains fully uninstallable.
+    const runInFlight = this.runAbort !== undefined || this.uninstallAbort !== undefined;
+    this.runAbort?.abort();
+    this.uninstallAbort?.abort();
     // THE PASSWORD GOES WITH THE PANEL. Closing the wizard is the clearest
     // possible statement that the operator is done, and a credential that
     // outlived the thing it was given to is a credential nobody is watching.
-    // `dispose()` cannot await, so this is fire-and-forget -- the agent's own
-    // dispose is idempotent and the failure mode is a stopped server.
-    void this.releaseSudoAgent();
+    //
+    // BUT NOT OUT FROM UNDER STEPS THAT ARE STILL RUNNING (memql#4614).
+    // `releaseSudoAgent()` `fs.rm`s the askpass socket directory, so releasing
+    // it here while a wave was in flight handed every remaining
+    // `elevation: "sudo"` step -- `hostsBlock`, `browserTrust`, `localCA` -- an
+    // askpass helper pointing at a path that no longer existed, and each of
+    // them failed on it. When a run is in flight its own `finally` releases the
+    // agent once the executor has come to rest, which is both later and
+    // correct; this branch covers the ordinary case of a panel closed with
+    // nothing running.
+    //
+    // `dispose()` cannot await, so this is fire-and-forget either way -- the
+    // agent's own dispose is idempotent and the failure mode is a stopped
+    // server.
+    if (!runInFlight) void this.releaseSudoAgent();
+    // AND SAY SO IF THE ONE-TIME RECOVERY KEY WENT WITH IT (memql#4615).
+    //
+    // NOT A CONFIRMATION, and it cannot be one. `WebviewPanel.onDidDispose` is
+    // the only close signal VS Code offers and it fires AFTER the tab is gone;
+    // there is no cancellable before-close hook for a webview, so a modal here
+    // would be asking permission for something that has already happened. Back
+    // gets the confirmation because Back is preventable. What is left for this
+    // path is the honest thing: say what was lost and name the one route to
+    // another key, rather than letting a credential disappear in silence.
+    if (this.state.recoveryKeyWouldBeLost) {
+      void vscode.window.showWarningMessage(
+        "MemQL: this cluster's recovery key was not copied, and closing the wizard let go of it. " +
+          "Only its hash was ever stored, so it cannot be shown again -- rotate the recovery key " +
+          "from the portal to get one you have.",
+      );
+    }
     if (AddClusterPanel.open_ === this) AddClusterPanel.open_ = undefined;
     for (const d of this.disposables.splice(0)) {
       try {

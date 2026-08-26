@@ -156,8 +156,12 @@ test("a failed mint is reported with the script's own reason", async () => {
 
 test("an unclaimed cluster is told apart from a mint that produced nothing", async () => {
   // Both come back with an empty link and they ask the operator for completely
-  // different things: one needs a first sign-in to create the account, the
-  // other is a fault.
+  // different things: one is a cluster that was brought up without a
+  // bootstrapped owner and needs the ownership wizard, the other is a fault.
+  //
+  // NOT "the first sign-in creates the account" (memql#4622). An install writes
+  // the owner row at identity boot, so `awaitingFirstSignIn` is the hand-rolled
+  // cluster rather than the freshly installed one.
   const { run } = runner({ enrolUrl: "", enrolmentState: "awaitingFirstSignIn", ownerClaimed: false });
   await assert.rejects(
     () =>
@@ -168,7 +172,8 @@ test("an unclaimed cluster is told apart from a mint that produced nothing", asy
     (err: unknown) =>
       err instanceof OwnershipError &&
       err.reason === "noLink" &&
-      /no owner account yet/.test(err.message),
+      /reports no owner account/.test(err.message) &&
+      /ownership wizard/.test(err.message),
   );
 });
 

@@ -6,7 +6,7 @@
     {
       "id": "detect",
       "script": "install.detect",
-      "description": "Checking this machine can run a cluster: a supported system, Docker running, the ports free, and enough disk space.",
+      "description": "Taking stock of this machine before anything is installed: what system it is, which supporting tools are already here, whether Docker is answering, whether the ports a cluster needs are free, and how much disk is left. Only a system MemQL cannot support stops the install here; the rest is reported for you to read.",
       "readOnly": true,
       "elevation": "none",
       "verify": {
@@ -269,7 +269,7 @@
     {
       "id": "enrolmentLink",
       "script": "install.enrolmentLink",
-      "description": "Creating a single-use link for setting up a passkey on the owner account. A cluster nobody has signed into yet has no account -- the first sign-in creates it -- and that is reported instead.",
+      "description": "Creating a single-use link for setting up a passkey on the owner account. This install names that owner as the cluster starts, so the link is normally ready here; a cluster started without owner details has nobody to enrol yet, and that is reported instead.",
       "params": {
         "local": "1"
       },
@@ -286,7 +286,7 @@
     {
       "id": "recoveryKey",
       "script": "install.recoveryKey",
-      "description": "Claiming this cluster's recovery key and showing it once, so you finish with a way back in if every other is ever lost. A cluster nobody has signed into yet has no owner and no key; a key an earlier run already claimed is left alone, because only its fingerprint was kept and re-showing it is impossible.",
+      "description": "Claiming this cluster's recovery key and showing it once, so you finish with a way back in if every other is ever lost. The key is minted for the owner as the cluster starts, so a first install normally ends holding one; a cluster started without owner details has nobody to mint one for, and a key an earlier run already claimed is left alone, because only its fingerprint was kept and re-showing it is impossible.",
       "params": {
         "local": "1"
       },

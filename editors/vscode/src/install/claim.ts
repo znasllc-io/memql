@@ -1,19 +1,23 @@
 // Claiming a cluster: the magic link, host side (znasllc-io/memql#3884).
 //
-// WHAT WAS MISSING. A MemQL cluster is claimed by its FIRST SIGN-IN -- that
-// sign-in is what creates the owner account. The install's `magicLink` step
-// recovers the owner's link out of the identity workload's log and returns it
+// WHAT WAS MISSING. A MemQL cluster is claimed by its FIRST SIGN-IN, and the
+// distinction that matters is between the ACCOUNT and the CREDENTIAL. The
+// account is already there: an install that seeds the bootstrap values gets its
+// owner row written on the identity node's own first boot
+// (`App.provisionBootstrapOwner`, memql#3591), which is why `/setup` 404s on a
+// freshly installed cluster. What does not exist yet is any way to authenticate
+// as that owner, and the magic link is the first one offered. The install's
+// `magicLink` step recovers it out of the identity workload's log and returns it
 // on `result.link`, and until this module existed NOTHING READ IT. The only
 // occurrence of `magicLink` anywhere in the extension was the script path in
 // the runner's table.
 //
 // The consequence was not a missing convenience, it was a dead end. The step
-// after it, `enrolmentLink`, correctly reports that there is no account to
-// enrol a passkey for yet and tells the operator to "sign in with the owner
-// magic link -- that first sign-in is what creates the account" -- naming the
-// link the install had just thrown away. The operator was then offered SIGN IN
-// against an account that did not exist, which times out and falls back to a
-// device code that cannot complete either.
+// after it, `enrolmentLink`, points an operator at the owner magic link when
+// there is nothing to enrol against -- naming the link the install had just
+// thrown away. The operator was then offered SIGN IN for an account holding no
+// credential, which times out and falls back to a device code that cannot
+// complete either.
 //
 // So this is `enrolment.ts`'s sibling, and deliberately its mirror in shape:
 // same injected host capabilities, same validate-before-open discipline, same

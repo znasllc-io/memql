@@ -47,11 +47,18 @@ cap_spec_param "binary"    "path to the memql binary inside the pod (default /ap
 
 # RESULT: recoveryKeyState is `claimed`, `awaitingOwner` or `alreadyClaimed`,
 # mirroring enrolment-link.sh's enrolmentState and for the same reason
-# (memql#3591): a cluster nobody has signed into has no owner, so there is no
-# key, and a verify demanding one would make every fresh install end in a failed
-# step. The state is set on all three paths and every genuine failure exits
-# non-zero before reaching any of them -- so a state means the question was
-# answered, not that a key was produced.
+# (memql#3591): a cluster with no owner has nothing to bind a key to, so there is
+# no key, and a verify demanding one would turn that into a failed step. The
+# state is set on all three paths and every genuine failure exits non-zero before
+# reaching any of them -- so a state means the question was answered, not that a
+# key was produced.
+#
+# `claimed` IS THE ORDINARY ANSWER ON A FRESH INSTALL. An install that seeded
+# MEMQL_IDENTITY_BOOTSTRAP_* gets its owner row written on the identity node's
+# own first boot (App.provisionBootstrapOwner), and ensureOwnerRecoveryKey runs
+# immediately AFTER that on the same boot, deliberately -- so the key exists,
+# unclaimed, before this ever runs, and this step is what reveals it. The
+# ordering is argued at the call site in app/integrations_identity.go.
 #
 # THE THREE STATES ARE THREE DIFFERENT FACTS AND MUST STAY TELLABLE APART. Two
 # of them emit no key, which is exactly why collapsing them would be tempting
@@ -136,8 +143,9 @@ function check_prerequisites() {
 _RK_KEY=""
 _RK_OUTPUT=""
 _RK_STDERR=""
-# Set when the claim failed because the cluster has no owner yet, i.e. nobody
-# has signed in. Reported rather than raised -- see the RESULT note above.
+# Set when the claim failed because the cluster has no owner yet -- not because
+# nobody has signed in, which is a different question and no longer the same
+# answer. Reported rather than raised; see the RESULT note above.
 _RK_NO_OWNER=0
 # Set when the claim was refused because the key has ALREADY been claimed, i.e.
 # this install graph has run here before. Reported rather than raised, for the
@@ -164,9 +172,11 @@ function claim_key() {
     rm -f "$err_file"
 
     if [[ $rc -ne 0 ]]; then
-        # NO OWNER YET is not a failure of this step (memql#3591's shape). A
-        # cluster is claimed by its first sign-in and the key is minted once an
-        # owner exists, so on a fresh install this is the expected answer.
+        # NO OWNER YET is not a failure of this step (memql#3591's shape), and is
+        # no longer the expected answer on a fresh install: an install that
+        # seeded the owner details has its owner row, and its key, before this
+        # runs. The key is minted once an owner exists, so this branch is what
+        # remains for a cluster that was never given those details.
         if printf '%s' "$_RK_STDERR" | grep -qF "$CLAIM_NO_OWNER_MSG"; then
             _RK_NO_OWNER=1
             return 0
@@ -220,9 +230,9 @@ function main() {
         cap_result_set     recoveryKey       ""
         cap_result_set_raw ownerClaimed      false
         cap_result_set     recoveryKeyState  "awaitingOwner"
-        cap_result_set     nextStep     "sign in with the owner magic link -- that first sign-in is what creates the account -- then run this again to claim the recovery key"
-        cap_info "this cluster has no owner yet: a cluster is claimed by its first sign-in."
-        cap_info "Sign in, then claim the recovery key and store it somewhere the cluster is not."
+        cap_result_set     nextStep     "sign in with the owner magic link -- on a cluster with no owner account, that first sign-in is what creates one -- then run this again to claim the recovery key"
+        cap_info "this cluster has no owner yet. An install that seeds the owner details names the owner as the cluster starts, and the key is minted for them then, so this cluster was started without them."
+        cap_info "Sign in to create the owner, then claim the recovery key and store it somewhere the cluster is not."
         cap_ok
     fi
 

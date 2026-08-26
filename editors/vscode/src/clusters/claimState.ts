@@ -1,17 +1,35 @@
 // Is this cluster claimed yet? (znasllc-io/memql#3885)
 //
-// WHAT WAS WRONG. Clicking a freshly installed cluster offered SIGN IN. There
-// is no account to sign in to yet -- a cluster is claimed by its FIRST sign-in,
-// and that sign-in is what creates the owner -- so the browser flow times out
-// and falls back to a device code that cannot complete either:
+// WHAT WAS WRONG. Clicking a freshly installed cluster offered SIGN IN, and the
+// sign-in had nothing to authenticate with -- so the browser flow ran out its
+// deadline and fell back to a device code that could not complete either:
 //
 //   the browser sign-in could not complete (No sign-in callback arrived within
-//   120 seconds...). Falling back to a device code.
+//   600 seconds...). Falling back to a device code.
 //   enter code AGXC-QCLZ at https://identity.<domain>/device to finish signing in.
 //
-// The operator is asked to authorize a device against an account that does not
-// exist. Nothing in that sequence is wrong on its own; the entry point simply
+// The operator is asked to authorize a device against an account that cannot
+// answer. Nothing in that sequence is wrong on its own; the entry point simply
 // never asked which of three states the cluster was in.
+//
+// WHAT CREATES THE OWNER, because this comment used to state the opposite and
+// the wrong model is how the next regression gets written (memql#4622). It is
+// NOT the first sign-in. The install writes the owner ROW at identity boot --
+// `seedBootstrap` creates it from the values the installer seeds -- so a cluster
+// this extension installed HAS an owner before anybody opens a browser, and that
+// owner holds no passkey and no magic-link identity. THAT is why signing in to a
+// fresh install cannot work, and it is also why `/setup` is already sealed there.
+// clusters/ownershipRoute.ts carries the three-state model in full; this module
+// answers one question of it and defers to that file for the rest.
+//
+// A cluster with no owner at all is the HAND-ROLLED case -- one brought up
+// without those seeded values. There the wizard below is the route, and it is
+// the only route, because there is genuinely no account to sign in to.
+//
+// THE DEADLINE IN THE QUOTE ABOVE IS 600 SECONDS, not the 120 this text used to
+// quote: `DEFAULT_CALLBACK_TIMEOUT_MS` has been 600_000 since memql#4600
+// (src/auth/loopback.ts), sized for the magic-link round trip. A stale number in
+// a quote is how a reader comes to trust the stale model around it.
 //
 // # The signal
 //
@@ -47,6 +65,9 @@
 // `/setup` needs none of it. If it answers 200 the cluster is offering the
 // wizard to whoever asks, so opening it is both the correct remedy and one that
 // works identically for local and remote.
+
+import { identityBaseUrlFor } from "../connection/endpoint.js";
+import type { ClusterConfig } from "./model.js";
 
 /** Binds to `fetch`. Injected so this module is testable without a network. */
 export type FetchLike = (
@@ -121,6 +142,80 @@ export async function probeClaimState(
   if (status === 200) return "unclaimed";
   if (status === 404) return "claimed";
   return "unknown";
+}
+
+// -----------------------------------------------------------------------------
+// THE CLUSTER-FACING HALF (memql#4620)
+// -----------------------------------------------------------------------------
+//
+// THE TWO FUNCTIONS ABOVE TAKE AN ISSUER, AND THE EXTENSION HAD NO ISSUER TO
+// GIVE THEM. `src/extension.ts` passed `cluster.issuer` -- a field NOTHING in
+// this extension ever writes. The connect form's registration shape has no such
+// key (state/addCluster.ts, `ClusterRegistration`), and the install path omits
+// it deliberately and says why (install/handoff.ts: `identityBaseUrlFor` derives
+// the host, so storing one would override the operator's own discovery document
+// later). So the argument was `undefined` on every cluster the extension can
+// produce, `setupUrl` returned "", `probeClaimState` short-circuited to
+// `unknown`, and `routeForClaimState` mapped that to sign-in. The `claim` branch
+// -- the whole of memql#3885's fix -- was unreachable in the shipped product,
+// and an operator connecting to a genuinely unclaimed remote cluster was sent to
+// authenticate against an account that does not exist. The exact dead end the
+// issue exists to prevent, present in the tree and never taken.
+//
+// WHY WRAPPERS RATHER THAN A FIXED CALL SITE. "Which field names the identity
+// service" is a decision, and `identityBaseUrlFor` is where it is already made
+// -- issuer when the cockpit wrote one, else `identity.<domain>`, else the
+// `api.<host>` endpoint's sibling. Leaving the composition inline in
+// `extension.ts` leaves it where no test can reach it (the file imports
+// `vscode`), which is precisely how a one-word argument stayed wrong. These two
+// take a CLUSTER, so the entry point has no field left to choose.
+
+/**
+ * The wizard URL for a cluster, or "" when nothing names its identity service.
+ *
+ * "" keeps `setupUrl`'s contract: there is nothing to probe and nothing to open.
+ * It now means "this cluster names no identity service at all" rather than "this
+ * cluster has no `issuer` key", which was true of every cluster.
+ */
+export function setupUrlForCluster(cluster: ClusterConfig): string {
+  return setupUrl(identityBaseUrlFor(cluster));
+}
+
+/** probeClaimState, pointed at the identity service the CLUSTER names. */
+export function probeClaimStateForCluster(
+  cluster: ClusterConfig,
+  deps: ProbeDeps,
+): Promise<ClaimState> {
+  return probeClaimState(identityBaseUrlFor(cluster), deps);
+}
+
+/**
+ * How long the probe may take before the answer is `unknown`.
+ *
+ * A BOUND, NOT A TUNING KNOB. The probe is one unauthenticated GET on the path
+ * to a sign-in the operator has already asked for, and `unknown` is a
+ * first-class answer that costs them nothing but the claim branch -- so the
+ * question is only ever "how long may a sign-in wait to learn this", and the
+ * answer is "not long". Node's fetch binds undici's 300-SECOND headers timeout
+ * by default: with no signal at all, a cluster whose host does not route hung
+ * `MemQL: Sign In` for five minutes before the command did anything, and until
+ * memql#4620 it did so before any progress notification existed, so there was
+ * no spinner and nothing to cancel.
+ */
+export const CLAIM_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * The signal the probe runs under: the deadline above, plus the caller's own
+ * cancellation when it has one.
+ *
+ * TWO SOURCES, ONE SIGNAL, because both mean the same thing to `probeClaimState`
+ * -- a rejected fetch, caught, answered `unknown`. The caller's is the progress
+ * notification's cancellation token, so an operator who does not want to wait
+ * out even five seconds does not have to.
+ */
+export function claimProbeSignal(cancel?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(CLAIM_PROBE_TIMEOUT_MS);
+  return cancel === undefined ? deadline : AbortSignal.any([deadline, cancel]);
 }
 
 // WHAT THE ENTRY POINT DOES WITH THIS ANSWER LIVES NEXT DOOR (memql#3906).

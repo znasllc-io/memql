@@ -90,6 +90,13 @@
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
+// errorText is the SHARED renderer in src/auth/errors.ts, not a local copy.
+// It walks undici's `.cause` chain (memql#4619), which is the only way a
+// refresh failure says ENOTFOUND or CERT_HAS_EXPIRED instead of the bare
+// "fetch failed" undici throws for all of them. The copy that used to live
+// here was identical prose, which is exactly how a fix applied to one of them
+// leaves the other reporting less than it does.
+import { errorText } from "../auth/errors.js";
 import {
   ClusterCredentialStore,
   type SecretStore,
@@ -590,10 +597,6 @@ export const staticCredentials: CredentialSource = new CredentialResolver();
  */
 export function defaultFetch(url: string, init: HttpRequestInit): Promise<HttpResponseLike> {
   return fetch(url, init) as unknown as Promise<HttpResponseLike>;
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // oauthError turns a failure body into the sentence an operator can act on.

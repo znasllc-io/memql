@@ -171,11 +171,20 @@ export async function mintOwnershipLink(
     // `enrolmentState` says which of the two empty cases this is, and they ask
     // the operator for different things -- so the message names it rather than
     // reporting one blank for both.
+    //
+    // THE FIRST SENTENCE USED TO STATE A BOOTSTRAP MODEL THAT NO LONGER EXISTS
+    // (memql#4622): "the first sign-in is what creates it". It does not. The
+    // install writes the owner ROW at identity boot -- `seedBootstrap` creates
+    // it from the seeded values -- which is exactly why `enrolmentState` is
+    // `minted` and the recovery key IS revealed on a fresh install. A cluster
+    // that answers `awaitingFirstSignIn` is therefore the HAND-ROLLED one,
+    // brought up without those values, and its route is the ownership wizard
+    // rather than a sign-in. clusters/ownershipRoute.ts carries the model.
     const state = envelope.result["enrolmentState"];
     throw new OwnershipError(
       "noLink",
       state === "awaitingFirstSignIn"
-        ? "This cluster has no owner account yet -- the first sign-in is what creates it, so there is nothing to enrol against."
+        ? "This cluster reports no owner account, so there is nothing to enrol against. An install seeds the owner at identity boot, so a cluster answering this was brought up without those values -- claim it through the ownership wizard, which mints the first owner."
         : "The mint reported success and produced no link.",
     );
   }

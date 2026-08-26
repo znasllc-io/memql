@@ -52,7 +52,11 @@ import type { ExtensionContext } from "vscode";
 import { ClusterPresence, type AddClusterAction } from "../src/clusters/presence.js";
 import { graphDocumentPath, loadGraphFile, type Verify } from "../src/install/graph.js";
 import type { ScriptOutcome, ScriptRun } from "../src/install/runner.js";
-import { AddClusterPanel, type AddClusterDeps } from "../src/webview/addClusterPanel.js";
+import {
+  AddClusterPanel,
+  type AddClusterDeps,
+  type DestructiveConfirmation,
+} from "../src/webview/addClusterPanel.js";
 import {
   Uri,
   recorded,
@@ -246,6 +250,19 @@ function open(options: {
   verdict?: "absent" | "installed-healthy" | "installed-unreachable";
   /** Seeded before the panel opens, for the repair cases. */
   receipt?: unknown;
+  /**
+   * Answers the modal the panel puts in front of a destructive Back
+   * (memql#4615). Absent means the case never reaches one -- and if it does,
+   * the panel's own default would try to draw a real modal, so leaving it out
+   * is how a case that wanders into the prompt fails loudly.
+   */
+  confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
+  /**
+   * Whether sudo runs without asking. Injected so a case that starts a run does
+   * not spawn the real thing -- see AddClusterDeps.sudoIsFree, which says why
+   * that seam is a safety rail as much as a seam.
+   */
+  sudoIsFree?: () => Promise<boolean>;
 }): Harness {
   resetRecorded();
   const dir = fs.mkdtempSync(path.join(HOME, "case-"));
@@ -267,6 +284,8 @@ function open(options: {
     refreshTree: () => undefined,
     removeRegistryEntry: async () => undefined,
     ...(options.runner ? { runScript: options.runner.run } : {}),
+    ...(options.confirmDestructive ? { confirmDestructive: options.confirmDestructive } : {}),
+    ...(options.sudoIsFree ? { sudoIsFree: options.sudoIsFree } : {}),
   };
 
   AddClusterPanel.show(
@@ -1188,15 +1207,47 @@ test("the reconnect card registers the cluster and never shows a form", async ()
 const RECOVERY_KEY = `mql_rec_${"R".repeat(43)}`;
 
 /** Runs an install whose recoveryKey step reports the given state (and key). */
-async function runToDoneWithRecovery(state: string, key: string): Promise<Harness> {
+async function runToDoneWithRecovery(
+  state: string,
+  key: string,
+  /**
+   * Passed through to `open()`. The Back and close guards (memql#4615) are the
+   * only callers that need it -- everything else reaches the done screen and
+   * stays there.
+   */
+  over: {
+    confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
+  } = {},
+): Promise<Harness> {
   const runner = await fakeRunner(
     {},
     { "install.recoveryKey": { recoveryKey: key, recoveryKeyState: state } },
   );
-  const h = open({ runner });
+  const h = open({ runner, ...over });
   beginInstall(h);
   await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
   return h;
+}
+
+/**
+ * A confirm that answers the same way every time and keeps what it was asked.
+ *
+ * Keeping the prompts is half the point: "a modal was shown" and "a modal that
+ * says what is about to be destroyed was shown" are different facts, and only
+ * the second one is worth having.
+ */
+function answering(answer: boolean): {
+  prompts: DestructiveConfirmation[];
+  confirmDestructive: (prompt: DestructiveConfirmation) => Promise<boolean>;
+} {
+  const prompts: DestructiveConfirmation[] = [];
+  return {
+    prompts,
+    confirmDestructive: async (prompt) => {
+      prompts.push(prompt);
+      return answer;
+    },
+  };
 }
 
 test("the claimed recovery key is shown once, on the done screen", async () => {
@@ -1307,6 +1358,270 @@ test("a cluster with no owner yet says when the key will exist", async () => {
     const html = h.html();
     assert.match(html, /Recovery key: minted after the first sign-in/);
     assert.ok(!html.includes('data-act="copyRecoveryKey"'));
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Closing the wizard mid-run (memql#4614)
+// -----------------------------------------------------------------------------
+
+/**
+ * Wraps a runner so ONE capability blocks until the case lets it go.
+ *
+ * The seam has to be installed BEFORE `open()`, because the panel captures
+ * `runner.run` by value when it builds its deps -- reassigning it afterwards
+ * would leave the panel holding the unwrapped function and the gate would never
+ * close.
+ */
+function gateOn(
+  runner: FakeRunner,
+  capability: string,
+): { reached: () => boolean; release: () => void } {
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reached = false;
+  const inner = runner.run;
+  runner.run = async (run) => {
+    if (run.capability === capability) {
+      reached = true;
+      await held;
+    }
+    return inner(run);
+  };
+  return { reached: () => reached, release };
+}
+
+test("closing the wizard mid-run aborts the run rather than orphaning it", async () => {
+  // THE DEFECT (memql#4614). `dispose()` released the sudo agent and never
+  // touched `runAbort` -- compare the Cancel handler, which aborts FIRST and
+  // transitions second. Closing the tab during a twenty-minute install
+  // therefore left the graph running HEADLESS: k3d still built a cluster,
+  // `seedBootstrap` still bootstrapped an owner, `recoveryKey` still ROTATED
+  // the break-glass credential and revealed the new plaintext into a report
+  // nobody would ever read -- and then `if (this.disposed) return` skipped the
+  // hand-off entirely, so no registry entry was written either.
+  //
+  // The operator was left with a real cluster on their machine that the editor
+  // did not know about, and whose recovery key had been generated and thrown
+  // away. Every remaining privileged step failed on top of that, because
+  // `releaseSudoAgent()` had already `fs.rm`'d the askpass socket out from
+  // under the steps still queued behind it.
+  //
+  // THE GATE IS ON A WAVE-2 CAPABILITY, not on the first one, and that is
+  // load-bearing. `install.detect` is also run by the platform probe that fires
+  // when the install card is chosen -- gating it stops the panel BEFORE
+  // `startRun` creates the AbortController, so the case would pass against the
+  // unfixed panel by never starting a run at all. `install.dockerAccess` is
+  // reached only from inside the executor, with the run in flight and the
+  // controller live, which is the state this defect is about.
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = open({ runner, sudoIsFree: async () => true });
+  try {
+    beginInstall(h);
+    await until(gate.reached, "the run to reach a step inside the graph");
+
+    // The tab is closed while wave 2 is still in flight.
+    h.close();
+    gate.release();
+
+    // Let the executor come to rest: wait for the held step to land, then give
+    // the run every chance to dispatch another wave. "Nothing further happened"
+    // has no edge to wait on, so the bound is the assertion's honesty.
+    await until(
+      () => runner.calls.some((c) => c.capability === "install.dockerAccess"),
+      "the gated step to finish",
+    );
+    for (let i = 0; i < 100; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    const ran = runner.calls.map((c) => c.capability);
+    assert.ok(
+      ran.includes("install.dockerAccess"),
+      "the case must actually have got a run going, or it proves nothing",
+    );
+    // Named individually because these are what make an orphaned run expensive
+    // rather than merely untidy: system files edited, a cluster on the machine,
+    // an owner bootstrapped into it, and a rotated recovery key revealed to
+    // nobody.
+    for (const capability of [
+      "install.hostsEntries",
+      "install.nssTools",
+      "install.mkcert",
+      "k3d.up",
+      "install.seedBootstrap",
+      "install.recoveryKey",
+    ]) {
+      assert.ok(
+        !ran.includes(capability),
+        `${capability} ran after the wizard was closed: ${ran.join(", ")}`,
+      );
+    }
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Back, one click from a one-time credential (memql#4615)
+// -----------------------------------------------------------------------------
+
+test("Back on an uncopied recovery key asks first, and a refusal changes nothing", async () => {
+  // THE DEFECT (memql#4615). `back()` deliberately destroys the plaintext, and
+  // the done screen renders Back as an ordinary secondary button in the SAME
+  // actions row as "Set up a passkey" and "Claim this cluster". Only the key's
+  // hash is stored, so one misclick permanently destroyed the cluster's
+  // break-glass credential -- with no confirmation and no "you have not copied
+  // this yet". The screen's own copy already said closing it was goodbye.
+  const asked = answering(false);
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
+  try {
+    h.post({ type: "revealRecoveryKey" });
+    assert.ok(h.html().includes(RECOVERY_KEY), "the key must be on screen for this to be a loss");
+
+    h.post({ type: "back" });
+    await until(() => asked.prompts.length > 0, "the confirmation");
+
+    const prompt = asked.prompts[0]!;
+    assert.match(prompt.message, /recovery key/i, "the prompt must name what is about to go");
+    assert.match(
+      `${prompt.message} ${prompt.detail}`,
+      /shown exactly once|only its hash/i,
+      "and why it cannot simply be looked at again",
+    );
+    assert.match(
+      prompt.proceed,
+      /lose the key/i,
+      "the button that goes through with it states the consequence a second time",
+    );
+
+    // A REFUSAL IS A NO-OP. The operator is still on the done screen, the key
+    // is still rendered, and the Copy button is still under it -- there is
+    // nothing to undo because nothing was done.
+    assert.match(h.html(), /Your cluster is ready/, "a refusal must not leave the screen");
+    assert.ok(h.html().includes(RECOVERY_KEY), "a refusal must not destroy the key");
+  } finally {
+    h.close();
+  }
+});
+
+test("Back that is confirmed does go back, and does let go of the key", async () => {
+  // The other half: the prompt is a speed bump, not a wall. An operator who has
+  // stored the key elsewhere, or who genuinely means to abandon it, gets the
+  // transition the button has always promised.
+  const asked = answering(true);
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
+  try {
+    h.post({ type: "revealRecoveryKey" });
+    h.post({ type: "back" });
+    await until(() => !/Your cluster is ready/.test(h.html()), "the landing screen");
+
+    assert.equal(asked.prompts.length, 1, "it still asked exactly once");
+    assert.ok(
+      !h.html().includes(RECOVERY_KEY),
+      "leaving the done screen lets go of the plaintext (memql#4079)",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("a copy that FAILED is not a copy: Back still asks", async () => {
+  // The clipboard is a host capability that can refuse -- a headless CI box, a
+  // Wayland session with no bridge -- and the panel is loud about it for the
+  // reason `copyRecoveryKey` states: an operator who believes they copied a key
+  // they did not is worse off than one who was told to select it by hand. The
+  // flag has to agree with that sentence, so it is set on the write resolving
+  // and not on the click.
+  const asked = answering(false);
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
+  try {
+    h.post({ type: "revealRecoveryKey" });
+    h.post({ type: "copyRecoveryKey" });
+    await until(
+      () => recorded.errors.some((e) => /could not be copied/.test(e)),
+      "the clipboard refusal",
+    );
+
+    h.post({ type: "back" });
+    await until(() => asked.prompts.length > 0, "the confirmation");
+    assert.match(h.html(), /Your cluster is ready/, "and the refusal still keeps the key");
+  } finally {
+    h.close();
+  }
+});
+
+test("closing the panel on an uncopied key says the key is gone", async () => {
+  // NOT A CONFIRMATION, and it cannot be one: `WebviewPanel.onDidDispose` fires
+  // AFTER the tab is gone and VS Code offers webviews no cancellable
+  // before-close hook, so a modal here would ask permission for something that
+  // has already happened. What is left is the honest half -- say what was lost
+  // and name the one route to another key, rather than letting a break-glass
+  // credential disappear in silence.
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
+  h.post({ type: "revealRecoveryKey" });
+  h.close();
+
+  const warning = recorded.warnings.find((w) => /recovery key/i.test(w));
+  assert.ok(warning !== undefined, `no warning about the key: ${recorded.warnings.join(" | ")}`);
+  assert.match(warning, /rotate/i, "and it names the one way to get another");
+  assert.ok(!warning.includes(RECOVERY_KEY), "a notification is not a place to put the plaintext");
+});
+
+test("closing a screen that is holding no plaintext says nothing", async () => {
+  // `alreadyClaimed` renders one line and no value. Warning about it would be
+  // warning about nothing, and a prompt that fires when there is nothing to
+  // lose is how the prompt that matters stops being read.
+  const h = await runToDoneWithRecovery("alreadyClaimed", "");
+  h.close();
+  assert.deepEqual(
+    recorded.warnings.filter((w) => /recovery key/i.test(w)),
+    [],
+    "there was no plaintext on this screen to lose",
+  );
+});
+
+// -----------------------------------------------------------------------------
+// The reveal guard, on every run rather than once per panel (memql#4616)
+// -----------------------------------------------------------------------------
+
+test("the reveal guard re-arms for the next run, not once per panel", async () => {
+  // THE DEFECT (memql#4616). `recoveryKeyRevealed` was a field on this panel
+  // that nothing ever reset -- not `back()`, not `beginRun()`. So the
+  // click-to-reveal guard memql#4194 added worked exactly once per panel
+  // lifetime: install, reveal, Back, repair, and the done screen rendered the
+  // NEW plaintext immediately with no click, defeating the guard at precisely
+  // the moment a screen is most likely to be shared.
+  const asked = answering(true);
+  const runner = await fakeRunner(
+    {},
+    { "install.recoveryKey": { recoveryKey: RECOVERY_KEY, recoveryKeyState: "claimed" } },
+  );
+  const h = open({ runner, confirmDestructive: asked.confirmDestructive });
+  try {
+    beginInstall(h);
+    await until(() => /Your cluster is ready/.test(h.html()), "the first run to settle");
+    h.post({ type: "revealRecoveryKey" });
+    assert.ok(h.html().includes(RECOVERY_KEY), "the first reveal works");
+
+    h.post({ type: "back" });
+    await until(() => !/Your cluster is ready/.test(h.html()), "the landing screen");
+
+    // A repair is the same call over the same graph, which is what makes this
+    // the ordinary path rather than a contrived one.
+    beginInstall(h);
+    await until(() => /Your cluster is ready/.test(h.html()), "the second run to settle");
+
+    const html = h.html();
+    assert.ok(
+      !html.includes(RECOVERY_KEY),
+      "the second run's key must be behind a click too: this is the run whose screen " +
+        "is most likely to be shared, because the operator is showing somebody a repair",
+    );
+    assert.match(html, /data-act="revealRecoveryKey"/, "the reveal is offered again");
   } finally {
     h.close();
   }
