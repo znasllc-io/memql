@@ -589,13 +589,13 @@ func (s *Server) LayoutData(r *http.Request, title string, dataMe bool, navLinks
 		BrandLogoDataURI: settings.BrandLogoDataURI,
 		BrandIconDataURI: settings.BrandIconDataURI,
 		BrandCSSVersion:  s.brandAssetVersion(r),
-		Year:              time.Now().UTC().Year(),
-		NavLinks:          navLinks,
-		ExtraScripts:      extraScripts,
-		DataMe:            dataMe,
-		Path:              path,
-		Asset:             s.assetURL,
-		CSRFToken:         CSRFTokenFromRequest(r),
+		Year:             time.Now().UTC().Year(),
+		NavLinks:         navLinks,
+		ExtraScripts:     extraScripts,
+		DataMe:           dataMe,
+		Path:             path,
+		Asset:            s.assetURL,
+		CSRFToken:        CSRFTokenFromRequest(r),
 	}
 }
 

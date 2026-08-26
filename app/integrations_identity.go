@@ -551,6 +551,18 @@ func (a *App) integrationsIdentity() {
 			// them looking for a problem that is not there.
 			switch {
 			case !strings.EqualFold(strings.TrimSpace(row.Kind), "user"):
+				// UNREACHABLE TODAY, AND KEPT ANYWAY. userInvitationByTokenHash
+				// filters kind=="user", so no other kind can arrive here --
+				// a guest token presented to this page reads as not-found
+				// instead, which is the honest answer for a credential this
+				// door does not serve.
+				//
+				// The branch stays because the guarantee lives in a DSL filter
+				// one file away. If that query is ever widened -- and the
+				// obvious "fix" for the defect memql#4612 records was exactly
+				// to widen its sibling -- this is what stops a guest invitation
+				// from being spent as a user one. A check that costs nothing
+				// and fails closed is worth more than the line it saves.
 				out.State = identityweb.InvitationWrongKind
 			case !row.Active:
 				out.State = identityweb.InvitationRevoked
