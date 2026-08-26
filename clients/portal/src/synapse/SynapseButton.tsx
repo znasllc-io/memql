@@ -181,10 +181,16 @@ export function SynapseButton(): ReactNode {
   const busy = phase === "running" || phase === "transcribing";
 
   return (
-    <div className="fixed right-6 bottom-6 z-30 flex flex-col items-end gap-2">
+    // `self-end` on the button rather than `items-end` on this column. In a
+    // flex COLUMN that alignment is horizontal, so the kit's items-end ban --
+    // which is about the tallest child in a form ROW deciding where everyone
+    // else's bottom edge lands -- does not apply here; expressing it per child
+    // says which element actually needs it and keeps the guard's allowlist
+    // from growing an entry that explains a rule not being broken.
+    <div className="fixed right-6 bottom-6 z-30 flex flex-col gap-2">
       {open ? (
         <div
-          className="w-80 rounded-lg border border-line bg-surface p-3 shadow-none"
+          className="w-80 self-end rounded-lg border border-line bg-surface p-3 shadow-none"
           role="dialog"
           aria-label="Synapse"
         >
@@ -234,7 +240,7 @@ export function SynapseButton(): ReactNode {
         </div>
       ) : null}
 
-      <div className="relative">
+      <div className="relative self-end">
         {float === null ? null : (
           <span
             key={float.key}

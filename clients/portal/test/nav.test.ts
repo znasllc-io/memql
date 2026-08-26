@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { FLEET_SURFACES } from "../src/fleet/urls";
 import {
   DESTINATIONS,
   destinationById,
@@ -54,6 +55,19 @@ describe("the rail", () => {
         expect(`${destination.id} at ${role || "(unresolved)"}: ${path}`).not.toContain("undefined");
       }
     }
+  });
+});
+
+describe("the two lists that must not drift", () => {
+  it("keeps Fleet's tabs in step with the surfaces themselves", () => {
+    // nav.ts spells these out so the repo-root guide-coverage gate can READ
+    // them -- a template literal is not a value a gate can parse. That makes
+    // this the join between the two lists, and it is the reason spelling them
+    // out is safe.
+    const tabs = destinationById("fleet")?.tabs ?? [];
+    expect(tabs.map((tab) => tab.id)).toEqual(FLEET_SURFACES.map((s) => `fleet.${s.id}`));
+    expect(tabs.map((tab) => tab.label)).toEqual(FLEET_SURFACES.map((s) => s.label));
+    expect(tabs.map((tab) => tab.to)).toEqual(FLEET_SURFACES.map((s) => `/fleet/${s.id}`));
   });
 });
 

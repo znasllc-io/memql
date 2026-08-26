@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
-import { Badge, Band, Button, ButtonLink, Callout, DataText, EmptyState, Panel, Skeleton } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  ButtonLink,
+  DataText,
+  EmptyState,
+  ErrorNotice,
+  Panel,
+  Skeleton,
+} from "../ui";
 import { ExternalLink, KeyRound } from "../ui/icons";
 import { formatDay } from "./MeLayout";
 import {
@@ -55,10 +65,22 @@ export function SecurityTab({ me }: { me: MeState }): ReactNode {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* THE SERVER'S OWN WORDS ARE THE SENTENCE HERE, which inverts D5 for
+          the same reason admin/WriteOutcome.tsx does. This is the person's OWN
+          account, the refusal reads "Add a passkey first. Turning off sign-in
+          links with no passkey enrolled would leave you unable to sign in at
+          all" -- and that is precisely what they need. Filing it behind an
+          owner-only disclosure would leave a writer managing their own
+          security with nothing but "refused". */}
       {me.policyError === "" ? null : (
-        <Callout tone="danger" title="That change was refused">
-          {me.policyError}
-        </Callout>
+        <ErrorNotice
+          sentence={
+            <>
+              That change was refused. {me.policyError}
+            </>
+          }
+          next="Your sign-in settings are unchanged."
+        />
       )}
 
       <Band title="Sign-in links">

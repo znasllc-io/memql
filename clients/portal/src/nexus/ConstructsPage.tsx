@@ -1,6 +1,15 @@
 import { useState, type ReactNode } from "react";
 
-import { Badge, Band, Button, Callout, ConfirmDialog, DataText, Panel } from "../ui";
+import {
+  Badge,
+  Band,
+  Button,
+  Callout,
+  ConfirmDialog,
+  DataText,
+  ErrorNotice,
+  Panel,
+} from "../ui";
 import { useCluster } from "../cluster/ClusterProvider";
 import { DependencyGraph } from "./constructs/DependencyGraph";
 import { useGoalContext } from "./GoalLayout";
@@ -176,9 +185,11 @@ export function ConstructsPage(): ReactNode {
       </Band>
 
       {error === "" ? null : (
-        <Callout tone="danger" title="The write was refused">
-          {error}
-        </Callout>
+        <ErrorNotice
+          sentence="That write was refused."
+          next="Nothing was saved."
+          detail={error}
+        />
       )}
       {done === "" ? null : (
         <Callout tone="ok" title="Done">

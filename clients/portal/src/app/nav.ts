@@ -5,7 +5,7 @@ import { ARTIFACTS_ROOT } from "../artifacts/urls";
 import { COMPOSE_ROOT } from "../compose/urls";
 import { CONCEPTS_ROOT } from "../concepts/urls";
 import { DATA_ORIGINS_ROOT } from "../dataorigins/urls";
-import { FLEET_ROOT, FLEET_SURFACES, fleetPath } from "../fleet/urls";
+import { FLEET_ROOT, fleetPath } from "../fleet/urls";
 import { INTEGRATIONS_ROOT } from "../integrations/urls";
 import { Archive, Boxes, Cpu, Gauge, LayoutGrid, Network, Orbit } from "../ui/icons";
 import { VIEWS_ROOT } from "../views/urls";
@@ -132,12 +132,23 @@ export const DESTINATIONS: readonly NavDestination[] = [
     // the product that means "your screen".
     icon: Cpu,
     match: [FLEET_ROOT],
-    tabs: FLEET_SURFACES.map((surface) => ({
-      id: `fleet.${surface.id}`,
-      label: surface.label,
-      to: fleetPath(surface.id),
-      end: true,
-    })),
+    // SPELLED OUT rather than mapped from FLEET_SURFACES, and the derivation
+    // it replaced was the tempting version. Two reasons it is worse here:
+    //
+    //   * an id is a GUIDE KEY, and the repo-root coverage gate reads these
+    //     ids out of this file. A template literal is not a value a gate can
+    //     read, and a gate that skipped what it could not parse would go
+    //     quiet exactly when somebody added something.
+    //   * a new area surface should be a deliberate decision anyway. It needs
+    //     a guide entry, and deriving the tab silently gives it one without.
+    //
+    // The two lists cannot drift: nav.test.ts asserts these ids and labels
+    // against FLEET_SURFACES.
+    tabs: [
+      { id: "fleet.machines", label: "Machines", to: fleetPath("machines"), end: true },
+      { id: "fleet.apps", label: "Local apps", to: fleetPath("apps"), end: true },
+      { id: "fleet.workbenches", label: "Workbenches", to: fleetPath("workbenches"), end: true },
+    ],
   },
   {
     id: "library",

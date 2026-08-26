@@ -111,7 +111,6 @@ export function ComposerSection({
           <PopulationMeta
             count={data.rows.length}
             status={data.walk.status}
-            error={data.walk.error}
             onLoadMore={data.loadMore}
             onRetry={data.retry}
           />

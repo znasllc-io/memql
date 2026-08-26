@@ -7,6 +7,7 @@ import {
   Callout,
   Checkbox,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -168,9 +169,11 @@ export function AddMachine({
         ) : null}
 
         {error === "" ? null : (
-          <Callout tone="danger" title="The token was not minted">
-            {error}
-          </Callout>
+          <ErrorNotice
+            sentence="The token was not minted."
+            next="Nothing was created; try again."
+            detail={error}
+          />
         )}
 
         {/* The build choice is an INPUT to the mint -- it decides which install

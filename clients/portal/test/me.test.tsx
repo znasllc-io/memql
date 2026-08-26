@@ -252,7 +252,7 @@ describe("/me -- Account (memql#4318, #4319)", () => {
 
   it("says the read failed rather than rendering an empty account", async () => {
     renderMe("/me", { failReads: true });
-    await waitFor(() => expect(screen.getByText(/could not read your account/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read your account/)).toBeTruthy());
     expect(screen.queryByText("Display name")).toBeNull();
   });
 });

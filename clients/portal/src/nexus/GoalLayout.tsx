@@ -1,7 +1,7 @@
 import { Outlet, useOutletContext, useParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { Badge, Callout, Container, PageHeader, Skeleton, Tabs } from "../ui";
+import { Badge, Callout, Container, ErrorNotice, PageHeader, Skeleton, Tabs } from "../ui";
 import { useGoalWorld } from "./feed/useGoalWorld";
 import { GoalPicker } from "./GoalPicker";
 import { NewGoalAction } from "./NewGoalDialog";
@@ -136,9 +136,7 @@ export function GoalLayout(): ReactNode {
             may name a goal from another cluster.
           </Callout>
         ) : error !== "" ? (
-          <Callout tone="danger" title="The goal could not be read">
-            {error}
-          </Callout>
+          <ErrorNotice sentence="Could not read this goal." detail={error} />
         ) : loading && plan === null ? (
           <Skeleton variant="rows" rows={6} />
         ) : (

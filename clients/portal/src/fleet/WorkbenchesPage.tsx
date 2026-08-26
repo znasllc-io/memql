@@ -4,7 +4,6 @@ import {
   Badge,
   Band,
   Button,
-  Callout,
   ConfirmDialog,
   Container,
   DataText,
@@ -101,9 +100,11 @@ export function WorkbenchesPage(): ReactNode {
         <LiveDegraded reason={state.liveDegraded} noun="workspace" />
 
         {state.actionError === "" ? null : (
-          <Callout tone="danger" title="That did not work">
-            {state.actionError}
-          </Callout>
+          <ErrorNotice
+            sentence="That did not work."
+            next="The workspace is unchanged; try it again."
+            detail={state.actionError}
+          />
         )}
 
         <Band
@@ -115,9 +116,10 @@ export function WorkbenchesPage(): ReactNode {
           }
         >
           {state.nodesError !== "" ? (
-            <Callout tone="danger" title="Could not read the cluster's nodes">
-              {state.nodesError}
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read which replicas are running workbenches."
+              detail={state.nodesError}
+            />
           ) : state.nodesLoading && state.nodes.length === 0 ? (
             <Skeleton variant="rows" rows={2} />
           ) : state.nodes.length === 0 ? (

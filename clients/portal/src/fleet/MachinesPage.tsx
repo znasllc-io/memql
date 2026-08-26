@@ -3,16 +3,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
-import {
-  Band,
-  Button,
-  Callout,
-  Container,
-  EmptyState,
-  ErrorNotice,
-  Select,
-  Skeleton,
-} from "../ui";
+import { Band, Button, Container, EmptyState, ErrorNotice, Select, Skeleton } from "../ui";
 import { AddMachine } from "./AddMachine";
 import { FleetFrame, LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
@@ -100,9 +91,11 @@ export function MachinesPage(): ReactNode {
         <LiveDegraded reason={state.liveDegraded} noun="machine" />
 
         {state.actionError === "" ? null : (
-          <Callout tone="danger" title="That did not work">
-            {state.actionError}
-          </Callout>
+          <ErrorNotice
+            sentence="That did not work."
+            next="The machine is unchanged; try it again."
+            detail={state.actionError}
+          />
         )}
 
         {showAdd ? (
