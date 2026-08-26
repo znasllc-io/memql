@@ -68,6 +68,7 @@
 // See docs/public/concepts/view-elements.md.
 
 import { resolveDisplayCard } from "./displayCard.js";
+import type { RefResolver } from "./cell.js";
 import type {
   ConceptFieldLike,
   ConceptLike,
@@ -544,6 +545,11 @@ export interface ElementOptions {
   // bindings and their title. The LAYOUT decides it, so an arrangement does
   // not have to store the same intent twice.
   readonly display?: "list" | "cards";
+  // Resolves a relationship pointer to the target row's label (epic
+  // memql#4661). Supplied by a host that batches the reads; absent means a
+  // reference renders as its id, which is the correct rendering whenever a
+  // lookup has not resolved and is never blank.
+  readonly resolveRef?: RefResolver;
 }
 
 export interface ElementRenderInput {

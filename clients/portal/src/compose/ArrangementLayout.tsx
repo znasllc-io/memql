@@ -72,6 +72,15 @@ export interface ArrangementLayoutProps {
   // h3 in the composer, where a section header already holds h2. See
   // ComposeBand for why the caller states it.
   headingLevel?: "h2" | "h3";
+  // Resolves a relationship pointer to the target row's label (task
+  // memql#4671). Absent renders references as ids, which is what a surface
+  // that does no lookups should show and is never blank.
+  resolveRef?: (relationshipAs: string, rowId: string, targetField: string) => string | undefined;
+  // Bumped when a batch of lookups lands. Threaded down PURELY to re-render:
+  // the resolver is a stable callback reading a mutable cache, so without a
+  // changing value React has no reason to call it again and the page keeps
+  // showing ids forever.
+  resolveEpoch?: number;
 }
 
 export function ArrangementLayout({
@@ -86,6 +95,8 @@ export function ArrangementLayout({
   selectedEntry,
   renderModule,
   headingLevel = "h3",
+  resolveRef,
+  resolveEpoch = 0,
 }: ArrangementLayoutProps): ReactNode {
   if (arrangement.elements.length === 0) {
     return (
@@ -103,7 +114,7 @@ export function ArrangementLayout({
         <div key={slot.slot} className={slotClassName(slot.slot)}>
           {slot.entries.map((planned) => (
             <ArrangedEntry
-              key={`${planned.at}:${planned.entry.band}:${planned.entry.element}`}
+              key={`${planned.at}:${planned.entry.band}:${planned.entry.element}:${resolveEpoch}`}
               planned={planned}
               concept={concept}
               rows={rows}
@@ -114,6 +125,7 @@ export function ArrangementLayout({
               {...(onSelectEntry === undefined ? {} : { onSelectEntry })}
               {...(selectedEntry === undefined ? {} : { selectedEntry })}
               {...(renderModule === undefined ? {} : { renderModule })}
+              {...(resolveRef === undefined ? {} : { resolveRef })}
               headingLevel={headingLevel}
             />
           ))}
@@ -135,6 +147,7 @@ function ArrangedEntry({
   selectedEntry,
   renderModule,
   headingLevel,
+  resolveRef,
 }: {
   planned: PlannedEntry;
   concept: ConceptLike;
@@ -147,6 +160,7 @@ function ArrangedEntry({
   selectedEntry?: number;
   renderModule?: (planned: PlannedEntry) => ReactNode;
   headingLevel: "h2" | "h3";
+  resolveRef?: (relationshipAs: string, rowId: string, targetField: string) => string | undefined;
 }): ReactNode {
   const { entry, at } = planned;
   const element = elementById(entry.element);
@@ -218,6 +232,7 @@ function ArrangedEntry({
         // grid), so it is read off the plan rather than stored twice on the
         // entry.
         display: planned.display,
+        ...(resolveRef === undefined ? {} : { resolveRef }),
         ...(selectedRowId === undefined || selectedRowId === ""
           ? {}
           : { selectedRowId }),

@@ -53,6 +53,7 @@ export {
   cellContent,
   DISPLAY_COLUMN_CAP,
   type CellKind,
+  type RefResolver,
 } from "./cell.js";
 export type {
   ConceptFieldLike,

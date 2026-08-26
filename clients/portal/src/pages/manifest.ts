@@ -37,6 +37,26 @@ export interface PageSection {
   readonly meta?: string;
   // The seed arrangement: layout, elements, roles, bindings.
   readonly arrangement: Arrangement;
+  // LINK this section to an earlier one (epic memql#4661, task memql#4671).
+  //
+  // "Selecting a row in section A filters section B to the rows related to
+  // it." Declared as the relationship LABEL (`as`) plus the concept it points
+  // back at, because that is the shape the schema already publishes -- and
+  // because naming the relationship rather than a field means the link
+  // survives a field rename.
+  //
+  // V1 FILTERS THE LOADED WALK, CLIENT-SIDE, AND SAYS SO. A predicate-capable
+  // read path is the filed follow-up, not this epic (spec F). The honest
+  // label is part of the contract rather than decoration: a section that
+  // showed three related rows when the cluster holds forty, without saying it
+  // was filtering only what it had loaded, would be wrong in a way nobody
+  // could see.
+  readonly linkedTo?: {
+    // The section whose selection drives this one.
+    readonly conceptId: string;
+    // The field on THIS section's rows holding the pointer back.
+    readonly field: string;
+  };
   // Entries this page CANNOT BE WITHOUT.
   //
   // The guardrail behind regeneration: a model rearranging the fleet page may

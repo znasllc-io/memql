@@ -186,7 +186,7 @@ function draw({ rows, concept, fit, options }: ElementRenderInput): VNode {
       return h("td", cell, [
         rules === undefined
           ? text(String(row[field] ?? ""))
-          : cellContent(row, rules.field, rules.kind),
+          : cellContent(row, rules.field, rules.kind, options?.resolveRef),
       ]);
     });
     if (showView) {

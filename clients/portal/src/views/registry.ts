@@ -201,6 +201,12 @@ export const VIEWS: readonly ViewDefinition[] = [
           // This is the whole reason Users needed hand-written code: it reads
           // two populations, and an arrangement can now say so.
           conceptId: SESSION_CONCEPT_ID,
+          // ...and LINKED to the first: selecting a user narrows the sessions
+          // to theirs. Client-side over the loaded walk, and the section says
+          // so -- there is no engine join in this epic (spec D2), and a
+          // section that filtered silently would show three of forty sessions
+          // and look complete.
+          linkedTo: { conceptId: "v1:identity:user", field: "userId" },
           // NO section title: the one band in it carries the caption instead.
           // A section heading plus a band caption over a single element is the
           // same words twice, and the band caption is the one that survives if

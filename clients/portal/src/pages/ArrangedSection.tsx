@@ -19,6 +19,7 @@ import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { PopulationMeta, Skeleton } from "../ui";
 import { WIDGET_IDS, renderWidget } from "../widgets/registry";
 import { SCENE_IDS, renderScene } from "../nexus/scene/registry";
+import { useLookups } from "./useLookups";
 import type { PageSection } from "./manifest";
 
 // ONE SECTION of an arranged page: one concept, one walk, one arrangement.
@@ -94,9 +95,32 @@ export function ArrangedSection({
     setNonce((n) => n + 1);
   }, [data]);
 
+  // Lookup columns: relationship pointers resolved to the row they name, in
+  // batches (task memql#4671). Pure at render -- a cell cannot await -- so the
+  // first paint shows ids and the second shows labels, which is deliberate:
+  // an id is a true and useful thing to show while a read is in flight.
+  const lookups = useLookups(concept, data.rows);
+
+  // LINKED SECTIONS (task memql#4671). A section linked to an earlier one
+  // shows the rows related to that section's selection -- filtered over the
+  // walk THIS section has loaded, client-side, with no engine join (spec D2).
+  //
+  // The label below is part of the contract, not decoration. "Showing rows
+  // related to X, from loaded data" is the difference between a section a
+  // person can trust and one that shows three of forty related rows and looks
+  // complete. A predicate-capable server-side read is the filed follow-up.
+  const link = section.linkedTo;
+  const linkedRows = useMemo(() => {
+    if (link === undefined || selectedRowId === "") return data.rows;
+    return data.rows.filter((row) => {
+      const value = (row as Record<string, unknown>)[link.field];
+      return typeof value === "string" && value === selectedRowId;
+    });
+  }, [link, selectedRowId, data.rows]);
+
   const live = useMemo(() => {
     if (concept === undefined) return undefined;
-    const profile = profileConcept(concept, data.rows);
+    const profile = profileConcept(concept, linkedRows);
     // REPAIR, WITH THE PAGE'S OWN GUARDRAIL. `required` is what stops a
     // regeneration from producing a page that loads the right rows and no
     // longer does its job.
@@ -105,7 +129,7 @@ export function ArrangedSection({
       scenes: SCENE_IDS,
       widgets: WIDGET_IDS,
     });
-  }, [arrangement, concept, data.rows, section.required]);
+  }, [arrangement, concept, linkedRows, section.required]);
 
   // Reported on every change of either, so a regeneration issued after a
   // "load more" sees the rows on screen rather than the first page.
@@ -122,7 +146,7 @@ export function ArrangedSection({
         const id = options?.["widgetId"] ?? "";
         return renderWidget(id, {
           concept,
-          rows: data.rows,
+          rows: linkedRows,
           selectedRowId,
           onSelect,
           onChanged,
@@ -132,14 +156,14 @@ export function ArrangedSection({
         const id = options?.["sceneId"] ?? "";
         return renderScene(id, {
           concept,
-          rows: data.rows,
+          rows: linkedRows,
           selectedRowId,
           onSelect,
         });
       }
       return null;
     },
-    [concept, data.rows, selectedRowId, onSelect, onChanged],
+    [concept, linkedRows, selectedRowId, onSelect, onChanged],
   );
 
   if (data.registryError !== "") {
@@ -210,14 +234,22 @@ export function ArrangedSection({
         onReload={data.reload}
         selectedRowId={selectedRowId}
       />
+      {link !== undefined && selectedRowId !== "" ? (
+        <p className="text-xs text-subtle">
+          Showing rows related to the selection, from loaded data — {linkedRows.length} of{" "}
+          {data.rows.length} loaded. Rows this page has not walked to yet are not counted.
+        </p>
+      ) : null}
       <ArrangementLayout
         arrangement={live}
         concept={concept}
-        rows={data.rows}
+        rows={linkedRows}
         onSelect={onSelect}
         selectedRowId={selectedRowId}
         onRowAction={onRowAction}
         renderModule={renderModule}
+        resolveRef={lookups.resolve}
+        resolveEpoch={lookups.epoch}
         // A band caption is a PAGE's second-level structure, under the page's
         // h1. It is the composer that nests one level deeper, because there a
         // section header already holds h2.

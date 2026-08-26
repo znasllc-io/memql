@@ -125,7 +125,8 @@ function renderUsers(harness: Harness = {}) {
       // The asOf walk: each step asks for versions strictly older than the
       // instant it names. A plain read returns the newest.
       const at = /asOf\([^,]+, "([^"]*)"\)/.exec(call)?.[1] ?? "";
-      const eligible = at === "" ? mine : mine.filter((v) => v.createdAt < at);
+      const eligible =
+        at === "" ? mine : mine.filter((v) => String(v["createdAt"] ?? "") < at);
       const newest = eligible[0];
       return new Result({
         bundle: { nodes: newest ? [newest] : [] },

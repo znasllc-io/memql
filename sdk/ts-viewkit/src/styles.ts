@@ -1030,6 +1030,16 @@ const elementStyles = `
   white-space: nowrap;
 }
 
+/* A RESOLVED reference: the target row's own label, reading as prose because
+   that is what it is -- a name, not an id. The dotted underline is the same
+   "there is more here" convention the elapsed-time cell uses, and here the
+   more is the id on hover. */
+.vk-cell-ref {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vk-border, currentColor);
+}
+
 /* An id, and the fallback for a reference that could not be resolved. Reads
    as DATA: monospace, tight, quieter than prose. Never blank -- an id is
    always better than nothing, which is the rule lookups build on. */

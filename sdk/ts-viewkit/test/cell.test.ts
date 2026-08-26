@@ -187,6 +187,50 @@ test("an id and an unresolved reference both read as data, never as prose", () =
   assert.match(html(profile(), "id"), /class="vk-cell-data"/);
 });
 
+test("a reference renders the target's label once it resolves, and the id until then", () => {
+  // NEVER BLANK is the whole contract of this cell. There are four ways a
+  // lookup fails to resolve -- deleted target, unreadable target, unknown
+  // relationship, read not landed -- and a cell cannot tell them apart. The
+  // id is true in all four and is something a person can paste into a query;
+  // a blank would say "this row has no value here", which is false in all
+  // four.
+  const p = profile();
+  const carrierId = field(p, "carrierId");
+
+  const unresolved = renderToHtml(cellContent(ROW, carrierId, "reference"));
+  assert.match(unresolved, /carrier:c1/);
+  assert.match(unresolved, /vk-cell-data/);
+
+  // A resolver that has not got the answer yet returns undefined, which is
+  // the SAME rendering -- not a spinner and not an empty cell.
+  const pending = renderToHtml(cellContent(ROW, carrierId, "reference", () => undefined));
+  assert.equal(pending, unresolved);
+
+  const resolved = renderToHtml(
+    cellContent(ROW, carrierId, "reference", (as, rowId) => {
+      // The DOMAIN label is what a resolver is keyed on -- what the edge
+      // MEANS -- not the engine's structural type.
+      assert.equal(as, "carrier");
+      assert.equal(rowId, "carrier:c1");
+      return "Northern Freight";
+    }),
+  );
+  assert.match(resolved, /Northern Freight/);
+  assert.match(resolved, /vk-cell-ref/);
+  // The id stays reachable: a resolved label is friendlier, and the id is
+  // what somebody debugging needs.
+  assert.match(resolved, /title="carrier:c1"/);
+  assert.match(resolved, /data-vk-ref-concept="v9:madeup:carrier"/);
+});
+
+test("a resolver that returns an empty label falls back to the id rather than blanking", () => {
+  // A target row whose display card resolves to nothing is a real state -- a
+  // concept with no card and no name-shaped field. Rendering the empty string
+  // would produce exactly the blank cell this rule exists to prevent.
+  const out = renderToHtml(cellContent(ROW, field(profile(), "carrierId"), "reference", () => ""));
+  assert.match(out, /carrier:c1/);
+});
+
 test("an absent value is an em dash, and it is labelled", () => {
   for (const name of ["dispatchedAt", "weightKg", "status", "insured", "carrierId"]) {
     const out = html(profile(), name, { id: "shipment:s2" });

@@ -146,7 +146,26 @@ export function cellAttrs(kind: CellKind): Readonly<Record<string, string>> {
 }
 
 // cellContent renders one value under one rule.
-export function cellContent(row: RowLike, field: FieldProfile, kind: CellKind): VNode {
+// A resolver a host supplies so a REFERENCE cell can render the row it points
+// at rather than the id (epic memql#4661, task memql#4671).
+//
+// A FUNCTION rather than a map of pre-resolved values: the host owns the
+// batching, the cache and the network, and view-kit must not learn about any
+// of them. It answers `undefined` for "not resolved", which is not a failure
+// -- it is the state a cell is in for the first paint, and the honest
+// rendering of it is the id.
+export type RefResolver = (
+  relationshipAs: string,
+  rowId: string,
+  targetField: string,
+) => string | undefined;
+
+export function cellContent(
+  row: RowLike,
+  field: FieldProfile,
+  kind: CellKind,
+  resolve?: RefResolver,
+): VNode {
   const raw = row[field.field];
 
   // ABSENT IS ABSENT, and it looks different from empty. A blank cell is
@@ -165,8 +184,9 @@ export function cellContent(row: RowLike, field: FieldProfile, kind: CellKind): 
       return booleanCell(field.field, raw);
     case "enum":
       return enumCell(raw);
-    case "id":
     case "reference":
+      return referenceCell(field, raw, resolve);
+    case "id":
       return idCell(raw);
     default:
       // A BARE TEXT NODE, not a wrapped span. Plain text is the majority of
@@ -236,4 +256,44 @@ function enumCell(raw: unknown): VNode {
 // lookup that cannot resolve shows the id, never a blank.
 function idCell(raw: unknown): VNode {
   return h("span", { class: "vk-cell-data" }, [text(statusValue(raw) || String(raw))]);
+}
+
+// A reference: the target row's own label where it resolved, the id where it
+// did not.
+//
+// NEVER BLANK, and that is the whole contract of this cell. There are four
+// ways a lookup fails to resolve -- the target row was deleted, the caller's
+// row authz does not admit it, the relationship names a concept this cluster
+// no longer publishes, or the read simply has not landed yet -- and a cell
+// cannot tell them apart. What it CAN do is show the id, which is true in all
+// four cases and is something a person can paste into a query. A blank cell
+// would say "this row has no value here", which is false in all four.
+//
+// The resolved value is linked to the target's row detail through the same
+// `data-row-id` contract every element uses, so a host that already wires row
+// selection gets click-through for free.
+function referenceCell(
+  field: FieldProfile,
+  raw: unknown,
+  resolve: RefResolver | undefined,
+): VNode {
+  const id = statusValue(raw) || String(raw);
+  const rel = field.relationship;
+  const label =
+    resolve === undefined || rel === undefined
+      ? undefined
+      : resolve(rel.as ?? rel.field, id, "");
+  if (label === undefined || label === "") return idCell(raw);
+  return h(
+    "span",
+    {
+      class: "vk-cell-ref",
+      "data-vk-ref-id": id,
+      "data-vk-ref-concept": rel?.target ?? "",
+      // The id stays reachable on hover: a resolved label is friendlier and
+      // the id is what somebody debugging needs.
+      title: id,
+    },
+    [text(label)],
+  );
 }
