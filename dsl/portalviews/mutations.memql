@@ -36,13 +36,16 @@ mutate view createComposedView {
     conceptIds    []string!
     arrangements  []object!
     origin        enum("manual", "suggested")
+    kind          enum("composed", "override")
+    targetPageId  string
   }
   insert {
-    accept { name, description, conceptIds, arrangements }
+    accept { name, description, conceptIds, arrangements, targetPageId }
     stamp {
       id: args.viewId
       ownerUserId: actor.userId
       origin: args.origin ?? "manual"
+      kind: args.kind ?? "composed"
       status: "active"
       updatedAt: now
     }
@@ -70,6 +73,38 @@ mutate view updateComposedView {
     stamp {
       id: args.viewId
       ownerUserId: actor.userId
+      updatedAt: now
+    }
+  }
+}
+
+/// Write the newest version of a page override -- the ONE write behind regeneration and behind
+/// "use this version" (epic memql#4661). Owned: ownerUserId is stamped from actor.userId, so a
+/// regeneration is per-person by construction and can never repaint somebody else's console.
+///
+/// It is a create-or-append rather than two calls because a write in MemQL is an append onto one
+/// id: the first regeneration of a page and the fifth are the same operation, and the version
+/// history the strip walks is the row's own. `kind` and `targetPageId` are re-stamped on every
+/// write so an override cannot be turned into a composed view -- or pointed at a different page --
+/// by a later call.
+@actor
+mutate view writePageOverride {
+  args {
+    viewId        string!
+    targetPageId  string!
+    arrangements  []object!
+    conceptIds    []string!
+    origin        enum("manual", "suggested")
+  }
+  insert {
+    accept { arrangements, conceptIds, targetPageId }
+    stamp {
+      id: args.viewId
+      ownerUserId: actor.userId
+      kind: "override"
+      origin: args.origin ?? "suggested"
+      status: "active"
+      name: args.targetPageId
       updatedAt: now
     }
   }

@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   profileConcept,
   sanitizeArrangement,
   type Arrangement,
+  type ConceptLike,
   type PlannedEntry,
+  type RowLike,
 } from "@znasllc-io/memql-view-kit";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -57,6 +59,13 @@ export interface ArrangedSectionProps {
   // Shown when this section's concept is not published by the cluster.
   // Absent renders the standard sentence.
   missingStatement?: ReactNode;
+  // Reports the concept and the rows this section actually loaded, upward.
+  //
+  // Regeneration needs a PROFILE, and a profile needs the rows the page
+  // loaded -- which only the section knows. Reporting rather than lifting the
+  // walk keeps one walk per section (a page with two sections has two, which
+  // is right) instead of centralising a read that is genuinely per-section.
+  onLoaded?: (conceptId: string, concept: ConceptLike, rows: readonly RowLike[]) => void;
 }
 
 export function ArrangedSection({
@@ -66,6 +75,7 @@ export function ArrangedSection({
   onSelect,
   children,
   missingStatement,
+  onLoaded,
 }: ArrangedSectionProps): ReactNode {
   const { status } = useCluster();
   const data = useViewRows(section.conceptId);
@@ -96,6 +106,13 @@ export function ArrangedSection({
       widgets: WIDGET_IDS,
     });
   }, [arrangement, concept, data.rows, section.required]);
+
+  // Reported on every change of either, so a regeneration issued after a
+  // "load more" sees the rows on screen rather than the first page.
+  useEffect(() => {
+    if (concept === undefined || onLoaded === undefined) return;
+    onLoaded(section.conceptId, concept, data.rows);
+  }, [concept, data.rows, section.conceptId, onLoaded]);
 
   const renderModule = useCallback(
     (planned: PlannedEntry): ReactNode => {

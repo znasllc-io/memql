@@ -562,6 +562,7 @@ var BoundConcepts = map[string]string{
 	"outboxPending":                                    "v1:platform:outboxEntry",
 	"overrideById":                                     "v1:healing:healedOverride",
 	"overridesForConstruct":                            "v1:healing:healedOverride",
+	"pageOverride":                                     "v1:portalviews:view",
 	"participantByAgentSpace":                          "v1:cognition:participant",
 	"participantSession":                               "v1:cognition:session",
 	"passkeyByCredentialId":                            "v1:identity:identity",
@@ -958,6 +959,7 @@ var BoundConcepts = map[string]string{
 	"workersForUser":                                   "v1:worker:registration",
 	"workspaceForPlan":                                 "v1:workbench:workspace",
 	"writeKnowledgeChunk":                              "v1:knowledge:documentChunk",
+	"writePageOverride":                                "v1:portalviews:view",
 }
 
 // CDCTopics maps <CONCEPT_KEY>_<ACTION> to the full emitted CDC topic

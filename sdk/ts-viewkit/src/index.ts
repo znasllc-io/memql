@@ -184,6 +184,8 @@ export {
   formatTime,
   formatDateTime,
   formatNumber,
+  formatCompact,
+  formatRelative,
   compareScalars,
   isMissing,
   MONTH_NAMES,

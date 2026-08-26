@@ -1982,6 +1982,9 @@ export interface CreateComposedViewArgs {
   arrangements: Record<string, unknown>[];
   // Enum: manual | suggested
   origin?: string;
+  // Enum: composed | override
+  kind?: string;
+  targetPageId?: string;
 }
 
 export function buildCreateComposedView(args: CreateComposedViewArgs): string {
@@ -1992,6 +1995,8 @@ export function buildCreateComposedView(args: CreateComposedViewArgs): string {
   parts.push("conceptIds: " + renderMemQLValue(args.conceptIds));
   parts.push("arrangements: " + renderMemQLValue(args.arrangements));
   if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.targetPageId !== undefined) parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
   return "mutation createComposedView(" + parts.join(", ") + ")";
 }
 
@@ -9690,5 +9695,37 @@ declare module "./query.js" {
 
 QueryClient.prototype.writeKnowledgeChunk = function (this: QueryClient, args: WriteKnowledgeChunkArgs = {} as WriteKnowledgeChunkArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("writeKnowledgeChunk", buildWriteKnowledgeChunk(args), opts);
+};
+
+/** Write the newest version of a page override -- the ONE write behind regeneration and behind "use this version" (epic memql#4661). Owned: ownerUserId is stamped from actor.userId, so a regeneration is per-person by construction and can never repaint somebody else's console.
+It is a create-or-append rather than two calls because a write in MemQL is an append onto one id: the first regeneration of a page and the fifth are the same operation, and the version history the strip walks is the row's own. `kind` and `targetPageId` are re-stamped on every write so an override cannot be turned into a composed view -- or pointed at a different page -- by a later call. */
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["writePageOverride"] in generated_concepts.ts).
+export interface WritePageOverrideArgs {
+  viewId: string;
+  targetPageId: string;
+  arrangements: Record<string, unknown>[];
+  conceptIds: string[];
+  // Enum: manual | suggested
+  origin?: string;
+}
+
+export function buildWritePageOverride(args: WritePageOverrideArgs): string {
+  const parts: string[] = [];
+  parts.push("viewId: " + renderMemQLValue(args.viewId));
+  parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
+  parts.push("arrangements: " + renderMemQLValue(args.arrangements));
+  parts.push("conceptIds: " + renderMemQLValue(args.conceptIds));
+  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
+  return "mutation writePageOverride(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    writePageOverride(args: WritePageOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.writePageOverride = function (this: QueryClient, args: WritePageOverrideArgs = {} as WritePageOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("writePageOverride", buildWritePageOverride(args), opts);
 };
 

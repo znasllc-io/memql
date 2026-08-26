@@ -1,7 +1,13 @@
-import { type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import type { ConceptLike, RowLike } from "@znasllc-io/memql-view-kit";
 
 import { Container, PageHeader } from "../ui";
+import { ErrorMessage } from "../components/StatusMessage";
 import { ArrangedSection } from "./ArrangedSection";
+import { RegenerateAction } from "./RegenerateAction";
+import { VersionStrip } from "./VersionStrip";
+import { usePageArrangements, usePageOverrideWriter } from "./usePageArrangements";
+import { useRegenerate } from "./useRegenerate";
 import type { PageManifest } from "./manifest";
 
 // AN ARRANGED PAGE: the one page component the portal has (epic memql#4661).
@@ -42,10 +48,12 @@ export interface ArrangedPageProps {
   actions?: ReactNode;
   // Rendered between the header and the first section.
   notice?: ReactNode;
-  // The arrangement to render per section concept id. Absent falls back to the
-  // manifest's own seed, which is what a page with no override shows -- and
-  // what EVERY page shows until somebody regenerates it.
-  arrangements?: Readonly<Record<string, import("@znasllc-io/memql-view-kit").Arrangement>>;
+  // Turn regeneration off for this page. The excluded surfaces (sign-in, the
+  // composer's own editor, dialogs) are not arranged pages at all, so this is
+  // for a page that IS one and should not be rearranged -- there are none
+  // today, and the flag exists so the answer to "can I turn it off" is a
+  // parameter rather than a fork of this component.
+  regenerable?: boolean;
 }
 
 export function ArrangedPage({
@@ -55,9 +63,64 @@ export function ArrangedPage({
   onSelect,
   actions,
   notice,
-  arrangements,
+  regenerable = true,
 }: ArrangedPageProps): ReactNode {
-  void pageId;
+  const resolved = usePageArrangements(manifest, pageId);
+
+  // What each section loaded, for the profile a regeneration is built from.
+  //
+  // A REF PLUS A NONCE rather than state alone: a section reports on every row
+  // change, and storing that in state directly would re-render the page on
+  // every page of every walk. The nonce advances only when the SET of loaded
+  // sections changes, which is what the regenerate action's identity depends
+  // on.
+  const loaded = useRef<Record<string, { concept: ConceptLike; rows: readonly RowLike[] }>>({});
+  const [loadedCount, setLoadedCount] = useState(0);
+  const onLoaded = useCallback(
+    (conceptId: string, concept: ConceptLike, rows: readonly RowLike[]) => {
+      const had = loaded.current[conceptId] !== undefined;
+      loaded.current[conceptId] = { concept, rows };
+      if (!had) setLoadedCount((n) => n + 1);
+    },
+    [],
+  );
+  void loadedCount;
+
+  const regenerate = useRegenerate(
+    manifest,
+    pageId,
+    loaded.current,
+    resolved.arrangements,
+    resolved.reload,
+  );
+
+  // "Use this version" is a WRITE, not a state change: it re-writes the chosen
+  // arrangement as the newest version, so the history grows and nothing is
+  // destroyed. Reverting to ORIGINAL writes the manifest's own seed -- an
+  // explicit "this is what I want" rather than deleting the row, which would
+  // mean "I never regenerated this page" and would be silently undone by the
+  // next regeneration.
+  const writer = usePageOverrideWriter(pageId);
+  const useVersion = useCallback(() => {
+    const chosen = resolved.versions.find((v) => v.version === resolved.selected);
+    if (chosen === undefined) return;
+    const arrangements =
+      chosen.version === 0 ? manifest.sections.map((s) => s.arrangement) : chosen.arrangements;
+    void writer.write(arrangements).then(() => resolved.reload());
+  }, [resolved, manifest, writer]);
+
+  const header =
+    regenerable && actions === undefined ? (
+      <RegenerateAction
+        onRun={regenerate.run}
+        busy={regenerate.status === "working"}
+        error={regenerate.error}
+        onDismiss={regenerate.dismiss}
+      />
+    ) : (
+      actions
+    );
+
   return (
     <Container>
       <section className="flex min-h-full min-w-0 flex-col gap-6 pb-8">
@@ -65,16 +128,39 @@ export function ArrangedPage({
           eyebrow={manifest.sections[0]?.conceptId ?? ""}
           title={manifest.title}
           blurb={manifest.blurb}
-          {...(actions === undefined ? {} : { actions })}
+          {...(header === undefined ? {} : { actions: header })}
+          {...(resolved.versions.length > 1
+            ? {
+                meta: (
+                  <VersionStrip
+                    versions={resolved.versions}
+                    selected={resolved.selected}
+                    onSelect={resolved.select}
+                    onUse={useVersion}
+                    busy={writer.busy}
+                  />
+                ),
+              }
+            : {})}
         />
+        {/* A FAILED OVERRIDE READ LEAVES THE SEED STANDING, and says so beside
+            the page rather than instead of it: the page is not broken, it is
+            the page it has always been. */}
+        {resolved.error !== "" ? (
+          <ErrorMessage>
+            Could not read your saved arrangement of this page: {resolved.error}. You are
+            looking at the page as it ships.
+          </ErrorMessage>
+        ) : null}
         {notice}
         {manifest.sections.map((section) => (
           <ArrangedSection
             key={section.conceptId}
             section={section}
-            arrangement={arrangements?.[section.conceptId] ?? section.arrangement}
+            arrangement={resolved.arrangements[section.conceptId] ?? section.arrangement}
             selectedRowId={selectedRowId}
             onSelect={onSelect}
+            onLoaded={onLoaded}
           />
         ))}
       </section>
