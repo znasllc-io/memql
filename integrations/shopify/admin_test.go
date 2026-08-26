@@ -122,7 +122,10 @@ func TestAdminErrorClassification(t *testing.T) {
 }
 
 func TestTheAdminEndpointIsComposedFromTheStore(t *testing.T) {
-	got := AdminEndpoint("acme.myshopify.com", "2026-07")
+	got, err := AdminEndpoint("acme.myshopify.com", "2026-07")
+	if err != nil {
+		t.Fatalf("AdminEndpoint() error = %v", err)
+	}
 	if got != "https://acme.myshopify.com/admin/api/2026-07/graphql.json" {
 		t.Errorf("endpoint = %q", got)
 	}

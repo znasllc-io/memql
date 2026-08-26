@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +241,56 @@ func TestStoreRegistryCachesAndInvalidates(t *testing.T) {
 	}
 	if got := len(h.engine.callsTo("stores")); got == before {
 		t.Error("Invalidate did not force a re-read, so an operator's edit would wait out the TTL")
+	}
+}
+
+// A mirrored Shopify number is whatever that vendor's API said, and JSON
+// decodes every one of them to float64 -- so the narrowing to int saturates
+// rather than wrapping. An inventory count that wrapped negative would be
+// mirrored as fact with nothing anywhere to show it had been mangled.
+func TestAMirroredNumberTooWideForIntSaturates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		row  map[string]any
+		want int
+	}{
+		{name: "a bare int", row: map[string]any{"n": 7}, want: 7},
+		{name: "an int64 in range", row: map[string]any{"n": int64(7)}, want: 7},
+		{name: "a float64, as JSON decodes one", row: map[string]any{"n": float64(7)}, want: 7},
+		{name: "read through the payload probe", row: map[string]any{"payload": map[string]any{"n": float64(7)}}, want: 7},
+		{name: "a float64 past the ceiling", row: map[string]any{"n": 1e300}, want: math.MaxInt},
+		{name: "a float64 past the floor", row: map[string]any{"n": -1e300}, want: math.MinInt},
+		{name: "an unordered float64", row: map[string]any{"n": math.NaN()}, want: 0},
+		{name: "an absent field", row: map[string]any{}, want: 0},
+		{name: "a nil row", row: nil, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mapInt(tc.row, "n"); got != tc.want {
+				t.Errorf("mapInt(%v) = %d, want %d", tc.row, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheIntegerClampsKeepSignAndOrdering(t *testing.T) {
+	t.Parallel()
+	if got := clampInt64ToInt(math.MaxInt64); got != math.MaxInt {
+		t.Errorf("clampInt64ToInt(MaxInt64) = %d, want %d", got, math.MaxInt)
+	}
+	if got := clampInt64ToInt(math.MinInt64); got != math.MinInt {
+		t.Errorf("clampInt64ToInt(MinInt64) = %d, want %d", got, math.MinInt)
+	}
+	if got := clampFloat64ToInt(math.Inf(1)); got != math.MaxInt {
+		t.Errorf("clampFloat64ToInt(+Inf) = %d, want %d", got, math.MaxInt)
+	}
+	if got := clampFloat64ToInt(math.Inf(-1)); got != math.MinInt {
+		t.Errorf("clampFloat64ToInt(-Inf) = %d, want %d", got, math.MinInt)
+	}
+	// Truncation toward zero is the behaviour the bare conversion had, and
+	// the clamp must not have changed it for values that always fitted.
+	if got := clampFloat64ToInt(-7.9); got != -7 {
+		t.Errorf("clampFloat64ToInt(-7.9) = %d, want -7", got)
 	}
 }

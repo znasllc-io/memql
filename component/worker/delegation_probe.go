@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -297,16 +298,50 @@ func stringSliceFrom(v any) []string {
 	return out
 }
 
+// intFromRow reads an integer off a graph row.
+//
+// The narrowing is SATURATING rather than bare (CodeQL
+// go/incorrect-integer-conversion). Both wider cases are reachable with a
+// value int cannot hold -- JSON decodes every number to float64, and these
+// rows are written by cockpits reporting their own capability caps -- while a
+// bare conversion wraps on a 32-bit build and is implementation-defined for
+// an out-of-range float. A concurrency cap that wrapped negative would read
+// as "this machine can run nothing" and take a signed-in worker silently out
+// of the fleet, which is the failure this file exists to report on.
 func intFromRow(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return clampInt64(n)
 	case float64:
-		return int(n)
+		switch {
+		case math.IsNaN(n):
+			return 0
+		case n >= math.MaxInt:
+			return math.MaxInt
+		case n <= math.MinInt:
+			return math.MinInt
+		}
+		// Through clampInt64 rather than a bare int(n): the float bounds
+		// above cannot be exact, because float64 has no representation of
+		// math.MaxInt and rounds it up to 2^63, so a value in the gap passes
+		// the guard and then converts. The integer bound is exact.
+		return clampInt64(int64(n))
 	}
 	return 0
+}
+
+// clampInt64 narrows an int64 to int without wrapping: exact on a 64-bit
+// build, where int is already 64 bits, and saturating on a 32-bit one.
+func clampInt64(v int64) int {
+	if v > math.MaxInt {
+		return math.MaxInt
+	}
+	if v < math.MinInt {
+		return math.MinInt
+	}
+	return int(v)
 }
 
 // firstConnectedRunning returns the id of a worker on THIS replica that

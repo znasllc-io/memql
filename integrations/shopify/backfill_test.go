@@ -227,3 +227,33 @@ func TestApplyOrderPutsParentsFirst(t *testing.T) {
 		}
 	}
 }
+
+// The harness disables the bulk-download guard so its plaintext loopback
+// server is reachable. That seam is also the one way streamBulk could stop
+// consulting the guard without a test noticing -- so this removes it and
+// checks the refusal comes back, against the same loopback URL every other
+// backfill test streams happily.
+func TestTheBulkDownloadGuardIsConsulted(t *testing.T) {
+	h := newHarness(t)
+	h.conn.admin.downloadGuard = nil
+	store := h.store(t)
+	ctx := context.Background()
+
+	h.admin.reply("ShopifyBulkRun", startedOperation("gid://shopify/BulkOperation/1"))
+	page, err := h.conn.BackfillStore(ctx, store, "v1:shopify:product", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	url := h.admin.serveJSONL("/download/products.jsonl", bulkLines(
+		map[string]any{"id": "gid://shopify/Product/1", "title": "Shirt", "updatedAt": "2026-08-23T10:00:00Z"},
+	))
+	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", url))
+	_, err = h.conn.BackfillStore(ctx, store, "v1:shopify:product", page.NextCursor)
+	if err == nil {
+		t.Fatal("the download was fetched with no guard in front of it")
+	}
+	if !strings.Contains(err.Error(), "must be https") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+}
