@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import { useParams } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Container, PageHeader, Skeleton } from "../ui";
+import { Badge, Band, Container, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import { appLabel } from "./rows";
 import { isLive, useAppSessionDetail } from "./useAppSessions";
 
@@ -25,11 +24,16 @@ export function AppSessionPage(): ReactNode {
   const { session, loading, error, polling } = useAppSessionDetail(sessionId);
 
   if (loading) return <Container><Skeleton /></Container>;
-  if (error !== "") return <Container><ErrorMessage>{error}</ErrorMessage></Container>;
+  if (error !== "")
+    return (
+      <Container>
+        <ErrorNotice sentence="Could not read this run." detail={error} />
+      </Container>
+    );
   if (session === null) {
     return (
       <Container>
-        <ErrorMessage>{`No app session at ${sessionId}.`}</ErrorMessage>
+        <ErrorNotice sentence="There is no run at this address." next="It may have been cleaned up, or the link may be wrong." />
       </Container>
     );
   }
@@ -38,7 +42,7 @@ export function AppSessionPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow="v1:worker:appSession"
+          subtitle="Local apps"
           title={`${appLabel(session.app)} · ${session.kind}`}
           blurb={
             session.workspace === ""

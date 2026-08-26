@@ -15,8 +15,8 @@ import { RowDetailDialog } from "../components/RowDetailDialog";
 import { ArrangementLayout } from "../compose/ArrangementLayout";
 import { SectionHeader } from "../compose/ComposeLayout";
 import { LiveBandPanel } from "../concepts/LiveBandPanel";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { PopulationMeta, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { ErrorNotice, PopulationMeta, Skeleton } from "../ui";
 import { WIDGET_IDS, renderWidget } from "../widgets/registry";
 import { SCENE_IDS, renderScene } from "../nexus/scene/registry";
 import { useLookups } from "./useLookups";
@@ -173,7 +173,13 @@ export function ArrangedSection({
   );
 
   if (data.registryError !== "") {
-    return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
+    return (
+      <ErrorNotice
+        sentence="Could not read the concept registry, so this section cannot be drawn."
+        next="The connection may have dropped; reload the page to read it again."
+        detail={data.registryError}
+      />
+    );
   }
   if (concept === undefined || live === undefined) {
     if (status !== "connected" && data.rows.length === 0) {
@@ -218,10 +224,21 @@ export function ArrangedSection({
       <PopulationMeta
         count={data.rows.length}
         status={data.walk.status}
-        error={data.walk.error}
         onLoadMore={data.loadMore}
         onRetry={data.retry}
       />
+      {/* The walk's own error, in the BODY rather than in the header's meta
+          line (memql#4653): an engine string rendered at 12px beside a button
+          is unreadable at that size and unusable to whoever reads it.
+          PopulationMeta says the fact and the remedy; the raw string lives
+          here, behind the disclosure, where there is room. */}
+      {data.walk.error === "" ? null : (
+        <ErrorNotice
+          sentence="Part of this section's rows could not be read."
+          next="What is listed below is what the last read returned; use Retry to read again."
+          detail={data.walk.error}
+        />
+      )}
       {children}
       {/* LIVE (memql#4539). Every arranged section holds a CDC subscription;
           the band is what it is for. It sits ABOVE the elements deliberately

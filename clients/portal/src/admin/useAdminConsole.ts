@@ -7,6 +7,7 @@ import {
 
 import { useAuth } from "../auth/AuthProvider";
 import { useCluster } from "../cluster/ClusterProvider";
+import { canAdminister } from "../cluster/roles";
 import { useMyAccess } from "../cluster/useMyAccess";
 import { nodeTokenRows, tokenRows, type NodeTokenRow, type TokenRow } from "./rows";
 import {
@@ -36,7 +37,11 @@ import {
 // showing an operator a table that will always be empty, and a button that
 // will always fail, wastes their time and teaches them nothing about who can.
 // Saying "your role is reader" is the honest interface.
-const CAN_ADMINISTER: readonly Role[] = ["owner", "admin"];
+//
+// THE PREDICATE ITSELF MOVED to src/cluster/roles.ts in memql#4653, when
+// ErrorNotice and PageGuide became callers: three modules each spelling out
+// `role === "owner" || role === "admin"` is three places for one answer to
+// drift. What stays here is this console's own reading of it.
 
 export interface AdminAccess {
   role: Role;
@@ -52,7 +57,7 @@ export function useAdminAccess(): AdminAccess {
   const role: Role = access?.clusterRole ?? "";
   return {
     role,
-    canAdminister: CAN_ADMINISTER.includes(role),
+    canAdminister: canAdminister(role),
     resolved: !loading && access !== null,
   };
 }

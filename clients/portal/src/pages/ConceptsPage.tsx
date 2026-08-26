@@ -1,10 +1,11 @@
-import { Container, Skeleton, TextInput } from "../ui";
+import { AreaFrame } from "../app/AreaFrame";
+import { Container, ErrorNotice, Skeleton, TextInput } from "../ui";
 import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
 import {
   domainSummaries,
   filterConcepts,
@@ -67,16 +68,18 @@ export function ConceptsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-5">
-        <header>
-          <h1 className="text-xl font-semibold tracking-tight">Concept registry</h1>
-          <p className="mt-1 text-sm text-muted">
-            {concepts.length === 0
-              ? "Reading the registry from the cluster."
-              : `${concepts.length} concepts declared across ${domains.length} domains. ` +
-                "Pick one to inspect its schema and browse its rows."}
-          </p>
-        </header>
+      <AreaFrame
+        area="concepts"
+        pageId="concepts"
+        subtitle="Concepts"
+        title="Concept registry"
+        blurb={
+          concepts.length === 0
+            ? "Reading the registry from the cluster."
+            : `${concepts.length} concepts declared across ${domains.length} domains. ` +
+              "Pick one to inspect its schema and browse its rows."
+        }
+      >
 
         <div className="flex flex-col gap-3">
           <label className="relative block">
@@ -118,7 +121,7 @@ export function ConceptsPage(): ReactNode {
         </div>
 
         {error ? (
-          <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read the concept registry." next="Reload the page to read it again." detail={error} />
         ) : loading && concepts.length === 0 ? (
           <Skeleton variant="rows" rows={6} />
         ) : concepts.length === 0 ? (
@@ -168,7 +171,7 @@ export function ConceptsPage(): ReactNode {
             ))}
           </div>
         )}
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

@@ -1,8 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Button, Container, PageHeader, Skeleton } from "../ui";
+import { Badge, Band, Button, Container, ErrorNotice, PageHeader, Skeleton } from "../ui";
 import type { DomainState } from "./health";
 import { StoresRefused } from "./StoresRefused";
 import { useStoreActions } from "./useStoreActions";
@@ -33,13 +32,14 @@ export function StoreDetailPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
+          subtitle="Stores"
           eyebrow={storeId}
           title={store?.domain ?? storeId}
           blurb="Shopify owns this store's data and MemQL holds a generated mirror of it. Webhooks keep the mirror current; reconciliation repairs what they lose, and the drift below is the measurement of how much that is."
         />
 
-        {healthError ? <ErrorMessage>{healthError}</ErrorMessage> : null}
-        {actions.error ? <ErrorMessage>{actions.error}</ErrorMessage> : null}
+        {healthError ? <ErrorNotice sentence="Could not check this store's health." detail={healthError} /> : null}
+        {actions.error ? <ErrorNotice sentence="That action did not run." next="Nothing changed; try it again." detail={actions.error} /> : null}
         {actions.note !== "" ? (
           <p className="rounded border border-ok bg-ok-subtle px-3 py-2 text-sm text-fg">{actions.note}</p>
         ) : null}

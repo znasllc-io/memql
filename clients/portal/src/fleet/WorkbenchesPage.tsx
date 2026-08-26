@@ -4,17 +4,17 @@ import {
   Badge,
   Band,
   Button,
-  Callout,
   ConfirmDialog,
   DataText,
   EmptyState,
+  ErrorNotice,
   Panel,
   Select,
   Skeleton,
   type StatusTone,
 } from "../ui";
 import { ArrangedPage } from "../pages/ArrangedPage";
-import { FleetTabs, LiveDegraded } from "./FleetFrame";
+import { LiveDegraded } from "./FleetFrame";
 import { WORKBENCHES_PAGE, WORKBENCHES_PAGE_ID } from "./manifests";
 import { formatFreshness, formatMoment } from "./format";
 import { chipsFromMap } from "./labels";
@@ -79,9 +79,9 @@ export function WorkbenchesPage(): ReactNode {
       <ArrangedPage
         manifest={WORKBENCHES_PAGE}
         pageId={WORKBENCHES_PAGE_ID}
+        area="fleet"
         selectedRowId=""
         onSelect={() => {}}
-        nav={<FleetTabs />}
         actions={
           <>
             {state.isClusterOwner ? (
@@ -134,9 +134,11 @@ export function WorkbenchesBody(): ReactNode {
         <LiveDegraded reason={state.liveDegraded} noun="workspace" />
 
         {state.actionError === "" ? null : (
-          <Callout tone="danger" title="That did not work">
-            {state.actionError}
-          </Callout>
+          <ErrorNotice
+            sentence="That did not work."
+            next="The workspace is unchanged; try it again."
+            detail={state.actionError}
+          />
         )}
 
         <Band
@@ -148,17 +150,19 @@ export function WorkbenchesBody(): ReactNode {
           }
         >
           {state.nodesError !== "" ? (
-            <Callout tone="danger" title="Could not read the cluster's nodes">
-              {state.nodesError}
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read which replicas are running workbenches."
+              detail={state.nodesError}
+            />
           ) : state.nodesLoading && state.nodes.length === 0 ? (
             <Skeleton variant="rows" rows={2} />
           ) : state.nodes.length === 0 ? (
             <EmptyState
+              firstRun
               statement={
-                "No workbench replica is registered. With none, a workbench call from an agent is " +
-                "refused rather than run on the agent's own disk -- the remote flag is an " +
-                "assertion, not a preference."
+                "No workbench is running. Until one is, an agent that needs to write a file or " +
+                "run a command has nowhere sandboxed to do it, and those calls are refused " +
+                "rather than run somewhere they should not be."
               }
             />
           ) : (
@@ -174,7 +178,11 @@ export function WorkbenchesBody(): ReactNode {
                         <Badge tone={HEALTH_TONE[node.health] ?? "neutral"}>
                           {node.health || "unknown"}
                         </Badge>
-                        <span className="text-sm font-semibold break-all">{node.id}</span>
+                        {/* The id in the DATA voice rather than as a bold
+                            sans heading: it is the replica's address, which is
+                            a value an operator reads character by character
+                            and pastes elsewhere -- not a title. */}
+                        <DataText kind="id">{node.id}</DataText>
                         <span className="ml-auto text-xs text-subtle">
                           last seen{" "}
                           <DataText kind="time">{formatFreshness(node.lastSeen, now)}</DataText>
@@ -221,10 +229,11 @@ export function WorkbenchesBody(): ReactNode {
           }
         >
           {state.workspacesError !== "" ? (
-            <Callout tone="danger" title="Could not read the workspaces">
-              {state.workspacesError} Nothing is listed rather than an empty table -- an empty
-              list here would read as &ldquo;there are none&rdquo;.
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read the workspaces."
+              next="Nothing is listed below. Do not read that as there being none -- this read failed, so the answer is unknown."
+              detail={state.workspacesError}
+            />
           ) : state.workspacesLoading && state.workspaces.length === 0 ? (
             <Skeleton variant="rows" rows={3} />
           ) : workspacesEmpty ? (

@@ -30,7 +30,14 @@ import {
   type QueryClient,
   type SubscriptionManager,
 } from "@znasllc-io/memql-sdk-core/client";
-import { aiSuggest, type AiSuggestOptions, type AiSuggestResult } from "@znasllc-io/memql-sdk-core/ai";
+import {
+  aiSuggest,
+  aiTranscribe,
+  type AiSuggestOptions,
+  type AiSuggestResult,
+  type AiTranscribeOptions,
+  type AiTranscribeResult,
+} from "@znasllc-io/memql-sdk-core/ai";
 import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
 import {
   createWorkerToken,
@@ -95,12 +102,24 @@ export interface ClusterClients {
   revokeSession: (sessionId: string, signal?: AbortSignal) => Promise<RevokeSessionResult>;
   revokeAllSessions: (signal?: AbortSignal) => Promise<RevokeAllSessionsResult>;
   setSignInPolicy: (policy: SignInPolicy, signal?: AbortSignal) => Promise<SetSignInPolicyResult>;
-  // Structured-output suggestion (the composer's arrangement suggester).
+  // Structured-output suggestion (the composer's arrangement suggester, and
+  // Synapse's uiAssist fill).
   suggest: (
     domain: string,
     payload: Record<string, unknown>,
     opts?: AiSuggestOptions,
   ) => Promise<AiSuggestResult>;
+  // One-shot speech to text, for Synapse's press-and-hold (memql#4658).
+  //
+  // BATCH, not the streaming surface. A held button produces one recording
+  // with a definite end, and the transcript is shown in the popover for the
+  // person to edit before it runs -- so partials would be a live rewrite of
+  // something they are reading. Streaming transcription is the upgrade path
+  // if a longer dictation surface ever wants it.
+  transcribe: (
+    audio: Uint8Array,
+    opts?: AiTranscribeOptions,
+  ) => Promise<AiTranscribeResult>;
 }
 
 export type ConnectionStatus =
@@ -297,6 +316,7 @@ export function ClusterProvider({
                 revokeAllSessions: (signal) => revokeAllSessions(transport, signal),
                 setSignInPolicy: (policy, signal) => setSignInPolicy(transport, policy, signal),
                 suggest: (domain, payload, opts) => aiSuggest(transport, domain, payload, opts),
+                transcribe: (audio, opts) => aiTranscribe(transport, audio, opts),
               },
         );
         // liveStoreFor is memoized on the connection inside the SDK, so this

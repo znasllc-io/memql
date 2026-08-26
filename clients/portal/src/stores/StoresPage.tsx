@@ -1,9 +1,18 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Badge, Band, Button, Container, EmptyState, Field, PageHeader, Skeleton, TextInput } from "../ui";
-import { STORE_CONCEPT_ID } from "./concepts";
+import {
+  Badge,
+  Band,
+  Button,
+  Container,
+  EmptyState,
+  ErrorNotice,
+  Field,
+  Skeleton,
+  TextInput,
+} from "../ui";
+import { AreaFrame } from "../app/AreaFrame";
 import type { StoreHealth } from "./health";
 import { StoresRefused } from "./StoresRefused";
 import { storePath } from "./urls";
@@ -28,12 +37,13 @@ export function StoresPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={STORE_CONCEPT_ID}
-          title="Stores"
-          blurb="Every Shopify store this cluster mirrors. Shopify owns the data; MemQL holds a generated copy of it, kept current by webhooks and repaired by reconciliation. A store's three credentials live as references to secrets -- the row itself never carries a token."
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.stores"
+        subtitle="Cluster"
+        title="Stores"
+        blurb="Every Shopify store this cluster mirrors. Shopify owns the data; MemQL holds a generated copy of it, kept current by webhooks and repaired by reconciliation. A store's three credentials live as references to secrets -- the row itself never carries a token."
+      >
 
         <Band title="Add a store">
           <NewStoreForm busy={createBusy} error={createError} onCreate={createStore} />
@@ -48,7 +58,7 @@ export function StoresPage(): ReactNode {
           }
           panel
         >
-          {healthError ? <ErrorMessage>{healthError}</ErrorMessage> : null}
+          {healthError ? <ErrorNotice sentence="Could not check the stores' health." next="The list below is still what is configured." detail={healthError} /> : null}
           {healthLoading && health.length === 0 ? <Skeleton variant="text" width="w-64" /> : null}
           {!healthLoading && health.length === 0 && healthError === "" ? (
             <EmptyState statement="No store is configured. Create the custom-distribution app in the Shopify Dev Dashboard, seal its three credentials as secrets, then add the store above -- the connector runbook walks the whole sequence." />
@@ -61,7 +71,7 @@ export function StoresPage(): ReactNode {
             ))}
           </ul>
         </Band>
-      </section>
+      </AreaFrame>
     </Container>
   );
 }
@@ -172,7 +182,7 @@ function NewStoreForm({
           <TextInput value={form.ownerUserId} onChange={set("ownerUserId")} />
         </Field>
       </div>
-      {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+      {error ? <ErrorNotice sentence="The store was not added." next="Check the fields above and try again." detail={error} /> : null}
       <div>
         <Button type="submit" disabled={busy || form.storeId === "" || form.domain === ""}>
           {busy ? "Adding..." : "Add store"}

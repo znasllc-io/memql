@@ -6,10 +6,11 @@ import {
   TABLE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, Container, PageHeader, Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Band, Button, Container, ErrorNotice, Skeleton } from "../ui";
 import { ElementView } from "../viewkit/ElementView";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
@@ -70,27 +71,29 @@ export function IntegrationsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title="Integrations"
-          blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
-          actions={
-            <>
-              <Link
-                to={campaignsPath()}
-                className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
-              >
-                Email campaigns
-              </Link>
-              <Button size="xs" onClick={refresh}>
-                Refresh
-              </Button>
-              <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
-                Check now
-              </Button>
-            </>
-          }
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.integrations"
+        subtitle="Cluster"
+        title="Integrations"
+        blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
+        actions={
+          <>
+            <Link
+              to={campaignsPath()}
+              className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
+            >
+              Email campaigns
+            </Link>
+            <Button size="xs" onClick={refresh}>
+              Refresh
+            </Button>
+            <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
+              Check now
+            </Button>
+          </>
+        }
+      >
 
         {!canView ? (
           <Empty>
@@ -99,7 +102,7 @@ export function IntegrationsPage(): ReactNode {
             page is only declining to ask.
           </Empty>
         ) : error ? (
-          <ErrorMessage>Could not read the integration registry: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read what this cluster has wired to the outside world." detail={error} />
         ) : loading && status === null ? (
           <Skeleton variant="rows" rows={4} />
         ) : reports.length === 0 ? (
@@ -107,7 +110,7 @@ export function IntegrationsPage(): ReactNode {
         ) : (
           <>
             {probeError ? (
-              <ErrorMessage>The live check could not run: {probeError}</ErrorMessage>
+              <ErrorNotice sentence="The live check did not run, so what is listed is registration rather than health." detail={probeError} />
             ) : null}
 
             <Band title="Configured" meta="registration is not configuration">
@@ -133,11 +136,11 @@ export function IntegrationsPage(): ReactNode {
 
             <Band title="Email settings" meta="non-secret, and the source decides whether it is changeable">
               <p className="mb-3 max-w-3xl text-sm text-muted">
-                A setting sourced from <code className="font-mono text-xs">globalVariable</code> is a
-                row in the graph, so it can be changed without a redeploy. One sourced from{" "}
-                <code className="font-mono text-xs">env</code> comes from the bootstrap envelope, and
-                the resolver reads the environment first and stops — writing a row for it would have
-                no effect.
+                Some of these you can change here and they take effect straight
+                away. The rest are fixed when the cluster starts, and each one
+                says which it is -- editing a fixed setting from a browser would
+                appear to work and change nothing, so the page does not offer
+                it.
               </p>
               <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
                 <ElementView
@@ -183,7 +186,7 @@ export function IntegrationsPage(): ReactNode {
             />
           </>
         )}
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

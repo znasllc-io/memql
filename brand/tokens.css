@@ -47,35 +47,67 @@
  * a sign-in page cannot read the portal's localStorage across origins -- they
  * follow the OS, which is the honest default there.
  *
+ * DAYLIGHT -- THE LIGHT HALF, RE-GROUND (memql#4650)
+ *
+ * The light neutrals were green-tinted paper; they are near-neutral paper now.
+ * The accent family, the status families, the data tints and EVERY dark-mode
+ * value are byte-identical -- what moved is the six neutrals plus the two
+ * lines, so the console reads as paper with a green accent rather than as a
+ * green screen. Rationale and the owner's table:
+ * docs/superpowers/specs/2026-08-26-portal-declutter-identity-design.md (C).
+ *
+ * TWO VALUES DEVIATE FROM THAT TABLE, and both are the table's own escape
+ * clause ("exact hex may shift to hit the targets"):
+ *
+ *   --memql-fg-subtle  #7e837b, not #82877f. The spec value measures 3.67 on
+ *                      white where today's #7c847b measures 3.86, and subtle
+ *                      is PLACEHOLDER TEXT -- moving to a neutral is not a
+ *                      licence to make the palette's weakest text weaker. This
+ *                      value holds today's ratio (3.87) on the new ground.
+ *   scrollbar thumb    follows --memql-border-strong, as its own note below
+ *                      has always said it does. Leaving it at the OLD
+ *                      border-strong would have made that sentence quietly
+ *                      false; the HOVER step is picked to preserve today's
+ *                      2.30 ratio, because the hover is the affordance.
+ *
  * CONTRAST (measured, WCAG relative luminance -- keep this table honest when
  * a value moves):
  *   dark  fg/bg 15.96 . muted/bg 7.68 . subtle/bg 4.04 . accent/bg 10.21
  *         accent-fg on accent 10.21 . warn/bg 8.95 . danger/bg 6.32
  *         data-number/surface 16.08 . data-string/surface 9.15
- *   light fg/bg 15.15 . muted/white 6.42 . subtle/white 3.86 . accent/white 5.14
- *         accent-fg on accent 5.14 . warn/bg 4.94 . danger/white 6.04
- *         data-number/white 5.47 . data-string/white 5.02
- * The binding floors: warn is a border and a dot (non-text UI, >= 3:1 against
- * the ground it sits on -- both themes clear it with room); accent and the
- * data tints carry small text (>= 4.5:1 -- both themes clear it).
+ *   light fg/bg 15.89 . fg/surface 17.05 . fg/raised 14.80
+ *         muted/bg 5.92 . muted/surface 6.35 . muted/raised 5.51
+ *         subtle/bg 3.61 . subtle/surface 3.87 . subtle/raised 3.36
+ *         accent/bg 4.79 . accent/surface 5.14 . accent-fg on accent 5.14
+ *         warn/bg 5.10 . danger/surface 6.04 . danger/bg 5.63
+ *         data-number/surface 5.47 . data-string/surface 5.02
+ *         scrollbar thumb/surface 1.49 . thumb-hover/surface 2.30
+ * The binding floors: body text is AA on all three light grounds (bg, surface
+ * and surface-raised) and muted text clears 4.5:1 on bg and on surface, which
+ * are this epic's two stated targets. warn is a border and a dot (non-text UI,
+ * >= 3:1 against the ground it sits on -- both themes clear it with room);
+ * accent and the data tints carry small text (>= 4.5:1 -- both themes clear
+ * it). subtle is the one family below 4.5 and always has been: it is reserved
+ * for placeholders and the literal "null", never for a sentence a reader has
+ * to get through.
  */
 
 :root {
   color-scheme: light dark;
 
   /* --- surfaces, back to front ------------------------------------- */
-  --memql-bg: light-dark(#f2f4ef, #07090a);          /* the page itself */
+  --memql-bg: light-dark(#f7f7f5, #07090a);          /* the page itself */
   --memql-surface: light-dark(#ffffff, #0b1110);     /* cards, panels, the rail */
-  --memql-surface-raised: light-dark(#e9ede6, #0e1311); /* hover, selected rows */
+  --memql-surface-raised: light-dark(#efefec, #0e1311); /* hover, selected rows */
 
   /* --- foreground ---------------------------------------------------- */
-  --memql-fg: light-dark(#14201a, #e8e6dd);          /* body text */
-  --memql-fg-muted: light-dark(#586159, #9ca395);    /* labels, secondary slots */
-  --memql-fg-subtle: light-dark(#7c847b, #6c726a);   /* placeholders, "null" */
+  --memql-fg: light-dark(#191d1a, #e8e6dd);          /* body text */
+  --memql-fg-muted: light-dark(#5b615c, #9ca395);    /* labels, secondary slots */
+  --memql-fg-subtle: light-dark(#7e837b, #6c726a);   /* placeholders, "null" */
 
   /* --- lines --------------------------------------------------------- */
-  --memql-border: light-dark(#d6ddd4, #18231e);
-  --memql-border-strong: light-dark(#c2cabf, #213029);
+  --memql-border: light-dark(#e5e6e2, #18231e);
+  --memql-border-strong: light-dark(#d2d4cf, #213029);
 
   /* --- accents -------------------------------------------------------- */
   --memql-accent: light-dark(#047d5a, #5ccda7);
@@ -135,6 +167,30 @@
   --memql-radius: 0.375rem;
   --memql-radius-lg: 0.625rem;
 
+  /* --- motion ----------------------------------------------------------
+   * ONE DURATION AND ONE CURVE, because a console with three of each has
+   * none. Every state change a person can cause -- a hover wash, a tab
+   * underline sliding, a dialog settling, a row rising into place -- runs at
+   * this duration on this curve, so the whole surface moves as one object
+   * instead of as a collection of components that each guessed.
+   *
+   * 160ms is chosen to be BELOW the threshold where a transition reads as an
+   * animation rather than as responsiveness. The curve is fast-out, hard-in:
+   * it leaves immediately (so the interface never feels like it is deciding)
+   * and arrives without overshoot (so nothing bounces -- this is an
+   * operations console, not a toy).
+   *
+   * These are metrics, not colours, so they carry no light-dark() pair: the
+   * theme flip must never change how fast anything moves.
+   *
+   * WHAT DOES NOT USE THEM: the breathing pulses in the portal's own
+   * stylesheet (the connection mark, streaming states). Those are not
+   * responses to a gesture -- they are a running thing saying it is running,
+   * and they are deliberately slow enough to read as a heartbeat.
+   */
+  --memql-motion-dur: 160ms;
+  --memql-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
   /* --- control metrics -------------------------------------------------
    * THE HEIGHT OF A CONTROL IS A TOKEN, not an emergent property of padding.
    *
@@ -169,8 +225,8 @@
    * Hover is one step stronger again, which is the whole affordance: the bar
    * is draggable and nothing else on the page darkens under the pointer.
    */
-  --memql-scrollbar-thumb: light-dark(#c2cabf, #213029);
-  --memql-scrollbar-thumb-hover: light-dark(#a4aea1, #33473c);
+  --memql-scrollbar-thumb: light-dark(#d2d4cf, #213029);
+  --memql-scrollbar-thumb-hover: light-dark(#a9aca5, #33473c);
 }
 
 /* The explicit choice, written by src/app/theme.ts. Pinning color-scheme is
@@ -181,4 +237,24 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+}
+
+/* Reduced motion, in ONE place.
+ *
+ * Zeroing the duration token is the whole opt-out for everything that
+ * transitions: a rule written as `transition-duration: var(--memql-motion-dur)`
+ * becomes 0ms here and the state change lands instantly, with no per-component
+ * media query and nothing to forget. The CURVE is left alone -- a curve over
+ * zero time is not motion.
+ *
+ * It is not the whole story, and it is not meant to be. Keyframe animations
+ * (the mark's breathing, a staggered first paint, the token float) name a
+ * duration of their own, so each still needs its own reduced-motion rule
+ * beside it -- which is why the portal's stylesheet keeps its own opt-out
+ * block. What this removes is the LARGEST category: every hover, focus,
+ * selection and open/close transition in both surfaces, at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --memql-motion-dur: 0ms;
+  }
 }

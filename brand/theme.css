@@ -64,6 +64,40 @@
      modules/ObservabilitySection.tsx already needs the min-h form. */
   --spacing-control: var(--memql-control-h);
   --spacing-control-sm: var(--memql-control-h-sm);
+
+  /* The motion curve reaches Tailwind through the EASE namespace, which is
+     what makes `ease-brand` exist. The DURATION has no theme namespace in v4,
+     so it is reached either as `duration-(--memql-motion-dur)` (v4's
+     CSS-variable shorthand for an arbitrary value) or -- far more often --
+     through the `.motion-wash` recipe below, which is the shape nearly every
+     caller actually wants. */
+  --ease-brand: var(--memql-motion-ease);
+}
+
+/*
+ * The one transition recipe, as a class rather than as three utilities.
+ *
+ * Every interactive surface in both consumers wants the same thing: colour,
+ * ground, line and opacity easing at the brand duration on the brand curve,
+ * and nothing else moving. Written as utilities that is
+ * `transition-colors duration-(--memql-motion-dur) ease-brand` on every rail
+ * row, tab, card, chip and ghost button -- three tokens to keep in step across
+ * two surfaces, which is exactly the drift this directory exists to prevent.
+ *
+ * `transform` is IN the property list and `box-shadow` is not: the kit has no
+ * shadows by rule, and a settle (a dialog scaling 0.98 -> 1) is the one
+ * non-colour move the system makes.
+ *
+ * It needs no reduced-motion rule of its own -- the duration token is already
+ * 0ms there (brand/tokens.css).
+ */
+@layer components {
+  .motion-wash {
+    transition-property: color, background-color, border-color,
+      text-decoration-color, fill, stroke, opacity, transform;
+    transition-duration: var(--memql-motion-dur);
+    transition-timing-function: var(--memql-motion-ease);
+  }
 }
 
 /*

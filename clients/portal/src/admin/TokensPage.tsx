@@ -3,8 +3,7 @@ import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-ki
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { ErrorMessage } from "../components/StatusMessage";
-import { Band, Button, DataText } from "../ui";
+import { Band, Button, DataText, ErrorNotice } from "../ui";
 import { ElementView } from "../viewkit/ElementView";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { NODE_TOKEN_CONCEPT, TOKEN_CONCEPT } from "./rows";
@@ -96,7 +95,7 @@ export function TokensPage(): ReactNode {
         </div>
         {console_.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read the tokens: {console_.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read the tokens issued against this cluster." detail={console_.error} />
           </div>
         )}
         {console_.capped ? (
@@ -174,7 +173,7 @@ export function TokensPage(): ReactNode {
         panel
       >
         {nodes.error !== "" ? (
-          <ErrorMessage>Could not read the node tokens: {nodes.error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read the node tokens." detail={nodes.error} />
         ) : nodes.tokens.length === 0 ? (
           <p className="p-3 text-sm text-subtle">
             {nodes.loading

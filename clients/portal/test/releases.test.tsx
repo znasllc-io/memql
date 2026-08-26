@@ -4,7 +4,7 @@
 //
 // RENDERED THROUGH THE REAL VIEW, not by mounting the card with hand-built
 // props. The property most worth holding here is that a non-owner never sees
-// the card at all -- and that decision lives in DeploymentsView, so a test that
+// the card at all -- and that decision lives in DeployControlsWidget, so a test that
 // mounted ReleasesCard directly would assert nothing about it while looking
 // like it did.
 

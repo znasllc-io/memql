@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
@@ -44,7 +44,13 @@ export function ViewPage(): ReactNode {
   // order cannot vary between renders -- so this is computed unconditionally
   // and an empty concept id parks the read in idle.
   const dialogRowId = view !== undefined && view.id !== "deployments" ? rowId : "";
-  const detail = useRowDetail(view?.conceptId ?? "", dialogRowId);
+  // Bumped by a write from the row's own action panel, so the dialog re-reads
+  // the row it just changed and stays open. Closing it instead -- which this
+  // did briefly -- makes a second decision about the same person cost a second
+  // navigation, and suspending somebody right after changing their role is
+  // exactly the two-decision case the panel is built for.
+  const [writeNonce, setWriteNonce] = useState(0);
+  const detail = useRowDetail(view?.conceptId ?? "", dialogRowId, writeNonce);
 
   if (view === undefined) {
     return (
@@ -87,12 +93,17 @@ export function ViewPage(): ReactNode {
         missing={detail.missing}
         {...(view.id === "users" && canAdminister && detail.row !== null
           ? {
-              // onChanged CLOSES the dialog rather than re-running the walk.
-              // The section holds a live CDC subscription, so the row the
-              // action changed is already updating underneath -- and the page
-              // no longer owns the walk to re-run, which is the point of the
-              // arrangement path.
-              actions: <PersonActions person={detail.row as Row} onChanged={onCloseRow} />,
+              // onChanged RE-READS the row and leaves the dialog open. The
+              // section's own live subscription updates the list underneath;
+              // what the dialog needs is the row it just wrote, so the panel
+              // reflects it -- a suspend turns the button into "Reinstate"
+              // without the person navigating anywhere.
+              actions: (
+                <PersonActions
+                  person={detail.row as Row}
+                  onChanged={() => setWriteNonce((n) => n + 1)}
+                />
+              ),
             }
           : {})}
       />

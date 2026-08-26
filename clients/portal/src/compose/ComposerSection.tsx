@@ -8,8 +8,8 @@ import {
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { ErrorNotice, Skeleton } from "../ui";
 import { ArrangementLayout } from "./ArrangementLayout";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
 import { SCENE_IDS } from "../nexus/scene/registry";
@@ -116,7 +116,7 @@ export function ComposerSection({
   const [selected, setSelected] = useState(0);
 
   if (data.registryError) {
-    return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
+    return <ErrorNotice sentence="Could not read the concept registry, so this section cannot be drawn." detail={data.registryError} />;
   }
   if (concept === undefined || profile === undefined) {
     // "Not connected" and "the registry does not carry that" are different
@@ -150,7 +150,6 @@ export function ComposerSection({
           <PopulationMeta
             count={data.rows.length}
             status={data.walk.status}
-            error={data.walk.error}
             onLoadMore={data.loadMore}
             onRetry={data.retry}
           />

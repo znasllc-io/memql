@@ -1,11 +1,13 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { SynapseSection, type SynapsePatch } from "../synapse";
 import {
   Button,
   Callout,
   Checkbox,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -89,6 +91,47 @@ export function AddMachine({
   const clusterUrl = workerClusterUrl(domain);
   const registered = awaitingFrom !== null && machineCount > awaitingFrom;
 
+  // The Synapse scope (memql#4658). Three fields, described the way a person
+  // would describe them -- "call it the studio mac and install the
+  // computer-use build" fills two of them, and nothing here can submit.
+  const fields = useMemo(
+    () => [
+      {
+        name: "name",
+        type: "text" as const,
+        label: "What this machine is called",
+        value: name,
+        constraints: "a short name for the credential",
+      },
+      {
+        name: "platform",
+        type: "enum" as const,
+        label: "Platform",
+        value: platform,
+        options: INSTALL_PLATFORMS,
+      },
+      {
+        name: "computerUse",
+        type: "boolean" as const,
+        label: "Install the computer-use build",
+        value: computerUse ? "true" : "false",
+      },
+    ],
+    [name, platform, computerUse],
+  );
+
+  function applyPatches(patches: readonly SynapsePatch[]): void {
+    for (const patch of patches) {
+      if (patch.field === "name" && typeof patch.value === "string") setName(patch.value);
+      if (patch.field === "platform" && typeof patch.value === "string") {
+        setPlatform(patch.value as InstallPlatform);
+      }
+      if (patch.field === "computerUse" && typeof patch.value === "boolean") {
+        setComputerUse(patch.value);
+      }
+    }
+  }
+
   function submit(event: FormEvent): void {
     event.preventDefault();
     if (clients === null || name.trim() === "" || busy) return;
@@ -116,6 +159,7 @@ export function AddMachine({
   }
 
   return (
+    <SynapseSection id="fleet.addMachine" label="Add a machine" fields={fields} apply={applyPatches}>
     <Panel>
       <form onSubmit={submit} className="flex flex-col gap-3">
         {clients === null ? (
@@ -125,9 +169,11 @@ export function AddMachine({
         ) : null}
 
         {error === "" ? null : (
-          <Callout tone="danger" title="The token was not minted">
-            {error}
-          </Callout>
+          <ErrorNotice
+            sentence="The token was not minted."
+            next="Nothing was created; try again."
+            detail={error}
+          />
         )}
 
         {/* The build choice is an INPUT to the mint -- it decides which install
@@ -135,11 +181,15 @@ export function AddMachine({
             that acts on it. Bringing the button up onto the control line (the
             alignment this issue is about) would otherwise have left an option
             sitting after the submit it changes. */}
-        <Checkbox
-          checked={computerUse}
-          onChange={setComputerUse}
-          label="Install the computer-use build (mouse, keyboard, screenshots). It asks for Accessibility and Screen Recording the first time it runs."
-        />
+        {/* data-synapse-field is how the section finds a control to flash
+            when Synapse fills it. The name matches the scope's own field. */}
+        <div data-synapse-field="computerUse">
+          <Checkbox
+            checked={computerUse}
+            onChange={setComputerUse}
+            label="Install the computer-use build (mouse, keyboard, screenshots). It asks for Accessibility and Screen Recording the first time it runs."
+          />
+        </div>
 
         <FormRow>
           <Field
@@ -147,7 +197,9 @@ export function AddMachine({
             grow
             hint="Yours, for the credential. The machine reports its own hostname when it connects, and you can rename it here afterwards."
           >
-            <TextInput value={name} onChange={setName} placeholder="jose-mac-mini" />
+            <div data-synapse-field="name">
+              <TextInput value={name} onChange={setName} placeholder="jose-mac-mini" />
+            </div>
           </Field>
           <Field label="Operating system">
             <Select
@@ -227,5 +279,6 @@ export function AddMachine({
         </div>
       )}
     </Panel>
+    </SynapseSection>
   );
 }

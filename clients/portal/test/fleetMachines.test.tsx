@@ -814,18 +814,29 @@ describe("adding a machine", () => {
   });
 });
 
-describe("the nav rail", () => {
-  it("carries a Fleet group linking to both surfaces", async () => {
+describe("where Fleet lives in the chrome (memql#4655)", () => {
+  it("is ONE rail row, and its surfaces are the frame's tabs", async () => {
     const h = harness();
     renderFleet(h);
     await waitFor(() => expect(screen.getByRole("heading", { name: "jose-mac-mini" })).toBeTruthy());
 
+    // The rail lists AREAS; a page's sub-surfaces are its tabs; never both
+    // (decision D2). Fleet used to appear as a caption with three rows under
+    // it, which is how it came to be listed three times across two captions.
     const rail = within(screen.getByRole("navigation", { name: "Portal sections" }));
-    expect(rail.getByRole("heading", { name: "Fleet" })).toBeTruthy();
-    expect(rail.getByRole("link", { name: "Machines" }).getAttribute("href")).toBe(
+    expect(rail.getByRole("link", { name: "Fleet" }).getAttribute("href")).toBe("/fleet/machines");
+    expect(rail.queryByRole("heading", { name: "Fleet" })).toBeNull();
+    for (const gone of ["Machines", "Local apps", "Workbenches"]) {
+      expect(rail.queryByRole("link", { name: gone })).toBeNull();
+    }
+
+    // ...and they are all reachable, one level in, from the strip.
+    const tabs = within(screen.getByRole("navigation", { name: "Fleet" }));
+    expect(tabs.getByRole("link", { name: "Machines" }).getAttribute("href")).toBe(
       "/fleet/machines",
     );
-    expect(rail.getByRole("link", { name: "Workbenches" }).getAttribute("href")).toBe(
+    expect(tabs.getByRole("link", { name: "Local apps" }).getAttribute("href")).toBe("/fleet/apps");
+    expect(tabs.getByRole("link", { name: "Workbenches" }).getAttribute("href")).toBe(
       "/fleet/workbenches",
     );
   });

@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { ConceptLike, RowLike } from "@znasllc-io/memql-view-kit";
 
-import { Container, PageHeader } from "../ui";
-import { ErrorMessage } from "../components/StatusMessage";
+import { AreaFrame, type AreaId } from "../app/AreaFrame";
+import { Container, ErrorNotice, PageHeader } from "../ui";
 import { ArrangedSection } from "./ArrangedSection";
 import { RegenerateAction } from "./RegenerateAction";
 import { VersionStrip } from "./VersionStrip";
@@ -58,6 +58,18 @@ export interface ArrangedPageProps {
   nav?: ReactNode;
   // Rendered between the header and the first section.
   notice?: ReactNode;
+  // The nav AREA this page belongs to (epic memql#4654's rail work). When
+  // given, the header and the area's tab strip come from AreaFrame -- which is
+  // role-aware and knows which tabs a person may see, where this component's
+  // `nav` slot only knows what it was handed.
+  //
+  // THE TWO FRAMES COMPOSE RATHER THAN COMPETE, and that is the point. Two
+  // epics landed a page frame in the same release: AreaFrame owns WHERE a page
+  // sits in the rail and which sibling tabs it has, and ArrangedPage owns what
+  // the page IS -- its manifest, its version strip, its regenerate control.
+  // Neither subsumes the other, so an area page renders one inside the other
+  // and a page with no area (Me, a composed view) keeps the plain header.
+  area?: AreaId;
   // Override the manifest's heading and its line of copy.
   //
   // A manifest is DATA and does not know who is reading. Most pages are named
@@ -81,6 +93,7 @@ export function ArrangedPage({
   selectedRowId,
   onSelect,
   actions,
+  area,
   nav,
   notice,
   title,
@@ -145,49 +158,80 @@ export function ArrangedPage({
     </>
   );
 
-  return (
-    <Container>
-      <section className="flex min-h-full min-w-0 flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={manifest.sections[0]?.conceptId ?? ""}
-          title={title ?? manifest.title}
-          blurb={blurb ?? manifest.blurb}
-          actions={header}
-          {...(resolved.versions.length > 1
-            ? {
-                meta: (
-                  <VersionStrip
-                    versions={resolved.versions}
-                    selected={resolved.selected}
-                    onSelect={resolved.select}
-                    onUse={useVersion}
-                    busy={writer.busy}
-                  />
-                ),
-              }
-            : {})}
-        />
-        {nav}
+  // The version strip rides the header's `meta` slot, and only when there is
+  // something to choose between -- a strip offering one version explains
+  // nothing.
+  const meta =
+    resolved.versions.length > 1 ? (
+      <VersionStrip
+        versions={resolved.versions}
+        selected={resolved.selected}
+        onSelect={resolved.select}
+        onUse={useVersion}
+        busy={writer.busy}
+      />
+    ) : undefined;
+
+  const body = (
+    <>
         {/* A FAILED OVERRIDE READ LEAVES THE SEED STANDING, and says so beside
             the page rather than instead of it: the page is not broken, it is
             the page it has always been. */}
         {resolved.error !== "" ? (
-          <ErrorMessage>
-            Could not read your saved arrangement of this page: {resolved.error}. You are
-            looking at the page as it ships.
-          </ErrorMessage>
+          <ErrorNotice
+            sentence="Could not read your saved arrangement of this page."
+            next="You are looking at the page as it ships; reload to try reading it again."
+            detail={resolved.error}
+          />
         ) : null}
         {notice}
-        {manifest.sections.map((section) => (
-          <ArrangedSection
-            key={section.conceptId}
-            section={section}
-            arrangement={resolved.arrangements[section.conceptId] ?? section.arrangement}
-            selectedRowId={selectedRowId}
-            onSelect={onSelect}
-            onLoaded={onLoaded}
-          />
-        ))}
+      {manifest.sections.map((section) => (
+        <ArrangedSection
+          key={section.conceptId}
+          section={section}
+          arrangement={resolved.arrangements[section.conceptId] ?? section.arrangement}
+          selectedRowId={selectedRowId}
+          onSelect={onSelect}
+          onLoaded={onLoaded}
+        />
+      ))}
+    </>
+  );
+
+  if (area !== undefined) {
+    return (
+      <Container>
+        <AreaFrame
+          area={area}
+          pageId={pageId}
+          title={title ?? manifest.title}
+          blurb={blurb ?? manifest.blurb}
+          actions={header}
+          {...(meta === undefined ? {} : { meta })}
+        >
+          {body}
+        </AreaFrame>
+      </Container>
+    );
+  }
+
+  return (
+    <Container>
+      <section className="flex min-h-full min-w-0 flex-col gap-6 pb-8">
+        {/* NO CONCEPT-ID EYEBROW. memql#4657 took it off the designed views
+            deliberately -- the id belongs in the area's guide, where its
+            audience is, rather than above every page heading. An arranged
+            page follows the same rule; ArrangedSection still shows it on a
+            titled section, which is where a multi-population page needs it. */}
+        <PageHeader
+          pageId={pageId}
+          title={title ?? manifest.title}
+          blurb={blurb ?? manifest.blurb}
+          actions={header}
+          {...(meta === undefined ? {} : { meta })}
+        />
+        {nav}
+        {body}
       </section>
     </Container>
   );

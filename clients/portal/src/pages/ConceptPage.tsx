@@ -7,8 +7,8 @@ import { clusterDomainFor } from "../cluster/editorLink";
 import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
 import { OpenInVsCode } from "../components/OpenInVsCode";
-import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Breadcrumbs, Callout, DataText, Skeleton, Tabs } from "../ui";
+import { Empty } from "../components/StatusMessage";
+import { Breadcrumbs, Callout, DataText, ErrorNotice, Skeleton, Tabs } from "../ui";
 import { OriginBadge, isMirror } from "../dataorigins/OriginBadge";
 import type { ConceptPaneContext } from "./conceptContext";
 import {
@@ -64,7 +64,7 @@ export function ConceptPage(): ReactNode {
       <Empty>Not connected to a cluster. See the connection state in the header.</Empty>
     );
   }
-  if (error) return <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>;
+  if (error) return <ErrorNotice sentence="Could not read this cluster's concepts." next="Reload the page; if it keeps failing the connection is the place to look." detail={error} />;
   if (concept === undefined) {
     if (loading) return <Skeleton variant="rows" rows={8} />;
     return (

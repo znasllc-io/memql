@@ -337,167 +337,139 @@ describe("the shell chrome (memql#4240, restructured in memql#4316)", () => {
   });
 });
 
-// The Views group's two sub-sections (memql#4527): Built-in and Custom, each
-// a disclosure inside ONE Views caption.
+// THE SEVEN-ITEM RAIL (memql#4655, decision D1).
 //
-// What these own is the part a source read cannot settle: that the control is
-// a real disclosure (focusable, Enter/Space, aria-expanded), that closing one
-// hides ONLY its own rows, that the choice survives a reload, and that the
-// COLLAPSED icon rail throws the whole structure away rather than rendering
-// sub-captions an icon column has no room for.
-describe("the Views sub-sections (memql#4527)", () => {
-  const SECTION_KEYS = [
+// What this owns is the part a source read cannot settle: that the rail is
+// SEVEN rows and not eight, that the rows that left it really left (a saved
+// view, the composer, the admin surfaces), that the destinations whose tabs
+// live under unrelated prefixes still light up, and that the collapsed icon
+// rail keeps every accessible name.
+//
+// The shape it replaces was two collapsible sub-sections with their own
+// localStorage keys inside one captioned group, on top of five other
+// captions. app/nav.test.ts owns the definition itself; this owns what the
+// rail RENDERS from it.
+describe("the seven-item rail (memql#4655)", () => {
+  const RETIRED_SECTION_KEYS = [
     "memql-portal-rail-section-built-in",
     "memql-portal-rail-section-custom",
   ];
 
   afterEach(() => {
     globalThis.localStorage?.removeItem("memql-portal-rail");
-    for (const key of SECTION_KEYS) globalThis.localStorage?.removeItem(key);
+    for (const key of RETIRED_SECTION_KEYS) globalThis.localStorage?.removeItem(key);
   });
 
-  function signedIn() {
+  function signedIn(queryStub: Record<string, unknown> = {}, path = "/concepts") {
     const dial = vi.fn(async () =>
-      fakeConnection({ engineVersion: "v0.19.5" }),
+      fakeConnection({ engineVersion: "v0.19.5" }, queryStub),
     ) as unknown as typeof Connection.dial;
-    return renderSignedIn(dial);
+    return renderSignedIn(dial, path);
   }
 
-  function disclosure(name: string): HTMLElement {
-    return within(rail()).getByRole("button", { name });
+  // The destination rows only: the profile link and the footer are the rail's
+  // other two parts and neither is a place you can go.
+  function destinationLinks(): HTMLAnchorElement[] {
+    const list = rail().querySelector("ul");
+    return list === null ? [] : [...list.querySelectorAll("a")];
   }
 
-  it("opens expanded, and each disclosure governs the list it names", async () => {
+  it("is exactly seven rows, in the designed order", async () => {
     signedIn();
     await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    expect(destinationLinks().map((a) => a.textContent)).toEqual([
+      "Console",
+      "Nexus",
+      "Views",
+      "Concepts",
+      "Fleet",
+      "Library",
+      "Cluster",
+    ]);
+  });
 
-    // ONE Views caption. The Custom group that used to sit beside it is gone.
-    expect(within(rail()).getByRole("heading", { name: "Views", level: 2 })).toBeTruthy();
-    expect(within(rail()).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
-
-    for (const name of ["Built-in", "Custom"]) {
-      const button = disclosure(name);
-      // Default expanded: a person who has never touched the control gets the
-      // whole rail.
-      expect(button.getAttribute("aria-expanded")).toBe("true");
-      // A native <button>, which is the whole keyboard story -- focusable in
-      // source order, Enter and Space activate it. A <div> with a click
-      // handler would look identical here and be unreachable.
-      expect(button.tagName).toBe("BUTTON");
-      expect(button.getAttribute("type")).toBe("button");
-      const id = button.getAttribute("aria-controls") ?? "";
-      expect(document.getElementById(id)).toBeTruthy();
+  it("carries no group captions at all", async () => {
+    signedIn();
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    // Seven items need no grouping -- that is the whole argument for seven.
+    expect(within(rail()).queryAllByRole("heading", { level: 2 })).toHaveLength(0);
+    for (const caption of ["Views", "Build", "Fleet", "Library", "Cluster", "Nexus"]) {
+      expect(within(rail()).queryByRole("heading", { name: caption })).toBeNull();
     }
   });
 
-  it("closes one sub-section without touching the other, and persists it", async () => {
+  it("sends each row to the surface that area opens on", async () => {
     signedIn();
-    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
-    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
-
-    fireEvent.click(disclosure("Built-in"));
-
-    // Its own rows leave the accessibility tree; Custom's stay. `hidden` is
-    // what makes getByRole stop finding them, which is the same reason a
-    // screen reader and the Tab order stop finding them.
-    expect(disclosure("Built-in").getAttribute("aria-expanded")).toBe("false");
-    await waitFor(() =>
-      expect(within(rail()).queryByRole("link", { name: "Users" })).toBeNull(),
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    const hrefs = Object.fromEntries(
+      destinationLinks().map((a) => [a.textContent, a.getAttribute("href")]),
     );
-    expect(within(rail()).queryByRole("link", { name: "Audit" })).toBeNull();
-    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
-    expect(disclosure("Custom").getAttribute("aria-expanded")).toBe("true");
-
-    // Beside the rail's own key, one key per section -- so a half-written
-    // value takes down the section it belongs to and not the other.
-    expect(globalThis.localStorage.getItem("memql-portal-rail-section-built-in")).toBe(
-      "collapsed",
-    );
-    expect(globalThis.localStorage.getItem("memql-portal-rail-section-custom")).toBeNull();
-
-    // Re-open, and the stored value follows the control rather than sticking
-    // at whatever the first click wrote.
-    fireEvent.click(disclosure("Built-in"));
-    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
-    expect(globalThis.localStorage.getItem("memql-portal-rail-section-built-in")).toBe(
-      "expanded",
-    );
-  });
-
-  it("reopens closed, because the choice is read back at mount", async () => {
-    globalThis.localStorage.setItem("memql-portal-rail-section-custom", "collapsed");
-    signedIn();
-    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
-    expect(disclosure("Custom").getAttribute("aria-expanded")).toBe("false");
-    expect(within(rail()).queryByRole("link", { name: "Compose" })).toBeNull();
-  });
-
-  it("lists the operator's saved views inside Custom, above Compose", async () => {
-    // The regression this guards is the restructure quietly dropping the
-    // composer's output: Custom used to be a top-level group with its own
-    // derivation, and it is now a sub-section fed by the same useSavedViews
-    // hook. A rail that lost the saved views would still look correct.
-    const dial = vi.fn(async () =>
-      fakeConnection(
-        { engineVersion: "v0.19.5" },
-        {
-          composedViews: async () => ({
-            rows: () => [
-              { id: "sv-1", name: "Churn watch", status: "active", conceptIds: [], arrangements: [] },
-              { id: "sv-2", name: "Deploy health", status: "active", conceptIds: [], arrangements: [] },
-            ],
-            rawNodes: () => [],
-            single: () => null,
-            meta: () => null,
-          }),
-        },
-      ),
-    ) as unknown as typeof Connection.dial;
-    renderSignedIn(dial);
-
-    const custom = await waitFor(() => {
-      const button = disclosure("Custom");
-      const list = document.getElementById(button.getAttribute("aria-controls") ?? "");
-      expect(list).toBeTruthy();
-      return list as HTMLElement;
+    expect(hrefs).toEqual({
+      Console: "/",
+      Nexus: "/nexus",
+      Views: "/views",
+      Concepts: "/concepts",
+      // Areas with tabs open on the first tab their reader may see -- there is
+      // no /fleet or /cluster landing page above a tab strip.
+      Fleet: "/fleet/machines",
+      Library: "/artifacts",
+      Cluster: "/integrations",
     });
-    await waitFor(() =>
-      expect(within(custom).getByRole("link", { name: "Churn watch" })).toBeTruthy(),
-    );
-    expect(within(custom).getByRole("link", { name: "Deploy health" })).toBeTruthy();
-
-    // Compose is LAST, always -- the door to making another one, after the
-    // ones already made.
-    const rows = [...custom.querySelectorAll("a")].map((a) => a.textContent);
-    expect(rows).toEqual(["Churn watch", "Deploy health", "Compose"]);
-
-    // And they are under Views, not a caption of their own.
-    expect(within(rail()).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
   });
 
-  it("flattens in the collapsed icon rail, closed sub-section and all", async () => {
-    // Closed in the WIDE rail, and still rendered in the icon rail: an icon
-    // column has no caption to explain why four destinations vanished, so
-    // hiding them there would read as a bug rather than as a fold.
-    globalThis.localStorage.setItem("memql-portal-rail-section-built-in", "collapsed");
-    globalThis.localStorage.setItem("memql-portal-rail", "collapsed");
+  it("has no disclosure controls and writes no sub-section keys", async () => {
     signedIn();
-
-    await waitFor(() => expect(within(rail()).getByRole("link", { name: "Users" })).toBeTruthy());
-    expect(within(rail()).getByRole("link", { name: "Compose" })).toBeTruthy();
-
-    // No captions and no disclosure controls -- the rule the group captions
-    // already follow.
-    expect(within(rail()).queryByRole("heading", { name: "Views", level: 2 })).toBeNull();
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
     for (const name of ["Built-in", "Custom"]) {
       expect(within(rail()).queryByRole("button", { name })).toBeNull();
     }
+    // The mechanism is gone, not merely unused: a key written by a rail that
+    // no longer folds would be a preference nothing can act on.
+    for (const key of RETIRED_SECTION_KEYS) {
+      expect(globalThis.localStorage.getItem(key)).toBeNull();
+    }
+  });
 
-    // The rows keep their accessible names, which is what a collapsed row has
-    // instead of a label.
-    expect(within(rail()).getByRole("link", { name: "Users" }).getAttribute("title")).toBe(
-      "Users",
-    );
+  it("keeps saved views out of the rail, however many there are", async () => {
+    // The regression this guards is the old shape coming back by accident. A
+    // saved view was a permanent rail row, so forty views meant forty extra
+    // rows -- and the gallery is what scales instead.
+    signedIn({
+      composedViews: async () => ({
+        rows: () => [
+          { id: "sv-1", name: "Churn watch", status: "active", conceptIds: [], arrangements: [] },
+          { id: "sv-2", name: "Deploy health", status: "active", conceptIds: [], arrangements: [] },
+        ],
+        rawNodes: () => [],
+        single: () => null,
+        meta: () => null,
+      }),
+    });
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    expect(destinationLinks()).toHaveLength(7);
+    for (const gone of ["Churn watch", "Deploy health", "Compose", "Users", "Audit", "Modules"]) {
+      expect(within(rail()).queryByRole("link", { name: gone })).toBeNull();
+    }
+  });
+
+  it("lights the destination that owns the open address, across prefixes", async () => {
+    // Library's two tabs are /artifacts and /deployables. NavLink can follow
+    // one path, which is why the destination declares what it owns.
+    signedIn({}, "/deployables");
+    await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
+    const current = destinationLinks().filter((a) => a.getAttribute("aria-current") === "page");
+    expect(current.map((a) => a.textContent)).toEqual(["Library"]);
+  });
+
+  it("keeps every name in the collapsed icon rail", async () => {
+    globalThis.localStorage.setItem("memql-portal-rail", "collapsed");
+    signedIn();
+    await waitFor(() => expect(destinationLinks()).toHaveLength(7));
+    // Seven icons, and each still says what it is -- an icon column has no
+    // label, so the accessible name is the only one there is.
+    for (const label of ["Console", "Nexus", "Views", "Concepts", "Fleet", "Library", "Cluster"]) {
+      expect(within(rail()).getByRole("link", { name: label }).getAttribute("title")).toBe(label);
+    }
   });
 });
 

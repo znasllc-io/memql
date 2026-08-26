@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { useAdminAccess, useAdminWrites } from "../admin/useAdminConsole";
-import { ErrorMessage } from "../components/StatusMessage";
+import { ErrorNotice } from "../ui";
 import { InvitePerson, PendingInvitations } from "../people/InvitePerson";
 import { usePendingInvitations } from "../people/usePendingInvitations";
 
@@ -29,7 +29,11 @@ export function InvitePersonWidget(): ReactNode {
         <InvitePerson onInvited={invitations.reload} />
       </div>
       {invitations.error !== "" ? (
-        <ErrorMessage>Could not read invitations: {invitations.error}</ErrorMessage>
+        <ErrorNotice
+          sentence="Could not read the pending invitations."
+          next="Anyone already invited is unaffected; reload the page to read them again."
+          detail={invitations.error}
+        />
       ) : (
         <PendingInvitations
           rows={invitations.rows}

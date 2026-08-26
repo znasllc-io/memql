@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { ErrorMessage } from "../components/StatusMessage";
+import { ErrorNotice } from "../ui";
 import type { WriteState } from "./useAdminConsole";
 
 // What happened to the last write, and the row that records it.
@@ -10,19 +10,28 @@ import type { WriteState } from "./useAdminConsole";
 // THE AUDIT ID IS SURFACED, NOT SWALLOWED
 // ===========================================================================
 // Every write on this console emits a v1:identity:auditEvent and the reply
-// carries its id — on a REFUSAL too, because the refusal is itself an audited
+// carries its id -- on a REFUSAL too, because the refusal is itself an audited
 // event (`admin_auth_forbidden`). A status line that said only "Saved." would
 // throw away the one durable artefact of the action.
 //
-// So the id is shown, monospace, next to a link into the Audit view. It is the
-// thing an operator quotes in an incident thread and the thing they hand a
-// colleague who asks "who changed this". Same convention as the deploy
-// console's ActionResult.auditEventId.
+// So the id is shown as a QUIET MONO CHIP (memql#4653) beside a link into the
+// Audit view. It is evidence and it stays -- what changed is that it stopped
+// competing with the sentence it belongs to. It is the thing an operator
+// quotes in an incident thread and hands a colleague who asks "who changed
+// this". Same convention as the deploy console's ActionResult.auditEventId.
 //
-// A REFUSAL READS AS A REFUSAL. The message comes back from the cluster
-// verbatim -- "requires the owner or admin role (you hold "writer")" -- rather
-// than being re-phrased here, because the server's answer is the authoritative
-// one and a console that paraphrases it will eventually paraphrase it wrongly.
+// ===========================================================================
+// A REFUSAL STILL READS AS A REFUSAL -- the one place D5 is inverted
+// ===========================================================================
+// Everywhere else in the portal the raw string goes behind ErrorNotice's
+// disclosure and a plain sentence takes its place. Here the raw string IS the
+// plain sentence: the cluster answers "requires the owner or admin role (you
+// hold \"writer\")", which is precisely what the person needs to read, and
+// re-phrasing it in this file is how a console eventually paraphrases it
+// wrongly. Passing it as `sentence` rather than as `detail` is therefore
+// deliberate, and it keeps this component on the single ErrorNotice seam
+// rather than in the error-discipline gate's allowlist.
+
 export function WriteOutcome({ state }: { state: WriteState }): ReactNode {
   if (state.message === "" && state.error === "") return null;
 
@@ -34,27 +43,24 @@ export function WriteOutcome({ state }: { state: WriteState }): ReactNode {
           className="rounded border border-ok bg-ok-subtle px-3 py-2 text-sm text-fg"
         >
           {state.message}
-          <AuditLink id={state.auditEventId} />
+          <AuditChip id={state.auditEventId} />
         </p>
       ) : (
-        <ErrorMessage>
-          {state.error}
-          <AuditLink id={state.auditEventId} />
-        </ErrorMessage>
+        <ErrorNotice sentence={state.error} next={<AuditChip id={state.auditEventId} />} />
       )}
     </div>
   );
 }
 
-function AuditLink({ id }: { id: string }): ReactNode {
+function AuditChip({ id }: { id: string }): ReactNode {
   if (id === "") return null;
   return (
     <>
       {" "}
-      <span className="text-xs text-muted">
-        Audited as <span className="font-mono break-all">{id}</span> —{" "}
-        <Link to="/views/audit" className="underline hover:text-fg">
-          open the trail
+      <span className="inline-flex items-center gap-1.5 rounded border border-line bg-raised px-1.5 py-0.5 align-middle text-xs">
+        <span className="font-mono break-all text-muted">{id}</span>
+        <Link to="/views/audit" className="motion-wash text-muted hover:text-fg hover:underline">
+          trail
         </Link>
       </span>
     </>

@@ -43,6 +43,7 @@ export function HomePage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
+          pageId="console"
           title="Console"
           blurb={
             <>
@@ -150,8 +151,12 @@ function NumberTile({
         <span className="uppercase tracking-wide">{label}</span>
         {live ? <LivenessChip liveness={tile.liveness} /> : null}
       </div>
+      {/* A tile is a NUMBER on a dashboard, so the failure says so in three
+          words and the full surface behind it carries the read's own error.
+          Rendering an engine string under a count would make the tile
+          unreadable to say something the page it opens already says. */}
       {tile.error !== "" ? (
-        <p className="mt-1 text-xs text-subtle">could not read: {tile.error}</p>
+        <p className="mt-1 text-xs text-subtle">could not read</p>
       ) : null}
     </Link>
   );
@@ -182,7 +187,7 @@ function RecentList({
 }): ReactNode {
   if (tile.loading) return <Skeleton variant="rows" rows={3} />;
   if (tile.error !== "") {
-    return <p className="text-sm text-muted">Could not read this: {tile.error}</p>;
+    return <p className="text-sm text-muted">Could not read this.</p>;
   }
   if (tile.rows.length === 0) {
     return <p className="text-sm text-muted">{empty}</p>;

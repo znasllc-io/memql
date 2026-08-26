@@ -3,13 +3,13 @@ import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
-import { ErrorMessage } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
 import { ElementView } from "../viewkit/ElementView";
 import { AdminFrame, Elsewhere, Reading, Refused } from "./AdminLayout";
 import { signingKeyRows, SIGNING_KEY_CONCEPT } from "./rows";
 import { surfaceById } from "./urls";
 import { lastRotation, useAdminAccess, useAuditTrail, useSigningKeys } from "./useAdminConsole";
+import { ErrorNotice } from "../ui";
 
 // Signing keys.
 //
@@ -91,7 +91,7 @@ export function KeysPage(): ReactNode {
         ) : null}
         {keys.error === "" ? null : (
           <div className="mt-3">
-            <ErrorMessage>Could not read the key feed: {keys.error}</ErrorMessage>
+            <ErrorNotice sentence="Could not read this cluster's signing keys." detail={keys.error} />
           </div>
         )}
       </Band>
@@ -132,22 +132,15 @@ export function KeysPage(): ReactNode {
       </Band>
 
       <Elsewhere what="Rotating a key">
-        There is no rotate button here, and in a deployed cluster there is no
-        rotate button anywhere — the retired identity console had one, and it
-        answers with an error in every environment that runs the way this one
-        does. A staging or production node receives its signing key sealed in
-        the environment envelope (<code>MEMQL_IDENTITY_SIGNING_KEY_B64</code>),
-        so that every replica derives the SAME key and any of them can verify a
-        token another minted. A key manager in that mode reports
-        <code> RotationSupported() == false</code> and refuses to rotate,
-        because rotating in one replica&apos;s memory would leave the other
-        replicas signing with the old key and rejecting the new one. Rotation
-        there is a re-seal and a rolling restart, not a click — see the
-        identity-service runbook. The scheduled rotation (
-        <code>MEMQL_IDENTITY_KEY_ROTATION_DAYS</code>, 90 by default) applies
-        only to the on-disk key directory a single-node development cluster
-        uses. Either way the rotation writes a <code>jwks_rotated</code> audit
-        event and shows up in the reading above.
+        There is no rotate button here, and that is not an omission. Every
+        replica of this cluster has to hold the SAME signing key -- any of them
+        may be asked to verify a token another one minted -- so rotating in one
+        replica&rsquo;s memory would leave the rest signing with the old key and
+        rejecting the new one. Rotation is therefore a change to how the
+        cluster is configured followed by a restart, not a click, and it is an
+        operator&rsquo;s job with access to the deployment rather than a
+        browser&rsquo;s. Whichever way it happens, it is recorded and appears in
+        the reading above. The guide on this page names the settings involved.
       </Elsewhere>
       <RowDetailDialog
         open={dialog.open}

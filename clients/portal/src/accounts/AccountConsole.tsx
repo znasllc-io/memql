@@ -8,6 +8,7 @@ import {
   Button,
   ConfirmDialog,
   DataText,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -228,7 +229,7 @@ function TokenPanel({
       </FormRow>
 
       {state.tokensError ? (
-        <p className="text-sm text-fg">Could not read credentials: {state.tokensError}</p>
+        <ErrorNotice sentence="Could not read this account's credentials." detail={state.tokensError} />
       ) : state.tokensLoading ? (
         <p className="text-sm text-muted">Reading credentials…</p>
       ) : (

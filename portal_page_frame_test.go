@@ -91,6 +91,10 @@ var mustUseContainer = []string{
 	"clients/portal/src/modules/ModulesPage.tsx",
 	"clients/portal/src/modules/ModuleDetailPage.tsx",
 	"clients/portal/src/artifacts/ArtifactsPage.tsx",
+	// The Views gallery, the area's landing since memql#4655. It sits in
+	// pages/ rather than views/ because it renders no concept rows -- the
+	// guarded view tree is for view BODIES (portal_view_composition_test.go).
+	"clients/portal/src/pages/ViewsGalleryPage.tsx",
 	"clients/portal/src/artifacts/ArtifactDetailPage.tsx",
 }
 

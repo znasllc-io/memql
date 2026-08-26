@@ -5,7 +5,7 @@ import { CHECKLIST_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetailDialog } from "../components/RowDetailDialog";
-import { ErrorMessage } from "../components/StatusMessage";
+
 import { DeploymentOps } from "../deploy/DeploymentOps";
 import { overlayAbsenceOf, overlayAbsenceStatement } from "../deploy/noOverlay";
 import { ReleasesCard } from "../deploy/releases/ReleasesCard";
@@ -19,7 +19,7 @@ import {
   rolloutRows,
 } from "../deploy/rows";
 import { useDeployConsole } from "../deploy/useDeployConsole";
-import { Band, DataText } from "../ui";
+import { Band, DataText, ErrorNotice } from "../ui";
 import { ElementView } from "../viewkit/ElementView";
 
 // The whole live-deploy panel, as a widget (epic memql#4661, task memql#4674).
@@ -102,13 +102,17 @@ export function DeployControlsWidget({
           {overlayAbsenceStatement(overlayAbsence)}
         </p>
       ) : error ? (
-        <ErrorMessage>Could not read the deployment: {error}</ErrorMessage>
+        // ErrorNotice, not a raw string in a sentence (memql#4653): a plain
+        // statement of what failed, with the engine's own text filed behind
+        // the disclosure where there is room to read it.
+        <ErrorNotice sentence="Could not read this deployment." detail={error} />
       ) : null}
       {actionError ? (
-        <ErrorMessage>
-          {actionError}
-          <RefusalAuditLink id={actionAuditEventId} />
-        </ErrorMessage>
+        <ErrorNotice
+          sentence="That deployment action did not run."
+          next={<RefusalAuditLink id={actionAuditEventId} />}
+          detail={actionError}
+        />
       ) : null}
       {actionMessage ? (
         // role="status" is load-bearing rather than decorative: the outcome of

@@ -407,13 +407,12 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		// optional post-process pass. A *SuggestValidationError maps to the
 		// same codes.InvalidArgument "X is required in payload" error the old
 		// per-domain checks emitted; any other error is an internal failure.
-		// RenderPrompt lets a domain whose prompt is DECLARED IN THE DSL render
-		// it rather than carry a second copy as a Go string. Bound to this
-		// node's engine, which is non-nil here (checked above).
-		engine := s.service.engine
 		plan, err := handler(memqlengine.SuggestContext{
-			Payload:      payload,
-			RenderPrompt: engine.RenderPrompt,
+			Payload: payload,
+			// So a domain can keep its instruction in .memql rather than in a
+			// Go string literal (memql#4654). The handler gets the render
+			// function and nothing else -- not the engine, not the session.
+			RenderPrompt: s.service.engine.RenderPrompt,
 		})
 		if err != nil {
 			var ve *memqlengine.SuggestValidationError
@@ -434,7 +433,7 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		// schema so parse / field-shape failures are eliminated
 		// before they reach the client. Falls back to regular chat
 		// when no structured-capable provider is registered.
-		result, usage, err := callSuggestWithSchema(ctx, s.service.engine, messages, schemaName, schema)
+		result, err := callSuggestWithSchema(ctx, s.service.engine, messages, schemaName, schema)
 		if err != nil {
 			s.sendAiError(requestId, correlate, fmt.Sprintf("%s suggestion failed", domain), err)
 			return
@@ -466,13 +465,6 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 					RequestId: requestId,
 					Domain:    domain,
 					Result:    resultStruct,
-					// ABSENT when the provider said nothing (epic memql#4661).
-					// A zero-filled usage block would tell a client the call
-					// cost nothing, which is a confident claim about a number
-					// nobody measured -- so the client's own estimate is the
-					// right fallback and it can only reach for one if the
-					// field is missing.
-					Usage: suggestUsage(usage),
 				},
 			},
 		})
@@ -507,50 +499,21 @@ func callSuggestWithSchema(
 	messages []common.ChatMessage,
 	schemaName string,
 	schema json.RawMessage,
-) (string, common.ChatUsage, error) {
+) (string, error) {
 	if engine == nil {
-		return "", common.ChatUsage{}, fmt.Errorf("engine unavailable")
+		return "", fmt.Errorf("engine unavailable")
 	}
 	if structured := engine.StructuredChatProvider(); structured != nil {
-		spec := common.StructuredSchema{
+		return structured.CallChatStructured(ctx, messages, common.StructuredSchema{
 			Name:        schemaName,
 			Description: schemaName + " output",
 			Schema:      schema,
 			Strict:      true,
-		}
-		// The usage-reporting variant when the provider has one. A provider
-		// that does not implement it is not a degraded provider -- it is one
-		// whose vendor did not say, which is the same answer as Reported=false
-		// and is handled identically downstream.
-		if withUsage, ok := structured.(common.ChatStructuredUsageProvider); ok {
-			return withUsage.CallChatStructuredWithUsage(ctx, messages, spec)
-		}
-		content, err := structured.CallChatStructured(ctx, messages, spec)
-		return content, common.ChatUsage{}, err
+		})
 	}
 	provider := engine.SuggestChatProvider()
 	if provider == nil {
-		return "", common.ChatUsage{}, fmt.Errorf("no non-streaming chat provider available")
+		return "", fmt.Errorf("no non-streaming chat provider available")
 	}
-	// The unstructured fallback reports nothing, and that is honest rather
-	// than a gap: this path exists for a cluster with no structured-capable
-	// provider at all, and CallChat's contract has never carried a cost.
-	content, err := provider.CallChat(ctx, messages)
-	return content, common.ChatUsage{}, err
-}
-
-// suggestUsage renders a reported cost onto the wire, or nothing.
-//
-// The nil return is the load-bearing half: an ABSENT message and a message of
-// zeroes say opposite things to a client deciding whether to show a figure or
-// fall back to its own estimate.
-func suggestUsage(usage common.ChatUsage) *memqlv1.AiSuggestUsage {
-	if !usage.Reported {
-		return nil
-	}
-	return &memqlv1.AiSuggestUsage{
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
-		Model:        usage.Model,
-	}
+	return provider.CallChat(ctx, messages)
 }

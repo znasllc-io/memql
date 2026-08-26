@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
 import { ArrangedPage } from "../pages/ArrangedPage";
-import { Band, Button, Callout, EmptyState, Select, Skeleton } from "../ui";
+import { Band, Button, EmptyState, ErrorNotice, Select, Skeleton } from "../ui";
 import { AddMachine } from "./AddMachine";
-import { FleetTabs, LiveDegraded } from "./FleetFrame";
+import { LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
 import { MACHINES_PAGE, MACHINES_PAGE_ID } from "./manifests";
 import { RoutingPolicyEditor } from "./RoutingPolicyEditor";
@@ -66,7 +67,7 @@ export function MachinesPage(): ReactNode {
         pageId={MACHINES_PAGE_ID}
         selectedRowId=""
         onSelect={() => {}}
-        nav={<FleetTabs />}
+        area="fleet"
         actions={
           <>
             {state.isClusterOwner ? (
@@ -110,7 +111,16 @@ export function MachinesBody(): ReactNode {
   const state = useMachinesState();
   const now = useNow();
   const { config } = useAuth();
-  const [adding, setAdding] = useState(false);
+  // The command palette's "Add machine" lands here with the form already open
+  // (memql#4656). Read ONCE, as the initial state, rather than watched: a
+  // person who then closes the form must not have it reopened under them by a
+  // re-render, and the address they can still see says where they came from.
+  //
+  // It lives in the BODY rather than in the page shell because the body owns
+  // the form -- the shell became an ArrangedPage in epic memql#4661 and holds
+  // no form state at all.
+  const [params] = useSearchParams();
+  const [adding, setAdding] = useState(() => params.get("add") === "1");
 
   const domain = clusterDomainFor(config);
   const empty =
@@ -135,9 +145,11 @@ export function MachinesBody(): ReactNode {
         </div>
 
         {state.actionError === "" ? null : (
-          <Callout tone="danger" title="That did not work">
-            {state.actionError}
-          </Callout>
+          <ErrorNotice
+            sentence="That did not work."
+            next="The machine is unchanged; try it again."
+            detail={state.actionError}
+          />
         )}
 
         {showAdd ? (
@@ -155,18 +167,24 @@ export function MachinesBody(): ReactNode {
           }
         >
           {state.error !== "" ? (
-            <Callout tone="danger" title="Could not read the machines">
-              {state.error} Nothing is listed rather than an empty table -- an empty list here
-              would read as &ldquo;you have no machines&rdquo;, which is not what happened.
-            </Callout>
+            <ErrorNotice
+              sentence="Could not read the machines."
+              next="Nothing is listed below. Do not read that as having no machines -- this read failed, so the answer is unknown."
+              detail={state.error}
+            />
           ) : state.loading && state.machines.length === 0 ? (
             <Skeleton variant="rows" rows={3} />
           ) : empty ? (
             <EmptyState
+              // The exemplar first-run empty (memql#4651). `firstRun` is true
+              // only for YOUR OWN list: "no machine has ever registered" on
+              // the all-cluster scope is an operator's observation about a
+              // cluster, not the product introducing itself to a person.
+              firstRun={state.scope !== "all"}
               statement={
                 state.scope === "all"
                   ? "No machine has ever registered against this cluster."
-                  : "You have no machines. Mint a token above and run the command it gives you on the computer you want an agent to be able to reach."
+                  : "You have no machines yet. Add one to run work on a computer you own -- mint a token above and run the command it gives you on that computer."
               }
             />
           ) : (

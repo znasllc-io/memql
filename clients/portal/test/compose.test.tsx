@@ -416,9 +416,13 @@ describe("with no AI provider", () => {
     await screen.findAllByText(/north inlet/);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Plant readings" } });
     fireEvent.click(screen.getByRole("button", { name: "Save view" }));
-    await waitFor(() =>
-      expect(screen.getByText(/Could not save the view: write refused/)).toBeTruthy(),
-    );
+    // The sentence says what did not happen and what the person still has;
+    // the cluster's own words go behind the owner-only disclosure.
+    await waitFor(() => expect(screen.getByText(/The view was not saved/)).toBeTruthy());
+    expect(screen.getByText(/Your arrangement is still here/)).toBeTruthy();
+    // Awaited: the role arrives over the connection, and ErrorNotice offers no
+    // disclosure until it does. This fixture is an owner, so it arrives.
+    await waitFor(() => expect(screen.getByText(/write refused/)).toBeTruthy());
   });
 });
 

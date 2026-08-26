@@ -274,104 +274,74 @@ function bandTitles(): (string | null)[] {
   return [...main.querySelectorAll("h2")].map((h) => h.textContent);
 }
 
-describe("the nav rail", () => {
-  // The rail's captions (memql#4264, restructured in memql#4527). What #4264
-  // replaced -- Operate / Explore / Administer -- put the user population in
-  // two groups at once, which is the shape being asserted against here.
-  //
-  // What #4527 changed: Views is ONE caption with two SUB-SECTIONS, Built-in
-  // and Custom, because the split between what ships with the product and what
-  // an operator composed is provenance rather than category -- and it used to
-  // cost a top-level caption to say so. Agents moved under Nexus, derived from
-  // its registry row rather than hard-coded here.
-  afterEach(() => {
-    globalThis.localStorage?.removeItem("memql-portal-rail-section-built-in");
-    globalThis.localStorage?.removeItem("memql-portal-rail-section-custom");
-  });
-
+// WHERE THE VIEWS LIVE IN THE CHROME (memql#4655, decision D1).
+//
+// They were rail rows: five built-in ones under a Built-in sub-section, the
+// caller's composed ones under a Custom sub-section, both inside a Views
+// caption, with the composer's door as the last Custom row. That shape did
+// not scale -- a saved view was a permanent rail row, so forty views meant a
+// rail forty rows longer -- and it asked the reader to learn a
+// built-in-versus-composed distinction that is provenance rather than
+// category.
+//
+// One rail row now, opening a gallery that lists both. What is asserted here
+// is that the rows really left, that the gallery really carries them, and
+// that no URL moved on the way -- rail placement is not URL shape, which is
+// why this restructure needed no redirects.
+describe("the Views destination", () => {
   function railOf(): HTMLElement {
     return screen.getByRole("navigation", { name: "Portal sections" });
   }
 
-  // The rows a captioned group owns, found through its own heading rather than
-  // by position: a test that counts children breaks when a group gains one.
-  function groupNamed(name: string): HTMLElement {
-    const heading = within(railOf()).getByRole("heading", { name, level: 2 });
-    const parent = heading.parentElement;
-    expect(parent).toBeTruthy();
-    return parent as HTMLElement;
-  }
-
-  // The rows a SUB-section owns, found through the disclosure's own
-  // aria-controls -- which is also the assertion that the control names the
-  // thing it governs rather than pointing at nothing.
-  function sectionNamed(name: string): HTMLElement {
-    const button = within(railOf()).getByRole("button", { name });
-    const id = button.getAttribute("aria-controls") ?? "";
-    const list = document.getElementById(id);
-    expect(list).toBeTruthy();
-    return list as HTMLElement;
-  }
-
-  it("captions the sections and files each view under the right one", async () => {
+  it("is one rail row, and no view is a row of its own", async () => {
     renderView({}, "/views/users");
     const nav = railOf();
     await waitFor(() =>
-      expect(within(nav).getByRole("heading", { name: "Views", level: 2 })).toBeTruthy(),
+      expect(within(nav).getByRole("link", { name: "Views" }).getAttribute("href")).toBe("/views"),
     );
-    for (const group of ["Nexus", "Views", "Build", "Fleet", "Library", "Cluster"]) {
-      expect(within(nav).getByRole("heading", { name: group, level: 2 })).toBeTruthy();
+
+    // No captions at all, and none of the rows the captions used to hold.
+    expect(within(nav).queryAllByRole("heading", { level: 2 })).toHaveLength(0);
+    for (const gone of ["Users", "Accounts", "Deployments", "Audit", "Agents", "Compose"]) {
+      expect(within(nav).queryByRole("link", { name: gone })).toBeNull();
     }
-
-    // Custom is no longer a top-level caption. It is a disclosure inside
-    // Views, which is the whole of this restructure.
-    expect(within(nav).queryByRole("heading", { name: "Custom", level: 2 })).toBeNull();
-
-    // Built-in carries the four registry views in the operate group, and NOT
-    // Agents -- which is the derivation working rather than a hard-coded list.
-    const builtIn = sectionNamed("Built-in");
-    for (const label of ["Users", "Accounts", "Deployments", "Audit"]) {
-      expect(within(builtIn).getByRole("link", { name: label })).toBeTruthy();
+    // ...including the disclosures that governed them.
+    for (const name of ["Built-in", "Custom"]) {
+      expect(within(nav).queryByRole("button", { name })).toBeNull();
     }
-    expect(within(builtIn).queryByRole("link", { name: "Agents" })).toBeNull();
-
-    // Agents renders under Nexus, beside Goals. Its ROUTE is untouched:
-    // rail placement is not URL shape.
-    const nexus = groupNamed("Nexus");
-    expect(within(nexus).getByRole("link", { name: "Goals" })).toBeTruthy();
-    const agents = within(nexus).getByRole("link", { name: "Agents" });
-    expect(agents.getAttribute("href")).toContain("/views/agents");
-
-    // The composer's door is the last Custom row, so an operator with no saved
-    // views still has somewhere to start -- and it reads Compose, the
-    // composer's own noun, not "New view".
-    const custom = sectionNamed("Custom");
-    expect(within(custom).getByRole("link", { name: "Compose" })).toBeTruthy();
-    expect(within(nav).queryByRole("link", { name: "New view" })).toBeNull();
-
-    expect(within(nav).getByRole("link", { name: "Concepts" })).toBeTruthy();
-
-    // Users appears ONCE. The duplicate was the whole reason for memql#4264:
-    // the population under one group and the change surface under another.
-    expect(within(nav).getAllByRole("link", { name: "Users" })).toHaveLength(1);
-
-    // Artifacts MOVED out of Cluster into Library rather than being listed in
-    // both -- the same duplicate-door failure, one group over (memql#4343).
-    expect(within(nav).getAllByRole("link", { name: "Artifacts" })).toHaveLength(1);
-
-    // Deployables joined it there and left Cluster with it (memql#4346). Same
-    // axis argument: as Sites it was cluster-owner-only and genuinely a fact
-    // about the machine; v1:platform:site declares the composite tier now, so a
-    // deployable is a person's own material. Once, and under Library.
-    expect(within(nav).getAllByRole("link", { name: "Deployables" })).toHaveLength(1);
-    expect(within(nav).queryByRole("link", { name: "Sites" })).toBeNull();
   });
 
-  it("keeps the active row lit when its sub-section is the one holding it", async () => {
+  it("lights its row for a view, and for the composer that makes one", async () => {
     renderView({}, "/views/users");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
-    const users = within(sectionNamed("Built-in")).getByRole("link", { name: "Users" });
-    expect(users.getAttribute("aria-current")).toBe("page");
+    expect(
+      within(railOf()).getByRole("link", { name: "Views" }).getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
+  it("lists the five built-in views as gallery cards, at their own URLs", async () => {
+    renderView({}, "/views");
+    const main = within(await waitFor(() => screen.getByRole("main")));
+    for (const [label, href] of [
+      ["Users", "/views/users"],
+      ["Accounts", "/views/accounts"],
+      ["Agents", "/views/agents"],
+      ["Deployments", "/views/deployments"],
+      ["Audit", "/views/audit"],
+    ] as const) {
+      const card = await waitFor(() => main.getByRole("link", { name: new RegExp(`^${label}`) }));
+      // Agents is a card here rather than a row under Nexus, and its address
+      // is the one it always had.
+      expect(card.getAttribute("href")).toBe(href);
+    }
+  });
+
+  it("absorbs the composer's rail row as the gallery's own action", async () => {
+    renderView({}, "/views");
+    // "New view" names the OUTCOME, which is what a gallery of views is
+    // choosing among -- the rail said Compose because it sat beside the thing
+    // the composer produces.
+    await waitFor(() => expect(screen.getByRole("button", { name: "New view" })).toBeTruthy());
   });
 });
 
@@ -380,9 +350,10 @@ describe("the Users view", () => {
     const { container } = renderView({}, "/views/users");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
 
-    // The eyebrow names the concept the page is about -- the one thing that
-    // tells an operator which rows these are.
-    expect(screen.getByText(USER)).toBeTruthy();
+    // THE CONCEPT ID LEFT THE HEADER (memql#4657). What is above the title is
+    // the area, in words; the id is in the Views guide under Technical
+    // details, which is where the people who query rows will look.
+    expect(screen.queryByText(USER)).toBeNull();
 
     const classes = viewKitClasses(container);
     expect(classes.has("vk-stat")).toBe(true);
@@ -438,14 +409,16 @@ describe("the retired view slugs", () => {
   it("sends /views/people to the Users view", async () => {
     renderView({}, "/views/people");
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
-    expect(screen.getByText(USER)).toBeTruthy();
+    // Landed on the Users view, asserted by its own heading rather than by
+    // the concept id the header no longer carries.
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Users" })).toBeTruthy();
     expect(screen.queryByText(/has no view called/)).toBeNull();
   });
 
   it("sends /views/customers to the Accounts view", async () => {
     renderView({}, "/views/customers");
     await waitFor(() => expect(screen.getByText("Northwind Trading")).toBeTruthy());
-    expect(screen.getByText(ACCOUNT)).toBeTruthy();
+    expect(within(screen.getByRole("main")).getByRole("heading", { name: "Accounts" })).toBeTruthy();
     expect(screen.queryByText(/has no view called/)).toBeNull();
   });
 
@@ -616,7 +589,7 @@ describe("the Deployments view", () => {
 
   it("says the read failed rather than showing a stale-looking blank", async () => {
     renderView({ role: "owner", deployFails: true }, "/views/deployments");
-    await waitFor(() => expect(screen.getByText(/Could not read the deployment/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read this deployment/)).toBeTruthy());
   });
 
   it("keeps deploy selection on history click and opens the row dialog from View", async () => {

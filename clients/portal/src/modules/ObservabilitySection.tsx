@@ -2,8 +2,7 @@ import { useState, type ReactNode } from "react";
 import { LINE_CHART_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import type { Module } from "@znasllc-io/memql-sdk-core/client";
 
-import { ErrorMessage } from "../components/StatusMessage";
-import { Band, DataText, EmptyState, Skeleton } from "../ui";
+import { Band, DataText, EmptyState, ErrorNotice, Skeleton } from "../ui";
 import { useConcepts } from "../cluster/useConcepts";
 import { ElementView } from "../viewkit/ElementView";
 import {
@@ -70,7 +69,7 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
       }
     >
       {obs.error !== "" ? (
-        <ErrorMessage>Could not read invocation metrics: {obs.error}</ErrorMessage>
+        <ErrorNotice sentence="Could not read this module's activity." detail={obs.error} />
       ) : obs.loading && obs.windows.length === 0 ? (
         <Skeleton variant="stat" />
       ) : obs.windows.length === 0 ? (

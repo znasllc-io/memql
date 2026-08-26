@@ -54,21 +54,17 @@ type SuggestContext struct {
 	// never nil. Each domain pulls its own required fields out of it.
 	Payload map[string]any
 
-	// RenderPrompt renders a DSL prompt template by name, validated against
-	// that prompt's own declared input schema (MemQLEngine.RenderPrompt).
+	// RenderPrompt renders a DSL prompt template by id, for a domain whose
+	// instruction lives in .memql rather than in a Go string literal
+	// (memql#4654). It is the engine's own MemQLEngine.RenderPrompt, handed
+	// in by the caller so a handler still cannot reach the engine, the
+	// stream session, or the database.
 	//
-	// WHY A DOMAIN WOULD WANT IT. The knowledge domain builds its messages as
-	// Go string literals, which is fine for a prompt that exists nowhere else.
-	// A domain whose prompt is DECLARED IN THE DSL is a different case: the
-	// declaration is loaded, validated at boot, versioned with the tree and
-	// visible to anyone reading dsl/, and a Go handler that ignored it would
-	// make the file a decoration that reads exactly like the live thing. This
-	// is what keeps the two from being separate sources.
-	//
-	// NIL when the caller has no engine to render with -- a unit test, a node
-	// with no AI runtime configured. A handler MUST check: falling back to a
-	// built-in string is a choice a domain makes deliberately, not something
-	// this field decides for it.
+	// NIL IS A REAL STATE and a handler must say so rather than guess: an
+	// engine with no AI runtime configured, or a caller that predates this
+	// field. Returning a plain error there is right -- a suggestion is
+	// always optional at the call site, and silently substituting a
+	// hardcoded prompt would make the .memql file a decoration.
 	RenderPrompt func(templateId string, data map[string]any) (string, error)
 }
 

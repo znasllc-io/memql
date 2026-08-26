@@ -2,11 +2,12 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { STAT_TILE_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
-import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
 import {
   Band,
   Button,
   Container,
+  ErrorNotice,
   Field,
   FormActions,
   FormRow,
@@ -69,7 +70,8 @@ export function CampaignsPage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
-          eyebrow={CAMPAIGN_CONCEPT_ID}
+          pageId="cluster.integrations"
+          subtitle="Integrations"
           title="Email campaigns"
           blurb="Audiences, templates and the campaigns that pair them. Open a campaign to send it — scheduling records an intended time and does not start a send on its own."
           actions={
@@ -84,7 +86,7 @@ export function CampaignsPage(): ReactNode {
           }
         />
 
-        {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
+        {actionError ? <ErrorNotice sentence="That action did not run." next="Nothing changed; try it again." detail={actionError} /> : null}
         {actionMessage ? (
           <p role="status" className="rounded border border-line bg-raised px-3 py-2 text-sm text-fg">
             {actionMessage}
@@ -92,7 +94,7 @@ export function CampaignsPage(): ReactNode {
         ) : null}
 
         {error ? (
-          <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>
+          <ErrorNotice sentence="Could not read your campaigns." next="Reload the page to read them again." detail={error} />
         ) : loading && campaigns.length === 0 && audiences.length === 0 ? (
           <Skeleton variant="rows" rows={6} />
         ) : (
