@@ -30,6 +30,7 @@ import { MemoryRouter } from "react-router-dom";
 import {
   Result,
   type AccessSummary,
+  type Concept,
   type Connection,
   type Event,
   type QueryClient,
@@ -41,6 +42,36 @@ import { AppRoutes } from "../src/app/routes";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
 import { asQueryClient } from "./support/queryFake";
+
+// The concepts this fake cluster publishes.
+//
+// It published NONE until epic memql#4661, which was a shape no real cluster
+// has: the portal reads the registry on connect, and every page that renders
+// rows resolves its concept through it. The fleet pages got away with it
+// because they read through named queries rather than the concept browse
+// path; now that they are ARRANGEMENTS, the section resolves its concept like
+// every other page and an empty registry means "this cluster publishes no
+// such concept" -- which is a true statement about this fixture and a false
+// one about any cluster the page would run against.
+const CONCEPTS: Concept[] = [
+  {
+    id: "v1:worker:registration",
+    version: "v1",
+    domain: "worker",
+    entity: "registration",
+    type: "concept",
+    description: "A machine registered to this cluster as a worker",
+  },
+  {
+    id: "v1:workbench:workspace",
+    version: "v1",
+    domain: "workbench",
+    entity: "workspace",
+    type: "concept",
+    description: "A per-plan sandboxed working directory",
+  },
+];
+
 
 const REGISTRATION = "v1:worker:registration";
 
@@ -212,7 +243,7 @@ function harness(
   });
 
   const query = asQueryClient({
-    listConcepts: vi.fn(async () => []),
+    listConcepts: vi.fn(async () => CONCEPTS),
     getMyAccess: vi.fn(async () => {
       if (overrides.accessGate) await overrides.accessGate;
       return access;

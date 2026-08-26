@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import {
   Badge,
@@ -6,7 +6,6 @@ import {
   Button,
   Callout,
   ConfirmDialog,
-  Container,
   DataText,
   EmptyState,
   Panel,
@@ -14,14 +13,15 @@ import {
   Skeleton,
   type StatusTone,
 } from "../ui";
-import { WORKBENCH_WORKSPACE_CONCEPT_ID } from "./concepts";
-import { FleetFrame, LiveDegraded } from "./FleetFrame";
+import { ArrangedPage } from "../pages/ArrangedPage";
+import { FleetTabs, LiveDegraded } from "./FleetFrame";
+import { WORKBENCHES_PAGE, WORKBENCHES_PAGE_ID } from "./manifests";
 import { formatFreshness, formatMoment } from "./format";
 import { chipsFromMap } from "./labels";
 import { RELEASE_REASON_BLURB, type Workspace } from "./rows";
 import { fleetSurfaceById } from "./urls";
 import { useNow } from "./useNow";
-import { useWorkbenches } from "./useWorkbenches";
+import { useWorkbenches, type WorkbenchesState } from "./useWorkbenches";
 
 // /fleet/workbenches (memql#4356): the cluster's own sandboxed working
 // directories -- the replicas that host them, and the per-plan workspaces
@@ -61,22 +61,27 @@ const STATUS_TONE: Record<string, StatusTone> = {
   released: "neutral",
 };
 
+// The page (epic memql#4661, task memql#4674). An ARRANGEMENT: the header, the
+// version strip and the regenerate control are ArrangedPage's, and the body is
+// one widget.
+//
+// It stayed one widget for a reason particular to this screen: the list groups
+// per REPLICA, because "why is this workbench node full" is the question an
+// operator came with, and a flat table of workspaces cannot ask it. That
+// grouping is not something an element expresses today.
 export function WorkbenchesPage(): ReactNode {
   const state = useWorkbenches();
-  const now = useNow();
-  const [confirming, setConfirming] = useState<Workspace | null>(null);
-
   const surface = fleetSurfaceById("workbenches");
   if (surface === undefined) return null;
 
-  const workspacesEmpty =
-    !state.workspacesLoading && state.workspacesError === "" && state.workspaces.length === 0;
-
   return (
-    <Container>
-      <FleetFrame
-        surface={surface}
-        eyebrow={WORKBENCH_WORKSPACE_CONCEPT_ID}
+    <WorkbenchesStateContext.Provider value={state}>
+      <ArrangedPage
+        manifest={WORKBENCHES_PAGE}
+        pageId={WORKBENCHES_PAGE_ID}
+        selectedRowId=""
+        onSelect={() => {}}
+        nav={<FleetTabs />}
         actions={
           <>
             {state.isClusterOwner ? (
@@ -98,7 +103,34 @@ export function WorkbenchesPage(): ReactNode {
             <Button onClick={state.reload}>Reload</Button>
           </>
         }
-      >
+      />
+    </WorkbenchesStateContext.Provider>
+  );
+}
+
+// Shared between the header actions and the body widget. A CONTEXT rather than
+// two calls to useWorkbenches(): the hook opens live subscriptions, and a
+// second set would repaint a list the first already owns.
+const WorkbenchesStateContext = createContext<WorkbenchesState | null>(null);
+
+function useWorkbenchesState(): WorkbenchesState {
+  const state = useContext(WorkbenchesStateContext);
+  if (state === null) {
+    throw new Error("the workbenches widget must be rendered inside WorkbenchesPage");
+  }
+  return state;
+}
+
+export function WorkbenchesBody(): ReactNode {
+  const state = useWorkbenchesState();
+  const now = useNow();
+  const [confirming, setConfirming] = useState<Workspace | null>(null);
+
+  const workspacesEmpty =
+    !state.workspacesLoading && state.workspacesError === "" && state.workspaces.length === 0;
+
+  return (
+    <>
         <LiveDegraded reason={state.liveDegraded} noun="workspace" />
 
         {state.actionError === "" ? null : (
@@ -264,7 +296,6 @@ export function WorkbenchesPage(): ReactNode {
             </ul>
           )}
         </Band>
-      </FleetFrame>
 
       <ConfirmDialog
         open={confirming !== null}
@@ -288,6 +319,6 @@ export function WorkbenchesPage(): ReactNode {
           provisions a fresh, empty directory.
         </p>
       </ConfirmDialog>
-    </Container>
+    </>
   );
 }

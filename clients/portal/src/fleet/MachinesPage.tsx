@@ -1,15 +1,16 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
-import { Band, Button, Callout, Container, EmptyState, Select, Skeleton } from "../ui";
+import { ArrangedPage } from "../pages/ArrangedPage";
+import { Band, Button, Callout, EmptyState, Select, Skeleton } from "../ui";
 import { AddMachine } from "./AddMachine";
-import { WORKER_REGISTRATION_CONCEPT_ID } from "./concepts";
-import { FleetFrame, LiveDegraded } from "./FleetFrame";
+import { FleetTabs, LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
+import { MACHINES_PAGE, MACHINES_PAGE_ID } from "./manifests";
 import { RoutingPolicyEditor } from "./RoutingPolicyEditor";
 import { fleetSurfaceById } from "./urls";
-import { useMachines } from "./useMachines";
+import { useMachines, type MachinesState } from "./useMachines";
 import { useNow } from "./useNow";
 
 // /fleet/machines (memql#4355): the computers registered to this cluster as
@@ -38,27 +39,34 @@ import { useNow } from "./useNow";
 // a designed surface for one concept, which is exactly the category the rule
 // carves out.
 
+// The page (epic memql#4661, task memql#4674).
+//
+// It is now an ARRANGEMENT: a manifest with a reading band the element library
+// renders over v1:worker:registration, the pairing and routing controls as
+// registered WIDGETS, and the machine cards as one more. Which means it is
+// regenerable and versioned like every other page in the console, and its
+// header, its version strip and its regenerate control are the shared ones.
+//
+// The cards stayed one widget rather than becoming elements, and that is a
+// decision rather than a shortcut: a machine card carries an online dot
+// derived from a 30-second window, the MERGE of two label maps with only one
+// half editable, a rename, a revoke and an expandable call history. A display
+// card has four slots. Decomposing it means designing the elements it would
+// decompose into, which is element-library work rather than convergence work
+// -- and is what phase 2 is for.
 export function MachinesPage(): ReactNode {
   const state = useMachines();
-  const now = useNow();
-  const { config } = useAuth();
-  const [adding, setAdding] = useState(false);
-
   const surface = fleetSurfaceById("machines");
   if (surface === undefined) return null;
 
-  const domain = clusterDomainFor(config);
-  const empty =
-    !state.loading && state.error === "" && state.machines.length === 0;
-  // A fleet with nothing in it should open on the thing to do about that,
-  // rather than on an empty list with a button beside it.
-  const showAdd = adding || empty;
-
   return (
-    <Container>
-      <FleetFrame
-        surface={surface}
-        eyebrow={WORKER_REGISTRATION_CONCEPT_ID}
+    <MachinesStateContext.Provider value={state}>
+      <ArrangedPage
+        manifest={MACHINES_PAGE}
+        pageId={MACHINES_PAGE_ID}
+        selectedRowId=""
+        onSelect={() => {}}
+        nav={<FleetTabs />}
         actions={
           <>
             {state.isClusterOwner ? (
@@ -71,19 +79,60 @@ export function MachinesPage(): ReactNode {
                 <option value="all">Every machine in this cluster</option>
               </Select>
             ) : null}
-            <Button
-              pressed={showAdd}
-              disabled={empty}
-              onClick={() => setAdding((open) => !open)}
-              title={empty ? "There is nothing here yet, so this panel stays open" : undefined}
-            >
-              Add a machine
-            </Button>
             <Button onClick={state.reload}>Reload</Button>
           </>
         }
-      >
+      />
+    </MachinesStateContext.Provider>
+  );
+}
+
+// The machines state, shared between the page's header actions and the body
+// widget.
+//
+// A CONTEXT rather than two calls to useMachines(): the hook opens a live
+// subscription, and calling it twice would open two -- which is not a
+// performance detail but a correctness one, since the second subscription's
+// events would repaint a list the first one already owns.
+const MachinesStateContext = createContext<MachinesState | null>(null);
+
+function useMachinesState(): MachinesState {
+  const state = useContext(MachinesStateContext);
+  if (state === null) {
+    throw new Error("the machines widget must be rendered inside MachinesPage");
+  }
+  return state;
+}
+
+// MachinesBody is what the `fleetMachines` widget renders. Every behaviour the
+// page had, unchanged -- see the header for why it is one widget.
+export function MachinesBody(): ReactNode {
+  const state = useMachinesState();
+  const now = useNow();
+  const { config } = useAuth();
+  const [adding, setAdding] = useState(false);
+
+  const domain = clusterDomainFor(config);
+  const empty =
+    !state.loading && state.error === "" && state.machines.length === 0;
+  // A fleet with nothing in it should open on the thing to do about that,
+  // rather than on an empty list with a button beside it.
+  const showAdd = adding || empty;
+
+  return (
+    <>
         <LiveDegraded reason={state.liveDegraded} noun="machine" />
+
+        <div className="flex justify-start">
+          <Button
+            pressed={showAdd}
+            disabled={empty}
+            onClick={() => setAdding((open) => !open)}
+            title={empty ? "There is nothing here yet, so this panel stays open" : undefined}
+          >
+            Add a machine
+          </Button>
+        </div>
 
         {state.actionError === "" ? null : (
           <Callout tone="danger" title="That did not work">
@@ -145,7 +194,6 @@ export function MachinesPage(): ReactNode {
         >
           <RoutingPolicyEditor />
         </Band>
-      </FleetFrame>
-    </Container>
+    </>
   );
 }

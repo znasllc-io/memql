@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
-import { Badge, Button, ConfirmDialog, Container, PageHeader, Skeleton, Tabs } from "../ui";
+import { Badge, Button, ConfirmDialog, Skeleton, Tabs } from "../ui";
 import { ME_FACETS, mePath } from "./urls";
 import type { MeAccount } from "./useMe";
 
@@ -29,6 +29,20 @@ import type { MeAccount } from "./useMe";
 // navigation, the URL stays -- which is what the portal already does
 // everywhere else.
 
+// The chrome a Me tab is drawn in, supplied to the tab as a RENDER PROP.
+//
+// A render prop rather than a wrapper because the chrome is now ArrangedPage's
+// and the tab is what constructs it: the heading, the blurb, the sign-out and
+// the tab bar all have to reach ArrangedPage's own slots, and a component that
+// wrapped its children could only put them around the outside -- which would
+// give the page two headers.
+export interface MeChrome {
+  title: ReactNode;
+  blurb: ReactNode | undefined;
+  actions: ReactNode;
+  nav: ReactNode;
+}
+
 export function MeLayout({
   account,
   loading,
@@ -36,7 +50,7 @@ export function MeLayout({
 }: {
   account: MeAccount | null;
   loading: boolean;
-  children: ReactNode;
+  children: (chrome: MeChrome) => ReactNode;
 }): ReactNode {
   const { signOut } = useAuth();
   const [confirming, setConfirming] = useState(false);
@@ -48,42 +62,48 @@ export function MeLayout({
   const title = displayName === "" ? (email === "" ? "Your account" : email) : displayName;
 
   return (
-    <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title={loading && account === null ? <Skeleton variant="text" width="w-48" /> : title}
-          blurb={
-            account === null ? undefined : (
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                {displayName === "" || email === "" ? null : <span>{email}</span>}
-                {role === "" ? null : <Badge>{role}</Badge>}
-                {account.memberSince === "" ? null : (
-                  <span className="text-subtle">
-                    <span aria-hidden="true">· </span>member since {formatDay(account.memberSince)}
-                  </span>
-                )}
-              </span>
-            )
-          }
-          actions={
-            <Button tone="danger" onClick={() => setConfirming(true)}>
-              Sign out
-            </Button>
-          }
-        />
+    <>
+      {/* THE PAGE IS AN ARRANGEMENT (epic memql#4661, task memql#4674), so the
+          container, the header and the sections are ArrangedPage's. What is
+          left here is what a manifest cannot hold: a heading that is YOUR OWN
+          NAME, the tab bar (route-level navigation, deliberately outside the
+          arrangement), and the sign-out confirmation.
 
-        <div className="-mt-2">
-          <Tabs
-            label="Your account"
-            items={ME_FACETS.map((facet) => ({
-              to: mePath(facet.id),
-              label: facet.label,
-              end: true,
-            }))}
-          />
-        </div>
-
-        {children}
+          The tabs render through ArrangedPage's `nav` slot and the heading
+          through its title/blurb overrides -- a manifest is data and does not
+          know who is reading. */}
+      {children({
+        title: loading && account === null ? <Skeleton variant="text" width="w-48" /> : title,
+        blurb:
+          account === null ? undefined : (
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {displayName === "" || email === "" ? null : <span>{email}</span>}
+              {role === "" ? null : <Badge>{role}</Badge>}
+              {account.memberSince === "" ? null : (
+                <span className="text-subtle">
+                  <span aria-hidden="true">· </span>member since {formatDay(account.memberSince)}
+                </span>
+              )}
+            </span>
+          ),
+        actions: (
+          <Button tone="danger" onClick={() => setConfirming(true)}>
+            Sign out
+          </Button>
+        ),
+        nav: (
+          <div className="-mt-2">
+            <Tabs
+              label="Your account"
+              items={ME_FACETS.map((facet) => ({
+                to: mePath(facet.id),
+                label: facet.label,
+                end: true,
+              }))}
+            />
+          </div>
+        ),
+      })}
 
         <ConfirmDialog
           open={confirming}
@@ -99,8 +119,7 @@ export function MeLayout({
           This browser stops holding a credential for this cluster. Your other
           devices are untouched -- end those from the Sessions tab.
         </ConfirmDialog>
-      </section>
-    </Container>
+    </>
   );
 }
 

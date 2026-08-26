@@ -88,7 +88,14 @@ import { AccountConsole } from "../accounts/AccountConsole";
 import { AddMachineWidget } from "./AddMachineWidget";
 import { DeployControlsWidget } from "./DeployControlsWidget";
 import { InvitePersonWidget } from "./InvitePersonWidget";
+import { MeAccountWidget, MeSecurityWidget, MeSessionsWidget } from "./meWidgets";
 import { ProfilePreferencesWidget } from "./ProfilePreferencesWidget";
+import {
+  ArtifactsWidget,
+  DeployablesWidget,
+  MachinesWidget,
+  WorkbenchesWidget,
+} from "./pageBodies";
 import { RoutingPolicyWidget } from "./RoutingPolicyWidget";
 
 export const WIDGETS: readonly WidgetDefinition[] = [
@@ -140,6 +147,54 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     title: "Preferences",
     summary: "Your own settings on this cluster.",
     render: () => <ProfilePreferencesWidget />,
+  },
+  // The four CONVERGED PAGE BODIES (task memql#4674). Each is a rich per-row
+  // reading or a set of controls that no element in the library expresses --
+  // see pageBodies.tsx for why each one is a widget rather than a handful of
+  // elements, and what phase 2 would decompose them into.
+  {
+    id: "fleetMachines",
+    title: "Machines",
+    summary: "The computers registered to this cluster, with pairing and routing.",
+    render: () => <MachinesWidget />,
+  },
+  {
+    id: "fleetWorkbenches",
+    title: "Workspaces",
+    summary: "The sandboxes this cluster provisions, grouped by the replica holding them.",
+    render: () => <WorkbenchesWidget />,
+  },
+  {
+    id: "artifacts",
+    title: "Library",
+    summary: "Everything the Library has indexed, with upload, search and labels.",
+    render: () => <ArtifactsWidget />,
+  },
+  {
+    id: "deployables",
+    title: "Deployables",
+    summary: "The hosted surfaces this cluster answers for, and how to make another.",
+    render: () => <DeployablesWidget />,
+  },
+  // The Me tabs (task memql#4674). The exemplar non-data page: one row that is
+  // yours, your credentials, and your own sessions.
+  {
+    id: "meAccount",
+    title: "Account",
+    summary: "Who this cluster knows you as.",
+    render: () => <MeAccountWidget />,
+  },
+  {
+    id: "meSecurity",
+    title: "Security",
+    summary: "How you sign in, and the devices that can.",
+    render: () => <MeSecurityWidget />,
+  },
+  {
+    id: "meSessions",
+    title: "Sessions",
+    summary: "Everywhere you are signed in right now, and how to end one.",
+    render: () => <MeSessionsWidget />,
   },
 ];
 

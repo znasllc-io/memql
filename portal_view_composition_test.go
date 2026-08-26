@@ -420,6 +420,70 @@ func TestStripTSCommentsKeepsCode(t *testing.T) {
 	}
 }
 
+// convergedPages are the phase-1 pages that became arrangements (epic
+// memql#4661, task memql#4674): the manifest that declares each one, and the
+// page id an override row is keyed on.
+//
+// THE PAGE ID IS PINNED HERE ON PURPOSE. It is a durable identifier rather
+// than a route: an override row is keyed on it, so renaming one orphans every
+// regeneration anybody made of that page -- silently, because the page still
+// works and simply forgets what somebody did to it. A rename should show up in
+// a diff of this file.
+var convergedPages = []struct {
+	manifest string
+	pageID   string
+}{
+	{"clients/portal/src/fleet/manifests.ts", "fleet.machines"},
+	{"clients/portal/src/fleet/manifests.ts", "fleet.workbenches"},
+	{"clients/portal/src/artifacts/manifest.ts", "library.artifacts"},
+	{"clients/portal/src/deployables/manifest.ts", "platform.deployables"},
+	{"clients/portal/src/me/manifests.ts", "me.account"},
+	{"clients/portal/src/me/manifests.ts", "me.settings"},
+	{"clients/portal/src/me/manifests.ts", "me.sessions"},
+	{"clients/portal/src/me/manifests.ts", "me.security"},
+	{"clients/portal/src/nexus/goalPage.ts", "nexus.goal"},
+}
+
+// TestConvergedPagesAreManifests is the guard growing with each converged page,
+// which is what task memql#4674 asks of it.
+//
+// It asserts the two things that make a converged page converged, and both
+// fail SILENTLY if unasserted: the page declares a manifest (so it has a seed,
+// a version strip and a regenerate control), and that manifest declares
+// REQUIRED entries (so a regeneration cannot produce a valid arrangement of a
+// page that no longer does its job -- a fleet page with no machines on it is
+// not a rearrangement of the fleet page).
+func TestConvergedPagesAreManifests(t *testing.T) {
+	for _, page := range convergedPages {
+		source := readViewFile(t, page.manifest)
+		if !strings.Contains(source, `pageId: "`+page.pageID+`"`) &&
+			!strings.Contains(source, `"`+page.pageID+`"`) {
+			t.Errorf("%s declares no manifest for %q. A converged page is a manifest "+
+				"(epic memql#4661): without one it has no seed, no version strip and no "+
+				"regenerate control, and it has quietly gone back to being a bespoke "+
+				"page.", page.manifest, page.pageID)
+		}
+	}
+
+	// Required entries, per manifest file. Checked per FILE rather than per
+	// page because a manifest file may declare several and the shape is the
+	// same; what matters is that none of them forgot the guardrail.
+	seen := map[string]bool{}
+	for _, page := range convergedPages {
+		if seen[page.manifest] {
+			continue
+		}
+		seen[page.manifest] = true
+		source := stripTSComments(readViewFile(t, page.manifest))
+		if !strings.Contains(source, "required:") {
+			t.Errorf("%s declares no `required` entries. That is the guardrail behind "+
+				"regeneration: without it a model may produce a valid arrangement of a "+
+				"page that no longer does its job, and the page will look deliberate.",
+				page.manifest)
+		}
+	}
+}
+
 // TestAPredefinedViewIsData is the other half, and it is the claim epic
 // memql#4661 actually makes.
 //

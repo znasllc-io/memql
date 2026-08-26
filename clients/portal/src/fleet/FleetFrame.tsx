@@ -53,6 +53,33 @@ export function FleetFrame({
   );
 }
 
+// FleetTabs is the surface strip on its own (epic memql#4661, task
+// memql#4674).
+//
+// Split out of FleetFrame because the two Fleet screens are ARRANGEMENTS now:
+// their header, their version strip and their regenerate control come from
+// ArrangedPage, and what remains that is genuinely theirs is this -- which of
+// the two surfaces you are on.
+//
+// It sits OUTSIDE the arrangement deliberately, in ArrangedPage's `nav` slot.
+// A tab bar is route-level navigation rather than a reading of a population,
+// and an arrangement that placed it would be an arrangement a regeneration
+// could remove -- leaving a page you cannot navigate away from.
+export function FleetTabs(): ReactNode {
+  return (
+    <div className="-mt-2">
+      <Tabs
+        label="Fleet"
+        items={FLEET_SURFACES.map((one) => ({
+          to: fleetPath(one.id),
+          label: one.label,
+          end: true,
+        }))}
+      />
+    </div>
+  );
+}
+
 // LiveDegraded says the list has stopped being live, in the one place both
 // screens need it.
 //

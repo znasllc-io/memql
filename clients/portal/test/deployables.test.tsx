@@ -400,7 +400,13 @@ describe("the deployables list", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Deployables", level: 1 })).toBeTruthy(),
     );
-    expect(screen.getByRole("button", { name: "Create deployable" })).toBeTruthy();
+    // AWAITED. Since epic memql#4661 this page is an arrangement, so its body
+    // renders once the section resolves its concept through the registry --
+    // the same read the list has always needed. The header arrives first,
+    // which is better than the blank page a page-level wait would give.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create deployable" })).toBeTruthy(),
+    );
     expect(screen.queryByText(/cluster-owner surface/)).toBeNull();
     expect(screen.queryByText(/only the cluster owner may list/)).toBeNull();
   });

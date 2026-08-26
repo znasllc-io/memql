@@ -43,11 +43,30 @@ export interface ArrangedPageProps {
   pageId: string;
   selectedRowId: string;
   onSelect: (rowId: string) => void;
-  // Rendered in the page header, right-aligned. Where the regenerate
-  // affordance and the version strip go (task memql#4669).
+  // The page's OWN header actions -- a scope selector, a reload, an upload.
+  // Rendered beside the regenerate affordance rather than instead of it: a
+  // converged page keeps every verb it had AND becomes regenerable, and a
+  // slot that held one or the other would silently make the second true only
+  // for pages with no verbs.
   actions?: ReactNode;
+  // Rendered directly under the header, above the sections. ROUTE-LEVEL
+  // NAVIGATION goes here -- the fleet's tab bar, the Me tabs -- and it is
+  // outside the arrangement deliberately: navigation is not a reading of a
+  // population, and an arrangement that placed the tab bar would be an
+  // arrangement a regeneration could remove, leaving a page you cannot
+  // navigate away from.
+  nav?: ReactNode;
   // Rendered between the header and the first section.
   notice?: ReactNode;
+  // Override the manifest's heading and its line of copy.
+  //
+  // A manifest is DATA and does not know who is reading. Most pages are named
+  // for their population ("Machines", "Artifacts") and the constant is right.
+  // A page named for a ROW -- your own profile is headed with your own name --
+  // cannot be, and forcing it into the manifest would either put a placeholder
+  // on screen or make every manifest a function.
+  title?: ReactNode;
+  blurb?: ReactNode;
   // Turn regeneration off for this page. The excluded surfaces (sign-in, the
   // composer's own editor, dialogs) are not arranged pages at all, so this is
   // for a page that IS one and should not be rearranged -- there are none
@@ -62,7 +81,10 @@ export function ArrangedPage({
   selectedRowId,
   onSelect,
   actions,
+  nav,
   notice,
+  title,
+  blurb,
   regenerable = true,
 }: ArrangedPageProps): ReactNode {
   const resolved = usePageArrangements(manifest, pageId);
@@ -109,26 +131,28 @@ export function ArrangedPage({
     void writer.write(arrangements).then(() => resolved.reload());
   }, [resolved, manifest, writer]);
 
-  const header =
-    regenerable && actions === undefined ? (
-      <RegenerateAction
-        onRun={regenerate.run}
-        busy={regenerate.status === "working"}
-        error={regenerate.error}
-        onDismiss={regenerate.dismiss}
-      />
-    ) : (
-      actions
-    );
+  const header = (
+    <>
+      {actions}
+      {regenerable ? (
+        <RegenerateAction
+          onRun={regenerate.run}
+          busy={regenerate.status === "working"}
+          error={regenerate.error}
+          onDismiss={regenerate.dismiss}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <Container>
       <section className="flex min-h-full min-w-0 flex-col gap-6 pb-8">
         <PageHeader
           eyebrow={manifest.sections[0]?.conceptId ?? ""}
-          title={manifest.title}
-          blurb={manifest.blurb}
-          {...(header === undefined ? {} : { actions: header })}
+          title={title ?? manifest.title}
+          blurb={blurb ?? manifest.blurb}
+          actions={header}
           {...(resolved.versions.length > 1
             ? {
                 meta: (
@@ -143,6 +167,7 @@ export function ArrangedPage({
               }
             : {})}
         />
+        {nav}
         {/* A FAILED OVERRIDE READ LEAVES THE SEED STANDING, and says so beside
             the page rather than instead of it: the page is not broken, it is
             the page it has always been. */}
