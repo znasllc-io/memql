@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
 
-import { PageHeader, Tabs } from "../ui";
-import { adminPath, adminSurfacesFor, type AdminSurface } from "./urls";
+import { AreaFrame } from "../app/AreaFrame";
+import type { AdminSurface } from "./urls";
 
 // The chrome the admin screens share.
+//
+// It is a thin binding of the shared AreaFrame since memql#4655: these
+// screens are TABS ON CLUSTER now, beside Integrations, Data origins and
+// Stores, rather than a console of their own with its own strip. The strip
+// comes from the nav definition, so what the rail says Cluster contains and
+// what the tab strip offers are one list.
 //
 // ===========================================================================
 // WHY THIS IS NOT ViewFrame
@@ -19,19 +25,18 @@ import { adminPath, adminSurfacesFor, type AdminSurface } from "./urls";
 // the one line where a view puts a concept id.
 //
 // ===========================================================================
-// THE EYEBROW IS THE ROLE FLOOR
+// THE SUBTITLE IS THE ROLE FLOOR
 // ===========================================================================
-// A view's eyebrow is the concept id -- the address of the rows, the single
-// most useful fact about the page. The most useful fact about an admin page is
-// a different one: WHO IS ALLOWED TO SEE IT, and that the permission is the
-// cluster's rather than this console's. Every screen under /admin is owner or
-// admin, enforced server-side on every read and every write, and an operator
-// looking at an empty table should be able to tell "there is nothing here"
-// from "you are not allowed to see it" without leaving the page.
+// The most useful fact about one of these pages is WHO IS ALLOWED TO SEE IT,
+// and that the permission is the cluster's rather than this console's. Every
+// one of them is owner or admin, enforced server-side on every read and every
+// write, and an operator looking at an empty table should be able to tell
+// "there is nothing here" from "you are not allowed to see it" without
+// leaving the page.
 //
-// So the eyebrow states the floor and the console's actual answer for you. It
-// is structure, not decoration: it is the only place the two facts appear
-// together.
+// It rides the SUBTITLE slot rather than the eyebrow since memql#4657: the
+// eyebrow's monospace treatment is for a value that IS data, and a role floor
+// is a sentence. Same two facts, same place, no longer dressed as a row id.
 
 export function AdminFrame({
   surface,
@@ -48,44 +53,30 @@ export function AdminFrame({
   children: ReactNode;
 }): ReactNode {
   return (
-    <section className="flex min-h-full flex-col gap-6 pb-8">
-      <PageHeader
-        eyebrow={
-          <>
-            {/* THE SURFACE'S OWN FLOOR, not the console's. Most screens here
-                are owner-or-admin; AI providers is owner-only (epic
-                memql#4440), and an eyebrow that said otherwise would tell an
-                admin the empty page in front of them was a bug. */}
-            {surface.ownerOnly === true ? "owner" : "owner or admin"}
-            <span aria-hidden="true"> · </span>
-            {resolved
-              ? role === ""
-                ? "no role on this connection"
-                : `you are ${role}`
-              : "resolving your role"}
-          </>
-        }
-        title={surface.title}
-        blurb={surface.blurb}
-        {...(actions === undefined ? {} : { actions })}
-      />
-
-      {/* The surfaces, as the one Tabs idiom directly under the header. A
-          second nav RAIL would compete with the shell's; a tab strip reads as
-          what it is -- facets of one console, not unrelated destinations. */}
-      <div className="-mt-2">
-        <Tabs
-          label="Administration"
-          items={adminSurfacesFor(role).map((s) => ({
-            to: adminPath(s.id),
-            label: s.label,
-            end: true,
-          }))}
-        />
-      </div>
-
+    <AreaFrame
+      area="cluster"
+      pageId={`cluster.${surface.id}`}
+      subtitle={
+        <>
+          {/* THE SURFACE'S OWN FLOOR, not the console's. Most of these are
+              owner-or-admin; AI providers is owner-only (epic memql#4440),
+              and a line that said otherwise would tell an admin the empty
+              page in front of them was a bug. */}
+          {surface.ownerOnly === true ? "Owner only" : "Owner or admin"}
+          <span aria-hidden="true"> · </span>
+          {resolved
+            ? role === ""
+              ? "no role on this connection"
+              : `you are ${role}`
+            : "resolving your role"}
+        </>
+      }
+      title={surface.title}
+      blurb={surface.blurb}
+      {...(actions === undefined ? {} : { actions })}
+    >
       {children}
-    </section>
+    </AreaFrame>
   );
 }
 

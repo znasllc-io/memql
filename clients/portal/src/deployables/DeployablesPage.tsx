@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
 import {
@@ -12,7 +13,6 @@ import {
   EmptyState,
   ErrorNotice,
   Field,
-  PageHeader,
   Select,
   Skeleton,
   TextInput,
@@ -72,21 +72,22 @@ export function DeployablesPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={SITE_CONCEPT_ID}
-          title="Deployables"
-          blurb={
-            isClusterOwner
-              ? "Every hosted surface this cluster's edge answers for, across every user -- the platform's own portal included. You see all of them because you are the cluster owner; everyone else sees their own. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-              : "The things this cluster hosts for you. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
-          }
-          actions={
-            <Button size="xs" onClick={reload}>
-              Refresh
-            </Button>
-          }
-        />
+      <AreaFrame
+        area="library"
+        pageId="library.deployables"
+        subtitle="Library"
+        title="Deployables"
+        blurb={
+          isClusterOwner
+            ? "Every hosted surface this cluster's edge answers for, across every user -- the platform's own portal included. You see all of them because you are the cluster owner; everyone else sees their own. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
+            : "The things this cluster hosts for you. A deployable is data, not infrastructure: deploying and rolling back point its row at a bundle version, and the edge picks the change up on its next resolve for that hostname."
+        }
+        actions={
+          <Button size="xs" onClick={reload}>
+            Refresh
+          </Button>
+        }
+      >
 
         <Band title="New deployable" meta="created as a draft; deploy a bundle to it from your Library">
           <NewDeployableForm
@@ -119,7 +120,7 @@ export function DeployablesPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

@@ -83,20 +83,20 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   },
 ];
 
-// The surfaces a given role may be OFFERED.
+// WHICH SURFACES A ROLE IS OFFERED IS NOT DECIDED HERE ANY MORE (memql#4655).
 //
-// ABSENT, NOT DISABLED, for a surface above the caller's floor (epic
-// memql#4440). A greyed-out tab is an advertisement for a capability, and the
-// operator's only way to learn what it does is to be told they may not. This
-// console already refuses below its floor with a page that names the role it
-// read; a second, weaker refusal in the tab strip adds nothing.
+// These four are tabs on the Cluster destination now, beside Integrations,
+// Data origins and Stores, so their visibility is one `access` field per tab
+// in src/app/nav.ts and the rule that reads it is nav.ts's `maySee`. This
+// module kept its own copy of that filter until the restructure; two filters
+// over one tab strip is how a strip and the rail row that opens it come to
+// disagree about what an area contains.
 //
-// An empty role has not resolved yet -- see AdminAccess.resolved. It is
-// treated as below the owner floor here, which is the safe direction: the
-// strip gains the tab when the role arrives.
-export function adminSurfacesFor(role: string): readonly AdminSurface[] {
-  return ADMIN_SURFACES.filter((surface) => surface.ownerOnly !== true || role === "owner");
-}
+// The RULE is unchanged and still worth stating: a surface above the caller's
+// floor is ABSENT, not disabled (epic memql#4440). A greyed-out tab is an
+// advertisement for a capability whose only explanation is being told you may
+// not have it. And an unresolved role is treated as below every floor -- the
+// safe direction, because the tab appears when the role arrives.
 
 export function adminPath(surfaceId = ""): string {
   return surfaceId === "" ? ADMIN_ROOT : `${ADMIN_ROOT}/${surfaceId}`;

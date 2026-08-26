@@ -25,6 +25,11 @@ export {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  // The Fleet rail destination (memql#4655). A machine is a computer DOING
+  // WORK, which is what a processor draws; Monitor drew a screen and is now
+  // the theme toggle's alone -- "your screen" is the only other thing in this
+  // product that word means.
+  Cpu,
   Download,
   ExternalLink,
   // The per-page guide's entry point (memql#4652). An eye rather than a
@@ -41,6 +46,9 @@ export {
   LogOut,
   Monitor,
   Moon,
+  // The Cluster rail destination (memql#4655): the machine itself, as nodes
+  // and the links between them, rather than the data inside it.
+  Network,
   Orbit,
   Plug,
   Plus,

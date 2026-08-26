@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "../modules/ModulesRefused";
@@ -12,7 +13,6 @@ import {
   DataText,
   EmptyState,
   ErrorNotice,
-  PageHeader,
   Skeleton,
 } from "../ui";
 import { OriginBadge } from "./OriginBadge";
@@ -57,22 +57,24 @@ export function DataOriginsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title="Data origins"
-          blurb="MemQL is the origin of what it owns, a faithful mirror of what it does not, and every concept says which. A mirror is read-only here by construction — change it at the origin."
-          actions={
-            <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
-              Refresh
-            </Button>
-          }
-          meta={
-            <span className="text-xs text-subtle">
-              {connected.length} concept{connected.length === 1 ? "" : "s"} with a connector,{" "}
-              {state.origins.length} declared in all
-            </span>
-          }
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.data-origins"
+        subtitle="Cluster"
+        title="Data origins"
+        blurb="MemQL is the origin of what it owns, a faithful mirror of what it does not, and every concept says which. A mirror is read-only here by construction — change it at the origin."
+        actions={
+          <Button size="xs" onClick={state.reload} busy={state.loading} busyLabel="Reading…">
+            Refresh
+          </Button>
+        }
+        meta={
+          <span className="text-xs text-subtle">
+            {connected.length} concept{connected.length === 1 ? "" : "s"} with a connector,{" "}
+            {state.origins.length} declared in all
+          </span>
+        }
+      >
 
         {state.error !== "" ? (
           <ErrorNotice sentence="Could not read what this cluster owns and mirrors." detail={state.error} />
@@ -95,7 +97,7 @@ export function DataOriginsPage(): ReactNode {
         )}
 
         <DeadLetterBand connectors={connectorsIn(connected)} />
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

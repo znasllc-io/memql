@@ -413,10 +413,15 @@ describe("the admin console's authorization shape", () => {
     expect(calls.some((c) => c.name === "searchUsers")).toBe(false);
   });
 
-  it("states the role floor and the caller's own role in the eyebrow", async () => {
+  it("states the role floor and the caller's own role above the title", async () => {
     renderAdmin({}, "/admin/tokens");
-    await waitFor(() => expect(screen.getByText(/owner or admin/)).toBeTruthy());
-    expect(screen.getByText(/you are owner/)).toBeTruthy();
+    // It rides the SUBTITLE slot since memql#4657 rather than the monospace
+    // eyebrow: the eyebrow's treatment is for a value that IS data, and a role
+    // floor is a sentence. Same two facts, same place.
+    await waitFor(() => expect(screen.getByText(/Owner or admin/)).toBeTruthy());
+    // Awaited: the role arrives over the connection, and until it does the
+    // line says so ("resolving your role") rather than guessing.
+    await waitFor(() => expect(screen.getByText(/you are owner/)).toBeTruthy());
   });
 });
 
@@ -697,16 +702,26 @@ describe("cluster settings", () => {
   });
 });
 
-describe("the admin sub-nav", () => {
-  it("links every surface and marks the current one", async () => {
+describe("the admin surfaces are tabs on Cluster (memql#4655)", () => {
+  it("sits in the Cluster strip beside the other cluster surfaces", async () => {
     renderAdmin({}, "/admin/tokens");
     await waitFor(() => expect(screen.getByText("Sessions and tokens")).toBeTruthy());
-    const nav = screen.getByRole("navigation", { name: "Administration" });
-    // Three surfaces, not five. Overview and People retired in memql#4264 --
-    // the console answers the first and the Users view carries the second.
-    for (const label of ["Tokens", "Signing keys", "Settings"]) {
+    // Not an "Administration" strip of its own any more. These four were a
+    // separate console with its own sub-nav; they are facets of Cluster, and
+    // an operator moving from Integrations to Signing keys was crossing an
+    // invisible boundary between two tab strips to do it.
+    expect(screen.queryByRole("navigation", { name: "Administration" })).toBeNull();
+    // Awaited for the same reason: tab visibility is role-gated, an
+    // unresolved role is below every floor, and a strip of ONE tab is not
+    // rendered at all -- so the strip arrives with the role. The direction is
+    // deliberate: gaining tabs as the answer lands, never flashing doors that
+    // are about to be taken away.
+    const nav = await waitFor(() => screen.getByRole("navigation", { name: "Cluster" }));
+    for (const label of ["Integrations", "Tokens", "Signing keys", "Settings"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
     }
+    // Retired in memql#4264 and still gone: the console answers the first and
+    // the Users view carries the second.
     for (const gone of ["Overview", "People"]) {
       expect(within(nav).queryByRole("link", { name: gone })).toBeNull();
     }

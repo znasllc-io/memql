@@ -6,10 +6,11 @@ import {
   TABLE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { Empty } from "../components/StatusMessage";
-import { Band, Button, Container, ErrorNotice, PageHeader, Skeleton } from "../ui";
+import { Band, Button, Container, ErrorNotice, Skeleton } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
@@ -70,27 +71,29 @@ export function IntegrationsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          title="Integrations"
-          blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
-          actions={
-            <>
-              <Link
-                to={campaignsPath()}
-                className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
-              >
-                Email campaigns
-              </Link>
-              <Button size="xs" onClick={refresh}>
-                Refresh
-              </Button>
-              <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
-                Check now
-              </Button>
-            </>
-          }
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.integrations"
+        subtitle="Cluster"
+        title="Integrations"
+        blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
+        actions={
+          <>
+            <Link
+              to={campaignsPath()}
+              className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
+            >
+              Email campaigns
+            </Link>
+            <Button size="xs" onClick={refresh}>
+              Refresh
+            </Button>
+            <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
+              Check now
+            </Button>
+          </>
+        }
+      >
 
         {!canView ? (
           <Empty>
@@ -183,7 +186,7 @@ export function IntegrationsPage(): ReactNode {
             />
           </>
         )}
-      </section>
+      </AreaFrame>
     </Container>
   );
 }

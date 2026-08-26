@@ -18,11 +18,21 @@ function goalRow(id: string, goal: string, status: string, createdAt: string): R
 }
 
 describe("the Nexus section", () => {
-  it("has a rail group of its own", async () => {
+  it("is a rail destination of its own", async () => {
     renderNexus(nexusHarness(), "/nexus/plan-spring");
     const rail = within(screen.getByRole("navigation", { name: /portal sections/i }));
-    await waitFor(() => expect(rail.getByRole("heading", { name: /nexus/i })).toBeTruthy());
-    expect(rail.getByRole("link", { name: "Goals" }).getAttribute("href")).toContain("/nexus");
+    // A flat row since memql#4655, not a caption with rows under it. Nexus
+    // keeps its per-goal tabs (Map / Constructs / Replay) INSIDE a goal, which
+    // is a different altitude from an area's facets -- so Goals is simply
+    // where the row lands rather than a row of its own.
+    await waitFor(() =>
+      expect(rail.getByRole("link", { name: "Nexus" }).getAttribute("href")).toBe("/nexus"),
+    );
+    expect(rail.queryByRole("heading", { name: /nexus/i })).toBeNull();
+    expect(rail.queryByRole("link", { name: "Goals" })).toBeNull();
+    // Agents left the rail with the caption: it is a card in the Views
+    // gallery now, at the same URL it always had.
+    expect(rail.queryByRole("link", { name: "Agents" })).toBeNull();
   });
 
   it("opens a goal by id, from a cold load", async () => {

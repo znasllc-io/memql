@@ -4,7 +4,6 @@ import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
 import { Band, Button, Callout, Container, EmptyState, Select, Skeleton } from "../ui";
 import { AddMachine } from "./AddMachine";
-import { WORKER_REGISTRATION_CONCEPT_ID } from "./concepts";
 import { FleetFrame, LiveDegraded } from "./FleetFrame";
 import { MachineCard } from "./MachineCard";
 import { RoutingPolicyEditor } from "./RoutingPolicyEditor";
@@ -58,7 +57,6 @@ export function MachinesPage(): ReactNode {
     <Container>
       <FleetFrame
         surface={surface}
-        eyebrow={WORKER_REGISTRATION_CONCEPT_ID}
         actions={
           <>
             {state.isClusterOwner ? (

@@ -11,12 +11,12 @@ import {
   EmptyState,
   ErrorNotice,
   Field,
-  PageHeader,
   Select,
   Skeleton,
   TextInput,
 } from "../ui";
-import { sessionPath } from "./urls";
+import { FleetFrame } from "./FleetFrame";
+import { fleetSurfaceById, sessionPath } from "./urls";
 import { appLabel } from "./rows";
 import { useAppSessions, type AppSessionCard } from "./useAppSessions";
 import {
@@ -50,15 +50,16 @@ export function LocalAppsPage(): ReactNode {
   const sessions = useAppSessions();
   const policy = useDelegationPolicy();
 
+  // THE FRAME, not a hand-rolled header (memql#4655). This page used to build
+  // its own PageHeader, so navigating to it made the Fleet tab strip
+  // disappear -- the strip is how a person gets back to Machines, and it
+  // vanished exactly when they had gone one level in.
+  const surface = fleetSurfaceById("apps");
+  if (surface === undefined) return null;
+
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow="v1:worker:delegationPolicy"
-          title="Local apps"
-          blurb="Handing a task to an app you already pay for, on a machine you own. Which apps a machine actually has is on its card under Machines; this page decides when the planner uses them, and shows what happened when it did."
-        />
-
+      <FleetFrame surface={surface}>
         <Band title="Delegation">
           <DelegationPolicyEditor state={policy} />
         </Band>
@@ -78,7 +79,7 @@ export function LocalAppsPage(): ReactNode {
             </ul>
           )}
         </Band>
-      </section>
+      </FleetFrame>
     </Container>
   );
 }

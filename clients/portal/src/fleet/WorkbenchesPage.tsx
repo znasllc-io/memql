@@ -14,7 +14,6 @@ import {
   Skeleton,
   type StatusTone,
 } from "../ui";
-import { WORKBENCH_WORKSPACE_CONCEPT_ID } from "./concepts";
 import { FleetFrame, LiveDegraded } from "./FleetFrame";
 import { formatFreshness, formatMoment } from "./format";
 import { chipsFromMap } from "./labels";
@@ -76,7 +75,6 @@ export function WorkbenchesPage(): ReactNode {
     <Container>
       <FleetFrame
         surface={surface}
-        eyebrow={WORKBENCH_WORKSPACE_CONCEPT_ID}
         actions={
           <>
             {state.isClusterOwner ? (

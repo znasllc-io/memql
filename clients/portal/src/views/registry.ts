@@ -50,17 +50,14 @@
 // Users carries two populations, Deployments carries a control panel and row
 // sets that are not concept rows at all, Audit is an append-only log.
 
-// A view's group in the nav rail.
+// RETIRED IN memql#4655: `group`, which placed a view under a rail caption.
 //
-// "operate" is the DATA an operator works in; the rail renders that set as the
-// Views group's BUILT-IN sub-section. "nexus" is a surface about ONE GOAL of
-// yours rather than a population, which is a different kind of thing and files
-// under its own caption -- see the NEXUS constant in app/AppShell.tsx.
-//
-// A group is a rail PLACEMENT, not a URL. Every view here is addressed at
-// /views/:id whichever caption it renders under, so moving a row between
-// groups breaks no link and no bookmark.
-export type ViewGroup = "operate" | "nexus";
+// There are no rail captions any more, and no per-view rail rows -- the five
+// built-in views are cards in the Views gallery, which lists all of them
+// together because to the person choosing a screen they are one kind of
+// thing. Agents was the one row the field ever moved (under Nexus), and it is
+// a gallery card now like the rest. Its URL is untouched, as it was then:
+// placement was never URL shape.
 
 export interface ViewDefinition {
   // The URL slug. Short, lower-case, and chosen here -- never a concept id.
@@ -86,7 +83,6 @@ export interface ViewDefinition {
   // self-evident: the Accounts blurb still has to say what an account is,
   // because the word alone does not.
   readonly label: string;
-  readonly group: ViewGroup;
   // The concept whose rows this view is primarily about. A view may read
   // OTHER concepts too (Users also reads sessions); this is the one its
   // header, its walk and its row-detail address are keyed on.
@@ -105,7 +101,6 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "users",
     label: "Users",
-    group: "operate",
     conceptId: "v1:identity:user",
     title: "Users",
     blurb:
@@ -115,7 +110,6 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "agents",
     label: "Agents",
-    group: "nexus",
     conceptId: "v1:agents:agent",
     title: "Agents",
     blurb:
@@ -125,7 +119,6 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "accounts",
     label: "Accounts",
-    group: "operate",
     conceptId: "v1:identity:account",
     title: "Accounts",
     blurb:
@@ -135,7 +128,6 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "deployments",
     label: "Deployments",
-    group: "operate",
     conceptId: "v1:cluster:deployment",
     title: "Deployments",
     blurb:
@@ -145,7 +137,6 @@ export const VIEWS: readonly ViewDefinition[] = [
   {
     id: "audit",
     label: "Audit",
-    group: "operate",
     conceptId: "v1:identity:auditEvent",
     title: "Audit",
     blurb:

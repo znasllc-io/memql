@@ -13,7 +13,12 @@
 
 export function navClass(isActive: boolean, collapsed: boolean): string {
   return (
-    "flex items-center gap-2.5 rounded py-1.5 text-sm " +
+    // `motion-wash` is the brand's one transition recipe (brand/theme.css):
+    // colour, ground and line at --memql-motion-dur on the brand curve, and
+    // nothing at all under prefers-reduced-motion, because that token is 0ms
+    // there. Written as a class rather than three utilities so every nav row,
+    // tab and card in both surfaces eases identically.
+    "motion-wash flex items-center gap-2.5 rounded py-1.5 text-sm " +
     (collapsed ? "justify-center px-0 " : "px-2.5 ") +
     // The active edge: a 2px accent bar on the left plus a soft fill. The
     // border is always present (transparent at rest) so activation never

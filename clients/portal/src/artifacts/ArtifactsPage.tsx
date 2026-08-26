@@ -2,6 +2,7 @@ import { useState, type DragEvent, type FormEvent, type ReactNode } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { rowString, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { AreaFrame } from "../app/AreaFrame";
 import { useConcepts } from "../cluster/useConcepts";
 import { RowList } from "../components/RowList";
 import {
@@ -16,7 +17,6 @@ import {
   Field,
   FormActions,
   FormRow,
-  PageHeader,
   Skeleton,
   Textarea,
   TextInput,
@@ -119,17 +119,18 @@ export function ArtifactsPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={ARTIFACT_CONCEPT_ID}
-          title="Artifacts"
-          blurb="Everything this cluster's Library has indexed for you -- files you uploaded, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
-          actions={
-            <Button size="xs" onClick={reload}>
-              Refresh
-            </Button>
-          }
-        />
+      <AreaFrame
+        area="library"
+        pageId="library.artifacts"
+        subtitle="Library"
+        title="Artifacts"
+        blurb="Everything this cluster's Library has indexed for you -- files you uploaded, generated outputs, and the notes, to-dos, calendar events, and memories your agents have created. Put your own labels on one to say what it was for; a label you or an agent added is a filter here too."
+        actions={
+          <Button size="xs" onClick={reload}>
+            Refresh
+          </Button>
+        }
+      >
 
         <Band
           title="Upload a file"
@@ -227,7 +228,7 @@ export function ArtifactsPage(): ReactNode {
             <Skeleton variant="rows" rows={5} />
           )}
         </Band>
-      </section>
+      </AreaFrame>
 
       <ConfirmDialog
         open={pendingArchive !== null}

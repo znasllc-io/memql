@@ -26,7 +26,11 @@ export interface TabItem {
 
 function tabClass(active: boolean): string {
   return (
-    "-mb-px border-b-2 px-3 py-1.5 text-sm " +
+    // `motion-wash` eases the underline and the colour at the brand duration
+    // (brand/theme.css). The underline SLIDING between positions is what
+    // design E asks for; a border-colour transition is how a strip of
+    // adjacent 2px borders reads as one edge moving.
+    "motion-wash -mb-px border-b-2 px-3 py-1.5 text-sm " +
     (active
       ? "border-accent font-medium text-fg"
       : "border-transparent text-muted hover:text-fg")

@@ -9,11 +9,10 @@ import {
   EmptyState,
   ErrorNotice,
   Field,
-  PageHeader,
   Skeleton,
   TextInput,
 } from "../ui";
-import { STORE_CONCEPT_ID } from "./concepts";
+import { AreaFrame } from "../app/AreaFrame";
 import type { StoreHealth } from "./health";
 import { StoresRefused } from "./StoresRefused";
 import { storePath } from "./urls";
@@ -38,12 +37,13 @@ export function StoresPage(): ReactNode {
 
   return (
     <Container>
-      <section className="flex min-h-full flex-col gap-6 pb-8">
-        <PageHeader
-          eyebrow={STORE_CONCEPT_ID}
-          title="Stores"
-          blurb="Every Shopify store this cluster mirrors. Shopify owns the data; MemQL holds a generated copy of it, kept current by webhooks and repaired by reconciliation. A store's three credentials live as references to secrets -- the row itself never carries a token."
-        />
+      <AreaFrame
+        area="cluster"
+        pageId="cluster.stores"
+        subtitle="Cluster"
+        title="Stores"
+        blurb="Every Shopify store this cluster mirrors. Shopify owns the data; MemQL holds a generated copy of it, kept current by webhooks and repaired by reconciliation. A store's three credentials live as references to secrets -- the row itself never carries a token."
+      >
 
         <Band title="Add a store">
           <NewStoreForm busy={createBusy} error={createError} onCreate={createStore} />
@@ -71,7 +71,7 @@ export function StoresPage(): ReactNode {
             ))}
           </ul>
         </Band>
-      </section>
+      </AreaFrame>
     </Container>
   );
 }
