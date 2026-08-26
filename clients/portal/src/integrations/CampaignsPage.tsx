@@ -15,7 +15,7 @@ import {
   Textarea,
   TextInput,
 } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { useCampaigns } from "./useCampaigns";
 import {
   AUDIENCE_CONCEPT_ID,
@@ -98,7 +98,7 @@ export function CampaignsPage(): ReactNode {
         ) : (
           <>
             <Band>
-              <ViewElement
+              <ElementView
                 element={STAT_TILE_ELEMENT}
                 rows={campaigns}
                 concept={campaignConcept}
@@ -113,7 +113,7 @@ export function CampaignsPage(): ReactNode {
                   those below.
                 </Empty>
               ) : (
-                <ViewElement
+                <ElementView
                   element={TABLE_ELEMENT}
                   rows={campaigns}
                   concept={campaignConcept}
@@ -129,7 +129,7 @@ export function CampaignsPage(): ReactNode {
                 {audiences.length === 0 ? (
                   <Empty>No audiences yet.</Empty>
                 ) : (
-                  <ViewElement
+                  <ElementView
                     element={TABLE_ELEMENT}
                     rows={audiences}
                     concept={audienceConcept}
@@ -145,7 +145,7 @@ export function CampaignsPage(): ReactNode {
                 {templates.length === 0 ? (
                   <Empty>No templates yet.</Empty>
                 ) : (
-                  <ViewElement
+                  <ElementView
                     element={TABLE_ELEMENT}
                     rows={templates}
                     concept={templateConcept}

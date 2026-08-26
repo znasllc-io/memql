@@ -129,15 +129,28 @@ export interface ArrangedElement {
   // How much of the page this entry carries. Omitted is `standard`, which is
   // what every entry stored before roles existed means.
   readonly role?: EntryRole;
-  // Element-kind options: which SCENE (`sceneId`) or which WIDGET
-  // (`widgetId`) this entry names. Carried on the entry rather than in
-  // `bindings` because a binding names FIELDS and these name a registered
-  // module -- putting them in the same map would make "the field called
-  // goalMap" a thing a reader has to rule out.
+  // Per-entry ELEMENT OPTIONS: everything an entry says about its element
+  // that is not a field binding.
   //
-  // Both registries are CLOSED: sanitize drops an entry naming one that does
-  // not exist, so an arrangement can place a scene or a widget and can never
-  // invent one.
+  //   sceneId / widgetId   which registered module a `scene` or `widget`
+  //                        entry names. Both registries are CLOSED --
+  //                        sanitize drops an entry naming one that does not
+  //                        exist -- so an arrangement can PLACE a scene or a
+  //                        widget and can never invent one.
+  //   rowAction            "view" gives a population element a trailing
+  //                        per-row control, for a page that spends row-click
+  //                        on something else (deploy/rollback).
+  //   sortField / sortDir  the column a table or timeline opens sorted on.
+  //   month                the month a calendar opens on, "YYYY-MM".
+  //
+  // SEPARATE FROM `bindings` because a binding names FIELDS and these do not.
+  // Merging them would make "the field called goalMap" something a reader has
+  // to rule out, and would put a module id through the unknown-field check.
+  //
+  // STRING VALUES ONLY, which is what keeps a stored arrangement a plain JSON
+  // value that survives a round trip through the graph unchanged -- the sort
+  // direction is two keys rather than a nested object for exactly that
+  // reason.
   readonly options?: Readonly<Record<string, string>>;
 }
 
@@ -171,7 +184,25 @@ export function entryRole(entry: ArrangedElement): EntryRole {
 // single place the conversion happens, so a host cannot forget that an entry's
 // bindings are the caller-override half of the fitness contract.
 export function elementOptions(entry: ArrangedElement): ElementOptions {
-  return entry.bindings === undefined ? {} : { bindings: entry.bindings };
+  const options: Record<string, unknown> = {};
+  if (entry.bindings !== undefined) options["bindings"] = entry.bindings;
+
+  const raw = entry.options ?? {};
+  // Read by NAME rather than spread, so an unknown key in a stored row -- one
+  // this release does not have, or a typo -- cannot reach an element's option
+  // bag and change a behaviour nobody meant to set.
+  if (raw["rowAction"] === "view") options["rowAction"] = "view";
+  if (raw["month"] !== undefined && raw["month"] !== "") options["month"] = raw["month"];
+  const sortField = raw["sortField"] ?? "";
+  if (sortField !== "") {
+    options["sort"] = {
+      field: sortField,
+      // Anything other than an explicit "desc" is ascending. A sort with a
+      // nonsense direction should still sort.
+      direction: raw["sortDir"] === "desc" ? "desc" : "asc",
+    };
+  }
+  return options as ElementOptions;
 }
 
 // ---------------------------------------------------------------------------

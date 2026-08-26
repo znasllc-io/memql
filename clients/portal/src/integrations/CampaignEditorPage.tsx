@@ -4,7 +4,7 @@ import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { Band, Breadcrumbs, Button, ConfirmDialog, Container, Field, PageHeader, Select, Skeleton, TextInput } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { useCampaignDetail, useCampaigns } from "./useCampaigns";
 import {
   DELIVERY_CONCEPT_ID,
@@ -262,7 +262,7 @@ export function CampaignEditorPage(): ReactNode {
               </Empty>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
-                <ViewElement
+                <ElementView
                   element={TABLE_ELEMENT}
                   rows={detail.deliveries}
                   concept={deliveryConcept}

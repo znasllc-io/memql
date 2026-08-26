@@ -5,7 +5,7 @@ import { RowDetailDialog } from "../components/RowDetailDialog";
 import { rowWithId, useLocalRowId } from "../components/localRow";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, Button, DataText } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { NODE_TOKEN_CONCEPT, TOKEN_CONCEPT } from "./rows";
 import { surfaceById } from "./urls";
@@ -115,7 +115,7 @@ export function TokensPage(): ReactNode {
             {console_.loading ? "Reading tokens…" : "No personal access tokens have been issued."}
           </p>
         ) : (
-          <ViewElement
+          <ElementView
             element={PROPORTION_BAR_ELEMENT}
             rows={console_.tokens}
             concept={TOKEN_CONCEPT}
@@ -132,7 +132,7 @@ export function TokensPage(): ReactNode {
               : "Nothing to show. A user mints one of these from the CLI."}
           </p>
         ) : (
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={console_.tokens}
             concept={TOKEN_CONCEPT}
@@ -182,7 +182,7 @@ export function TokensPage(): ReactNode {
               : "No node has bootstrapped a credential on this cluster."}
           </p>
         ) : (
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={nodes.tokens}
             concept={NODE_TOKEN_CONCEPT}

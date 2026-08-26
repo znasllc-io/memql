@@ -389,11 +389,16 @@ describe("the Users view", () => {
     expect(classes.has("vk-chart-rail-seg")).toBe(true);
     expect(classes.has("vk-table")).toBe(true);
 
-    // Band order is the grammar: reading, then shape, then roll.
     // Band order is the grammar: reading, then shape, then roll. "Invited" is
-    // an administrative addendum (memql#4272) and sits AFTER all three -- the
-    // operator came to look at users, not at who is on their way in.
-    expect(bandTitles()).toEqual(["By role", "Everyone", "Open sessions", "Invited"]);
+    // an administrative addendum (memql#4272) and sits after the population --
+    // the operator came to look at users, not at who is on their way in.
+    //
+    // It moved one place, from the end of the PAGE to the end of the users
+    // SECTION, when the view became data (epic memql#4661): sessions are now a
+    // second section over a second concept rather than a band of the first, and
+    // an addendum about users belongs with the users. The intent the original
+    // order expressed -- not at the top -- is what is asserted here.
+    expect(bandTitles()).toEqual(["By role", "Everyone", "Invited", "Open sessions"]);
 
     // The rail divides on role, which is what this view designed for -- not
     // on the concept's declared status slot, which would be active/inactive.
@@ -511,7 +516,12 @@ describe("the Accounts view", () => {
     await waitFor(() =>
       expect(screen.getByText(/publishes no concept called/)).toBeTruthy(),
     );
-    expect(screen.getByText(ACCOUNT)).toBeTruthy();
+    // TWICE, and both are wanted: the page header's eyebrow still names the
+    // concept the page is about, and the statement names the one that is
+    // missing. Before the views became data (epic memql#4661) this state
+    // replaced the whole page, header included, so a person landed on a page
+    // that had stopped saying what it was.
+    expect(screen.getAllByText(ACCOUNT).length).toBeGreaterThan(0);
   });
 });
 

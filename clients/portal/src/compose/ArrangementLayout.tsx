@@ -13,7 +13,7 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import { ComposeBand } from "./ComposeLayout";
-import { ComposeElement } from "./ComposeElement";
+import { ElementView } from "../viewkit/ElementView";
 
 // Rendering an arrangement, in whichever of the five layouts it names.
 //
@@ -50,6 +50,11 @@ export interface ArrangementLayoutProps {
   rows: readonly RowLike[];
   onSelect?: (rowId: string) => void;
   selectedRowId?: string;
+  // A TRAILING per-row control that is not row-select, for a page that spends
+  // row-click on something else. Absent means an element carrying
+  // `rowAction: "view"` renders the control and it does nothing, which is why
+  // the seed and this prop travel together.
+  onRowAction?: (action: string, rowId: string) => void;
   // Per-entry chrome, right-aligned on the band caption. The composer's
   // move / remove / rebind controls; absent when the view is being read.
   controls?: (index: number) => ReactNode;
@@ -63,6 +68,10 @@ export interface ArrangementLayoutProps {
   // application renders it. Undefined means this surface has none, which is
   // the honest state for a preview that has not been given the registries.
   renderModule?: (planned: PlannedEntry) => ReactNode;
+  // The heading level for band captions. h2 on a page (under the page's h1);
+  // h3 in the composer, where a section header already holds h2. See
+  // ComposeBand for why the caller states it.
+  headingLevel?: "h2" | "h3";
 }
 
 export function ArrangementLayout({
@@ -71,10 +80,12 @@ export function ArrangementLayout({
   rows,
   onSelect,
   selectedRowId,
+  onRowAction,
   controls,
   onSelectEntry,
   selectedEntry,
   renderModule,
+  headingLevel = "h3",
 }: ArrangementLayoutProps): ReactNode {
   if (arrangement.elements.length === 0) {
     return (
@@ -98,10 +109,12 @@ export function ArrangementLayout({
               rows={rows}
               {...(onSelect === undefined ? {} : { onSelect })}
               {...(selectedRowId === undefined ? {} : { selectedRowId })}
+              {...(onRowAction === undefined ? {} : { onRowAction })}
               {...(controls === undefined ? {} : { controls })}
               {...(onSelectEntry === undefined ? {} : { onSelectEntry })}
               {...(selectedEntry === undefined ? {} : { selectedEntry })}
               {...(renderModule === undefined ? {} : { renderModule })}
+              headingLevel={headingLevel}
             />
           ))}
         </div>
@@ -116,20 +129,24 @@ function ArrangedEntry({
   rows,
   onSelect,
   selectedRowId,
+  onRowAction,
   controls,
   onSelectEntry,
   selectedEntry,
   renderModule,
+  headingLevel,
 }: {
   planned: PlannedEntry;
   concept: ConceptLike;
   rows: readonly RowLike[];
   onSelect?: (rowId: string) => void;
   selectedRowId?: string;
+  onRowAction?: (action: string, rowId: string) => void;
   controls?: (index: number) => ReactNode;
   onSelectEntry?: (index: number) => void;
   selectedEntry?: number;
   renderModule?: (planned: PlannedEntry) => ReactNode;
+  headingLevel: "h2" | "h3";
 }): ReactNode {
   const { entry, at } = planned;
   const element = elementById(entry.element);
@@ -154,6 +171,7 @@ function ArrangedEntry({
         {...(caption === undefined ? {} : { title: caption })}
         {...(controls === undefined ? {} : { meta: controls(at) })}
         panel={entry.band === "roll"}
+        headingLevel={headingLevel}
       >
         {chosen ? (
           <div className="rounded-lg outline-2 outline-offset-4 outline-accent">{children}</div>
@@ -181,7 +199,7 @@ function ArrangedEntry({
   const caption = entry.title ?? (entry.band === "reading" ? undefined : element.title);
 
   // A HOSTED kind -- a scene or a widget -- is rendered by the application,
-  // never by view-kit. Falling through to ComposeElement would render
+  // never by view-kit. Falling through to ElementView would render
   // view-kit's own "this surface does not render scenes" placeholder, which is
   // correct for a host that HAS no scenes and misleading on one that does.
   const hosted = renderModule?.(planned);
@@ -190,7 +208,7 @@ function ArrangedEntry({
   }
 
   return frame(
-    <ComposeElement
+    <ElementView
       element={element}
       rows={rows}
       concept={concept}
@@ -205,6 +223,7 @@ function ArrangedEntry({
           : { selectedRowId }),
       }}
       {...(onSelect === undefined ? {} : { onSelect })}
+      {...(onRowAction === undefined ? {} : { onRowAction })}
     />,
     caption,
   );

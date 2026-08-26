@@ -190,7 +190,13 @@ describe("who sees the Releases card", () => {
   for (const role of ["admin", "developer", "writer", "reader"]) {
     it(`shows a ${role} nothing at all -- absent, not disabled`, async () => {
       renderDeployments(role, { cuts: CUT_ROWS });
-      await waitFor(() => expect(screen.getByText("Deployments")).toBeTruthy());
+      // Scoped to the page HEADING. The nav rail carries the word too, and
+      // since the page header renders before its rows land (epic memql#4661)
+      // a bare getByText now sees both -- which is a query that was always
+      // ambiguous and happened to resolve on the rail first.
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { level: 1, name: "Deployments" })).toBeTruthy(),
+      );
       expect(screen.queryByText("Releases")).toBeNull();
       // Not "present and disabled": instanceActions' doctrine is never to
       // offer a button whose only outcome is a refusal.
@@ -203,7 +209,13 @@ describe("who sees the Releases card", () => {
     // console with refusals for a card nobody is looking at -- which trains an
     // operator to ignore exactly the errors that matter.
     const calls = renderDeployments("admin", { cuts: CUT_ROWS });
-    await waitFor(() => expect(screen.getByText("Deployments")).toBeTruthy());
+    // Scoped to the page HEADING. The nav rail carries the word too, and
+      // since the page header renders before its rows land (epic memql#4661)
+      // a bare getByText now sees both -- which is a query that was always
+      // ambiguous and happened to resolve on the rail first.
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { level: 1, name: "Deployments" })).toBeTruthy(),
+      );
     expect(calls.filter((c) => c.name.startsWith("release"))).toEqual([]);
   });
 });

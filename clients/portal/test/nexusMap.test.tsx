@@ -167,27 +167,68 @@ describe("the lazy chunk", () => {
     import: "default",
   }) as Record<string, string>;
 
-  it("keeps three.js behind one dynamic import", () => {
+  // The CANVASES: the only modules in the tree allowed to import three.js.
+  //
+  // This was one file until epic memql#4661 made scenes a registry (task
+  // memql#4672). It is a LIST rather than a suffix rule ("anything called
+  // *Canvas.tsx") on purpose: a suffix rule grants permission by filename, so
+  // the way to bypass the guard would be to name a file well, and the guard's
+  // whole job is that nobody adds a static three.js import by accident.
+  //
+  // Adding a scene means adding its canvas here, deliberately, in the same
+  // change -- which is exactly the moment to think about whether the new
+  // module really needs its own chunk.
+  const CANVASES = [
+    "map/NexusCanvas.tsx",
+    "scene/ConceptGraphCanvas.tsx",
+  ];
+
+  it("keeps three.js behind dynamic imports, one per scene", () => {
     const offenders: string[] = [];
     for (const [path, source] of Object.entries(sources)) {
-      if (path.endsWith("map/NexusCanvas.tsx")) continue;
+      if (CANVASES.some((canvas) => path.endsWith(canvas))) continue;
       if (/from "(three|@react-three\/[a-z]+)"/.test(source)) offenders.push(path);
     }
-    // Any static import outside the canvas pulls three.js, fiber and drei
-    // into the portal's main bundle, which every other page then pays for.
-    // Naming the offenders rather than asserting a count, so a failure says
-    // which file to fix.
+    // Any static import outside a canvas pulls three.js, fiber and drei into
+    // the portal's main bundle, which every other page then pays for. The
+    // scene REGISTRY is reachable from every arranged page in the console, so
+    // the cost of getting this wrong went up rather than down when scenes
+    // became elements. Naming the offenders rather than asserting a count, so
+    // a failure says which file to fix.
     expect(offenders.join(", ")).toBe("");
 
-    // ...and the anti-vacuous half: the canvas really does import it, so a
+    // ...and the anti-vacuous half: every canvas really does import it, so a
     // rename that made this scan find nothing would fail here instead of
     // passing silently.
-    const canvas = Object.entries(sources).find(([path]) => path.endsWith("map/NexusCanvas.tsx"));
-    expect(canvas?.[1] ?? "").toContain('from "three"');
+    for (const canvas of CANVASES) {
+      const found = Object.entries(sources).find(([path]) => path.endsWith(canvas));
+      expect(found?.[1] ?? "", `${canvas} is listed as a canvas but imports no three.js`).toContain(
+        'from "three"',
+      );
+    }
 
-    // And the only reference to the canvas is a dynamic import.
+    // And every canvas is reached ONLY through a dynamic import.
     const surface = Object.entries(sources).find(([path]) => path.endsWith("map/MapSurface.tsx"));
     expect(surface?.[1] ?? "").toContain('lazy(() => import("./NexusCanvas"))');
+    const graph = Object.entries(sources).find(([path]) =>
+      path.endsWith("scene/ConceptGraphScene.tsx"),
+    );
+    expect(graph?.[1] ?? "").toContain('lazy(() => import("./ConceptGraphCanvas"))');
+  });
+
+  it("loads every registered scene lazily, so no page pays for a scene it does not place", () => {
+    // The registry NAMES every scene, so a static import in it would bundle
+    // the whole WebGL stack for every arranged page -- which is every page.
+    const registry = Object.entries(sources).find(([path]) =>
+      path.endsWith("scene/registry.tsx"),
+    );
+    const source = registry?.[1] ?? "";
+    expect(source, "the scene registry was not found").not.toBe("");
+    for (const module of ["ConceptGraphScene", "GoalMapScene"]) {
+      expect(source).toContain(`await import("./${module}")`);
+    }
+    // Nothing in the registry may import a scene statically.
+    expect(/^import .*\.\/(ConceptGraphScene|GoalMapScene)/m.test(source)).toBe(false);
   });
 });
 

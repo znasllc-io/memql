@@ -13,7 +13,7 @@ import {
   FormRow,
   TextInput,
 } from "../ui";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import { ACCOUNT_TOKEN_CONCEPT, accountTokenRows } from "./rows";
 import {
   EMPTY_DRAFT,
@@ -233,7 +233,7 @@ function TokenPanel({
         <p className="text-sm text-muted">Reading credentials…</p>
       ) : (
         <>
-          <ViewElement
+          <ElementView
             element={TABLE_ELEMENT}
             rows={tokenRows}
             concept={ACCOUNT_TOKEN_CONCEPT}

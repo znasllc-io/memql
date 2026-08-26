@@ -5,7 +5,7 @@ import type { Module } from "@znasllc-io/memql-sdk-core/client";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, DataText, EmptyState, Skeleton } from "../ui";
 import { useConcepts } from "../cluster/useConcepts";
-import { ViewElement } from "../views/ViewElement";
+import { ElementView } from "../viewkit/ElementView";
 import {
   isJoinable,
   joinKeysOf,
@@ -95,7 +95,7 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
           </div>
 
           {metricConcept && obs.windows.length >= 2 ? (
-            <ViewElement
+            <ElementView
               element={LINE_CHART_ELEMENT}
               rows={windowRows(obs.windows)}
               concept={metricConcept}
@@ -108,7 +108,7 @@ export function ObservabilitySection({ module }: { module: Module }): ReactNode 
               <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">
                 Recent invocations
               </h3>
-              <ViewElement
+              <ElementView
                 element={TABLE_ELEMENT}
                 rows={obs.invocations}
                 concept={invocationConcept}
@@ -186,7 +186,7 @@ function Reading({ label, value }: { label: string; value: string }): ReactNode 
   );
 }
 
-// Re-wrap the windows in the wire row shape ViewElement's flatten expects,
+// Re-wrap the windows in the wire row shape ElementView's flatten expects,
 // so the chart reads the same nested form real rows carry.
 function windowRows(windows: readonly MetricWindow[]) {
   return windows.map((w, index) => ({
@@ -201,5 +201,5 @@ function windowRows(windows: readonly MetricWindow[]) {
       errorCount: w.errorCount,
       p95DurationNs: w.p95DurationNs,
     },
-  })) as unknown as Parameters<typeof ViewElement>[0]["rows"];
+  })) as unknown as Parameters<typeof ElementView>[0]["rows"];
 }
