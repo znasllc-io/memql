@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, ConfirmDialog, DataText, Field, Select, TextInput } from "../ui";
+import { Badge, Button, ConfirmDialog, DataText, Field, Select, TextInput } from "../ui";
+import { deliveryBadge, invitationAdvice, invitationVerdict } from "./invitationState";
 import { useAdminWrites, useClusterSettings, type WriteState } from "../admin/useAdminConsole";
 
 // Inviting somebody into the cluster (memql#4270, memql#4272).
@@ -321,18 +322,96 @@ function InvitationRow({
   onChanged: () => void;
 }): ReactNode {
   const [confirming, setConfirming] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resentUrl, setResentUrl] = useState("");
+  const [resentSent, setResentSent] = useState(false);
+  const [resentError, setResentError] = useState("");
   const id = rowIdOf(row);
+  const email = text(row, "inviteeEmail");
+  const role = text(row, "inviteeRole");
+
+  // WHAT THIS ROW ACTUALLY SAYS ABOUT ITSELF (memql#4587). `status: pending`
+  // reads identically whether the invitee got the link or the panel was closed
+  // and forgotten, which is how memql#4583 went unnoticed until the owner asked
+  // the colleague in person.
+  const verdict = invitationVerdict(
+    {
+      deliveryState: text(row, "deliveryState"),
+      deliveryError: text(row, "deliveryError"),
+      expiresAt: text(row, "expiresAt"),
+    },
+    Date.now(),
+  );
+  const badge = deliveryBadge(verdict);
+  const advice = invitationAdvice(verdict);
+
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded border border-line bg-surface px-3 py-1.5">
-      <span className="text-sm text-fg">{text(row, "inviteeEmail")}</span>
-      <span className="text-xs text-muted">{text(row, "inviteeRole") || "cluster default"}</span>
+    <div className="flex flex-col gap-1 rounded border border-line bg-surface px-3 py-1.5">
+     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span className="text-sm text-fg">{email}</span>
+      <span className="text-xs text-muted">{role || "cluster default"}</span>
+      <Badge tone={badge.tone}>{badge.label}</Badge>
+      {verdict.expired ? (
+        <Badge tone="danger">expired</Badge>
+      ) : verdict.expiringSoon ? (
+        <Badge tone="warn">expiring</Badge>
+      ) : null}
       <span className="min-w-0 flex-1 text-xs text-subtle">
         invited by {text(row, "inviterName") || text(row, "inviterId")}
       </span>
       <DataText kind="time">{text(row, "expiresAt")}</DataText>
+      <Button size="xs" onClick={() => setResending(true)} disabled={writes.busy}>
+        Re-send
+      </Button>
       <Button size="xs" tone="danger" onClick={() => setConfirming(true)} disabled={writes.busy}>
         Revoke
       </Button>
+     </div>
+      {advice === "" ? null : <p className="text-xs text-warn">{advice}</p>}
+      {resentUrl === "" ? null : (
+        <MintedInvitation
+          url={resentUrl}
+          mode=""
+          to={email}
+          emailSent={resentSent}
+          emailError={resentError}
+          onDismiss={() => setResentUrl("")}
+        />
+      )}
+      <ConfirmDialog
+        open={resending}
+        title="Re-send this invitation?"
+        confirmLabel="Re-send"
+        busy={writes.busy}
+        onConfirm={() => {
+          setResending(false);
+          writes.run(
+            async (client) => {
+              // ISSUE FIRST, REVOKE SECOND, and the order is the whole point.
+              // If the issue fails, the operator still has the invitation they
+              // had; revoking first would destroy a working credential to
+              // replace it with nothing.
+              const result = await client.issueUserInvitation(email, role, 0);
+              setResentUrl(result.url);
+              setResentSent(result.emailSent);
+              setResentError(result.emailError);
+              // The OLD link must stop working. Leaving it live would mean one
+              // person holding two redeemable credentials, for the whole of the
+              // original TTL, with only one of them visible in this list.
+              await client.revokeUserInvitation(id);
+              return result;
+            },
+            onChanged,
+          );
+        }}
+        onCancel={() => setResending(false)}
+      >
+        <p>
+          A fresh link is minted for {email} and the current one stops working. The original link
+          cannot be shown again — only its hash was ever stored — so re-sending is the only way
+          back to a link you can deliver.
+        </p>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirming}
         title="Revoke this invitation?"

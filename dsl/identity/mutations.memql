@@ -3035,7 +3035,58 @@ mutate invitation createUserInvitation {
       inviterName: args.inviterName ?? ""
       status: "pending"
       active: true
+      // not_attempted until recordUserInvitationDelivery says otherwise. The
+      // row exists BEFORE the send -- the link is composed from it -- so the
+      // verdict is a second write rather than an argument here (memql#4587).
+      deliveryState: "not_attempted"
     }
+  }
+}
+
+/// Record what happened to an invitation's EMAIL, on the row (memql#4587).
+///
+/// The verdict already reached the audit trail and the issuing operator's own
+/// response. Neither is visible to the operator who comes back a week later and
+/// asks why somebody never joined: `status: pending` reads identically whether
+/// the invitee got the link or the panel was closed and forgotten. That is how
+/// memql#4583 went unnoticed until the owner asked the colleague in person.
+///
+/// A SECOND WRITE rather than an argument to createUserInvitation, because the
+/// row has to exist before the link can be composed and the link has to exist
+/// before anything can be sent. It is also what a resend updates.
+///
+/// @serverOnly, and actor.userId scoping is NOT the fix here.
+///
+/// Caller-scoping restricts WHOSE rows a caller may write. It cannot restrict
+/// WHAT may be claimed about them, and the value this mutation carries is a
+/// claim about the SERVER'S OWN I/O -- whether a mail provider accepted the
+/// message. An operator scoped to their own invitations could still stamp
+/// `sent` on one nobody sent, which makes this surface lie in exactly the
+/// direction it exists to stop: the whole point of memql#4587 is that a list
+/// reading "delivered" when nothing was delivered is how memql#4583 stayed
+/// invisible for its whole life.
+///
+/// So the bar is not about ownership at all. There is no caller: the identity
+/// node writes this under internal origin, immediately after the send it just
+/// attempted, recording something only it observed.
+@serverOnly
+mutate invitation recordUserInvitationDelivery {
+  args {
+    invitationId   string!
+    /// not_attempted when this node has no mail seam -- nobody asked for a
+    /// send; sent when the provider accepted it; failed when it was tried and
+    /// refused. What the issuing path OBSERVED, never a guess.
+    deliveryState  enum("not_attempted", "sent", "failed")!
+    /// The provider's own text when deliveryState is failed, so an operator can
+    /// tell a refused credential from a refused sender from an unreachable
+    /// host. NEVER the link: that is a bearer credential.
+    deliveryError  string
+  }
+  update {
+    id: args.invitationId
+    deliveryState: args.deliveryState
+    deliveryError: args.deliveryError ?? ""
+    deliveryAttemptedAt: now
   }
 }
 

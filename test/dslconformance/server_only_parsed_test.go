@@ -274,10 +274,24 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// mutation body at all -- no predicate, no filter, and update() is a
 		// read-merge-write -- so it lives in Store.BindUserInvitation, inside
 		// the advisory-lock critical section magic_link_gate.go provides.
-		{Path: "identity/mutations.memql", Name: "createUserInvitation"}:       true,
-		{Path: "identity/mutations.memql", Name: "bindUserInvitation"}:         true,
-		{Path: "identity/mutations.memql", Name: "markUserInvitationAccepted"}: true,
-		{Path: "identity/mutations.memql", Name: "revokeUserInvitation"}:       true,
+		//
+		// recordUserInvitationDelivery (memql#4587) is the fifth, and its
+		// argument is a different shape from the four above: ownership is not
+		// what is at stake. Caller-scoping restricts WHOSE rows may be written;
+		// it cannot restrict WHAT may be claimed about them, and the value here
+		// is a claim about the SERVER'S OWN I/O -- whether a mail provider
+		// accepted the message. An operator scoped to their own invitations
+		// could still stamp `sent` on one nobody sent, which would make the
+		// pending list lie in exactly the direction the field exists to stop:
+		// memql#4583 stayed invisible for its whole life precisely because a
+		// never-delivered invitation read as a delivered one. There is also no
+		// caller to scope TO -- the identity node writes this under internal
+		// origin, immediately after the send it just attempted.
+		{Path: "identity/mutations.memql", Name: "createUserInvitation"}:         true,
+		{Path: "identity/mutations.memql", Name: "recordUserInvitationDelivery"}: true,
+		{Path: "identity/mutations.memql", Name: "bindUserInvitation"}:           true,
+		{Path: "identity/mutations.memql", Name: "markUserInvitationAccepted"}:   true,
+		{Path: "identity/mutations.memql", Name: "revokeUserInvitation"}:         true,
 		// memql#2991. Caller-scoping is not merely hard here, it is
 		// INEXPRESSIBLE: `update { id: args.userId; args.payload }` relates the
 		// target to nothing, and no mutation in the tree carries a filter --

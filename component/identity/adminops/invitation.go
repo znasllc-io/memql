@@ -272,6 +272,37 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		}
 	}
 
+	// THE VERDICT GOES ON THE ROW, not only into the trail and this response
+	// (memql#4587). Both of those are read at the moment of issue, by the
+	// operator who is already looking; neither is visible to the one who comes
+	// back a week later and asks why somebody never joined. `status: pending`
+	// reads identically whether the invitee got the link or the panel was
+	// closed and forgotten -- which is how memql#4583 went unnoticed until the
+	// owner asked the colleague in person.
+	//
+	// BEST-EFFORT, and deliberately so: the invitation is already issued and
+	// its link is already in `res`. Failing the whole operation because a
+	// bookkeeping write did not land would throw away a working credential to
+	// record that a working credential exists. The log line is the fallback,
+	// which is exactly the state this field improves on rather than replaces.
+	deliveryState := "not_attempted"
+	switch {
+	case emailErr != "":
+		deliveryState = "failed"
+	case emailSent:
+		deliveryState = "sent"
+	}
+	deliveryQ := fmt.Sprintf(
+		`mutation recordUserInvitationDelivery(invitationId: %s, deliveryState: %s, deliveryError: %s)`,
+		quote(invitationID), quote(deliveryState), quote(emailErr),
+	)
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), deliveryQ); err != nil && s.Logger != nil {
+		s.Logger.Warn("identity admin: invitation delivery verdict could not be recorded on the row",
+			slog.String("invitationId", invitationID),
+			slog.String("deliveryState", deliveryState),
+			slog.String("error", err.Error()))
+	}
+
 	message := "Invitation issued. Copy the link now -- it is not shown again."
 	if mode == string(identity.RegistrationModeOpen) {
 		message = "Invitation issued. Note that this cluster allows open sign-up, " +
