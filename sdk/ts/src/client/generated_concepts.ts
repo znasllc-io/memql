@@ -551,6 +551,7 @@ export const BoundConcepts = {
   numbersByPartition: "v1:telephony:number",
   oAuthClientByClientId: "v1:identity:oauthClient",
   oAuthClientCORSGrants: "v1:identity:oauthClient",
+  oidcIdentityBySubject: "v1:identity:identity",
   ordersByCompany: "v1:shopify:order",
   ordersInWindow: "v1:shopify:order",
   outboundRequestsByStatus: "v1:platform:outboundRequest",

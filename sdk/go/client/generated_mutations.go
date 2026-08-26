@@ -2336,7 +2336,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -5008,7 +5008,7 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	return b.String()
 }
 
-// CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
+// CreatePasskeyIdentity wraps the mutation named "createPasskeyIdentity".
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
 type CreatePasskeyIdentityArgs struct {

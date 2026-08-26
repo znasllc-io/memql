@@ -1456,7 +1456,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -2775,7 +2775,7 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
   return this.executeNamed("createPATIdentity", buildCreatePATIdentity(args), opts);
 };
 
-/** Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold. */
+/** createPasskeyIdentity wraps the mutation named "createPasskeyIdentity". */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.ts).
 export interface CreatePasskeyIdentityArgs {
   identityId: string;
