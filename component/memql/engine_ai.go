@@ -198,6 +198,25 @@ func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[
 // re-train invalidates within a minute, long enough to swallow
 // click-dismiss-click-again sequences). Frontend callers that
 // want longer-lived caching keep their own per-utterance memo.
+// structuredFallbackMessages is the last-resort prompt shape when no
+// structured-capable provider is available: the rendered template stays the
+// system message and the schema directive becomes the USER turn. Two messages
+// rather than one system blob, deliberately -- the Anthropic Messages API
+// refuses a conversation with no user turn (400 "messages: Field required"),
+// and this fallback is exactly the path a Claude-only cluster takes for every
+// structured prompt (none of the Anthropic providers implement
+// CallChatStructured). toAnthropicMessages also guards the empty-messages
+// case now, but the guard is a floor; this is the shape the call should have.
+func structuredFallbackMessages(rendered string, schema json.RawMessage) []common.ChatMessage {
+	return []common.ChatMessage{
+		{Role: "system", Content: rendered},
+		{Role: "user", Content: fmt.Sprintf(
+			"Return ONLY JSON that matches this schema. No markdown, no prose:\n%s",
+			string(schema),
+		)},
+	}
+}
+
 func (e *MemQLEngine) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
@@ -272,16 +291,7 @@ func (e *MemQLEngine) InvokeAIStructured(
 		if chat == nil {
 			return "", fmt.Errorf("no chat provider available for structured invocation")
 		}
-		fallbackMessages := []common.ChatMessage{
-			{
-				Role: "system",
-				Content: fmt.Sprintf(
-					"%s\n\nReturn ONLY JSON that matches this schema. No markdown, no prose:\n%s",
-					rendered, string(schema),
-				),
-			},
-		}
-		result, err = chat.CallChat(ctx, fallbackMessages)
+		result, err = chat.CallChat(ctx, structuredFallbackMessages(rendered, schema))
 	}
 	if err != nil {
 		return "", err
