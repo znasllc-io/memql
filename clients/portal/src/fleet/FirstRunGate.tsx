@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { useCluster } from "../cluster/ClusterProvider";
-import { Container } from "../ui";
+import { Button, ButtonLink, Container, Panel } from "../ui";
 import { InferenceGate } from "./InferenceGate";
 import { canSkipInference, gateStep, useInferenceStatus } from "./useInferenceStatus";
 import { fleetPath } from "./urls";
@@ -144,23 +144,20 @@ export function FirstRunGate({ children }: { children: ReactNode }): ReactNode {
 // enrolled in the other tab and wants this page to stop asking.
 function PasskeyStep({ onContinue }: { onContinue: () => void }): ReactNode {
   return (
-    <div className="rounded-md border border-line bg-surface p-6">
+    <Panel>
       <h2 className="text-lg font-medium">Add a passkey first</h2>
       <p className="mt-1 text-sm text-muted">
         A passkey is what gets you back in without a link in your inbox. It takes one touch, and it
         is the credential this cluster prefers.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
-        <a
-          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
-          href="/me/devices"
-        >
+        <ButtonLink tone="primary" href="/me/devices">
           Add a passkey
-        </a>
-        <button className="rounded px-3 py-1.5 text-sm text-muted hover:bg-raised" onClick={onContinue}>
+        </ButtonLink>
+        <Button tone="quiet" onClick={onContinue}>
           I already added one
-        </button>
+        </Button>
       </div>
-    </div>
+    </Panel>
   );
 }
