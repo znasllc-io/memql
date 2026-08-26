@@ -343,6 +343,11 @@ func newHarness(t *testing.T) *testHarness {
 
 	client := NewAdminClient()
 	client.endpoint = func(Store) string { return admin.server.URL + "/graphql" }
+	// The bulk file is served by an httptest server: plaintext, on loopback,
+	// which is exactly what checkBulkDownloadURL refuses. The guard's own
+	// coverage is urlsafety_test.go; TestTheBulkDownloadGuardIsConsulted
+	// proves streamBulk still consults it when this seam is absent.
+	client.downloadGuard = func(string) error { return nil }
 	client.sleep = func(_ context.Context, d time.Duration) error {
 		h.slept = append(h.slept, d)
 		return nil

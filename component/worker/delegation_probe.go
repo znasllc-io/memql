@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -297,13 +298,37 @@ func stringSliceFrom(v any) []string {
 	return out
 }
 
+// intFromRow reads an integer off a graph row.
+//
+// The narrowing is SATURATING rather than bare (CodeQL
+// go/incorrect-integer-conversion). Both wider cases are reachable with a
+// value int cannot hold -- JSON decodes every number to float64, and these
+// rows are written by cockpits reporting their own capability caps -- while a
+// bare conversion wraps on a 32-bit build and is implementation-defined for
+// an out-of-range float. A concurrency cap that wrapped negative would read
+// as "this machine can run nothing" and take a signed-in worker silently out
+// of the fleet, which is the failure this file exists to report on.
 func intFromRow(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
 	case int64:
+		if n > math.MaxInt {
+			return math.MaxInt
+		}
+		if n < math.MinInt {
+			return math.MinInt
+		}
 		return int(n)
 	case float64:
+		switch {
+		case math.IsNaN(n):
+			return 0
+		case n >= math.MaxInt:
+			return math.MaxInt
+		case n <= math.MinInt:
+			return math.MinInt
+		}
 		return int(n)
 	}
 	return 0

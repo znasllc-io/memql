@@ -28,8 +28,21 @@ import (
 // own admin share the bucket), but on a healthy store it should never fire.
 
 // AdminEndpoint builds the Admin GraphQL URL for a store and version.
-func AdminEndpoint(domain, apiVersion string) string {
-	return fmt.Sprintf("https://%s/admin/api/%s/graphql.json", strings.TrimSuffix(domain, "/"), apiVersion)
+//
+// Both halves are VALIDATED, not merely interpolated: they come off the same
+// operator-written v1:shopify:store row, and the composed string is a URL
+// this process then sends an access token to. See NormalizeShopDomain in
+// urlsafety.go for what that row could otherwise do.
+func AdminEndpoint(domain, apiVersion string) (string, error) {
+	host, err := NormalizeShopDomain(domain)
+	if err != nil {
+		return "", err
+	}
+	version, err := normalizeAPIVersion(apiVersion)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("https://%s/admin/api/%s/graphql.json", host, version), nil
 }
 
 // ThrottleStatus is Shopify's own view of the cost bucket.
@@ -134,6 +147,15 @@ type AdminClient struct {
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
 	endpoint func(store Store) string
+	// downloadGuard vets a bulk-download URL before it is fetched, and again
+	// on every redirect. Nil means checkBulkDownloadURL, which is what a real
+	// build always uses.
+	//
+	// It is a seam for the same reason `endpoint` above is one, and only that
+	// reason: an httptest server is plaintext on loopback, which is precisely
+	// the shape the real guard exists to refuse. urlsafety_test.go covers the
+	// guard; this lets backfill_test.go cover the backfill.
+	downloadGuard func(string) error
 	// MaxRetries bounds throttle retries for a single call.
 	MaxRetries int
 	// Reserve is the number of cost points to keep in the bucket. Pacing
@@ -229,7 +251,11 @@ func (c *AdminClient) once(ctx context.Context, store Store, token, document, op
 	if err != nil {
 		return nil, fmt.Errorf("shopify: encode request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointFor(store), bytes.NewReader(payload))
+	endpoint, err := c.endpointFor(store)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -278,9 +304,17 @@ func (c *AdminClient) once(ctx context.Context, store Store, token, document, op
 	}, nil
 }
 
-func (c *AdminClient) endpointFor(store Store) string {
+// checkDownloadURL applies the bulk-download guard, or its test seam.
+func (c *AdminClient) checkDownloadURL(raw string) error {
+	if c.downloadGuard != nil {
+		return c.downloadGuard(raw)
+	}
+	return checkBulkDownloadURL(raw)
+}
+
+func (c *AdminClient) endpointFor(store Store) (string, error) {
 	if c.endpoint != nil {
-		return c.endpoint(store)
+		return c.endpoint(store), nil
 	}
 	return AdminEndpoint(store.Domain, store.APIVersion)
 }

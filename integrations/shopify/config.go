@@ -117,7 +117,15 @@ func SeedStoreFromEnv(ctx context.Context, engine memql.IntegrationEngineAccess,
 	if len(existing) > 0 {
 		return "", nil
 	}
-	storeID, err := StoreIDForDomain(cfg.StoreDomain)
+	// Normalised HERE as well as at request time, so the row is written in
+	// the one form every request path accepts -- and so a mistyped variable
+	// is a refusal at boot rather than a store that looks configured in the
+	// portal and fails every call it is asked to make.
+	domain, err := NormalizeShopDomain(cfg.StoreDomain)
+	if err != nil {
+		return "", err
+	}
+	storeID, err := StoreIDForDomain(domain)
 	if err != nil {
 		return "", err
 	}
@@ -138,8 +146,8 @@ func SeedStoreFromEnv(ctx context.Context, engine memql.IntegrationEngineAccess,
 
 	call := renderCall("createStore", map[string]any{
 		"storeId":            storeID,
-		"domain":             cfg.StoreDomain,
-		"name":               cfg.StoreDomain,
+		"domain":             domain,
+		"name":               domain,
 		"appClientId":        cfg.AppClientID,
 		"adminTokenRef":      adminRef,
 		"storefrontTokenRef": storefrontRef,

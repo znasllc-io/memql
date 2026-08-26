@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -178,5 +179,36 @@ func TestRegistrationIsUsableBoundary(t *testing.T) {
 	}
 	if RegistrationIsUsable(row(RegistrationFreshFor+time.Second), now) {
 		t.Error("a registration past the window must not be usable")
+	}
+}
+
+// A capability cap that wrapped negative reads as "this machine can run
+// nothing", which takes a signed-in worker out of the fleet with nothing to
+// show why -- so the narrowing saturates rather than wrapping.
+func TestARowIntegerTooWideForIntSaturates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		in   any
+		want int
+	}{
+		{name: "an int passes through", in: 7, want: 7},
+		{name: "an int64 in range", in: int64(7), want: 7},
+		{name: "a float64 in range, as JSON decodes one", in: float64(7), want: 7},
+		{name: "a float64 truncates toward zero", in: 7.9, want: 7},
+		{name: "a float64 past the ceiling", in: 1e300, want: math.MaxInt},
+		{name: "a float64 past the floor", in: -1e300, want: math.MinInt},
+		{name: "an unordered float64", in: math.NaN(), want: 0},
+		{name: "positive infinity", in: math.Inf(1), want: math.MaxInt},
+		{name: "negative infinity", in: math.Inf(-1), want: math.MinInt},
+		{name: "an absent field", in: nil, want: 0},
+		{name: "a value of the wrong type", in: "12", want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := intFromRow(tc.in); got != tc.want {
+				t.Errorf("intFromRow(%v) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
 	}
 }

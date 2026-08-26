@@ -290,11 +290,19 @@ func operationBody(document, operation string) (string, error) {
 // `skip`, returning the writes, how many lines were consumed, and whether the
 // file ended.
 func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated.TypeSpec, url string, skip, limit int) ([]memqlsync.MirrorWrite, int, bool, error) {
+	// The URL arrived inside a bulk-operation status rather than from a
+	// caller, which makes it more trusted than a request parameter and not
+	// trusted enough to fetch unchecked: the status came from a host named on
+	// the store row. checkBulkDownloadURL guards this hop and the client
+	// guards every redirect after it.
+	if err := c.admin.checkDownloadURL(url); err != nil {
+		return nil, 0, false, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	resp, err := c.admin.http.Do(req)
+	resp, err := bulkDownloadClient(c.admin.http, c.admin.checkDownloadURL).Do(req)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("shopify: download bulk result: %w", err)
 	}
