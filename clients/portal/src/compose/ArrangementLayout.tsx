@@ -196,6 +196,10 @@ function ArrangedEntry({
       concept={concept}
       options={{
         ...elementOptions(entry),
+        // The LAYOUT decides presentation (a gallery's population is a card
+        // grid), so it is read off the plan rather than stored twice on the
+        // entry.
+        display: planned.display,
         ...(selectedRowId === undefined || selectedRowId === ""
           ? {}
           : { selectedRowId }),

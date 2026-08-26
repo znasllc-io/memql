@@ -74,6 +74,14 @@ export interface PlannedEntry {
   readonly at: number;
   readonly entry: ArrangedElement;
   readonly role: EntryRole;
+  // How the element should PRESENT its rows in this slot. "cards" is what the
+  // gallery layout asks of its population element.
+  //
+  // It comes from the LAYOUT rather than from the entry, which is the point:
+  // an arrangement stores the intent once ("gallery"), and a person switching
+  // a section between gallery and stack keeps their bindings and their title
+  // instead of losing them to a different element id.
+  readonly display: "list" | "cards";
 }
 
 export interface PlannedSlot {
@@ -152,10 +160,14 @@ export function roleClassName(role: EntryRole): string {
 // is valid and has to render.
 export function planLayout(arrangement: Arrangement): LayoutPlan {
   const layout = arrangementLayout(arrangement);
+  const gallery = layout === "gallery";
   const entries: PlannedEntry[] = arrangement.elements.map((entry, at) => ({
     at,
     entry,
     role: entryRole(entry),
+    // Only the ROLL band becomes cards: a gallery's stat strip is still a
+    // stat strip, and turning a chart into a card grid means nothing.
+    display: gallery && entry.band === "roll" ? "cards" : "list",
   }));
 
   const slots = assign(layout, entries);

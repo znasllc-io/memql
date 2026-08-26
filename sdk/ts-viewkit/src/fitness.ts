@@ -424,6 +424,15 @@ export interface ElementRequirement {
   // fewest distinct values. For grouping slots this is the difference
   // between columns-by-status and columns-by-title.
   readonly preferFewestDistinct?: boolean;
+  // Among otherwise-equal automatic candidates, prefer the ones the concept
+  // DECLARES REQUIRED (epic memql#4661). A field the schema insists every row
+  // carries is part of the thing; an optional one is elaboration, and when a
+  // slot is capped the required ones are the ones to keep.
+  //
+  // Has no effect against a concept whose cluster publishes no shape, where
+  // nothing is known to be required -- the ordering then falls through to the
+  // profile's own, exactly as before.
+  readonly preferRequired?: boolean;
   // Bind only from an override, a display-card slot or a preferred name --
   // never from the generic scan. For a semantically loaded slot (is-this-an-
   // all-day-event, is-this-a-latitude) any type-compatible field will "fit"
@@ -525,6 +534,16 @@ export interface ElementOptions {
   // value today: a host that already spends row-click on something else
   // (deploy/rollback) opens the full-row read from this control instead.
   readonly rowAction?: "view";
+  // How a population element PRESENTS its rows (epic memql#4661). "cards" is
+  // what the gallery layout asks for; "list" is the default and what every
+  // caller before this meant.
+  //
+  // It is an option rather than a separate element because a card grid IS a
+  // row list -- same rows, same display card, same selection contract -- and
+  // splitting it in two would mean a person switching to a gallery lost their
+  // bindings and their title. The LAYOUT decides it, so an arrangement does
+  // not have to store the same intent twice.
+  readonly display?: "list" | "cards";
 }
 
 export interface ElementRenderInput {
@@ -598,8 +617,9 @@ function kindLabel(kinds: readonly FieldKind[]): string {
 //   2. the display-card slots named in `prefer`, in order
 //   3. the field names in `preferNames`, in order
 //   4. every remaining kind-compatible candidate, skipping NON_DISPLAY_FIELDS,
-//      ordered by fewest-distinct (when the requirement asks) and then by the
-//      profile's field order -- skipped entirely for an `explicitOnly` slot
+//      ordered by declared-required and then by fewest-distinct (when the
+//      requirement asks for either) and then by the profile's field order --
+//      skipped entirely for an `explicitOnly` slot
 //
 // STEPS 2-4 ARE FOR SLOTS THE CALLER DID NOT DECIDE. If options.bindings names
 // the slot at all -- even with an empty list, even with a field that does not
@@ -704,6 +724,12 @@ export function fitElement(
         // Stable: sort() is stable in every engine this package supports, so
         // ties keep field order.
         rest.sort((a, b) => a.distinct - b.distinct);
+      }
+      if (req.preferRequired) {
+        // Applied AFTER preferFewestDistinct so the two compose in the order
+        // they read: requiredness is the coarser question and wins, and
+        // within either group the finer ordering survives (stable sort).
+        rest.sort((a, b) => Number(b.required) - Number(a.required));
       }
       for (const f of rest) {
         if (!autoRoom()) break;

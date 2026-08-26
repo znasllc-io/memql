@@ -44,6 +44,16 @@ export {
   type RemovalItemKind,
   type RemovalItemView,
 } from "./install.js";
+// Element personality: what one value looks like, and which fields a table
+// or a card shows. Inside view-kit so every consumer improves at once.
+export {
+  displayColumns,
+  cellKind,
+  cellAttrs,
+  cellContent,
+  DISPLAY_COLUMN_CAP,
+  type CellKind,
+} from "./cell.js";
 export type {
   ConceptFieldLike,
   ConceptLike,
@@ -155,7 +165,6 @@ export {
   renderPieChart,
   renderProportionBar,
   axisScale,
-  formatCompact,
   BAR_CHART_ELEMENT,
   LINE_CHART_ELEMENT,
   PIE_CHART_ELEMENT,

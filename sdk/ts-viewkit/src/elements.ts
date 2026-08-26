@@ -34,7 +34,7 @@ export const ROW_LIST_ELEMENT: ElementSpec = {
   summary: "One line per row, through the concept's display card.",
   requires: [],
   render: ({ rows, concept, options }) =>
-    renderRowList([...rows], concept, options?.selectedRowId),
+    renderRowList([...rows], concept, options?.selectedRowId, options?.display ?? "list"),
 };
 
 export const DETAIL_ELEMENT: ElementSpec = {

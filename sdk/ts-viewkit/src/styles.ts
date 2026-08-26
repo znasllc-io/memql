@@ -936,6 +936,109 @@ const elementStyles = `
 .vk-map-point { stroke: var(--vk-chart-surface, var(--vk-chart-surface-default)); stroke-width: 1; }
 .vk-map-point[data-selected="true"] { stroke: var(--vk-fg, currentColor); stroke-width: 1.5; }
 
+/* ---- cards (epic memql#4661) -------------------------------------------- */
+
+/* The gallery layout's presentation of a row list: the same rows, the same
+   display card, laid out as a grid. Every visible part of a card is a
+   vk-row-* class the list already emits, so a concept's own display identity
+   drives its card with no per-concept code and no second contract. */
+.vk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 8px;
+  min-width: 0;
+}
+.vk-card:hover { background: var(--vk-hover-bg, transparent); }
+.vk-card[data-selected="true"] {
+  background: var(--vk-selected-bg, transparent);
+  color: var(--vk-selected-fg, inherit);
+}
+/* A card's primary is its heading: in a column of rows the primary is
+   distinguished by position, and in a grid of cards it has to be
+   distinguished by weight. */
+.vk-card .vk-row-primary { font-weight: 600; }
+/* ...and the status badge goes to the bottom rather than trailing the line,
+   since a card has vertical room a row does not. */
+.vk-card .vk-row-status { align-self: flex-start; margin-top: 4px; }
+
+/* ---- cell personality (epic memql#4661) --------------------------------- */
+
+/* One rule per value KIND, so a timestamp reads the same in a table, a card
+   and a concept browser. Everything here is theme-neutral or goes through a
+   --vk-* token: a pill that hardcoded a background would be unreadable in one
+   of the two themes, which is the failure mode this whole family risks. */
+
+/* An absent value. Distinct from an empty cell on purpose: blank is ambiguous
+   between "no value" and "the renderer gave up", and only one of those is
+   ever true here. */
+.vk-cell-absent { color: var(--vk-muted-fg, inherit); opacity: 0.6; }
+
+/* Elapsed time. The exact instant is on the title AND the datetime attribute
+   -- title alone is unreachable on a touch device. The dotted underline is
+   the standing convention for "there is more here on hover" and costs nothing
+   where there is no hover. */
+.vk-cell-time {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vk-border, currentColor);
+}
+
+/* Numerals: tabular so a column lines up digit for digit, which is the whole
+   reason a column of numbers is readable at all. The right-alignment is on
+   the CELL rather than here, because it is the cell that has the width. */
+.vk-cell-number { font-variant-numeric: tabular-nums; }
+.vk-table-cell[data-vk-cell="number"] { text-align: right; }
+.vk-table-head[data-vk-cell="number"] { text-align: right; }
+
+/* A boolean as a dot plus its label. The dot carries the state and the label
+   carries the field's meaning -- neither alone is readable, which is why the
+   literal "true" was worth replacing. */
+.vk-cell-bool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.vk-cell-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  /* currentColor at low alpha for false, full for true: one declaration, no
+     palette, correct in both themes. */
+  background: currentColor;
+  opacity: 0.25;
+}
+.vk-cell-bool[data-value="true"] .vk-cell-dot { opacity: 1; }
+
+/* An enum member as a pill: a closed set should look closed. Colour comes
+   from the host via [data-status], which is the same split the row status
+   badge makes -- prose for people, data attributes for stylesheets. */
+.vk-cell-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--vk-border, currentColor);
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* An id, and the fallback for a reference that could not be resolved. Reads
+   as DATA: monospace, tight, quieter than prose. Never blank -- an id is
+   always better than nothing, which is the rule lookups build on. */
+.vk-cell-data {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
 /* ---- arrangement layouts (epic memql#4661) ------------------------------ */
 
 /* The five grids. Defined HERE rather than per host for the reason the row
