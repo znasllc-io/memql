@@ -1,4 +1,5 @@
-# INTERNAL TLS -- the CA every mesh node trusts, and identity's serving cert.
+# INTERNAL TLS -- the trust anchor every mesh node mounts, and identity's
+# serving certificate.
 #
 # WHAT THIS FIXES (memql#4484). Every mesh Deployment mounts `memql-ca`;
 # identity mounts `identity-tls`; every node dials https://identity:8085 and
@@ -21,14 +22,75 @@
 # memql#3845; this is the same treatment for the manifest the engine should
 # have been shipping all along.
 #
-# THE CHAIN, and why it is four objects rather than two:
+#=============================================================================
+# THE CHAIN IS THREE TIERS, AND THAT IS THE ROTATION FIX (memql#4599)
+#=============================================================================
 #
-#   memql-internal-selfsigned (Issuer, selfSigned)
-#     -> memql-internal-ca (Certificate, isCA)  --> Secret `memql-ca`
-#          -> memql-internal-ca (Issuer, ca:)
-#               -> identity-tls (Certificate)   --> Secret `identity-tls`
+#   memql-internal-selfsigned (Issuer, selfSigned)                    wave -3
+#     -> memql-internal-root (Certificate, isCA, 10y) --> Secret `memql-ca`
+#          ^-- THE ANCHOR. Ten Deployments mount ca.crt from here.
+#          -> memql-internal-root (Issuer, ca:)                       wave -2
+#               -> memql-internal-ca (Certificate, isCA, 2y)
+#                    --> Secret `memql-ca-issuer`
+#                    -> memql-internal-ca (Issuer, ca:)               wave -1
+#                         -> identity-tls (Certificate)
+#                              --> Secret `identity-tls`
 #
-# The two Issuers are NAMESPACED, not ClusterIssuers, deliberately: this CA is
+# WHY THREE RATHER THAN TWO. Until v0.20.4 one Secret was BOTH the anchor every
+# pod mounts AND the issuer's signing material, so rotating the signing key
+# necessarily rewrote the anchor. That is not a subtle coupling -- it is the
+# 2026-08-25 outage. Adopting this component on a cluster that already had a
+# hand-seeded `memql-ca` produced, one second apart:
+#
+#   19:22:00  identity-tls issued, signed by the OUTGOING CA
+#   19:22:01  memql-ca overwritten with the INCOMING CA
+#
+# Every running pod then held a trust bundle that could not verify the leaf
+# identity was presenting, and rejected it with `remote error: tls: bad
+# certificate`. The bff's JWKS fetch is the call that fails, and it reaches a
+# user as 502 on "Continue to sign in" -- while every pod is Running and Ready
+# and ArgoCD reports Healthy, so nothing alerts.
+#
+# cert-manager says this in its own words, and it is the reason for the split:
+#
+#   "The ca.crt field ... contains a best-effort guess of the issuing CA ...
+#    Relying on ca.crt for trust purposes is risky because it only reflects the
+#    current issuer and DOES NOT SUPPORT SAFE ROTATION, which requires
+#    simultaneous trust in both old and new CA certificates."
+#     -- cert-manager FAQ, "Why isn't my certificate's chain in ca.crt?"
+#
+# So the anchor must not be the `ca.crt` of a certificate that rotates. With
+# the split it no longer is: the ROOT is what pods trust and it does not rotate
+# in normal operation, while the INTERMEDIATE carries the shorter life and
+# reissues under it. A leaf minted from a freshly rotated intermediate still
+# verifies against the root a pod loaded at startup, WHATEVER order things
+# restarted in -- which is the property #4599 asks for, and it is structural
+# rather than a runbook step somebody has to remember.
+#
+# WHAT THIS DOES NOT DO. Rotating the ROOT still needs simultaneous trust, and
+# nothing here provides it -- that is trust-manager's job, and it is a cluster
+# operator this component deliberately does not require. The root is a ten-year
+# certificate: a root rotation is a scheduled operation with a maintenance
+# window, not something that arrives on a Tuesday because a component was
+# composed. Reducing it to that IS the fix.
+#
+# THE CHAIN IS PRESENTED, NOT ASSUMED. cert-manager writes the full chain into
+# `tls.crt` -- leaf first, issuing CA last, de-duplicated, root excluded (it
+# "does not include root certificates in the chain, as they are expected to be
+# managed independently by the client"). Go's ServeTLS sends every certificate
+# in that file, so identity presents leaf + intermediate and a client anchored
+# on the root completes the path. Nothing in the node code changes.
+#
+# SYNC WAVES ARE THE OTHER HALF, and they are what makes the ADOPTION safe
+# rather than merely the steady state. cert-manager offers no ordering between
+# a CA and a leaf that names it; ArgoCD does, and it waits for each wave to go
+# Healthy (its built-in health check reads the Certificate's Ready condition)
+# before starting the next. The waves are NEGATIVE so the whole chain lands
+# before the default-wave workloads that mount it. Making them positive would
+# deadlock: the Deployments would be created first and hang in
+# ContainerCreating on a Secret whose wave had not run yet.
+#
+# THE TWO ISSUERS ARE NAMESPACED, not ClusterIssuers, deliberately: this CA is
 # an internal trust root for one instance's mesh and has no business being
 # offerable to any other namespace on the cluster. It is also why the AppProject
 # needs no widening -- namespaced Issuers and Certificates are already inside
@@ -38,39 +100,52 @@
 # cert-manager Certificate produces a kubernetes.io/tls Secret carrying tls.crt,
 # tls.key AND ca.crt. `memql-ca` is mounted by TEN workloads, and a volume with
 # no `items:` selector projects EVERY key -- so shipping this chain naively
-# would put THE CA'S PRIVATE KEY inside every mesh pod, and SSL_CERT_DIR would
+# would put THE ROOT'S PRIVATE KEY inside every mesh pod, and SSL_CERT_DIR would
 # scan it. Every one of those ten mounts therefore selects `ca.crt` explicitly.
 # The openssl path produces a generic Secret with ca.crt alone, so the same
 # selector is correct there and the two paths stay interchangeable.
 #
 # NOT USED LOCALLY. k3d gets the openssl chain from `make secrets`, which skips
 # when the Secrets already exist -- so this component and that script must never
-# both run against one cluster. They do not: local composes neither.
+# both run against one cluster. They do not: local composes neither. The local
+# path stays a flat CA -> leaf on purpose: nothing rotates it, and the contract
+# it satisfies is the Secret NAMES plus "ca.crt verifies identity-tls", which a
+# one-tier chain meets exactly as well as a two-tier one.
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: memql-internal-selfsigned
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
 spec:
   selfSigned: {}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: memql-internal-ca
+  name: memql-internal-root
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
 spec:
-  # The Secret name IS the contract -- ten Deployments name it.
+  # The Secret name IS the contract -- ten Deployments mount ca.crt from here,
+  # and this is now the ROOT rather than the signing CA. Renaming it is not a
+  # rename; it is ten pods in ContainerCreating.
   secretName: memql-ca
   isCA: true
-  commonName: memql-internal-ca
+  commonName: memql-internal-root
   subject:
     organizations:
       - MemQL
-  # Ten years, matching CA_DAYS in deploy/k8s/base/tls/gen-internal-ca.sh. A CA
-  # rotation invalidates every leaf under it at once, so it is an operation to
-  # schedule rather than one to have arrive.
+  # Ten years, matching CA_DAYS in deploy/k8s/base/tls/gen-internal-ca.sh.
+  #
+  # renewBefore is ONE MONTH, not the year it used to be. That is deliberate
+  # and it is the opposite of what it looks like: a root reissue rewrites the
+  # anchor under every running pod, so it should happen as LATE as the safety
+  # margin allows and as a scheduled operation, never as a surprise a year
+  # early. Nine years and eleven months of warning is enough.
   duration: 87600h
-  renewBefore: 8760h
+  renewBefore: 720h
   privateKey:
     algorithm: RSA
     size: 4096
@@ -84,7 +159,9 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: memql-internal-ca
+  name: memql-internal-root
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   ca:
     secretName: memql-ca
@@ -92,7 +169,48 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
+  name: memql-internal-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  # NOT `memql-ca`. This is the intermediate's own material, and keeping it out
+  # of the anchor Secret is the entire fix: this certificate is allowed to
+  # rotate, and nothing that rotates may be what the mesh trusts.
+  secretName: memql-ca-issuer
+  isCA: true
+  commonName: memql-internal-ca
+  subject:
+    organizations:
+      - MemQL
+  # Two years under a ten-year root, renewing a month out. This is the tier
+  # that is SUPPOSED to move, and after the split it can: a leaf reissued from
+  # a new intermediate still chains to the root every pod already trusts.
+  duration: 17520h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 4096
+    rotationPolicy: Always
+  issuerRef:
+    name: memql-internal-root
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: memql-internal-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  ca:
+    secretName: memql-ca-issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
   name: identity-tls
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   secretName: identity-tls
   commonName: identity
