@@ -2410,12 +2410,86 @@ variables:
     optional: true
     description: "Comma-separated allowlist consulted when registration mode is domain_restricted."
 
+  # UPSTREAM IDENTITY PROVIDER (memql#4611). All optional; with
+  # MEMQL_IDENTITY_OIDC_ENABLED unset the whole feature is inert and nothing
+  # else here is consulted. A HALF-configured provider refuses boot rather than
+  # presenting a sign-in button that fails per-user.
+  - name: MEMQL_IDENTITY_OIDC_ENABLED
+    component: identity
+    scope: node
+    default: "false"
+    optional: true
+    description: "Turns on Entra ID / generic OIDC sign-in. Everything else in this group is inert without it."
+
+  - name: MEMQL_IDENTITY_OIDC_ISSUER
+    component: identity
+    scope: node
+    optional: true
+    description: "The upstream provider's issuer URL. Must be https -- the keys that verify an id token would otherwise be fetched over a channel anyone on the path can choose. Wins over MEMQL_IDENTITY_OIDC_TENANT_ID, so a non-Microsoft provider is not second class."
+
+  - name: MEMQL_IDENTITY_OIDC_TENANT_ID
+    component: identity
+    scope: node
+    optional: true
+    description: "Entra tenant id, which composes the v2.0 issuer when MEMQL_IDENTITY_OIDC_ISSUER is unset. Exists because the tenant id is the value an operator actually has."
+
+  - name: MEMQL_IDENTITY_OIDC_CLIENT_ID
+    component: identity
+    scope: node
+    optional: true
+    description: "This cluster's application id at the provider. Required when OIDC is enabled: without it the provider cannot tell which application is asking, and an id token could not be audience-checked."
+
+  - name: MEMQL_IDENTITY_OIDC_CLIENT_SECRET
+    component: identity
+    scope: node
+    secret: true
+    optional: true
+    description: "Client secret, when the provider registration is a confidential client. A public client using PKCE has none, and sending an empty secret to a provider expecting none is a rejection -- so this is read rather than assumed."
+
+  - name: MEMQL_IDENTITY_OIDC_SCOPES
+    component: identity
+    scope: node
+    default: "openid email profile"
+    optional: true
+    description: "Scopes requested at the provider. Groups are deliberately not here: a provider that carries them in the id token needs no extra scope, and one that does not needs a provider-specific scope the operator configures."
+
+  - name: MEMQL_IDENTITY_OIDC_GROUPS_CLAIM
+    component: identity
+    scope: node
+    optional: true
+    description: "Which id-token claim carries group membership. There is no standard one -- Entra uses `groups`. Empty means groups are not read, so no group mapping applies."
+
+  - name: MEMQL_IDENTITY_OIDC_GROUP_ROLES
+    component: identity
+    scope: node
+    optional: true
+    description: "Directory group to cluster role, as `group=role,group=role`. The HIGHEST matching role wins, because membership is a set and first-match would depend on the order the directory returned them. An unmapped group is the cluster default, NOT a ban. A value that does not parse refuses boot."
+
+  - name: MEMQL_IDENTITY_OIDC_EXCLUSIVE
+    component: identity
+    scope: node
+    default: "false"
+    optional: true
+    description: "Disables magic-link and passkey sign-in for every NON-OWNER user. The owner exemption is not configurable: a federated cluster whose IdP is unreachable would otherwise have nobody able to sign in, including the person who could fix the federation. The break-glass path is the owner recovery key (memql#3958)."
+
+  - name: MEMQL_IDENTITY_OIDC_DISPLAY_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "What the sign-in button says, e.g. \"Continue with Microsoft\"."
+
+  - name: MEMQL_IDENTITY_OIDC_DOMAIN_HINT
+    component: identity
+    scope: node
+    optional: true
+    description: "Passed through to skip the provider's account picker for a known tenant. Cosmetic; providers that do not know it ignore it."
+
   - name: MEMQL_IDENTITY_REGISTRATION_MODE
     component: identity
     scope: node
     default: "open"
     optional: true
-    description: "Controls who can self-register; one of open, domain_restricted, invite_only, or waitlist."
+    description: "Controls who can self-register; one of open, domain_restricted, invite_only, waitlist, or directory. `directory` means directory membership IS the invitation -- nobody self-registers by email and the upstream OIDC provider is the gate (memql#4611)."
 
   - name: MEMQL_IDENTITY_RISK_THRESHOLD
     component: identity
