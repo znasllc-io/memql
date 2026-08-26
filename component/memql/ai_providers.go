@@ -1434,14 +1434,24 @@ func (p *openAIProvider) CallChat(ctx context.Context, messages []common.ChatMes
 // parses against the schema -- no markdown fences, no missing fields,
 // no enum leaks.
 func (p *openAIProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	content, _, err := p.CallChatStructuredWithUsage(ctx, messages, schema)
+	return content, err
+}
+
+// CallChatStructuredWithUsage is the same call, reporting what it cost
+// (epic memql#4661). The plain method above delegates to it rather than the
+// other way round, so there is ONE request builder and one error taxonomy --
+// two copies of this function is two places for the finish_reason handling
+// below to drift.
+func (p *openAIProvider) CallChatStructuredWithUsage(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, common.ChatUsage, error) {
 	if p == nil || p.client == nil {
-		return "", fmt.Errorf("openai provider is not configured")
+		return "", common.ChatUsage{}, fmt.Errorf("openai provider is not configured")
 	}
 	if len(messages) == 0 {
-		return "", fmt.Errorf("at least one message is required")
+		return "", common.ChatUsage{}, fmt.Errorf("at least one message is required")
 	}
 	if len(schema.Schema) == 0 {
-		return "", fmt.Errorf("structured chat requires a non-empty schema")
+		return "", common.ChatUsage{}, fmt.Errorf("structured chat requires a non-empty schema")
 	}
 	name := strings.TrimSpace(schema.Name)
 	if name == "" {
@@ -1478,10 +1488,19 @@ func (p *openAIProvider) CallChatStructured(ctx context.Context, messages []comm
 
 	resp, err := p.client.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return "", err
+		return "", common.ChatUsage{}, err
+	}
+	// Reported=true even when both counts are zero: the API SAID something,
+	// and "the provider reported zero" is a different fact from "the provider
+	// said nothing", which is the whole distinction this type exists for.
+	usage := common.ChatUsage{
+		InputTokens:  int64(resp.Usage.PromptTokens),
+		OutputTokens: int64(resp.Usage.CompletionTokens),
+		Model:        resp.Model,
+		Reported:     true,
 	}
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices returned")
+		return "", common.ChatUsage{}, fmt.Errorf("no choices returned")
 	}
 	choice := resp.Choices[0]
 	content := strings.TrimSpace(choice.Message.Content)
@@ -1500,23 +1519,23 @@ func (p *openAIProvider) CallChatStructured(ctx context.Context, messages []comm
 		// the caller's JSON unmarshal as "unexpected end of JSON
 		// input", which masked the actual cause. Surface it.
 		if refusal := strings.TrimSpace(choice.Message.Refusal); refusal != "" {
-			return "", fmt.Errorf("model refused structured output: %s", refusal)
+			return "", common.ChatUsage{}, fmt.Errorf("model refused structured output: %s", refusal)
 		}
 		switch choice.FinishReason {
 		case openai.FinishReasonLength:
-			return "", fmt.Errorf(
+			return "", common.ChatUsage{}, fmt.Errorf(
 				"empty content with finish_reason=length (model %q hit completion-token cap before producing output -- raise maxCompletionTokens or shrink the schema/input)",
 				p.model,
 			)
 		case openai.FinishReasonContentFilter:
-			return "", fmt.Errorf("empty content with finish_reason=content_filter (response was suppressed by safety filter)")
+			return "", common.ChatUsage{}, fmt.Errorf("empty content with finish_reason=content_filter (response was suppressed by safety filter)")
 		case "":
-			return "", fmt.Errorf("empty content with no finish_reason returned (model %q may not exist or returned a malformed response)", p.model)
+			return "", common.ChatUsage{}, fmt.Errorf("empty content with no finish_reason returned (model %q may not exist or returned a malformed response)", p.model)
 		default:
-			return "", fmt.Errorf("empty content with finish_reason=%s (model %q)", choice.FinishReason, p.model)
+			return "", common.ChatUsage{}, fmt.Errorf("empty content with finish_reason=%s (model %q)", choice.FinishReason, p.model)
 		}
 	}
-	return content, nil
+	return content, usage, nil
 }
 
 // CallChatWithTools implements tool-calling chat completion using OpenAI tools.

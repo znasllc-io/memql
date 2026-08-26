@@ -61,6 +61,38 @@ type ChatStructuredProvider interface {
 	CallChatStructured(ctx context.Context, messages []ChatMessage, schema StructuredSchema) (string, error)
 }
 
+// ChatUsage is what a call cost, as the PROVIDER reported it.
+//
+// Zero is not "free". A provider that reported nothing leaves this zero, and a
+// caller must decide from Reported which of the two it is holding -- rendering
+// an unreported call as "0 tokens" is a confident lie about a number nobody
+// measured, and it is the failure this field exists to make impossible.
+type ChatUsage struct {
+	InputTokens  int64
+	OutputTokens int64
+	// The provider-facing model id the call actually RAN on, which is not
+	// always the one the prompt named -- a policy fallback, a vendor alias.
+	// Carried because a token count without the model it was spent on cannot
+	// be priced.
+	Model string
+	// Whether the provider said anything at all about usage.
+	Reported bool
+}
+
+// ChatStructuredUsageProvider is the OPTIONAL half of
+// ChatStructuredProvider: a structured provider that can also say what the
+// call cost.
+//
+// Optional rather than folded into the interface above so a provider that
+// cannot report usage -- a fake in a test, a vendor whose API does not say --
+// stays a valid ChatStructuredProvider without inventing a number. A caller
+// type-asserts; the absence of the interface is the same answer as
+// Reported=false, and both mean "ask somebody else".
+type ChatStructuredUsageProvider interface {
+	ChatStructuredProvider
+	CallChatStructuredWithUsage(ctx context.Context, messages []ChatMessage, schema StructuredSchema) (string, ChatUsage, error)
+}
+
 // ToolDefinition is a minimal tool schema used for tool-calling providers.
 // It intentionally mirrors the MCP surface: name + description + JSON Schema input.
 type ToolDefinition struct {

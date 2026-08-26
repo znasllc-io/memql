@@ -53,6 +53,23 @@ type SuggestContext struct {
 	// Payload is the deserialized AiSuggestMsg payload (Struct.AsMap()),
 	// never nil. Each domain pulls its own required fields out of it.
 	Payload map[string]any
+
+	// RenderPrompt renders a DSL prompt template by name, validated against
+	// that prompt's own declared input schema (MemQLEngine.RenderPrompt).
+	//
+	// WHY A DOMAIN WOULD WANT IT. The knowledge domain builds its messages as
+	// Go string literals, which is fine for a prompt that exists nowhere else.
+	// A domain whose prompt is DECLARED IN THE DSL is a different case: the
+	// declaration is loaded, validated at boot, versioned with the tree and
+	// visible to anyone reading dsl/, and a Go handler that ignored it would
+	// make the file a decoration that reads exactly like the live thing. This
+	// is what keeps the two from being separate sources.
+	//
+	// NIL when the caller has no engine to render with -- a unit test, a node
+	// with no AI runtime configured. A handler MUST check: falling back to a
+	// built-in string is a choice a domain makes deliberately, not something
+	// this field decides for it.
+	RenderPrompt func(templateId string, data map[string]any) (string, error)
 }
 
 // String returns the string value at key, or "" when missing / non-string.

@@ -51,10 +51,31 @@
 @defaultProvider("chat54Mini")
 @templateFile("prompts/composeViewArrangement.tmpl")
 prompt composeViewArrangement {
-  concept    object!  @description("The concept being arranged: {id, entity}. Identity only -- there is no schema here and no rows.")
-  rowCount   int  @description("How many rows the profile was built from. Lets the model prefer a reading over an enumeration for a large set, and skip a chart for a set of three.")
-  fields     []object!  @description("The concept's shape as OBSERVED on the rows, one entry per field: {field, kind, present, distinct, slots}. kind is text | number | boolean | datetime | list | object; present is how many rows carry a value; distinct is the capped distinct-value count (small means categorical); slots names the @displayCard slots pointing at the field.")
-  bands      []object!  @description("The layout grammar: [{band, question}] for reading / shape / roll. The question is the words a person would use, so the model places an element by what it answers rather than by where it goes.")
-  candidates []object!  @description("The elements that ALREADY FIT these rows, best first: {element, title, summary, band, verdict, bindings, explanation}. This is the deterministic match; the model may only choose from it. verdict is full or partial, and explanation is view-kit's own sentence about what the element would use and what it would lose.")
-  baseline   object  @description("The arrangement the system already built from the candidates: {conceptId, elements:[{element, band}]}. The model is improving on a working answer, not producing one from nothing.")
+  concept       object!  @description("The concept being arranged: {id, entity}. Identity only -- there is no schema here and no rows.")
+  rowCount      int  @description("How many rows the profile was built from. Lets the model prefer a reading over an enumeration for a large set, and skip a chart for a set of three.")
+  fields        []object!  @description("The concept's shape, one entry per field: {field, kind, present, distinct, slots}. Since epic memql#4661 the field list comes from the concept's DECLARED schema, so a field no loaded row happens to carry is still offered; kind is text | number | boolean | datetime | list | object; present is how many rows carry a value; distinct is the capped distinct-value count (small means categorical, and a declared enum reports its member count even with nothing loaded); slots names the @displayCard slots pointing at the field.")
+  bands         []object!  @description("The layout grammar: [{band, question}] for reading / shape / roll. The question is the words a person would use, so the model places an element by what it answers rather than by where it goes.")
+  layouts       []object!  @description("The layout vocabulary: [{layout, description}] for stack / dashboard / split / focus / gallery. A layout is HOW the bands are placed and is a property of the whole section; absent means stack, which is always correct.")
+  candidates    []object!  @description("The elements that ALREADY FIT these rows, best first: {element, title, summary, band, verdict, bindings, explanation}. This is the deterministic match; the model may only choose from it. verdict is full or partial, and explanation is view-kit's own sentence about what the element would use and what it would lose.")
+  baseline      object  @description("The arrangement the system already built from the candidates: {conceptId, elements:[{element, band, role?}]}. The model is improving on a working answer, not producing one from nothing.")
+  currentLayout string  @description("The layout the arrangement being improved on currently uses. Empty means stack. Distinct from the vocabulary above: this is what the person is looking at right now.")
+  hint          string  @description("What the person asked for, in their own words -- 'more visual', 'lead with the chart'. Empty when they asked for nothing in particular, which is the common case: regenerate is a button before it is a conversation.")
+}
+
+/// Draft a whole view from a free-text description of what somebody wants to see. This is the
+/// "describe a view" entry: unlike composeViewArrangement, which improves an arrangement of one
+/// concept the person already picked, this one CHOOSES the concepts too -- from a compact digest of
+/// what the cluster publishes -- and returns a full multi-section draft. The reply is treated
+/// exactly like a stored row: validated and repaired client-side by sanitizeArrangement before it is
+/// rendered or saved, so it cannot name an element that does not exist, a layout this build lacks,
+/// or a widget nobody registered. A draft the person then edits by hand is the expected outcome, not
+/// a failure of the draft.
+@defaultProvider("chat54Mini")
+@templateFile("prompts/composeView.tmpl")
+prompt composeView {
+  description string!  @description("What the person said they wanted to see, verbatim. The whole input -- there is no structured form behind this, deliberately: the point of the entry is that somebody can say 'the agents that failed something this week' without knowing what a concept is.")
+  registry    []object!  @description("A COMPACT digest of what this cluster publishes, one entry per concept: {id, entity, description, fields, relationships}. Ids, prose, field names with kinds, and relationship labels -- not full schemas. The model may only name concepts from this list.")
+  elements    []object!  @description("The element library: [{element, title, summary, band}]. What a view can be made of. The model may only name these; anything else is discarded at parse time.")
+  layouts     []object!  @description("The layout vocabulary: [{layout, description}] for stack / dashboard / split / focus / gallery.")
+  bands       []object!  @description("The band grammar: [{band, question}] for reading / shape / roll.")
 }
