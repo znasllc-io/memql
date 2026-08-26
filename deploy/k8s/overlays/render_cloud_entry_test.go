@@ -599,3 +599,55 @@ func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// memql#4634 -- every user-facing node keeps a PodDisruptionBudget
+// ---------------------------------------------------------------------------
+
+// THE GAP THIS CLOSES, AND WHY IT SURVIVED A LIVE CHECK.
+//
+// base ships a PDB beside the Deployment for every user-facing node. The bff
+// does not live in base -- it comes from components/engine-bff, which shipped
+// the Deployment alone -- so every install had six protected user-facing nodes
+// and one unprotected one, and the unprotected one is the node the portal and
+// every SPA actually talk to.
+//
+// The downstream verification enumerated what it FOUND ("PDBs already exist for
+// agent, cognition, edge, identity, planner, workbench") rather than what it was
+// LOOKING FOR. That is a true statement and also a list with bff missing from
+// it, and a check of that shape reads as complete whichever way it comes out.
+//
+// So this asserts the REQUIREMENT rather than the inventory: it derives the set
+// from the rendered Deployments and demands a PDB for each, which means a node
+// added tomorrow is covered without anybody remembering to extend a list.
+func TestEveryServingNodeHasAPodDisruptionBudget(t *testing.T) {
+	rendered := render(t, entryOverlay)
+
+	protected := map[string]bool{}
+	for _, r := range parse(t, rendered) {
+		if r.Kind == "PodDisruptionBudget" {
+			protected[r.Metadata.Name] = true
+		}
+	}
+
+	// Derived from what actually renders, NOT from entryMeshOn: a list is the
+	// thing that failed here. Voice-off nodes are excluded because a PDB over
+	// zero replicas protects nothing and blocks nothing.
+	byName := entryWorkloadsByName(t, rendered)
+	checked := 0
+	for name, w := range byName {
+		if w.Spec.Replicas != nil && *w.Spec.Replicas == 0 {
+			continue
+		}
+		checked++
+		if !protected[name] {
+			t.Errorf("Deployment %s serves traffic at %d replica(s) and has no PodDisruptionBudget. "+
+				"A voluntary disruption -- node drain, cluster upgrade -- can then take its last "+
+				"pod with nothing to stop it (memql#4634).", name, deref(w.Spec.Replicas))
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no serving Deployments found; this gate would pass vacuously")
+	}
+	t.Logf("checked %d serving Deployment(s) for a PodDisruptionBudget", checked)
+}
