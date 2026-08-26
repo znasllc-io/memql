@@ -78,10 +78,25 @@ type Candidate struct {
 	RegistrationId string
 	Name           string
 	DisplayName    string
-	Capabilities   []string
+	// OwnerUserId is populated only on the cross-owner read
+	// (SharedInferenceWorkers). On the user-scoped path it is redundant --
+	// every machine belongs to the owner the query was scoped to -- and is
+	// left blank rather than restated.
+	OwnerUserId  string
+	Capabilities []string
 	// Labels is the MERGE: the cockpit's `labels` overlaid by the owner's
 	// `operatorLabels`, operator side winning (design D3).
-	Labels          map[string]string
+	Labels map[string]string
+	// SharedInference is the owner's opt-in for cluster system work, and it
+	// is projected from `operatorLabels` ALONE -- never from the merge above.
+	//
+	// The prohibition is expressed as a FIELD rather than a lookup for a
+	// reason: `labels` is rewritten from the Register message on every
+	// reconnect, so an opt-in read out of the merge could have been granted
+	// by the machine rather than by its owner, and would be revoked roughly
+	// whenever the lid closed. Resolving it once, where the row is projected,
+	// leaves no merged map for a later reader to consult by mistake.
+	SharedInference bool
 	Concurrency     map[string]uint32
 	ActiveCount     int
 	ConnectedNodeId string
