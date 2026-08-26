@@ -53,6 +53,25 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, withQuery("/setup", r.URL.RawQuery), http.StatusFound)
 		return
 	}
+
+	// AN INVITATION LINK LANDS HERE ONLY BY HISTORY (memql#4601).
+	//
+	// adminops.invitationURL used to compose `/login?invitation=<token>`, and
+	// nothing ever read that parameter: the invitee got a bare email box, and
+	// the token they had been sent was discarded on arrival. Those links are in
+	// mailboxes now, and the people holding them are exactly the people the fix
+	// is for -- so the parameter is finally read, and it is read by handing the
+	// request to the page that knows what to do with it.
+	//
+	// A REDIRECT RATHER THAN RENDERING THE INVITATION HERE. Two renderers for
+	// one credential would be two places to keep the refusal copy, the rate
+	// limit, the HTTPS check and the binding cookie in step, and the second one
+	// would be the one nobody remembered to update. /invitation is the page;
+	// this is a signpost to it.
+	if token := strings.TrimSpace(r.URL.Query().Get("invitation")); token != "" {
+		http.Redirect(w, r, "/invitation?code="+url.QueryEscape(token), http.StatusSeeOther)
+		return
+	}
 	settings := s.snapshotSettings(r)
 	data := webtempl.LoginData{
 		// passkey-login.js reveals the "Sign in with a passkey" control
@@ -255,6 +274,25 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 			s.renderError(w, r, http.StatusBadRequest, "Please paste your invitation token.")
 			return
 		}
+		// THE ADDRESS IS REQUIRED HERE, AND ITS ABSENCE WAS THE BUG (memql#4601).
+		//
+		// loginFormInvite rendered no email field, so this branch handed the
+		// issuer `email: ""` on every submission. resolveInvitation then found
+		// the row by hash, compared its address against the empty string, and
+		// refused `invitation_address_mismatch` -- and the page told the person
+		// holding a perfectly good invitation to check their email address.
+		// User-invitation redemption had never once succeeded.
+		//
+		// The template now carries the address, and this guard is what keeps
+		// the two honest: if the field is ever dropped again the submission
+		// fails HERE, naming the real problem, instead of travelling on to be
+		// misdiagnosed as somebody else's address. The waitlist branch below
+		// has always guarded its own email for the same reason.
+		if email == "" {
+			s.renderError(w, r, http.StatusBadRequest,
+				"We could not tell which invitation this is for. Open the link from your invitation email again.")
+			return
+		}
 	case "waitlist":
 		in.IsAccessRequest = true
 		in.WaitlistName = strings.TrimSpace(r.PostForm.Get("name"))
@@ -422,6 +460,36 @@ func (s *Server) renderLoginStage(r *http.Request, stage, email, returnTo, info 
 		AllowedDomainsHint: settings.RegistrationDomains,
 		PrefillEmail:       email,
 		ReturnTo:           returnTo,
+
+		// THE OAUTH CONTEXT SURVIVES THE STAGE CHANGE (memql#4609).
+		//
+		// It did not. This function built stage 2 out of the settings and the
+		// address and nothing else, so a person who arrived through /authorize
+		// and landed on waitlist_signup or needs_invite lost their relying
+		// party at that moment. The stage-2 forms had rendered client_id,
+		// redirect_uri and state since they were written, each behind an
+		// `if != ""` that was never once true. Completing stage 2 therefore
+		// signed them in as an identity ADMIN session and left them on
+		// /admin/, with the application that sent them still waiting.
+		//
+		// The PKCE pair travels for a second reason. handleLoginPost reads
+		// code_challenge in its PROLOGUE, before the form switch, so it is
+		// every stage's contract and not the email stage's alone; and since
+		// memql#4303 a matched client that arrives without one is refused at
+		// the door, because /oauth/token would not redeem the code it would
+		// otherwise mint. Carrying client_id without carrying the challenge
+		// would therefore convert this silent loss into a 400 -- which is why
+		// the two halves of this block have to land together.
+		//
+		// Read from PostForm rather than from pickOAuthCtx's resolved answer:
+		// this is a RE-RENDER, echoing back what the browser sent so the next
+		// submission can be resolved from scratch. Every caller reaches here
+		// from handleLoginPost, after ParseForm.
+		ClientID:            strings.TrimSpace(r.PostForm.Get("client_id")),
+		RedirectURI:         strings.TrimSpace(r.PostForm.Get("redirect_uri")),
+		OAuthState:          strings.TrimSpace(r.PostForm.Get("state")),
+		CodeChallenge:       strings.TrimSpace(r.PostForm.Get("code_challenge")),
+		CodeChallengeMethod: strings.TrimSpace(r.PostForm.Get("code_challenge_method")),
 	}
 	if info != "" {
 		d.Flash = &webtempl.Flash{Kind: "info", Message: info}

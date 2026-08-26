@@ -36,7 +36,13 @@ package http
 //     silently succeeding into nowhere. The magic-link form remains the
 //     path for the admin-session case (/login reached with no client),
 //     which is exactly what makes the button a progressive enhancement
-//     rather than a second front door.
+//     rather than a second front door. memql#4610 added ONE named
+//     exception -- an explicit `firstParty: true` ceremony that mints no
+//     auth code and produces only the browser session -- so that /enroll,
+//     which has no relying party and never will, can end holding a
+//     session instead of an instruction. Silence is still refused; only
+//     the request that asks for that arm by name gets it, and the full
+//     argument sits at the branch in handleWebAuthnLoginBegin.
 //   - A sign-count regression is refused and audited as the spec's
 //     cloned-authenticator signal. A zero counter from an authenticator
 //     that does not implement one is not that case; see
@@ -97,6 +103,12 @@ type WebAuthnLoginBeginRequest struct {
 	State               string `json:"state,omitempty"`
 	CodeChallenge       string `json:"codeChallenge,omitempty"`
 	CodeChallengeMethod string `json:"codeChallengeMethod,omitempty"`
+
+	// FirstParty asks for the arm that mints no auth code (memql#4610).
+	// Mutually exclusive with the five fields above; the full argument for
+	// why it is opt-in, and for why it is not a widening of what a passkey
+	// assertion authorizes, is at the branch in handleWebAuthnLoginBegin.
+	FirstParty bool `json:"firstParty,omitempty"`
 }
 
 // WebAuthnLoginBeginResponse carries the browser-ready request options
@@ -195,30 +207,86 @@ func (s *Server) handleWebAuthnLoginBegin(w http.ResponseWriter, r *http.Request
 		CodeChallengeMethod: strings.TrimSpace(body.CodeChallengeMethod),
 	}
 
-	// A relying party is REQUIRED. Passkey login exists to produce an
-	// auth code for a client; without one there is nowhere to deliver it
-	// and nothing this ceremony could accomplish. The /login page hides
-	// the button in that case and the magic-link form -- which reaches
-	// the admin-session branch in handleComplete -- stays the path.
-	if !oauth.HasClient() {
+	// TWO ARMS, AND ONLY TWO.
+	//
+	//  1. A RELYING-PARTY ceremony (memql#3407), the original one. A client
+	//     is named, validated here, and held on the challenge; the assertion
+	//     ends in an auth code delivered to that client's registered
+	//     callback. This is what the /login button drives.
+	//  2. A FIRST-PARTY ceremony (memql#4610), asked for explicitly with
+	//     `firstParty: true`. It mints NO auth code. Its whole product is
+	//     the memql_admin cookie startBrowserSession already stamps on arm 1
+	//     (memql#3920), plus a destination this server computes for itself.
+	//     It exists because /enroll has no relying party and never will --
+	//     an enrolment link is opened out of an email, not by an application
+	//     -- so without it a person who has just made a passkey there is
+	//     told to go and sign in with the credential they produced ten
+	//     seconds earlier (memql#4610, and the friction memql#4601 exists to
+	//     remove).
+	//
+	// ARM 2 GRANTS STRICTLY LESS THAN ARM 1, which is why it is not a new
+	// boundary. The proof it demands is identical: a user-verified assertion
+	// from a discoverable credential enrolled on this cluster, verified by
+	// the same FinishLogin, with the same sign-count and revocation checks.
+	// What it hands back is a SUBSET of arm 1's output -- the same browser
+	// session, minus the auth code -- so nothing is reachable through it
+	// that a client-bearing ceremony could not already reach. The refusal
+	// below was always about DELIVERY rather than about authority: an auth
+	// code with no client is a credential aimed nowhere, and a caller that
+	// could name the target later could aim someone else's freshly minted
+	// code at itself. Arm 2 mints no code, so it has nothing to misdeliver,
+	// and its redirect target is read off this server's own configuration
+	// rather than off the request.
+	//
+	// IT IS OPT-IN, NOT A FALLBACK. A request that merely forgot its client
+	// is still refused with client_required, exactly as before: "no client
+	// named" is far more often a caller's mistake than a deliberate
+	// first-party sign-in, and a silent fallback would quietly convert every
+	// one of those mistakes into a session nobody asked for. It also leaves
+	// the /login page's posture untouched -- the button still renders only
+	// with a relying party in scope, so it remains a progressive enhancement
+	// beside the magic-link form rather than a second front door.
+	switch {
+	case body.FirstParty:
+		if oauth.ClientId != "" || oauth.RedirectURI != "" {
+			// One ceremony, one product. A request asking for the first-party
+			// arm AND naming a client has not said what it wants, and the
+			// thing that would have to be guessed is where a credential goes.
+			s.auditPasskey(r, "passkey_login_challenge_denied", "", "", identity.AuditOutcomeBlocked, "first_party_names_a_client", map[string]any{
+				"clientId": oauth.ClientId,
+			})
+			writeJSON(w, http.StatusBadRequest, WebAuthnLoginBeginResponse{
+				ErrorCode: "ambiguous_ceremony",
+				Error:     "firstParty cannot be combined with clientId or redirectUri"})
+			return
+		}
+		// Zeroed rather than merely unvalidated: the challenge is what the
+		// finish step reads its arm off, and an OAuth context carrying a
+		// stray state or PKCE value would make "no client" a matter of
+		// inspecting five fields instead of one.
+		oauth = webauthn.OAuthContext{}
+
+	case !oauth.HasClient():
 		s.auditPasskey(r, "passkey_login_challenge_denied", "", "", identity.AuditOutcomeBlocked, "no_relying_party", nil)
 		writeJSON(w, http.StatusBadRequest, WebAuthnLoginBeginResponse{
 			ErrorCode: "client_required",
 			Error:     "clientId and redirectUri are required for passkey sign-in"})
 		return
-	}
-	// Validated HERE, not at finish: the challenge is what carries the
-	// target from this point on, so an unregistered pair must never
-	// become a stored one.
-	if identity.ResolveClient(ctx, s.Cfg, s.Store, oauth.ClientId) == nil ||
-		!identity.ClientAllowsRedirectURI(ctx, s.Cfg, s.Store, oauth.ClientId, oauth.RedirectURI) {
-		s.auditPasskey(r, "passkey_login_challenge_denied", "", "", identity.AuditOutcomeBlocked, "unregistered_client", map[string]any{
-			"clientId": oauth.ClientId,
-		})
-		writeJSON(w, http.StatusBadRequest, WebAuthnLoginBeginResponse{
-			ErrorCode: "invalid_client",
-			Error:     "client_id or redirect_uri is not registered"})
-		return
+
+	default:
+		// Validated HERE, not at finish: the challenge is what carries the
+		// target from this point on, so an unregistered pair must never
+		// become a stored one.
+		if identity.ResolveClient(ctx, s.Cfg, s.Store, oauth.ClientId) == nil ||
+			!identity.ClientAllowsRedirectURI(ctx, s.Cfg, s.Store, oauth.ClientId, oauth.RedirectURI) {
+			s.auditPasskey(r, "passkey_login_challenge_denied", "", "", identity.AuditOutcomeBlocked, "unregistered_client", map[string]any{
+				"clientId": oauth.ClientId,
+			})
+			writeJSON(w, http.StatusBadRequest, WebAuthnLoginBeginResponse{
+				ErrorCode: "invalid_client",
+				Error:     "client_id or redirect_uri is not registered"})
+			return
+		}
 	}
 
 	challenge, err := ceremony.BeginLogin(oauth)
@@ -232,6 +300,7 @@ func (s *Server) handleWebAuthnLoginBegin(w http.ResponseWriter, r *http.Request
 	s.auditPasskey(r, "passkey_login_challenge_issued", "", "", identity.AuditOutcomeSuccess, "", map[string]any{
 		"challengeExpiresAt": challenge.ExpiresAt.Format(time.RFC3339Nano),
 		"clientId":           oauth.ClientId,
+		"firstParty":         body.FirstParty,
 		"relyingPartyId":     ceremony.RPID(),
 	})
 
@@ -316,86 +385,115 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// THE ROLE FLOOR (memql#4516). The third and last place the code flow can
-	// mint a credential, so it consults the same identity.CheckClientRoleFloor
-	// the magic-link verifier and the SSO fast path do. Without it, a reader
-	// refused through the emailed link would simply present a passkey instead
-	// and be admitted -- the floor has to sit on the MINT, not on one factor.
-	//
-	// The role is read from the user row rather than from a session, because
-	// authenticating is what this handler just did: there is no session yet.
-	if refusal := s.passkeyRoleFloorRefusal(ctx, asserted.OAuth.ClientId, userId); refusal != nil {
-		s.auditPasskey(r, identity.AuditActionRoleFloorRefused, userId, asserted.Row.ID,
-			identity.AuditOutcomeBlocked, "role_below_client_floor", refusal.AuditDetail())
-		// Hand the browser the client's own callback carrying the OAuth error
-		// envelope, so the refusal reaches the application that asked and the
-		// editor can print error_description verbatim. passkey-login.js
-		// navigates on redirectTo and does not read `success`, so a refused
-		// ceremony ends where an approved one would -- at the client -- rather
-		// than as an inline message the extension never sees.
-		if target, err := buildClientErrorCallback(asserted.OAuth.RedirectURI, "access_denied",
-			refusal.Description(), asserted.OAuth.State); err == nil {
-			writeJSON(w, http.StatusOK, WebAuthnLoginFinishResponse{
-				ErrorCode:  "role_floor",
-				Error:      refusal.Description(),
-				RedirectTo: target,
-			})
+	now := time.Now().UTC()
+
+	// WHICH ARM THIS CEREMONY WAS BEGUN AS is read off the CHALLENGE, never
+	// off this request (memql#4610). asserted.OAuth is what the begin handler
+	// validated and then stored server-side, so a challenge with no client in
+	// it can only have come from the first-party arm, and no field a caller
+	// sends here can turn one arm into the other. Same reasoning as the
+	// redirect URI: the ceremony's target is fixed when the challenge is
+	// minted and is not restatable at finish time.
+	firstParty := !asserted.OAuth.HasClient()
+
+	// target is where the browser goes next; codeId names the auth code for
+	// the audit trail, and stays empty on the arm that mints none.
+	target := ""
+	codeId := ""
+
+	if firstParty {
+		// NO AUTH CODE, and no role floor either -- both are properties of a
+		// relying party, and this ceremony has none. identity.CheckClientRoleFloor
+		// would admit an empty client id anyway (only the built-in editor
+		// declares a floor), but skipping it says why rather than relying on
+		// a default two packages away.
+		//
+		// The destination is computed from this server's own configuration.
+		// It is the one thing the first-party arm must not take from the
+		// caller: a redirect target a request could name is exactly the
+		// misdelivery the relying-party arm validates against.
+		target = s.postLoginLanding(ctx)
+	} else {
+		// THE ROLE FLOOR (memql#4516). The third and last place the code flow can
+		// mint a credential, so it consults the same identity.CheckClientRoleFloor
+		// the magic-link verifier and the SSO fast path do. Without it, a reader
+		// refused through the emailed link would simply present a passkey instead
+		// and be admitted -- the floor has to sit on the MINT, not on one factor.
+		//
+		// The role is read from the user row rather than from a session, because
+		// authenticating is what this handler just did: there is no session yet.
+		if refusal := s.passkeyRoleFloorRefusal(ctx, asserted.OAuth.ClientId, userId); refusal != nil {
+			s.auditPasskey(r, identity.AuditActionRoleFloorRefused, userId, asserted.Row.ID,
+				identity.AuditOutcomeBlocked, "role_below_client_floor", refusal.AuditDetail())
+			// Hand the browser the client's own callback carrying the OAuth error
+			// envelope, so the refusal reaches the application that asked and the
+			// editor can print error_description verbatim. passkey-login.js
+			// navigates on redirectTo and does not read `success`, so a refused
+			// ceremony ends where an approved one would -- at the client -- rather
+			// than as an inline message the extension never sees.
+			if target, err := buildClientErrorCallback(asserted.OAuth.RedirectURI, "access_denied",
+				refusal.Description(), asserted.OAuth.State); err == nil {
+				writeJSON(w, http.StatusOK, WebAuthnLoginFinishResponse{
+					ErrorCode:  "role_floor",
+					Error:      refusal.Description(),
+					RedirectTo: target,
+				})
+				return
+			}
+			writeJSON(w, http.StatusForbidden, WebAuthnLoginFinishResponse{
+				ErrorCode: "role_floor", Error: refusal.Description()})
 			return
 		}
-		writeJSON(w, http.StatusForbidden, WebAuthnLoginFinishResponse{
-			ErrorCode: "role_floor", Error: refusal.Description()})
-		return
-	}
 
-	// The auth code. Identical shape to the one the magic-link verifier
-	// mints -- same five OAuth fields, same 60-second life, same
-	// digest-only persistence (the plaintext travels back on the
-	// redirect and never reaches the database). identityId names the
-	// PASSKEY row, so the session created at /oauth/token attributes to
-	// the credential that actually authenticated. magicLinkRequestId is
-	// empty because no magic link was involved, which is also how an
-	// operator tells the two apart after the fact.
-	plainCode, codeHash, err := newPasskeyAuthCode()
-	if err != nil {
-		s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "code_mint_failed", nil)
-		writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
-			ErrorCode: "internal", Error: "auth code mint failed"})
-		return
-	}
-	codeId, err := identity.NewRandomId("")
-	if err != nil {
-		s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "code_id_mint_failed", nil)
-		writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
-			ErrorCode: "internal", Error: "auth code id mint failed"})
-		return
-	}
-	now := time.Now().UTC()
-	if err := s.Store.CreateAuthCode(
-		ctx,
-		codeId,
-		codeHash,
-		asserted.OAuth.ClientId,
-		asserted.OAuth.RedirectURI,
-		asserted.OAuth.State,
-		asserted.OAuth.CodeChallenge,
-		asserted.OAuth.CodeChallengeMethod,
-		userId,
-		asserted.Row.ID,
-		"",
-		now.Add(authCodeTTL).Format(time.RFC3339Nano),
-	); err != nil {
-		s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "auth_code_persist_failed", nil)
-		writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
-			ErrorCode: "persist_failed", Error: err.Error()})
-		return
-	}
+		// The auth code. Identical shape to the one the magic-link verifier
+		// mints -- same five OAuth fields, same 60-second life, same
+		// digest-only persistence (the plaintext travels back on the
+		// redirect and never reaches the database). identityId names the
+		// PASSKEY row, so the session created at /oauth/token attributes to
+		// the credential that actually authenticated. magicLinkRequestId is
+		// empty because no magic link was involved, which is also how an
+		// operator tells the two apart after the fact.
+		plainCode, codeHash, err := newPasskeyAuthCode()
+		if err != nil {
+			s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "code_mint_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
+				ErrorCode: "internal", Error: "auth code mint failed"})
+			return
+		}
+		codeId, err = identity.NewRandomId("")
+		if err != nil {
+			s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "code_id_mint_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
+				ErrorCode: "internal", Error: "auth code id mint failed"})
+			return
+		}
+		if err := s.Store.CreateAuthCode(
+			ctx,
+			codeId,
+			codeHash,
+			asserted.OAuth.ClientId,
+			asserted.OAuth.RedirectURI,
+			asserted.OAuth.State,
+			asserted.OAuth.CodeChallenge,
+			asserted.OAuth.CodeChallengeMethod,
+			userId,
+			asserted.Row.ID,
+			"",
+			now.Add(authCodeTTL).Format(time.RFC3339Nano),
+		); err != nil {
+			s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "auth_code_persist_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
+				ErrorCode: "persist_failed", Error: err.Error()})
+			return
+		}
 
-	target, err := buildClientCallback(asserted.OAuth.RedirectURI, plainCode, asserted.OAuth.State)
-	if err != nil {
-		s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "redirect_build_failed", nil)
-		writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
-			ErrorCode: "internal", Error: "could not build the client callback target"})
-		return
+		target, err = buildClientCallback(asserted.OAuth.RedirectURI, plainCode, asserted.OAuth.State)
+		if err != nil {
+			s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID, identity.AuditOutcomeFailure, "redirect_build_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
+				ErrorCode: "internal", Error: "could not build the client callback target"})
+			return
+		}
 	}
 
 	// THE BROWSER GETS A SESSION TOO (memql#3920).
@@ -413,6 +511,14 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 	// it now over a cookie would cost the operator the credential they
 	// just proved. A missing cookie costs one extra ceremony; a failed
 	// login costs the whole attempt.
+	//
+	// ON THE FIRST-PARTY ARM IT IS FATAL INSTEAD (memql#4610), and the same
+	// sentence is why: there, the session IS the whole attempt. A cookie
+	// that failed to stamp costs nothing extra on the relying-party arm
+	// because the client still got its code, but on this one it would leave
+	// a caller holding a success response and no session -- and /enroll acts
+	// on that response by navigating, so the person would land on a page
+	// that asks them to sign in with no idea why.
 	if err := s.startBrowserSession(w, r, browserSessionSubject{
 		UserId: userId,
 		lookup: func(ctx context.Context) (*identity.UserRow, error) {
@@ -420,6 +526,14 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		},
 	}, "passkey_session_started"); err != nil {
 		s.logErr("webauthn: passkey browser session not started", err)
+		if firstParty {
+			s.auditPasskey(r, "passkey_login_denied", userId, asserted.Row.ID,
+				identity.AuditOutcomeFailure, "session_start_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
+				ErrorCode: "session_failed",
+				Error:     "the passkey was accepted but the sign-in could not be completed"})
+			return
+		}
 	}
 
 	// Best-effort bookkeeping, AFTER the code is minted so a failure here
@@ -437,6 +551,7 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 	s.auditPasskey(r, "passkey_login_succeeded", userId, asserted.Row.ID, identity.AuditOutcomeSuccess, "", map[string]any{
 		"clientId":       asserted.OAuth.ClientId,
 		"authCodeId":     codeId,
+		"firstParty":     firstParty,
 		"signCount":      asserted.SignCount,
 		"backupState":    asserted.BackupState,
 		"relyingPartyId": ceremony.RPID(),
@@ -469,6 +584,33 @@ func (s *Server) passkeyRoleFloorRefusal(ctx context.Context, clientId, userId s
 		}
 	}
 	return identity.CheckClientRoleFloor(clientId, auth.Role(role))
+}
+
+// postLoginLanding is where a first-party passkey sign-in ends up: the
+// cluster's own portal when its origin can be named, and the same-origin /me
+// when it cannot (memql#4610).
+//
+// COMPUTED, NEVER SUPPLIED. This is the whole reason the first-party arm can
+// do without the relying-party validation the other arm runs: there is no
+// caller-named target to validate, because the only target is the one this
+// server derives from the cluster domain it was configured with.
+//
+// A three-line copy of component/identity/web's postLoginLanding rather than a
+// shared helper, for the reason buildClientCallback in complete.go already
+// records: web cannot import this package without closing a cycle. The policy
+// itself is not duplicated -- both call identity.DefaultPostLoginLanding, which
+// is the one place it lives.
+func (s *Server) postLoginLanding(ctx context.Context) string {
+	if s == nil {
+		return "/me"
+	}
+	domain := ""
+	if s.Store != nil {
+		if row, err := s.Store.ReadClusterSettings(ctx); err == nil && row != nil {
+			domain = row.ClusterDomain
+		}
+	}
+	return identity.DefaultPostLoginLanding(domain, s.Cfg.BaseURL)
 }
 
 // buildClientErrorCallback is buildClientCallback's refusal counterpart: the

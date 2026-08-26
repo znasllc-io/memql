@@ -10154,6 +10154,28 @@ func UserDisplayByIdBuild(args UserDisplayByIdArgs) string {
 	return b.String()
 }
 
+// UserInvitationByTokenHash -- Returns the kind="user" invitation whose tokenHash matches the argument. Zero or one result.
+//
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["userInvitationByTokenHash"] in generated_concepts.go).
+type UserInvitationByTokenHashArgs struct {
+	TokenHash string
+}
+
+// UserInvitationByTokenHash calls the engine query userInvitationByTokenHash.
+func (qc *QueryClient) UserInvitationByTokenHash(ctx context.Context, args UserInvitationByTokenHashArgs) (*Result, error) {
+	call := UserInvitationByTokenHashBuild(args)
+	return qc.executeNamed(ctx, "userInvitationByTokenHash", call)
+}
+
+func UserInvitationByTokenHashBuild(args UserInvitationByTokenHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query userInvitationByTokenHash(")
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.go).

@@ -940,6 +940,7 @@ export const BoundConcepts = {
   userCount: "v1:identity:user",
   userDefaults: "v1:platform:globalVariable",
   userDisplayById: "v1:identity:user",
+  userInvitationByTokenHash: "v1:identity:invitation",
   usersActiveInSpace: "v1:identity:user",
   validateOverride: "v1:healing:healedOverride",
   validateRequest: "v1:forge:request",
