@@ -8,6 +8,7 @@ import { RailProfileLink } from "../components/RailProfileLink";
 import { RailStatus } from "../components/RailStatus";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useAdminAccess } from "../admin/useAdminConsole";
+import { CommandPalette } from "../palette/CommandPalette";
 import { Outlet } from "react-router-dom";
 import {
   DESTINATIONS,
@@ -217,6 +218,11 @@ export function AppShell(): ReactNode {
           <Outlet />
         </main>
       </div>
+
+      {/* Cmd+K. Mounted at the shell so it is reachable from every routed
+          page, and rendering nothing until it is opened. It is what makes the
+          seven-item rail safe rather than lossy (memql#4656). */}
+      <CommandPalette />
     </div>
   );
 }

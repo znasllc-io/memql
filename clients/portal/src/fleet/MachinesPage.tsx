@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterDomainFor } from "../cluster/editorLink";
@@ -41,7 +42,13 @@ export function MachinesPage(): ReactNode {
   const state = useMachines();
   const now = useNow();
   const { config } = useAuth();
-  const [adding, setAdding] = useState(false);
+  // The command palette's "Add machine" lands here with the form already
+  // open (memql#4656). Read once, as the initial state, rather than watched:
+  // a person who then CLOSES the form must not have it reopened under them by
+  // a re-render, and the address they can still see says where they came
+  // from.
+  const [params] = useSearchParams();
+  const [adding, setAdding] = useState(() => params.get("add") === "1");
 
   const surface = fleetSurfaceById("machines");
   if (surface === undefined) return null;
