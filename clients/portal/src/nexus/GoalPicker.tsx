@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { Badge, Field, Select } from "../ui";
+import { toneForStatus } from "./status";
 import { nexusPath } from "./urls";
 import type { Goal } from "./useGoals";
 
@@ -40,6 +41,11 @@ export function GoalPicker({
           <option key={goal.id} value={goal.id}>
             {goal.running ? "* " : ""}
             {goal.goal === "" ? goal.id : goal.goal}
+            {/* A <option> renders no badge, so the status rides the text --
+                the incident behind the goals list was three FAILED goals all
+                reading as current in this control. Running keeps its "*",
+                succeeded stays clean; every other status is worth a word. */}
+            {goal.running || goal.status === "succeeded" ? "" : ` -- ${goal.status}`}
           </option>
         ))}
       </Select>
@@ -68,11 +74,14 @@ export function RecentGoals({
           className="flex h-control-sm items-center rounded border border-line bg-surface px-2 text-xs hover:bg-raised"
         >
           <span className="max-w-64 truncate align-middle">{goal.goal === "" ? goal.id : goal.goal}</span>
-          {goal.running ? (
+          {/* Every non-succeeded status gets its badge, not only running:
+              a failed goal in this strip looking identical to a finished one
+              is the same silence the goals list exists to end. */}
+          {goal.status === "succeeded" ? null : (
             <span className="ml-1.5 align-middle">
-              <Badge tone="warn">running</Badge>
+              <Badge tone={toneForStatus(goal.status)}>{goal.status}</Badge>
             </span>
-          ) : null}
+          )}
         </Link>
       ))}
     </nav>

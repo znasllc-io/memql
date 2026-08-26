@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ConstructsPage } from "./ConstructsPage";
 import { GoalLayout } from "./GoalLayout";
+import { GoalsPage } from "./GoalsPage";
 import { MapPage } from "./MapPage";
-import { NexusIndexPage } from "./NexusIndexPage";
 import { ReplayPage } from "./ReplayPage";
 
 // Nexus, mounted from the route table as a SPLAT (`nexus/*`) -- the same
@@ -14,9 +14,11 @@ import { ReplayPage } from "./ReplayPage";
 // route table, which in a repository worked by several sessions at once is
 // three chances to clobber somebody else's line.
 //
-// FIVE ADDRESSES, and the nesting is the decision:
+// SIX ADDRESSES, and the nesting is the decision:
 //
-//   /nexus                             the most recent goal (a redirect)
+//   /nexus                             your goals -- the list, statuses shown
+//                                      (was a redirect; GoalsPage's header
+//                                      says why that reversed)
 //   /nexus/:planId                     the Map
 //   /nexus/:planId/node/:nodeId        ...with that node's detail open
 //   /nexus/:planId/constructs          what the goal authored
@@ -37,7 +39,7 @@ import { ReplayPage } from "./ReplayPage";
 export function NexusRoutes(): ReactNode {
   return (
     <Routes>
-      <Route index element={<NexusIndexPage />} />
+      <Route index element={<GoalsPage />} />
       <Route path=":planId" element={<GoalLayout />}>
         <Route index element={<MapPage />} />
         <Route path="node/:nodeId" element={<MapPage />} />
