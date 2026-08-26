@@ -144,9 +144,20 @@ export function isClaimUrl(candidate: string): boolean {
 /**
  * Opens the magic link in the operator's browser.
  *
- * `asExternalUri` runs first and is not optional: without it the URL breaks
- * under Remote-SSH, Codespaces and devcontainers, where the extension host and
- * the browser are on different machines.
+ * `asExternalUri` runs first and is REQUIRED but NOT SUFFICIENT.
+ *
+ * This comment used to say it made the URL survive a remote host. It does not
+ * (memql#4623). `asExternalUri` tunnels LOOPBACK authorities only, and this URL
+ * is `https://identity.<domain>/...` -- for a local install, `identity.memql.localhost`,
+ * which is not a loopback authority and so comes back unchanged. RFC 6761 then
+ * makes the USER's browser resolve the whole `.localhost` family to its own
+ * 127.0.0.1, where the cluster is not. And even if it were forwarded, the
+ * mkcert CA was installed in the REMOTE's trust store, not theirs.
+ *
+ * So a local install under Remote-SSH succeeds and hands the operator a link
+ * that cannot connect. `refuseLocalInstallOnRemoteHost` (install/remoteHost.ts)
+ * is the gate; this function is left able to open any link it is given, because
+ * a link to a REACHABLE cluster is fine from anywhere.
  */
 export async function openClaimLink(url: string, deps: ClaimDeps): Promise<void> {
   if (!isClaimUrl(url)) {

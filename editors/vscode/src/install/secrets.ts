@@ -272,18 +272,37 @@ export function maskHomePath(text: string, home: string): string {
 /**
  * Text as a human surface may show it: home masked, credentials scrubbed.
  *
- * The credential patterns are the two families this product actually mints or
- * collects -- provider keys (`sk-...`) and MemQL credentials (`mql_pat_`,
- * `mql_wkr_`, `mql_rec_`, `mql_enr_`, and any future `mql_*_` sibling). This
- * is NOT a general secret detector, for `looksLikeProviderKey`'s reason: a
- * heuristic wide enough to catch everything also eats the ordinary paths and
- * ids an operator is reading the text FOR. Anything else a subprocess echoes
- * is bounded by the channel being local output, not a file or a wire.
+ * The credential patterns are the families this product actually mints,
+ * collects or carries -- provider keys (`sk-...`), MemQL credentials
+ * (`mql_pat_`, `mql_wkr_`, `mql_rec_`, `mql_enr_`, and any future `mql_*_`
+ * sibling), and since memql#4625 the two shapes an OAuth session travels in: a
+ * JWT and an `Authorization:` bearer.
+ *
+ * THE TOKEN RULES WERE ADDED BEFORE ANYTHING NEEDED THEM, deliberately. No
+ * path the memql#4601 audit could find puts an access or refresh token into an
+ * error message or the output channel, so the protection until now was
+ * "nothing puts one there" rather than "anything that does gets stripped". The
+ * first is a property of today's call sites and the second is a property of
+ * this function; only one of them survives somebody adding a call site.
+ *
+ * This is still NOT a general secret detector, for `looksLikeProviderKey`'s
+ * reason: a heuristic wide enough to catch everything also eats the ordinary
+ * paths and ids an operator is reading the text FOR. The JWT rule is anchored
+ * on `eyJ` followed by a dot, which is base64url `{"` and then a segment
+ * boundary -- specific enough not to eat identifiers.
  */
 export function redactForDisplay(text: string, home: string): string {
   return maskHomePath(text, home)
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, SCRUBBED)
-    .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]{8,}/g, SCRUBBED);
+    .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]{8,}/g, SCRUBBED)
+    // A JWT: header segment, then at least one more segment. Access tokens and
+    // id tokens both look like this.
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?/g, SCRUBBED)
+    // A bearer of ANY shape, which is what covers an opaque refresh token --
+    // it has no recognisable form of its own, so the only thing that can be
+    // matched is the header carrying it.
+    .replace(/\b(Authorization\s*:\s*)?(Bearer|Operator|Guest|Enrolment)\s+\S+/gi,
+      (_m, prefix: string | undefined, scheme: string) => `${prefix ?? ""}${scheme} ${SCRUBBED}`);
 }
 
 /**

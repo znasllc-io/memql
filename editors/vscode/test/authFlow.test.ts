@@ -16,6 +16,7 @@ import { isAuthFlowError } from "../src/auth/errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps } from "../src/auth/flow.js";
 import { codeChallengeS256 } from "../src/auth/pkce.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
+import { OAUTH_METADATA_PATH } from "../src/auth/discovery.js";
 
 const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
@@ -39,19 +40,64 @@ interface FakeIdentity {
   fetch: (url: string, init: HttpRequestInit) => Promise<HttpResponseLike>;
   calls: Array<{ url: string; body: Record<string, unknown> }>;
   urls(): string[];
+  /** The RFC 8414 pre-flight GETs, kept apart from `urls()` (memql#4624). */
+  discoveryUrls(): string[];
 }
 
 interface FakeIdentityOptions {
   tokenStatus?: number;
   tokenBody?: unknown;
+  /** Override fields of the published RFC 8414 document (memql#4624). */
+  metadata?: Partial<Record<string, unknown>>;
+}
+
+/** The document a MemQL cluster publishes, matching
+ *  component/identity/oauth_metadata.go. */
+function oauthMetadata(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    issuer: ISSUER,
+    authorization_endpoint: `${ISSUER}/authorize`,
+    token_endpoint: `${ISSUER}/oauth/token`,
+    device_authorization_endpoint: `${ISSUER}/device/code`,
+    jwks_uri: `${ISSUER}/.well-known/jwks.json`,
+    response_types_supported: ["code"],
+    grant_types_supported: [
+      "authorization_code",
+      "refresh_token",
+      "urn:ietf:params:oauth:grant-type:device_code",
+    ],
+    code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+    ...overrides,
+  };
 }
 
 function identity(options: FakeIdentityOptions = {}): FakeIdentity {
   const calls: FakeIdentity["calls"] = [];
+  const discovery: string[] = [];
   return {
     calls,
+    discoveryUrls: () => discovery,
     urls: () => calls.map((c) => c.url),
     fetch: async (url, init) => {
+      // The RFC 8414 pre-flight (memql#4624). Answered here so the fake is a
+      // CLUSTER rather than a token endpoint -- the flow asks where the
+      // endpoints are before it opens a browser, which is the whole point of
+      // the pre-flight, and a fake that cannot answer it is not a cluster.
+      if (url.endsWith(OAUTH_METADATA_PATH)) {
+        // Recorded SEPARATELY from `calls` (memql#4624). `urls()` answers "what
+        // credential-bearing requests did the extension make", which is what
+        // the /register assertions and the client_id assertions are about.
+        // Folding an unauthenticated discovery GET into it would change the
+        // meaning of every one of those without changing what they were
+        // written to protect.
+        discovery.push(url);
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(oauthMetadata(options.metadata)),
+        };
+      }
       calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
       // ONE endpoint, deliberately: /register is not among the requests this
       // extension may make any more (memql#4517), so a stray call to it shows
@@ -178,7 +224,18 @@ test("the authorization URL is a PKCE S256 code request against this flow's own 
   assert.notEqual(redirect.port, "");
 });
 
-test("the URL is opened THROUGH asExternalUri, so a remote host tunnels", async () => {
+// THE NAME OF THIS TEST WAS WRONG, and the wrongness was the whole of
+// memql#4623. asExternalUri tunnels LOOPBACK authorities, and it is applied
+// here to the AUTHORIZE url -- an `https://identity...` URL, which comes back
+// unchanged. No tunnel is created for the callback port by this, and the
+// redirect_uri never passes through it at all. So "so a remote host tunnels"
+// pinned an invariant that did not hold, in the one place somebody checking
+// would have looked.
+//
+// What it actually protects is real and worth keeping: the flow opens the URL
+// asExternalUri RETURNED rather than the raw one. The remote case is covered by
+// its own tests below, against the vscode:// callback that does work.
+test("the URL is opened THROUGH asExternalUri rather than raw", async () => {
   const net = identity();
   const ui = browser(goodCallback, "https://tunnel.example.dev/open?target=");
 
@@ -482,11 +539,21 @@ test("browserUnavailable fails fast rather than sitting out the callback deadlin
 // against a throwing fetch at all. undici's TypeError carries the real reason
 // in `.cause`, so the assertion is that the reason reaches the sentence an
 // operator reads -- not merely that the flow rejected.
+//
+// THE KIND CHANGED IN memql#4624, deliberately. The pre-flight now runs before
+// the browser opens, so an unreachable host is caught there rather than at the
+// token exchange -- which is the improvement, not a regression: the user
+// previously waited out a 600-second callback deadline first. `registrationFailed`
+// is the kind deviceCode.ts already uses for the same situation (a network
+// failure before any credential exists, retryable the moment the server is
+// willing). What this test was WRITTEN to protect is unchanged and still
+// asserted: the cause in `.cause` reaches the sentence.
 test("a transport failure names the cause, not just \"fetch failed\"", async () => {
   const ui = browser();
   const net: FakeIdentity = {
     calls: [],
     urls: () => [],
+    discoveryUrls: () => [],
     fetch: async () => {
       const cause = new Error("getaddrinfo ENOTFOUND identity.memql.localhost");
       (cause as { code?: string }).code = "ENOTFOUND";
@@ -500,7 +567,7 @@ test("a transport failure names the cause, not just \"fetch failed\"", async () 
     () => runAuthorizationFlow(cluster(), deps(net, ui)),
     (err: unknown) => {
       assert.ok(isAuthFlowError(err));
-      assert.equal(err.kind, "exchangeRejected");
+      assert.equal(err.kind, "registrationFailed");
       assert.match(err.message, /ENOTFOUND/);
       assert.match(err.message, /identity\.memql\.localhost/);
       return true;

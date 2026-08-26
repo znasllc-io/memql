@@ -31,6 +31,7 @@ type firstPartyClientContract struct {
 	ClientId          string   `json:"clientId"`
 	ClientName        string   `json:"clientName"`
 	RedirectURI       string   `json:"redirectURI"`
+	RedirectURIVSCode string   `json:"redirectURIVSCode"`
 	MinRole           string   `json:"minRole"`
 	AcceptedCallbacks []string `json:"acceptedCallbacks"`
 	RejectedCallbacks []string `json:"rejectedCallbacks"`
@@ -67,8 +68,24 @@ func TestFirstPartyClientContract_RegistryMatchesTheFixture(t *testing.T) {
 	if entry.Name != c.ClientName {
 		t.Errorf("Name = %q, fixture says %q", entry.Name, c.ClientName)
 	}
-	if len(entry.RedirectURIs) != 1 || entry.RedirectURIs[0] != c.RedirectURI {
-		t.Errorf("RedirectURIs = %v, fixture says [%q]", entry.RedirectURIs, c.RedirectURI)
+	// BOTH redirects, in fixture order (memql#4623). Which one the editor uses
+	// is a property of WHERE it runs -- loopback locally, the vscode:// URI
+	// under Remote-SSH, Codespaces or a dev container -- so the cluster has to
+	// accept either. A registry carrying only the loopback one is the state in
+	// which remote sign-in silently never completes.
+	wantRedirects := []string{c.RedirectURI, c.RedirectURIVSCode}
+	if len(entry.RedirectURIs) != len(wantRedirects) {
+		t.Errorf("RedirectURIs = %v, fixture says %v", entry.RedirectURIs, wantRedirects)
+	} else {
+		for i, want := range wantRedirects {
+			if entry.RedirectURIs[i] != want {
+				t.Errorf("RedirectURIs[%d] = %q, fixture says %q", i, entry.RedirectURIs[i], want)
+			}
+		}
+	}
+	if BuiltinRedirectVSCodeURI != c.RedirectURIVSCode {
+		t.Errorf("BuiltinRedirectVSCodeURI = %q, fixture says %q",
+			BuiltinRedirectVSCodeURI, c.RedirectURIVSCode)
 	}
 
 	var declared auth.Role

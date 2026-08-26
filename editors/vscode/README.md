@@ -296,10 +296,15 @@ secret storage.
 
 **Signing in needs nothing configured on either side.** Every identity node
 carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
-**MemQL: Sign In** works against a cluster on the day it is installed. It opens
-your browser and catches the callback on a loopback port; when this host cannot
-do that -- Remote-SSH, a dev container, a machine with no browser -- it falls
-back automatically to a short code you approve on another device. Nothing is
+**MemQL: Sign In** works against a cluster on the day it is installed.
+
+On a local editor it opens your browser and catches the callback on a loopback
+port. Under **Remote-SSH, Codespaces or a dev container** it uses a
+`vscode://` callback instead, which your own VS Code client resolves and
+forwards to the extension across the remote boundary -- a loopback port would be
+bound on the *server*, while your browser redirects to *your* machine, where
+nothing is listening. On a machine with **no browser at all** it falls back to a
+short code you approve on another device. Nothing is
 registered with the cluster at any point, and the `clientId` field in
 `clusters.yaml` is an override you will usually not set.
 

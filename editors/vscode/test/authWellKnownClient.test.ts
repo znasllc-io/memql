@@ -22,6 +22,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { HttpRequestInit, HttpResponseLike } from "../src/connection/credentials.js";
+import { OAUTH_METADATA_PATH } from "../src/auth/discovery.js";
 import { runAuthorizationFlow } from "../src/auth/flow.js";
 import { runDeviceCodeFlow } from "../src/auth/deviceCode.js";
 import {
@@ -85,8 +86,26 @@ function recorder(): RequestLog {
     urls,
     registerCalls: () => urls.filter((u) => new URL(u).pathname === "/register").length,
     fetch: async (url) => {
-      urls.push(url);
       const path = new URL(url).pathname;
+      // The RFC 8414 pre-flight (memql#4624). NOT pushed onto `urls`, because
+      // this fake's whole assertion is "which requests may this extension make"
+      // and that list is about credential-bearing calls -- an unauthenticated
+      // discovery GET is not the thing /register was banned for.
+      if (path === OAUTH_METADATA_PATH) {
+        return json(200, {
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/oauth/token`,
+          device_authorization_endpoint: `${ISSUER}/device/code`,
+          grant_types_supported: [
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:device_code",
+          ],
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      urls.push(url);
       if (path === "/device/code") {
         return json(200, {
           device_code: "dc-1",

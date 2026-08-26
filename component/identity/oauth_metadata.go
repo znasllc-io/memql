@@ -70,6 +70,7 @@ func OAuthServerMetadataHandler(cfg Config) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
+		setDiscoveryCORS(w)
 		_ = json.NewEncoder(w).Encode(doc)
 	})
 }

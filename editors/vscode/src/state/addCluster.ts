@@ -305,6 +305,29 @@ export function connectDomainProblem(domain: string): string | undefined {
       "This form registers a cluster reachable over the network."
     );
   }
+
+  // A FRONT-DOOR HOST IS NOT A DOMAIN (memql#4624).
+  //
+  // The field wants `example.com`; the thing an operator has in front of them
+  // is usually a URL they were sent, so `api.example.com` gets pasted. Nothing
+  // caught it: the form composed `api.api.example.com:443`, the reachability
+  // probe failed with a generic "no answer within 10s", the operator clicked
+  // "Save anyway" -- which the failed state offers -- and sign-in dead-ended
+  // much later at an identity host that never existed.
+  //
+  // Refused BY NAME for connectDomainProblem's own stated reason: this is a
+  // decision the form can make with certainty, and prose in the hint is advice.
+  // The role set is the generated one (component/frontdoor), so a host that is
+  // one of MemQL's own single labels under a domain is exactly the mistake.
+  const frontDoorLabel = /^(api|identity|mcp|portal)\.(.+\..+)$/.exec(bare);
+  if (frontDoorLabel !== null) {
+    const role = frontDoorLabel[1];
+    const domainPart = frontDoorLabel[2];
+    return (
+      `That looks like the ${role === "api" ? "API" : role} host, not the domain. ` +
+      `Enter "${domainPart}" -- MemQL composes ${role}.${domainPart} itself.`
+    );
+  }
   return undefined;
 }
 

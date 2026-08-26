@@ -56,6 +56,7 @@ import type {
   CredentialFailureReason,
   CredentialSource,
 } from "../connection/credentials.js";
+import type { RevocationOutcome } from "./revoke.js";
 import { errorText } from "./errors.js";
 
 /**
@@ -157,7 +158,17 @@ export class ClusterCredentialStore {
 
   async writeExpiry(clusterName: string, expiresAtEpochSeconds: number): Promise<void> {
     if (this.secrets === undefined) return;
-    if (!Number.isFinite(expiresAtEpochSeconds) || expiresAtEpochSeconds <= 0) return;
+    // NO LIFETIME REPORTED MEANS DELETE, NOT "LEAVE WHAT WAS THERE" (memql#4625).
+    //
+    // This used to return early, so a re-sign-in that reported no lifetime left
+    // the PREVIOUS sign-in's expiry secret in place -- a stale timestamp
+    // describing a token that no longer exists. Benign for a JWT, whose own
+    // `exp` wins (connection/credentials.ts), and wrong for an opaque token,
+    // which is then judged expired and refreshed on every single connect.
+    if (!Number.isFinite(expiresAtEpochSeconds) || expiresAtEpochSeconds <= 0) {
+      await this.remove(accessTokenExpirySecretKey(clusterName));
+      return;
+    }
     const stored = await this.write(
       accessTokenExpirySecretKey(clusterName),
       String(Math.floor(expiresAtEpochSeconds)),
@@ -333,10 +344,49 @@ export async function persistSignIn(
 export async function signOut(
   deps: CredentialStoreDeps,
   clusterName: string,
-): Promise<void> {
-  await new ClusterCredentialStore(deps.secrets).clear(clusterName);
+  revoke?: SessionRevoker,
+): Promise<RevocationOutcome> {
+  // REVOKE FIRST, CLEAR REGARDLESS (memql#4625).
+  //
+  // The refresh token has to be read BEFORE the local clear, because the clear
+  // is what destroys the only copy this extension holds. And the clear has to
+  // happen whatever the revocation did: refusing to sign out of an unreachable
+  // cluster would leave the credential in SecretStorage as well as live on the
+  // server, which is strictly worse than the bug being fixed.
+  //
+  // So the outcome is RETURNED rather than acted on here. What it changes is
+  // what the user is told -- `signed out of "x"` was true about this editor and
+  // false about the cluster, and for 30 days nothing distinguished the two.
+  const store = new ClusterCredentialStore(deps.secrets);
+  let outcome: RevocationOutcome = { kind: "nothingToRevoke" };
+  if (revoke !== undefined) {
+    let refreshToken: string | undefined;
+    try {
+      refreshToken = await store.readRefreshToken(clusterName);
+    } catch {
+      // A locked or absent keyring is a normal state. Nothing to revoke that
+      // we can reach, and the local clear below still runs.
+      refreshToken = undefined;
+    }
+    outcome = await revoke(clusterName, refreshToken);
+  }
+
+  await store.clear(clusterName);
   await deps.writeCluster({ name: clusterName, token: "", refreshToken: "" });
+  return outcome;
 }
+
+/**
+ * SessionRevoker ends the cluster-side session, given whatever refresh token
+ * was held. Injected rather than imported so `signOut` stays testable without a
+ * network, and so the extension host owns the issuer lookup.
+ *
+ * It must never throw -- see revoke.ts.
+ */
+export type SessionRevoker = (
+  clusterName: string,
+  refreshToken: string | undefined,
+) => Promise<RevocationOutcome>;
 
 /**
  * renameClusterCredentials moves a cluster's secrets when it is renamed.

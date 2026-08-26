@@ -28,6 +28,7 @@
 // through every caller.
 
 import type { ClusterConfig } from "../clusters/model.js";
+import type { RevocationOutcome } from "./revoke.js";
 import type { ConnectionErrorReason } from "../connection/manager.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
 import { isAuthFlowError, type AuthFlowErrorKind } from "./errors.js";
@@ -62,7 +63,9 @@ export interface SignInCredentials {
  */
 export interface SignInTokenStore {
   persistSignIn(clusterName: string, credentials: SignInCredentials): Promise<void>;
-  signOut(clusterName: string): Promise<void>;
+  /** Returns what happened to the CLUSTER-side session (memql#4625): the
+   *  local clear always succeeds, and the outcome is what the user is told. */
+  signOut(clusterName: string): Promise<RevocationOutcome>;
 }
 
 /** Runs the browser flow. Bound to runAuthorizationFlow by the adapter layer. */

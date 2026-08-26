@@ -57,8 +57,30 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
+		setDiscoveryCORS(w)
 		_ = json.NewEncoder(w).Encode(doc)
 	})
+}
+
+// setDiscoveryCORS makes the two PUBLIC discovery documents readable from a
+// browser (memql#4624).
+//
+// Both are unauthenticated, carry no secrets, and exist to be read by clients
+// that have not authenticated yet -- that is the whole point of discovery. With
+// no CORS header they are readable from Node `fetch` and NOT from a webview or
+// any browser-based client, which is a limit nothing about them justifies: the
+// VS Code add-cluster panel is a webview, and a portal or a third-party console
+// doing pre-flight is the same shape.
+//
+// `*` rather than an origin allowlist, and credentials deliberately NOT
+// allowed: a wildcard origin and `Access-Control-Allow-Credentials` are
+// mutually exclusive by spec, and no cookie or bearer belongs on a request for
+// a public document anyway. So a browser may READ these two and may not use
+// them to make an authenticated call, which is exactly the intended surface.
+func setDiscoveryCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "accept, content-type")
 }
 
 // DeriveGRPCEndpoint resolves the gRPC host:port a client should dial.

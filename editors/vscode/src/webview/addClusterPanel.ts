@@ -28,6 +28,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
+import { localInstallRefusal } from "../install/remoteHost.js";
+
 import {
   escapeHtml,
   renderInstallSteps,
@@ -516,7 +518,27 @@ export class AddClusterPanel {
     presence: ClusterPresence,
     deps: AddClusterDeps,
     initialAction?: AddClusterAction,
-  ): AddClusterPanel {
+  ): AddClusterPanel | undefined {
+    // A LOCAL INSTALL CANNOT BE DRIVEN FROM A REMOTE WINDOW (memql#4623).
+    //
+    // Refused here, at the single entry point every route goes through, rather
+    // than at each command -- and refused rather than worked around, because
+    // there is no client-side fix: the cluster's `.localhost` credential links
+    // resolve to the USER's machine, and its mkcert CA is trusted only on the
+    // remote. The install SUCCEEDED before this gate, and then every credential
+    // button opened a tab that could not connect, which reads as "MemQL is
+    // broken" rather than "this combination is not supported".
+    //
+    // CONNECTING is untouched, and that distinction is the point: a reachable
+    // https cluster signs in fine from a remote window since the vscode://
+    // callback (auth/uriCallback.ts).
+    if (initialAction === "install" || initialAction === "installGuided") {
+      const refusal = localInstallRefusal({ remoteName: vscode.env.remoteName });
+      if (refusal !== undefined) {
+        void vscode.window.showWarningMessage(refusal, { modal: true });
+        return undefined;
+      }
+    }
     const existing = AddClusterPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);

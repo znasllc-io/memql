@@ -63,6 +63,13 @@ import {
   passkeyAlreadyEnrolledMessage,
   passkeyOfferMessage,
 } from './auth/passkeyOffer.js';
+import { deliverUriCallback } from './auth/uriCallback.js';
+import {
+  describeRevocation,
+  revocationNeedsAttention,
+  revokeRefreshToken,
+  type RevocationOutcome,
+} from './auth/revoke.js';
 import {
   ClusterCredentialStore,
   persistSignIn,
@@ -102,8 +109,8 @@ import {
   memqlThemeFor,
   shouldOfferMemqlTheme,
 } from './theme/themeOffer.js';
-import { CredentialResolver } from './connection/credentials.js';
-import { composeEndpointFromDomain } from './connection/endpoint.js';
+import { CredentialResolver, defaultFetch } from './connection/credentials.js';
+import { composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
 import { ConnectionManager, type ConnectionState } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -375,6 +382,15 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   context.subscriptions.push(
     window.registerUriHandler({
       handleUri: (uri) => {
+        // THE SIGN-IN CALLBACK COMES BACK THROUGH HERE UNDER A REMOTE HOST
+        // (memql#4623). It is checked FIRST and returns when consumed: a
+        // sign-in callback is not a portal handoff, and handing one to
+        // handleOpenUri would report a handoff failure for a uri that was
+        // exactly right. deliverUriCallback answers false for anything that is
+        // not a callback it is waiting on, so the handoff path is untouched.
+        if (deliverUriCallback(uri.query, uri.path)) {
+          return;
+        }
         void handleOpenUri(uri).catch(noteHandoffFailure);
       },
     })
@@ -1767,7 +1783,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // working untouched.
         clientId: '',
       }),
-    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
+    // memql#4625: sign-out ends the session on the CLUSTER, not only here.
+    // The issuer comes from the same derivation a refresh exchange uses, so a
+    // cluster this extension can refresh against is one it can revoke against.
+    signOut: (clusterName) =>
+      signOutCredentials(storeDeps, clusterName, async (name, refreshToken) => {
+        const registry = await readClustersFileSafe(clustersPath);
+        // A malformed file means no issuer can be named, which the outcome
+        // reports as `noIssuer` -- the local clear still runs.
+        const cluster = registry.ok
+          ? registry.file.clusters.find((c) => c.name === name)
+          : undefined;
+        return revokeRefreshToken({
+          issuer: cluster === undefined ? undefined : identityBaseUrlFor(cluster),
+          refreshToken,
+          fetch: defaultFetch,
+        });
+      }),
   };
 
   // sweepOrphanedCredentials deletes SecretStorage entries whose cluster is no
@@ -2221,8 +2253,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
+      let revocation: RevocationOutcome;
       try {
-        await signInStore.signOut(target.cluster.name);
+        revocation = await signInStore.signOut(target.cluster.name);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `signing out of "${target.cluster.name}" failed`, detail);
@@ -2240,9 +2273,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await connections?.disconnect();
       }
       clustersTree.refresh();
-      window.showInformationMessage(
-        `MemQL: signed out of "${target.cluster.name}". Run "MemQL: Sign In" to authenticate again.`
-      );
+      // WHAT THE USER IS TOLD DEPENDS ON WHAT ACTUALLY HAPPENED (memql#4625).
+      // `signed out of "x"` reads as "the session is over", and until the
+      // revocation call existed that was false for 30 days. A warning rather
+      // than an info toast when the cluster-side session survived, because the
+      // user has to do something about it.
+      const message = `MemQL: ${describeRevocation(target.cluster.name, revocation)} ` +
+        'Run "MemQL: Sign In" to authenticate again.';
+      if (revocationNeedsAttention(revocation)) {
+        void window.showWarningMessage(message);
+      } else {
+        void window.showInformationMessage(message);
+      }
     }),
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
     // remote cluster -- for an operator who may have no cluster at all, or one
@@ -3964,6 +4006,13 @@ async function runSignInToCluster(
                 signal,
                 onUserCode,
                 resolveExternalUri,
+                // WHERE THIS EXTENSION HOST RUNS DECIDES THE CALLBACK ROUTE
+                // (memql#4623). `remoteName` is set under Remote-SSH,
+                // Codespaces and dev containers -- exactly the cases where the
+                // browser opens on a different machine from the one a loopback
+                // listener binds on. Read here, where `vscode` is available,
+                // and passed down: auth/flow.ts stays free of vscode imports.
+                isRemote: env.remoteName !== undefined,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
                 onFallback: (reason) => {
                   fallbackFired = true;

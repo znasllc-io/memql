@@ -304,3 +304,43 @@ test("an Advanced endpoint is what gets probed, not the one it replaced", () => 
     "the sign-in host still follows the DOMAIN, which is what names it",
   );
 });
+
+// A FRONT-DOOR HOST PASTED AS A DOMAIN (memql#4624).
+//
+// The field wants `example.com`; what the operator has in front of them is
+// usually a URL they were sent. Nothing caught it: the form composed
+// `api.api.example.com:443`, the probe failed with a generic "no answer within
+// 10s", the operator took the "Save anyway" the failed state offers, and
+// sign-in dead-ended much later at an identity host that never existed.
+test("a front-door host pasted into the domain field is refused by name", () => {
+  const cases: Array<[string, RegExp]> = [
+    ["api.example.com", /API host/],
+    ["identity.example.com", /identity host/],
+    ["mcp.example.com", /mcp host/],
+    ["portal.example.com", /portal host/],
+    ["API.Example.com", /API host/],
+  ];
+  for (const [input, shape] of cases) {
+    const problem = connectDomainProblem(input);
+    assert.ok(problem !== undefined, `${input} was accepted; it composes api.${input}:443`);
+    assert.match(problem, shape);
+    // The message has to name the value to type, not merely say "wrong".
+    assert.match(problem, /example\.com/);
+  }
+});
+
+test("an ordinary subdomain is not mistaken for a front-door host", () => {
+  // Only MemQL's OWN role labels are the mistake. A cluster genuinely served at
+  // a subdomain is a legitimate answer, and refusing it would be worse than the
+  // bug: it would block a correct value.
+  for (const domain of [
+    "memql.example.com",
+    "cluster.example.com",
+    "apiary.example.com", // starts with "api" but is not the api label
+    "identity-lab.example.com",
+  ]) {
+    assert.equal(connectDomainProblem(domain), undefined, `${domain} must be accepted`);
+  }
+  // And a bare role label with no domain under it is not a front-door host.
+  assert.equal(connectDomainProblem("api.internal"), undefined);
+});

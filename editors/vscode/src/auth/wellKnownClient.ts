@@ -68,6 +68,25 @@ export const WELL_KNOWN_CLIENT_ID = "memql-vscode";
 export const WELL_KNOWN_REDIRECT_URI = `http://${LOOPBACK_HOST}${CALLBACK_PATH}`;
 
 /**
+ * The PRIVATE-USE URI SCHEME redirect (RFC 8252 §7.1), used when this extension
+ * host is somewhere the user's browser cannot reach by loopback -- Remote-SSH,
+ * Codespaces, a dev container (memql#4623).
+ *
+ * The loopback listener binds 127.0.0.1 on the machine the extension host runs
+ * on; under a remote host that is the SERVER, while the browser opens on the
+ * user's machine. A vscode:// URI is resolved by the user's own VS Code client
+ * and forwarded to this extension across the remote boundary, over the
+ * connection that already exists.
+ *
+ * MATCHED EXACTLY, unlike the loopback one: RFC 8252 §7.3's any-port exception
+ * is for loopback, and a private-use scheme has no port. The authority is
+ * `publisher.name` from package.json, so it must equal
+ * identity.BuiltinRedirectVSCodeURI byte for byte -- both are asserted against
+ * test/fixtures/first-party-client-contract.json.
+ */
+export const WELL_KNOWN_REDIRECT_URI_VSCODE = "vscode://znasllc.memql/callback";
+
+/**
  * resolveClientId returns the client_id to authorize with.
  *
  * `clusters.yaml`'s `clientId` stays as an explicit OPERATOR OVERRIDE, which is

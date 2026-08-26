@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 
 import type { ClusterConfig } from "../src/clusters/model.js";
 import type { HttpRequestInit, HttpResponseLike } from "../src/connection/credentials.js";
+import { OAUTH_METADATA_PATH } from "../src/auth/discovery.js";
 import {
   DEVICE_GRANT_TYPE,
   MAX_POLL_INTERVAL_SECONDS,
@@ -99,6 +100,24 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
     tokenCalls: () => calls.filter((c) => c.url.endsWith("/oauth/token")).map((c) => c.body),
     deviceRequests: () => calls.filter((c) => c.url.endsWith("/device/code")).map((c) => c.body),
     fetch: async (url, init) => {
+      // The RFC 8414 pre-flight the browser flow now runs before opening a
+      // browser (memql#4624). Answered here, and NOT recorded in `calls`, so
+      // the `urls()` / `tokenCalls()` assertions keep meaning "the
+      // credential-bearing requests this extension made".
+      if (url.endsWith(OAUTH_METADATA_PATH)) {
+        return reply(200, {
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/oauth/token`,
+          device_authorization_endpoint: `${ISSUER}/device/code`,
+          grant_types_supported: [
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:device_code",
+          ],
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
       calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
 
       // /register has no branch here on purpose: it is not a request this

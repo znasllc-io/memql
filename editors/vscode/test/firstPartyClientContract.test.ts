@@ -25,12 +25,14 @@ import * as path from "node:path";
 import {
   WELL_KNOWN_CLIENT_ID,
   WELL_KNOWN_REDIRECT_URI,
+  WELL_KNOWN_REDIRECT_URI_VSCODE,
 } from "../src/auth/wellKnownClient.js";
 
 interface Contract {
   clientId: string;
   clientName: string;
   redirectURI: string;
+  redirectURIVSCode: string;
   minRole: string;
   acceptedCallbacks: string[];
   rejectedCallbacks: string[];
@@ -66,6 +68,24 @@ test("the extension's redirect URI equals the one identity registers", () => {
   assert.equal(WELL_KNOWN_REDIRECT_URI, contract.redirectURI);
 });
 
+test("the extension's vscode:// redirect equals the one identity registers", () => {
+  // The SECOND registered redirect (memql#4623), used under Remote-SSH,
+  // Codespaces and dev containers. Matched EXACTLY by identity -- RFC 8252
+  // §7.3's any-port exception is for loopback and a private-use scheme has no
+  // port -- so a one-character drift here strands remote sign-in entirely.
+  assert.equal(WELL_KNOWN_REDIRECT_URI_VSCODE, contract.redirectURIVSCode);
+  const parsed = new URL(contract.redirectURIVSCode);
+  assert.equal(parsed.protocol, "vscode:");
+  assert.equal(parsed.pathname, "/callback");
+  // The authority is `publisher.name` from package.json. Asserted against the
+  // manifest rather than restated, because renaming either half is exactly the
+  // change that would silently break this.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(repoRoot(), "editors", "vscode", "package.json"), "utf8"),
+  ) as { publisher: string; name: string };
+  assert.equal(parsed.hostname, `${manifest.publisher}.${manifest.name}`.toLowerCase());
+});
+
 test("the contract's redirect URI is portless", () => {
   // RFC 8252 §7.3's any-port exception applies ONLY to a registered loopback
   // URI with no explicit port. Adding one here would opt the built-in back
@@ -82,12 +102,19 @@ test("every callback the fixture says is accepted is one this extension could pr
   // are the shapes this extension actually produces: the loopback listener
   // varies the port and nothing else, so scheme, host and path must equal the
   // registered URI on every one of them.
-  const registered = new URL(contract.redirectURI);
+  // TWO registered shapes since memql#4623: the loopback one, whose port
+  // varies, and the vscode:// one, which is fixed. Each accepted entry must
+  // match ONE of them on scheme, host and path.
+  const registered = [contract.redirectURI, contract.redirectURIVSCode].map((u) => new URL(u));
   for (const uri of contract.acceptedCallbacks) {
     const candidate = new URL(uri);
-    assert.equal(candidate.protocol, registered.protocol, uri);
-    assert.equal(candidate.hostname, registered.hostname, uri);
-    assert.equal(candidate.pathname, registered.pathname, uri);
+    const matches = registered.some(
+      (r) =>
+        candidate.protocol === r.protocol &&
+        candidate.hostname === r.hostname &&
+        candidate.pathname === r.pathname,
+    );
+    assert.ok(matches, `${uri} is not a shape this extension presents`);
   }
 });
 
@@ -95,13 +122,15 @@ test("every callback the fixture says is rejected differs in more than the port"
   // The complement, and the reason it is worth asserting: a "rejected" entry
   // that differed only by port would be testing that the any-port exception
   // does NOT work, which is the opposite of the contract.
-  const registered = new URL(contract.redirectURI);
+  const registered = [contract.redirectURI, contract.redirectURIVSCode].map((u) => new URL(u));
   for (const uri of contract.rejectedCallbacks) {
     const candidate = new URL(uri);
-    const differs =
-      candidate.protocol !== registered.protocol ||
-      candidate.hostname !== registered.hostname ||
-      candidate.pathname !== registered.pathname;
-    assert.ok(differs, `${uri} differs only by port, which the matcher must ACCEPT`);
+    const differsFromAll = registered.every(
+      (r) =>
+        candidate.protocol !== r.protocol ||
+        candidate.hostname !== r.hostname ||
+        candidate.pathname !== r.pathname,
+    );
+    assert.ok(differsFromAll, `${uri} differs only by port, which the matcher must ACCEPT`);
   }
 });

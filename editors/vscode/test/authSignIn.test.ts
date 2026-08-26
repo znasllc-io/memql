@@ -68,6 +68,7 @@ function recorder(
       },
       signOut: async (clusterName) => {
         rec.signedOut.push(clusterName);
+        return { kind: "nothingToRevoke" as const };
       },
     },
   };

@@ -31,6 +31,20 @@
 // reach. Skipping it produces a sign-in that works on a laptop and silently
 // fails for every remote user.
 //
+// IT IS ALSO NOT SUFFICIENT, AND THIS COMMENT USED TO CLAIM IT WAS (memql#4623).
+// asExternalUri tunnels LOOPBACK authorities, and it was applied to the
+// AUTHORIZE url -- an `https://identity...` URL, which comes back unchanged, so
+// no tunnel was ever created for the callback port. The redirect_uri, which is
+// the loopback one, was never passed through it at all. A remote user therefore
+// got a browser on their machine redirecting to THEIR 127.0.0.1, where nothing
+// listens; the bind succeeded and openExternal succeeded, so neither fallback
+// trigger fired and they watched the whole 600-second deadline.
+//
+// The fix is a different REDIRECT rather than a rewritten one: `isRemote`
+// selects the registered `vscode://` callback (uriCallback.ts), which the
+// user's own VS Code client forwards across the remote boundary over the
+// connection that already exists.
+//
 // -----------------------------------------------------------------------------
 // WHY state IS CHECKED BEFORE THE EXCHANGE, NOT AFTER
 // -----------------------------------------------------------------------------
@@ -52,14 +66,22 @@ import {
   type HttpResponseLike,
 } from "../connection/credentials.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
+import { awaitUriCallback as awaitUriCallbackImpl } from "./uriCallback.js";
+import {
+  describeDiscoveryFailure,
+  discoverAuthorizationServer,
+  supportsAuthorizationCodeWithS256,
+} from "./discovery.js";
 import { AuthFlowError, errorText } from "./errors.js";
 import {
+  DEFAULT_CALLBACK_TIMEOUT_MS,
   startLoopbackListener,
+  type CallbackParams,
   type LoopbackListener,
   type LoopbackOptions,
 } from "./loopback.js";
 import { generatePkcePair, generateState } from "./pkce.js";
-import { resolveClientId } from "./wellKnownClient.js";
+import { resolveClientId, WELL_KNOWN_REDIRECT_URI_VSCODE } from "./wellKnownClient.js";
 
 /** Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL string. */
 export type ExternalUriResolver = (url: string) => string | Promise<string>;
@@ -99,6 +121,31 @@ export interface AuthFlowDeps {
   signal?: AbortSignal;
   /** Injected clock, so the computed expiry is assertable. Defaults to Date.now. */
   now?: () => number;
+  /**
+   * True when this extension host runs somewhere the user's browser cannot
+   * reach by loopback -- Remote-SSH, Codespaces, a dev container (memql#4623).
+   *
+   * `vscode.env.remoteName !== undefined` is the editor's own answer, and it is
+   * INJECTED rather than read here so this module stays free of `vscode`
+   * imports and so the remote path is testable without one.
+   */
+  isRemote?: boolean;
+  /**
+   * Arms the vscode:// callback waiter. Defaults to the real one; injected so
+   * the remote path can be driven under bare `node --test`.
+   */
+  awaitUriCallback?: typeof awaitUriCallbackImpl;
+}
+
+/**
+ * What the flow needs of a callback route, whichever transport provides it.
+ * The loopback listener carries more (host, port); nothing after the choice
+ * looks at those.
+ */
+interface CallbackTransport {
+  readonly redirectUri: string;
+  waitForCallback(): Promise<CallbackParams>;
+  close(): void;
 }
 
 export interface AuthFlowTokens {
@@ -144,6 +191,49 @@ export async function runAuthorizationFlow(
   const now = deps.now ?? (() => Date.now());
   const startListener = deps.startListener ?? startLoopbackListener;
 
+  // PRE-FLIGHT BEFORE THE BROWSER, NOT AFTER THE DEADLINE (memql#4624).
+  //
+  // This used to open a browser and park for 600 seconds without ever asking
+  // whether the issuer exists. A wrong domain, an unreachable host, a bad
+  // certificate, an old cluster and a host that is not MemQL at all ALL cost
+  // the full deadline, and were then blamed on the browser: "No sign-in
+  // callback arrived within 600 seconds. The browser page was never completed,
+  // or it could not reach 127.0.0.1" -- wrong in every one of those cases.
+  //
+  // The sharpest one is a cluster predating the memql-vscode built-in client:
+  // /authorize renders an HTML 400 "Unknown client" page that is never
+  // redirected, so there is no callback AND no OAuth error envelope. Silence,
+  // for ten minutes. One GET answers it in a round trip, which is what the
+  // device path has always done (deviceCode.ts).
+  //
+  // The metadata is also USED, not merely checked -- the endpoints come from
+  // the document rather than from hard-coded paths, so an identity service that
+  // is not at `identity.<domain>` works instead of being unrecoverable without
+  // hand-editing clusters.yaml.
+  const discovery = await discoverAuthorizationServer({ baseUrl: issuer, fetch: doFetch });
+  if (discovery.kind !== "ok") {
+    // THE KIND SAYS WHICH OF TWO THINGS IS WRONG, because callers branch on it.
+    // `unreachable` is a NETWORK failure before any credential exists, which is
+    // the situation deviceCode.ts already calls `registrationFailed` and
+    // describes as retryable the moment the server is willing. The other two
+    // mean the host answered and is not a MemQL identity service, which no
+    // retry fixes.
+    throw new AuthFlowError(
+      discovery.kind === "unreachable" ? "registrationFailed" : "misconfigured",
+      describeDiscoveryFailure(issuer, discovery),
+    );
+  }
+  const metadata = discovery.metadata;
+  if (!supportsAuthorizationCodeWithS256(metadata)) {
+    // Named here rather than discovered as a silent non-callback later. The
+    // device grant is the fallback, and the caller already offers it.
+    throw new AuthFlowError(
+      "misconfigured",
+      `${metadata.issuer} does not advertise the authorization-code grant with S256 PKCE, ` +
+        `which is the only browser sign-in this extension performs.`,
+    );
+  }
+
   // A local constant lookup, not a network call: identity carries this client
   // compiled in (wellKnownClient.ts). The step that used to be the first thing
   // to fail -- POST /register against a cluster with DCR off -- is gone.
@@ -152,10 +242,33 @@ export async function runAuthorizationFlow(
   const pkce = generatePkcePair();
   const state = generateState();
 
-  const listener = await startListener({ timeoutMs: deps.timeoutMs, signal: deps.signal });
+  // WHICH CALLBACK TRANSPORT, AND WHY IT IS A PROPERTY OF WHERE WE RUN (memql#4623).
+  //
+  // A loopback listener binds 127.0.0.1 on the machine THIS extension host runs
+  // on. Under Remote-SSH, Codespaces or a dev container that is the server,
+  // while the browser opens on the USER's machine and redirects to THEIR
+  // loopback, where nothing is listening. Nothing detected it: the bind
+  // succeeded, openExternal succeeded, and `timeout` stopped being a fallback
+  // trigger in memql#4600 -- so the user waited out the full deadline and was
+  // then told the browser could not reach 127.0.0.1, which was true and useless.
+  //
+  // The vscode:// redirect is resolved by the user's own VS Code client and
+  // forwarded to this extension across the remote boundary, over the connection
+  // that already exists. Both URIs are registered on the cluster
+  // (component/identity/builtin_clients.go), so the choice is entirely ours.
+  const listener: CallbackTransport = deps.isRemote === true
+    ? (deps.awaitUriCallback ?? awaitUriCallbackImpl)({
+        redirectUri: WELL_KNOWN_REDIRECT_URI_VSCODE,
+        state,
+        timeoutMs: deps.timeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS,
+        signal: deps.signal,
+      })
+    : await startListener({ timeoutMs: deps.timeoutMs, signal: deps.signal });
   try {
     const authorizeUrl = buildAuthorizeUrl({
-      issuer,
+      // The cluster's own answer, not a composed path.
+      issuer: metadata.issuer,
+      authorizationEndpoint: metadata.authorizationEndpoint,
       clientId,
       redirectUri: listener.redirectUri,
       state,
@@ -216,6 +329,16 @@ export async function runAuthorizationFlow(
 
 interface AuthorizeUrlParts {
   issuer: string;
+  /**
+   * The authorization endpoint AS THE CLUSTER PUBLISHES IT (memql#4624).
+   *
+   * Optional so the composed `${issuer}/authorize` remains the answer when a
+   * caller has no metadata -- which keeps every existing test and the device
+   * path unchanged. When discovery ran, this is what it returned, and taking it
+   * is what lets an identity service that is not at `identity.<domain>`, or one
+   * that mounts /authorize elsewhere, work at all.
+   */
+  authorizationEndpoint?: string;
   clientId: string;
   redirectUri: string;
   state: string;
@@ -225,7 +348,8 @@ interface AuthorizeUrlParts {
 
 /** buildAuthorizeUrl composes the OAuth 2.1 code-flow authorization URL. */
 export function buildAuthorizeUrl(parts: AuthorizeUrlParts): string {
-  const url = new URL(`${parts.issuer}/authorize`);
+  const endpoint = (parts.authorizationEndpoint ?? "").trim();
+  const url = new URL(endpoint === "" ? `${parts.issuer}/authorize` : endpoint);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", parts.clientId);
   // The PORT-BEARING redirect URI. identity's RFC 8252 matcher reconciles it
