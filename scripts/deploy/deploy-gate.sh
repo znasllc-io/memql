@@ -40,7 +40,7 @@ function main() {
     local provider workdir dry gate
     provider="$(cap_param provider "azure")"
     workdir="$(cap_param workdir "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require workdir "$workdir"
 
     cap_result_set provider "$provider"

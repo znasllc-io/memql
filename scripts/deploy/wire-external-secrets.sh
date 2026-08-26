@@ -64,7 +64,7 @@ ESO_CLIENT_ID="$(cap_param esoClientId "")"
 NAMESPACE="$(cap_param namespace "memql")"
 SERVICE_ACCOUNT="$(cap_param serviceAccount "external-secrets-kv")"
 REPO_ROOT="$(cap_param repoRoot "$(cd "${SCRIPT_DIR}/../.." && pwd)")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 readonly EXTERNALSECRETS_FILE="deploy/external-secrets/externalsecret-memql.yaml"
 readonly UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'

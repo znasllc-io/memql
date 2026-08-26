@@ -140,7 +140,7 @@ function main() {
     PROFILE="$(cap_param profile "")"
     DB_PRESET="$(cap_param dbPreset "")"
     local ha dry out_root
-    ha="$(cap_param ha "false")"
+    ha="$(cap_bool_str ha false)"
     ENGINE_TAG="$(cap_param engineTag "latest")"
     DB_IMAGE_TAG="$(cap_param dbImageTag "16")"
     BACKUP_DESTINATION="$(cap_param backupDestination "")"
@@ -149,7 +149,7 @@ function main() {
     REPO_URL="$(cap_param repoUrl "https://github.com/znasllc-io/memql.git")"
     TARGET_REVISION="$(cap_param targetRevision "main")"
     out_root="$(cap_param outputRoot "$REPO_ROOT")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
 
     cap_require tenant   "$TENANT"
     cap_require domain   "$DOMAIN"

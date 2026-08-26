@@ -97,8 +97,8 @@ DB_HOST="$(cap_param dbHost "")"
 DB_NAME="$(cap_param dbName "memql")"
 DB_USER="$(cap_param dbUser "memql")"
 DB_SSLMODE="$(cap_param dbSslMode "require")"
-SKIP_CLUSTER="$(cap_param skipCluster "false")"
-DRY_RUN="$(cap_param dryRun "false")"
+SKIP_CLUSTER="$(cap_bool_str skipCluster false)"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 : "${DB_HOST:=memql-db-rw.${NAMESPACE}.svc.cluster.local}"
 

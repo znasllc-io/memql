@@ -37,7 +37,7 @@ function main() {
     local workdir ref dry
     workdir="$(cap_param workdir "")"
     ref="$(cap_param ref "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require workdir "$workdir"
     cap_require ref "$ref"
 

@@ -37,7 +37,7 @@ function main() {
     nodeType="$(cap_param nodeType "")"
     version="$(cap_param version "")"
     workdir="$(cap_param workdir "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require nodeType "$nodeType"
     cap_require version "$version"
     cap_require workdir "$workdir"

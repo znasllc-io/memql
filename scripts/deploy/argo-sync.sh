@@ -32,7 +32,7 @@ function main() {
     local app revision dry
     app="$(cap_param app "")"
     revision="$(cap_param revision "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require app "$app"
     cap_require revision "$revision"
 

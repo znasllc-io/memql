@@ -36,7 +36,7 @@ function main() {
     image="$(cap_param image "")"
     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
     version="$(cap_param version "dev")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require cluster "$cluster"
     if [ -z "$nodeType" ] && [ -z "$image" ]; then
         cap_fail 2 "one of nodeType or image is required"

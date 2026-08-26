@@ -187,6 +187,13 @@ const undeclared3217SeedSweepReason = "memql#3217 -- system-actor startup sweep,
 // They postdate the seed and name their own issue rather than carrying the
 // grandfather marker, for the same reason as the pairs above.
 //
+// `oidcIdentityBySubject` (memql#4611) joins them for the same reason and is
+// the plainest pre-actor case of the three: it runs INSIDE the OIDC callback,
+// between verifying an id token and deciding whether the person it names may be
+// admitted at all -- so there is not merely no AccessContext, there is not yet a
+// decision that this person has an account here. The row it returns holds no
+// secret: the `oidc` variant stores the provider's assertion, not a credential.
+//
 // They are two different shapes and both end up here for the one reason the
 // whole list exists: `v1:identity:identity` declares no `@rowAuthz` tier.
 // `passkeysForSelf` filters `userId==actor.userId`, so it is the same
@@ -196,6 +203,8 @@ const undeclared3217SeedSweepReason = "memql#3217 -- system-actor startup sweep,
 // no `actor.userId` in existence for a tier to compare against, let alone a
 // correct one. Both are classified in the memql#3349 credential-read inventory.
 const undeclared3406PasskeyReason = "memql#3406 -- passkey reads (one self-scoped, one pre-actor); v1:identity:identity still declares no tier"
+
+const undeclared4611OidcReason = "memql#4611 -- upstream-provider link lookup, pre-actor: it runs inside the OIDC callback before this person is known to have an account here, so there is no actor.userId to compare against; v1:identity:identity still declares no tier"
 
 // undeclared3410DeviceCodeReason covers the two reads over
 // `v1:identity:deviceCode`, the RFC 8628 device-authorization row added by
@@ -726,6 +735,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"patIdentitiesForSelf":        {"v1:identity:identity", undeclared3178SelfScopedReason},
 	"patIdentitiesForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
 	"patIdentityById":             {"v1:identity:identity", undeclaredGrandfatherReason},
+	"oidcIdentityBySubject":       {"v1:identity:identity", undeclared4611OidcReason},
 	"passkeyByCredentialId":       {"v1:identity:identity", undeclared3406PasskeyReason},
 	"passkeysForSelf":             {"v1:identity:identity", undeclared3406PasskeyReason},
 	"recoveryKeyByHash":           {"v1:identity:identity", undeclared3964RecoveryKeyReason},

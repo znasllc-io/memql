@@ -33,7 +33,7 @@ function main() {
     local status deploymentId dry webhook
     status="$(cap_param status "")"
     deploymentId="$(cap_param deploymentId "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     webhook="${MEMQL_DEPLOY_NOTIFY_WEBHOOK:-}"
     cap_require status "$status"
     cap_require deploymentId "$deploymentId"

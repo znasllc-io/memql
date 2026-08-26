@@ -75,7 +75,7 @@ REPO="$(cap_param repo "znasllc-io/memql")"
 NOTES="$(cap_param notes "")"
 TARGET_SHA="$(cap_param targetSha "")"
 POLL_SECONDS="$(cap_param pollSeconds "180")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 TAG=""
 BARE=""

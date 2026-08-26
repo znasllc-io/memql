@@ -4118,6 +4118,34 @@ func OAuthClientCORSGrantsBuild(args OAuthClientCORSGrantsArgs) string {
 	return "query oAuthClientCORSGrants()"
 }
 
+// OidcIdentityBySubject -- Resolve the upstream-provider link for one (issuer, subject) pair. Empty when this person has never signed in through the provider on this cluster.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["oidcIdentityBySubject"] in generated_concepts.go).
+type OidcIdentityBySubjectArgs struct {
+	Issuer  string
+	Subject string
+}
+
+// OidcIdentityBySubject calls the engine query oidcIdentityBySubject.
+func (qc *QueryClient) OidcIdentityBySubject(ctx context.Context, args OidcIdentityBySubjectArgs) (*Result, error) {
+	call := OidcIdentityBySubjectBuild(args)
+	return qc.executeNamed(ctx, "oidcIdentityBySubject", call)
+}
+
+func OidcIdentityBySubjectBuild(args OidcIdentityBySubjectArgs) string {
+	var b strings.Builder
+	b.WriteString("query oidcIdentityBySubject(")
+	b.WriteString("issuer: ")
+	b.WriteString(quoteMemQL(args.Issuer))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subject: ")
+	b.WriteString(quoteMemQL(args.Subject))
+	b.WriteString(")")
+	return b.String()
+}
+
 // OrdersByCompany -- One company's orders in a window -- the B2B account view.
 //
 // Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersByCompany"] in generated_concepts.go).

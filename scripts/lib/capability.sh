@@ -309,7 +309,7 @@ function _cap_declared_params_list() {
     printf '%s' "${out:-<none>}"
 }
 
-# cap_parse_flags "$@" -- parses --name=value and --name (bare -> "1") into
+# cap_parse_flags "$@" -- parses --name=value and --name (bare -> "true") into
 # CAP_ARG_<NAME> globals. --help / --print-spec are handled by cap_handle_meta.
 # Unknown flags are rejected (exit 2) to keep the param surface honest: a flag
 # is known only when the script declared it via cap_spec_param (or it is one
@@ -336,7 +336,12 @@ function cap_parse_flags() {
                     cap_fail 2 "unknown flag: --${name} (declared params: $(_cap_declared_params_list))"
                 fi
                 upper="$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')"
-                printf -v "CAP_ARG_${upper}" '%s' "1"
+                # A bare flag resolves to "true", NOT "1" (#4629/#4631). It used
+                # to be "1" while every consumer compared against "true", so
+                # `--dryRun` skipped the guard and ran the destructive branch --
+                # a safety flag failing OPEN, which is the one direction it must
+                # never fail. Read booleans with cap_bool, never by comparison.
+                printf -v "CAP_ARG_${upper}" '%s' "true"
                 shift ;;
             *) cap_fail 2 "unexpected positional argument: $1" ;;
         esac
@@ -351,6 +356,52 @@ function cap_flag() {
     upper="$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
     var="CAP_ARG_${upper}"
     printf '%s' "${!var:-}"
+}
+
+# cap_bool <name> [default] -- resolves a BOOLEAN param. This is the only
+# sanctioned way to read one; a hand-rolled comparison is what made a bare
+# --dryRun fail open (#4629), because the parser and the consumer disagreed on
+# the spelling of true.
+#
+# Returns 0 (shell true) for the bare flag, "true", "1", "yes", "y" or "on";
+# returns 1 (shell false) for "", "false", "0", "no", "n" or "off". Matching is
+# case-insensitive. "1" stays truthy so a scripted caller outside this tree
+# that still passes --dryRun=1 keeps working.
+#
+# Anything else is REFUSED with exit 2. cap_bool cannot know a flag's polarity
+# -- --dryRun is safe when true, --purgeKeyVault is safe when false -- so there
+# is no default it could pick for a typo that fails closed in both directions.
+# Refusing is the only answer that is safe whichever branch is the dangerous
+# one, and it turns `--dryRun=ture` into an error instead of a live deploy.
+#
+# Usage:  if cap_bool dryRun; then ... fi
+#         cap_bool skipMonitoring "false" || install_monitoring
+function cap_bool() {
+    local name="$1" default="${2:-false}" raw lower
+    raw="$(cap_param "$name" "$default")"
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+        true|1|yes|y|on)     return 0 ;;
+        ""|false|0|no|n|off) return 1 ;;
+        *) cap_fail 2 "--${name} takes a boolean (true/false); got '${raw}'" ;;
+    esac
+}
+
+# cap_bool_str <name> [default] -- the VALUE form of cap_bool: prints exactly
+# "true" or "false", never any other spelling, and refuses a non-boolean with
+# exit 2 the same way.
+#
+# Use it where a boolean is needed as a string rather than as a branch -- a
+# compound condition, or a field in the result envelope:
+#
+#     DRY_RUN="$(cap_bool_str dryRun false)"
+#
+# Assigning through this instead of cap_param is what makes an existing
+# `[[ "$DRY_RUN" == "true" ]]` correct rather than accidental: the variable can
+# only ever hold one of two canonical values, so no comparison can miss. Prefer
+# `if cap_bool dryRun; then` when a branch is all that is wanted.
+function cap_bool_str() {
+    if cap_bool "$1" "${2:-false}"; then printf 'true'; else printf 'false'; fi
 }
 
 # cap_require <name> <value> -- fails (exit 2) when a required param is empty.

@@ -82,10 +82,10 @@ function main() {
     local tenant confirm skip_backup timeout argons dry
     tenant="$(cap_param tenant "")"
     confirm="$(cap_param confirm "")"
-    skip_backup="$(cap_param skipBackup "false")"
+    skip_backup="$(cap_bool_str skipBackup false)"
     timeout="$(cap_param backupTimeout "900")"
     argons="$(cap_param argocdNamespace "argocd")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require tenant "$tenant"
 
     # Refused (exit 3) rather than bad-param (exit 2): the parameters are

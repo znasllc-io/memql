@@ -36,6 +36,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/identity/oidc"
 )
 
 // ComponentName is the slog component label for log entries emitted
@@ -199,15 +201,28 @@ const (
 	// RegistrationModeWaitlist — users submit access requests; admin
 	// approves into invitations.
 	RegistrationModeWaitlist RegistrationMode = "waitlist"
+	// RegistrationModeDirectory — DIRECTORY MEMBERSHIP IS THE INVITATION
+	// (memql#4611). Nobody self-registers by email; a person who authenticates
+	// through the configured upstream provider is admitted, and everybody else
+	// is refused.
+	//
+	// This is the mode that removes the entire class of defect memql#4601
+	// exists to fix, by removing invitations from the path for internal staff
+	// -- and it is the only one whose gate is somebody ELSE'S system, which is
+	// exactly why it is a distinct mode rather than a flag on another. It also
+	// makes deprovisioning follow the directory: removing somebody there stops
+	// them signing in here, which no email-based mode can do.
+	RegistrationModeDirectory RegistrationMode = "directory"
 )
 
-// IsValid reports whether m is one of the four supported modes.
+// IsValid reports whether m is one of the supported modes.
 func (m RegistrationMode) IsValid() bool {
 	switch m {
 	case RegistrationModeOpen,
 		RegistrationModeDomainRestricted,
 		RegistrationModeInviteOnly,
-		RegistrationModeWaitlist:
+		RegistrationModeWaitlist,
+		RegistrationModeDirectory:
 		return true
 	}
 	return false
@@ -470,6 +485,15 @@ type Config struct {
 	// RegistrationMode == domain_restricted. Comma-separated.
 	// Env: MEMQL_IDENTITY_REGISTRATION_DOMAINS
 	RegistrationDomains []string
+
+	// OIDC is the UPSTREAM identity provider, when one is configured
+	// (memql#4611). Zero value means federation is off and every field is
+	// inert. See component/identity/oidc for the whole contract -- including
+	// the decision this epic required to be explicit: enabling a provider does
+	// NOT disable magic links or passkeys, `Exclusive` does, and even then the
+	// OWNER is exempt so a cluster whose IdP is unreachable is still
+	// recoverable through the owner recovery key (memql#3958).
+	OIDC oidc.Config
 
 	// InternalDomains is the cluster's "internal users" allowlist.
 	// Email-domain match flags v1:identity:user.internal=true.
@@ -769,6 +793,7 @@ func LoadConfigFromEnv() (Config, error) {
 	cfg.DeletionCooldown = envDurationDays("MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS", DefaultDeletionCooldownDays)
 
 	cfg.RegistrationMode = RegistrationMode(envString("MEMQL_IDENTITY_REGISTRATION_MODE", string(RegistrationModeOpen)))
+	cfg.OIDC = loadOIDCConfig()
 	cfg.RegistrationDomains = envStringList("MEMQL_IDENTITY_REGISTRATION_DOMAINS")
 	cfg.InternalDomains = envStringList("MEMQL_IDENTITY_INTERNAL_DOMAINS")
 	cfg.CORSAllowedOrigins = envStringList("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS")
@@ -841,7 +866,7 @@ func (c Config) Validate() error {
 	}
 
 	if !c.RegistrationMode.IsValid() {
-		return fmt.Errorf("MEMQL_IDENTITY_REGISTRATION_MODE %q is not one of: open, domain_restricted, invite_only, waitlist", c.RegistrationMode)
+		return fmt.Errorf("MEMQL_IDENTITY_REGISTRATION_MODE %q is not one of: open, domain_restricted, invite_only, waitlist, directory", c.RegistrationMode)
 	}
 
 	if c.RegistrationMode == RegistrationModeDomainRestricted && len(c.RegistrationDomains) == 0 {
@@ -1262,4 +1287,53 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// loadOIDCConfig reads the upstream provider from the environment
+// (memql#4611). Every key is optional; with MEMQL_IDENTITY_OIDC_ENABLED unset
+// the whole feature is inert and nothing else is consulted.
+func loadOIDCConfig() oidc.Config {
+	cfg := oidc.Config{
+		Enabled:      envBool("MEMQL_IDENTITY_OIDC_ENABLED", false),
+		DisplayName:  envString("MEMQL_IDENTITY_OIDC_DISPLAY_NAME", ""),
+		Issuer:       envString("MEMQL_IDENTITY_OIDC_ISSUER", ""),
+		TenantId:     envString("MEMQL_IDENTITY_OIDC_TENANT_ID", ""),
+		ClientID:     envString("MEMQL_IDENTITY_OIDC_CLIENT_ID", ""),
+		ClientSecret: envString("MEMQL_IDENTITY_OIDC_CLIENT_SECRET", ""),
+		GroupsClaim:  envString("MEMQL_IDENTITY_OIDC_GROUPS_CLAIM", ""),
+		Exclusive:    envBool("MEMQL_IDENTITY_OIDC_EXCLUSIVE", false),
+		DomainHint:   envString("MEMQL_IDENTITY_OIDC_DOMAIN_HINT", ""),
+	}
+	if raw := strings.TrimSpace(envString("MEMQL_IDENTITY_OIDC_SCOPES", "")); raw != "" {
+		cfg.Scopes = strings.FieldsFunc(raw, func(r rune) bool { return r == ' ' || r == ',' })
+	}
+	// A MAPPING THAT DOES NOT PARSE IS DROPPED HERE AND REFUSED BY Validate.
+	// Silently keeping a partial map would grant roles the operator did not
+	// write; leaving it empty makes Validate's group-map check fire, which
+	// names the problem at boot.
+	if raw := strings.TrimSpace(envString("MEMQL_IDENTITY_OIDC_GROUP_ROLES", "")); raw != "" {
+		m, err := oidc.ParseGroupRoleMap(raw, isClusterRole)
+		if err != nil {
+			// RECORDED, NOT DROPPED. A mapping that does not parse is one the
+			// operator believes is granting roles; starting with it silently
+			// absent would put everybody on the cluster default while the
+			// config says otherwise. Validate turns this into a refusal to
+			// boot, which reaches the person who can fix it.
+			cfg.GroupRolesError = err.Error()
+		}
+		cfg.GroupRoles = m
+	}
+	return cfg
+}
+
+// isClusterRole is the role vocabulary a group may map onto. Stated here rather
+// than imported from component/auth, which sits BELOW identity in the
+// dependency order -- the same reason oidc.GroupRoleMap takes rank as a
+// function. TestOIDCGroupRolesMatchTheClusterRoleSet keeps the two in step.
+func isClusterRole(role string) bool {
+	switch role {
+	case "owner", "admin", "developer", "writer", "reader":
+		return true
+	}
+	return false
 }

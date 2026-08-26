@@ -171,6 +171,18 @@ var credentialReadInventory = map[string]struct {
 			"there is no actor in existence -- the credential id is the only thing in the " +
 			"message that names a row."},
 
+	"oidcIdentityBySubject": {classPreActor,
+		"Upstream-provider link lookup (memql#4611). identity/store_oidc.go. Pre-actor in the " +
+			"plainest sense on this list: it runs INSIDE the OIDC callback, between verifying " +
+			"an id token and deciding whether the person it names may be admitted at all -- so " +
+			"there is not merely no AccessContext, there is not yet a decision that this person " +
+			"has an account. actor.userId is \"\" and scoping by it would match zero rows for " +
+			"the only caller that ever runs this. The (issuer, subject) pair in the verified " +
+			"token is the only thing in the request that names a row, exactly as a credential id " +
+			"is for passkeyByCredentialId. The row it returns holds NO SECRET either: the oidc " +
+			"variant stores the provider's assertion, not a credential, so possession of what it " +
+			"projects authenticates nobody."},
+
 	"recoveryKeyByHash": {classPreActor,
 		"Owner break-glass recovery-key lookup (memql#3964, @serverOnly). " +
 			"identity/recoverykey/store.go. Pre-actor in the same sense as patIdentityByKeyHash: " +
@@ -377,6 +389,13 @@ func TestCredentialPreActorReadsAreNamed(t *testing.T) {
 	want := []string{
 		"badgeByKeyHash",
 		"nodeTokenIdentityByBinding",
+		// memql#4611. The seventh, and the only one that resolves an identity
+		// asserted by SOMEBODY ELSE. The other six resolve a credential this
+		// cluster minted; this one resolves a link to a person a directory
+		// vouched for, inside the OIDC callback -- before there is a decision
+		// that they have an account here at all. Same conclusion for the same
+		// reason: there is no actor to compare against, so no tier can help.
+		"oidcIdentityBySubject",
 		"passkeyByCredentialId",
 		"patIdentityByKeyHash",
 		// memql#3964. The sixth member, and the one whose failure mode is the

@@ -52,9 +52,9 @@ function main() {
 
     local tenant include_db argons dry
     tenant="$(cap_param tenant "")"
-    include_db="$(cap_param includeDatabase "false")"
+    include_db="$(cap_bool_str includeDatabase false)"
     argons="$(cap_param argocdNamespace "argocd")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require tenant "$tenant"
 
     cap_result_set tenant "$tenant"

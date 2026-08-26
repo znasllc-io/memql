@@ -37,6 +37,8 @@ import (
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
+
+	"github.com/znasllc-io/memql/component/identity/oidc"
 )
 
 // Server bundles the dependencies the handlers need. Constructed once
@@ -155,6 +157,19 @@ type Server struct {
 	// badgeGrantLimiter is server-scoped rather than a package global.
 	corsGrants     *grantedOrigins
 	corsGrantsOnce sync.Once
+
+	// oidcOnce / oidcDisc hold the upstream provider's discovery cache
+	// (memql#4611). One per Server so a test gets its own, and lazily built so
+	// a cluster with no provider never allocates it.
+	oidcOnce sync.Once
+	oidcDisc *oidc.Discoverer
+
+	// OIDCLookup / OIDCSignIn are the upstream-federation seams (memql#4611).
+	// Nil on a cluster with no provider, and nil-safe: an unwired lookup reads
+	// as "nobody matched", so nothing is ever linked to a row that was not
+	// checked for.
+	OIDCLookup func(ctx context.Context, c oidc.Claims) oidc.LinkLookup
+	OIDCSignIn OIDCSignInHook
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -235,6 +250,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// (memql#4302). It renders a confirmation page rather than consuming a
 	// credential, and both muxes are served by ONE http.ServeMux -- so a
 	// registration left here would panic at boot rather than shadow.
+	// UPSTREAM SIGN-IN (memql#4611). Two documented HTTP exceptions of the kind
+	// the identity service already carries: the other party is a BROWSER
+	// performing an OAuth redirect, and there is no gRPC form of "the user was
+	// sent to Microsoft and came back". Both are GETs because that is what a
+	// redirect is; neither consumes anything before its state cookie is
+	// checked. Registered unconditionally and 404 when no provider is
+	// configured, so the route table does not vary with configuration.
+	mux.HandleFunc("GET /auth/oidc/start", wrap(s.handleOIDCStart))
+	mux.HandleFunc("GET /auth/oidc/callback", wrap(s.handleOIDCCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

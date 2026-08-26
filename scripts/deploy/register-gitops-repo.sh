@@ -78,7 +78,7 @@ GIT_USERNAME="$(cap_param username "git")"
 TOKEN_FILE="$(cap_param tokenFile "")"
 SSH_KEY_FILE="$(cap_param sshKeyFile "")"
 SECRET_NAME="$(cap_param secretName "")"
-DRY_RUN="$(cap_param dryRun "false")"
+DRY_RUN="$(cap_bool_str dryRun false)"
 
 WORK=""
 WROTE=""

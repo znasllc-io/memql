@@ -1,34 +1,18 @@
 package memql
 
 import (
-	"io"
-	"log/slog"
 	"reflect"
 	"testing"
-
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // loadedSchemaEngine builds a real engine with the full embedded DSL tree
 // loaded (concepts + functions), mirroring the cluster bootstrap. DB-free.
 func loadedSchemaEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	if registry == nil || len(registry.List()) == 0 {
-		t.Fatal("concept registry empty after LoadUnifiedConcepts; DSL tree did not load")
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("construct engine: %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init over the full DSL tree failed: %v", err)
-	}
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). Read-only, so
+	// sharing is safe; shared_dbless_engine_test.go names the tests that may
+	// not, and why.
+	return sharedDblessEngine(t)
 }
 
 // TestMCPSchemaSingleSourceOfTruth is the #1713 contract guard: for EVERY

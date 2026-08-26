@@ -218,3 +218,38 @@ spec:
   ports:
     - { name: node, port: 50058, targetPort: 50058 }
     - { name: grpc, port: 50051, targetPort: 50051 }
+---
+# THE BFF'S PodDisruptionBudget (memql#4634).
+#
+# `deploy/k8s/base` ships one of these beside the Deployment for every
+# user-facing node -- identity, agent, cognition, edge, planner, workbench,
+# voice. The bff had none, because the bff does not live in `base`: it comes
+# from THIS component, and the component shipped the Deployment alone. So every
+# install that composes it ran six protected user-facing nodes and one
+# unprotected one, and the unprotected one is the node the portal and every SPA
+# actually talk to.
+#
+# WHY THE LIVE CHECK MISSED IT. The downstream verification enumerated what it
+# FOUND -- "PDBs already exist for agent, cognition, edge, identity, planner,
+# workbench (and voice)" -- which is a true statement and also a list with bff
+# missing from it. A check that reports what it found rather than what it was
+# looking for reads as complete whichever way it comes out.
+#
+# minAvailable: 1 matches every sibling. At the 2 replicas base declares it
+# leaves one disruption allowed, which is what lets a node drain proceed; at 1
+# replica it allows none, which is correct and is why an entry install raises
+# replicas BEFORE node maintenance rather than during it
+# (docs/public/operate/instance-scale-and-upgrade.md).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bff
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bff

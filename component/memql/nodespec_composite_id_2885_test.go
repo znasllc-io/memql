@@ -3,8 +3,6 @@ package memql
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,16 +58,11 @@ func (s *fakeConceptStore) QueryMemoryNodes(_ context.Context, _ memorynodes.Que
 
 func nodeSpec2885Engine(t *testing.T) (*MemQLEngine, memorynodes.Registry) {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
-	}
-	registry := memorynodes.DefaultRegistry()
-	require.NotNil(t, registry, "concept registry must load")
-	eng, err := New(nil) // nil DB: nothing below this reaches the store
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(registry), "engine.Init over the full DSL tree")
-	return eng, registry
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). Read-only, so
+	// sharing is safe; shared_dbless_engine_test.go names the tests that may
+	// not, and why. The registry returned is the shared engine's own, which is
+	// the same object every private boot was re-deriving.
+	return sharedDblessEngine(t), memorynodes.DefaultRegistry()
 }
 
 func renderNodeSpecMutation(t *testing.T, eng *MemQLEngine, name string, args map[string]any) MutationNode {

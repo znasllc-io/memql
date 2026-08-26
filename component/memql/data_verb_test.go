@@ -1,14 +1,11 @@
 package memql
 
 import (
-	"io"
-	"log/slog"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // classifierEngine builds a DB-less engine carrying the full embedded DSL
@@ -16,22 +13,11 @@ import (
 // not a database -- see TestEngineInitLoadsFullDSL, which boots the same way.
 func classifierEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	if registry == nil || len(registry.List()) == 0 {
-		t.Fatal("concept registry empty after LoadUnifiedConcepts")
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("New(nil): %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init: %v", err)
-	}
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). This helper used
+	// to boot its own -- LoadUnifiedConcepts + New(nil) + Init, ~1.4s -- and
+	// every test calling it paid for an identical one. Read-only, so sharing is
+	// safe; see shared_dbless_engine_test.go for which tests may not.
+	return sharedDblessEngine(t)
 }
 
 // TestDataVerbFor classifies REAL constructs out of the shipped DSL tree --

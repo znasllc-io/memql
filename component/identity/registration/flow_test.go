@@ -132,3 +132,43 @@ func TestAnEmptyEmailIsRefusedWhateverIsPresented(t *testing.T) {
 		t.Error("an empty address was admitted")
 	}
 }
+
+// DIRECTORY MODE (memql#4611). Directory membership is the invitation, so the
+// EMAIL path -- which is what Decide serves -- has nothing to admit: arriving
+// here means somebody typed an address instead of using their organisation
+// account.
+func TestDirectoryModeRefusesTheEmailPath(t *testing.T) {
+	d, err := Decide(cfg(identity.RegistrationModeDirectory), "staff@example.com", nil)
+	if err == nil {
+		t.Fatal("directory mode admitted a self-registration by email")
+	}
+	if d.Action != ActionReject {
+		t.Errorf("action = %q, want reject", d.Action)
+	}
+	// The REASON is why this is its own mode rather than a flag on invite_only:
+	// there the answer is "ask an admin for an invitation", and here it is
+	// "sign in with your organisation account". Those are different
+	// instructions to a person who has one and does not know it applies.
+	if d.Reason != "directory_sign_in_required" {
+		t.Errorf("reason = %q, want directory_sign_in_required", d.Reason)
+	}
+	if d.Reason == "invite_only_no_invitation" {
+		t.Error("directory mode is reusing invite_only's reason, which sends the person to the wrong place")
+	}
+}
+
+// An invitation still overrides, and that matters: a federated cluster still
+// has to admit a contractor or an auditor who is not in the directory.
+func TestDirectoryModeStillHonoursAnInvitation(t *testing.T) {
+	invite := &Invitation{Email: "contractor@partner.example", Role: "reader"}
+	d, err := Decide(cfg(identity.RegistrationModeDirectory), "contractor@partner.example", invite)
+	if err != nil {
+		t.Fatalf("an invitation was refused under directory mode: %v", err)
+	}
+	if d.Action != ActionIssueMagicLink {
+		t.Errorf("action = %q, want issue_magic_link", d.Action)
+	}
+	if d.Role != "reader" {
+		t.Errorf("role = %q, want the inviter's choice", d.Role)
+	}
+}

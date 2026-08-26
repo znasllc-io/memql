@@ -15,27 +15,18 @@ package memql
 // arg-free, so that path must stay an unfiltered latest-per-id scan).
 
 import (
-	"io"
-	"log/slog"
 	"testing"
-
-	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 
 	"github.com/stretchr/testify/require"
 )
 
 func loadedStaleNodesEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
-	}
-	registry := memoryNodes.DefaultRegistry()
-	require.NotNil(t, registry)
-	eng, err := New(nil)
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(registry))
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). This helper used
+	// to boot its own -- LoadUnifiedConcepts + New(nil) + Init, ~1.4s -- and
+	// every test calling it paid for an identical one. Read-only, so sharing is
+	// safe; see shared_dbless_engine_test.go for which tests may not.
+	return sharedDblessEngine(t)
 }
 
 // TestQueryStaleClusterNodes_OlderThanPushdown: with olderThan supplied, the

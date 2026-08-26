@@ -4119,6 +4119,30 @@ QueryClient.prototype.oAuthClientCORSGrants = function (this: QueryClient, args:
   return this.executeNamed("oAuthClientCORSGrants", buildOAuthClientCORSGrants(args), opts);
 };
 
+/** Resolve the upstream-provider link for one (issuer, subject) pair. Empty when this person has never signed in through the provider on this cluster. */
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["oidcIdentityBySubject"] in generated_concepts.ts).
+export interface OidcIdentityBySubjectArgs {
+  issuer: string;
+  subject: string;
+}
+
+export function buildOidcIdentityBySubject(args: OidcIdentityBySubjectArgs): string {
+  const parts: string[] = [];
+  parts.push("issuer: " + renderMemQLValue(args.issuer));
+  parts.push("subject: " + renderMemQLValue(args.subject));
+  return "query oidcIdentityBySubject(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    oidcIdentityBySubject(args: OidcIdentityBySubjectArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.oidcIdentityBySubject = function (this: QueryClient, args: OidcIdentityBySubjectArgs = {} as OidcIdentityBySubjectArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("oidcIdentityBySubject", buildOidcIdentityBySubject(args), opts);
+};
+
 /** One company's orders in a window -- the B2B account view. */
 // Bound concept: v1:shopify:order (machine-readable: BoundConcepts["ordersByCompany"] in generated_concepts.ts).
 export interface OrdersByCompanyArgs {

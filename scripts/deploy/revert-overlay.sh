@@ -34,7 +34,7 @@ function main() {
     local overlayPath toDeploymentId dry
     overlayPath="$(cap_param overlayPath "")"
     toDeploymentId="$(cap_param toDeploymentId "")"
-    dry="$(cap_param dryRun "true")"
+    dry="$(cap_bool_str dryRun true)"
     cap_require overlayPath "$overlayPath"
     cap_require toDeploymentId "$toDeploymentId"
 

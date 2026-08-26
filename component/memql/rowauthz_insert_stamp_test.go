@@ -3,8 +3,6 @@ package memql
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,18 +46,10 @@ import (
 // store -- which is where a DB-free engine stops.
 func stampProbeEngine(t *testing.T) *MemQLEngine {
 	t.Helper()
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("New(nil): %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
-		t.Fatalf("engine.Init: %v", err)
-	}
-	return eng
+	// BORROWS THE PACKAGE-SHARED db-less engine (memql#4569). Read-only, so
+	// sharing is safe; shared_dbless_engine_test.go names the tests that may
+	// not, and why.
+	return sharedDblessEngine(t)
 }
 
 // The two values of MutationNode.FromTemplate, named at the call site so
