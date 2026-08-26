@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
@@ -75,7 +76,14 @@ func (s *Store) CreateOidcLink(ctx context.Context, identityId, userId, label, i
 		`mutation createOidcIdentity(identityId: %s, userId: %s, label: %s, issuer: %s, subject: %s, email: %s)`,
 		dslJSONString(identityId), dslJSONString(userId), dslJSONString(label),
 		dslJSONString(issuer), dslJSONString(subject), dslJSONString(email))
-	if _, err := s.executeAndExtractInternal(ctx, query); err != nil {
+	// INTERNAL ORIGIN, STAMPED AT THE CALL. createOidcIdentity is @serverOnly,
+	// and the engine refuses such a construct unless the context carries
+	// internal origin -- so without this the call cannot succeed, on any
+	// cluster, ever. Named here rather than left to executeAndExtractInternal's
+	// wrapper because TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin
+	// reads the FILE, and a stamp it cannot see is a stamp the next reader
+	// cannot see either.
+	if _, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query); err != nil {
 		return fmt.Errorf("identity.store: create oidc link: %w", err)
 	}
 	return nil

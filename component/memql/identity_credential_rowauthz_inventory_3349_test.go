@@ -389,6 +389,13 @@ func TestCredentialPreActorReadsAreNamed(t *testing.T) {
 	want := []string{
 		"badgeByKeyHash",
 		"nodeTokenIdentityByBinding",
+		// memql#4611. The seventh, and the only one that resolves an identity
+		// asserted by SOMEBODY ELSE. The other six resolve a credential this
+		// cluster minted; this one resolves a link to a person a directory
+		// vouched for, inside the OIDC callback -- before there is a decision
+		// that they have an account here at all. Same conclusion for the same
+		// reason: there is no actor to compare against, so no tier can help.
+		"oidcIdentityBySubject",
 		"passkeyByCredentialId",
 		"patIdentityByKeyHash",
 		// memql#3964. The sixth member, and the one whose failure mode is the
