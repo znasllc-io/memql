@@ -114,10 +114,15 @@ export function MachinesPage(): ReactNode {
             <Skeleton variant="rows" rows={3} />
           ) : empty ? (
             <EmptyState
+              // The exemplar first-run empty (memql#4651). `firstRun` is true
+              // only for YOUR OWN list: "no machine has ever registered" on
+              // the all-cluster scope is an operator's observation about a
+              // cluster, not the product introducing itself to a person.
+              firstRun={state.scope !== "all"}
               statement={
                 state.scope === "all"
                   ? "No machine has ever registered against this cluster."
-                  : "You have no machines. Mint a token above and run the command it gives you on the computer you want an agent to be able to reach."
+                  : "You have no machines yet. Add one to run work on a computer you own -- mint a token above and run the command it gives you on that computer."
               }
             />
           ) : (

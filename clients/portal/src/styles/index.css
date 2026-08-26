@@ -116,13 +116,159 @@
     filter: grayscale(0.6);
   }
 
+  /* ------------------------------------------------------------------
+   * The Constellation's assemble (memql#4651).
+   *
+   * Nodes scale in staggered, then the edges draw once, then it is STILL.
+   * There is no loop and no breathing: breathing is reserved for genuinely
+   * live things, and spending it on decoration is what would stop those
+   * states meaning anything.
+   *
+   * THE RESTING STATE IS THE FINAL FRAME. Every rule below animates FROM a
+   * hidden state TO the element's natural one, so removing the animation --
+   * which is exactly what reduced motion does -- leaves the assembled mark
+   * rather than a blank box. `backwards` fill is what holds the from-state
+   * during the stagger delay.
+   *
+   * Timing is the brand's motion duration, multiplied. Reduced motion zeroes
+   * that token (brand/tokens.css), so these already collapse to nothing
+   * before the media query below is even consulted -- the query is the belt
+   * to that braces, and it also covers the dash offset, which is a property
+   * rather than a duration.
+   */
+  @keyframes constellation-node {
+    from {
+      transform: scale(0);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* 20 covers the longest edge in the trace (~15.8 units on the 24-unit
+     viewBox), so one dasharray draws every line fully. */
+  @keyframes constellation-edge {
+    from {
+      stroke-dashoffset: 20;
+      opacity: 0;
+    }
+    to {
+      stroke-dashoffset: 0;
+      opacity: 1;
+    }
+  }
+
+  .constellation[data-animate="true"] .cn-node {
+    /* An SVG circle's transform-origin is the user-space origin without
+       these two, so `scale(0)` would fly it to the top-left corner instead
+       of shrinking it in place. */
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: constellation-node calc(var(--memql-motion-dur) * 2)
+      var(--memql-motion-ease) backwards;
+  }
+
+  .constellation[data-animate="true"] .cn-n1 { animation-delay: 0ms; }
+  .constellation[data-animate="true"] .cn-n2 { animation-delay: 40ms; }
+  .constellation[data-animate="true"] .cn-n3 { animation-delay: 80ms; }
+  .constellation[data-animate="true"] .cn-n4 { animation-delay: 120ms; }
+  .constellation[data-animate="true"] .cn-n5 { animation-delay: 160ms; }
+  .constellation[data-animate="true"] .cn-n6 { animation-delay: 200ms; }
+  .constellation[data-animate="true"] .cn-n7 { animation-delay: 240ms; }
+  .constellation[data-animate="true"] .cn-n8 { animation-delay: 280ms; }
+  .constellation[data-animate="true"] .cn-n9 { animation-delay: 320ms; }
+
+  /* The edges start after the last node lands: a graph draws its edges
+     between things that are already there. */
+  .constellation[data-animate="true"] .cn-edges line {
+    stroke-dasharray: 20;
+    animation: constellation-edge calc(var(--memql-motion-dur) * 3)
+      var(--memql-motion-ease) 360ms backwards;
+  }
+
+  /* ------------------------------------------------------------------
+   * The staggered first paint (design E): a list rising into place the
+   * first time it renders. Capped at twelve rows by the class set -- past
+   * that a stagger stops reading as one gesture and starts reading as the
+   * page being slow -- and the thirteenth row onward simply arrives.
+   *
+   * `row-wash` above is the LIVE arrival (a row that showed up while you
+   * were looking at the list) and stays exactly as it was. These are
+   * different events and they deliberately look different.
+   */
+  @keyframes list-rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .list-rise > * {
+    animation: list-rise calc(var(--memql-motion-dur) * 1.5) var(--memql-motion-ease)
+      backwards;
+  }
+  .list-rise > *:nth-child(1) { animation-delay: 0ms; }
+  .list-rise > *:nth-child(2) { animation-delay: 20ms; }
+  .list-rise > *:nth-child(3) { animation-delay: 40ms; }
+  .list-rise > *:nth-child(4) { animation-delay: 60ms; }
+  .list-rise > *:nth-child(5) { animation-delay: 80ms; }
+  .list-rise > *:nth-child(6) { animation-delay: 100ms; }
+  .list-rise > *:nth-child(7) { animation-delay: 120ms; }
+  .list-rise > *:nth-child(8) { animation-delay: 140ms; }
+  .list-rise > *:nth-child(9) { animation-delay: 160ms; }
+  .list-rise > *:nth-child(10) { animation-delay: 180ms; }
+  .list-rise > *:nth-child(11) { animation-delay: 200ms; }
+  .list-rise > *:nth-child(12) { animation-delay: 220ms; }
+  .list-rise > *:nth-child(n + 13) { animation: none; }
+
+  /* ------------------------------------------------------------------
+   * The dialog settle (design E): fade plus a 0.98 -> 1 scale. Applied to
+   * the native <dialog>, which is why it is here rather than a utility on
+   * ui/Dialog -- ::backdrop has no element to hang a class on.
+   */
+  @keyframes dialog-settle {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  dialog[open] {
+    animation: dialog-settle var(--memql-motion-dur) var(--memql-motion-ease);
+  }
+
   /* Reduced motion: static colour/opacity states only. The offline dimming
-     stays (it is not motion); everything that moves stops. */
+     stays (it is not motion); everything that moves stops.
+
+     The Constellation and the list stagger are listed even though their
+     durations are already zero here (the brand token collapses), because
+     stroke-dashoffset and the translate are PROPERTIES rather than
+     durations -- a zero-length animation still applies its from-state for
+     an instant, and an edge that flickers is worse than one that never
+     moved. */
   @media (prefers-reduced-motion: reduce) {
     .mark-connection .mm-node,
     .mark-connection svg,
-    .row-wash {
+    .row-wash,
+    .constellation .cn-node,
+    .constellation .cn-edges line,
+    .list-rise > *,
+    dialog[open] {
       animation: none !important;
+    }
+    .constellation .cn-edges line {
+      stroke-dasharray: none !important;
+      stroke-dashoffset: 0 !important;
     }
   }
 }
