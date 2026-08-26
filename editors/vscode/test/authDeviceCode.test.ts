@@ -99,7 +99,20 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
     tokenCalls: () => calls.filter((c) => c.url.endsWith("/oauth/token")).map((c) => c.body),
     deviceRequests: () => calls.filter((c) => c.url.endsWith("/device/code")).map((c) => c.body),
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
+
+      // The RFC 8414 pre-flight the browser flow now runs before opening a
+      // browser (memql#4624). Answering it here keeps these cases about what
+      // they were about; the pre-flight has its own tests in authFlow.test.ts.
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        const metaBase = url.slice(0, -"/.well-known/oauth-authorization-server".length);
+        return reply(200, {
+          issuer: metaBase,
+          authorization_endpoint: `${metaBase}/authorize`,
+          token_endpoint: `${metaBase}/oauth/token`,
+          device_authorization_endpoint: `${metaBase}/device/code`,
+        });
+      }
 
       // /register has no branch here on purpose: it is not a request this
       // extension may make any more (memql#4517). Every call is recorded above
@@ -247,7 +260,10 @@ test("a loopback listener that cannot bind falls back to the device code", async
   assert.equal(tokens.accessToken, "ACCESS");
   assert.equal(tokens.refreshToken, "REFRESH");
   assert.deepEqual(
-    fake.urls(),
+    // The browser attempt's RFC 8414 pre-flight runs before the listener is
+    // started, so it happens even on a fallback (memql#4624). It carries no
+    // credential and drives no grant; the claim here is about the grants.
+    fake.urls().filter((u) => !u.endsWith("/.well-known/oauth-authorization-server")),
     [`${ISSUER}/device/code`, `${ISSUER}/oauth/token`],
     "the fallback resolves one client_id and hands it to both grants",
   );
@@ -696,4 +712,48 @@ test("the fallback action message explains the switch in the same notification",
     message.includes("MemQL Connection"),
     `the message must say where the full reason lives: ${message}`,
   );
+});
+
+// -----------------------------------------------------------------------------
+// A remote extension host falls back to the device code (memql#4623)
+// -----------------------------------------------------------------------------
+//
+// THE POINT OF THE WHOLE #4623 CHANGE, stated as one case. Under Remote-SSH the
+// loopback listener binds on the REMOTE machine and the browser opens on the
+// user's OWN, so the callback goes to a port on the wrong computer. Neither
+// existing trigger fired -- the bind succeeded, openExternal succeeded -- so a
+// remote user waited out the full 600-second deadline and was then told the
+// browser had not completed the page. The device flow needs no callback at all,
+// which is why it is the right answer here rather than a consolation prize.
+
+test("a remote extension host signs in through the device code, not a dead callback", async () => {
+  const fake = identity();
+  const codes: DeviceAuthorization[] = [];
+  const fallbacks: AuthFlowError[] = [];
+  let bound = false;
+
+  const tokens = await signInWithDeviceCodeFallback(cluster(), {
+    ...loopbackDeps(fake, {
+      // If the flow ever reaches the listener on a remote host it has already
+      // lost: the port would be on the wrong machine.
+      startListener: async () => {
+        bound = true;
+        throw new AuthFlowError("bindFailed", "must not be reached");
+      },
+    }),
+    remoteName: "ssh-remote",
+    sleep: recordingSleep().sleep,
+    onUserCode: (authorization) => codes.push(authorization),
+    onFallback: (reason) => fallbacks.push(reason),
+  });
+
+  assert.equal(tokens.accessToken, "ACCESS");
+  assert.equal(bound, false, "a port was bound on the remote host for a callback that cannot arrive");
+  assert.equal(
+    fallbacks[0]?.kind,
+    "browserUnavailable",
+    "the switch is announced, and it is announced as the environment limitation it is",
+  );
+  assert.match(fallbacks[0]?.message ?? "", /ssh-remote/);
+  assert.ok(codes.length > 0, "the user was never given a code to approve");
 });

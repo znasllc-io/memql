@@ -25,11 +25,24 @@
 //   resolveExternalUri  <- vscode.env.asExternalUri
 //   openExternal        <- vscode.env.openExternal
 //
-// asExternalUri is not decoration. Under Remote-SSH, Codespaces or a
-// dev-container the "browser" runs on a different machine from this extension
-// host, and the URL has to be rewritten into one that machine can actually
-// reach. Skipping it produces a sign-in that works on a laptop and silently
-// fails for every remote user.
+// asExternalUri is not decoration on a LOCAL host: it is what lets a URL this
+// process composes be opened by the browser the editor can reach.
+//
+// IT DOES NOT MAKE THIS FLOW WORK UNDER REMOTE-SSH, and this comment used to
+// say that it did (memql#4623). The loopback listener binds on the EXTENSION
+// HOST -- the remote machine -- and that port goes into the redirect URI.
+// asExternalUri is then applied to the AUTHORIZE URL, which is an
+// `https://identity...` URL and comes back unchanged, so no tunnel is ever
+// created for the callback port. The browser opens on the user's own machine
+// and redirects to THEIR 127.0.0.1:PORT, where nothing is listening. Neither
+// fallback trigger fires -- the bind succeeded and the browser opened -- so the
+// result was a ten-minute spinner followed by advice to run a palette command.
+//
+// A remote host is therefore refused BEFORE the listener binds, as
+// `browserUnavailable`, which is the trigger that routes it to the device-code
+// flow. That flow needs no callback at all, which is why it is the right answer
+// rather than a consolation: the user reads a code and approves it in whatever
+// browser they have.
 //
 // -----------------------------------------------------------------------------
 // WHY state IS CHECKED BEFORE THE EXCHANGE, NOT AFTER
@@ -51,6 +64,7 @@ import {
   type FetchLike,
   type HttpResponseLike,
 } from "../connection/credentials.js";
+import { discoverIssuer } from "../connection/discovery.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
 import { AuthFlowError, errorText } from "./errors.js";
 import {
@@ -99,6 +113,14 @@ export interface AuthFlowDeps {
   signal?: AbortSignal;
   /** Injected clock, so the computed expiry is assertable. Defaults to Date.now. */
   now?: () => number;
+  /**
+   * `vscode.env.remoteName` -- undefined locally, otherwise the remote's kind
+   * ("ssh-remote", "dev-container", "codespaces", "wsl"), memql#4623.
+   *
+   * Injected rather than read, for this module's no-`vscode` rule. Undefined is
+   * the local case and is what every existing caller and test supplies.
+   */
+  remoteName?: string;
 }
 
 export interface AuthFlowTokens {
@@ -140,6 +162,29 @@ export async function runAuthorizationFlow(
     );
   }
 
+  // A REMOTE EXTENSION HOST CANNOT RECEIVE THIS CALLBACK (memql#4623).
+  //
+  // Refused here, before the listener binds and before a browser is opened, so
+  // that it lands as `browserUnavailable` -- the kind that routes to the
+  // device-code flow, which needs no loopback at all. Both fallback triggers
+  // fire before any page could have opened, and this one keeps that invariant:
+  // switching cannot orphan a live sign-in because nothing has been opened.
+  //
+  // The alternative -- registering a `vscode://` redirect URI and receiving the
+  // callback through the extension's own URI handler -- is a larger change that
+  // needs the redirect registered on the identity server too. It is worth doing
+  // and it is not what this is; what this removes is a ten-minute wait that
+  // ended by blaming the browser.
+  const remote = (deps.remoteName ?? "").trim();
+  if (remote !== "") {
+    throw new AuthFlowError(
+      "browserUnavailable",
+      `A browser sign-in cannot complete from a ${remote} window: the sign-in callback would be ` +
+        `sent to this editor's own machine, not to the remote host this extension is running on. ` +
+        `Signing in with a device code instead -- it needs no callback.`,
+    );
+  }
+
   const doFetch = deps.fetch ?? defaultFetch;
   const now = deps.now ?? (() => Date.now());
   const startListener = deps.startListener ?? startLoopbackListener;
@@ -149,13 +194,61 @@ export async function runAuthorizationFlow(
   // to fail -- POST /register against a cluster with DCR off -- is gone.
   const clientId = resolveClientId(cluster.clientId);
 
+  // THE PRE-FLIGHT (memql#4624). One round trip, before a browser is opened
+  // and before anything parks on a 600-second deadline.
+  //
+  // Without it, a wrong domain, an unreachable host, a bad certificate, an old
+  // cluster and a plain non-MemQL host were indistinguishable: all five cost
+  // the full deadline and were then reported as "the browser page was never
+  // completed, or it could not reach 127.0.0.1", which is wrong in every one
+  // of them. The worst is the old cluster -- one predating the `memql-vscode`
+  // built-in client renders an HTML 400 "Unknown client" page that is never
+  // redirected, so there is no callback and no OAuth error envelope, just
+  // silence for ten minutes.
+  //
+  // The device path has always failed in one round trip with the real reason
+  // (deviceCode.ts). This gives the browser path the same.
+  //
+  // THE ENDPOINTS ARE TAKEN FROM THE ANSWER, not composed. That is what makes
+  // an identity service at a non-conventional host work at all, and it is what
+  // lets an operator who pasted the API host be redirected to the real issuer
+  // rather than dead-ended.
+  //
+  // IT FAILS FAST ON "NOBODY ANSWERED" AND DEGRADES ON EVERYTHING ELSE, and
+  // the split is the whole care in this change. A host that does not answer
+  // cannot complete a sign-in by any route, so stopping here costs nothing and
+  // saves ten minutes. But a host that answers WITHOUT an RFC 8414 document is
+  // ambiguous: it is either the wrong host, or a cluster old enough to predate
+  // the document. Refusing would make this extension unable to sign in to a
+  // cluster it can sign in to today -- a regression traded for a diagnosis --
+  // so that case carries on with the conventional endpoints, exactly as before
+  // this existed. The wrong-host paste is caught earlier and more cheaply, by
+  // connectDomainProblem at the moment it is typed.
+  const discovered = await discoverIssuer(issuer, (url, init) => doFetch(url, init));
+  if (!discovered.ok && discovered.kind === "unreachable") {
+    throw new AuthFlowError(
+      // This vocabulary's "the identity service could not be reached" --
+      // deviceCode.ts uses it for exactly that.
+      "registrationFailed",
+      `Cannot sign in to "${cluster.name}": ${discovered.message}.`,
+    );
+  }
+  // Everything downstream speaks in terms of an issuer base, and the endpoints
+  // are the ones the document names -- so a cluster that publishes a
+  // non-default host or path is honoured rather than overwritten. A cluster
+  // that published nothing readable keeps the convention.
+  const resolvedIssuer = discovered.ok ? discovered.issuer.replace(/\/+$/, "") : issuer;
+  const authorizationEndpoint = discovered.ok ? discovered.authorizationEndpoint : undefined;
+  const tokenEndpoint = discovered.ok ? discovered.tokenEndpoint : undefined;
+
   const pkce = generatePkcePair();
   const state = generateState();
 
   const listener = await startListener({ timeoutMs: deps.timeoutMs, signal: deps.signal });
   try {
     const authorizeUrl = buildAuthorizeUrl({
-      issuer,
+      issuer: resolvedIssuer,
+      authorizationEndpoint,
       clientId,
       redirectUri: listener.redirectUri,
       state,
@@ -192,7 +285,8 @@ export async function runAuthorizationFlow(
     }
 
     const tokens = await exchangeAuthorizationCode({
-      issuer,
+      issuer: resolvedIssuer,
+      tokenEndpoint,
       clientId,
       code,
       redirectUri: listener.redirectUri,
@@ -216,6 +310,8 @@ export async function runAuthorizationFlow(
 
 interface AuthorizeUrlParts {
   issuer: string;
+  /** From the cluster's RFC 8414 document. Absent falls back to `${issuer}/authorize`. */
+  authorizationEndpoint?: string;
   clientId: string;
   redirectUri: string;
   state: string;
@@ -225,7 +321,16 @@ interface AuthorizeUrlParts {
 
 /** buildAuthorizeUrl composes the OAuth 2.1 code-flow authorization URL. */
 export function buildAuthorizeUrl(parts: AuthorizeUrlParts): string {
-  const url = new URL(`${parts.issuer}/authorize`);
+  // THE DISCOVERED ENDPOINT WINS (memql#4624). Composing `${issuer}/authorize`
+  // is the fallback for a caller that did no discovery; a cluster that
+  // publishes a different path in its RFC 8414 document means it, and
+  // overwriting that with a convention is how a conformant deployment becomes
+  // unreachable.
+  const url = new URL(
+    parts.authorizationEndpoint !== undefined && parts.authorizationEndpoint.trim() !== ""
+      ? parts.authorizationEndpoint.trim()
+      : `${parts.issuer}/authorize`,
+  );
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", parts.clientId);
   // The PORT-BEARING redirect URI. identity's RFC 8252 matcher reconciles it
@@ -290,6 +395,8 @@ async function openInBrowser(authorizeUrl: string, deps: AuthFlowDeps): Promise<
 
 interface ExchangeParts {
   issuer: string;
+  /** From the cluster's RFC 8414 document. Absent falls back to `${issuer}/oauth/token`. */
+  tokenEndpoint?: string;
   clientId: string;
   code: string;
   redirectUri: string;
@@ -311,7 +418,11 @@ type ExchangedTokens = Pick<
  * halves of this extension's token traffic look the same in a capture.
  */
 async function exchangeAuthorizationCode(parts: ExchangeParts): Promise<ExchangedTokens> {
-  const url = `${parts.issuer}/oauth/token`;
+  // Same rule as buildAuthorizeUrl: the published endpoint wins (memql#4624).
+  const url =
+    parts.tokenEndpoint !== undefined && parts.tokenEndpoint.trim() !== ""
+      ? parts.tokenEndpoint.trim()
+      : `${parts.issuer}/oauth/token`;
   let response: HttpResponseLike;
   try {
     response = await parts.fetch(url, {

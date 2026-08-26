@@ -49,6 +49,15 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 		envLookup = func(string) string { return "" }
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Public, unauthenticated and identical for every caller -- see
+		// setWellKnownCORS (memql#4624). A webview fetch is origin-checked
+		// where a Node fetch is not, and discovery that works from one and
+		// not the other is a difference found late.
+		setWellKnownCORS(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		doc := DiscoveryDocument{
 			IdentityURL:  cfg.BaseURL,
 			GRPCEndpoint: deriveGRPCEndpoint(cfg.BaseURL, envLookup),

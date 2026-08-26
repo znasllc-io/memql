@@ -104,6 +104,7 @@ func wellKnownRoutesMountedBy(t *testing.T, filename, funcName string) []string 
 	}
 
 	var routes []string
+	seen := map[string]bool{}
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name == nil || fn.Name.Name != funcName {
@@ -130,7 +131,16 @@ func wellKnownRoutesMountedBy(t *testing.T, filename, funcName string) []string 
 			if i := strings.LastIndex(pattern, " "); i >= 0 {
 				pattern = pattern[i+1:]
 			}
-			if strings.HasPrefix(pattern, "/.well-known/") {
+			// DEDUPED BY PATH, because a path is what gets DECLARED (memql#4624).
+			// One path can carry several method registrations -- the discovery
+			// documents mount GET and OPTIONS, the latter so a cross-origin
+			// fetch's preflight reaches the former -- and a second method is
+			// not a second route to declare. The exact-set guarantee is
+			// untouched: a NEW path still fails here until it is added below
+			// and declared, and a path that stops being parsed still fails as
+			// missing.
+			if strings.HasPrefix(pattern, "/.well-known/") && !seen[pattern] {
+				seen[pattern] = true
 				routes = append(routes, pattern)
 			}
 			return true

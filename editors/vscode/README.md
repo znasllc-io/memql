@@ -298,10 +298,19 @@ secret storage.
 carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
 **MemQL: Sign In** works against a cluster on the day it is installed. It opens
 your browser and catches the callback on a loopback port; when this host cannot
-do that -- Remote-SSH, a dev container, a machine with no browser -- it falls
-back automatically to a short code you approve on another device. Nothing is
-registered with the cluster at any point, and the `clientId` field in
-`clusters.yaml` is an override you will usually not set.
+do that -- a machine with no browser, or any remote window (Remote-SSH, a dev
+container, WSL, Codespaces), where the callback port would be on the wrong
+machine -- it falls back automatically to a short code you approve on another
+device. Nothing is registered with the cluster at any point, and the `clientId`
+field in `clusters.yaml` is an override you will usually not set.
+
+**A local install must be driven from a local window.** "Install a local
+cluster" writes hosts entries, issues an mkcert certificate into *this
+machine's* trust store and serves the cluster at `*.memql.localhost`. From a
+remote window those all land on the remote host while your browser is on your
+own, and `.localhost` resolves to loopback for whichever machine asks -- so the
+credential links the wizard hands you open a tab that cannot connect. Install
+locally, then register the cluster from wherever you like.
 
 **Sign-in needs the developer role or above on the cluster.** The editor is a
 management surface, so writer and reader are refused -- with a message naming

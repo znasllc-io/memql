@@ -143,9 +143,20 @@ export function isEnrolmentUrl(candidate: string): boolean {
 /**
  * Opens the enrolment link in the operator's browser.
  *
- * `asExternalUri` runs first and is not optional: without it the URL breaks
- * under Remote-SSH, Codespaces and devcontainers, where the extension host and
- * the browser are on different machines. A failure to open is
+ * `asExternalUri` runs first: it is what lets a host rewrite a URL into one its
+ * browser can reach, and skipping it would break every host that does.
+ *
+ * IT DOES NOT RESCUE A LOCAL INSTALL FROM A REMOTE WINDOW, and this comment
+ * used to say that it did (memql#4623). asExternalUri tunnels LOOPBACK
+ * authorities only, and this URL is `https://identity.<domain>/enroll?...`
+ * where the domain defaults to `memql.localhost` -- not a loopback authority,
+ * so it comes back unchanged. RFC 6761 then makes the browser on the operator's
+ * OWN machine resolve the whole `.localhost` family to its own 127.0.0.1, where
+ * no cluster is running. And even forwarded it would fail closed: the mkcert CA
+ * went into the REMOTE host's trust store (scripts/install/mkcert-setup.sh).
+ *
+ * The install itself is what must be local; nothing openable from here can
+ * repair a cluster installed on the far side of an SSH connection. A failure to open is
  * `browserUnavailable` rather than a generic error, because "this machine has
  * no browser" is a real, recoverable state -- the caller can fall back to
  * showing the link.

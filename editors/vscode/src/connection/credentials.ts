@@ -158,7 +158,12 @@ export function jwtExpirySeconds(token: string): number | undefined {
 export interface HttpRequestInit {
   method: string;
   headers: Record<string, string>;
-  body: string;
+  /**
+   * Absent on a GET (memql#4624). Every POST in this tree supplies one; the
+   * RFC 8414 discovery fetch does not, and `fetch` REJECTS a GET carrying a
+   * body -- an empty string included -- so this cannot be modelled as "" .
+   */
+  body?: string;
 }
 
 export interface HttpResponseLike {

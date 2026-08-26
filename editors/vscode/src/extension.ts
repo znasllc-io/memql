@@ -69,6 +69,7 @@ import {
   reconcileClusterCredentials,
   signOut as signOutCredentials,
 } from './auth/store.js';
+import { revokeRefreshToken, signOutMessage, type RevocationOutcome } from './auth/revoke.js';
 import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from './clusters/form.js';
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
@@ -103,7 +104,7 @@ import {
   shouldOfferMemqlTheme,
 } from './theme/themeOffer.js';
 import { CredentialResolver } from './connection/credentials.js';
-import { composeEndpointFromDomain } from './connection/endpoint.js';
+import { composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
 import { ConnectionManager, type ConnectionState } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -1767,7 +1768,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // working untouched.
         clientId: '',
       }),
-    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
+    // NO REVOCATION ON THIS PATH, deliberately (memql#4625). This is the
+    // SIGN-IN flow's cleanup seam -- what it forgets is a credential a
+    // sign-in produced and then could not use, so there is no established
+    // server session to end. The user-initiated sign-out is the revoking
+    // path, and it is the `memql.clusters.signOut` command below.
+    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName).then(() => undefined),
   };
 
   // sweepOrphanedCredentials deletes SecretStorage entries whose cluster is no
@@ -2221,8 +2227,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
+      // SIGNING OUT ENDS THE SESSION, NOT JUST THIS EDITOR'S COPY OF IT
+      // (memql#4625). Until this, sign-out was purely local: the refresh
+      // token stayed live on the cluster for its full thirty days while the
+      // toast said "signed out", which is a claim about the session and was
+      // only ever true here. The store attempts the revoke BEFORE it clears
+      // (it needs the token) and forgets regardless of the answer, so a
+      // sign-out on a plane still signs you out.
+      const issuer = identityBaseUrlFor(target.cluster);
+      let revocation: RevocationOutcome;
       try {
-        await signInStore.signOut(target.cluster.name);
+        revocation = await signOutCredentials(storeDeps, target.cluster.name, (refreshToken) =>
+          issuer === undefined
+            ? Promise.resolve({ attempted: false as const })
+            : revokeRefreshToken(issuer, refreshToken, (url, init) => fetch(url, init))
+        );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `signing out of "${target.cluster.name}" failed`, detail);
@@ -2240,9 +2259,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await connections?.disconnect();
       }
       clustersTree.refresh();
-      window.showInformationMessage(
-        `MemQL: signed out of "${target.cluster.name}". Run "MemQL: Sign In" to authenticate again.`
-      );
+      // The wording follows what actually happened. A session this could not
+      // end is named as such, with the portal's Devices page as the way to
+      // end it -- "signed out" over a live refresh token is the defect.
+      if (revocation.attempted && !revocation.revoked) {
+        noteDiagnostic(
+          connectionOutput,
+          `the session for "${target.cluster.name}" was not revoked on the cluster`,
+          revocation.reason
+        );
+        void offerDetails(
+          'warning',
+          connectionOutput,
+          signOutMessage(target.cluster.name, revocation)
+        );
+      } else {
+        window.showInformationMessage(signOutMessage(target.cluster.name, revocation));
+      }
     }),
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
     // remote cluster -- for an operator who may have no cluster at all, or one
@@ -3965,6 +3998,13 @@ async function runSignInToCluster(
                 onUserCode,
                 resolveExternalUri,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
+                // WHAT MAKES REMOTE-SSH WORK (memql#4623). Undefined locally.
+                // A remote extension host cannot receive a loopback callback --
+                // the port would be on the wrong machine -- so the flow refuses
+                // before binding and this fallback takes the device path, which
+                // needs no callback at all. Read here rather than in `flow.ts`,
+                // which must stay free of `vscode` imports.
+                remoteName: env.remoteName,
                 onFallback: (reason) => {
                   fallbackFired = true;
                   announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));

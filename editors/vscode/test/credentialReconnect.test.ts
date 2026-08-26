@@ -190,7 +190,7 @@ test("a session whose token expires survives past the 15-minute access-token lif
     },
     fetch: async (_url, init): Promise<HttpResponseLike> => {
       issued += 1;
-      const body = JSON.parse(init.body) as { refresh_token: string };
+      const body = JSON.parse(init.body ?? "{}") as { refresh_token: string };
       assert.equal(body.refresh_token, secrets.get("memql.cluster.refreshToken:local") ?? "RT-0");
       return {
         ok: true,

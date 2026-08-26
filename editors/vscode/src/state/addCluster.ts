@@ -257,6 +257,14 @@ export interface ClusterRegistration {
   endpoint: string;
   domain?: string;
   token?: string;
+  /**
+   * The issuer the cluster published, when discovery found one (memql#4624).
+   *
+   * Omitted rather than written empty, per connectDraft's rule: "" is an
+   * explicit CLEAR to upsertCluster, and a draft that says "forget where this
+   * cluster's identity service is" is not what a registration means.
+   */
+  issuer?: string;
 }
 
 /**
@@ -303,6 +311,35 @@ export function connectDomainProblem(domain: string): string | undefined {
     return (
       "That is a local install's domain -- use \"Install a local cluster\" instead. " +
       "This form registers a cluster reachable over the network."
+    );
+  }
+
+  // A FRONT-DOOR HOST PASTED INTO THE DOMAIN BOX (memql#4624).
+  //
+  // Everything this form writes is composed from the domain: the endpoint is
+  // `api.<domain>:443` and the sign-in host is `identity.<domain>`. So pasting
+  // the API host -- which is the URL an operator has most likely seen, because
+  // it is the one their applications dial -- composes `api.api.example.com`
+  // and `identity.api.example.com`, neither of which exists.
+  //
+  // Nothing caught it. The probe failed with a generic "no answer within 10s",
+  // the operator clicked "Save anyway" because the cluster demonstrably works,
+  // and sign-in dead-ended much later against a host that was never real.
+  //
+  // The labels are exactly the front door's ROLE set (component/frontdoor),
+  // which MemQL derives from the domain and reserves. A domain of its own that
+  // begins with one of them cannot be registered through this composition
+  // anyway, so naming the mistake is strictly better than composing a host
+  // that cannot answer.
+  const frontDoorLabels = ["api", "identity", "mcp", "portal"];
+  const firstLabel = bare.split(".")[0] ?? "";
+  if (bare.includes(".") && frontDoorLabels.includes(firstLabel)) {
+    const suggested = bare.slice(firstLabel.length + 1);
+    return (
+      `That looks like the cluster's ${firstLabel} host, not its domain. ` +
+      `MemQL composes every host from the domain -- the endpoint is \`api.<domain>\` ` +
+      `and sign-in is \`identity.<domain>\` -- so enter \`${suggested}\` here. ` +
+      `If \`${bare}\` really is the domain, set the endpoint by hand under Advanced.`
     );
   }
   return undefined;
@@ -360,8 +397,21 @@ export interface ConnectProbeTargets {
   endpoint: string;
 }
 
-/** What the host found, in the only two shapes a form can render. */
-export type ConnectProbeVerdict = { ok: true } | { ok: false; reason: string };
+/**
+ * What the host found, in the only two shapes a form can render.
+ *
+ * `issuer` is the RFC 8414 issuer identifier the cluster published, when it
+ * published one (memql#4624). It is carried back so the registry entry can
+ * RECORD it: `identityBaseUrlFor` prefers `issuer` over the `identity.<domain>`
+ * convention, so writing it is what makes an identity service at a
+ * non-conventional host work -- and it is what makes memql#4620's claim probe,
+ * which reads `cluster.issuer` and until now found nothing ever writing it,
+ * reachable at all. Absent on a cluster that publishes no document; the
+ * convention then applies exactly as before.
+ */
+export type ConnectProbeVerdict =
+  | { ok: true; issuer?: string }
+  | { ok: false; reason: string };
 
 /**
  * The probe itself, INJECTED (memql#4432).
@@ -378,7 +428,7 @@ export type ConnectProbe = (targets: ConnectProbeTargets) => Promise<ConnectProb
 export type ConnectProbeState =
   | { state: "none" }
   | { state: "running" }
-  | { state: "passed"; endpoint: string }
+  | { state: "passed"; endpoint: string; issuer?: string }
   | { state: "failed"; endpoint: string; reason: string };
 
 /**
@@ -864,9 +914,10 @@ export class AddClusterState {
    * reach -- and this one decides whether a credential survives.
    *
    * `claimed` with a non-empty key is the ONLY state holding a plaintext.
-   * `alreadyClaimed` and `awaitingOwner` render one line and no value, and
-   * prompting over those would train an operator to click through the one
-   * prompt on this surface that matters.
+   * `alreadyClaimed`, `awaitingOwner` and `revealLost` carry no value to lose
+   * -- `revealLost` least of all, since its whole content is that the value
+   * was already lost (memql#4628) -- and prompting over those would train an
+   * operator to click through the one prompt on this surface that matters.
    */
   get recoveryKeyWouldBeLost(): boolean {
     return this.recoveryState === "claimed" && this.revealedKey !== "" && !this.keyCopied;
@@ -1335,7 +1386,13 @@ export class AddClusterState {
     }
 
     if (verdict.ok) {
-      this.connectProbeStatus = { state: "passed", endpoint: targets.endpoint };
+      this.connectProbeStatus = {
+        state: "passed",
+        endpoint: targets.endpoint,
+        ...(verdict.issuer === undefined || verdict.issuer.trim() === ""
+          ? {}
+          : { issuer: verdict.issuer.trim() }),
+      };
       return "write";
     }
     this.connectProbeStatus = { state: "failed", endpoint: targets.endpoint, reason: verdict.reason };
@@ -1448,6 +1505,12 @@ export class AddClusterState {
     };
     if (domain !== "") draft.domain = domain;
     if (token !== "") draft.token = token;
+    // Recorded from the probe that just ran, not re-derived: this is the
+    // cluster's own answer about where its identity service is (memql#4624).
+    if (this.connectProbeStatus.state === "passed") {
+      const issuer = (this.connectProbeStatus.issuer ?? "").trim();
+      if (issuer !== "") draft.issuer = issuer;
+    }
     return draft;
   }
 

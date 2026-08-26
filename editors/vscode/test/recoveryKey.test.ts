@@ -127,3 +127,86 @@ test("a report without the step, or with a failed one, carries no state to rende
   assert.equal(recoveryKeyStateFrom(report()), "none");
   assert.equal(recoveryKeyStateFrom(report(outcome({ status: "failed" }))), "none");
 });
+
+// ---------------------------------------------------------------------------
+// the reveal that did not survive the journey (memql#4628)
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THESE PIN. `recovery-key claim` used to stamp the row claimed
+// before its plaintext left the process, so a perturbed capture spent the
+// cluster's break-glass credential and showed it to nobody. Every later run
+// then read the stamp, reported `alreadyClaimed`, and told the operator the
+// key they held was still live. They held none.
+//
+// The script now reports that case as its own state, through `cap_fail` --
+// a credential spent and delivered to nobody IS a failed install step. So this
+// side has to read a state off a FAILED outcome, which it does for this one
+// literal only.
+
+test("recoveryKeyStateFrom reads revealLost from a failed outcome", () => {
+  const rep = report(
+    outcome({
+      status: "failed",
+      exitCode: 5,
+      envelope: {
+        ok: false,
+        capability: "install.recoveryKey",
+        changed: true,
+        result: { recoveryKey: "", recoveryKeyState: "revealLost", ownerClaimed: true },
+        error: { code: 5, message: "the recovery key was revealed but did not survive the capture" },
+      },
+    }),
+  );
+  assert.equal(
+    recoveryKeyStateFrom(rep),
+    "revealLost",
+    "a lost reveal fell back to `none`, so the done screen renders nothing and the operator is " +
+      "never told the cluster has no break-glass credential anyone holds",
+  );
+});
+
+test("revealLost carries no plaintext to display", () => {
+  const rep = report(
+    outcome({
+      status: "failed",
+      exitCode: 5,
+      envelope: {
+        ok: false,
+        capability: "install.recoveryKey",
+        changed: true,
+        // Even if a value were present, this state must never display one:
+        // its entire content is that the value is gone.
+        result: { recoveryKey: KEY, recoveryKeyState: "revealLost", ownerClaimed: true },
+        error: { code: 5, message: "spent" },
+      },
+    }),
+  );
+  assert.equal(revealedRecoveryKeyFrom(rep), "");
+});
+
+// The narrowness is the safety. Reading state off a failed outcome is an
+// exception made for exactly one literal; every other state still has to have
+// succeeded to be believed.
+test("a failed outcome reporting any other state is still none", () => {
+  for (const state of ["claimed", "alreadyClaimed", "awaitingOwner"]) {
+    const rep = report(
+      outcome({
+        status: "failed",
+        exitCode: 5,
+        envelope: {
+          ok: false,
+          capability: "install.recoveryKey",
+          changed: false,
+          result: { recoveryKey: KEY, recoveryKeyState: state, ownerClaimed: true },
+          error: { code: 5, message: "boom" },
+        },
+      }),
+    );
+    assert.equal(
+      recoveryKeyStateFrom(rep),
+      "none",
+      `a failed step claiming ${state} was believed; a step that did not succeed has not earned a ` +
+        "claim about the cluster",
+    );
+  }
+});
