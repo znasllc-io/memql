@@ -38,8 +38,22 @@ export function SynapseSection({
 }): ReactNode {
   const synapse = useSynapse();
   const host = useRef<HTMLDivElement>(null);
-  // The caller's own apply, kept in a ref so re-registering on every keystroke
-  // (fields carry live values) does not need a stable callback from them.
+
+  // ===========================================================================
+  // THE SCOPE OBJECT IS STABLE PER ID. The live values are read through refs.
+  // ===========================================================================
+  // `fields` carries each field's CURRENT value, so it is a new array on every
+  // keystroke. Registering that object directly made the effect re-run per
+  // character -- and its cleanup unregisters, which cleared the active scope.
+  // Found in the visual QA pass (memql#4660): the ring blinked off and back on
+  // as you typed, and a fill's own status line was wiped by the re-render the
+  // fill itself caused.
+  //
+  // So the registered object is memoized on id and label alone, and `fields`
+  // is a GETTER over a ref -- the registry always reads what is on screen now,
+  // and nothing re-registers until the section genuinely changes identity.
+  const fieldsRef = useRef(fields);
+  fieldsRef.current = fields;
   const applyRef = useRef(apply);
   applyRef.current = apply;
 
@@ -47,7 +61,9 @@ export function SynapseSection({
     () => ({
       id,
       label,
-      fields,
+      get fields() {
+        return fieldsRef.current;
+      },
       apply: (patches: readonly SynapsePatch[]) => {
         applyRef.current(patches);
         try {
@@ -59,7 +75,7 @@ export function SynapseSection({
         }
       },
     }),
-    [id, label, fields],
+    [id, label],
   );
 
   const register = synapse?.register;

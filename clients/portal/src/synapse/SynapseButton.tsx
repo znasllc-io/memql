@@ -175,6 +175,20 @@ export function SynapseButton(): ReactNode {
 
   useEffect(() => () => stopHoldTimer(), []);
 
+  // THE STATUS BELONGS TO ONE SCOPE. Found in the visual QA pass (memql#4660):
+  // fill a form, navigate, and the popover still read "1 field filled." beside
+  // "Nothing on this page can be filled in" -- a report about a section that
+  // is no longer on screen, next to a sentence saying there is none.
+  //
+  // The PROMPT is deliberately kept. What a person typed is still what they
+  // want, and the scope also changes just by moving the pointer between two
+  // sections of one page -- clearing their words on a hover would be worse
+  // than the staleness this fixes.
+  useEffect(() => {
+    setStatus("");
+    setFloat(null);
+  }, [synapse?.activeId]);
+
   // Nothing to offer and nothing to say: a page outside a cluster connection.
   if (clients === null) return null;
 
@@ -190,7 +204,11 @@ export function SynapseButton(): ReactNode {
     <div className="fixed right-6 bottom-6 z-30 flex flex-col gap-2">
       {open ? (
         <div
-          className="w-80 self-end rounded-lg border border-line bg-surface p-3 shadow-none"
+          // border-line-strong, matching the button: this is a card FLOATING
+          // over the page rather than a panel sitting in it, and the kit has
+          // no shadows by rule -- so the line is the only thing that can say
+          // it is in front. A hairline read as a seam in the page behind it.
+          className="w-80 self-end rounded-lg border border-line-strong bg-surface p-3"
           role="dialog"
           aria-label="Synapse"
         >
@@ -288,7 +306,12 @@ export function SynapseButton(): ReactNode {
             stopHoldTimer();
             stopListening();
           }}
-          className="synapse-button motion-wash flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-accent hover:border-accent"
+          // TUNED AT REAL SIZE in the visual QA pass (decision D7 defers this
+          // here on purpose). Two things were wrong in the first cut and only
+          // a browser could show them: a hairline `border-line` on white made
+          // the button read as a smudge rather than a control at 44px, and a
+          // 20px glyph inside it left the ring mostly empty air.
+          className="synapse-button motion-wash flex h-11 w-11 items-center justify-center rounded-full border border-line-strong bg-surface text-accent hover:border-accent hover:bg-accent-subtle"
         >
           <Impulse />
         </button>
@@ -302,9 +325,9 @@ export function SynapseButton(): ReactNode {
 // moves, which is what "still at idle" means at this size.
 function Impulse(): ReactNode {
   return (
-    <svg viewBox="0 0 24 24" width={20} height={20} aria-hidden="true">
-      <circle className="synapse-ring" cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <circle cx="12" cy="12" r="3.4" fill="currentColor" />
+    <svg viewBox="0 0 24 24" width={22} height={22} aria-hidden="true">
+      <circle className="synapse-ring" cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="12" cy="12" r="3.8" fill="currentColor" />
     </svg>
   );
 }

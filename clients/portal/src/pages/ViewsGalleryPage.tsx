@@ -94,7 +94,6 @@ export function ViewsGalleryPage(): ReactNode {
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
           pageId="views"
-          subtitle="Views"
           title="Views"
           blurb="Screens over this cluster's data. Five ship with the product; the rest are ones you composed."
           actions={newView}

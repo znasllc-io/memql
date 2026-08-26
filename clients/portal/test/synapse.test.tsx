@@ -346,6 +346,100 @@ describe("the Synapse affordance", () => {
     expect(screen.getByText("first run").getAttribute("aria-hidden")).toBe("true");
   });
 
+  // The two defects the visual QA pass found (memql#4660). Both were
+  // invisible to every assertion above, because both are about what happens
+  // BETWEEN two interactions -- and both produced a wrong answer on screen
+  // rather than an error anywhere.
+  it("holds the active scope while you type into it", async () => {
+    renderSynapse(<ExampleForm />);
+    await openPopover();
+    const scope = () => document.querySelector('[data-synapse-scope="example"]');
+    expect(scope()?.getAttribute("data-synapse-active")).toBe("true");
+
+    // `fields` carries each field's CURRENT value, so it is a new array per
+    // keystroke. Registering that object directly re-ran the effect per
+    // character, and its cleanup unregisters -- so the ring blinked off and
+    // the active scope was momentarily nobody's.
+    fireEvent.change(screen.getByLabelText(/The example form name/), {
+      target: { value: "typed by hand" },
+    });
+    await waitFor(() =>
+      expect((screen.getByLabelText(/The example form name/) as HTMLInputElement).value).toBe(
+        "typed by hand",
+      ),
+    );
+    expect(scope()?.getAttribute("data-synapse-active")).toBe("true");
+    // ...and the popover still names it, rather than falling back to "nothing
+    // here can be filled in".
+    expect(screen.getByText("The example form")).toBeTruthy();
+  });
+
+  it("sends the values that are on screen NOW, not the ones at registration", async () => {
+    // The other half of the same fix: the scope object is stable, so `fields`
+    // has to be a live read rather than a snapshot -- otherwise "make it
+    // shorter" would be told the field is empty.
+    const { sendAndWait } = renderSynapse(<ExampleForm />);
+    await openPopover();
+    fireEvent.change(screen.getByLabelText(/The example form name/), {
+      target: { value: "the long original name" },
+    });
+    fireEvent.change(screen.getByLabelText("What to fill in"), { target: { value: "shorten it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fill" }));
+
+    await waitFor(() => expect(sendAndWait).toHaveBeenCalled());
+    const sent = sendAndWait.mock.calls[0]?.[0] as { aiSuggest?: Record<string, unknown> };
+    const payload = sent.aiSuggest?.["payload"] as {
+      scope: { fields: { name: string; value: string }[] };
+    };
+    expect(payload.scope.fields.find((f) => f.name === "name")?.value).toBe(
+      "the long original name",
+    );
+  });
+
+  it("does not carry one section's outcome to another", async () => {
+    // Fill a form, move to a different scope, and the popover still read
+    // "2 fields filled." -- a report about a section no longer in view. The
+    // PROMPT is deliberately kept: the scope also changes on a hover between
+    // two sections of one page, and clearing what somebody typed for that
+    // would be worse than the staleness.
+    renderSynapse(
+      <>
+        <ExampleForm id="first" label="The first form" />
+        <ExampleForm id="second" label="The second form" />
+      </>,
+    );
+    await openPopover();
+    fireEvent.change(screen.getByLabelText("What to fill in"), { target: { value: "fill it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fill" }));
+    await waitFor(() => expect(screen.getByText(/2 fields filled/)).toBeTruthy());
+
+    fireEvent.pointerEnter(document.querySelector('[data-synapse-scope="second"]')!);
+    await waitFor(() => expect(screen.getByText("The second form")).toBeTruthy());
+    expect(screen.queryByText(/fields filled/)).toBeNull();
+  });
+
+  it("keeps what you typed when the scope changes under you", async () => {
+    // The other side of the same decision. A successful fill clears the
+    // prompt (the words have been spent), but merely MOVING between two
+    // sections of one page must not -- the pointer does that on its own, and
+    // losing a sentence to a hover would be maddening.
+    renderSynapse(
+      <>
+        <ExampleForm id="first" label="The first form" />
+        <ExampleForm id="second" label="The second form" />
+      </>,
+    );
+    await openPopover();
+    fireEvent.change(screen.getByLabelText("What to fill in"), {
+      target: { value: "a sentence I am still writing" },
+    });
+    fireEvent.pointerEnter(document.querySelector('[data-synapse-scope="second"]')!);
+    await waitFor(() => expect(screen.getByText("The second form")).toBeTruthy());
+    expect((screen.getByLabelText("What to fill in") as HTMLInputElement).value).toBe(
+      "a sentence I am still writing",
+    );
+  });
+
   it("says so, and fills nothing, on a page with no fillable section", async () => {
     renderSynapse(<p>Just a page.</p>);
     await openPopover();

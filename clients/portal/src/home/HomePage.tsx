@@ -43,6 +43,7 @@ export function HomePage(): ReactNode {
     <Container>
       <section className="flex min-h-full flex-col gap-6 pb-8">
         <PageHeader
+          pageId="console"
           title="Console"
           blurb={
             <>
