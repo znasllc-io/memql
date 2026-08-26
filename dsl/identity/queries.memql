@@ -1115,6 +1115,58 @@ query invitation invitationByTokenHash {
   shape   invitationFull
 }
 
+// ---- queries/v1/identity/userInvitationByTokenHash.memql ----
+
+// userInvitationByTokenHash - Look Up a USER Invitation by Token Hash
+// ===================================================================
+//
+// The kind="user" twin of invitationByTokenHash above, and the reason it is a
+// SEPARATE query rather than a widened filter on that one (memql#4612).
+//
+// invitationByTokenHash filters kind=="guest". It was written when guest
+// invitations were the only kind, and its own heading still says "Guest".
+// kind="user" arrived later (memql#4270) and reused the Go store method that
+// runs it, so a user invitation was looked up through a query that excludes
+// user invitations: the lookup returned nothing, the redeem path refused
+// `invitation_not_found`, and user-invitation redemption never once succeeded
+// on any shipped version.
+//
+// THE OBVIOUS FIX -- drop `kind=="guest"` and let callers discriminate -- is the
+// wrong one. That query is shared with the guest path
+// (component/grpc/guest_handlers.go, reached from the stream interceptor and
+// two handlers), and widening a credential lookup so that a user invitation can
+// come back through the guest door makes every present and future caller
+// responsible for a privilege boundary the filter used to hold. The guest path
+// does re-check kind today; relying on that is a confused-deputy waiting to
+// happen. Two kinds, two doors.
+//
+// The tree already partitions these verbs by name -- createUserInvitation /
+// createGuestInvitation, markUserInvitationAccepted / markGuestInvitationAccepted
+// -- so the split here is the existing convention rather than a new one.
+//
+// Returns the latest version of the invitation with ANY status. Callers must
+// check status, active and expiresAt: "you already used this", "somebody
+// cancelled this" and "this expired" are three different next steps for the
+// person holding the link, and collapsing them is what makes an invitation flow
+// feel broken.
+//
+// Arguments:
+//   tokenHash (string) - SHA-256 hex digest (lowercase) of the plain token
+//
+// Returns:
+//   Zero or one invitation record.
+//
+
+/// Returns the kind="user" invitation whose tokenHash matches the argument. Zero or one result.
+@unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
+query invitation userInvitationByTokenHash {
+  args {
+    tokenHash  string!
+  }
+  filter  kind=="user" && tokenHash==args.tokenHash
+  shape   invitationFull
+}
+
 // ---- queries/v1/identity/invitationByPreviousTokenHash.memql ----
 
 // invitationByPreviousTokenHash - Look Up a Guest Invitation by an Older Token Hash

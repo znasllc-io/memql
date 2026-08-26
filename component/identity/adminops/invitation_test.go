@@ -109,10 +109,15 @@ func TestRoleRankOrdersEveryClusterRole(t *testing.T) {
 }
 
 // The link carries a plaintext bearer, so it must be https or not exist.
-func TestInvitationURLPutsTheTokenWhereTheLoginFormReadsIt(t *testing.T) {
+//
+// RENAMED AND REPOINTED (memql#4601). The old name asserted that the link put
+// the token "where the login form reads it", and that was the bug in one
+// sentence: the login form never read it. The link now lands on /invitation,
+// which resolves the token server-side.
+func TestInvitationURLLandsOnTheInvitationPage(t *testing.T) {
 	got := invitationURL("https://identity.example.com", "mql_inv_abc-123")
-	if !strings.HasPrefix(got, "https://identity.example.com/login?invitation=") {
-		t.Errorf("link %q does not land on the login page's invitation field", got)
+	if !strings.HasPrefix(got, "https://identity.example.com/invitation?code=") {
+		t.Errorf("link %q does not land on the invitation page", got)
 	}
 	if !strings.Contains(got, "mql_inv_abc-123") {
 		t.Errorf("link %q does not carry the token", got)
@@ -362,7 +367,7 @@ func TestTheInvitationLinkNeverEntersTheAuditTrail(t *testing.T) {
 			}
 			// The token, not merely the whole URL: a detail field holding just
 			// the plaintext token would leak exactly as badly.
-			token := strings.TrimPrefix(res.InvitationURL, "https://identity.example.test/login?invitation=")
+			token := strings.TrimPrefix(res.InvitationURL, "https://identity.example.test/invitation?code=")
 			if token == "" || token == res.InvitationURL {
 				t.Fatalf("could not isolate the token from %q", res.InvitationURL)
 			}

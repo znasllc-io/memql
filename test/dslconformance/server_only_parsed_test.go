@@ -229,9 +229,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
 		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
 		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
-		// memql#4270. The two halves of user invitations, and neither is
-		// caller-scopable for the same underlying reason: the row is not the
-		// caller's.
+		// memql#4270 / memql#4606 / memql#4601. The four writes of the
+		// user-invitation lifecycle, and none is caller-scopable for the same
+		// underlying reason: the row is not the caller's.
 		//
 		// createUserInvitation mints a credential for somebody who has no
 		// account yet -- there is no ownership relation to filter on, and
@@ -247,8 +247,37 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// an admin sending a link to the wrong address and an owner killing
 		// it. Both take the owner/admin gate in adminops instead, one audited
 		// event per call, refusals included.
-		{Path: "identity/mutations.memql", Name: "createUserInvitation"}: true,
-		{Path: "identity/mutations.memql", Name: "revokeUserInvitation"}: true,
+		//
+		// markUserInvitationAccepted is the third, and its argument is the
+		// REDEMPTION side's rather than the admin side's. It runs before the
+		// caller is authenticated -- it is a step of creating the account, not
+		// something a signed-in person does -- so actor.userId is empty for
+		// every legitimate caller and a self-scoped filter would match zero
+		// rows for the only caller that ever runs it. The row's two user
+		// pointers do not help either: inviterId names the wrong person, and
+		// inviteeId is the field this write SETS, so a filter over it would
+		// test the value being written. What authorizes it is possession of
+		// the token, matched against tokenHash on the resolve path before it
+		// runs. On the wire it would be a burn primitive against every
+		// outstanding invitation on the cluster, because burning one is
+		// exactly what it does -- that is the whole point of the write.
+		// bindUserInvitation is the fourth, and on the wire it is the sharpest
+		// of them: it writes a caller-supplied DIGEST that decides which
+		// browser may accept. That is createGuestInvitation's
+		// credential-forging shape rather than a new one, and no actor filter
+		// reaches it -- the caller who must be refused is an ordinary
+		// authenticated user, who satisfies any self-scoped test while binding
+		// an invitation they merely know the id of to a cookie they hold. The
+		// honest caller cannot be scoped either, for the reason above it: the
+		// toucher of a /join link has not authenticated yet. The no-overwrite
+		// rule that makes the binding worth anything is not expressible in a
+		// mutation body at all -- no predicate, no filter, and update() is a
+		// read-merge-write -- so it lives in Store.BindUserInvitation, inside
+		// the advisory-lock critical section magic_link_gate.go provides.
+		{Path: "identity/mutations.memql", Name: "createUserInvitation"}:       true,
+		{Path: "identity/mutations.memql", Name: "bindUserInvitation"}:         true,
+		{Path: "identity/mutations.memql", Name: "markUserInvitationAccepted"}: true,
+		{Path: "identity/mutations.memql", Name: "revokeUserInvitation"}:       true,
 		// memql#2991. Caller-scoping is not merely hard here, it is
 		// INEXPRESSIBLE: `update { id: args.userId; args.payload }` relates the
 		// target to nothing, and no mutation in the tree carries a filter --

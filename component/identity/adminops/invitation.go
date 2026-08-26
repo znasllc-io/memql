@@ -372,9 +372,24 @@ func (s *Service) invitationBaseURL(ctx context.Context) (string, string) {
 	return base, ""
 }
 
-// invitationURL composes the redeem link. The token goes in the `invitation`
-// query parameter -- the same name the login form's field posts, so a person
-// who follows the link arrives with it already filled in.
+// invitationURL composes the redeem link.
+//
+// IT POINTS AT /invitation, NOT /login (memql#4601). What was here sent the
+// recipient to `/login?invitation=<token>` and this comment claimed the token
+// arrived "already filled in". It did not: nothing in the tree ever read that
+// query parameter, so an invitee landed on a bare email box, was bounced into
+// the invite-only stage, and was asked to paste back the credential they had
+// just been handed -- which then failed too, because the form that asked for it
+// posted no address. Redemption had never once succeeded.
+//
+// /invitation resolves the token server-side and tells the holder what it says.
+// The parameter is `code`, matching /enroll and /recover, which are the two
+// other pages in this app that a credential-bearing link lands on.
+//
+// THE OLD SPELLING IS STILL HONOURED at the other end -- invitationCodeFrom
+// accepts `invitation` as well as `code` -- because links composed by earlier
+// builds are sitting in mailboxes now, and the people holding them are exactly
+// the people this change exists to rescue.
 func invitationURL(base, plainToken string) string {
-	return base + "/login?invitation=" + url.QueryEscape(plainToken)
+	return base + "/invitation?code=" + url.QueryEscape(plainToken)
 }

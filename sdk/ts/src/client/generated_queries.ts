@@ -9495,6 +9495,28 @@ QueryClient.prototype.userDisplayById = function (this: QueryClient, args: UserD
   return this.executeNamed("userDisplayById", buildUserDisplayById(args), opts);
 };
 
+/** Returns the kind="user" invitation whose tokenHash matches the argument. Zero or one result. */
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["userInvitationByTokenHash"] in generated_concepts.ts).
+export interface UserInvitationByTokenHashArgs {
+  tokenHash: string;
+}
+
+export function buildUserInvitationByTokenHash(args: UserInvitationByTokenHashArgs): string {
+  const parts: string[] = [];
+  parts.push("tokenHash: " + renderMemQLValue(args.tokenHash));
+  return "query userInvitationByTokenHash(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    userInvitationByTokenHash(args: UserInvitationByTokenHashArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.userInvitationByTokenHash = function (this: QueryClient, args: UserInvitationByTokenHashArgs = {} as UserInvitationByTokenHashArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("userInvitationByTokenHash", buildUserInvitationByTokenHash(args), opts);
+};
+
 /** Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4). */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.ts).
 export interface UsersActiveInSpaceArgs {
