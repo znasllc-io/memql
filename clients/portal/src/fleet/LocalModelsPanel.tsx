@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Badge, Button, Callout, DataText, EmptyState, Panel, StatusDot } from "../ui";
+import { Badge, Button, Callout, DataText, EmptyState, ErrorNotice, Panel, StatusDot } from "../ui";
 import {
   formatContextWindow,
   type FleetMachineRow,
@@ -91,9 +91,11 @@ export function LocalModelsPanel({
 
       {error ? (
         <div className="mt-3">
-          <Callout tone="danger" title="The model catalog could not be read">
-            {error}
-          </Callout>
+          <ErrorNotice
+            sentence="Could not read which models your machines are offering."
+            next="Refresh to read them again."
+            detail={error}
+          />
         </div>
       ) : null}
 

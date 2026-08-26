@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Badge, Button, Callout, DataText, Panel } from "../ui";
+import { Badge, Button, Callout, DataText, ErrorNotice, Panel } from "../ui";
 import type { InferenceStatus } from "./useInferenceStatus";
 
 // The inference step of the first-run gate (epic memql#4676, task memql#4684,
@@ -88,9 +88,11 @@ export function InferenceGate({
 
       {error ? (
         <div className="mt-3">
-          <Callout tone="danger" title="Could not read this cluster's inference status">
-            {error}
-          </Callout>
+          <ErrorNotice
+            sentence="Could not read what this cluster can run."
+            next="Check again, or pick a door below and this will re-check on its own."
+            detail={error}
+          />
         </div>
       ) : null}
 

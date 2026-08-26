@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Badge, Button, Callout, DataText, Panel } from "../ui";
+import { Badge, Button, DataText, ErrorNotice, Panel } from "../ui";
 
 // The `no_local_model_available` park (epic memql#4676, task memql#4683).
 //
@@ -104,9 +104,16 @@ export function NoLocalModelCard({
 
       {park.lastError ? (
         <div className="mt-3">
-          <Callout tone="neutral" title="Last attempt">
-            {park.lastError}
-          </Callout>
+          {/* The last machine actually attempted failed with something. That
+              is a RAW string from a runtime, so it goes behind ErrorNotice's
+              owner/admin disclosure (memql#4653) rather than into the card a
+              person reads. The sentence comes from what the call was trying
+              to do, which this call site knows and the error text does not. */}
+          <ErrorNotice
+            sentence="The last machine that was tried did not finish the call."
+            next="Waking another machine, or approving cloud for this plan, will let it continue."
+            detail={park.lastError}
+          />
         </div>
       ) : null}
 
