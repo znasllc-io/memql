@@ -237,6 +237,41 @@ describe("the lazy chunk", () => {
     expect(graph?.[1] ?? "").toContain('lazy(() => import("./ConceptGraphCanvas"))');
   });
 
+  it("would CATCH a violation, which is the only thing that makes the scan above evidence", () => {
+    // The guard is a regex over source. A regex that stopped matching -- a
+    // changed import spelling, a bundler alias, a `import * as THREE` form
+    // nobody anticipated -- reports a clean tree forever, and its silence is
+    // indistinguishable from compliance.
+    //
+    // So the detector is run over sources that DO violate it. This is the
+    // reachable positive behind the empty offender list: without it, "no
+    // offenders" is a statement about the regex rather than about the tree.
+    const violating = [
+      'import * as THREE from "three";',
+      'import { Canvas } from "@react-three/fiber";',
+      'import { OrbitControls } from "@react-three/drei";',
+    ];
+    for (const source of violating) {
+      expect(
+        /from "(three|@react-three\/[a-z]+)"/.test(source),
+        `the lazy-chunk detector does not match: ${source}`,
+      ).toBe(true);
+    }
+
+    // ...and does NOT fire on the things a scene module legitimately imports,
+    // so the guard cannot be "passing" by flagging everything.
+    for (const source of [
+      'import { readPalette } from "../map/palette";',
+      'import type { ConceptGraph } from "./conceptGraph";',
+      '// three.js is imported by the canvas, not here',
+    ]) {
+      expect(
+        /from "(three|@react-three\/[a-z]+)"/.test(source),
+        `the detector false-positives on: ${source}`,
+      ).toBe(false);
+    }
+  });
+
   it("loads every registered scene lazily, so no page pays for a scene it does not place", () => {
     // The registry NAMES every scene, so a static import in it would bundle
     // the whole WebGL stack for every arranged page -- which is every page.

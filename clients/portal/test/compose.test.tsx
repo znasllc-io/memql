@@ -328,6 +328,37 @@ describe("a concept this repository has never seen", () => {
     expect(screen.getAllByText(/does not fit/).length).toBeGreaterThan(0);
   });
 
+  it("reorders from the KEYBOARD, which the drag cannot do", async () => {
+    // Composer v2 replaced the up/down buttons with a pointer drag (epic
+    // memql#4661). A drag is not operable from a keyboard, so the transition
+    // those buttons dispatched stayed -- on the arrow keys, on every entry in
+    // the inspector. Without this test the reducer's transition is covered
+    // and the WIRING is not, which is the half that would silently take
+    // reordering away from anybody not using a mouse.
+    const { container } = renderCompose(COMPOSER_PATH);
+    await screen.findAllByText(/north inlet/);
+
+    const entries = () =>
+      [...container.querySelectorAll('li > [role="button"]')] as HTMLElement[];
+    await waitFor(() => expect(entries().length).toBeGreaterThan(1));
+
+    const before = entries().map((el) => el.textContent);
+    entries()[0]!.focus();
+    fireEvent.keyDown(entries()[0]!, { key: "ArrowDown" });
+
+    await waitFor(() => {
+      const after = entries().map((el) => el.textContent);
+      expect(after[0]).toBe(before[1]);
+      expect(after[1]).toBe(before[0]);
+    });
+
+    // And back, so the transition is a move rather than a one-way shuffle.
+    fireEvent.keyDown(entries()[1]!, { key: "ArrowUp" });
+    await waitFor(() =>
+      expect(entries().map((el) => el.textContent)).toEqual(before),
+    );
+  });
+
   it("lets a person add and remove elements by hand", async () => {
     const { container } = renderCompose(COMPOSER_PATH);
     // Wait for the ROWS, not just the header: candidacy is computed from the
