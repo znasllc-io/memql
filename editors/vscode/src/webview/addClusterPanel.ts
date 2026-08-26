@@ -28,8 +28,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-import { localInstallRefusal } from "../install/remoteHost.js";
-
 import {
   escapeHtml,
   renderInstallSteps,
@@ -51,6 +49,8 @@ import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
+import { discoverIssuer } from "../connection/discovery.js";
+import { localInstallRemoteProblem } from "../install/stackPin.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { maskHomePath, redactForDisplay } from "../install/secrets.js";
 import { brandStrip, brandStyleBlock } from "./brandTokens.js";
@@ -298,6 +298,22 @@ export async function probeClusterOverHttps(
         reason: `${targets.jwksUrl} answered, but not with a JWKS -- something else is serving that host`,
       };
     }
+    // THE CLUSTER IS REACHABLE; NOW ASK IT WHERE ITS ENDPOINTS ARE
+    // (memql#4624). The JWKS fetch above proves a MemQL identity service is
+    // answering; this reads the RFC 8414 document beside it so the registry
+    // entry can record the cluster's OWN issuer rather than the convention
+    // this form composed.
+    //
+    // A FAILURE HERE IS NOT A FAILED PROBE. The cluster has already proved
+    // itself; a cluster old enough to publish no document, or a proxy that
+    // serves JWKS and not the metadata, must still be registrable. The entry
+    // is then written without `issuer` and the convention applies, which is
+    // exactly the behaviour before this existed.
+    const issuerBase = targets.jwksUrl.replace(/\/\.well-known\/jwks\.json$/, "");
+    const discovered = await discoverIssuer(issuerBase, (url, init) =>
+      fetch(url, { method: init.method, headers: init.headers, redirect: "follow" }),
+    ).catch(() => ({ ok: false }) as const);
+    if (discovered.ok) return { ok: true, issuer: discovered.issuer };
     return { ok: true };
   } catch (err) {
     // AbortError is the timeout, and it deserves its own sentence: "aborted"
@@ -518,27 +534,7 @@ export class AddClusterPanel {
     presence: ClusterPresence,
     deps: AddClusterDeps,
     initialAction?: AddClusterAction,
-  ): AddClusterPanel | undefined {
-    // A LOCAL INSTALL CANNOT BE DRIVEN FROM A REMOTE WINDOW (memql#4623).
-    //
-    // Refused here, at the single entry point every route goes through, rather
-    // than at each command -- and refused rather than worked around, because
-    // there is no client-side fix: the cluster's `.localhost` credential links
-    // resolve to the USER's machine, and its mkcert CA is trusted only on the
-    // remote. The install SUCCEEDED before this gate, and then every credential
-    // button opened a tab that could not connect, which reads as "MemQL is
-    // broken" rather than "this combination is not supported".
-    //
-    // CONNECTING is untouched, and that distinction is the point: a reachable
-    // https cluster signs in fine from a remote window since the vscode://
-    // callback (auth/uriCallback.ts).
-    if (initialAction === "install" || initialAction === "installGuided") {
-      const refusal = localInstallRefusal({ remoteName: vscode.env.remoteName });
-      if (refusal !== undefined) {
-        void vscode.window.showWarningMessage(refusal, { modal: true });
-        return undefined;
-      }
-    }
+  ): AddClusterPanel {
     const existing = AddClusterPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
@@ -984,6 +980,20 @@ export class AddClusterPanel {
     // chosen action and every field error with it. Checking first keeps a
     // refusal on the form the operator is already looking at, with the box they
     // need to edit still on screen and still holding what they typed.
+    // A REMOTE WINDOW CANNOT INSTALL A LOCAL CLUSTER (memql#4623), and the
+    // refusal belongs here for the same reason the key-file check does: before
+    // `beginRun()`, so it lands on the form rather than on a run screen the
+    // operator can only leave by discarding what they typed.
+    //
+    // It is a refusal rather than a warning because the failure is silent and
+    // total: the install SUCCEEDS, and every credential link on the done screen
+    // opens a tab that cannot connect.
+    const remoteProblem = localInstallRemoteProblem(vscode.env.remoteName);
+    if (remoteProblem !== undefined) {
+      this.deps.diagnostics.appendLine(`a local install was refused: ${remoteProblem}`);
+      void vscode.window.showWarningMessage(remoteProblem, { modal: true });
+      return;
+    }
     const problem = await this.keyFileProblem(this.state.inputs.providerKeyFile);
     if (problem !== "") {
       this.state.noteFieldProblem("providerKeyFile", problem);
@@ -3201,7 +3211,7 @@ ${providers}`,
   /**
    * The recovery-key block of the done screen (memql#4079).
    *
-   * One of four renderings, decided by the step's own state:
+   * One of five renderings, decided by the step's own state:
    *
    *   claimed         the reveal -- heading, the key, Copy, and what to do
    *                   with it. The only time the plaintext will ever be shown.
@@ -3210,6 +3220,12 @@ ${providers}`,
    *   awaitingOwner   one line: the key is minted after the first sign-in.
    *                   What a fresh install finds, since a cluster is claimed
    *                   by that sign-in.
+   *   revealLost      a WARNING (memql#4628): the key was spent and reached
+   *                   nobody, so this cluster has no break-glass credential
+   *                   anyone holds. The only rendering here that asks the
+   *                   operator to go and do something, because it is the only
+   *                   one where doing nothing leaves the cluster worse off
+   *                   than it looks.
    *   none            nothing at all -- the step did not run or did not
    *                   succeed, and a block about it would be a guess.
    */
@@ -3244,6 +3260,17 @@ ${providers}`,
     if (state === "alreadyClaimed") {
       return `<p>${escapeHtml(
         "Recovery key: claimed earlier. If you no longer have it, rotate it from the portal.",
+      )}</p>`;
+    }
+    if (state === "revealLost") {
+      return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- not held by anyone")}</h2>
+<p>${escapeHtml(
+        "This cluster's break-glass recovery key was spent during the install and its value did not " +
+          "reach this screen, so nobody holds it. Nothing here can show it: only its hash was ever stored.",
+      )}</p>
+<p>${escapeHtml(
+        "Rotate it from the portal, or from a terminal with cluster access, to obtain a key you can " +
+          "store. Until you do, treat this cluster as having no way back in if you lose your passkey.",
       )}</p>`;
     }
     if (state === "awaitingOwner") {

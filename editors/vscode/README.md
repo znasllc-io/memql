@@ -296,17 +296,21 @@ secret storage.
 
 **Signing in needs nothing configured on either side.** Every identity node
 carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
-**MemQL: Sign In** works against a cluster on the day it is installed.
+**MemQL: Sign In** works against a cluster on the day it is installed. It opens
+your browser and catches the callback on a loopback port; when this host cannot
+do that -- a machine with no browser, or any remote window (Remote-SSH, a dev
+container, WSL, Codespaces), where the callback port would be on the wrong
+machine -- it falls back automatically to a short code you approve on another
+device. Nothing is registered with the cluster at any point, and the `clientId`
+field in `clusters.yaml` is an override you will usually not set.
 
-On a local editor it opens your browser and catches the callback on a loopback
-port. Under **Remote-SSH, Codespaces or a dev container** it uses a
-`vscode://` callback instead, which your own VS Code client resolves and
-forwards to the extension across the remote boundary -- a loopback port would be
-bound on the *server*, while your browser redirects to *your* machine, where
-nothing is listening. On a machine with **no browser at all** it falls back to a
-short code you approve on another device. Nothing is
-registered with the cluster at any point, and the `clientId` field in
-`clusters.yaml` is an override you will usually not set.
+**A local install must be driven from a local window.** "Install a local
+cluster" writes hosts entries, issues an mkcert certificate into *this
+machine's* trust store and serves the cluster at `*.memql.localhost`. From a
+remote window those all land on the remote host while your browser is on your
+own, and `.localhost` resolves to loopback for whichever machine asks -- so the
+credential links the wizard hands you open a tab that cannot connect. Install
+locally, then register the cluster from wherever you like.
 
 **Sign-in needs the developer role or above on the cluster.** The editor is a
 management surface, so writer and reader are refused -- with a message naming

@@ -99,15 +99,8 @@ func rkRun(t *testing.T, env []string, args ...string) (stdout string, code int)
 		}
 	}
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, out.String(), errb.String())
-	rkLastStderr = errb.String()
 	return out.String(), code
 }
-
-// rkLastStderr holds the stderr of the most recent rkRun. The operator-facing
-// prose goes to stderr by contract rule 5 (stdout carries the envelope and
-// nothing else), so a test asserting on what an operator READS has to look
-// here rather than at the envelope.
-var rkLastStderr string
 
 func rkParse(t *testing.T, stdout string) (rkEnvelope, rkResult) {
 	t.Helper()
@@ -199,30 +192,41 @@ func TestRecoveryKeyOnAnAlreadyClaimedKeySaysHowToRotate(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// the three states must stay tellable apart
+// the four states must stay tellable apart
 // -----------------------------------------------------------------------
 
-// `claimed` / `awaitingOwner` / `alreadyClaimed` are three different facts, and
-// an operator or a run record reading the envelope has to be able to tell which
-// one happened. Collapsing any two of them -- most temptingly the two that both
-// emit no key -- would make "we just handed you a credential" indistinguishable
-// from "you already have one" in the record of the run.
-func TestRecoveryKeyKeepsItsThreeStatesDistinguishable(t *testing.T) {
+// `claimed` / `awaitingOwner` / `alreadyClaimed` / `revealLost` are four
+// different facts, and an operator or a run record reading the envelope has to
+// be able to tell which one happened. Collapsing any two of them -- most
+// temptingly the three that emit no key -- would make "we just handed you a
+// credential" indistinguishable from "you already have one" in the record of
+// the run.
+//
+// `revealLost` was added because `alreadyClaimed` was already doing duty for
+// two of them (memql#4628): "you were handed this and still have it" and "this
+// was consumed and you never saw it". Those need opposite actions, so they
+// cannot share a name.
+func TestRecoveryKeyKeepsItsFourStatesDistinguishable(t *testing.T) {
 	cases := []struct {
-		name  string
-		env   []string
+		name string
+		env  []string
+		// exit is part of the fact. Three of these are successful outcomes;
+		// revealLost is not -- a break-glass credential that was spent and
+		// shown to nobody is a step that failed at its own goal.
+		exit  int
 		state string
 	}{
-		{"claimed", []string{"FAKE_EXIT=0", "FAKE_STDOUT=" + rkKey()}, "claimed"},
-		{"awaitingOwner", []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrNoOwner}, "awaitingOwner"},
-		{"alreadyClaimed", []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrAlreadyClaimed}, "alreadyClaimed"},
+		{"claimed", []string{"FAKE_EXIT=0", "FAKE_STDOUT=" + rkKey()}, 0, "claimed"},
+		{"awaitingOwner", []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrNoOwner}, 0, "awaitingOwner"},
+		{"alreadyClaimed", []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrAlreadyClaimed}, 0, "alreadyClaimed"},
+		{"revealLost", []string{"FAKE_EXIT=0", "FAKE_STDOUT=" + rkTruncatedReveal}, 5, "revealLost"},
 	}
 	seen := map[string]string{}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, code := rkRun(t, tc.env, rkArgs()...)
-			if code != 0 {
-				t.Fatalf("exit %d; all three states are successful outcomes: %s", code, stdout)
+			if code != tc.exit {
+				t.Fatalf("exit %d, want %d: %s", code, tc.exit, stdout)
 			}
 			_, res := rkParse(t, stdout)
 			if res.RecoveryKeyState != tc.state {
@@ -233,6 +237,77 @@ func TestRecoveryKeyKeepsItsThreeStatesDistinguishable(t *testing.T) {
 			}
 			seen[res.RecoveryKeyState] = tc.name
 		})
+	}
+}
+
+// -----------------------------------------------------------------------
+// the reveal that did not survive the journey (memql#4628)
+// -----------------------------------------------------------------------
+
+// What a perturbed capture looks like: the subcommand ran, wrote its key and
+// stamped the row, and what arrived here is missing the value. Truncation is
+// the plausible shape -- an interleaved log line, a severed exec stream.
+const rkTruncatedReveal = `{"level":"INFO","component":"MemQLEngine","msg":"started"}`
+
+// The message must stop blaming the subcommand for a mint failure it did not
+// have. The claim SUCCEEDED; the credential is spent; the operator holds
+// nothing. Anything softer than that leaves a cluster whose break-glass key
+// exists nowhere while the install reads as a tooling hiccup.
+func TestRecoveryKeyRevealLostSaysTheKeyIsSpentAndHeldByNobody(t *testing.T) {
+	env := []string{"FAKE_EXIT=0", "FAKE_STDOUT=" + rkTruncatedReveal}
+	stdout, code := rkRun(t, env, rkArgs()...)
+	if code != 5 {
+		t.Fatalf("exit %d, want 5 -- the step did not achieve its goal: %s", code, stdout)
+	}
+	envelope, res := rkParse(t, stdout)
+	if envelope.OK {
+		t.Error("ok=true for a run that spent the cluster's break-glass credential and delivered nothing")
+	}
+	if res.RecoveryKey != "" {
+		t.Errorf("recoveryKey = %q, want empty -- there is nothing to emit", res.RecoveryKey)
+	}
+	if envelope.Error == nil {
+		t.Fatal("no error block on a failed envelope")
+	}
+	msg := envelope.Error.Message
+	if strings.Contains(msg, "emitted no recovery key") || strings.Contains(msg, "mint failure") {
+		t.Errorf("error message %q still says the claim emitted nothing / a mint failed. It did\n"+
+			"neither: it SUCCEEDED and rotated. That wording is what sent operators looking at\n"+
+			"identity logs while the cluster sat with a spent credential nobody held.", msg)
+	}
+	if !strings.Contains(msg, "spent") {
+		t.Errorf("error message %q does not say the key was spent, which is the whole fact the\n"+
+			"operator needs in order to know they must rotate", msg)
+	}
+	if !strings.Contains(string(envelope.Result), "--reclaim") {
+		t.Errorf("the result does not name --reclaim, the only way out: %s", envelope.Result)
+	}
+}
+
+// The state exists to be told apart from alreadyClaimed. Their remedies are
+// opposite -- do nothing versus rotate now -- so a reader that cannot separate
+// them will take the wrong one roughly half the time.
+func TestRecoveryKeyRevealLostIsNotReportedAsAlreadyClaimed(t *testing.T) {
+	env := []string{"FAKE_EXIT=0", "FAKE_STDOUT=" + rkTruncatedReveal}
+	stdout, _ := rkRun(t, env, rkArgs()...)
+	_, res := rkParse(t, stdout)
+	if res.RecoveryKeyState == "alreadyClaimed" {
+		t.Fatal("a lost reveal reports alreadyClaimed, whose copy tells the operator the key they " +
+			"hold is still live. They hold no key. That is memql#4628 exactly")
+	}
+}
+
+// The sibling half of the same fix: alreadyClaimed must stop ASSERTING the
+// operator holds the key. The stamp records that a claim happened, not that
+// its value ever reached a human, and this step cannot tell those apart.
+func TestRecoveryKeyAlreadyClaimedDoesNotAssertTheOperatorHoldsIt(t *testing.T) {
+	env := []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrAlreadyClaimed}
+	stdout, _ := rkRun(t, env, rkArgs()...)
+	_, res := rkParse(t, stdout)
+	if strings.Contains(res.NextStep, "nothing -- the key claimed earlier is still the live one") {
+		t.Errorf("nextStep = %q. It states as fact that the operator holds the key; the cluster\n"+
+			"cannot know that, and until memql#4628 there was a window where it was false.\n"+
+			"State the condition instead.", res.NextStep)
 	}
 }
 
@@ -363,79 +438,4 @@ func shellConstant(t *testing.T, script, name string) string {
 		return value[:end]
 	}
 	return ""
-}
-
-// -----------------------------------------------------------------------
-// memql#4628 -- a claim whose value never reached this step
-// -----------------------------------------------------------------------
-
-// THE FOURTH STATE. Exit 0 with nothing matching RECOVERY_KEY_RE used to be
-// reported as "the claim reported success but emitted no recovery key", which
-// is wrong in the way that matters: the claim did not fail to emit, it
-// SUCCEEDED and rotated. The step reported a failed install while the
-// cluster's break-glass credential had already been consumed and shown to
-// nobody -- and every later run then said the operator still held it.
-//
-// `alreadyClaimed` was doing duty for two facts that need separating: "you
-// were handed this and still have it" and "this was consumed and you never saw
-// it". This is the second one.
-func TestRecoveryKeyReportsAClaimWhoseValueNeverArrived(t *testing.T) {
-	// Exit 0 -- the claim SUCCEEDED -- but stdout carried no key.
-	env := []string{"FAKE_EXIT=0", "FAKE_STDOUT="}
-	stdout, code := rkRun(t, env, rkArgs()...)
-
-	if code == 0 {
-		t.Fatalf("exit 0, but this run has no key to hand the operator; it must not report success: %s", stdout)
-	}
-	_, res := rkParse(t, stdout)
-
-	if res.RecoveryKeyState != "claimedNotCaptured" {
-		t.Errorf("recoveryKeyState = %q, want \"claimedNotCaptured\" -- this must be distinguishable\n"+
-			"from alreadyClaimed, which asserts the operator HOLDS the key. Here nobody does.",
-			res.RecoveryKeyState)
-	}
-	if res.RecoveryKey != "" {
-		t.Errorf("recoveryKey = %q, want empty", res.RecoveryKey)
-	}
-	// The remedy must be named, and it is the one the alreadyClaimed copy
-	// steers people away from.
-	if !strings.Contains(stdout+rkLastStderr, "--reclaim") {
-		t.Errorf("does not name --reclaim, which is the only way back to a key the operator\n"+
-			"can actually store:\n%s\n%s", stdout, rkLastStderr)
-	}
-	// And it must stop blaming a mint failure that did not happen. Matched on
-	// the old wrong sentences rather than on the words "mint failure", because
-	// the corrected copy says "This is NOT a mint failure" and must be allowed
-	// to.
-	for _, wrong := range []string{
-		"emitted no recovery key",
-		"check the identity workload's logs for a mint failure",
-	} {
-		if strings.Contains(stdout+rkLastStderr, wrong) {
-			t.Errorf("still says %q; the claim did not fail to emit -- it SUCCEEDED and rotated:\n%s\n%s",
-				wrong, stdout, rkLastStderr)
-		}
-	}
-}
-
-// The alreadyClaimed copy must not assert the operator holds the key. The
-// cluster records that a claim happened; it cannot know the value reached a
-// human, and asserting it did is what made the #4628 state permanent.
-func TestRecoveryKeyDoesNotAssertTheOperatorHoldsAnAlreadyClaimedKey(t *testing.T) {
-	env := []string{"FAKE_EXIT=1", "FAKE_STDERR=" + rkStderrAlreadyClaimed}
-	stdout, code := rkRun(t, env, rkArgs()...)
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, stdout)
-	}
-	// The sentence that was wrong: an unconditional claim of possession.
-	if strings.Contains(rkLastStderr, "If you still hold it") {
-		t.Errorf("still says \"If you still hold it, keep it -- it is the live key\", which asserts\n" +
-			"possession the cluster cannot verify (memql#4628)")
-	}
-	if !strings.Contains(rkLastStderr, "cannot know whether the value reached you") {
-		t.Errorf("does not say the cluster cannot know whether the value reached the operator:\n%s", rkLastStderr)
-	}
-	if !strings.Contains(stdout+rkLastStderr, "--reclaim") {
-		t.Errorf("does not name --reclaim as the remedy:\n%s", rkLastStderr)
-	}
 }

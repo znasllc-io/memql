@@ -22,7 +22,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { HttpRequestInit, HttpResponseLike } from "../src/connection/credentials.js";
-import { OAUTH_METADATA_PATH } from "../src/auth/discovery.js";
 import { runAuthorizationFlow } from "../src/auth/flow.js";
 import { runDeviceCodeFlow } from "../src/auth/deviceCode.js";
 import {
@@ -86,26 +85,18 @@ function recorder(): RequestLog {
     urls,
     registerCalls: () => urls.filter((u) => new URL(u).pathname === "/register").length,
     fetch: async (url) => {
+      urls.push(url);
       const path = new URL(url).pathname;
-      // The RFC 8414 pre-flight (memql#4624). NOT pushed onto `urls`, because
-      // this fake's whole assertion is "which requests may this extension make"
-      // and that list is about credential-bearing calls -- an unauthenticated
-      // discovery GET is not the thing /register was banned for.
-      if (path === OAUTH_METADATA_PATH) {
+      // The RFC 8414 pre-flight (memql#4624).
+      if (path === "/.well-known/oauth-authorization-server") {
+        const metaBase = url.slice(0, -path.length);
         return json(200, {
-          issuer: ISSUER,
-          authorization_endpoint: `${ISSUER}/authorize`,
-          token_endpoint: `${ISSUER}/oauth/token`,
-          device_authorization_endpoint: `${ISSUER}/device/code`,
-          grant_types_supported: [
-            "authorization_code",
-            "refresh_token",
-            "urn:ietf:params:oauth:grant-type:device_code",
-          ],
-          code_challenge_methods_supported: ["S256"],
+          issuer: metaBase,
+          authorization_endpoint: `${metaBase}/authorize`,
+          token_endpoint: `${metaBase}/oauth/token`,
+          device_authorization_endpoint: `${metaBase}/device/code`,
         });
       }
-      urls.push(url);
       if (path === "/device/code") {
         return json(200, {
           device_code: "dc-1",
@@ -169,9 +160,15 @@ test("the browser flow authorizes as the well-known client and never calls /regi
   // The id reaches /authorize and the exchange, not just the return value.
   assert.equal(new URL(authorizeUrl).searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
   assert.deepEqual(
-    net.urls.map((u) => new URL(u).pathname),
+    net.urls
+      .map((u) => new URL(u).pathname)
+      // The RFC 8414 pre-flight is not an OAuth request and carries no
+      // credential (memql#4624); the claim here is about which OAuth
+      // endpoints a browser sign-in drives, and /register is the one that
+      // must not appear.
+      .filter((p) => p !== "/.well-known/oauth-authorization-server"),
     ["/oauth/token"],
-    "the only request a browser sign-in makes is the code exchange",
+    "the only OAuth request a browser sign-in makes is the code exchange",
   );
 });
 

@@ -51,9 +51,38 @@ type OAuthServerMetadata struct {
 // OAuthServerMetadata doc comment for why omitting it (rather than
 // advertising a /register that answers 403) is the RFC 8414-conformant
 // signal.
+// # THE COPY SERVED FROM THE API HOST IS A POINTER, NOT A CONFORMANT DOCUMENT
+// # FOR THAT HOST (memql#4624)
+//
+// `Issuer` is always cfg.BaseURL -- `https://identity.<domain>` -- including
+// on the copy component/server mounts at `api.<domain>`. RFC 8414 §3.3 says
+// the issuer value MUST be identical to the identifier the well-known URI was
+// inserted into, so a client that fetches from the API host and requires a
+// strict match will fail. That is correct behaviour on both sides, and the
+// resolution is NOT to make the API host claim to be an issuer -- it is not
+// one, nothing signs tokens there, and a client that believed it were would
+// send credentials to the wrong host.
+//
+// The API-host copy exists so a client that knows only `api.<domain>` can
+// LEARN where the issuer is. Having learned it, the client re-fetches from the
+// issuer's own URL and validates strictly there. `discovery.ts` on the
+// extension side does exactly that.
+//
+// # CORS
+//
+// Both well-known documents are public, unauthenticated, read-only and
+// identical for every caller, so `*` gives away nothing that fetching the URL
+// does not. It is here because a webview fetch is origin-checked while a Node
+// fetch is not: without it, discovery works from the extension host and fails
+// from any panel, which is the kind of difference that gets discovered late.
 func OAuthServerMetadataHandler(cfg Config) http.Handler {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setWellKnownCORS(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		doc := OAuthServerMetadata{
 			Issuer:                            cfg.BaseURL,
 			AuthorizationEndpoint:             base + "/authorize",
@@ -70,7 +99,21 @@ func OAuthServerMetadataHandler(cfg Config) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		setDiscoveryCORS(w)
 		_ = json.NewEncoder(w).Encode(doc)
 	})
+}
+
+// setWellKnownCORS marks a public discovery document readable from any origin.
+//
+// Deliberately NOT the identity server's `cors` middleware, which reflects a
+// configured allow-list because it guards endpoints that read cookies and
+// mint credentials. These two documents carry neither: they are the same
+// bytes for every caller, and an allow-list on them would mean a client can
+// only DISCOVER a cluster it has already been configured for, which is
+// backwards.
+func setWellKnownCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	w.Header().Set("Access-Control-Max-Age", "600")
 }

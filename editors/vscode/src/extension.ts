@@ -63,19 +63,13 @@ import {
   passkeyAlreadyEnrolledMessage,
   passkeyOfferMessage,
 } from './auth/passkeyOffer.js';
-import { deliverUriCallback } from './auth/uriCallback.js';
-import {
-  describeRevocation,
-  revocationNeedsAttention,
-  revokeRefreshToken,
-  type RevocationOutcome,
-} from './auth/revoke.js';
 import {
   ClusterCredentialStore,
   persistSignIn,
   reconcileClusterCredentials,
   signOut as signOutCredentials,
 } from './auth/store.js';
+import { revokeRefreshToken, signOutMessage, type RevocationOutcome } from './auth/revoke.js';
 import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from './clusters/form.js';
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
@@ -109,7 +103,7 @@ import {
   memqlThemeFor,
   shouldOfferMemqlTheme,
 } from './theme/themeOffer.js';
-import { CredentialResolver, defaultFetch } from './connection/credentials.js';
+import { CredentialResolver } from './connection/credentials.js';
 import { composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
 import { ConnectionManager, type ConnectionState } from './connection/manager.js';
 import {
@@ -382,15 +376,6 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   context.subscriptions.push(
     window.registerUriHandler({
       handleUri: (uri) => {
-        // THE SIGN-IN CALLBACK COMES BACK THROUGH HERE UNDER A REMOTE HOST
-        // (memql#4623). It is checked FIRST and returns when consumed: a
-        // sign-in callback is not a portal handoff, and handing one to
-        // handleOpenUri would report a handoff failure for a uri that was
-        // exactly right. deliverUriCallback answers false for anything that is
-        // not a callback it is waiting on, so the handoff path is untouched.
-        if (deliverUriCallback(uri.query, uri.path)) {
-          return;
-        }
         void handleOpenUri(uri).catch(noteHandoffFailure);
       },
     })
@@ -1783,23 +1768,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // working untouched.
         clientId: '',
       }),
-    // memql#4625: sign-out ends the session on the CLUSTER, not only here.
-    // The issuer comes from the same derivation a refresh exchange uses, so a
-    // cluster this extension can refresh against is one it can revoke against.
-    signOut: (clusterName) =>
-      signOutCredentials(storeDeps, clusterName, async (name, refreshToken) => {
-        const registry = await readClustersFileSafe(clustersPath);
-        // A malformed file means no issuer can be named, which the outcome
-        // reports as `noIssuer` -- the local clear still runs.
-        const cluster = registry.ok
-          ? registry.file.clusters.find((c) => c.name === name)
-          : undefined;
-        return revokeRefreshToken({
-          issuer: cluster === undefined ? undefined : identityBaseUrlFor(cluster),
-          refreshToken,
-          fetch: defaultFetch,
-        });
-      }),
+    // NO REVOCATION ON THIS PATH, deliberately (memql#4625). This is the
+    // SIGN-IN flow's cleanup seam -- what it forgets is a credential a
+    // sign-in produced and then could not use, so there is no established
+    // server session to end. The user-initiated sign-out is the revoking
+    // path, and it is the `memql.clusters.signOut` command below.
+    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName).then(() => undefined),
   };
 
   // sweepOrphanedCredentials deletes SecretStorage entries whose cluster is no
@@ -2253,9 +2227,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
+      // SIGNING OUT ENDS THE SESSION, NOT JUST THIS EDITOR'S COPY OF IT
+      // (memql#4625). Until this, sign-out was purely local: the refresh
+      // token stayed live on the cluster for its full thirty days while the
+      // toast said "signed out", which is a claim about the session and was
+      // only ever true here. The store attempts the revoke BEFORE it clears
+      // (it needs the token) and forgets regardless of the answer, so a
+      // sign-out on a plane still signs you out.
+      const issuer = identityBaseUrlFor(target.cluster);
       let revocation: RevocationOutcome;
       try {
-        revocation = await signInStore.signOut(target.cluster.name);
+        revocation = await signOutCredentials(storeDeps, target.cluster.name, (refreshToken) =>
+          issuer === undefined
+            ? Promise.resolve({ attempted: false as const })
+            : revokeRefreshToken(issuer, refreshToken, (url, init) => fetch(url, init))
+        );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `signing out of "${target.cluster.name}" failed`, detail);
@@ -2273,17 +2259,22 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await connections?.disconnect();
       }
       clustersTree.refresh();
-      // WHAT THE USER IS TOLD DEPENDS ON WHAT ACTUALLY HAPPENED (memql#4625).
-      // `signed out of "x"` reads as "the session is over", and until the
-      // revocation call existed that was false for 30 days. A warning rather
-      // than an info toast when the cluster-side session survived, because the
-      // user has to do something about it.
-      const message = `MemQL: ${describeRevocation(target.cluster.name, revocation)} ` +
-        'Run "MemQL: Sign In" to authenticate again.';
-      if (revocationNeedsAttention(revocation)) {
-        void window.showWarningMessage(message);
+      // The wording follows what actually happened. A session this could not
+      // end is named as such, with the portal's Devices page as the way to
+      // end it -- "signed out" over a live refresh token is the defect.
+      if (revocation.attempted && !revocation.revoked) {
+        noteDiagnostic(
+          connectionOutput,
+          `the session for "${target.cluster.name}" was not revoked on the cluster`,
+          revocation.reason
+        );
+        void offerDetails(
+          'warning',
+          connectionOutput,
+          signOutMessage(target.cluster.name, revocation)
+        );
       } else {
-        void window.showInformationMessage(message);
+        window.showInformationMessage(signOutMessage(target.cluster.name, revocation));
       }
     }),
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
@@ -4006,14 +3997,14 @@ async function runSignInToCluster(
                 signal,
                 onUserCode,
                 resolveExternalUri,
-                // WHERE THIS EXTENSION HOST RUNS DECIDES THE CALLBACK ROUTE
-                // (memql#4623). `remoteName` is set under Remote-SSH,
-                // Codespaces and dev containers -- exactly the cases where the
-                // browser opens on a different machine from the one a loopback
-                // listener binds on. Read here, where `vscode` is available,
-                // and passed down: auth/flow.ts stays free of vscode imports.
-                isRemote: env.remoteName !== undefined,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
+                // WHAT MAKES REMOTE-SSH WORK (memql#4623). Undefined locally.
+                // A remote extension host cannot receive a loopback callback --
+                // the port would be on the wrong machine -- so the flow refuses
+                // before binding and this fallback takes the device path, which
+                // needs no callback at all. Read here rather than in `flow.ts`,
+                // which must stay free of `vscode` imports.
+                remoteName: env.remoteName,
                 onFallback: (reason) => {
                   fallbackFired = true;
                   announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));

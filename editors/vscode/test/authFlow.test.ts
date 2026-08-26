@@ -16,7 +16,6 @@ import { isAuthFlowError } from "../src/auth/errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps } from "../src/auth/flow.js";
 import { codeChallengeS256 } from "../src/auth/pkce.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
-import { OAUTH_METADATA_PATH } from "../src/auth/discovery.js";
 
 const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
@@ -40,65 +39,67 @@ interface FakeIdentity {
   fetch: (url: string, init: HttpRequestInit) => Promise<HttpResponseLike>;
   calls: Array<{ url: string; body: Record<string, unknown> }>;
   urls(): string[];
-  /** The RFC 8414 pre-flight GETs, kept apart from `urls()` (memql#4624). */
+  /**
+   * Every request EXCEPT the RFC 8414 pre-flight (memql#4624).
+   *
+   * The pre-flight is a real request and `urls()` shows it. These assertions
+   * are about which OAuth ENDPOINTS the flow drove -- "it redeemed at
+   * /oauth/token", "it never called /register" -- and threading a discovery
+   * URL through every one of them would bury the claim each is making.
+   * `discoveryUrls()` asserts the pre-flight itself, in its own tests.
+   */
+  oauthUrls(): string[];
   discoveryUrls(): string[];
 }
 
 interface FakeIdentityOptions {
   tokenStatus?: number;
   tokenBody?: unknown;
-  /** Override fields of the published RFC 8414 document (memql#4624). */
-  metadata?: Partial<Record<string, unknown>>;
-}
-
-/** The document a MemQL cluster publishes, matching
- *  component/identity/oauth_metadata.go. */
-function oauthMetadata(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
-  return {
-    issuer: ISSUER,
-    authorization_endpoint: `${ISSUER}/authorize`,
-    token_endpoint: `${ISSUER}/oauth/token`,
-    device_authorization_endpoint: `${ISSUER}/device/code`,
-    jwks_uri: `${ISSUER}/.well-known/jwks.json`,
-    response_types_supported: ["code"],
-    grant_types_supported: [
-      "authorization_code",
-      "refresh_token",
-      "urn:ietf:params:oauth:grant-type:device_code",
-    ],
-    code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
-    ...overrides,
-  };
+  /**
+   * The RFC 8414 document this cluster publishes (memql#4624). `undefined`
+   * serves the ordinary one for `issuer`; `null` serves a 404, which is what a
+   * host that is not a MemQL identity service looks like.
+   */
+  metadata?: Record<string, unknown> | null;
+  /** The issuer the served metadata names. Defaults to the fetched host. */
+  issuer?: string;
 }
 
 function identity(options: FakeIdentityOptions = {}): FakeIdentity {
   const calls: FakeIdentity["calls"] = [];
-  const discovery: string[] = [];
   return {
     calls,
-    discoveryUrls: () => discovery,
     urls: () => calls.map((c) => c.url),
+    oauthUrls: () =>
+      calls
+        .map((c) => c.url)
+        .filter((u) => !u.endsWith("/.well-known/oauth-authorization-server")),
+    discoveryUrls: () =>
+      calls
+        .map((c) => c.url)
+        .filter((u) => u.endsWith("/.well-known/oauth-authorization-server")),
     fetch: async (url, init) => {
-      // The RFC 8414 pre-flight (memql#4624). Answered here so the fake is a
-      // CLUSTER rather than a token endpoint -- the flow asks where the
-      // endpoints are before it opens a browser, which is the whole point of
-      // the pre-flight, and a fake that cannot answer it is not a cluster.
-      if (url.endsWith(OAUTH_METADATA_PATH)) {
-        // Recorded SEPARATELY from `calls` (memql#4624). `urls()` answers "what
-        // credential-bearing requests did the extension make", which is what
-        // the /register assertions and the client_id assertions are about.
-        // Folding an unauthenticated discovery GET into it would change the
-        // meaning of every one of those without changing what they were
-        // written to protect.
-        discovery.push(url);
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(oauthMetadata(options.metadata)),
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
+
+      // THE PRE-FLIGHT (memql#4624). Sign-in now asks the cluster where its
+      // endpoints are before it opens a browser, so the fake has to be able to
+      // answer -- and being able to answer WRONGLY is what lets the pre-flight
+      // itself be tested.
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        if (options.metadata === null) {
+          return { ok: false, status: 404, text: async () => "not found" };
+        }
+        const base = url.slice(0, -"/.well-known/oauth-authorization-server".length);
+        const doc = options.metadata ?? {
+          issuer: options.issuer ?? base,
+          authorization_endpoint: `${base}/authorize`,
+          token_endpoint: `${base}/oauth/token`,
+          device_authorization_endpoint: `${base}/device/code`,
+          jwks_uri: `${base}/.well-known/jwks.json`,
         };
+        return { ok: true, status: 200, text: async () => JSON.stringify(doc) };
       }
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+
       // ONE endpoint, deliberately: /register is not among the requests this
       // extension may make any more (memql#4517), so a stray call to it shows
       // up in `urls()` rather than being quietly answered.
@@ -198,7 +199,7 @@ test("signs in end to end: authorizes, redeems, returns the tokens", async () =>
   // to come first, and it is what failed on every DCR-off cluster.
   assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
 
-  assert.deepEqual(net.urls(), [`${ISSUER}/oauth/token`]);
+  assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
 });
 
 test("the authorization URL is a PKCE S256 code request against this flow's own listener", async () => {
@@ -224,18 +225,14 @@ test("the authorization URL is a PKCE S256 code request against this flow's own 
   assert.notEqual(redirect.port, "");
 });
 
-// THE NAME OF THIS TEST WAS WRONG, and the wrongness was the whole of
-// memql#4623. asExternalUri tunnels LOOPBACK authorities, and it is applied
-// here to the AUTHORIZE url -- an `https://identity...` URL, which comes back
-// unchanged. No tunnel is created for the callback port by this, and the
-// redirect_uri never passes through it at all. So "so a remote host tunnels"
-// pinned an invariant that did not hold, in the one place somebody checking
-// would have looked.
-//
-// What it actually protects is real and worth keeping: the flow opens the URL
-// asExternalUri RETURNED rather than the raw one. The remote case is covered by
-// its own tests below, against the vscode:// callback that does work.
-test("the URL is opened THROUGH asExternalUri rather than raw", async () => {
+// NOT "so a remote host tunnels" (memql#4623). That is what this test claimed,
+// and it was the wrong invariant: asExternalUri is applied to the AUTHORIZE
+// URL, which is an `https://identity...` URL and comes back unchanged, so no
+// tunnel is ever created for the loopback CALLBACK port. What the call
+// genuinely buys is that whatever the host hands back is what gets opened,
+// which is what a local host with a rewriting URI resolver needs. A remote
+// host is refused before it reaches here, in its own test below.
+test("the URL is opened THROUGH asExternalUri, so a rewriting host is honoured", async () => {
   const net = identity();
   const ui = browser(goodCallback, "https://tunnel.example.dev/open?target=");
 
@@ -281,7 +278,7 @@ test("a cluster clientId OVERRIDES the well-known id", async () => {
   );
 
   assert.equal(tokens.clientId, "mcp_stored");
-  assert.deepEqual(net.urls(), [`${ISSUER}/oauth/token`]);
+  assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
   assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), "mcp_stored");
 });
 
@@ -299,7 +296,7 @@ test("a state mismatch is refused and the code is NEVER exchanged", async () => 
   );
 
   assert.deepEqual(
-    net.urls(),
+    net.oauthUrls(),
     [],
     "the token endpoint was called with a code that failed the state check",
   );
@@ -313,7 +310,7 @@ test("a missing state is a mismatch, not a pass", async () => {
     () => runAuthorizationFlow(cluster(), deps(net, ui)),
     (err: unknown) => isAuthFlowError(err) && err.kind === "stateMismatch",
   );
-  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
+  assert.deepEqual(net.oauthUrls(), [], "a refused flow makes no OAuth request at all");
 });
 
 test("an OAuth error envelope on the callback reports authorizationDenied", async () => {
@@ -334,7 +331,7 @@ test("an OAuth error envelope on the callback reports authorizationDenied", asyn
       return true;
     },
   );
-  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
+  assert.deepEqual(net.oauthUrls(), [], "a refused flow makes no OAuth request at all");
 });
 
 test("a callback with neither code nor error reports invalidCallback", async () => {
@@ -369,7 +366,7 @@ test("a callback that never arrives fails as timeout, distinguishably", async ()
       return true;
     },
   );
-  assert.deepEqual(net.urls(), [], "a refused flow makes no request at all");
+  assert.deepEqual(net.oauthUrls(), [], "a refused flow makes no OAuth request at all");
 });
 
 test("an abort during the wait fails as cancelled, not as timeout", async () => {
@@ -488,7 +485,11 @@ test("an openExternal that RESOLVES false reports browserUnavailable, not a wait
     Date.now() - started < 2_000,
     "the flow sat on a callback that can never arrive instead of reporting the refusal",
   );
-  assert.equal(net.calls.length, 0, "nothing was redeemed for a sign-in that never opened");
+  assert.deepEqual(
+    net.oauthUrls(),
+    [],
+    "nothing was redeemed for a sign-in that never opened",
+  );
 });
 
 test("only an explicit false is a refusal: true, and void, are browsers that opened", async () => {
@@ -539,22 +540,31 @@ test("browserUnavailable fails fast rather than sitting out the callback deadlin
 // against a throwing fetch at all. undici's TypeError carries the real reason
 // in `.cause`, so the assertion is that the reason reaches the sentence an
 // operator reads -- not merely that the flow rejected.
-//
-// THE KIND CHANGED IN memql#4624, deliberately. The pre-flight now runs before
-// the browser opens, so an unreachable host is caught there rather than at the
-// token exchange -- which is the improvement, not a regression: the user
-// previously waited out a 600-second callback deadline first. `registrationFailed`
-// is the kind deviceCode.ts already uses for the same situation (a network
-// failure before any credential exists, retryable the moment the server is
-// willing). What this test was WRITTEN to protect is unchanged and still
-// asserted: the cause in `.cause` reaches the sentence.
 test("a transport failure names the cause, not just \"fetch failed\"", async () => {
   const ui = browser();
+  // Discovery succeeds and the EXCHANGE throws, so this stays a test about the
+  // exchange (memql#4624 put a pre-flight in front of it; a fake that throws on
+  // everything would now be exercising that instead, and the pre-flight has its
+  // own tests below).
   const net: FakeIdentity = {
     calls: [],
     urls: () => [],
+    oauthUrls: () => [],
     discoveryUrls: () => [],
-    fetch: async () => {
+    fetch: async (url: string) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        const base = url.slice(0, -"/.well-known/oauth-authorization-server".length);
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              issuer: base,
+              authorization_endpoint: `${base}/authorize`,
+              token_endpoint: `${base}/oauth/token`,
+            }),
+        };
+      }
       const cause = new Error("getaddrinfo ENOTFOUND identity.memql.localhost");
       (cause as { code?: string }).code = "ENOTFOUND";
       const wrapper = new TypeError("fetch failed");
@@ -567,7 +577,7 @@ test("a transport failure names the cause, not just \"fetch failed\"", async () 
     () => runAuthorizationFlow(cluster(), deps(net, ui)),
     (err: unknown) => {
       assert.ok(isAuthFlowError(err));
-      assert.equal(err.kind, "registrationFailed");
+      assert.equal(err.kind, "exchangeRejected");
       assert.match(err.message, /ENOTFOUND/);
       assert.match(err.message, /identity\.memql\.localhost/);
       return true;
@@ -640,7 +650,7 @@ test("an explicit issuer wins over the domain convention", async () => {
     deps(net, ui),
   );
 
-  assert.deepEqual(net.urls(), ["https://auth.example.com/oauth/token"]);
+  assert.deepEqual(net.oauthUrls(), ["https://auth.example.com/oauth/token"]);
 });
 
 test("a server that reports no expires_in leaves the expiry unknown rather than expired", async () => {
@@ -652,4 +662,171 @@ test("a server that reports no expires_in leaves the expiry unknown rather than 
   const tokens = await runAuthorizationFlow(cluster(), deps(net, ui));
   assert.equal(tokens.expiresInSeconds, 0);
   assert.equal(tokens.expiresAtEpochSeconds, 0);
+});
+
+// -----------------------------------------------------------------------------
+// The pre-flight (memql#4624)
+// -----------------------------------------------------------------------------
+//
+// THE DEFECT THESE PIN. runAuthorizationFlow opened a browser and parked for
+// 600 seconds without ever asking whether the issuer existed. A wrong domain,
+// an unreachable host, a bad certificate, an old cluster and a plain non-MemQL
+// host all cost the full deadline and were then blamed on the browser:
+// "the browser page was never completed, or it could not reach 127.0.0.1" --
+// wrong in every one of them. The device path has always failed in one round
+// trip with the real reason.
+
+test("sign-in asks the cluster where its endpoints are before opening a browser", async () => {
+  const net = identity();
+  const ui = browser();
+
+  await runAuthorizationFlow(cluster(), deps(net, ui));
+
+  assert.deepEqual(
+    net.discoveryUrls(),
+    [`${ISSUER}/.well-known/oauth-authorization-server`],
+    "no pre-flight ran, so every failure below still costs the full sign-in deadline",
+  );
+  assert.equal(
+    net.calls[0]?.url,
+    `${ISSUER}/.well-known/oauth-authorization-server`,
+    "the pre-flight must be FIRST -- after the browser is open it has saved nothing",
+  );
+});
+
+test("an unreachable issuer fails immediately with the real reason", async () => {
+  const started = Date.now();
+  const net: FakeIdentity = {
+    calls: [],
+    urls: () => [],
+    oauthUrls: () => [],
+    discoveryUrls: () => [],
+    fetch: async () => {
+      const wrapper = new TypeError("fetch failed");
+      (wrapper as { cause?: unknown }).cause = new Error("getaddrinfo ENOTFOUND identity.memql.localhost");
+      throw wrapper;
+    },
+  };
+  const ui = browser();
+
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui)),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.match(
+        err.message,
+        /ENOTFOUND/,
+        "the failure does not name what actually went wrong, which is the whole complaint",
+      );
+      return true;
+    },
+  );
+  assert.ok(Date.now() - started < 2_000, "the flow waited out a deadline instead of failing fast");
+  assert.deepEqual(ui.opened, [], "a browser was opened at a host that cannot answer");
+});
+
+// THE DEGRADE, and it matters as much as the fail-fast. A host that answers
+// WITHOUT an RFC 8414 document is either the wrong host or a cluster old
+// enough to predate the document, and the extension cannot tell them apart.
+// Refusing would make it unable to sign in to a cluster it can sign in to
+// today -- a regression traded for a diagnosis.
+test("a cluster that publishes no metadata still signs in, on the convention", async () => {
+  const net = identity({ metadata: null });
+  const ui = browser();
+
+  const tokens = await runAuthorizationFlow(cluster(), deps(net, ui));
+
+  assert.equal(tokens.accessToken, "ACCESS");
+  assert.deepEqual(
+    net.oauthUrls(),
+    [`${ISSUER}/oauth/token`],
+    "a cluster with no discovery document became unreachable, which is a regression",
+  );
+});
+
+// The payoff: an identity service that is not at `identity.<domain>` and a
+// cluster whose paths are not the conventional ones both work, because the
+// document is believed.
+test("the authorize and token URLs come from the published document", async () => {
+  const net = identity({
+    metadata: {
+      issuer: ISSUER,
+      authorization_endpoint: `${ISSUER}/oauth2/v1/auth`,
+      token_endpoint: `${ISSUER}/oauth2/v1/token`,
+    },
+  });
+  const ui = browser();
+
+  await runAuthorizationFlow(cluster(), deps(net, ui));
+
+  assert.equal(
+    new URL(ui.opened[0] ?? "https://x.invalid/").pathname,
+    "/oauth2/v1/auth",
+    "the published authorization endpoint was overwritten by the convention",
+  );
+  assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth2/v1/token`]);
+});
+
+// -----------------------------------------------------------------------------
+// A remote extension host cannot receive this callback (memql#4623)
+// -----------------------------------------------------------------------------
+//
+// THE DEFECT THESE PIN. loopback.ts binds 127.0.0.1 ON THE EXTENSION HOST -- the
+// remote machine -- and that port goes into the redirect URI. The browser opens
+// on the user's OWN machine and redirects to THEIR 127.0.0.1:PORT, where nothing
+// is listening. Neither fallback trigger fired, because the bind succeeded and
+// openExternal succeeded, so the result was a 600-second spinner and then advice
+// to run a palette command. `README.md` and this module's own header both said
+// it "falls back automatically"; neither `env.remoteName` nor `env.uiKind`
+// appeared anywhere in `src/`.
+
+test("a remote extension host is refused before anything binds", async () => {
+  const net = identity();
+  const ui = browser();
+  let bound = false;
+
+  await assert.rejects(
+    () =>
+      runAuthorizationFlow(cluster(), {
+        ...deps(net, ui),
+        remoteName: "ssh-remote",
+        startListener: async () => {
+          bound = true;
+          throw new Error("must not be reached");
+        },
+      }),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(
+        err.kind,
+        "browserUnavailable",
+        "the refusal must carry the kind that routes to the device-code flow, or a remote " +
+          "user is refused instead of being signed in",
+      );
+      assert.match(err.message, /ssh-remote/, "the message does not say what is different here");
+      return true;
+    },
+  );
+
+  assert.equal(bound, false, "a port was bound on the remote host for a callback that cannot arrive");
+  assert.deepEqual(ui.opened, [], "a browser was opened for a sign-in that cannot complete");
+  assert.deepEqual(net.oauthUrls(), [], "an OAuth request was made for a sign-in that cannot complete");
+});
+
+// The other direction: a local host must be unaffected. `remoteName` is
+// undefined locally, and every existing caller supplies nothing.
+test("a local host is not refused", async () => {
+  const net = identity();
+  const ui = browser();
+  const tokens = await runAuthorizationFlow(cluster(), { ...deps(net, ui), remoteName: undefined });
+  assert.equal(tokens.accessToken, "ACCESS");
+});
+
+// An empty string is what a host that reports "no remote" as "" would give, and
+// it must read as local rather than as a remote named nothing.
+test("an empty remoteName is local", async () => {
+  const net = identity();
+  const ui = browser();
+  const tokens = await runAuthorizationFlow(cluster(), { ...deps(net, ui), remoteName: "  " });
+  assert.equal(tokens.accessToken, "ACCESS");
 });

@@ -64,30 +64,6 @@ const BuiltinClientVSCode = "memql-vscode"
 // registers. See the header for why the missing port is load-bearing.
 const builtinRedirectVSCode = "http://127.0.0.1/callback"
 
-// BuiltinRedirectVSCodeURI is the editor's PRIVATE-USE URI SCHEME redirect
-// (RFC 8252 §7.1), and it is what makes sign-in work under Remote-SSH,
-// Codespaces and dev containers (memql#4623).
-//
-// WHY LOOPBACK ALONE IS NOT ENOUGH. The extension host binds 127.0.0.1 on the
-// machine it runs on, and under a remote host that is the SERVER. The browser
-// opens on the USER's machine and redirects to THEIR 127.0.0.1, where nothing
-// is listening -- so the callback never arrives, no fallback triggers (the bind
-// succeeded, the browser launched), and the user watches a 600-second spinner.
-// `asExternalUri` does not rescue it either: it tunnels loopback authorities,
-// and it was being applied to the AUTHORIZE url rather than to the redirect.
-//
-// A vscode:// URI is resolved by the user's own VS Code client, which forwards
-// it to the extension wherever that runs -- across the remote boundary,
-// because that is the editor's own transport. So the callback comes back over
-// the connection that already exists instead of over a port that does not.
-//
-// EXACT MATCH, NO PORT EXCEPTION. RFC 8252 §7.3's any-port rule is for
-// loopback; a private-use scheme has no port and is compared byte for byte.
-// The value must stay identical to the extension's own
-// WELL_KNOWN_REDIRECT_URI_VSCODE, and the authority is `publisher.name` from
-// its package.json -- changing either strands the flow.
-const BuiltinRedirectVSCodeURI = "vscode://znasllc.memql/callback"
-
 // BuiltinClient is a compiled-in first-party relying party: the
 // RegisteredClient the resolver hands back, plus the policy that is a
 // property of what this particular application IS rather than of OAuth.
@@ -113,12 +89,8 @@ type BuiltinClient struct {
 var builtinClients = []BuiltinClient{
 	{
 		Client: RegisteredClient{
-			ClientId: BuiltinClientVSCode,
-			// BOTH redirects, because which one the editor uses is a
-			// property of WHERE it is running, not of the cluster: loopback
-			// on a local editor, the vscode:// URI under Remote-SSH,
-			// Codespaces or a dev container (memql#4623).
-			RedirectURIs: []string{builtinRedirectVSCode, BuiltinRedirectVSCodeURI},
+			ClientId:     BuiltinClientVSCode,
+			RedirectURIs: []string{builtinRedirectVSCode},
 			Name:         "MemQL for VS Code",
 		},
 		// Developer and above: owner, admin and developer complete sign-in;

@@ -10,7 +10,11 @@ import {
   type ConnectProbe,
   type ConnectProbeTargets,
 } from "../src/state/addCluster.js";
-import { DEFAULT_LOCAL_DOMAIN, installDomainProblem } from "../src/install/stackPin.js";
+import {
+  DEFAULT_LOCAL_DOMAIN,
+  installDomainProblem,
+  localInstallRemoteProblem,
+} from "../src/install/stackPin.js";
 import { composeEndpointFromDomain } from "../src/connection/endpoint.js";
 
 // connectForm.test.ts -- znasllc-io/memql#4431, memql#4432.
@@ -305,42 +309,132 @@ test("an Advanced endpoint is what gets probed, not the one it replaced", () => 
   );
 });
 
-// A FRONT-DOOR HOST PASTED AS A DOMAIN (memql#4624).
+// ---------------------------------------------------------------------------
+// A front-door host pasted into the domain box (memql#4624)
+// ---------------------------------------------------------------------------
 //
-// The field wants `example.com`; what the operator has in front of them is
-// usually a URL they were sent. Nothing caught it: the form composed
-// `api.api.example.com:443`, the probe failed with a generic "no answer within
-// 10s", the operator took the "Save anyway" the failed state offers, and
-// sign-in dead-ended much later at an identity host that never existed.
-test("a front-door host pasted into the domain field is refused by name", () => {
-  const cases: Array<[string, RegExp]> = [
-    ["api.example.com", /API host/],
-    ["identity.example.com", /identity host/],
-    ["mcp.example.com", /mcp host/],
-    ["portal.example.com", /portal host/],
-    ["API.Example.com", /API host/],
-  ];
-  for (const [input, shape] of cases) {
-    const problem = connectDomainProblem(input);
-    assert.ok(problem !== undefined, `${input} was accepted; it composes api.${input}:443`);
-    assert.match(problem, shape);
-    // The message has to name the value to type, not merely say "wrong".
-    assert.match(problem, /example\.com/);
+// Everything this form writes is COMPOSED from the domain -- `api.<domain>:443`
+// for the endpoint, `identity.<domain>` for sign-in. So pasting the API host,
+// which is the URL an operator has most likely seen because it is the one their
+// applications dial, composed `api.api.example.com` and
+// `identity.api.example.com`, neither of which exists.
+//
+// Nothing caught it. The probe failed with a generic "no answer within 10s",
+// the operator clicked "Save anyway" because the cluster demonstrably works,
+// and sign-in dead-ended much later against a host that was never real.
+
+test("pasting the API host into the domain box is named, not composed", () => {
+  const problem = connectDomainProblem("api.example.com");
+  assert.ok(problem !== undefined, "api.example.com was accepted as a domain");
+  assert.match(problem, /api host/i);
+  // The PHRASE, not the bare host: it is the instruction that has to be there,
+  // and asserting the surrounding words is what proves the message tells the
+  // operator what to type rather than merely mentioning a domain somewhere.
+  assert.ok(
+    problem.includes("enter `example.com` here"),
+    `the message does not say what to type instead: ${problem}`,
+  );
+});
+
+// The whole front-door role set, not just `api.` -- they are all hosts MemQL
+// derives from the domain and reserves, so none of them is a domain.
+test("every front-door host label is caught", () => {
+  for (const label of ["api", "identity", "mcp", "portal"]) {
+    assert.notEqual(
+      connectDomainProblem(`${label}.example.com`),
+      undefined,
+      `${label}.example.com was accepted as a domain`,
+    );
   }
 });
 
-test("an ordinary subdomain is not mistaken for a front-door host", () => {
-  // Only MemQL's OWN role labels are the mistake. A cluster genuinely served at
-  // a subdomain is a legitimate answer, and refusing it would be worse than the
-  // bug: it would block a correct value.
+// The check must stay anchored on the reserved labels. A domain that merely
+// CONTAINS one, or begins with something else, is ordinary.
+test("an ordinary domain is not caught by the front-door check", () => {
   for (const domain of [
+    "example.com",
     "memql.example.com",
-    "cluster.example.com",
-    "apiary.example.com", // starts with "api" but is not the api label
-    "identity-lab.example.com",
+    "api-gateway.example.com",
+    "eu.api.example.com",
+    "apiary.example.com",
   ]) {
-    assert.equal(connectDomainProblem(domain), undefined, `${domain} must be accepted`);
+    assert.equal(
+      connectDomainProblem(domain),
+      undefined,
+      `${domain} was refused, and it is a perfectly ordinary domain`,
+    );
   }
-  // And a bare role label with no domain under it is not a front-door host.
-  assert.equal(connectDomainProblem("api.internal"), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// The registry entry records the cluster's own issuer (memql#4624)
+// ---------------------------------------------------------------------------
+//
+// `identityBaseUrlFor` prefers `issuer` over the `identity.<domain>`
+// convention, and until this NOTHING in the extension ever wrote it -- which is
+// also what made memql#4620's claim probe, which reads `cluster.issuer`,
+// unreachable.
+
+test("a probe that discovers an issuer writes it into the registration", async () => {
+  const s = connectForm({ name: "prod", domain: "example.com" });
+  const outcome = await s.prepareConnectSave(async () => ({
+    ok: true,
+    issuer: "https://auth.example.com",
+  }));
+  assert.equal(outcome, "write");
+
+  const draft = s.connectDraft();
+  assert.equal(
+    draft?.issuer,
+    "https://auth.example.com",
+    "the cluster's own answer about where its identity service is was discarded, so an " +
+      "identity service away from identity.<domain> stays unreachable",
+  );
+});
+
+test("a probe that discovers nothing omits issuer rather than writing empty", async () => {
+  const s = connectForm({ name: "prod", domain: "example.com" });
+  await s.prepareConnectSave(async () => ({ ok: true }));
+
+  const draft = s.connectDraft();
+  assert.ok(draft !== undefined);
+  assert.equal(
+    "issuer" in draft,
+    false,
+    'an empty issuer is an explicit CLEAR to upsertCluster, so it must be omitted',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// A local install cannot be driven from a remote window (memql#4623)
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THIS PINS. The install writes hosts entries, issues an mkcert
+// certificate and creates a k3d cluster -- all on the EXTENSION HOST, which
+// under Remote-SSH is the far end of a connection, while the browser is on the
+// near end. The install SUCCEEDED and every credential link on the done screen
+// opened a tab that could not connect: `asExternalUri` tunnels loopback
+// authorities and `identity.memql.localhost` is a name, RFC 6761 makes the near
+// end resolve the `.localhost` family to its own loopback, and the mkcert CA
+// went into the far end's trust store. Three independent reasons, none of which
+// announced itself. Two comments and the README all claimed it worked.
+
+test("a local install is refused from a remote window, with the reason", () => {
+  const problem = localInstallRemoteProblem("ssh-remote");
+  assert.ok(problem !== undefined, "a remote window was allowed to install a local cluster");
+  assert.match(problem, /ssh-remote/, "the refusal does not say what is different about this window");
+  assert.match(
+    problem,
+    /Connect to an existing cluster/,
+    "an operator told only \"no\" tries again; the refusal must name the way through",
+  );
+});
+
+test("every remote kind is refused, and a local window is not", () => {
+  for (const remote of ["ssh-remote", "dev-container", "wsl", "codespaces", "attached-container"]) {
+    assert.notEqual(localInstallRemoteProblem(remote), undefined, `${remote} was allowed to install`);
+  }
+  assert.equal(localInstallRemoteProblem(undefined), undefined, "a local window was refused");
+  assert.equal(localInstallRemoteProblem(""), undefined, "an empty remoteName must read as local");
+  assert.equal(localInstallRemoteProblem("   "), undefined);
 });

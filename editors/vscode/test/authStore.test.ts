@@ -381,3 +381,84 @@ test("a credential that will not resolve is reported without the attempt being m
   assert.equal(attempts, 0);
   assert.equal(result.ok === false ? result.reason : "", "wrongTokenClass");
 });
+
+// -----------------------------------------------------------------------------
+// signOut ends the session on the cluster too (memql#4625)
+// -----------------------------------------------------------------------------
+
+test("signing out hands the refresh token to the revoker BEFORE forgetting it", async () => {
+  const secrets = new FakeSecrets();
+  const deps = { secrets, writeCluster: writer([]) };
+  await persistSignIn(deps, "local", tokens());
+
+  let handed = "";
+  await signOut(deps, "local", async (refreshToken) => {
+    handed = refreshToken;
+    return { attempted: true, revoked: true };
+  });
+
+  assert.equal(
+    handed,
+    tokens().refreshToken,
+    "the revoker got nothing, so the cluster is never told and the token stays live for its " +
+      "full thirty days while the toast says the session ended",
+  );
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), undefined);
+});
+
+// The direction that matters most: a revocation that fails must not keep the
+// credential on this machine. Somebody signing out on a plane still gets
+// signed out here.
+test("a failing revoke still clears every local credential", async () => {
+  const secrets = new FakeSecrets();
+  const written: ClusterUpdate[] = [];
+  const deps = { secrets, writeCluster: writer(written) };
+  await persistSignIn(deps, "local", tokens());
+  written.length = 0;
+
+  const outcome = await signOut(deps, "local", async () => {
+    throw new Error("offline");
+  });
+
+  assert.equal(outcome.attempted, true);
+  assert.equal(outcome.attempted && outcome.revoked, false);
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), undefined);
+  assert.deepEqual(written, [{ name: "local", token: "", refreshToken: "" }]);
+});
+
+test("with no refresh token there is nothing to revoke and the revoker is not called", async () => {
+  const secrets = new FakeSecrets();
+  const deps = { secrets, writeCluster: writer([]) };
+
+  let called = false;
+  const outcome = await signOut(deps, "local", async () => {
+    called = true;
+    return { attempted: true, revoked: true };
+  });
+
+  assert.equal(called, false);
+  assert.deepEqual(outcome, { attempted: false });
+});
+
+// -----------------------------------------------------------------------------
+// A re-sign-in with no lifetime must not leave the last one's expiry (memql#4625)
+// -----------------------------------------------------------------------------
+
+test("writing a zero expiry DELETES the stored one rather than leaving it", async () => {
+  const secrets = new FakeSecrets();
+  const store = new ClusterCredentialStore(secrets);
+
+  await store.writeExpiry("local", NOW_SECONDS + 3600);
+  assert.notEqual(secrets.values.get(accessTokenExpirySecretKey("local")), undefined);
+
+  await store.writeExpiry("local", 0);
+
+  assert.equal(
+    secrets.values.get(accessTokenExpirySecretKey("local")),
+    undefined,
+    "the previous sign-in's expiry survived a re-sign-in that reported no lifetime, so it is " +
+      "now attached to a token it does not describe. For an opaque token readExpiry then " +
+      "judges it expired and every connect spends a refresh renewing a token that was fine",
+  );
+  assert.equal(await store.readExpiry("local"), undefined);
+});

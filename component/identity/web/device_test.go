@@ -380,38 +380,62 @@ func TestDevicePageIsRateLimitedPerIP(t *testing.T) {
 	}
 }
 
-// A BOUNCE COSTS NO BUDGET (memql#4626). The limit protects a code ORACLE --
-// a submission tells the caller whether a user_code exists and what state it is
-// in, so the 40-bit space is only as strong as the guesses allowed against it.
-// A signed-out visitor gets a redirect to /login and learns nothing, so
-// charging it a token protected nothing and cost a real one.
+// The guess budget is spent by callers who can actually ask the oracle a
+// question, and by nobody else (memql#4626).
 //
-// It cost two or three per approval -- the bounce, the return, the POST -- and
-// behind a corporate NAT, where an office shares one address, that ran the
-// budget out as a spurious HTML 429 on a legitimate sign-in.
-func TestDeviceBouncesDoNotSpendTheOracleBudget(t *testing.T) {
+// THE DEFECT THIS PINS. The limiter used to run BEFORE the session check, on
+// the reasoning that an unauthenticated caller "can still burn budget probing
+// this endpoint, and the page's whole job is to answer questions about a
+// 40-bit code". The second half is the important one, and it is exactly what
+// makes the ordering wrong: the page answers nothing until the caller is
+// signed in. A signed-out request gets the same bounce whether the user_code
+// is live, spent or invented, so it learns nothing and charging it protected
+// nothing.
+//
+// What it did cost was approvals. One visitor spends a token on the GET that
+// bounces, another on the GET after signing in, and another on the POST --
+// three per approval, against 120 an hour shared by everyone behind one NAT.
+// An office runs out and reads an HTML 429 at the moment it is trying to
+// authorize a device.
+func TestDeviceSignedOutBounceDoesNotSpendTheGuessBudget(t *testing.T) {
 	t.Setenv(envDeviceVerifyPerHour, "3")
 	s, _, token := newDeviceWebServer(t)
 
-	// Ten signed-out visits: every one is a bounce, so none may be charged.
+	// Ten signed-out visits: more than triple the budget, all of them bounces.
 	for i := 0; i < 10; i++ {
 		rec := deviceGet(s, "", "?user_code="+url.QueryEscape(deviceTestUserCode))
 		if rec.Code != http.StatusSeeOther {
-			t.Fatalf("signed-out request %d: status = %d, want 303. A bounce answers nothing about\n"+
-				"any user_code, so it must never be the thing that exhausts the budget.", i, rec.Code)
+			t.Fatalf("signed-out visit %d: status = %d, want 303 -- a signed-out caller is bounced\n"+
+				"to sign in, not rate limited, because the bounce answers nothing about the code",
+				i, rec.Code)
 		}
 	}
 
-	// The authenticated budget must be untouched: all three still available.
+	// The budget must be untouched, so the visitor who signs in can still work.
 	for i := 0; i < 3; i++ {
 		if rec := deviceGet(s, token, ""); rec.Code != http.StatusOK {
-			t.Fatalf("authenticated request %d: status = %d, want 200. Ten bounces spent budget that\n"+
-				"belongs to requests which can actually learn something (memql#4626).", i, rec.Code)
+			t.Fatalf("authenticated request %d: status = %d, want 200. The signed-out bounces above\n"+
+				"spent this caller's guess budget, so a person who signs in to approve a device is\n"+
+				"refused by attempts that never reached the oracle", i, rec.Code)
 		}
 	}
-	// And the fourth is still refused -- moving the check must not remove it.
+}
+
+// And the oracle protection itself is unchanged: an authenticated caller still
+// pays per attempt. This is the half that must NOT be traded away for the one
+// above -- the 40-bit code space is only as strong as the guesses allowed
+// against it.
+func TestDeviceAuthenticatedAttemptsStillSpendTheGuessBudget(t *testing.T) {
+	t.Setenv(envDeviceVerifyPerHour, "2")
+	s, _, token := newDeviceWebServer(t)
+
+	for i := 0; i < 2; i++ {
+		if rec := deviceGet(s, token, ""); rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200 inside the budget", i, rec.Code)
+		}
+	}
 	if rec := deviceGet(s, token, ""); rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429. The oracle limit still has to bite; what changed is WHICH\n"+
-			"requests it counts, not whether it counts.", rec.Code)
+		t.Fatalf("status = %d, want 429. Moving the limiter after the session check must not "+
+			"remove it: the page is a code oracle for anyone signed in", rec.Code)
 	}
 }

@@ -23,39 +23,21 @@
     "",
     "Read by component/identity/first_party_client_contract_test.go (Go) and",
     "editors/vscode/test/firstPartyClientContract.test.ts (TypeScript). Changing a value",
-    "here obliges both -- and strands every already-released editor, so treat it as frozen.",
-    "",
-    "'redirectURIVSCode' is the SECOND registered redirect, and it is what makes sign-in work",
-    "under Remote-SSH, Codespaces and dev containers (memql#4623). The extension host binds",
-    "127.0.0.1 on the machine IT runs on; under a remote host that is the server, while the",
-    "browser opens on the user's machine and redirects to THEIR loopback, where nothing is",
-    "listening. No fallback fires -- the bind succeeded and the browser launched -- so the",
-    "user watches the full callback deadline and is then told the browser could not reach",
-    "127.0.0.1. A vscode:// URI is resolved by the user's own VS Code client and forwarded to",
-    "the extension across the remote boundary, over the connection that already exists.",
-    "",
-    "It is matched EXACTLY: RFC 8252 section 7.3's any-port rule is for loopback, and a",
-    "private-use scheme has no port. The authority is 'publisher.name' from the extension's",
-    "package.json, so renaming either strands the flow."
+    "here obliges both -- and strands every already-released editor, so treat it as frozen."
   ],
   "clientId": "memql-vscode",
   "clientName": "MemQL for VS Code",
   "redirectURI": "http://127.0.0.1/callback",
-  "redirectURIVSCode": "vscode://znasllc.memql/callback",
   "minRole": "developer",
   "acceptedCallbacks": [
     "http://127.0.0.1:54321/callback",
     "http://127.0.0.1:1/callback",
     "http://127.0.0.1:65535/callback",
-    "http://127.0.0.1/callback",
-    "vscode://znasllc.memql/callback"
+    "http://127.0.0.1/callback"
   ],
   "rejectedCallbacks": [
     "http://127.0.0.1:54321/other",
     "https://127.0.0.1:54321/callback",
-    "http://evil.example.com:54321/callback",
-    "vscode://znasllc.memql/other",
-    "vscode://someone.else/callback",
-    "vscode-insiders://znasllc.memql/callback"
+    "http://evil.example.com:54321/callback"
   ]
 }

@@ -143,21 +143,20 @@ export function isEnrolmentUrl(candidate: string): boolean {
 /**
  * Opens the enrolment link in the operator's browser.
  *
- * `asExternalUri` runs first and is REQUIRED but NOT SUFFICIENT.
+ * `asExternalUri` runs first: it is what lets a host rewrite a URL into one its
+ * browser can reach, and skipping it would break every host that does.
  *
- * This comment used to say it made the URL survive a remote host. It does not
- * (memql#4623). `asExternalUri` tunnels LOOPBACK authorities only, and this URL
- * is `https://identity.<domain>/...` -- for a local install, `identity.memql.localhost`,
- * which is not a loopback authority and so comes back unchanged. RFC 6761 then
- * makes the USER's browser resolve the whole `.localhost` family to its own
- * 127.0.0.1, where the cluster is not. And even if it were forwarded, the
- * mkcert CA was installed in the REMOTE's trust store, not theirs.
+ * IT DOES NOT RESCUE A LOCAL INSTALL FROM A REMOTE WINDOW, and this comment
+ * used to say that it did (memql#4623). asExternalUri tunnels LOOPBACK
+ * authorities only, and this URL is `https://identity.<domain>/enroll?...`
+ * where the domain defaults to `memql.localhost` -- not a loopback authority,
+ * so it comes back unchanged. RFC 6761 then makes the browser on the operator's
+ * OWN machine resolve the whole `.localhost` family to its own 127.0.0.1, where
+ * no cluster is running. And even forwarded it would fail closed: the mkcert CA
+ * went into the REMOTE host's trust store (scripts/install/mkcert-setup.sh).
  *
- * So a local install under Remote-SSH succeeds and hands the operator a link
- * that cannot connect. `refuseLocalInstallOnRemoteHost` (install/remoteHost.ts)
- * is the gate; this function is left able to open any link it is given, because
- * a link to a REACHABLE cluster is fine from anywhere.
- * A failure to open is
+ * The install itself is what must be local; nothing openable from here can
+ * repair a cluster installed on the far side of an SSH connection. A failure to open is
  * `browserUnavailable` rather than a generic error, because "this machine has
  * no browser" is a real, recoverable state -- the caller can fall back to
  * showing the link.

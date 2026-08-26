@@ -272,37 +272,39 @@ export function maskHomePath(text: string, home: string): string {
 /**
  * Text as a human surface may show it: home masked, credentials scrubbed.
  *
- * The credential patterns are the families this product actually mints,
- * collects or carries -- provider keys (`sk-...`), MemQL credentials
- * (`mql_pat_`, `mql_wkr_`, `mql_rec_`, `mql_enr_`, and any future `mql_*_`
- * sibling), and since memql#4625 the two shapes an OAuth session travels in: a
- * JWT and an `Authorization:` bearer.
+ * The credential patterns are the families this product mints, collects or
+ * carries -- provider keys (`sk-...`), MemQL credentials (`mql_pat_`,
+ * `mql_wkr_`, `mql_rec_`, `mql_enr_`, and any future `mql_*_` sibling), and
+ * since memql#4625 the two shapes a SESSION travels as: a JWT and a bearer
+ * header.
  *
- * THE TOKEN RULES WERE ADDED BEFORE ANYTHING NEEDED THEM, deliberately. No
- * path the memql#4601 audit could find puts an access or refresh token into an
- * error message or the output channel, so the protection until now was
- * "nothing puts one there" rather than "anything that does gets stripped". The
- * first is a property of today's call sites and the second is a property of
- * this function; only one of them survives somebody adding a call site.
+ * THE JWT AND BEARER RULES ARE DEFENCE IN DEPTH, NOT A RESPONSE TO A LEAK.
+ * The #4625 audit could find no path that puts a session token into an error
+ * message or an output channel, so the protection today is "nothing puts one
+ * there" rather than "anything that does gets stripped". The first is a
+ * property of every current call site; the second is a property of this
+ * function, and only the second survives somebody adding a call site. The
+ * rules cost two regexes.
  *
  * This is still NOT a general secret detector, for `looksLikeProviderKey`'s
  * reason: a heuristic wide enough to catch everything also eats the ordinary
- * paths and ids an operator is reading the text FOR. The JWT rule is anchored
- * on `eyJ` followed by a dot, which is base64url `{"` and then a segment
- * boundary -- specific enough not to eat identifiers.
+ * paths and ids an operator is reading the text FOR. Both additions are
+ * anchored on structure a normal word cannot have -- `eyJ` followed by
+ * base64url and a dot is a JWT header segment, and `Bearer ` is a scheme name
+ * that only ever precedes a credential.
  */
 export function redactForDisplay(text: string, home: string): string {
   return maskHomePath(text, home)
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, SCRUBBED)
     .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]{8,}/g, SCRUBBED)
-    // A JWT: header segment, then at least one more segment. Access tokens and
-    // id tokens both look like this.
-    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?/g, SCRUBBED)
-    // A bearer of ANY shape, which is what covers an opaque refresh token --
-    // it has no recognisable form of its own, so the only thing that can be
-    // matched is the header carrying it.
-    .replace(/\b(Authorization\s*:\s*)?(Bearer|Operator|Guest|Enrolment)\s+\S+/gi,
-      (_m, prefix: string | undefined, scheme: string) => `${prefix ?? ""}${scheme} ${SCRUBBED}`);
+    // A JWT: the header segment and everything joined to it. Matching from
+    // `eyJ` through the remaining segments means a partially-logged token is
+    // scrubbed too -- a truncated JWT is still a credential's prefix.
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]*){0,2}/g, SCRUBBED)
+    // An Authorization header as anything would print it. The scheme is kept
+    // so the line still reads as an auth header rather than becoming a
+    // mystery, which is what makes a redacted log worth reading.
+    .replace(/\bBearer\s+\S+/gi, `Bearer ${SCRUBBED}`);
 }
 
 /**

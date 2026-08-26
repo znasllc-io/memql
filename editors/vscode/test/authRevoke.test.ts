@@ -1,128 +1,148 @@
-// Sign-out ends the session on the CLUSTER, not only in this editor
-// (memql#4625).
+// Sign-out reaches the cluster (znasllc-io/memql#4625).
 //
-// The defect these tests exist for is not a crash: sign-out worked, the toast
-// said `signed out of "x"`, and the refresh token stayed live on the cluster
-// for its full 30 days. So the assertions are about two things that have to be
-// true together -- the revocation call is MADE, and the message TELLS THE TRUTH
-// when it did not land.
+// THE DEFECT THESE PIN. Signing out cleared SecretStorage, blanked the file
+// keys and dropped the connection, and told the cluster nothing. The refresh
+// token stayed live for its full thirty days while a toast said
+// `signed out of "x"` -- a claim about the session that was only ever true of
+// this editor. Anyone holding a copy of the file could still mint access
+// tokens against an account whose owner believed the session was over.
 
-import test from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import type { HttpRequestInit, HttpResponseLike } from "../src/connection/credentials.js";
 import {
-  LOGOUT_PATH,
-  describeRevocation,
-  revocationNeedsAttention,
   revokeRefreshToken,
+  signOutMessage,
   type RevocationOutcome,
+  type RevokeFetch,
 } from "../src/auth/revoke.js";
 
-const ISSUER = "https://identity.memql.localhost";
-const REFRESH = "a-refresh-token";
+type Call = { url: string; method: string; body: string; headers: Record<string, string> };
 
-interface Call {
-  url: string;
-  init: HttpRequestInit;
-}
-
-function recordingFetch(
-  respond: (url: string) => HttpResponseLike | Promise<HttpResponseLike>,
-): { fetch: (url: string, init: HttpRequestInit) => Promise<HttpResponseLike>; calls: Call[] } {
+function recorder(response: { ok: boolean; status: number } | Error): {
+  calls: Call[];
+  fetch: RevokeFetch;
+} {
   const calls: Call[] = [];
-  return {
-    calls,
-    fetch: async (url, init) => {
-      calls.push({ url, init });
-      return respond(url);
-    },
+  const fetch: RevokeFetch = async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body, headers: init.headers });
+    if (response instanceof Error) throw response;
+    return response;
   };
+  return { calls, fetch };
 }
 
-const noContent: HttpResponseLike = { ok: true, status: 204, text: async () => "" };
+// ---------------------------------------------------------------------------
+// the call itself
+// ---------------------------------------------------------------------------
 
-test("a sign-out POSTs the refresh token to the cluster's logout route", async () => {
-  const { fetch, calls } = recordingFetch(() => noContent);
+test("revokeRefreshToken POSTs the token to the issuer's logout endpoint", async () => {
+  const { calls, fetch } = recorder({ ok: true, status: 204 });
+  const outcome = await revokeRefreshToken("https://identity.example.com", "rt-abc", fetch);
 
-  const outcome = await revokeRefreshToken({ issuer: ISSUER, refreshToken: REFRESH, fetch });
-
-  assert.equal(outcome.kind, "revoked");
-  assert.equal(calls.length, 1, "the cluster was never called; the session would stay live for 30 days");
-  assert.equal(calls[0].url, `${ISSUER}${LOGOUT_PATH}`);
-  assert.equal(calls[0].init.method, "POST");
-  // The JSON body form, which extractRefreshToken accepts alongside the cookie
-  // and the Authorization header. The cookie is a browser's spelling.
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { refresh_token: REFRESH });
+  assert.deepEqual(outcome, { attempted: true, revoked: true });
+  assert.equal(calls.length, 1, "the cluster was never told; this is the whole defect");
+  assert.equal(calls[0]?.url, "https://identity.example.com/auth/logout");
+  assert.equal(calls[0]?.method, "POST");
+  assert.deepEqual(
+    JSON.parse(calls[0]?.body ?? "{}"),
+    { refresh_token: "rt-abc" },
+    "the body must carry refresh_token, which is the key extractRefreshToken reads " +
+      "(component/identity/http/refresh.go)",
+  );
 });
 
-test("a trailing slash on the issuer does not produce a double-slash URL", async () => {
-  const { fetch, calls } = recordingFetch(() => noContent);
-  await revokeRefreshToken({ issuer: `${ISSUER}/`, refreshToken: REFRESH, fetch });
-  assert.equal(calls[0].url, `${ISSUER}${LOGOUT_PATH}`);
+test("a trailing slash on the issuer does not produce a double slash", async () => {
+  const { calls, fetch } = recorder({ ok: true, status: 204 });
+  await revokeRefreshToken("https://identity.example.com/", "rt-abc", fetch);
+  assert.equal(calls[0]?.url, "https://identity.example.com/auth/logout");
 });
 
-test("an unreachable cluster is a value, never a throw", async () => {
-  // The caller's next step -- clear the local credentials -- is unconditional.
-  // An exception here would put that behind a try/catch somebody could later
-  // get wrong, and failing to clear locally is strictly worse than the bug.
-  const outcome = await revokeRefreshToken({
-    issuer: ISSUER,
-    refreshToken: REFRESH,
-    fetch: async () => {
-      throw new Error("connect ECONNREFUSED");
-    },
+// The handler answers 204, but a proxy that rewrites it to 200 has not failed
+// to revoke anything.
+test("any 2xx counts as revoked", async () => {
+  const { fetch } = recorder({ ok: true, status: 200 });
+  assert.deepEqual(await revokeRefreshToken("https://i.example.com", "rt", fetch), {
+    attempted: true,
+    revoked: true,
   });
-  assert.equal(outcome.kind, "failed");
-  assert.match((outcome as { reason: string }).reason, /ECONNREFUSED/);
 });
 
-test("a refusal from the cluster is reported, not swallowed", async () => {
-  const outcome = await revokeRefreshToken({
-    issuer: ISSUER,
-    refreshToken: REFRESH,
-    fetch: async () => ({ ok: false, status: 500, text: async () => "boom" }),
+// ---------------------------------------------------------------------------
+// what happens when it cannot be done
+// ---------------------------------------------------------------------------
+
+test("an unreachable issuer is a failed attempt naming the host", async () => {
+  const { fetch } = recorder(new Error("getaddrinfo ENOTFOUND identity.example.com"));
+  const outcome = await revokeRefreshToken("https://identity.example.com", "rt", fetch);
+  assert.equal(outcome.attempted, true);
+  assert.equal(outcome.attempted && outcome.revoked, false);
+  // THE WHOLE SENTENCE, not a substring of it. The person reading this has to
+  // decide whether to go and revoke the session by hand, so the reason must
+  // name the host AND say what happened to it -- which an equality asserts and
+  // a containment check does not. (It also keeps CodeQL from reading a
+  // host-shaped substring check as an incomplete URL sanitizer.)
+  assert.equal(
+    outcome.attempted && !outcome.revoked ? outcome.reason : "",
+    "https://identity.example.com could not be reached " +
+      "(getaddrinfo ENOTFOUND identity.example.com)",
+  );
+});
+
+test("a non-2xx is a failed attempt naming the status", async () => {
+  const { fetch } = recorder({ ok: false, status: 502 });
+  const outcome = await revokeRefreshToken("https://i.example.com", "rt", fetch);
+  assert.match(outcome.attempted && !outcome.revoked ? outcome.reason : "", /502/);
+});
+
+// Nothing to revoke is NOT a failure. A cluster signed in with a bare token
+// has no server-side session to end, and saying "only forgotten locally" there
+// would be alarming and false.
+test("no token and no issuer are not attempts", async () => {
+  const { calls, fetch } = recorder({ ok: true, status: 204 });
+  assert.deepEqual(await revokeRefreshToken("https://i.example.com", "   ", fetch), {
+    attempted: false,
   });
-  assert.equal(outcome.kind, "failed");
-  assert.match((outcome as { reason: string }).reason, /500/);
-});
-
-test("no issuer means nowhere to POST, and that is its own outcome", async () => {
-  const { fetch, calls } = recordingFetch(() => noContent);
-  const outcome = await revokeRefreshToken({ issuer: undefined, refreshToken: REFRESH, fetch });
-  assert.equal(outcome.kind, "noIssuer");
+  assert.deepEqual(await revokeRefreshToken("", "rt", fetch), { attempted: false });
   assert.equal(calls.length, 0);
 });
 
-test("no refresh token held means there is nothing to revoke", async () => {
-  const { fetch, calls } = recordingFetch(() => noContent);
-  for (const held of [undefined, "", "   "]) {
-    const outcome = await revokeRefreshToken({ issuer: ISSUER, refreshToken: held, fetch });
-    assert.equal(outcome.kind, "nothingToRevoke");
-  }
-  assert.equal(calls.length, 0, "a POST with no token would be a pointless round trip");
+// ---------------------------------------------------------------------------
+// what the person is told
+// ---------------------------------------------------------------------------
+
+test("a revoked session is described as ended on the cluster", () => {
+  const msg = signOutMessage("prod", { attempted: true, revoked: true });
+  assert.match(msg, /prod/);
+  assert.match(msg, /cluster/i);
 });
 
-// THE MESSAGE IS THE OTHER HALF OF THE FIX. `signed out of "x"` reads as "the
-// session is over" whether or not it is, and a user who believes they revoked
-// access takes no further action.
-test("the message distinguishes a revoked session from a merely forgotten one", () => {
-  const revoked = describeRevocation("prod", { kind: "revoked" });
-  assert.match(revoked, /revoked on the cluster/i);
-  assert.ok(!revocationNeedsAttention({ kind: "revoked" }));
+// The message that was wrong before: "signed out" over a token that is still
+// live for thirty days.
+test("an unrevoked session says so, and names where to end it", () => {
+  const outcome: RevocationOutcome = {
+    attempted: true,
+    revoked: false,
+    reason: "https://identity.example.com could not be reached (offline)",
+  };
+  const msg = signOutMessage("prod", outcome);
+  assert.match(
+    msg,
+    /this machine/i,
+    "the message claims the session ended when only this machine forgot it",
+  );
+  assert.match(msg, /Devices/, "the person is left with a live credential and no next step");
+  assert.ok(
+    !/^MemQL: signed out of "prod"\.$/.test(msg),
+    "the unrevoked case still reads as a clean sign-out",
+  );
+});
 
-  for (const outcome of [
-    { kind: "noIssuer" } as RevocationOutcome,
-    { kind: "failed", reason: "the cluster answered 500" } as RevocationOutcome,
-  ]) {
-    const text = describeRevocation("prod", outcome);
-    assert.match(text, /HERE ONLY/, `"${text}" does not say the cluster session survived`);
-    assert.match(text, /stays valid until it expires/, `"${text}" does not say the credential is still live`);
-    // And it names where the user can actually finish the job.
-    assert.match(text, /Devices page/, `"${text}" does not name the portal's Devices page`);
-    assert.ok(
-      revocationNeedsAttention(outcome),
-      "a session that survived sign-out must be a warning, not a status line",
-    );
-  }
+test("nothing to revoke keeps the ordinary wording", () => {
+  const msg = signOutMessage("local", { attempted: false });
+  assert.match(msg, /signed out of "local"/);
+  assert.ok(
+    !/could not/.test(msg),
+    "a cluster with no server-side session should not be told revocation failed",
+  );
 });

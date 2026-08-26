@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/core/repowalk"
 	"github.com/znasllc-io/memql/dsl"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -823,78 +826,143 @@ func TestDeviceAuthorizationRequestIsRateLimitedPerIP(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("a 429 must carry Retry-After so a client knows when to come back")
 	}
-	// NOT slow_down (memql#4626). This expectation used to say slow_down, and
-	// it was the assertion that certified the overload: RFC 8628 §3.5 gives
-	// that code ONE meaning -- "you are polling the TOKEN endpoint faster than
-	// the interval, and the interval has been raised" -- which token_device.go
-	// returns as an HTTP 400. Using it here for an HTTP 429 address rate limit
-	// gave one error string two meanings across two statuses, and a stock
-	// OAuth library keying on the `error` field alone reads a rate limit as a
-	// poll-interval bump and retries into the same wall.
+	// NOT slow_down (memql#4626). This test used to assert it, on the
+	// reasoning that "RFC 8628 clients already understand slow_down as back
+	// off" -- true, and beside the point. RFC 8628 §3.5 defines slow_down for
+	// the TOKEN endpoint with one specific meaning: you polled faster than
+	// `interval`, and `interval` has now permanently risen. Reusing it here
+	// gave one error code two meanings across two statuses, and a client
+	// keying on the `error` field alone cannot tell which it got.
+	if got := errorCode(t, rec.Body.Bytes()); got == "slow_down" {
+		t.Fatal("a throttled device AUTHORIZATION request returns slow_down, which RFC 8628 " +
+			"reserves for a too-fast poll at the TOKEN endpoint. One code, two meanings")
+	}
 	if got := errorCode(t, rec.Body.Bytes()); got != "temporarily_unavailable" {
 		t.Fatalf("error = %q, want temporarily_unavailable", got)
 	}
-	// And the two must stay distinguishable. slow_down belongs to the token
-	// endpoint's poll floor and to nothing else.
-	if got := errorCode(t, rec.Body.Bytes()); got == "slow_down" {
-		t.Fatal("the device-authorization rate limit is using slow_down again, which the token " +
-			"endpoint's poll floor already means (memql#4626)")
+}
+
+// slow_down must keep meaning exactly one thing (memql#4626). The token
+// endpoint's poll floor is its ONLY site; if a second one ever appears, a
+// client that acts on the error field alone starts acting on a coin flip.
+func TestSlowDownIsOnlyEverThePollFloor(t *testing.T) {
+	root := ".."
+	var offenders []string
+	// The positive control. An empty offender list is only evidence if the
+	// walk could have produced a non-empty one -- otherwise a broken root, a
+	// renamed suffix or a moved package turns "no violations" into "no files
+	// read", and the two look identical from the outside.
+	sawLegitimateSite := false
+	scanned := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// The shared skip list (memql#3678). A `.claude/worktrees/` entry is a
+		// full second copy of this repo, and a walker that descends into one
+		// reads every file twice -- which here would report the legitimate
+		// token_device.go site as an offender from the copied tree.
+		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		scanned++
+		for _, line := range strings.Split(string(body), "\n") {
+			// The literal in an error-code position, not in prose.
+			if !strings.Contains(line, `"slow_down"`) {
+				continue
+			}
+			if strings.HasSuffix(filepath.Base(path), "token_device.go") {
+				sawLegitimateSite = true
+				continue // the one legitimate site: RFC 8628 §3.5
+			}
+			offenders = append(offenders, path+": "+strings.TrimSpace(line))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if scanned == 0 {
+		t.Fatalf("scanned no Go files under %q; this gate is asserting nothing", root)
+	}
+	if !sawLegitimateSite {
+		t.Fatalf("scanned %d files and never saw slow_down at the token endpoint's poll floor.\n"+
+			"Either it moved -- in which case this gate's one exemption is now pointing at nothing --\n"+
+			"or the walk is not reaching the code it is supposed to police", scanned)
+	}
+	if len(offenders) > 0 {
+		t.Errorf("slow_down is emitted outside the token endpoint's poll floor:\n  %s\n\n"+
+			"RFC 8628 defines it for §3.5 only, where it means \"your interval just went up\".\n"+
+			"A second meaning makes the code unusable by any client that reads it alone.",
+			strings.Join(offenders, "\n  "))
 	}
 }
 
-// ---------------------------------------------------------------------------
-// memql#4626 -- the request-time validator must agree with redemption
-// ---------------------------------------------------------------------------
-
-// THE VALIDATOR EXISTS TO MOVE AN ERROR EARLIER. validateDevicePKCE's whole
-// stated purpose is that "a device that mistypes its method would otherwise
-// complete the whole human round trip before discovering the grant can never be
-// redeemed". Accepting `plain` here while verifyPKCE refuses it (memql#4303)
-// inverted that: the client spent the entire round trip -- open the page,
-// approve on another device -- and only then learned the flow was dead.
+// PKCE: what the request-time validator admits, redemption must accept
+// (memql#4626).
 //
-// A validator that admits what redemption refuses is worse than no validator,
-// because it moves the error to the point where it costs the most.
-func TestDevicePKCEValidatorAgreesWithRedemption(t *testing.T) {
-	cases := []struct {
-		method  string
-		wantErr bool
-		why     string
-	}{
-		{method: "", wantErr: false, why: "absent means S256 (RFC 7636 §4.3)"},
-		{method: "S256", wantErr: false, why: "the only method any MemQL client uses"},
-		{method: "plain", wantErr: true, why: "verifyPKCE refuses it, so accepting it here strands the client after the human round trip"},
-		{method: "S512", wantErr: true, why: "unsupported"},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run("method="+tc.method, func(t *testing.T) {
-			err := validateDevicePKCE("a-challenge", tc.method)
-			if tc.wantErr && err == nil {
-				t.Fatalf("code_challenge_method=%q accepted at /device/code; %s", tc.method, tc.why)
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("code_challenge_method=%q refused at /device/code (%v); %s", tc.method, err, tc.why)
-			}
-		})
-	}
+// `plain` used to pass here and fail at redemption, so a client spent the
+// entire human round trip -- print a code, walk to a browser, approve --
+// before learning the grant could never be redeemed. A request-time validator
+// that admits what redemption refuses is worse than none: it runs, passes, and
+// buys nothing.
+func TestDeviceCodeRefusesPlainPKCEAtRequestTime(t *testing.T) {
+	t.Setenv(envDeviceCodePerHour, "50")
+	s, _ := newDeviceTestServer(t)
 
-	// And the error must not advertise the method it now refuses. The old text
-	// literally read "use S256 or plain".
-	if msg := errDevicePKCEUnsupportedMethod.Error(); strings.Contains(msg, "plain") {
-		t.Errorf("the unsupported-method error still offers plain: %q", msg)
+	req := httptest.NewRequest(http.MethodPost, "/device/code",
+		strings.NewReader("client_id="+deviceTestClientId+
+			"&code_challenge=abc123&code_challenge_method=plain"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	s.handleDeviceCode(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 -- plain is refused at redemption (token.go), so admitting\n"+
+			"it here sells the client a round trip that cannot end in a token; body=%s",
+			rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "S256") {
+		t.Errorf("the refusal does not name S256, which is the client's whole fix: %s", rec.Body.String())
 	}
 }
 
-// The two grants must refuse `plain` for the same reason, so the request-time
-// answer and the redemption answer cannot drift apart again. Asserted as a
-// PAIR, because each half was correct in isolation and the seam between them
-// was what nothing tested -- the same shape as memql#4601 and memql#4629.
-func TestPlainPKCEIsRefusedAtBothEnds(t *testing.T) {
-	if err := validateDevicePKCE("challenge", "plain"); err == nil {
-		t.Error("/device/code accepts code_challenge_method=plain")
+// The two ends must agree, asserted as one statement rather than two
+// independent ones that can drift apart again.
+func TestDeviceRequestTimePKCEAgreesWithRedemption(t *testing.T) {
+	for _, method := range []string{"", "S256", "plain", "S384"} {
+		requestOK := validateDevicePKCE("challengevalue", method) == nil
+		redeemOK := verifyPKCE("challengevalue", method, "verifier") == nil ||
+			// A mismatch is a DIFFERENT refusal from "this method is not
+			// supported": it means the method was accepted and the values did
+			// not line up. Only the latter is what this test is about.
+			!strings.Contains(verifyPKCEErr(method), "plain") &&
+				!strings.Contains(verifyPKCEErr(method), "unsupported")
+		if requestOK != redeemOK {
+			t.Errorf("code_challenge_method=%q: accepted at request time = %v, accepted at redemption = %v.\n"+
+				"A device using it would learn the difference only after a human round trip",
+				method, requestOK, redeemOK)
+		}
 	}
-	if err := verifyPKCE("challenge", "verifier", "plain"); err == nil {
-		t.Error("redemption accepts code_challenge_method=plain")
+}
+
+// verifyPKCEErr returns verifyPKCE's message for a method, with a
+// deliberately-wrong verifier so only method handling is exercised.
+func verifyPKCEErr(method string) string {
+	err := verifyPKCE("challengevalue", method, "verifier")
+	if err == nil {
+		return ""
 	}
+	return err.Error()
 }

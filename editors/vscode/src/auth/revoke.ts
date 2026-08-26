@@ -1,130 +1,123 @@
-// Ending a session on the CLUSTER, not only in this editor (memql#4625).
+// Sign-out that reaches the cluster (znasllc-io/memql#4625).
 //
-// -----------------------------------------------------------------------------
-// WHAT WAS WRONG
-// -----------------------------------------------------------------------------
+// WHAT WAS WRONG. Signing out was purely local: SecretStorage was cleared, the
+// file keys were blanked, the connection was dropped, and a toast said
+// `signed out of "x"`. Nothing ever told the cluster. The refresh token stayed
+// live for its full thirty days (component/identity/config.go), so anyone
+// holding a copy -- a synced settings file, a backup, a shared machine, a
+// laptop being handed on -- could still mint access tokens against an account
+// whose owner had been told the session was over.
 //
-// Sign-out was local only. `signOut` cleared SecretStorage and blanked the file
-// keys, the connection was dropped, and a toast said `signed out of "x"` --
-// which reads, to anybody, as "the session is over". It was not. The refresh
-// token stayed live on the cluster for its full 30 days
-// (component/identity/config.go), redeemable by anyone who had obtained a copy.
+// The toast is the part that makes it a defect rather than a gap. "Signed out"
+// is a claim about the SESSION, and it was only ever true of this editor.
 //
-// A sign-out that leaves a 30-day credential live is the one case where the
-// reassuring message is the dangerous part: a user who believed they had
-// revoked access takes no further action.
+// BEST EFFORT, AND THE LOCAL CLEAR IS UNCONDITIONAL. A person signing out on a
+// plane, behind a captive portal, or against a cluster that is down must still
+// end up signed out HERE -- refusing to forget the credential because the
+// server could not be reached would leave it on disk, which is worse in every
+// direction. So revocation is attempted first, its outcome is carried back,
+// and the wording changes rather than the behaviour.
 //
-// -----------------------------------------------------------------------------
-// WHY BEST-EFFORT, AND WHY THAT IS NOT A COP-OUT
-// -----------------------------------------------------------------------------
-//
-// The local clear MUST happen whether or not the cluster can be reached --
-// refusing to sign out of an unreachable cluster would leave the credential in
-// SecretStorage as well as on the server, which is strictly worse. So the call
-// is attempted first, and its outcome changes only what the user is TOLD.
-//
-// That is the whole design: the operation is unchanged, and the honesty of the
-// report is what this adds. `describeRevocation` returns the sentence, and when
-// revocation did not happen it names the portal's Devices page, which is where
-// a session can be ended without this extension's help.
-//
-// Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
+// Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go):
+// the decision -- what to POST, what counts as revoked, what to say when it did
+// not -- is the part worth testing, and the command supplies the fetch.
 
-import type { FetchLike } from "../connection/credentials.js";
-
-/** The identity route that revokes a refresh token. HTTP by necessity: it is
- *  the same endpoint a browser form posts (docs: Allowed HTTP Exceptions). */
-export const LOGOUT_PATH = "/auth/logout";
-
-/** How long to wait before giving up and clearing locally anyway. Short on
- *  purpose -- sign-out is a foreground action, and a user who has decided to
- *  leave should not watch a spinner because a cluster is down. */
-export const REVOKE_TIMEOUT_MS = 5_000;
-
-export type RevocationOutcome =
-  /** The cluster confirmed the session is revoked. */
-  | { kind: "revoked" }
-  /** There was nothing to revoke -- no refresh token was held. */
-  | { kind: "nothingToRevoke" }
-  /** No issuer is known for this cluster, so there is nowhere to POST. */
-  | { kind: "noIssuer" }
-  /** The cluster was reached and refused, or could not be reached at all. */
-  | { kind: "failed"; reason: string };
-
-export interface RevokeRequest {
-  /** The identity service base URL, e.g. `https://identity.example.com`. */
-  issuer: string | undefined;
-  /** The refresh token to revoke. `""`/undefined means there is nothing to do. */
-  refreshToken: string | undefined;
-  fetch: FetchLike;
-}
+/** The subset of `fetch` this module needs; the same shape credentials.ts uses. */
+export type RevokeResponseLike = { ok: boolean; status: number };
+export type RevokeFetch = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+) => Promise<RevokeResponseLike>;
 
 /**
- * revokeRefreshToken ends the session on the cluster.
+ * What became of the attempt.
  *
- * NEVER THROWS. Every failure is a value, because the caller's next step --
- * clear the local credentials -- is unconditional, and an exception here would
- * put that step behind a try/catch somebody could later get wrong.
+ * `attempted: false` is NOT a failure -- it is "there was nothing to revoke, or
+ * nowhere to send it", which is the ordinary case for a cluster signed in with
+ * a bare token and no refresh credential. It gets its own value so the caller
+ * can stay quiet about it: telling somebody their session "was only forgotten
+ * locally" when no server-side session ever existed would be alarming and
+ * false.
  */
-export async function revokeRefreshToken(req: RevokeRequest): Promise<RevocationOutcome> {
-  const refreshToken = (req.refreshToken ?? "").trim();
-  if (refreshToken === "") return { kind: "nothingToRevoke" };
+export type RevocationOutcome =
+  | { attempted: true; revoked: true }
+  | { attempted: true; revoked: false; reason: string }
+  | { attempted: false };
 
-  const issuer = (req.issuer ?? "").trim().replace(/\/+$/, "");
-  if (issuer === "") return { kind: "noIssuer" };
+/**
+ * Revoke one refresh token at its issuer.
+ *
+ * `POST <issuer>/auth/logout` with `{refresh_token}`, which is the endpoint's
+ * documented JSON carrier (component/identity/http/refresh.go's
+ * extractRefreshToken). The handler is idempotent by design: an unknown or
+ * already-revoked token answers 204 exactly as a live one does, so a second
+ * sign-out is not an error and a stale token in a file does not produce a
+ * frightening message.
+ *
+ * ANY 2xx COUNTS. The endpoint answers 204, but a proxy that rewrites it to
+ * 200 has not failed to revoke anything, and treating that as a failure would
+ * tell an operator their session survived when it did not.
+ */
+export async function revokeRefreshToken(
+  issuerBaseUrl: string,
+  refreshToken: string,
+  fetchImpl: RevokeFetch,
+): Promise<RevocationOutcome> {
+  const base = issuerBaseUrl.trim().replace(/\/+$/, "");
+  const token = refreshToken.trim();
+  if (base === "" || token === "") return { attempted: false };
 
+  const url = `${base}/auth/logout`;
+  let response: RevokeResponseLike;
   try {
-    const response = await req.fetch(`${issuer}${LOGOUT_PATH}`, {
+    response = await fetchImpl(url, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
-      // The JSON body form, which extractRefreshToken accepts alongside the
-      // cookie and the Authorization header (component/identity/http/refresh.go).
-      // The cookie is a browser's spelling and this is not a browser.
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      body: JSON.stringify({ refresh_token: token }),
     });
-    // 204 is the documented answer. The handler is IDEMPOTENT -- an unknown or
-    // already-revoked token also answers 204 -- so any 2xx means the session is
-    // not live, which is the question being asked.
-    if (response.ok) return { kind: "revoked" };
-    return { kind: "failed", reason: `the cluster answered ${response.status}` };
   } catch (err) {
-    return { kind: "failed", reason: errorText(err) };
+    return {
+      attempted: true,
+      revoked: false,
+      // The message is shown to a person deciding whether to go and revoke the
+      // session by hand, so it names the host that could not be reached.
+      reason: `${base} could not be reached (${errorText(err)})`,
+    };
   }
+
+  if (!response.ok) {
+    return { attempted: true, revoked: false, reason: `${url} returned ${response.status}` };
+  }
+  return { attempted: true, revoked: true };
 }
 
 /**
- * describeRevocation is the sentence the user sees, and the point of the whole
- * change: `signed out of "x"` was true about this editor and false about the
- * cluster, and nothing distinguished the two.
+ * What to tell the person, given the outcome.
+ *
+ * Returned as a sentence rather than shown here, for the module's no-`vscode`
+ * rule -- and because the caller composes it with the cluster's name.
+ *
+ * The unrevoked wording names the portal's Devices page, which is where a
+ * session can actually be ended when this could not do it. A message that says
+ * only "revocation failed" leaves the person with a live credential and no
+ * next step.
  */
-export function describeRevocation(clusterName: string, outcome: RevocationOutcome): string {
-  switch (outcome.kind) {
-    case "revoked":
-      return `Signed out of "${clusterName}". The session was revoked on the cluster.`;
-    case "nothingToRevoke":
-      return `Signed out of "${clusterName}".`;
-    case "noIssuer":
-      return (
-        `Signed out of "${clusterName}" HERE ONLY. No identity service is known for this ` +
-        `cluster, so its session could not be revoked; it stays valid until it expires. ` +
-        `End it from the portal's Devices page.`
-      );
-    case "failed":
-      return (
-        `Signed out of "${clusterName}" HERE ONLY -- the session could not be revoked on the ` +
-        `cluster (${outcome.reason}), so it stays valid until it expires. End it from the ` +
-        `portal's Devices page.`
-      );
+export function signOutMessage(clusterName: string, outcome: RevocationOutcome): string {
+  const quoted = `"${clusterName}"`;
+  if (outcome.attempted && outcome.revoked) {
+    return `MemQL: signed out of ${quoted} and ended the session on the cluster.`;
   }
-}
-
-/** True when the user should be shown a warning rather than a status message. */
-export function revocationNeedsAttention(outcome: RevocationOutcome): boolean {
-  return outcome.kind === "noIssuer" || outcome.kind === "failed";
+  if (outcome.attempted && !outcome.revoked) {
+    return (
+      `MemQL: forgot the credentials for ${quoted} on this machine, but could not end the ` +
+      `session on the cluster (${outcome.reason}). The refresh token stays valid until it ` +
+      `expires -- end it from the portal's Devices page if that matters.`
+    );
+  }
+  return `MemQL: signed out of ${quoted}. Run "MemQL: Sign In" to authenticate again.`;
 }
 
 function errorText(err: unknown): string {
-  if (err instanceof Error && err.message.trim() !== "") return err.message;
-  const text = String(err ?? "").trim();
-  return text === "" ? "unknown error" : text;
+  if (err instanceof Error) return err.message;
+  return String(err);
 }
