@@ -2,7 +2,7 @@
   "name": "@znasllc-io/memql-os",
   "version": "0.1.0",
   "private": true,
-  "description": "MemQL OS -- the platform's empty desktop shell. An APPLICATION, not a library.",
+  "description": "MemQL OS -- the platform's desktop shell. An APPLICATION, not a library.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,10 @@
     "clean": "rm -rf dist node_modules/.vite"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
+    "lucide-react": "^1.33.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

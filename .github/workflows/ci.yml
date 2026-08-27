@@ -66,6 +66,7 @@ jobs:
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
       portal: ${{ steps.filter.outputs.portal }}
+      osclient: ${{ steps.filter.outputs.osclient }}
       ci: ${{ steps.filter.outputs.ci }}
       # Target-module buckets (memql#3163 / design D3). Declared so the split
       # in memql#3165 is a no-op for CI, per decision F. NOT yet consumed by any
@@ -515,6 +516,23 @@ jobs:
               # that stage is a portal break with nothing under clients/
               # touched, which is exactly how memql#4458 reached a release.
               - 'Dockerfile'
+
+            # The MemQL OS shell (clients/os, memql#4705). Its own bucket
+            # rather than riding `portal`: the portal bucket fires portal-checks,
+            # which tests the PORTAL -- before this bucket existed the OS suite
+            # ran in NO lane at all, so an OS regression shipped behind a green
+            # ci-required. sdk/ts is here because the OS consumes it as a
+            # `file:` dependency (same reasoning as the portal bucket);
+            # scripts/os because the lane's own recipe lives there; brand
+            # because the OS stylesheet @imports brand/fonts.css directly.
+            # The Dockerfile stays with the portal bucket only -- the
+            # stage-isolation docker step runs in portal-checks and already
+            # builds the OS bundle in the same stage.
+            osclient:
+              - 'clients/os/**'
+              - 'sdk/ts/**'
+              - 'scripts/os/**'
+              - 'brand/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -1227,6 +1245,40 @@ jobs:
       - name: build the portal the way the image does (stage isolation)
         run: docker build --target portal-build .
 
+  # MemQL OS shell lane (the desktop client at clients/os). Gates on
+  # `osclient` -- before this lane existed the OS suite ran NOWHERE in CI:
+  # make os-test existed, #4705/#4706 merged with tests, and no job called
+  # them, so ci-required was green over an untested client. Node 22 for the
+  # same Vite 7 reason as portal-checks. The docker stage-isolation step is
+  # deliberately NOT repeated here: portal-checks runs it and that one
+  # stage builds BOTH bundles, so a second run would pay the stage twice
+  # for the same proof.
+  os-checks:
+    name: os-checks
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.osclient == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '22'
+      # Retried (memql#3166 / design D4.3): dependency install is a network
+      # op. The three steps below are deliberately NOT retried -- retrying a
+      # test is how a flake becomes invisible.
+      - name: install
+        run: scripts/ci/retry.sh -- make os-install
+      - name: typecheck
+        run: make os-typecheck
+      - name: test
+        run: make os-test
+      # A gate, not a packaging step: what tsc tolerates (a broken CSS
+      # import, a dynamic import that does not resolve) shows up only here,
+      # and the image build runs exactly this command.
+      - name: build
+        run: make os-build
+
   # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
   # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),
   # this job provisions a TimescaleDB service so the DB-backed contract dimensions
@@ -1926,6 +1978,7 @@ jobs:
       - sdk-ts-typecheck
       - viewkit-checks
       - portal-checks
+      - os-checks
       - conformance
       - db-tests
       - vscode-extension
