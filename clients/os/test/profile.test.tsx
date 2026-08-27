@@ -1,8 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
 import { parseProfileAccess } from "../src/modules/profile/access";
+import { resetIdsForTest } from "../src/system/desks";
+import { LocalDesktopStore } from "../src/system/store";
+import type { OsRuntimeConfig } from "../src/cluster/config";
+
+// The Profile MODULE is gone (spec A0): its MyAccess facts now surface in
+// Settings -> About and the avatar menu. The parse layer stays -- App.tsx
+// still reads it at boot.
 
 const ACCESS = {
   userId: "v1:identity:user:u-42",
@@ -10,8 +17,16 @@ const ACCESS = {
   clusterRole: "owner",
 };
 
+const CONFIG: OsRuntimeConfig = {
+  identityUrl: "https://identity.example.test",
+  identityApiBaseUrl: "",
+  oauthClientId: "client",
+  authEnabled: true,
+  domain: "example.test",
+};
+
 describe("parseProfileAccess", () => {
-  it("reads MyAccess data only — user id, primaryEmail, clusterRole", () => {
+  it("reads MyAccess data only -- user id, primaryEmail, clusterRole", () => {
     expect(parseProfileAccess(ACCESS)).toEqual(ACCESS);
   });
 
@@ -22,42 +37,48 @@ describe("parseProfileAccess", () => {
   });
 });
 
-describe("Profile module", () => {
-  it("occupies a slot on desktop when opened from the launcher", () => {
-    render(<Shell layout="desktop" onSignOut={vi.fn()} access={ACCESS} />);
-    expect(document.querySelector("[data-os-module='profile']")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
-    const slot = document.querySelector("[data-os-slot='a']");
-    expect(slot?.querySelector("[data-os-module='profile']")).toBeTruthy();
-    expect(screen.getByText("ada@example.test")).toBeTruthy();
-    expect(screen.getByText("owner")).toBeTruthy();
-    expect(screen.getByText("v1:identity:user:u-42")).toBeTruthy();
-  });
+describe("the access facts surface in chrome", () => {
+  function memStorage(): Pick<Storage, "getItem" | "setItem"> {
+    const data = new Map<string, string>();
+    return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
+  }
 
-  it("occupies a slot on iPad", () => {
-    render(<Shell layout="ipad" onSignOut={vi.fn()} access={ACCESS} />);
-    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
-    expect(document.querySelector("[data-os-slot] [data-os-module='profile']")).toBeTruthy();
-  });
-
-  it("is the phone allowlist (not a slot) with the research sheet", () => {
-    render(<Shell layout="phone" onSignOut={vi.fn()} access={ACCESS} />);
-    expect(document.querySelector("[data-os-slot]")).toBeNull();
-    expect(document.querySelector("[data-os-module='profile']")).toBeTruthy();
-    expect(document.querySelector("[data-os-research]")?.getAttribute("data-os-host")).toBe(
-      "sheet",
+  it("Settings -> About names the signed-in identity and role", () => {
+    resetIdsForTest();
+    render(
+      <Shell
+        layout="desktop"
+        onSignOut={vi.fn()}
+        access={ACCESS}
+        config={CONFIG}
+        ports={{ store: new LocalDesktopStore(memStorage()) }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: "Settings" }),
     );
     expect(screen.getByText("ada@example.test")).toBeTruthy();
+    expect(screen.getByText("owner")).toBeTruthy();
+    expect(screen.getByText("example.test")).toBeTruthy();
   });
 
-  it("keeps sign out in chrome after Profile occupies a slot", () => {
+  it("the avatar menu carries the email and the sign out", () => {
+    resetIdsForTest();
     const onSignOut = vi.fn();
-    render(<Shell layout="desktop" onSignOut={onSignOut} access={ACCESS} />);
-    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
-    const chromeSignOut = document.querySelector(".os-chrome-actions [data-sign-out]");
-    expect(chromeSignOut).toBeTruthy();
-    expect(document.querySelector("[data-os-module='profile'] [data-sign-out]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(onSignOut).toHaveBeenCalledOnce();
+    render(
+      <Shell
+        layout="desktop"
+        onSignOut={onSignOut}
+        access={ACCESS}
+        config={CONFIG}
+        ports={{ store: new LocalDesktopStore(memStorage()) }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    const menu = screen.getByRole("menu", { name: "Account" });
+    expect(within(menu).getByText("ada@example.test")).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 });

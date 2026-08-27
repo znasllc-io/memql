@@ -42,15 +42,15 @@ describe("desk surface grid", () => {
   it("settles on the nearest free cell when the preferred is taken", () => {
     let s = place(emptySurface(), file("a"), 0, 0);
     s = place(s, file("b"), 0, 0);
-    expect(s.positions.b).not.toEqual({ col: 0, row: 0 });
-    const d = Math.max(Math.abs(s.positions.b.col), Math.abs(s.positions.b.row));
+    expect(s.positions.b!).not.toEqual({ col: 0, row: 0 });
+    const d = Math.max(Math.abs(s.positions.b!.col), Math.abs(s.positions.b!.row));
     expect(d).toBe(1);
   });
 
   it("a widget occupies its full span for collision", () => {
     let s = place(emptySurface(), widget("w"), 0, 0); // covers 2x2
     s = place(s, file("a"), 1, 1); // inside the span -> pushed out
-    const p = s.positions.a;
+    const p = s.positions.a!;
     expect(p.col > 1 || p.row > 1).toBe(true);
   });
 
@@ -79,7 +79,7 @@ describe("desk surface grid", () => {
   it("updateFile patches file fields in place", () => {
     let s = place(emptySurface(), { ...file("a"), uploadState: "uploading" } as DesktopItem, 0, 0);
     s = updateFile(s, "a", { uploadState: undefined, artifactId: "art-real" });
-    const item = s.items.a;
+    const item = s.items.a!;
     expect(item.kind === "file" && item.artifactId).toBe("art-real");
   });
 });
@@ -91,7 +91,7 @@ describe("folders", () => {
     s = addFileToFolder(s, "dir", "a");
     expect(s.items.a).toBeUndefined();
     expect(s.positions.a).toBeUndefined();
-    const dir = s.items.dir;
+    const dir = s.items.dir!;
     expect(dir.kind === "folder" && dir.children.map((c) => c.id)).toEqual(["a"]);
   });
 
@@ -100,8 +100,8 @@ describe("folders", () => {
     s = createFolder(s, "dir", "Reports", { col: 4, row: 2 }, GRID)!;
     s = addFileToFolder(s, "dir", "a");
     s = removeFileFromFolder(s, "dir", "a", GRID);
-    expect(s.items.a.kind).toBe("file");
-    const d = Math.max(Math.abs(s.positions.a.col - 4), Math.abs(s.positions.a.row - 2));
+    expect(s.items.a!.kind).toBe("file");
+    const d = Math.max(Math.abs(s.positions.a!.col - 4), Math.abs(s.positions.a!.row - 2));
     expect(d).toBeLessThanOrEqual(1);
   });
 
@@ -113,8 +113,8 @@ describe("folders", () => {
     s = addFileToFolder(s, "dir", "b");
     s = deleteFolder(s, "dir", GRID);
     expect(s.items.dir).toBeUndefined();
-    expect(s.items.a.kind).toBe("file");
-    expect(s.items.b.kind).toBe("file");
+    expect(s.items.a!.kind).toBe("file");
+    expect(s.items.b!.kind).toBe("file");
   });
 
   it("refuses folder-into-folder by construction (only files move in)", () => {

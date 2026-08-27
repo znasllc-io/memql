@@ -26,14 +26,14 @@ describe("memory field geometry", () => {
   it("links only reach nearby dots", () => {
     const field = generateField(9, 1440, 900);
     for (const l of field.links) {
-      const a = field.dots[l.from];
-      const b = field.dots[l.to];
+      const a = field.dots[l.from]!;
+      const b = field.dots[l.to]!;
       expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeLessThanOrEqual(DEFAULT_FIELD.linkReach);
     }
   });
 
   it("drift is a bounded orbit around the base position", () => {
-    const dot = generateField(9, 400, 400).dots[0];
+    const dot = generateField(9, 400, 400).dots[0]!;
     for (const t of [0, 10, 100, 1000]) {
       const p = dotAt(dot, t);
       expect(Math.hypot(p.x - dot.x, p.y - dot.y)).toBeLessThanOrEqual(dot.amp * Math.SQRT2 + 0.001);

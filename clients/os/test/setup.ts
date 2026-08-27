@@ -30,3 +30,37 @@ Object.defineProperty(globalThis, "sessionStorage", {
   value: new MemoryStorage(),
   configurable: true,
 });
+
+// ---- shims the desktop chrome needs under jsdom ----
+
+// matchMedia: layout + reduced-motion checks read it; jsdom has none.
+if (!window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      onchange: null,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
+// ResizeObserver: the wallpaper canvas observes its parent.
+if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
+  class ResizeObserverShim {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverShim;
+}
+
+// Element.scrollTo: the Ask log pins to its bottom; jsdom throws on it.
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}

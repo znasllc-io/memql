@@ -78,7 +78,7 @@ function replaceDesk(state: ShellState, desk: Desk): ShellState {
   return { ...state, desks: state.desks.map((d) => (d.id === desk.id ? desk : d)) };
 }
 
-function deskHasVacancy(state: ShellState, desk: Desk): boolean {
+function deskHasVacancy(desk: Desk): boolean {
   return desk.windows.length < DESK_CAP;
 }
 
@@ -105,7 +105,7 @@ export function openApp(state: ShellState, appId: AppId, sectionId = ""): ShellR
 
   const win = newWindow(nextId("win"), appId, sectionId);
   const current = activeDesk(state);
-  if (deskHasVacancy(state, current)) {
+  if (deskHasVacancy(current)) {
     const next = replaceDesk(
       { ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id },
       { ...current, windows: [...current.windows, win.id] },
@@ -152,7 +152,10 @@ export function setWindowMode(state: ShellState, windowId: WindowId, mode: OsWin
   let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...win, mode } } };
   if (mode === "minimized" && state.focusedWindowId === windowId) {
     const desk = deskOfWindow(state, windowId);
-    const sibling = desk?.windows.find((id) => id !== windowId && isVisible(next.windows[id]));
+    const sibling = desk?.windows.find((id) => {
+      const w = next.windows[id];
+      return id !== windowId && !!w && isVisible(w);
+    });
     next = { ...next, focusedWindowId: sibling ?? null };
   }
   if (mode !== "minimized") {
@@ -163,8 +166,8 @@ export function setWindowMode(state: ShellState, windowId: WindowId, mode: OsWin
 
 export function focusWindow(state: ShellState, windowId: WindowId): ShellState {
   const desk = deskOfWindow(state, windowId);
-  if (!desk) return state;
   const win = state.windows[windowId];
+  if (!desk || !win) return state;
   const restored: OsWindow = win.mode === "minimized" ? { ...win, mode: "normal" } : win;
   return {
     ...state,
@@ -183,8 +186,10 @@ export function setWindowSection(state: ShellState, windowId: WindowId, sectionI
 /** Swap the two windows of a desk (left <-> right). No-op on a solo desk. */
 export function swapSides(state: ShellState, deskId: DeskId): ShellState {
   const desk = deskById(state, deskId);
-  if (!desk || desk.windows.length !== 2) return state;
-  return replaceDesk(state, { ...desk, windows: [desk.windows[1], desk.windows[0]] });
+  if (!desk) return state;
+  const [left, right] = desk.windows;
+  if (!left || !right) return state;
+  return replaceDesk(state, { ...desk, windows: [right, left] });
 }
 
 /**
@@ -203,7 +208,7 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   } else {
     const found = deskById(state, target);
     if (!found || found.id === from.id) return { state, effect: { kind: "none" } };
-    if (!deskHasVacancy(state, found)) return { state, effect: { kind: "refused-full", deskId: found.id } };
+    if (!deskHasVacancy(found)) return { state, effect: { kind: "refused-full", deskId: found.id } };
     targetDesk = found;
   }
 
@@ -235,7 +240,10 @@ export function switchDeskBy(state: ShellState, delta: 1 | -1, opts: SwitchDeskO
 function topWindowOf(state: ShellState, deskId: DeskId): WindowId | null {
   const desk = deskById(state, deskId);
   if (!desk) return null;
-  const visible = desk.windows.filter((id) => isVisible(state.windows[id]));
+  const visible = desk.windows.filter((id) => {
+    const w = state.windows[id];
+    return !!w && isVisible(w);
+  });
   return visible[visible.length - 1] ?? null;
 }
 

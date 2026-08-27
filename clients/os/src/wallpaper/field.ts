@@ -84,12 +84,14 @@ export function generateField(
   const links: FieldLink[] = [];
   for (let i = 0; i < dots.length; i += 1) {
     if (rand() > opts.linkChance) continue;
+    const from = dots[i];
+    if (!from) continue;
     let best = -1;
     let bestDist = opts.linkReach;
     for (let j = i + 1; j < dots.length; j += 1) {
-      const dx = dots[j].x - dots[i].x;
-      const dy = dots[j].y - dots[i].y;
-      const dist = Math.hypot(dx, dy);
+      const candidate = dots[j];
+      if (!candidate) continue;
+      const dist = Math.hypot(candidate.x - from.x, candidate.y - from.y);
       if (dist < bestDist) {
         best = j;
         bestDist = dist;

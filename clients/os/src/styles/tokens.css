@@ -16,10 +16,8 @@
  *
  * Motion lives here as tokens, never as hard-coded timings in components,
  * and prefers-reduced-motion zeroes all of it (the wallpaper reads the
- * same signal and stills itself).
+ * same signal and stills itself). Fonts are imported by index.css, once.
  */
-
-@import "../../../../brand/fonts.css";
 
 :root,
 [data-os-window],

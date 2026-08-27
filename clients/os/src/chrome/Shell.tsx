@@ -1,65 +1,134 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ChromeLayout } from "../app/layout";
+import { AskProvider } from "../ask/AskProvider";
+import { AskSheet } from "../ask/AskSheet";
+import { StubAskTransport, type AskTransport } from "../ask/askController";
+import { OS_REGISTRY } from "../apps/registry";
+import type { OsRuntimeConfig } from "../cluster/config";
+import { InMemoryUploadProvider, type UploadProvider } from "../items/upload";
 import type { ProfileAccess } from "../modules/profile/access";
-import { Profile } from "../modules/profile/Profile";
-import { Research } from "../research/Research";
-import { emptySlots, occupy, slotCap, vacate, type SlotId, type SlotState } from "../slots/manager";
-import { Slot } from "../slots/Slot";
-import { Launcher } from "./Launcher";
-import { ModeSwitcher } from "./ModeSwitcher";
-import { SignOut } from "./SignOut";
+import type { PlacementTokens } from "../system/placement";
+import type { DesktopStore } from "../system/store";
+import { SessionProvider } from "./access";
+import { Desktop } from "./Desktop";
+import { Dock } from "./Dock";
+import { gridForViewport, OsProvider, useOs } from "./state";
+import { LauncherOverlay } from "./LauncherOverlay";
+import { PhoneShell } from "./PhoneShell";
+
+// The shell (spec A): providers + the layout split. Desktop and iPad get
+// the desk world; the phone gets its own chrome. Transports and stores
+// are injectable so tests and PR B swap them without touching chrome.
+
+export interface ShellPorts {
+  askTransport?: AskTransport;
+  uploads?: UploadProvider;
+  store?: DesktopStore;
+}
 
 export function Shell({
   layout,
   onSignOut,
   access = null,
+  config,
+  ports = {},
 }: {
   layout: ChromeLayout;
   onSignOut: () => void;
   access?: ProfileAccess | null;
+  config: OsRuntimeConfig;
+  ports?: ShellPorts;
 }) {
-  const [slots, setSlots] = useState<SlotState>(emptySlots);
-  const cap = slotCap(layout);
-  const showSlots = cap > 0;
+  const askTransport = useMemo(() => ports.askTransport ?? new StubAskTransport(), [ports.askTransport]);
+  const uploads = useMemo(() => ports.uploads ?? new InMemoryUploadProvider(), [ports.uploads]);
+  const actorRole = access?.clusterRole ?? "";
 
-  const launchProfile = useCallback(() => {
-    setSlots((current) => occupy(current, layout, "profile").state);
-  }, [layout]);
-
-  const closeSlot = useCallback((id: SlotId) => {
-    setSlots((current) => vacate(current, id));
+  const [viewport, setViewport] = useState(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const grid = useMemo(() => gridForViewport(viewport.w, viewport.h), [viewport]);
+
   return (
-    <div className="os-root" data-os-root data-layout={layout}>
-      <Launcher layout={layout} onLaunchProfile={showSlots ? launchProfile : undefined} />
-      <div className="os-chrome-actions">
-        <ModeSwitcher />
-        <SignOut onSignOut={onSignOut} />
-      </div>
-      {showSlots ? (
-        <div className="os-slots" data-os-slots>
-          <Slot id="a" occupant={slots.a} onVacate={closeSlot}>
-            {mountModule(slots.a, access)}
-          </Slot>
-          {cap >= 2 ? (
-            <Slot id="b" occupant={slots.b} onVacate={closeSlot}>
-              {mountModule(slots.b, access)}
-            </Slot>
-          ) : null}
-        </div>
-      ) : (
-        <main className="os-phone-allowlist" data-os-phone-allowlist>
-          <Profile access={access} />
-        </main>
-      )}
-      <Research host={layout === "phone" ? "sheet" : "strip"} />
-    </div>
+    <SessionProvider value={{ access, config }}>
+      <AskProvider transport={askTransport}>
+        <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={ports.store}>
+          {layout === "phone" ? (
+            <div className="os-root" data-os-root data-layout={layout}>
+              <PhoneShell onSignOut={onSignOut} />
+              <AskSheet />
+            </div>
+          ) : (
+            <DesktopChrome layout={layout} viewport={viewport} uploads={uploads} onSignOut={onSignOut} />
+          )}
+        </OsProvider>
+      </AskProvider>
+    </SessionProvider>
   );
 }
 
-function mountModule(moduleId: string | null, access: ProfileAccess | null): ReactNode {
-  if (moduleId === "profile") return <Profile access={access} />;
-  return null;
+function DesktopChrome({
+  layout,
+  viewport,
+  uploads,
+  onSignOut,
+}: {
+  layout: ChromeLayout;
+  viewport: { w: number; h: number };
+  uploads: UploadProvider;
+  onSignOut: () => void;
+}) {
+  const { actions, state } = useOs();
+  const [launcherOpen, setLauncherOpen] = useState(false);
+
+  const placement = useMemo<PlacementTokens>(
+    () => ({ margin: 28, gutter: 16, dockReserve: 118, maxSoloWidth: 1280 }),
+    [],
+  );
+
+  // Desk keyboard bindings (spec A): scoped off editable targets and off
+  // window content. The launcher toggle works everywhere.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.shiftKey)) return;
+      if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+        setLauncherOpen((v) => !v);
+        return;
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest("input, textarea, [contenteditable], [data-os-window-content]")) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        actions.switchDeskBy(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        actions.switchDeskBy(1);
+      } else if (/^[1-9]$/.test(event.key)) {
+        const desk = state.shell.desks[Number(event.key) - 1];
+        if (desk) {
+          event.preventDefault();
+          actions.switchDesk(desk.id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [actions, state.shell.desks]);
+
+  return (
+    <div className="os-root" data-os-root data-layout={layout}>
+      <Desktop viewport={viewport} placement={placement} uploads={uploads} />
+      <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
+      <LauncherOverlay open={launcherOpen} onClose={() => setLauncherOpen(false)} />
+      <AskSheet />
+    </div>
+  );
 }

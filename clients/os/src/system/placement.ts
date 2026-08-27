@@ -62,14 +62,14 @@ export function placeWindows(
   const rects: Record<WindowId, Rect> = {};
 
   const split = visible.filter((w) => w.mode !== "fullscreen");
-  if (split.length === 1) {
-    const solo = split[0];
+  const [first, second] = split;
+  if (first && !second) {
     const w = Math.min(area.w, t.maxSoloWidth);
-    rects[solo.id] = { x: area.x + (area.w - w) / 2, y: area.y, w, h: area.h };
-  } else if (split.length === 2) {
+    rects[first.id] = { x: area.x + (area.w - w) / 2, y: area.y, w, h: area.h };
+  } else if (first && second) {
     const w = Math.max(0, (area.w - t.gutter) / 2);
-    rects[split[0].id] = { x: area.x, y: area.y, w, h: area.h };
-    rects[split[1].id] = { x: area.x + w + t.gutter, y: area.y, w, h: area.h };
+    rects[first.id] = { x: area.x, y: area.y, w, h: area.h };
+    rects[second.id] = { x: area.x + w + t.gutter, y: area.y, w, h: area.h };
   }
 
   for (const win of visible) {

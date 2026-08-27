@@ -102,20 +102,20 @@ describe("desktop store", () => {
     const doc = sampleDocument();
     const deskId = doc.activeDeskId;
     const raw = JSON.parse(JSON.stringify(doc)) as DesktopDocument;
-    const fileItem = raw.surfaces[deskId].items.f1;
+    const fileItem = raw.surfaces[deskId]!.items.f1!;
     if (fileItem.kind === "file") fileItem.uploadState = "uploading";
-    (raw.surfaces[deskId].positions as Record<string, unknown>).ghost = { col: 1, row: 1 };
+    (raw.surfaces[deskId]!.positions as Record<string, unknown>).ghost = { col: 1, row: 1 };
     const clean = sanitizeDocument(raw)!;
-    const cleanFile = clean.surfaces[deskId].items.f1;
+    const cleanFile = clean.surfaces[deskId]!.items.f1!;
     expect(cleanFile.kind === "file" && cleanFile.uploadState).toBe("failed");
-    expect(clean.surfaces[deskId].positions.ghost).toBeUndefined();
+    expect(clean.surfaces[deskId]!.positions.ghost).toBeUndefined();
   });
 
   it("sanitize repairs a dangling activeDeskId", () => {
     const doc = sampleDocument();
     const raw = { ...doc, activeDeskId: "desk-elsewhere" };
     const clean = sanitizeDocument(raw)!;
-    expect(clean.activeDeskId).toBe(doc.desks[0].id);
+    expect(clean.activeDeskId).toBe(doc.desks[0]!.id);
   });
 
   it("save never throws when storage is unavailable", () => {

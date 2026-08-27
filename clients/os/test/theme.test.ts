@@ -60,8 +60,12 @@ describe("theme", () => {
     expect(tokens).toMatch(/--os-duration-med:\s*0ms/);
   });
 
-  it("hosts the same --os-* pack on each slot root", () => {
-    expect(tokens).toMatch(/\[data-os-slot\]/);
+  it("hosts the same --os-* pack on window, widget and sheet roots", () => {
+    // Spec G: a later per-window theme mix must be a CSS-only change, so
+    // every one of these roots re-inherits the full pack.
+    expect(tokens).toMatch(/\[data-os-window\]/);
+    expect(tokens).toMatch(/\[data-os-widget\]/);
+    expect(tokens).toMatch(/\[data-os-sheet\]/);
     for (const name of TOKEN_PACK) {
       expect(tokens).toContain(name);
     }

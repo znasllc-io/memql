@@ -19,7 +19,12 @@ function fieldColors(el: HTMLElement): { dot: string; link: string } {
 }
 
 function paint(canvas: HTMLCanvasElement, field: Field, t: number): void {
-  const ctx = canvas.getContext("2d");
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = canvas.getContext("2d");
+  } catch {
+    return; // jsdom (and some capture contexts) have no canvas backend
+  }
   if (!ctx) return;
   const { dot, link } = fieldColors(canvas);
   const dpr = window.devicePixelRatio || 1;
@@ -29,8 +34,11 @@ function paint(canvas: HTMLCanvasElement, field: Field, t: number): void {
   ctx.strokeStyle = link;
   ctx.lineWidth = 1;
   for (const l of field.links) {
-    const a = dotAt(field.dots[l.from], t);
-    const b = dotAt(field.dots[l.to], t);
+    const fromDot = field.dots[l.from];
+    const toDot = field.dots[l.to];
+    if (!fromDot || !toDot) continue;
+    const a = dotAt(fromDot, t);
+    const b = dotAt(toDot, t);
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);

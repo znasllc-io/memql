@@ -58,8 +58,10 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
     .map((d) => ({ id: d.id, createdBy: d.createdBy === "auto" ? ("auto" as const) : ("user" as const) }));
   if (desks.length === 0) return null;
 
+  const first = desks[0];
+  if (!first) return null;
   const deskIds = new Set(desks.map((d) => d.id));
-  const activeDeskId = deskIds.has(doc.activeDeskId ?? "") ? (doc.activeDeskId as DeskId) : desks[0].id;
+  const activeDeskId = deskIds.has(doc.activeDeskId ?? "") ? (doc.activeDeskId as DeskId) : first.id;
 
   const surfaces: Record<DeskId, DeskSurface> = {};
   for (const [deskId, surface] of Object.entries(doc.surfaces ?? {})) {
