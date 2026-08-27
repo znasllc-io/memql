@@ -59,6 +59,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/localtls.sh
 source "${SCRIPT_DIR}/../lib/localtls.sh"
+# shellcheck source=../lib/ports.sh
+source "${SCRIPT_DIR}/../lib/ports.sh"
 
 cap_init "k3d.up" "Bootstrap a local k3d cluster running ArgoCD pointed at the local overlay."
 cap_spec_param "cluster"        "k3d cluster name"
@@ -90,6 +92,25 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 ARGOCD_VERSION="v2.13.3"
+
+# PIN BOTH SIDES OR NEITHER. ARGOCD_VERSION was pinned and k3s was not, so k3d
+# served whatever its default channel had that week and the pair drifted apart
+# on the calendar rather than on any change of ours. It reached k8s 1.33, whose
+# Deployment status carries `.status.terminatingReplicas`, which ArgoCD 2.13.3's
+# bundled schema does not know -- and the two Applications that opt into
+# ServerSideApply (cert-manager, cnpg-operator) went to
+#
+#   ComparisonError: ... error building typed value from live resource:
+#   .status.terminatingReplicas: field not declared in schema
+#
+# i.e. permanently un-diffable, so drift in the operator stack stops being
+# visible while both apps still report Healthy. The bring-up that worked in
+# July and failed in August had no commit between them.
+#
+# 1.32 is the newest line before that field. Raising it means raising
+# ARGOCD_VERSION in the same commit -- which is the better long-term fix, since
+# a cloud AKS at its region default will meet the same wall.
+K3S_VERSION="${MEMQL_K3D_K3S_VERSION:-v1.32.13-k3s1}"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 ARGOCD_NAMESPACE="argocd"
 
@@ -241,6 +262,56 @@ function check_prerequisites() {
 # CLUSTER CREATION
 #=============================================================================
 
+# warn_occupied_ports <port-arg>... -- name what already holds a port the cluster
+# is about to publish. Reads the same `--port H:C@loadbalancer` array the create
+# is given, so --extra-ports is covered without a second list.
+#
+# HERE, NOT IN check_prerequisites. The question only means anything when a
+# cluster is about to be CREATED: a cluster that is already running holds these
+# ports ITSELF, so the same check higher up would fire on every re-run of
+# `make up` against a healthy cluster. It has to sit after the already-exists
+# return.
+#
+# A WARNING, NOT A REFUSAL, AND THE DISTINCTION WAS MEASURED. "Something is
+# listening" is not the same question as "docker cannot publish this". On this
+# project's macOS reference machine a Homebrew Postgres holds 127.0.0.1:5432 and
+# [::1]:5432 while Docker Desktop published *:5432 for the k3d load balancer --
+# both listening at once, cluster up and healthy, because the two binds do not
+# actually conflict. A refusal here would have blocked a create that works, and
+# a preflight that is wrong in the direction of "no" is worse than the failure
+# it replaces.
+#
+# WHAT IT BUYS, THEN. Docker fails a create it genuinely cannot make with "port
+# is already allocated" -- a port number and nothing else. This line runs
+# immediately before, so an operator who hits that has the process name in front
+# of it. And when docker succeeds anyway, the warning is still worth printing:
+# `psql ... localhost:5432` then reaches the NATIVE Postgres rather than the
+# cluster, which is a quieter way to be wrong than a failed create.
+function warn_occupied_ports() {
+    local spec port holder taken=""
+    for spec in "$@"; do
+        if [[ "$spec" == --* ]]; then
+            continue
+        fi
+        port="${spec%%:*}"
+        if port_free "$port"; then
+            continue
+        fi
+        holder="$(port_holder "$port")"
+        if [[ -n "$taken" ]]; then
+            taken+="; "
+        fi
+        taken+="${port} (held by ${holder:-an unidentified process})"
+    done
+    if [[ -n "$taken" ]]; then
+        cap_warn "these host ports are already in use and the cluster publishes them: ${taken}."
+        cap_warn "  If the create fails with \"port is already allocated\", that is why -- stop the listener"
+        cap_warn "  (a native Postgres on 5432 is the usual one: \`brew services stop postgresql\` on macOS)."
+        cap_warn "  If it succeeds, note that localhost:5432 reaches the OTHER listener, not this cluster."
+    fi
+    return 0
+}
+
 function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
 
@@ -279,7 +350,10 @@ function create_cluster() {
         done
     fi
 
+    warn_occupied_ports "${port_args[@]}"
+
     k3d cluster create "${CLUSTER_NAME}" \
+        --image "rancher/k3s:${K3S_VERSION}" \
         --servers "${K3D_SERVERS}" \
         --agents "${K3D_AGENTS}" \
         "${port_args[@]}" \

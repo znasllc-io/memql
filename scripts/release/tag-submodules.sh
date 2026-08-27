@@ -270,8 +270,16 @@ main() {
 		return 4
 	fi
 
-	local mods=()
-	mapfile -t mods < <(modules_for_line "$line") || return 2
+	# A `while read` LOOP, NOT `mapfile` (bash 4.0): macOS ships bash 3.2, where
+	# mapfile does not exist at all. The emptiness check below is the real guard
+	# either way -- mapfile's own failure status was never the signal, since a
+	# failure inside the process substitution does not reach it.
+	local mods=() mod
+	while IFS= read -r mod; do
+		if [[ -n "$mod" ]]; then
+			mods+=("$mod")
+		fi
+	done < <(modules_for_line "$line")
 	if [[ "${#mods[@]}" -eq 0 ]]; then
 		echo "ERROR: --line=$line selected no modules" >&2
 		return 2

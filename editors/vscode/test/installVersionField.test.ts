@@ -302,7 +302,9 @@ test("Create deployment on an unsupported platform refuses instead of listing ta
   // Darwin + no wizard cluster: a tag list is a list of versions that cannot
   // run. The listing must not degrade to a text box (memql#4294).
   let listed = false;
-  const g = refusedPlatformGuidance();
+  const g = refusedPlatformGuidance(
+    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64",
+  );
   const listing = await listReleaseTags({
     cwd: "/tmp",
     repo: DEFAULT_STACK_REPO,
@@ -316,5 +318,5 @@ test("Create deployment on an unsupported platform refuses instead of listing ta
   assert.deepEqual(listing.tags, []);
   assert.equal(listing.refusedPlatform, true);
   assert.match(listing.error, /linux\/amd64/);
-  assert.match(listing.error, /make up/);
+  assert.match(listing.error, /will not change that/);
 });

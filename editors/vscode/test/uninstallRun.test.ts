@@ -352,7 +352,7 @@ test("an unsupported platform refuses uninstall before any removal, and the rece
   const before = await fs.readFile(receiptFile, "utf8");
   const inner = remover();
   const darwin =
-    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
   const run: RunScript = async (inv) => {
     if ((inv.capability ?? inv.scriptPath).includes("detect")) {
       return {

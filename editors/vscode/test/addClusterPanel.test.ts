@@ -782,7 +782,7 @@ test("Create deployment on an unsupported platform refuses instead of listing ta
   const runner = await fakeRunner();
   const inner = runner.run;
   const darwin =
-    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
   runner.run = async (run) => {
     if (run.capability === "install.detect") {
       runner.calls.push(run);
@@ -808,7 +808,7 @@ test("Create deployment on an unsupported platform refuses instead of listing ta
     h.post({ type: "choose", value: "install" });
     await until(() => /linux\/amd64/.test(h.html()), "the refused-platform screen");
     const html = h.html();
-    assert.match(html, /make up/);
+    assert.match(html, /will not change that/);
     assert.doesNotMatch(html, /The step refused to act/, "must not use generic exit-3 artifact copy");
     assert.doesNotMatch(html, /data-field="version"/, "must not offer a tag list that cannot run");
     assert.ok(

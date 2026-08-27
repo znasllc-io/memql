@@ -1963,6 +1963,40 @@ jobs:
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
   # is treated as a pass. Point the ruleset's required check at `ci-required`
   # ONLY, never at the individual jobs.
+  # THE ONE LANE THAT RUNS A DIFFERENT BASH (macOS install portability).
+  #
+  # Every other job here runs on ubuntu-latest, where bash is 5.x. macOS ships
+  # bash 3.2.57 as /bin/bash and always will -- bash 4 went GPLv3 -- and
+  # scripts/lib/platform.sh lists darwin/arm64 as a SUPPORTED install target
+  # with digest-pinned tools in scripts/install/tool-pins.env. So `local -n` (a
+  # bash 4.3 nameref) shipped in scripts/install/seed-bootstrap.sh, broke 100%
+  # of macOS installs, and every lane stayed green.
+  #
+  # THE IMAGE, NOT A macOS RUNNER. GitHub's macOS runners have no usable
+  # Docker, so install-cluster-e2e.yml -- which DOES drive the real
+  # seedBootstrap -- cannot run there at all. This is the same interpreter on
+  # the runner we already pay for. Pinned by digest for the reason
+  # scripts/k3d/up.sh's K3S_VERSION comment gives: pinning one side of a pair
+  # and floating the other is how the pair drifts apart on the calendar.
+  #
+  # It complements rather than duplicates scripts/lib/bash_portability_test.go:
+  # that scans for the constructs we know about, this runs the interpreter,
+  # which is what catches the one nobody thought to add to a list.
+  bash32-smoke:
+    name: bash32-smoke
+    timeout-minutes: 10
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.gates == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: capability scripts answer their meta paths under stock macOS bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/w" -w /w \
+            bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89 \
+            ./scripts/ci/bash32-smoke.sh
+
   ci-required:
     name: ci-required
     timeout-minutes: 10
@@ -1984,6 +2018,7 @@ jobs:
       - vscode-extension
       - vscode-extension-host
       - module-boundaries
+      - bash32-smoke
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped
