@@ -1,5 +1,4 @@
 import { Mark } from "./Mark";
-import { ModeSwitcher } from "./ModeSwitcher";
 
 export function SignIn({
   status,
@@ -23,7 +22,6 @@ export function SignIn({
             Sign in
           </button>
         ) : null}
-        <ModeSwitcher />
       </div>
     </div>
   );

@@ -56,5 +56,5 @@ function OsBoot() {
   if (status === "signed-out" || status === "unavailable") {
     return <SignIn status={status} onSignIn={signIn} />;
   }
-  return <Shell layout={layout} onSignOut={signOut} access={access} />;
+  return <Shell layout={layout} onSignOut={signOut} access={access} config={config} />;
 }

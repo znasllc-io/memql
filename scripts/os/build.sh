@@ -49,6 +49,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 OS_DIR="${REPO_ROOT}/clients/os"
+SDK_CORE_DIR="${REPO_ROOT}/sdk/ts"
 
 # --no-audit --no-fund everywhere: both make network calls that are pure noise
 # in CI and add seconds to every install.
@@ -84,9 +85,20 @@ function install_os() {
     ( cd "${OS_DIR}" && npm ci "${NPM_FLAGS[@]}" )
 }
 
+# build_workspace_deps builds the `file:` dependency so its dist/ exists
+# before anything resolves against it (same shape as scripts/portal/build.sh:
+# a file: dep is a linked source tree, so the OS's typecheck, tests and vite
+# build all resolve @znasllc-io/memql-sdk-core through sdk/ts's exports map
+# into ./dist). `npm ci` because the lockfile is committed; idempotent, and a
+# no-op rebuild when the portal half of the Docker stage already built it.
+function build_workspace_deps() {
+    info "Building @znasllc-io/memql-sdk-core (sdk/ts)..."
+    ( cd "${SDK_CORE_DIR}" && npm ci "${NPM_FLAGS[@]}" && npm run build )
+}
+
 function run_install() {
     check_node
-    : # no sdk/ts file: deps
+    build_workspace_deps
     install_os
 }
 
@@ -129,7 +141,7 @@ function usage() {
 function main() {
     local command="${1:-}"
     case "${command}" in
-        deps)      check_node ;;
+        deps)      check_node; build_workspace_deps ;;
         install)   run_install ;;
         typecheck) run_typecheck ;;
         test)      run_test ;;

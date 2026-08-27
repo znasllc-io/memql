@@ -1,94 +1,184 @@
 /*
- * OS tokens live on the desktop root AND each slot root (memql#4706).
- * One default theme, two looks. A later per-window mix can override
- * one [data-os-slot] without a rewrite. No picker in this PR.
- * Light is less techy (warm paper). Dark is a bit more techy, not sci-fi.
- * Motion is tokens, never hard-coded timings in components.
- * backdrop-filter plus a solid fallback so a browser that cannot blur
- * still reads as glass, just flatter.
+ * MemQL OS tokens (spec F/G, memql-os-foundation).
+ *
+ * Brand-anchored, dark-first instrument look: graphite grounds on the brand
+ * dark axis, porcelain (not cream) light mode, and the brand green demoted
+ * to SIGNAL duty -- focus, live dots, primary action -- never decoration.
+ * Amber and red exist only as status. Fonts come from brand/fonts.css (the
+ * brand gate forbids @font-face outside brand/); Squada One appears in
+ * exactly three places: boot mark, ghost desk numeral, Launcher wordmark.
+ *
+ * A THEME is this complete token set plus the wallpaper parameters, applied
+ * via data-os-theme on the root (spec G). Mode (light/dark/system) stays
+ * orthogonal: explicit choice stamps data-theme; system default resolves
+ * through prefers-color-scheme. Tokens are re-inherited onto every window,
+ * widget and sheet root so a later per-window mix is a CSS-only change.
+ *
+ * Motion lives here as tokens, never as hard-coded timings in components,
+ * and prefers-reduced-motion zeroes all of it (the wallpaper reads the
+ * same signal and stills itself). Fonts are imported by index.css, once.
  */
 
 :root,
-[data-os-slot] {
+[data-os-window],
+[data-os-widget],
+[data-os-sheet] {
   color-scheme: light dark;
 
   --os-font: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --os-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --os-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --os-font-display: "Squada One", "InterVariable", "Inter", ui-sans-serif, sans-serif;
 
-  --os-radius: 18px;
+  --os-text-xs: 0.6875rem;   /* 11px -- provenance lines, ticks */
+  --os-text-sm: 0.75rem;     /* 12px -- captions, dock labels */
+  --os-text-base: 0.8125rem; /* 13px -- chrome UI */
+  --os-text-md: 0.9375rem;   /* 15px -- app content */
+  --os-text-lg: 1.125rem;    /* 18px -- window titles, launcher search */
+
+  --os-radius: 16px;
   --os-radius-sm: 10px;
+  --os-radius-xs: 6px;
 
-  --os-duration-fast: 160ms;
-  --os-duration-med: 280ms;
+  --os-duration-fast: 140ms;
+  --os-duration-med: 260ms;
   --os-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   --os-blur: 18px;
+
+  /* Desktop icon grid cell (items snap to it; widgets span multiples). */
+  --os-cell-w: 96px;
+  --os-cell-h: 104px;
+  --os-dock-h: 64px;
 }
 
-[data-os-slot] {
+/* Window/widget/sheet roots re-inherit every color token so one root can
+ * be overridden later (per-window theme mix) without a rewrite. */
+[data-os-window],
+[data-os-widget],
+[data-os-sheet] {
   --os-ground: inherit;
+  --os-plate: inherit;
+  --os-raised: inherit;
   --os-ink: inherit;
   --os-muted: inherit;
-  --os-accent: inherit;
+  --os-line: inherit;
   --os-glass: inherit;
   --os-glass-solid: inherit;
-  --os-line: inherit;
-  --os-shadow: inherit;
+  --os-accent: inherit;
+  --os-accent-fg: inherit;
+  --os-accent-soft: inherit;
+  --os-warn: inherit;
+  --os-error: inherit;
+  --os-shadow-item: inherit;
+  --os-shadow-float: inherit;
+  --os-shadow-window: inherit;
+  --os-field-dot: inherit;
+  --os-field-link: inherit;
+  --os-field-numeral: inherit;
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --os-ground: #f4f1ea;
-    --os-ink: #1c1915;
-    --os-muted: #6b6458;
-    --os-accent: #047d5a;
-    --os-glass: rgba(255, 252, 246, 0.62);
-    --os-glass-solid: #f7f3ea;
-    --os-line: rgba(28, 25, 21, 0.08);
-    --os-shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
-  }
-}
-
+/* ---- dark (the OS default look) ---- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --os-ground: #0b1014;
-    --os-ink: #e8eef2;
-    --os-muted: #93a0aa;
+    --os-ground: #07090a;
+    --os-plate: #0b1110;
+    --os-raised: #0e1311;
+    --os-ink: #e8e6dd;
+    --os-muted: #9ca395;
+    --os-line: rgba(232, 230, 221, 0.08);
+    --os-glass: rgba(11, 17, 16, 0.55);
+    --os-glass-solid: #0e1311;
     --os-accent: #5ccda7;
-    --os-glass: rgba(16, 24, 32, 0.55);
-    --os-glass-solid: #121820;
-    --os-line: rgba(232, 238, 242, 0.1);
-    --os-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+    --os-accent-fg: #07090a;
+    --os-accent-soft: rgba(92, 205, 167, 0.12);
+    --os-warn: #e0a63c;
+    --os-error: #e05b4d;
+    --os-shadow-item: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --os-shadow-float: 0 12px 32px rgba(0, 0, 0, 0.42);
+    --os-shadow-window: 0 24px 64px rgba(0, 0, 0, 0.5);
+    --os-field-dot: rgba(232, 230, 221, 0.055);
+    --os-field-link: rgba(92, 205, 167, 0.05);
+    --os-field-numeral: rgba(232, 230, 221, 0.04);
   }
+}
+
+/* ---- light (porcelain, cool -- never cream) ---- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --os-ground: #f2f4ef;
+    --os-plate: #ffffff;
+    --os-raised: #e9ede6;
+    --os-ink: #191d1a;
+    --os-muted: #5b615c;
+    --os-line: rgba(25, 29, 26, 0.1);
+    --os-glass: rgba(255, 255, 255, 0.62);
+    --os-glass-solid: #fbfcfa;
+    --os-accent: #047d5a;
+    --os-accent-fg: #ffffff;
+    --os-accent-soft: rgba(4, 125, 90, 0.1);
+    --os-warn: #a86a08;
+    --os-error: #b23b2e;
+    --os-shadow-item: 0 1px 2px rgba(25, 29, 26, 0.08);
+    --os-shadow-float: 0 12px 32px rgba(25, 29, 26, 0.12);
+    --os-shadow-window: 0 24px 64px rgba(25, 29, 26, 0.16);
+    --os-field-dot: rgba(25, 29, 26, 0.05);
+    --os-field-link: rgba(4, 125, 90, 0.05);
+    --os-field-numeral: rgba(25, 29, 26, 0.045);
+  }
+}
+
+/* ---- explicit mode choices (the toggle wins in both directions) ---- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --os-ground: #07090a;
+  --os-plate: #0b1110;
+  --os-raised: #0e1311;
+  --os-ink: #e8e6dd;
+  --os-muted: #9ca395;
+  --os-line: rgba(232, 230, 221, 0.08);
+  --os-glass: rgba(11, 17, 16, 0.55);
+  --os-glass-solid: #0e1311;
+  --os-accent: #5ccda7;
+  --os-accent-fg: #07090a;
+  --os-accent-soft: rgba(92, 205, 167, 0.12);
+  --os-warn: #e0a63c;
+  --os-error: #e05b4d;
+  --os-shadow-item: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --os-shadow-float: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --os-shadow-window: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --os-field-dot: rgba(232, 230, 221, 0.055);
+  --os-field-link: rgba(92, 205, 167, 0.05);
+  --os-field-numeral: rgba(232, 230, 221, 0.04);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --os-ground: #f4f1ea;
-  --os-ink: #1c1915;
-  --os-muted: #6b6458;
+  --os-ground: #f2f4ef;
+  --os-plate: #ffffff;
+  --os-raised: #e9ede6;
+  --os-ink: #191d1a;
+  --os-muted: #5b615c;
+  --os-line: rgba(25, 29, 26, 0.1);
+  --os-glass: rgba(255, 255, 255, 0.62);
+  --os-glass-solid: #fbfcfa;
   --os-accent: #047d5a;
-  --os-glass: rgba(255, 252, 246, 0.62);
-  --os-glass-solid: #f7f3ea;
-  --os-line: rgba(28, 25, 21, 0.08);
-  --os-shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --os-ground: #0b1014;
-  --os-ink: #e8eef2;
-  --os-muted: #93a0aa;
-  --os-accent: #5ccda7;
-  --os-glass: rgba(16, 24, 32, 0.55);
-  --os-glass-solid: #121820;
-  --os-line: rgba(232, 238, 242, 0.1);
-  --os-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+  --os-accent-fg: #ffffff;
+  --os-accent-soft: rgba(4, 125, 90, 0.1);
+  --os-warn: #a86a08;
+  --os-error: #b23b2e;
+  --os-shadow-item: 0 1px 2px rgba(25, 29, 26, 0.08);
+  --os-shadow-float: 0 12px 32px rgba(25, 29, 26, 0.12);
+  --os-shadow-window: 0 24px 64px rgba(25, 29, 26, 0.16);
+  --os-field-dot: rgba(25, 29, 26, 0.05);
+  --os-field-link: rgba(4, 125, 90, 0.05);
+  --os-field-numeral: rgba(25, 29, 26, 0.045);
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root,
-  [data-os-slot] {
+  [data-os-window],
+  [data-os-widget],
+  [data-os-sheet] {
     --os-duration-fast: 0ms;
     --os-duration-med: 0ms;
   }
