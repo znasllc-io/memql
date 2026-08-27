@@ -13,11 +13,10 @@ The default CodeQL suite runs on every push to `main`. This is the standing
 record of how its open alerts were resolved. Twenty-six were triaged: the 23
 open on `main`, plus 3 that arrived with the local-models-fleet epic.
 
-**Six were real and are fixed in code. Twenty were false positives.** Five of
-the six fixes cleared the analysis; the sixth is dismissed WITH the fix cited,
-because CodeQL cannot recognise the validator that now stands in front of it
-(see the residual section below). So every alert here is either fixed and
-gone, or dismissed with a reason -- none is merely open.
+**Six were real and are fixed in code. Twenty were false positives.** All six
+fixes cleared the analysis -- alerts #1003-#1008 are `state=fixed`, not
+dismissed -- and the twenty carry a dismissal reason each. `main` has no open
+code-scanning alert.
 
 Dismissals live on the alert itself (GitHub keeps them across re-scans of the
 same finding). This file exists because a dismissal reason is one sentence and
@@ -176,35 +175,32 @@ real open redirect and the dismissal is void.
 
 ---
 
-## Residual after the fix: `go/request-forgery` on the bulk download
+## Why the bulk download is not host-allowlisted
 
-The fix cleared five of the six real alerts. The bulk download's stays open,
-and is dismissed rather than chased.
+Worth recording because the obvious hardening was considered and rejected, and
+the next person to look at `checkBulkDownloadURL` will wonder why it checks a
+SHAPE rather than a name.
 
-**CodeQL does not recognise a custom URL validator as a barrier.** The taint
-runs from the operator-written store row to `http.Client.Do`, and
-`checkBulkDownloadURL` sits in between; the query has no way to know that the
-function it passes through decides anything. This is a limitation of the
-analysis, not a gap in the code, and the shapes that WOULD clear it are worse
-code:
+Shopify serves bulk results from object storage, and which bucket host that is
+stays theirs to change. An allowlist would turn a vendor's routine migration
+into a backfill that stops working -- loudly, but as an outage caused by a
+hardcoded constant. So the check requires https, no credentials, and a public
+host where the host is a literal address, and leaves the host itself open.
 
-- **Allowlisting the host** would clear it, and is the one thing deliberately
-  rejected in the fix. Shopify serves bulk results from object storage and
-  which bucket host that is stays theirs to change, so an allowlist turns a
-  vendor's routine migration into a backfill that stops working. The failure
-  would be loud, but it would be an outage caused by a hardcoded constant.
-- **Inlining the check** at the call site would not help: the query is
-  tracking the value, not the call depth.
+That is not the only thing in front of the request. In order:
+`NormalizeShopDomain` means the status carrying the URL can only have come
+from a real shop host; `checkBulkDownloadURL` applies the shape check; and
+`bulkDownloadClient` re-applies it to every redirect hop, because a guard on
+the first hop only is the usual way a guard like this is defeated.
 
-What is actually in front of that request, in order: `NormalizeShopDomain`
-means the status carrying the URL can only have come from a real shop host;
-`checkBulkDownloadURL` requires https, no credentials, and a public host where
-the host is a literal address; and `bulkDownloadClient` re-applies the same
-check to every redirect hop.
-
-**The property that makes the dismissal safe:** all three are on the path, and
-`TestTheBulkDownloadGuardIsConsulted` fails if `streamBulk` stops consulting
-the first. Remove any of them and the dismissal is void.
+**A note on what this section used to say.** While the fix was in flight it
+predicted that CodeQL would keep flagging the download, on the reasoning that
+the query cannot recognise a custom validator as a barrier -- and a transient
+alert on the pull request's merge ref (#1030) was dismissed on that basis. The
+prediction was wrong: on `main` the finding closed as `state=fixed` along with
+the other five. The lesson is worth keeping even though the dismissal was not:
+**an alert's fate is something to read after the scan, not something to
+conclude from how the query works.**
 
 ---
 
