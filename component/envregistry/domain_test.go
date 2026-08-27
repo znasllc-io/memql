@@ -14,7 +14,7 @@ func TestDomainDerivations(t *testing.T) {
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": "https://identity.memql.localhost",
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         "memql.localhost",
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api.memql.localhost:443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     "https://api.memql.localhost,https://app.memql.localhost,https://portal.memql.localhost",
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     "https://api.memql.localhost,https://app.memql.localhost,https://portal.memql.localhost,https://os.memql.localhost",
 		"MEMQL_MCP_PUBLIC_URL":                    "https://mcp.memql.localhost",
 	}
 	for name, wantVal := range want {
@@ -29,6 +29,7 @@ func TestDomainDerivations(t *testing.T) {
 		`"clientId":"portal"`,
 		`"clientId":"app"`,
 		"https://portal.memql.localhost/auth/callback",
+		"https://os.memql.localhost/auth/callback",
 		"https://app.memql.localhost/auth/callback",
 		"http://127.0.0.1/cockpit/callback",
 	} {

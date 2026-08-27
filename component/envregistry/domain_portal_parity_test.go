@@ -26,7 +26,10 @@ func TestPortalOriginIsTheFrontDoorPortalHost(t *testing.T) {
 		origin := "https://" + frontdoor.PortalHost(domain)
 
 		clients := derived["MEMQL_IDENTITY_REGISTERED_CLIENTS"]
-		if !strings.Contains(clients, `{"clientId":"portal","redirectURIs":["`+origin+`/auth/callback"]}`) {
+		if !strings.Contains(clients, `"clientId":"portal"`) {
+			t.Errorf("domain %q: the portal client is missing: %s", domain, clients)
+		}
+		if !strings.Contains(clients, origin+"/auth/callback") {
 			t.Errorf("domain %q: the portal client is not registered at %s/auth/callback: %s", domain, origin, clients)
 		}
 

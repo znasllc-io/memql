@@ -91,7 +91,7 @@ var generatedOverlays = []string{cloudOverlay, entryOverlay}
 // select by Secret name.
 var frontDoorIngressNames = []string{
 	"api-front-door", "api-front-door-grpc", "identity-front-door",
-	"mcp-front-door", "portal-front-door", "edge-front-door",
+	"mcp-front-door", "portal-front-door", "os-front-door", "edge-front-door",
 }
 
 // hostsIn returns every Ingress rule host in a rendered stream. Parsed by line
@@ -594,6 +594,45 @@ func TestThePortalHasItsOwnExactRuleToTheEdge(t *testing.T) {
 	}
 }
 
+// TestTheOsHasItsOwnExactRuleToTheEdge is the portal rule's twin (memql#4705).
+// Same TLS reason: ingress-nginx builds a certificate-bearing server block per
+// RULE host, so os.<domain> needs an exact rule to the edge or Safari sees the
+// controller's self-signed default.
+func TestTheOsHasItsOwnExactRuleToTheEdge(t *testing.T) {
+	osHost := frontdoor.OsHost(committedDomain)
+	wildcard := frontdoor.SitesWildcard(committedDomain)
+
+	for _, overlay := range generatedOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			var sawOs, sawWildcard bool
+			for _, ing := range frontDoorIngresses(t, render(t, overlay)) {
+				for _, r := range ing.Spec.Rules {
+					switch r.Host {
+					case wildcard:
+						sawWildcard = true
+					case osHost:
+						sawOs = true
+						for _, p := range r.HTTP.Paths {
+							if p.Backend.Service.Name != "edge" {
+								t.Errorf("the OS rule on %s points at Service %q, want edge -- the OS is a site "+
+									"and takes the site path; the exact rule exists for TLS only",
+									ing.Metadata.Name, p.Backend.Service.Name)
+							}
+						}
+					}
+				}
+			}
+			if !sawOs {
+				t.Errorf("the %s overlay has no exact Ingress rule for %q; ingress-nginx then answers it from the "+
+					"wildcard's server block with its self-signed default certificate (memql#4224 / #4705)", overlay, osHost)
+			}
+			if !sawWildcard {
+				t.Errorf("the %s overlay has no %q rule; every other site reaches the edge through it", overlay, wildcard)
+			}
+		})
+	}
+}
+
 // certificateDoc is the slice of a rendered cert-manager Certificate these
 // gates reason about.
 type certificateDoc struct {
@@ -965,8 +1004,8 @@ func TestRenderedHostsAreExactlyTheProduct(t *testing.T) {
 				if want[got] || strings.HasPrefix(got, "livekit.") {
 					continue
 				}
-				t.Errorf("the %s overlay serves %q, which is not one of the six derived hosts and is "+
-					"not the media plane -- a seventh host rule is a design change, not a configuration "+
+				t.Errorf("the %s overlay serves %q, which is not one of the seven derived hosts and is "+
+					"not the media plane -- an eighth host rule is a design change, not a configuration "+
 					"change (docs/public/operate/front-door.md)", overlay, got)
 			}
 		})

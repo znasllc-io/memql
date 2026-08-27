@@ -256,6 +256,7 @@ WORKDIR /src
 # to install the portal at all -- a `file:` dep is a linked source tree, not a
 # registry tarball.
 COPY clients/portal/package.json clients/portal/package-lock.json ./clients/portal/
+COPY clients/os/package.json clients/os/package-lock.json ./clients/os/
 COPY sdk/ts/package.json ./sdk/ts/
 COPY sdk/ts-viewkit/package.json sdk/ts-viewkit/package-lock.json ./sdk/ts-viewkit/
 
@@ -273,18 +274,20 @@ COPY sdk/ts ./sdk/ts
 COPY sdk/ts-viewkit ./sdk/ts-viewkit
 COPY clients/portal ./clients/portal
 COPY scripts/portal ./scripts/portal
+COPY clients/os ./clients/os
+COPY scripts/os ./scripts/os
 
 # The SAME script `make portal-build` runs, so the image bundle and a locally
 # built one cannot diverge in how they were produced. Moved to /portal-dist so
 # both alternatives of the PORTAL_DIST_STAGE selector expose the bundle at one
 # path -- the runtime's COPY cannot branch on which stage it resolved to.
-RUN bash scripts/portal/build.sh build && mv clients/portal/dist /portal-dist
+RUN bash scripts/portal/build.sh build && mv clients/portal/dist /portal-dist && bash scripts/os/build.sh build && mv clients/os/dist /os-dist
 
 # portal-skip is the empty alternative the PORTAL_DIST_STAGE selector resolves
 # to by default. Derived FROM builder purely because that stage is already
 # built -- it contributes one empty directory and pulls no additional image.
 FROM builder AS portal-skip
-RUN mkdir -p /portal-dist
+RUN mkdir -p /portal-dist /os-dist
 
 FROM ${PORTAL_DIST_STAGE} AS portal-dist
 
@@ -312,6 +315,7 @@ COPY --from=builder /app/bin/healthcheck ./healthcheck
 # is missing on disk 404s asset-by-asset rather than failing boot
 # (component/edge/handler.go resolves against whatever os.DirFS finds there).
 COPY --from=portal-dist /portal-dist ./portal
+COPY --from=portal-dist /os-dist ./os
 
 EXPOSE 8085 50051
 
@@ -338,6 +342,7 @@ COPY --from=builder /app/bin/healthcheck ./healthcheck
 # --target, which resolves to the LAST stage -- this one -- so a copy only in
 # the distroless stage would ship no portal in the images that actually run.
 COPY --from=portal-dist /portal-dist ./portal
+COPY --from=portal-dist /os-dist ./os
 
 EXPOSE 8085 50051
 

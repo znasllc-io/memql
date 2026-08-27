@@ -15,7 +15,7 @@
 # certificates by SNI against the certificate's own names -- so this rule
 # changes nothing a browser can see here. It exists because the local cluster
 # is the cloud's parity topology (docs/public/operate/environment-parity.md):
-# the front door has the same six host rules everywhere, and
+# the front door has the same seven host rules everywhere, and
 # ../render_frontdoor_test.go computes that set from component/frontdoor, the
 # same derivation cmd/frontdoorhosts writes the cloud front door from. A rule
 # the cloud has and local lacks is a rule local cannot prove anything about.

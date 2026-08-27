@@ -40,3 +40,30 @@ seed site portal {
   systemOwned: true
   title:       "MemQL Portal"
 }
+
+/// The MemQL OS shell, as a second platform site (memql#4705).
+///
+/// SEEDED, not a wildcard site. The OS is a named front-door host like the
+/// portal: exact Ingress, exact Certificate SAN, HTTP-01. Putting it on
+/// *.<domain> would send Safari through edge site-hosting with no SAN
+/// (memql#4224).
+///
+/// bundleRef is file:///app/os -- the directory the image ships next to
+/// /app/portal. kind stays spa; this is not a new site kind.
+///
+/// The hostname is the committed localhost default; SeedMaterializer
+/// rewrites it from MEMQL_DOMAIN the same way it rewrites the portal.
+///
+/// NO ownerUserId: cluster-owned, like the portal. `os.<domain>` is a
+/// reserved label a user may not claim.
+@description("The MemQL OS shell")
+seed site os {
+  id:          "os"
+  hostname:    "os.memql.localhost"
+  kind:        "spa"
+  bundleRef:   "file:///app/os"
+  status:      "live"
+  apiProxy:    true
+  systemOwned: true
+  title:       "MemQL OS"
+}

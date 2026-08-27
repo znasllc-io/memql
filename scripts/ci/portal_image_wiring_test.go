@@ -416,6 +416,29 @@ func TestPortalBuildStageCopiesEveryTreeThePortalImports(t *testing.T) {
 	}
 }
 
+func TestEveryRuntimeStageCopiesTheOs(t *testing.T) {
+	body := readRepoFile(t, "Dockerfile")
+	blocks := regexp.MustCompile(`(?mi)^FROM\s`).Split(body, -1)
+	names := regexp.MustCompile(`(?mi)^FROM\s+(.*)$`).FindAllStringSubmatch(body, -1)
+	runtimes := 0
+	for i, block := range blocks[1:] {
+		if !strings.Contains(block, `ENTRYPOINT ["./memql"]`) {
+			continue
+		}
+		runtimes++
+		if !strings.Contains(block, "/os-dist") {
+			label := "stage"
+			if i < len(names) {
+				label = strings.TrimSpace(names[i][1])
+			}
+			t.Errorf("runtime %q does not COPY the OS bundle from /os-dist. The edge would 404 at os.<domain> (memql#4705).", label)
+		}
+	}
+	if runtimes == 0 {
+		t.Fatal("found no runtime stage; this guard cannot pass vacuously")
+	}
+}
+
 func keysOf(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

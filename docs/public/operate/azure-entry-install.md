@@ -828,7 +828,7 @@ manual dispatch.
 
 - The local k3d + Argo cluster --
   [reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md)
-- The six host rules in general -- [front-door.md](front-door.md)
+- The seven host rules in general -- [front-door.md](front-door.md)
 - The `memql-project` template's own retirement of staging / prod and
   the Azure provisioning script -- the template repo and later tickets,
   not this page

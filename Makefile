@@ -474,7 +474,7 @@ db-failover-litmus:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean os-install os-typecheck os-test os-build os-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -648,15 +648,18 @@ vscode-test: vscode-deps
 ## exist before anything in the portal can resolve against them. Idempotent.
 portal-install:
 	bash scripts/portal/build.sh install
+	bash scripts/os/build.sh install
 
 ## Typecheck the portal. `tsc -b` over both projects: the browser sources and
 ## vite.config.ts are deliberately separate type environments.
 portal-typecheck:
 	bash scripts/portal/build.sh typecheck
+	bash scripts/os/build.sh typecheck
 
 ## Run the portal test suite (vitest + @testing-library/react on jsdom).
 portal-test:
 	bash scripts/portal/build.sh test
+	bash scripts/os/build.sh test
 
 ## Build the portal bundle into clients/portal/dist. This is what the
 ## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
@@ -665,11 +668,32 @@ portal-test:
 ## longer an env var that repoints it.
 portal-build:
 	bash scripts/portal/build.sh build
+	bash scripts/os/build.sh build
 
 ## Remove the portal's build output (dist + the vite/tsc caches). Leaves
 ## node_modules alone -- `npm ci` already fixes anything stale in there.
 portal-clean:
 	bash scripts/portal/build.sh clean
+
+## Install the MemQL OS shell dependencies (clients/os).
+os-install:
+	bash scripts/os/build.sh install
+
+## Typecheck the OS shell.
+os-typecheck:
+	bash scripts/os/build.sh typecheck
+
+## Run the OS shell test suite (vitest + @testing-library/react on jsdom).
+os-test:
+	bash scripts/os/build.sh test
+
+## Build the OS bundle into clients/os/dist. Same script the image stage runs.
+os-build:
+	bash scripts/os/build.sh build
+
+## Remove the OS shell build output (dist + vite/tsc caches).
+os-clean:
+	bash scripts/os/build.sh clean
 
 ## Run the VS Code extension's Extension Development Host smoke lane
 ## (memql#3302): downloads a real VS Code and asserts the host-only surface --

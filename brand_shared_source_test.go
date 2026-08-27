@@ -73,6 +73,7 @@ var (
 var generatedStylesheetDirs = []string{
 	"component/identity/web/static",
 	"clients/portal/dist",
+	"clients/os/dist",
 }
 
 func isGenerated(path string) bool {
@@ -200,5 +201,20 @@ func TestPortalFaviconMatchesBrand(t *testing.T) {
 	if string(source) != string(copied) {
 		t.Errorf("clients/portal/public/favicon.svg has drifted from brand/favicon.svg.\n" +
 			"Copy the brand file over it: cp brand/favicon.svg clients/portal/public/favicon.svg")
+	}
+}
+
+func TestOsFaviconMatchesBrand(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join(brandDir, "favicon.svg"))
+	if err != nil {
+		t.Fatalf("reading brand/favicon.svg: %v", err)
+	}
+	copied, err := os.ReadFile("clients/os/public/favicon.svg")
+	if err != nil {
+		t.Fatalf("reading the OS public/favicon.svg: %v", err)
+	}
+	if string(source) != string(copied) {
+		t.Errorf("clients/os/public/favicon.svg has drifted from brand/favicon.svg.\n" +
+			"Copy the brand file over it: cp brand/favicon.svg clients/os/public/favicon.svg")
 	}
 }

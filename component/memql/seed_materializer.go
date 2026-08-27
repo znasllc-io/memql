@@ -47,9 +47,9 @@ const (
 // existed). See frontend#237.
 const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
 
-// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The portal
-// site hostname is derived from it on every global rematerialize; the
-// committed DSL seed stays portal.memql.localhost.
+// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The portal and OS
+// site hostnames are derived from it on every global rematerialize; the
+// committed DSL seeds stay *.memql.localhost.
 const memqlDomainEnv = "MEMQL_DOMAIN"
 
 // defaultPortalHostname is the product fail-closed hostname when MEMQL_DOMAIN
@@ -57,7 +57,12 @@ const memqlDomainEnv = "MEMQL_DOMAIN"
 const defaultPortalHostname = "portal.memql.localhost"
 
 const portalSiteSeedName = "portal"
+const osSiteSeedName = "os"
 const portalSiteConcept = "site"
+
+// defaultOsHostname is the product fail-closed hostname when MEMQL_DOMAIN
+// is unset or empty. Same committed default as dsl/platform/seeds.memql.
+const defaultOsHostname = "os.memql.localhost"
 
 // seedMaterializerActor is the synthetic actor every materializer
 // mutation runs as. Mutations require an actor (for createdBy
@@ -393,6 +398,7 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
 	applyPortalSiteHostname(def, args)
+	applyOsSiteHostname(def, args)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
@@ -484,6 +490,19 @@ func applyPortalSiteHostname(def *SeedDefinition, args map[string]any) {
 	args["hostname"] = portalSiteHostname(os.Getenv(memqlDomainEnv))
 }
 
+// applyOsSiteHostname rewrites the OS site hostname from MEMQL_DOMAIN on
+// every global rematerialize (memql#4705), the same way applyPortalSiteHostname
+// does for the portal. The committed seed stays os.memql.localhost.
+func applyOsSiteHostname(def *SeedDefinition, args map[string]any) {
+	if def == nil || args == nil {
+		return
+	}
+	if def.Name != osSiteSeedName || def.UseConcept != portalSiteConcept {
+		return
+	}
+	args["hostname"] = osSiteHostname(os.Getenv(memqlDomainEnv))
+}
+
 // portalSiteHostname is the pure derivation: frontdoor.PortalHost when
 // MEMQL_DOMAIN is set, else the committed localhost default.
 func portalSiteHostname(domain string) string {
@@ -492,6 +511,16 @@ func portalSiteHostname(domain string) string {
 		return defaultPortalHostname
 	}
 	return frontdoor.PortalHost(domain)
+}
+
+// osSiteHostname is the pure derivation: frontdoor.OsHost when MEMQL_DOMAIN
+// is set, else the committed localhost default.
+func osSiteHostname(domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return defaultOsHostname
+	}
+	return frontdoor.OsHost(domain)
 }
 
 // resolveAvatarPersonaByName looks up a v1:agents:avatarPersona catalog row by

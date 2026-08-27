@@ -225,7 +225,7 @@ No file under `deploy/` names a domain.
 
 The installer points the front-door hostnames at 127.0.0.1 -- unless they
 already resolve there. If your own DNS answers 127.0.0.1 for
-`api.<domain>`, `identity.<domain>`, `mcp.<domain>`, `portal.<domain>` and the
+`api.<domain>`, `identity.<domain>`, `mcp.<domain>`, `portal.<domain>`, `os.<domain>` and the
 apex, the hosts block is skipped entirely and no elevation prompt appears. A
 hostname resolving to some OTHER address is refused rather than shadowed,
 naming the address it answered.

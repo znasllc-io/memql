@@ -375,6 +375,7 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 		{"identity.example.com", false, "reserved: sign-in"},
 		{"mcp.example.com", false, "reserved: the MCP protocol head"},
 		{"portal.example.com", false, "reserved: the platform's own console, site #1"},
+		{"os.example.com", false, "reserved: the platform's OS shell"},
 		{"www.example.com", false, "reserved: reads as the organisation's"},
 		{"admin.example.com", false, "reserved: reads as the organisation's"},
 		{"mail.example.com", false, "reserved: where a mail host would land"},
@@ -407,6 +408,9 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	if !reserved[frontdoor.PortalSite] {
 		t.Error("the portal's own label is not reserved")
 	}
+	if !reserved[frontdoor.OsSite] {
+		t.Error("the OS shell's own label is not reserved")
+	}
 	for _, l := range squatReservedSiteLabels {
 		if !reserved[l] {
 			t.Errorf("%q is missing from the reserved set", l)
@@ -414,8 +418,8 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	}
 	// And nothing beyond those: an over-broad reserved list refuses names for
 	// no stated reason, which is how a list acquires entries nobody can defend.
-	if want := len(frontdoor.Roles()) + 1 + len(squatReservedSiteLabels); len(reserved) != want {
-		t.Errorf("the reserved set holds %d labels, want %d (%d roles + the portal + %d squat "+
+	if want := len(frontdoor.Roles()) + 2 + len(squatReservedSiteLabels); len(reserved) != want {
+		t.Errorf("the reserved set holds %d labels, want %d (%d roles + portal + os + %d squat "+
 			"labels). Every entry needs a reason recorded beside it",
 			len(reserved), want, len(frontdoor.Roles()), len(squatReservedSiteLabels))
 	}
