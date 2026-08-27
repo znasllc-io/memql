@@ -415,3 +415,23 @@ func TestRuntimeConfigForSite_NoResolverStillCarriesTheStoreDomain(t *testing.T)
 		t.Errorf("storefrontToken = %q, want empty with no resolver", doc.Storefront.StorefrontToken)
 	}
 }
+
+// TestClientIDForHostname_OsHostResolvesToPortalClient is memql#4705: the OS
+// shell reuses the portal OAuth client. Once DomainDerivations registers
+// https://os.<d>/auth/callback on that client, the edge lookup -- which keys
+// on hostname, not a name it recognises -- must return "portal".
+func TestClientIDForHostname_OsHostResolvesToPortalClient(t *testing.T) {
+	// Imported via the same JSON DomainDerivations writes, not a hand-built
+	// fixture: a second spelling here would pass while production disagreed.
+	// The test lives in this package because clientIDForHostname is what the
+	// browser reads as oauthClientId.
+	clients := `[{"clientId":"app","redirectURIs":["https://app.example.com/auth/callback"]},` +
+		`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback"]},` +
+		`{"clientId":"portal","redirectURIs":["https://portal.example.com/auth/callback","https://os.example.com/auth/callback"]}]`
+	if got := clientIDForHostname("os.example.com", clients); got != "portal" {
+		t.Errorf("clientIDForHostname(os.example.com) = %q, want portal -- the OS reuses the portal client", got)
+	}
+	if got := clientIDForHostname("portal.example.com", clients); got != "portal" {
+		t.Errorf("clientIDForHostname(portal.example.com) = %q, want portal still", got)
+	}
+}

@@ -1,0 +1,80 @@
+/*
+ * OS tokens live on the desktop root. One default theme, two looks.
+ * Light is less techy (warm paper). Dark is a bit more techy, not sci-fi.
+ * Motion is tokens, never hard-coded timings in components.
+ * backdrop-filter plus a solid fallback so a browser that cannot blur
+ * still reads as glass, just flatter.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --os-font: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --os-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --os-radius: 18px;
+  --os-radius-sm: 10px;
+
+  --os-duration-fast: 160ms;
+  --os-duration-med: 280ms;
+  --os-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --os-blur: 18px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --os-ground: #f4f1ea;
+    --os-ink: #1c1915;
+    --os-muted: #6b6458;
+    --os-accent: #047d5a;
+    --os-glass: rgba(255, 252, 246, 0.62);
+    --os-glass-solid: #f7f3ea;
+    --os-line: rgba(28, 25, 21, 0.08);
+    --os-shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --os-ground: #0b1014;
+    --os-ink: #e8eef2;
+    --os-muted: #93a0aa;
+    --os-accent: #5ccda7;
+    --os-glass: rgba(16, 24, 32, 0.55);
+    --os-glass-solid: #121820;
+    --os-line: rgba(232, 238, 242, 0.1);
+    --os-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --os-ground: #f4f1ea;
+  --os-ink: #1c1915;
+  --os-muted: #6b6458;
+  --os-accent: #047d5a;
+  --os-glass: rgba(255, 252, 246, 0.62);
+  --os-glass-solid: #f7f3ea;
+  --os-line: rgba(28, 25, 21, 0.08);
+  --os-shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --os-ground: #0b1014;
+  --os-ink: #e8eef2;
+  --os-muted: #93a0aa;
+  --os-accent: #5ccda7;
+  --os-glass: rgba(16, 24, 32, 0.55);
+  --os-glass-solid: #121820;
+  --os-line: rgba(232, 238, 242, 0.1);
+  --os-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --os-duration-fast: 0ms;
+    --os-duration-med: 0ms;
+  }
+}

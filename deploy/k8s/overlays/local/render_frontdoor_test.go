@@ -11,7 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// The six hosts the front door serves (design D3, plus the portal's own exact
+// The seven hosts the front door serves (design D3, plus the portal's own exact
 // rule from memql#4224). The COUNT is the invariant: it must not grow with
 // customers, apps or sites.
 //
@@ -34,7 +34,7 @@ import (
 // exists, so a developer would never notice the rule missing. In the cloud the
 // certificate names exact hosts only (HTTP-01 cannot issue a wildcard), and
 // without the rule the portal serves the ingress controller's self-signed
-// default. Same six rules everywhere is what lets local prove the shape.
+// default. Same seven rules everywhere is what lets local prove the shape.
 var frontDoorHosts = func() []string {
 	var out []string
 	for _, h := range frontdoor.Hosts("memql.localhost") {
@@ -129,5 +129,27 @@ func TestCockpitHostIsGone(t *testing.T) {
 func TestNoSecondEntranceToIdentity(t *testing.T) {
 	if strings.Contains(render(t), "identity-external") {
 		t.Error("identity-external still exists; identity is reachable only through the front door")
+	}
+}
+
+func TestTheOsRuleReachesTheEdge(t *testing.T) {
+	rendered := render(t)
+	osHost := frontdoor.OsHost("memql.localhost")
+
+	var found bool
+	for _, doc := range strings.Split(rendered, "\n---\n") {
+		if !strings.Contains(doc, "kind: Ingress") || !strings.Contains(doc, "host: "+osHost) {
+			continue
+		}
+		found = true
+		if !strings.Contains(doc, "name: edge") {
+			t.Errorf("the Ingress serving %q does not point at svc/edge; the OS is a site and takes the site path", osHost)
+		}
+		if strings.Contains(doc, "router.priority") {
+			t.Errorf("the Ingress serving %q declares a router.priority; precedence is declared on the wildcard only (memql#3810)", osHost)
+		}
+	}
+	if !found {
+		t.Fatalf("no Ingress in the rendered overlay carries an exact rule for %q", osHost)
 	}
 }

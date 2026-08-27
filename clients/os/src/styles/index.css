@@ -1,0 +1,202 @@
+@import "../../../../brand/fonts.css";
+@import "./tokens.css";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--os-font);
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
+
+button {
+  font-family: inherit;
+}
+
+.os-root,
+.os-signin,
+.os-boot {
+  min-height: 100%;
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
+
+.os-root {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  padding: 1.25rem;
+  gap: 1rem;
+}
+
+.os-root[data-layout="desktop"] {
+  grid-template-columns: minmax(12rem, 18rem) 1fr minmax(12rem, 18rem);
+  grid-template-rows: auto 1fr;
+}
+
+.os-launcher {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.os-root[data-layout="desktop"] .os-launcher {
+  grid-column: 1 / -1;
+}
+
+.os-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.os-mark {
+  color: var(--os-accent);
+}
+
+.os-mark-lg {
+  width: 36px;
+  height: 36px;
+}
+
+.os-chrome-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+.os-root[data-layout="desktop"] .os-chrome-actions {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+}
+
+.os-mode {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: var(--os-glass-solid);
+  background: var(--os-glass);
+  backdrop-filter: blur(var(--os-blur));
+  -webkit-backdrop-filter: blur(var(--os-blur));
+  border: 1px solid var(--os-line);
+}
+
+.os-mode button,
+.os-sign-out,
+.os-primary {
+  border: 0;
+  background: transparent;
+  color: var(--os-ink);
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color var(--os-duration-fast) var(--os-ease),
+    color var(--os-duration-fast) var(--os-ease);
+}
+
+.os-mode button.is-active,
+.os-sign-out,
+.os-primary {
+  background: var(--os-glass-solid);
+}
+
+.os-sign-out,
+.os-primary {
+  background: var(--os-glass-solid);
+  background: var(--os-glass);
+  backdrop-filter: blur(var(--os-blur));
+  -webkit-backdrop-filter: blur(var(--os-blur));
+  border: 1px solid var(--os-line);
+}
+
+.os-slots {
+  display: contents;
+}
+
+.os-slot {
+  min-height: 12rem;
+  border-radius: var(--os-radius);
+  background: var(--os-glass-solid);
+  background: var(--os-glass);
+  backdrop-filter: blur(var(--os-blur));
+  -webkit-backdrop-filter: blur(var(--os-blur));
+  border: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow);
+}
+
+.os-desktop {
+  border-radius: var(--os-radius);
+  min-height: 16rem;
+  background: var(--os-glass-solid);
+  background: var(--os-glass);
+  backdrop-filter: blur(var(--os-blur));
+  -webkit-backdrop-filter: blur(var(--os-blur));
+  border: 1px solid var(--os-line);
+  display: grid;
+  place-items: center;
+}
+
+.os-root[data-layout="desktop"] .os-desktop {
+  grid-column: 2;
+}
+
+.os-root[data-layout="desktop"] .os-slot[data-slot="a"] {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.os-root[data-layout="desktop"] .os-slot[data-slot="b"] {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.os-empty {
+  color: var(--os-muted);
+  letter-spacing: 0.04em;
+}
+
+.os-signin {
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.os-signin-card {
+  width: min(26rem, 100%);
+  padding: 2rem;
+  border-radius: var(--os-radius);
+  background: var(--os-glass-solid);
+  background: var(--os-glass);
+  backdrop-filter: blur(var(--os-blur));
+  -webkit-backdrop-filter: blur(var(--os-blur));
+  border: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow);
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+
+.os-signin-card h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.03em;
+}
+
+.os-signin-card p {
+  margin: 0;
+  color: var(--os-muted);
+}
+
+.os-primary {
+  background: var(--os-accent);
+  color: #fff;
+}

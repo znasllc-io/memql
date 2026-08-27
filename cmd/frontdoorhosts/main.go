@@ -11,9 +11,10 @@
 //	identity    identity.<d>
 //	mcp         mcp.<d>
 //	sites       portal.<d> (the platform's own site, site #1)
+//	sites       os.<d>     (the OS shell, memql#4705)
 //	sites       *.<d> + the apex
 //
-// It emits ~440 lines of Ingress + Certificate from those six names, which is
+// It emits Ingress + Certificate from those seven names, which is
 // what earns generation for a listed target: hand-maintaining that is the same
 // shape of mistake cmd/frontdoorpaths exists to stop, one level up. There, a
 // path with no rule does not 404 -- it hands HTTP/1.1 to an h2c backend and

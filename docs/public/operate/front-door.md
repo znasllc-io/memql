@@ -1,5 +1,5 @@
 ---
-title: The cluster front door — six host rules
+title: The cluster front door — seven host rules
 audience: public
 status: stable
 area: operate
@@ -7,7 +7,7 @@ sinceVersion: 0.18.0
 owner: znas
 ---
 
-# The cluster front door — six host rules
+# The cluster front door — seven host rules
 
 A MemQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
 traefik locally, nginx in the cloud — terminating TLS and routing by hostname.
@@ -15,10 +15,10 @@ Port 80 exists only to redirect. One certificate covers the whole door locally;
 in the cloud it is two, split by which ACME challenge can issue each half
 ([below](#the-wildcard-has-a-certificate-now-and-it-is-a-second-one)).
 
-Behind that door are **six host rules**, committed to `deploy/k8s`, plus a
+Behind that door are **seven host rules**, committed to `deploy/k8s`, plus a
 **separate media plane** that does not and cannot go through it.
 
-Six is the number, and it stays six no matter how many customers,
+Seven is the number, and it stays seven no matter how many customers,
 applications or websites the cluster serves. That property is what this page is
 about.
 
@@ -33,7 +33,7 @@ Related: [environment-parity.md](environment-parity.md) ·
 
 ---
 
-## The six hosts
+## The seven hosts
 
 | Host | Backend | Protocol | Certificate (cloud) |
 |---|---|---|---|
@@ -41,6 +41,7 @@ Related: [environment-parity.md](environment-parity.md) ·
 | `identity.<domain>` | `svc/identity:8085` | https | `memql-front-door-tls` |
 | `mcp.<domain>` | `svc/mcp:8090` | http | `memql-front-door-tls` |
 | `portal.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
+| `os.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
 | `*.<domain>` | `svc/edge:8085` | http | `memql-wildcard-tls` — see below |
 | `<domain>` (apex) | `svc/edge:8085` | http | `memql-front-door-tls` (and named by the wildcard's too) |
 
@@ -73,9 +74,9 @@ reaches Key Vault — and one `Certificate` for `*.<domain>` **plus the apex**.
 | | `memql-front-door-tls` | `memql-wildcard-tls` |
 |---|---|---|
 | Issuer | `letsencrypt-prod` (HTTP-01) | `letsencrypt-dns01` (DNS-01, Azure DNS) |
-| Names | `api.`, `identity.`, `mcp.`, `portal.`, the apex | `*.<domain>`, the apex |
+| Names | `api.`, `identity.`, `mcp.`, `portal.`, `os.`, the apex | `*.<domain>`, the apex |
 | Declared in | `front-door.generated.yaml` (generated) | `dns01-wildcard-tls.yaml` (hand-authored) |
-| Terminates | every role host, the portal, the apex | the `*.<domain>` rule on `edge-front-door` |
+| Terminates | every role host, the portal, the OS, the apex | the `*.<domain>` rule on `edge-front-door` |
 
 **Why the apex is on both.** `*.<domain>` matches exactly one label and the
 apex has none, so a sites-plane certificate without it could not serve the main
@@ -116,11 +117,11 @@ rule serves.
 gone, the server-block reason is not. ingress-nginx builds a
 certificate-bearing server block per **rule** host, never per `tls` host, so an
 exact rule is what makes `portal.<domain>` outrank `*.<domain>` and get its own
-certificate rather than the wildcard's. The portal is also the one site the
-platform ships itself: its name exists before any operator creates a row, so
-the generator can write its rule and SAN, and the engine seeds its
+certificate rather than the wildcard's. The portal and the OS are the two sites the
+platform ships itself: their names exist before any operator creates a row, so
+the generator can write each rule and SAN, and the engine seeds each
 `v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
-(`frontdoor.PortalHost`).
+(`frontdoor.PortalHost`, `frontdoor.OsHost`).
 
 > **WARNING: the wildcard certificate is a cloud thing with install-time
 > prerequisites.** It needs an Azure DNS zone for `<domain>`, a managed identity
@@ -163,7 +164,7 @@ which resolves the request `Host` header against a `v1:platform:site` row and
 serves that site's bundle. The apex is not a special case: for a customer's own
 cluster the bare domain **is** their main website, so it is a site row like
 every other one. The portal is site #1 and takes the same path; its own rule
-exists for the certificate's sake ([above](#the-six-hosts)), not because the
+exists for the certificate's sake ([above](#the-seven-hosts)), not because the
 edge treats it differently.
 
 > **INFO: the edge route and the edge backend both ship as of memql#3714.**
@@ -203,8 +204,8 @@ nothing more about sites than the rule that routes them.
 ### Exact-versus-wildcard precedence is declared, not inherited
 
 `*.<domain>` also matches `api.<domain>`, `identity.<domain>`, `mcp.<domain>`
-and `portal.<domain>`. So whether the named hosts keep their own backends is
-not a detail — it is a **load-bearing assumption of the six-host design**, and
+and `portal.<domain>`, `os.<domain>`. So whether the named hosts keep their own backends is
+not a detail — it is a **load-bearing assumption of the seven-host design**, and
 it is worth knowing the state of it. (For the portal the question is moot —
 its rule and the wildcard reach the same Service — which is exactly why it is
 not in the precedence probe's host set.)
@@ -323,7 +324,7 @@ generators that answer different questions and stay separable.
 
 **The HOSTS** — `cmd/frontdoorhosts` writes `front-door.generated.yaml` into
 each instance overlay (`deploy/k8s/overlays/cloud` and `overlays/cloud-entry`)
-whole: the six Ingress rules and the cert-manager `Certificate` with its
+whole: the seven Ingress rules and the cert-manager `Certificate` with its
 exact-host SANs. Its whole input is the closed role set, the portal and the
 domain, and it emits ~440 lines from those — which is what earns generation for
 a listed target.
@@ -415,7 +416,7 @@ health JSON, `/portal/` returns the portal's `index.html`.
 See [inbound-delivery.md](inbound-delivery.md) and
 [campaign-sending.md](campaign-sending.md) for the two exceptions themselves.
 
-## Why the count is six, and must not grow
+## Why the count is seven, and must not grow
 
 Because **a site is data, not infrastructure.**
 
@@ -427,7 +428,7 @@ not a routing rule and not an overlay patch.
 
 The `*.<domain>` rule is what makes that possible: one wildcard rule routes
 every present and future site name to the one node that knows how to look them
-up — every name, that is, that the five exact hosts have not claimed, which is
+up — every name, that is, that the six exact hosts have not claimed, which is
 an assumption about rule ranking rather than a given
 ([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)).
 
@@ -444,7 +445,7 @@ apex, a second domain — is not under the wildcard and stays cluster-owner-only
 and hand-certified, one object pair each. And the wildcard covers exactly one
 label, so `shop.<domain>` is certified and `shop.eu.<domain>` is not. The
 portal is the one site whose rule and SAN the generator writes, because it is
-the one site whose name is known before any row exists.
+the two sites whose names are known before any row exists.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
@@ -453,10 +454,10 @@ a chat message is.
 
 Two consequences worth stating plainly:
 
-- **Adding a seventh host rule — a fourth ROLE — is a design change, not a
+- **Adding an eighth host rule — a fourth ROLE — is a design change, not a
   configuration change.** If a proposal needs one, the thing being added is
-  probably a site. `TestRenderedHostsAreExactlyTheProduct` fails on a seventh
-  host rule that is not one of the six and is not the media plane.
+  probably a site. `TestRenderedHostsAreExactlyTheProduct` fails on an eighth
+  host rule that is not one of the seven and is not the media plane.
 - **A wildcard DNS record is not a wildcard hosts file.** In the cloud
   `*.<domain>` resolves at the DNS layer and nothing local is involved. On a
   developer machine there is no wildcard in `/etc/hosts`, so each name has to
@@ -465,7 +466,7 @@ Two consequences worth stating plainly:
 
 ## The media plane is separate, permanently
 
-Voice is not one of the six hosts and never will be. **WebRTC media is UDP and
+Voice is not one of the seven hosts and never will be. **WebRTC media is UDP and
 cannot traverse an HTTP front door.**
 
 | Target | Media plane |
@@ -473,7 +474,7 @@ cannot traverse an HTTP front door.**
 | Cloud | `livekit.<domain>` for signaling, plus a LoadBalancer carrying UDP 7882 and TCP 7881 for media |
 | Local | LiveKit Cloud (the local overlay deletes the self-hosted livekit workloads) |
 
-So the honest statement of the topology is **six HTTP host rules plus a
+So the honest statement of the topology is **seven HTTP host rules plus a
 separate media plane** — said here rather than left for someone to discover
 while wondering which Ingress rule is missing. See
 [livekit-provision.md](livekit-provision.md) and
@@ -500,7 +501,7 @@ implementation of each interchangeable part is in play.
 > `kubectl -n memql get certificate memql-wildcard-tls` before believing a site
 > is served over TLS in the cloud.
 
-Fixed everywhere: **the six host rules, the paths behind them, and the dial
+Fixed everywhere: **the seven host rules, the paths behind them, and the dial
 path a client uses** (`https://api.<domain>`, TLS at the proxy, gRPC to the
 bff). The domain itself is a value too — one `MEMQL_DOMAIN`, from which every
 domain-shaped setting is derived at boot — so no file under `deploy/` names a
@@ -519,7 +520,7 @@ certificate naming a host the site row does not carry — which fails as
 What differs between the cloud and local is which of the interchangeable parts
 above is in play — plus that the local overlay's front door is hand-authored
 while the cloud one is generated, which is a source question rather than a shape
-one: the same six rules either way, gated against the same derivation.
+one: the same seven rules either way, gated against the same derivation.
 
 The standard those rows answer to, and the reason the divergences are confined
 to annotations and secret sources, is

@@ -78,6 +78,10 @@ func DomainDerivations(domain string) map[string]string {
 	// makes for the site row and cmd/frontdoorhosts makes for the portal's
 	// Ingress rule and certificate SAN (memql#4224).
 	portal := "https://" + frontdoor.PortalHost(d)
+	// The OS shell is the second named platform site (memql#4705). Same
+	// OAuth client as the portal -- extra redirect, extra CORS origin.
+	// Missing the CORS origin is a silent sign-in death (memql#3315).
+	osOrigin := "https://" + frontdoor.OsHost(d)
 
 	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
 	// redirect), so it carries no domain and is spelled out unchanged. Note
@@ -105,15 +109,15 @@ func DomainDerivations(domain string) map[string]string {
 	clients := fmt.Sprintf(
 		`[{"clientId":"app","redirectURIs":["%s/auth/callback"]},`+
 			`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},`+
-			`{"clientId":"portal","redirectURIs":["%s/auth/callback"]}]`,
-		app, portal)
+			`{"clientId":"portal","redirectURIs":["%s/auth/callback","%s/auth/callback"]}]`,
+		app, portal, osOrigin)
 
 	return map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 identity,
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api" + suffix + ":443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + portal,
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + portal + "," + osOrigin,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
 		// The MCP protocol head's own front-door host (memql#3704) -- advertised
 		// in OAuth discovery metadata and the 401 WWW-Authenticate hint

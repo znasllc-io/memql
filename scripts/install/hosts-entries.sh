@@ -19,6 +19,7 @@
 #   127.0.0.1 identity.memql.localhost
 #   127.0.0.1 mcp.memql.localhost
 #   127.0.0.1 portal.memql.localhost
+#   127.0.0.1 os.memql.localhost
 #   127.0.0.1 memql.localhost
 #   # END memql
 #
@@ -74,7 +75,7 @@ cap_init "install.hostsEntries" "Add or remove the MemQL front-door hostnames in
 cap_spec_param_required "action"     "add | remove (required)"
 cap_spec_param "hosts-file" "hosts file to edit (default: /etc/hosts)"
 cap_spec_param "hostnames"  "comma/space separated hostnames (default: the MemQL front door)"
-cap_spec_param "domain"     "front-door apex; derives api.<d>, identity.<d>, mcp.<d>, portal.<d>, <d> (mutually exclusive with --hostnames)"
+cap_spec_param "domain"     "front-door apex; derives api.<d>, identity.<d>, mcp.<d>, portal.<d>, os.<d>, <d> (mutually exclusive with --hostnames)"
 cap_spec_param "ip"         "address the hostnames resolve to (default: 127.0.0.1)"
 cap_spec_param "confirm"    "exact phrase: 'add-memql-hosts' or 'remove-memql-hosts'"
 
@@ -82,7 +83,7 @@ readonly DEFAULT_HOSTS_FILE="/etc/hosts"
 # The local front door. Keep in step with deploy/k8s/overlays/local, whose
 # Ingresses carry the same apex as their committed default (memql#3593).
 readonly DEFAULT_DOMAIN="memql.localhost"
-readonly DEFAULT_HOSTNAMES="api.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN},mcp.${DEFAULT_DOMAIN},portal.${DEFAULT_DOMAIN},${DEFAULT_DOMAIN}"
+readonly DEFAULT_HOSTNAMES="api.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN},mcp.${DEFAULT_DOMAIN},portal.${DEFAULT_DOMAIN},os.${DEFAULT_DOMAIN},${DEFAULT_DOMAIN}"
 readonly DEFAULT_IP="127.0.0.1"
 
 readonly BLOCK_BEGIN="# BEGIN memql"
@@ -419,7 +420,7 @@ function offer_terminal_handoff() {
 # added later need their own entry, which the site-hosting runbook covers.
 function hostnames_for_domain() {
     local apex="$1"
-    printf 'api.%s,identity.%s,mcp.%s,portal.%s,%s' "$apex" "$apex" "$apex" "$apex" "$apex"
+    printf 'api.%s,identity.%s,mcp.%s,portal.%s,os.%s,%s' "$apex" "$apex" "$apex" "$apex" "$apex" "$apex"
 }
 
 # probe_hostnames -- decides whether the block is needed. Sets _PROBE_VERDICT to

@@ -53,6 +53,7 @@ func manifest(overlay, domain, pathBlock string) string {
 	b.WriteString(identityIngress(domain))
 	b.WriteString(mcpIngress(domain))
 	b.WriteString(portalIngress(domain))
+	b.WriteString(osIngress(domain))
 	b.WriteString(edgeIngress(domain))
 	return b.String()
 }
@@ -300,6 +301,36 @@ func portalIngress(domain string) string {
 		"kind: Ingress\n" +
 		"metadata:\n" +
 		"  name: portal-front-door\n" +
+		"  namespace: memql\n" +
+		"spec:\n" +
+		"  ingressClassName: " + ingressClass + "\n" +
+		tlsBlock(host) +
+		"  rules:\n" +
+		"    - host: " + host + "\n" +
+		"      http:\n" +
+		"        paths:\n" +
+		pathRule("/", "edge", 8085)
+}
+
+// osIngress is the OS shell's own exact-host rule (memql#4705).
+func osIngress(domain string) string {
+	host := frontdoor.OsHost(domain)
+
+	return "---\n" +
+		"# The OS shell -- the second named platform site, with an exact rule of its own (memql#4705).\n" +
+		"#\n" +
+		"# Same TLS reason as the portal (memql#4224): ingress-nginx creates a certificate-bearing\n" +
+		"# server block per RULE host. On the wildcard alone, os.<domain> is answered by the\n" +
+		"# wildcard's server block and the controller's self-signed default. An exact rule gives\n" +
+		"# the OS a server block the HTTP-01 certificate verifies for.\n" +
+		"#\n" +
+		"# The engine seeds that row's hostname from MEMQL_DOMAIN through frontdoor.OsHost, so\n" +
+		"# the certificate cannot name a host the row does not carry. Same Service and port as\n" +
+		"# the edge Ingress below.\n" +
+		"apiVersion: networking.k8s.io/v1\n" +
+		"kind: Ingress\n" +
+		"metadata:\n" +
+		"  name: os-front-door\n" +
 		"  namespace: memql\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +

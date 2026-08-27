@@ -16,7 +16,7 @@ door -- what a build has to emit, how to publish and roll one back, and
 where the real limits are.
 
 Read [front-door.md](front-door.md) first if you have not -- it covers the
-six host rules and the `*.<domain>` / apex routing every hosted site rides
+seven host rules and the `*.<domain>` / apex routing every hosted site rides
 on. This page does not restate it.
 
 Related: [The cluster front door](front-door.md) ·

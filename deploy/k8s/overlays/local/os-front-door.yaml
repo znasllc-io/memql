@@ -1,0 +1,42 @@
+# The OS shell's own exact-host rule (memql#4705) -- the second named platform
+# site, served by the same edge Service the wildcard in edge-front-door.yaml
+# points at.
+#
+# WHY A RULE OF ITS OWN WHEN THE WILDCARD ALREADY MATCHES IT. Same TLS reason
+# as portal-front-door.yaml (memql#4224): in the cloud the front-door
+# certificate names EXACT hosts and no wildcard. ingress-nginx builds a
+# certificate-bearing server block per Ingress RULE host, so with only the
+# wildcard rule os.<domain> is answered by the wildcard's server block and
+# its certificate is the controller's self-signed default.
+#
+# Locally the mkcert pair IS a wildcard, so this rule changes nothing a
+# browser can see here. It exists because the local cluster is the cloud's
+# parity topology: the front door has the same host rules everywhere, and
+# ../render_frontdoor_test.go computes that set from component/frontdoor.
+#
+# NO router.priority HERE, DELIBERATELY (memql#3810). Precedence over the
+# wildcard is declared ON THE WILDCARD.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: os-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["os.memql.localhost"]
+      secretName: memql-front-door-tls
+  rules:
+    - host: os.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085

@@ -94,8 +94,8 @@ func TestPortalHostIsASiteHost(t *testing.T) {
 // set plus the platform's own site, and never grows with customer sites.
 func TestHostsIsTheWholeSet(t *testing.T) {
 	hosts := Hosts(domain)
-	if len(hosts) != 6 {
-		t.Errorf("Hosts returns %d rules, want 6 (three roles, the portal, the sites wildcard, the apex)", len(hosts))
+	if len(hosts) != 7 {
+		t.Errorf("Hosts returns %d rules, want 7 (three roles, the portal, the OS shell, the sites wildcard, the apex)", len(hosts))
 	}
 
 	seen := map[string]bool{}
@@ -124,7 +124,7 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 		t.Errorf("Hosts carries %d wildcard rules, want exactly 1 (the sites rule)", wildcards)
 	}
 
-	// The three rules that reach the edge: the portal (exact), every other
+	// The four rules that reach the edge: the portal (exact), the OS shell (exact), every other
 	// site (the wildcard), and the apex.
 	var sites []string
 	for _, h := range hosts {
@@ -132,7 +132,7 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 			sites = append(sites, h.Name)
 		}
 	}
-	if want := strings.Join([]string{PortalHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
+	if want := strings.Join([]string{PortalHost(domain), OsHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
 		t.Errorf("sites rules are %v, want [%s]", sites, want)
 	}
 }
@@ -153,6 +153,7 @@ func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 		RoleHost(RoleIdentity, domain),
 		RoleHost(RoleMCP, domain),
 		PortalHost(domain),
+		OsHost(domain),
 		Apex(domain),
 	}
 	if strings.Join(sans, ",") != strings.Join(want, ",") {
@@ -208,6 +209,9 @@ func TestCoveredByIsExactOnly(t *testing.T) {
 	if !coveredBy(PortalHost(domain), sans) {
 		t.Errorf("the portal host is not covered by the requested SANs %v", sans)
 	}
+	if !coveredBy(OsHost(domain), sans) {
+		t.Errorf("the OS host is not covered by the requested SANs %v", sans)
+	}
 }
 
 // coveredBy applies the ONE-LABEL wildcard rule rather than a substring match,
@@ -252,5 +256,27 @@ func TestTheSuffixHelperAgreesWithTheHostBuilders(t *testing.T) {
 	}
 	if got, want := "portal"+DomainDerivationSuffix(domain), PortalHost(domain); got != want {
 		t.Errorf("DomainDerivationSuffix composes %q, PortalHost gives %q", got, want)
+	}
+	if got, want := "os"+DomainDerivationSuffix(domain), OsHost(domain); got != want {
+		t.Errorf("DomainDerivationSuffix composes %q, OsHost gives %q", got, want)
+	}
+}
+
+// TestOsHostIsASiteHost pins the ONE derivation of the OS hostname (memql#4705).
+// The engine seeds the OS site row from MEMQL_DOMAIN, envregistry derives the
+// extra portal-client redirect URI and CORS origin, and cmd/frontdoorhosts
+// writes the OS Ingress rule and certificate SAN. All three call OsHost.
+func TestOsHostIsASiteHost(t *testing.T) {
+	if got, want := OsHost(domain), "os.example.test"; got != want {
+		t.Errorf("OsHost = %q, want %q", got, want)
+	}
+	if got, want := OsHost(domain), SiteHost(OsSite, domain); got != want {
+		t.Errorf("OsHost = %q but SiteHost(OsSite) = %q; the OS is a named platform site and must be composed like any site", got, want)
+	}
+	if got, want := OsHost(domain), OsSite+DomainDerivationSuffix(domain); got != want {
+		t.Errorf("OsHost = %q but the suffix composition gives %q", got, want)
+	}
+	if OsHost(domain) == PortalHost(domain) {
+		t.Error("OsHost and PortalHost must be distinct hosts")
 	}
 }

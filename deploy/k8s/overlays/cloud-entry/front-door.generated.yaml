@@ -10,6 +10,7 @@
 #   identity     identity.memql.localhost
 #   mcp          mcp.memql.localhost
 #   sites        portal.memql.localhost
+#   sites        os.memql.localhost
 #   sites        *.memql.localhost
 #   sites        memql.localhost
 #
@@ -79,6 +80,7 @@ spec:
     - "identity.memql.localhost"
     - "mcp.memql.localhost"
     - "portal.memql.localhost"
+    - "os.memql.localhost"
     - "memql.localhost"
 ---
 # The API edge's HTTP half.
@@ -399,6 +401,39 @@ spec:
       secretName: memql-front-door-tls
   rules:
     - host: portal.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
+---
+# The OS shell -- the second named platform site, with an exact rule of its own (memql#4705).
+#
+# Same TLS reason as the portal (memql#4224): ingress-nginx creates a certificate-bearing
+# server block per RULE host. On the wildcard alone, os.<domain> is answered by the
+# wildcard's server block and the controller's self-signed default. An exact rule gives
+# the OS a server block the HTTP-01 certificate verifies for.
+#
+# The engine seeds that row's hostname from MEMQL_DOMAIN through frontdoor.OsHost, so
+# the certificate cannot name a host the row does not carry. Same Service and port as
+# the edge Ingress below.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: os-front-door
+  namespace: memql
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "os.memql.localhost"
+      secretName: memql-front-door-tls
+  rules:
+    - host: os.memql.localhost
       http:
         paths:
           - path: /

@@ -71,6 +71,7 @@ resources:
   - api-front-door.yaml
   - mcp-front-door.yaml
   - portal-front-door.yaml
+  - os-front-door.yaml
   - edge-front-door.yaml
   - ../../base
   # Local-only infrastructure (absent in base and the cloud overlay)

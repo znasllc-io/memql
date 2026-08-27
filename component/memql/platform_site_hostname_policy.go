@@ -103,7 +103,7 @@ const defaultSiteDomain = "memql.localhost"
 // door does not already name.
 //
 // The front door's own labels come from frontdoor.Roles() and
-// frontdoor.PortalSite rather than being re-listed here, so a new role reserves
+// frontdoor.PortalSite / frontdoor.OsSite rather than being re-listed here, so a new role reserves
 // its label automatically -- the failure mode of a second copy is that adding a
 // role silently opens its hostname to the first user who asks for it.
 //
@@ -116,11 +116,12 @@ var squatReservedSiteLabels = []string{"www", "admin", "mail"}
 // reservedSiteLabels is the closed set of labels a user may not claim, keyed
 // lowercase.
 func reservedSiteLabels() map[string]bool {
-	out := make(map[string]bool, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
+	out := make(map[string]bool, len(frontdoor.Roles())+2+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out[string(r)] = true
 	}
 	out[frontdoor.PortalSite] = true
+	out[frontdoor.OsSite] = true
 	for _, l := range squatReservedSiteLabels {
 		out[l] = true
 	}
@@ -211,11 +212,12 @@ func validateUserSiteHostname(hostname, domain string) error {
 // then the portal, then the squat list) so the message does not shuffle between
 // runs of a map iteration.
 func sortedReservedSiteLabels() []string {
-	out := make([]string, 0, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
+	out := make([]string, 0, len(frontdoor.Roles())+2+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out = append(out, string(r))
 	}
 	out = append(out, frontdoor.PortalSite)
+	out = append(out, frontdoor.OsSite)
 	out = append(out, squatReservedSiteLabels...)
 	return out
 }

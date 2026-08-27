@@ -21,8 +21,7 @@ alongside the engine?" has to have an answer, and the answer is better as a
 **worked example** than as prose: one real inhabitant, wired end to end, that
 the `memql-project` template copies.
 
-The engine repo carries exactly one — [`portal/`](portal), the platform's own
-graphical operations console. Everything a downstream client needs is visible
+The engine repo carries two platform surfaces — [`portal/`](portal), the operations console, and [`os/`](os), the named OS shell. Everything a downstream client needs is visible
 in what the portal does:
 
 - **Its own npm package**, not a workspace member. `clients/portal/package.json`

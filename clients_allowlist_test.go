@@ -10,7 +10,7 @@ import (
 // allowedClients is the closed set of directories permitted under `clients/`,
 // each paired with why it is a PLATFORM surface rather than a product.
 //
-// One entry today, and that is the point: the list is meant to be short and
+// Two entries today (portal + os), and that is the point: the list is meant to be short and
 // arguing to extend it is meant to be the moment someone re-reads the boundary
 // below. Adding a row is a deliberate, reviewable act; landing a directory is
 // otherwise the convenient path.
@@ -21,6 +21,7 @@ import (
 // exists to avoid.
 var allowedClients = map[string]string{
 	"portal": "the platform's own graphical operations console; served by component/edge as site #1, the same as any customer site (memql#3711)",
+	"os":     "the platform's OS shell; a second named front-door site (memql#4705), still kind spa, served by component/edge like the portal",
 }
 
 // TestClientsDirectoryIsAllowlisted is the structural half of engine product

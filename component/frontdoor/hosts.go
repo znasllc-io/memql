@@ -51,11 +51,11 @@
 // (memql#4347), which is why the render gate reads the SOLVER rather than
 // this list. Without such an issuer the wildcard rule still has nothing
 // behind it and every other site needs its own Certificate
-// (docs/public/operate/site-hosting.md). The portal is the one site the
-// platform ships itself, which is why it is the one site this package can
+// (docs/public/operate/site-hosting.md). The portal and the OS shell are the two sites the
+// platform ships itself, which is why they are the sites this package can
 // name in advance. A server block under ingress-nginx is
-// created per Ingress RULE host, never per tls host, so naming the portal in
-// tls.hosts is not enough: it carries its own exact rule, pointing at the same
+// created per Ingress RULE host, never per tls host, so naming the portal or the OS in
+// tls.hosts is not enough: each carries its own exact rule, pointing at the same
 // edge Service the wildcard does.
 package frontdoor
 
@@ -109,6 +109,20 @@ const PortalSite = "portal"
 // carry.
 func PortalHost(domain string) string { return SiteHost(PortalSite, domain) }
 
+// OsSite is the name of the second site the platform ships itself: the MemQL
+// OS shell (memql#4705). Same exception the portal already has -- a closed,
+// known-in-advance platform host, not a customer site on the wildcard.
+const OsSite = "os"
+
+// OsHost is the host the OS shell is served at: `os.<domain>`.
+//
+// Like the portal it is a site to the edge and a named front-door host to this
+// package: exact Ingress rule, exact Certificate SAN, HTTP-01. Putting it on
+// `*.<domain>` would send Safari through edge site-hosting with no HTTP-01 SAN
+// (memql#4224). Every consumer composes the hostname here: the SeedMaterializer,
+// envregistry (OAuth redirect + CORS origin) and cmd/frontdoorhosts.
+func OsHost(domain string) string { return SiteHost(OsSite, domain) }
+
 // SitesWildcard is the one Ingress rule that routes every present and future
 // site to the edge node.
 //
@@ -124,13 +138,13 @@ func Apex(domain string) string { return domain }
 
 // Host is one generated front-door rule.
 type Host struct {
-	// Role is the role that owns it, or "sites" for the three rules that reach
-	// the edge: the portal, the wildcard and the apex.
+	// Role is the role that owns it, or "sites" for the rules that reach
+	// the edge: the portal, the OS shell, the wildcard and the apex.
 	Role string
 	// Name is the hostname itself.
 	Name string
 	// Sites is true for the rules that reach the edge node rather than a named
-	// service: the portal, the wildcard and the apex.
+	// service: the portal, the OS shell, the wildcard and the apex.
 	Sites bool
 	// Wildcard is true for the one rule whose host is `*.<domain>`. It is the
 	// only rule this package requests no certificate SAN for (memql#4224) --
@@ -143,14 +157,15 @@ type Host struct {
 const SitesRole = "sites"
 
 // Hosts is the whole front-door host set, in the order the generated manifests
-// emit them: the roles, then the portal, then the sites wildcard, then the
+// emit them: the roles, then the portal, then the OS shell, then the sites wildcard, then the
 // apex.
 func Hosts(domain string) []Host {
-	out := make([]Host, 0, len(Roles())+3)
+	out := make([]Host, 0, len(Roles())+4)
 	for _, r := range Roles() {
 		out = append(out, Host{Role: string(r), Name: RoleHost(r, domain)})
 	}
 	out = append(out, Host{Role: SitesRole, Name: PortalHost(domain), Sites: true})
+	out = append(out, Host{Role: SitesRole, Name: OsHost(domain), Sites: true})
 	out = append(out, Host{Role: SitesRole, Name: SitesWildcard(domain), Sites: true, Wildcard: true})
 	out = append(out, Host{Role: SitesRole, Name: Apex(domain), Sites: true})
 	return out
