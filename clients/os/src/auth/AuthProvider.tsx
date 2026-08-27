@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const verifier = await generateCodeVerifier();
     const challenge = await challengeFor(verifier);
     const state = generateState();
-    rememberPending(verifier, state);
+    if (!rememberPending(verifier, state)) return;
     window.location.assign(
       authorizeUrl(config, {
         redirectUri: redirectUriFor(window.location.origin),
