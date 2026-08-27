@@ -5,10 +5,13 @@ import { DEFAULT_FIELD, dotAt, generateField, type Field } from "./field";
 // The wallpaper canvas. Reads its colors from the theme tokens at paint
 // time (so a theme pack restyles it with zero code), stills itself under
 // prefers-reduced-motion, and pauses entirely while the tab is hidden.
-// Deliberately throttled: the drift is glacial, ~10 frames per second is
-// already more temporal resolution than the motion has.
+// Deliberately throttled HARD: every repaint dirties the frame beneath the
+// glass chrome, and each dirty frame re-runs the backdrop blur for every
+// window above it, so the repaint interval is a direct multiplier on GPU
+// churn whenever windows are open. The drift is 0.05 rad/s -- one frame
+// per second is already more temporal resolution than the motion has.
 
-const FRAME_MS = 100;
+const FRAME_MS = 1000;
 
 function fieldColors(el: HTMLElement): { dot: string; link: string } {
   const styles = getComputedStyle(el);

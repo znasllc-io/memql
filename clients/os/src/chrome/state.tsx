@@ -113,11 +113,16 @@ export function useOs(): OsContextValue {
   return value;
 }
 
-/** Grid size from the viewport (cell tokens are 96x104; keep headroom). */
+/**
+ * Grid size from the viewport (cell tokens are 96x104). The surface pads
+ * 20px on each side and the dock reserves the bottom -- both come OUT of
+ * the cell budget, or the last column paints past the viewport edge and
+ * bleeds onto the neighboring desk plate.
+ */
 export function gridForViewport(width: number, height: number): GridSize {
   return {
-    cols: Math.max(3, Math.floor(width / 96)),
-    rows: Math.max(2, Math.floor((height - 160) / 104)),
+    cols: Math.max(3, Math.floor((width - 40) / 96)),
+    rows: Math.max(2, Math.floor((height - 200) / 104)),
   };
 }
 

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { closestCenter, DndContext, type DragEndEvent } from "@dnd-kit/core";
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { LayoutGrid, Sparkles } from "lucide-react";
 
@@ -163,6 +170,9 @@ export function Dock({
   const { openAsk } = useAsk();
   const connection = useConnectionStatus();
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
+  // Without an activation distance, a sortable pin treats pointerdown as a
+  // drag start and swallows the CLICK -- a pinned app that cannot launch.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const runningIds = Object.values(state.shell.windows).map((w) => w.appId);
   const visible = dockOrder(state.dock, runningIds).filter((id) => canOpen(registry, actorRole, id));
@@ -201,7 +211,7 @@ export function Dock({
         <LayoutGrid size={20} aria-hidden />
       </button>
       <div className="os-dock-strip" role="toolbar" aria-label="Apps">
-        <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext
             items={pinnedVisible.map((id) => `pin:${id}`)}
             strategy={horizontalListSortingStrategy}
