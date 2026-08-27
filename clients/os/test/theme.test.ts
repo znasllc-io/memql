@@ -10,6 +10,24 @@ const tokens = readFileSync(
   "utf8",
 );
 
+const TOKEN_PACK = [
+  "--os-font",
+  "--os-font-mono",
+  "--os-radius",
+  "--os-duration-fast",
+  "--os-duration-med",
+  "--os-ease",
+  "--os-blur",
+  "--os-ground",
+  "--os-ink",
+  "--os-muted",
+  "--os-accent",
+  "--os-glass",
+  "--os-glass-solid",
+  "--os-line",
+  "--os-shadow",
+];
+
 describe("theme", () => {
   beforeEach(() => {
     document.documentElement.removeAttribute("data-theme");
@@ -40,5 +58,12 @@ describe("theme", () => {
     expect(tokens).toMatch(/prefers-reduced-motion:\s*reduce/);
     expect(tokens).toMatch(/--os-duration-fast:\s*0ms/);
     expect(tokens).toMatch(/--os-duration-med:\s*0ms/);
+  });
+
+  it("hosts the same --os-* pack on each slot root", () => {
+    expect(tokens).toMatch(/\[data-os-slot\]/);
+    for (const name of TOKEN_PACK) {
+      expect(tokens).toContain(name);
+    }
   });
 });

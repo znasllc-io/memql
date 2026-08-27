@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { SignIn } from "../chrome/SignIn";
 import { Shell } from "../chrome/Shell";
+import { parseProfileAccess, type ProfileAccess } from "../modules/profile/access";
+import { fetchMyAccess } from "../modules/profile/myAccess";
 import { layoutFromWindow, type ChromeLayout } from "./layout";
 
 export function App() {
@@ -14,8 +16,9 @@ export function App() {
 }
 
 function OsBoot() {
-  const { status, signIn, signOut } = useAuth();
+  const { status, signIn, signOut, config } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
+  const [access, setAccess] = useState<ProfileAccess | null>(null);
 
   useEffect(() => {
     const update = () => setLayout(layoutFromWindow(window));
@@ -27,6 +30,22 @@ function OsBoot() {
     };
   }, []);
 
+  useEffect(() => {
+    if (status !== "signed-in") {
+      setAccess(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const facts = await fetchMyAccess(config);
+      if (cancelled) return;
+      setAccess(facts ? parseProfileAccess(facts) : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, config]);
+
   if (status === "loading") {
     return (
       <div className="os-boot" data-os-boot="loading">
@@ -37,5 +56,5 @@ function OsBoot() {
   if (status === "signed-out" || status === "unavailable") {
     return <SignIn status={status} onSignIn={signIn} />;
   }
-  return <Shell layout={layout} onSignOut={signOut} />;
+  return <Shell layout={layout} onSignOut={signOut} access={access} />;
 }

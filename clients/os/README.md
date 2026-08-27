@@ -1,8 +1,11 @@
 # `clients/os` — the MemQL OS shell
 
-The platform's second named front-door site (`os.<domain>`, memql#4705). An
-empty desktop and launcher chrome, served as an ordinary `kind: spa` hosted
-site by `component/edge`. Not a fork of the portal's pages or nav.
+The platform's second named front-door site (`os.<domain>`, memql#4705).
+Slots, research, Profile, and a coming-soon tile occupy the empty chrome
+(memql#4706). Not a fork of the portal's pages or nav.
 
-This PR lands the host, the seed, the OAuth redirect, and the empty chrome.
-Slot occupants, the Profile module, and the theme store are memql#4706.
+- Slots (`data-os-slot="a"|"b"`) mount one module React root each. Cap 2
+  on desktop/iPad. Phone has no slots.
+- Research is chrome (strip on desktop/iPad, sheet on phone). Not a module.
+- Profile is the one module. MyAccess data only. Sign out stays in chrome.
+- Coming-soon tile is visible on desktop/iPad and does not open a store.
