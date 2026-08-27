@@ -51,7 +51,7 @@ describe("the access facts surface in chrome", () => {
         onSignOut={vi.fn()}
         access={ACCESS}
         config={CONFIG}
-        ports={{ store: new LocalDesktopStore(memStorage()) }}
+        ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
@@ -72,7 +72,7 @@ describe("the access facts surface in chrome", () => {
         onSignOut={onSignOut}
         access={ACCESS}
         config={CONFIG}
-        ports={{ store: new LocalDesktopStore(memStorage()) }}
+        ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));

@@ -2,12 +2,12 @@
 // import site -- apps must not respell these. LiveList joins in the live
 // substrate task (PR B) and is exported from here the moment it exists.
 
-import type { ReactNode } from "react";
-
 import { deriveProvenance, type MachinePresence, type ProvenanceFacts, type ProvenanceTone } from "../items/provenance";
 import type { FileEntry } from "../system/desktop";
 import { roleAdmits, ROLE_LADDER, type ClusterRole, type RoleRequirement } from "../system/roles";
 
+export { Caption } from "./Caption";
+export { LiveList, type LiveListSource } from "../live/LiveList";
 export { deriveProvenance, roleAdmits, ROLE_LADDER };
 export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement };
 
@@ -45,9 +45,4 @@ export function FileProvenanceDot({
 }) {
   const facts = deriveProvenance(file, machine);
   return <ProvenanceDot tone={facts.tone} label={facts.origin || undefined} />;
-}
-
-/** Quiet caption row used across the OS for state lines and hints. */
-export function Caption({ children }: { children: ReactNode }) {
-  return <p className="os-caption">{children}</p>;
 }

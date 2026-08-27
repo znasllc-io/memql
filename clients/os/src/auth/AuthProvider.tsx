@@ -1,3 +1,4 @@
+import { anonymousSource, identitySource, type OsAuthSource } from "./source";
 import {
   createContext,
   useCallback,
@@ -23,6 +24,8 @@ export type AuthStatus = "loading" | "signed-out" | "signed-in" | "unavailable";
 export interface AuthContextValue {
   status: AuthStatus;
   config: OsRuntimeConfig;
+  /** The credential seam (spec D7): bearer/refresh, never the raw string. */
+  authSource: OsAuthSource;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -109,9 +112,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("signed-out");
   }, [config]);
 
+  const authSource = useMemo<OsAuthSource>(
+    () => (isRuntimeConfigReady(config) || !config.authEnabled ? identitySource(config) : anonymousSource),
+    [config],
+  );
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, config, signIn, signOut }),
-    [status, config, signIn, signOut],
+    () => ({ status, config, authSource, signIn, signOut }),
+    [status, config, authSource, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

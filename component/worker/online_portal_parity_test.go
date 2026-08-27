@@ -12,6 +12,12 @@ import (
 // the file a reader has to go and open.
 const portalOnlineRulePath = "../../clients/portal/src/fleet/online.ts"
 
+// osOnlineRulePath is the MemQL OS shell's copy (memql#4719): its Fleet
+// exemplar and its provenance dots decide `online` per row while rendering,
+// exactly like the Fleet page, so it restates the same literal and joins the
+// same gate. THREE implementations now, one number.
+const osOnlineRulePath = "../../clients/os/src/apps/fleet/online.ts"
+
 // portalOnlineWindowPattern matches the exported window constant and captures
 // its numeric literal. It accepts an optional `export`, `const`/`let`, and an
 // optional type annotation, because those are the parts of the declaration a
@@ -46,13 +52,21 @@ var portalOnlineWindowPattern = regexp.MustCompile(
 // moved, which is exactly when the two rules are most likely to have diverged.
 // The failure names the path so the fix is obvious in either direction.
 func TestFleetOnlineWindowMatchesPortal(t *testing.T) {
-	raw, err := os.ReadFile(portalOnlineRulePath)
+	for _, path := range []string{portalOnlineRulePath, osOnlineRulePath} {
+		assertOnlineWindowMatches(t, path)
+	}
+}
+
+func assertOnlineWindowMatches(t *testing.T, rulePath string) {
+	t.Helper()
+	raw, err := os.ReadFile(rulePath)
 	if err != nil {
-		t.Fatalf("the portal's half of the online rule is unreadable at %s: %v\n"+
-			"This gate is the only thing keeping component/worker.IsOnline and the Fleet page's\n"+
-			"copy in step. If the file moved, update portalOnlineRulePath; if it was deleted,\n"+
-			"the portal is deriving `online` some other way and that needs a decision, not a skip.",
-			portalOnlineRulePath, err)
+		t.Fatalf("a client's half of the online rule is unreadable at %s: %v\n"+
+			"This gate is the only thing keeping component/worker.IsOnline and the clients'\n"+
+			"copies in step. If the file moved, update the *OnlineRulePath const; if it was\n"+
+			"deleted, that client is deriving `online` some other way and that needs a\n"+
+			"decision, not a skip.",
+			rulePath, err)
 	}
 
 	m := portalOnlineWindowPattern.FindSubmatch(raw)
@@ -60,21 +74,21 @@ func TestFleetOnlineWindowMatchesPortal(t *testing.T) {
 		t.Fatalf("%s does not export an ONLINE_WINDOW_SECONDS numeric literal.\n"+
 			"It must, and as a literal rather than a computed expression: this gate compares the\n"+
 			"NUMBER, and a value assembled at runtime is one it cannot read.",
-			portalOnlineRulePath)
+			rulePath)
 	}
-	portalSeconds, err := strconv.Atoi(string(m[1]))
+	gotSeconds, err := strconv.Atoi(string(m[1]))
 	if err != nil {
-		t.Fatalf("ONLINE_WINDOW_SECONDS in %s is not an integer: %v", portalOnlineRulePath, err)
+		t.Fatalf("ONLINE_WINDOW_SECONDS in %s is not an integer: %v", rulePath, err)
 	}
 
 	wantSeconds := int(OnlineWindow.Seconds())
-	if portalSeconds != wantSeconds {
-		t.Fatalf("the online window disagrees across the two implementations:\n"+
+	if gotSeconds != wantSeconds {
+		t.Fatalf("the online window disagrees across the implementations:\n"+
 			"  component/worker.OnlineWindow = %v (%d seconds)\n"+
 			"  %s ONLINE_WINDOW_SECONDS      = %d seconds\n"+
 			"OnlineWindow is 2 x HeartbeatBatchInterval, so changing the heartbeat cadence moves\n"+
-			"it; the portal has to move with it or the page and the router will disagree about\n"+
-			"which machines are up.",
-			OnlineWindow, wantSeconds, portalOnlineRulePath, portalSeconds)
+			"it; every client copy has to move with it or a page and the router will disagree\n"+
+			"about which machines are up.",
+			OnlineWindow, wantSeconds, rulePath, gotSeconds)
 	}
 }

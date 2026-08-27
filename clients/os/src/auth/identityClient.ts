@@ -45,6 +45,33 @@ export async function probeSession(
   return { signedIn: response.ok };
 }
 
+/**
+ * Refresh the access token through the HttpOnly cookie (memql#4719). The
+ * credential rides the BODY and the cookie, never a query parameter. Null =
+ * no session (or no parsable token) -- the caller treats that as signed out.
+ * The identity service's field is `access_token` (OAuth shape).
+ */
+export async function refreshAccessToken(
+  config: OsRuntimeConfig,
+  fetchImpl: IdentityFetch = fetch,
+): Promise<string | null> {
+  const response = await fetchImpl(apiUrl(config, "/auth/refresh"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) return null;
+  try {
+    const payload = (await response.json()) as { access_token?: unknown };
+    return typeof payload.access_token === "string" && payload.access_token !== ""
+      ? payload.access_token
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function exchangeCode(
   config: OsRuntimeConfig,
   params: { code: string; codeVerifier: string; redirectUri: string },

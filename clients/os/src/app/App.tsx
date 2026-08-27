@@ -16,7 +16,7 @@ export function App() {
 }
 
 function OsBoot() {
-  const { status, signIn, signOut, config } = useAuth();
+  const { status, signIn, signOut, config, authSource } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
   const [access, setAccess] = useState<ProfileAccess | null>(null);
 
@@ -56,5 +56,5 @@ function OsBoot() {
   if (status === "signed-out" || status === "unavailable") {
     return <SignIn status={status} onSignIn={signIn} />;
   }
-  return <Shell layout={layout} onSignOut={signOut} access={access} config={config} />;
+  return <Shell layout={layout} onSignOut={signOut} access={access} config={config} authSource={authSource} />;
 }

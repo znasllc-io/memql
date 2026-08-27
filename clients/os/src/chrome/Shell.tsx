@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
 import { AskProvider } from "../ask/AskProvider";
 import { AskSheet } from "../ask/AskSheet";
-import { StubAskTransport, type AskTransport } from "../ask/askController";
+import { SdkAskTransport } from "../ask/sdkTransport";
+import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
+import type { OsAuthSource } from "../auth/source";
 import type { OsRuntimeConfig } from "../cluster/config";
-import { InMemoryUploadProvider, type UploadProvider } from "../items/upload";
+import { EdgeUploadProvider } from "../items/edgeUpload";
+import { type UploadProvider } from "../items/upload";
+import { MachinesProvider } from "../live/machines";
+import { OsConnectionProvider, useOsConnection } from "../live/connection";
 import type { ProfileAccess } from "../modules/profile/access";
 import type { PlacementTokens } from "../system/placement";
 import type { DesktopStore } from "../system/store";
@@ -25,6 +30,8 @@ export interface ShellPorts {
   askTransport?: AskTransport;
   uploads?: UploadProvider;
   store?: DesktopStore;
+  /** Tests: skip dialing the cluster entirely. */
+  disableConnection?: boolean;
 }
 
 export function Shell({
@@ -32,17 +39,22 @@ export function Shell({
   onSignOut,
   access = null,
   config,
+  authSource,
   ports = {},
 }: {
   layout: ChromeLayout;
   onSignOut: () => void;
   access?: ProfileAccess | null;
   config: OsRuntimeConfig;
+  /** The credential seam; absent = dial and fetch with nothing. */
+  authSource?: OsAuthSource;
   ports?: ShellPorts;
 }) {
-  const askTransport = useMemo(() => ports.askTransport ?? new StubAskTransport(), [ports.askTransport]);
-  const uploads = useMemo(() => ports.uploads ?? new InMemoryUploadProvider(), [ports.uploads]);
   const actorRole = access?.clusterRole ?? "";
+  const source = useMemo<OsAuthSource>(
+    () => authSource ?? { bearer: async () => null, refresh: async () => null },
+    [authSource],
+  );
 
   const [viewport, setViewport] = useState(() => ({
     w: window.innerWidth,
@@ -58,20 +70,54 @@ export function Shell({
 
   return (
     <SessionProvider value={{ access, config }}>
-      <AskProvider transport={askTransport}>
-        <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={ports.store}>
-          {layout === "phone" ? (
-            <div className="os-root" data-os-root data-layout={layout}>
-              <PhoneShell onSignOut={onSignOut} />
-              <AskSheet />
-            </div>
-          ) : (
-            <DesktopChrome layout={layout} viewport={viewport} uploads={uploads} onSignOut={onSignOut} />
-          )}
-        </OsProvider>
-      </AskProvider>
+      <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
+        <MachinesProvider>
+          <ShellTransports source={source} ports={ports}>
+            {(uploads) => (
+              <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={ports.store}>
+                {layout === "phone" ? (
+                  <div className="os-root" data-os-root data-layout={layout}>
+                    <PhoneShell onSignOut={onSignOut} />
+                    <AskSheet />
+                  </div>
+                ) : (
+                  <DesktopChrome
+                    layout={layout}
+                    viewport={viewport}
+                    uploads={uploads}
+                    onSignOut={onSignOut}
+                  />
+                )}
+              </OsProvider>
+            )}
+          </ShellTransports>
+        </MachinesProvider>
+      </OsConnectionProvider>
     </SessionProvider>
   );
+}
+
+// The default transports need the live connection, so they compose INSIDE
+// the connection provider; injected ports (tests, previews) still win.
+function ShellTransports({
+  source,
+  ports,
+  children,
+}: {
+  source: OsAuthSource;
+  ports: ShellPorts;
+  children: (uploads: UploadProvider) => ReactNode;
+}) {
+  const connection = useOsConnection();
+  const askTransport = useMemo<AskTransport>(
+    () => ports.askTransport ?? new SdkAskTransport(() => connection?.dispatcher ?? null),
+    [ports.askTransport, connection],
+  );
+  const uploads = useMemo<UploadProvider>(
+    () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer()),
+    [ports.uploads, source],
+  );
+  return <AskProvider transport={askTransport}>{children(uploads)}</AskProvider>;
 }
 
 function DesktopChrome({
