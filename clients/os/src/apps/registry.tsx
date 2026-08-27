@@ -11,6 +11,7 @@ import {
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
+import { FleetApp } from "./fleet/FleetApp";
 import { SettingsApp } from "./settings/SettingsApp";
 import { StubApp } from "./StubApp";
 
@@ -71,20 +72,19 @@ const deployables = stub(
   "Your hosted sites and the deploy map: what serves where, bound to which artifact, live at which host.",
 );
 
-const fleet = stub(
-  {
-    id: "fleet",
-    name: "Fleet",
-    icon: MonitorSmartphone,
-    sections: [
-      { id: "machines", name: "Machines" },
-      { id: "settings", name: "Settings" },
-    ],
-    settingsSection: "settings",
-  },
-  4729,
-  "The machines running MemQL Cockpit for you: presence, labels, routing -- live.",
-);
+// Fleet is the live exemplar (spec D7): its Machines section is a real
+// LiveList over the caller's worker registrations. The rest is #4729.
+const fleet: OsAppManifest = {
+  id: "fleet",
+  name: "Fleet",
+  icon: MonitorSmartphone,
+  sections: [
+    { id: "machines", name: "Machines" },
+    { id: "settings", name: "Settings" },
+  ],
+  settingsSection: "settings",
+  component: FleetApp,
+};
 
 const users = stub(
   {

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
+import { StubAskTransport } from "../src/ask/askController";
 import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
@@ -41,7 +42,7 @@ function renderShell({
       onSignOut={vi.fn()}
       access={access}
       config={CONFIG}
-      ports={{ store: new LocalDesktopStore(storage) }}
+      ports={{ store: new LocalDesktopStore(storage), disableConnection: true, askTransport: new StubAskTransport() }}
     />,
   );
   return { view, storage };

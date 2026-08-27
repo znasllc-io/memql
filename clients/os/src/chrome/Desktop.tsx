@@ -21,6 +21,7 @@ import type { DeskSurface, DesktopItem, FileEntry, GridPos } from "../system/des
 import type { Desk } from "../system/desks";
 import { DeskNumeral, MemoryField } from "../wallpaper/MemoryField";
 import { WidgetFrame } from "../widgets/WidgetFrame";
+import { useMachines } from "../live/machines";
 import { useSession } from "./access";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { DeskPager } from "./DeskPager";
@@ -473,6 +474,7 @@ function SurfaceItem({
   onMenu: (x: number, y: number) => void;
 }) {
   const { actions, registry } = useOs();
+  const { presence } = useMachines();
   const draggable = useDraggable({ id: `item:${item.id}` });
   const folderDrop = useDroppable({
     id: `folder:${item.id}`,
@@ -513,6 +515,7 @@ function SurfaceItem({
       {item.kind === "file" ? (
         <FileIcon
           entry={item}
+          machine={item.producedByWorkerId ? presence(item.producedByWorkerId) : null}
           selected={selected}
           noAnswerMessage={noAnswer ? VSCODE_NO_ANSWER_MESSAGE : null}
           onOpen={() => onOpenFile(item)}
