@@ -246,11 +246,17 @@ function main() {
     # Versions are resolved ONCE per tool and shared across platforms: a pin
     # set where one platform lags a release is a pin set nobody can reason
     # about, and every upstream here cuts one tag across all platforms.
-    local -A versions=()
-    for tool in "${PIN_TOOLS[@]}"; do
+    # PARALLEL INDEXED ARRAYS, NOT `local -A` (bash 4.0). macOS ships bash 3.2,
+    # where `local -A` fails with `local: -A: invalid option` and returns 2 --
+    # aborting under `set -e`. PIN_TOOLS is the key list and `versions` holds
+    # each value at the SAME index, which is the shape scripts/lib/agents.sh
+    # uses for the same reason.
+    local versions=() i
+    for i in "${!PIN_TOOLS[@]}"; do
+        tool="${PIN_TOOLS[$i]}"
         cap_step "Resolving ${tool}..."
-        versions["$tool"]="$(resolve_version "$tool" "$(cap_param "${tool}-version" "")")"
-        cap_info "${tool} ${versions[$tool]}"
+        versions[$i]="$(resolve_version "$tool" "$(cap_param "${tool}-version" "")")"
+        cap_info "${tool} ${versions[$i]}"
     done
 
     local summaries=() platform os arch suffix
@@ -259,8 +265,9 @@ function main() {
         arch="${platform##*/}"
         suffix="$(platform_pin_suffix "$platform")"
         printf '\n# --- %s %s\n' "$platform" "$(printf -- '-%.0s' $(seq 1 $((60 - ${#platform}))))" >> "$body"
-        for tool in "${PIN_TOOLS[@]}"; do
-            version="${versions[$tool]}"
+        for i in "${!PIN_TOOLS[@]}"; do
+            tool="${PIN_TOOLS[$i]}"
+            version="${versions[$i]}"
             url="$(artifact_url "$tool" "$version" "$os" "$arch")"
             cap_info "${tool} ${version} ${platform} -> ${url}"
             digest="$(digest_of_url "$url" "$scratch")"

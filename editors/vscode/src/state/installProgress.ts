@@ -76,15 +76,23 @@ export interface FailureGuidance {
  * The one honest refuse when detect.sh rejects the OS/arch (memql#4294).
  *
  * Generic exit 3 is "the step refused to act" / artifact-protection. Detect's
- * platform refuse is a different sentence: the wizard cannot run here, retry
- * will not help, and macOS inner-loop is `make up`.
+ * platform refuse is a different sentence: the wizard cannot run here, and
+ * retry will not help.
+ *
+ * THE SUPPORTED SET IS QUOTED, NEVER RESTATED. This used to say "The wizard
+ * targets linux/amd64 only. On macOS use make up" -- which stopped being true
+ * when darwin/arm64 became a supported, digest-pinned platform, and then told
+ * every Mac operator who tripped ANY platform refuse that their machine could
+ * not run the installer at all. detect.sh composes the list from
+ * scripts/lib/platform.sh's SUPPORTED_PLATFORMS, so its own sentence is the
+ * only one here that cannot go stale.
  */
-export function refusedPlatformGuidance(): FailureGuidance {
+export function refusedPlatformGuidance(detail = ""): FailureGuidance {
+  const named = detail.trim().replace(/\.$/, "");
   return {
     headline: "This machine is not a supported platform for the local cluster wizard.",
     advice:
-      "The wizard targets linux/amd64 only. On macOS use make up for the inner-loop cluster. " +
-      "Repair, retry, or picking another tag will not change that.",
+      (named ? `${named}. ` : "") + "Repair, retry, or picking another tag will not change that.",
     retryable: false,
   };
 }
@@ -95,7 +103,7 @@ export function isUnsupportedPlatformRefuse(exitCode: number | null, detail = ""
 
 export function failureGuidance(exitCode: number | null, remedy = "", detail = ""): FailureGuidance {
   if (isUnsupportedPlatformRefuse(exitCode, detail)) {
-    return refusedPlatformGuidance();
+    return refusedPlatformGuidance(detail);
   }
   // A REMEDY OUTRANKS THE CODE, on the one code that can carry it.
   //

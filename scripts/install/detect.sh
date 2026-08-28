@@ -36,7 +36,7 @@
 #
 # Usage:
 #   scripts/install/detect.sh
-#   scripts/install/detect.sh --ports=80,443 --path="$HOME"
+#   scripts/install/detect.sh --ports=80,443,5432 --path="$HOME"
 #   scripts/install/detect.sh --print-spec
 #
 # Exit codes: 0 ok | 2 bad param | 3 refused (unsupported platform)
@@ -52,9 +52,11 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/docker.sh"
 # shellcheck source=../lib/platform.sh
 source "${SCRIPT_DIR}/../lib/platform.sh"
+# shellcheck source=../lib/ports.sh
+source "${SCRIPT_DIR}/../lib/ports.sh"
 
 cap_init "install.detect" "Inventory the local machine's installer dependencies (read-only)."
-cap_spec_param "ports" "comma-separated TCP ports to probe (default: 80,443)"
+cap_spec_param "ports" "comma-separated TCP ports to probe (default: 80,443,5432)"
 cap_spec_param "path"  "filesystem path to measure free space on (default: \$HOME)"
 
 # The tool graph the installer depends on. Every one gets a present flag.
@@ -105,21 +107,9 @@ function _run_bounded() {
 # PORTS -- reported TRUE when FREE
 #=============================================================================
 
-# port_free <port> -- 0 when NOTHING is listening. The report follows this
-# polarity: true means "available to bind", which is what the caller needs to
-# decide whether the cluster's front door can come up.
-function port_free() {
-    local port="$1"
-    if command -v ss &>/dev/null; then
-        if ss -ltnH 2>/dev/null | grep -qE "[:.]${port}[[:space:]]"; then
-            return 1
-        fi
-    fi
-    if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-        return 1
-    fi
-    return 0
-}
+# port_free lives in scripts/lib/ports.sh, shared with scripts/k3d/up.sh, which
+# REFUSES to create a cluster on the same answer this step merely REPORTS. A
+# second copy here would be a second opinion about one machine.
 
 #=============================================================================
 # DISK
@@ -149,7 +139,7 @@ function main() {
     cap_parse_flags "$@"
 
     local ports_csv path
-    ports_csv="$(cap_param ports "80,443")"
+    ports_csv="$(cap_param ports "80,443,5432")"
     path="$(cap_param path "${HOME:-/}")"
     cap_require ports "$ports_csv"
     cap_require path  "$path"

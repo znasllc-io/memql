@@ -47,6 +47,22 @@ func repoRoot(t *testing.T) string {
 
 // capabilityScripts walks scripts/ and returns every .sh that sources
 // capability.sh (the opt-in marker for the contract).
+// sourcesCapabilityLib matches an actual `source .../lib/capability.sh`
+// STATEMENT, not a mention of the path.
+//
+// It was `bytes.Contains(b, "lib/capability.sh")`, which is an opt-in test that
+// a comment can pass. scripts/ci/bash32-smoke.sh names the path in its own
+// prose and in the pattern it greps for, so a substring rule classified the CI
+// reporter as a capability and these tests EXECUTED it -- whereupon it ran its
+// own discovery from the wrong working directory and reported two failures
+// about a corpus it could not see. The same loose rule fork-bombed that script
+// when it discovered itself, so this is the second time one substring match
+// has been wrong; both now require the statement.
+//
+// scripts/ci/bash32-smoke.sh applies the identical rule in shell, which is what
+// lets its header claim the two cover one corpus.
+var sourcesCapabilityLib = regexp.MustCompile(`(?m)^[ \t]*(source|\.)[ \t]+[^\n]*lib/capability\.sh`)
+
 func capabilityScripts(t *testing.T) []string {
 	t.Helper()
 	root := repoRoot(t)
@@ -70,7 +86,7 @@ func capabilityScripts(t *testing.T) []string {
 		if rerr != nil {
 			return rerr
 		}
-		if bytes.Contains(b, []byte("lib/capability.sh")) {
+		if sourcesCapabilityLib.Match(b) {
 			found = append(found, path)
 		}
 		return nil

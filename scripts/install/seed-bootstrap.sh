@@ -275,16 +275,38 @@ function stage_provider_key() {
 
 _SB_KEY_COUNT=0
 
-# add_literal <array-name> <param> <value> -- appends --from-literal=ENV=value
-# for a non-empty value, skipping empties so an unset optional never lands as an
-# empty env var (which reads as "configured, to nothing").
+# _SB_FROM_ARGS -- the `kubectl create secret` argument list add_literal builds.
+#
+# A MODULE GLOBAL, NOT A NAMEREF, BECAUSE macOS SHIPS BASH 3.2. add_literal
+# used to take the array's NAME and bind it with a bash 4.3 nameref. Stock
+# /bin/bash on macOS is 3.2, where that fails with
+#
+#     local: -n: invalid option
+#
+# and returns 2 -- so `set -euo pipefail` aborted this script before cap_ok,
+# and the EXIT trap reported "aborted (exit 2) without an explicit result" on
+# 100% of macOS installs, naming neither the variable nor the line. All ten
+# call sites named the same array, so the indirection bought nothing.
+#
+# NOT COMMAND SUBSTITUTION EITHER: an --org-name of "Acme Corp Inc" has to
+# survive as ONE argument, and $(...) would word-split it into three.
+#
+# NEVER EMPTY WHERE IT IS EXPANDED. require_complete_bootstrap_set guarantees
+# five non-blank values before the first add_literal, which matters because
+# bash 3.2 under `set -u` errors on "${arr[@]}" for an EMPTY array -- declared
+# or not. Anything that moves an expansion of this above that guard has to
+# carry its own default.
+_SB_FROM_ARGS=()
+
+# add_literal <param> <value> -- appends --from-literal=ENV=value to
+# _SB_FROM_ARGS for a non-empty value, skipping empties so an unset optional
+# never lands as an empty env var (which reads as "configured, to nothing").
 function add_literal() {
-    local -n out="$1"
-    local param="$2" value="$3" env
+    local param="$1" value="$2" env
     [[ -z "${value// }" ]] && return 0
     env="$(env_name_for "$param")"
     [[ -n "$env" ]] || cap_fail 2 "internal: no env var mapped for --${param}"
-    out+=("--from-literal=${env}=${value}")
+    _SB_FROM_ARGS+=("--from-literal=${env}=${value}")
     _SB_KEY_COUNT=$((_SB_KEY_COUNT + 1))
 }
 
@@ -652,22 +674,21 @@ function main() {
 
     stage_provider_key "$provider" "$key_file"
 
-    local -a from_args=()
-    add_literal from_args domain                "$domain"
-    add_literal from_args owner-email           "$owner_email"
-    add_literal from_args owner-first-name      "$owner_first"
-    add_literal from_args owner-last-name       "$owner_last"
-    add_literal from_args registration-mode     "$mode"
-    add_literal from_args org-name              "$org_name"
-    add_literal from_args registration-domains  "$reg_domains"
-    add_literal from_args internal-domains      "$internal_domains"
-    add_literal from_args internal-default-role "$internal_role"
-    add_literal from_args notify-emails         "$notify_emails"
+    add_literal domain                "$domain"
+    add_literal owner-email           "$owner_email"
+    add_literal owner-first-name      "$owner_first"
+    add_literal owner-last-name       "$owner_last"
+    add_literal registration-mode     "$mode"
+    add_literal org-name              "$org_name"
+    add_literal registration-domains  "$reg_domains"
+    add_literal internal-domains      "$internal_domains"
+    add_literal internal-default-role "$internal_role"
+    add_literal notify-emails         "$notify_emails"
 
     if [[ -n "$_SB_KEY_FILE" ]]; then
         # --from-file, so the key value never appears in any argv: not ours, not
         # kubectl's, not the runner's log of either.
-        from_args+=("--from-file=${_SB_KEY_ENV}=${_SB_KEY_FILE}")
+        _SB_FROM_ARGS+=("--from-file=${_SB_KEY_ENV}=${_SB_KEY_FILE}")
         _SB_KEY_COUNT=$((_SB_KEY_COUNT + 1))
     else
         cap_warn "no AI provider key supplied -- the cluster will bootstrap its owner but every model call fails."
@@ -678,13 +699,13 @@ function main() {
         check_prerequisites "$ns" "$ctx"
     fi
 
-    seed_secret "$ns" "$name" "$dry_run" "${from_args[@]}"
+    seed_secret "$ns" "$name" "$dry_run" "${_SB_FROM_ARGS[@]}"
 
     # THE HALF THAT WAS MISSING (memql#3588). A Secret nothing has read is not a
     # bootstrapped cluster.
     local digest="" recorded="" rolled=0 converged=false
     if [[ -z "$dry_run" ]]; then
-        digest="$(desired_digest "${from_args[@]}")"
+        digest="$(desired_digest "${_SB_FROM_ARGS[@]}")"
         recorded="$(recorded_digest "$ns" "$name")"
         if [[ "$recorded" == "$digest" ]]; then
             # Already restarted for exactly these values. Rolling again would

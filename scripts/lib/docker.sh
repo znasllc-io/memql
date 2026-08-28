@@ -55,8 +55,27 @@ function docker_access_state() {
     # silently fails to match. The cost of that is precisely the confusion this
     # function exists to remove: `denied` classified as `stopped`, sending
     # someone to restart a daemon that is already running.
-    local lower="${out,,}"
-    if [[ "$lower" == *"permission denied"* || "$lower" == *"dial unix"*"permission"* ]]; then
+    #
+    # `nocasematch` RATHER THAN `${out,,}`, which is bash 4.0. macOS ships bash
+    # 3.2, where that expansion is a `bad substitution` -- and this is the
+    # branch that runs precisely when Docker is NOT reachable, i.e. the most
+    # likely state a machine is in the first time anyone runs the installer. So
+    # the function whose entire job is explaining WHY docker is unreachable was
+    # the one that died there, and the operator got a bash error instead of
+    # "Docker Desktop is not running".
+    #
+    # SET FOR ONE COMPARISON AND UNSET BEFORE ANY RETURN. shopt is
+    # shell-global, so a leak would silently change the meaning of every later
+    # `[[ == ]]` in whatever sourced this library. Nothing in scripts/ sets it,
+    # so restoring means unsetting.
+    local denied=0
+    shopt -s nocasematch
+    if [[ "$out" == *"permission denied"* || "$out" == *"dial unix"*"permission"* ]]; then
+        denied=1
+    fi
+    shopt -u nocasematch
+
+    if [[ "$denied" == 1 ]]; then
         # DENIED SPLITS IN TWO, and the second half is the one that traps people
         # (memql#3554). `usermod -aG docker <user>` writes the group file and
         # cannot touch a process that is already running: supplementary groups

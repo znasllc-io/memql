@@ -360,7 +360,12 @@ test("a run's record joins the history the tree lists", async () => {
 });
 
 test("Create deployment on a refused platform does not offer a tag field", () => {
-  const g = refusedPlatformGuidance();
+  // The detail is what detect actually emits; production passes it through
+  // failureGuidance, so a fixture that omits it would test a shape the
+  // operator never sees.
+  const g = refusedPlatformGuidance(
+    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64",
+  );
   const html = renderChooseTag({
     instance: {
       name: "local",
@@ -376,7 +381,7 @@ test("Create deployment on a refused platform does not offer a tag field", () =>
     summary: "",
   });
   assert.match(html, /linux\/amd64/);
-  assert.match(html, /make up/);
+  assert.match(html, /will not change that/);
   assert.doesNotMatch(html, /data-field="tag"/);
   assert.doesNotMatch(html, /Type the tag/);
   assert.doesNotMatch(html, /<select/);

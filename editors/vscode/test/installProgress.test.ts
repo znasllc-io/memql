@@ -233,19 +233,25 @@ test("exit 3 with an unsupported-platform sentence is refused-platform, not arti
   assert.match(generic.advice, /artifact|declined/i);
   assert.equal(generic.retryable, false);
 
-  const platform = failureGuidance(
-    3,
-    "",
-    "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only",
-  );
+  const detail =
+    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
+  const platform = failureGuidance(3, "", detail);
   assert.notEqual(platform.headline, generic.headline);
   assert.match(platform.headline, /supported platform/i);
-  assert.match(platform.advice, /linux\/amd64/);
-  assert.match(platform.advice, /make up/);
   assert.match(platform.advice, /will not change that/);
   assert.doesNotMatch(platform.advice, /picking another tag will help/i);
   assert.equal(platform.retryable, false);
-  assert.deepEqual(platform, refusedPlatformGuidance());
+  assert.deepEqual(platform, refusedPlatformGuidance(detail));
+
+  // THE SUPPORTED SET IS QUOTED FROM DETECT, NOT RESTATED HERE. The advice
+  // used to hardcode "targets linux/amd64 only. On macOS use make up", which
+  // survived darwin/arm64 becoming supported and then told Mac operators the
+  // installer could not run on their machine at all. Both halves are pinned:
+  // detect's own sentence reaches the operator, and no macOS disclaimer is
+  // reintroduced.
+  assert.match(platform.advice, /linux\/amd64, darwin\/arm64/);
+  assert.doesNotMatch(platform.advice, /make up/i);
+  assert.doesNotMatch(refusedPlatformGuidance("").advice, /linux\/amd64/);
 });
 
 test("retryable distinguishes 'could differ' from 'will fail identically'", () => {

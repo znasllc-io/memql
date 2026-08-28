@@ -1,6 +1,7 @@
 // The wizard's platform gate (memql#4294).
 //
-// detect.sh is the authority: linux/amd64 only, exit 3 on anything else. The
+// detect.sh is the authority on which platforms are supported (it composes the
+// set from scripts/lib/platform.sh), exit 3 on anything else. The
 // install graph already starts there. Uninstall and Create-deployment-without-
 // a-cluster did not, so a Darwin machine could list tags or reach sudo/hosts
 // before anything named the refuse. This module is the one probe those verbs
@@ -78,7 +79,9 @@ function detectMessage(outcome: ScriptOutcome): string {
   return (
     outcome.envelope?.error?.message ??
     outcome.stderr.trim() ??
-    "unsupported platform: the local cluster installer targets linux/amd64 only"
+    // Last resort only: detect names the supported set itself, so this string
+    // is what an operator sees when detect produced no message at all.
+    "unsupported platform: this machine is not one the local cluster installer supports"
   );
 }
 

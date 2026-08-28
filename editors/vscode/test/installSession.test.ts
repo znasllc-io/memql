@@ -180,7 +180,7 @@ function okRunner(seen: string[] = []): { run: RunScript; seen: string[] } {
 }
 
 const DARWIN_REFUSE =
-  "unsupported platform darwin/arm64: the local cluster installer targets linux/amd64 only";
+  "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
 
 function darwinDetectRun(seen: string[] = []): { run: RunScript; seen: string[] } {
   const run: RunScript = async (inv) => {
@@ -1325,7 +1325,7 @@ test("runInstall on an unsupported platform fails at detect and does not create 
   );
   const copy = failureGuidance(3, "", report.outcomes[0]?.reason ?? "");
   assert.match(copy.advice, /linux\/amd64/);
-  assert.match(copy.advice, /make up/);
+  assert.match(copy.advice, /will not change that/);
   assert.equal(copy.retryable, false);
 });
 

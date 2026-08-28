@@ -31,11 +31,33 @@ if [[ -n "${_MEMQL_RESOLVE_LIB_LOADED:-}" ]]; then
 fi
 _MEMQL_RESOLVE_LIB_LOADED=1
 
-# resolver_tool -- names the resolver this machine actually has. getent is the
-# Linux/glibc path; dig and host cover macOS, where getent does not exist.
+# resolver_tool -- names the resolver this machine actually has.
+#
+# THE ORDER IS "SYSTEM RESOLVER FIRST, DNS LAST", and that is the whole point.
+# `getent` (Linux/glibc) and `dscacheutil` (macOS) ask the machine's own
+# name-resolution stack, which includes /etc/hosts. `dig` and `host` speak to a
+# DNS SERVER and see nothing else.
+#
+# dig and host were the only macOS path here, described as covering it. They do
+# not: the installer WRITES /etc/hosts (scripts/install/hosts-entries.sh) and
+# then verify-frontdoor.sh asked dig whether the names resolve, so on every Mac
+# it reported
+#
+#     FAIL dns api.memql.localhost: does not resolve (no A record and no hosts entry)
+#
+# about a name that resolves perfectly well -- with the TLS check on the NEXT
+# line connecting to that same name and passing, because curl uses the system
+# resolver. Two of seven front-door checks failed on a working cluster, which
+# failed the step, which skipped magicLink, enrolmentLink and recoveryKey and so
+# ended the install one step from done.
+#
+# dig and host stay as a last resort: a machine with neither getent nor
+# dscacheutil is not one we have seen, and a DNS-only answer is still better
+# than no answer.
 function resolver_tool() {
     if [[ -n "${MEMQL_RESOLVE_STUB:-}" ]]; then printf 'stub';   return; fi
-    if command -v getent &>/dev/null;            then printf 'getent'; return; fi
+    if command -v getent      &>/dev/null;       then printf 'getent';      return; fi
+    if command -v dscacheutil &>/dev/null;       then printf 'dscacheutil'; return; fi
     if command -v dig    &>/dev/null;            then printf 'dig';    return; fi
     if command -v host   &>/dev/null;            then printf 'host';   return; fi
     printf ''
@@ -52,6 +74,15 @@ function resolve_addresses() {
             fi
             ;;
         getent) getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u ;;
+        # `-q host -a name` is the full resolver query. It answers for a
+        # /etc/hosts entry and for real DNS alike, and prints one `ip_address:`
+        # line per IPv4 result (`ipv6_address:` for v6, which this deliberately
+        # drops -- callers compare against the IPv4 the hosts block pins).
+        dscacheutil)
+            dscacheutil -q host -a name "$host" 2>/dev/null |
+                awk '/^ip_address: /{print $2}' |
+                grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u
+            ;;
         dig)    dig +short A "$host" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u ;;
         host)   host -t A "$host" 2>/dev/null | awk '/has address/ {print $NF}' | sort -u ;;
     esac
