@@ -310,10 +310,7 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	if !ok {
 		return
 	}
-	if kind == "adHocAction" || kind == "scopeElevation" || kind == produceArtifactPlanKind {
-		// produceArtifact is started directly at creation (HandlePlanCreated ->
-		// startPlanDirect) and executed by handlePlanApprovedForExecution; it
-		// never needs the decompose/auto-start dance, so updates are a no-op here.
+	if ownedByAnotherDispatcher(kind) {
 		return
 	}
 	// Phased execution checkpoint (epic #836 / memql#840): when a running
@@ -692,7 +689,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// markPlanSucceeded on a plan that's already running /
 		// queued / etc. keeps its terminal-state semantics.
 		plan, lerr := l.loadPlan(ctx, planId)
-		if lerr == nil && getString(plan, "status") == "planning" {
+		if lerr == nil && stillPlanning(getString(plan, "status")) {
 			// Guard: a planning-stage Plan with ZERO tasks is the
 			// "model shortcutted the workflow and tried to answer
 			// the user directly" failure mode. The prompt forbids
@@ -876,16 +873,13 @@ func extractAgentFactoryResult(res any) (agentId, action string) {
 	return agentId, action
 }
 
-// assignOwnerAgent writes a Plan-status update setting ownerAgentId
-// and transitioning the Plan to routing. Mutation re-validates against
-// the Plan concept; we just want the in-place merge of ownerAgentId.
-// Bare-identifier keys per MemQL function-call syntax.
+// assignOwnerAgent attaches the factory-resolved specialist to the Plan while
+// it is still planning. Mutation re-validates against the Plan concept; we just
+// want the in-place merge of ownerAgentId. Bare-identifier keys per MemQL
+// function-call syntax. See stampOwnerAgentQuery for why the status it writes
+// is "planning" and not "routing" (memql#4691).
 func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId string) error {
-	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%s, status:"routing", ownerAgentId:%s)`,
-		langparser.QuoteString(planId), langparser.QuoteString(agentId),
-	)
-	_, err := l.engine.Execute(systemActorContext(ctx), q)
+	_, err := l.engine.Execute(systemActorContext(ctx), stampOwnerAgentQuery(planId, agentId))
 	return err
 }
 

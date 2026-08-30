@@ -94,7 +94,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	skillCatalog := i.loadSkillCatalog(ctx)
 
 	// Step 3: structured analysis.
-	decision, err := i.analyzeGoal(ctx, goal, existing, roleCatalog, skillCatalog)
+	decision, err := i.decideForGoal(ctx, goal, existing, roleCatalog, skillCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("ensureForGoal: analyze: %w", err)
 	}
@@ -324,20 +324,21 @@ func (i *Integration) loadSkillCatalog(ctx context.Context) []skillSnapshot {
 // additionalProperties:false and is validated BEFORE the template renders,
 // so an undeclared key here fails the call outright; it is not "extra
 // context the prompt ignores".
-func analyzeGoalPromptData(goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, now string) map[string]any {
+func analyzeGoalPromptData(goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, now string, priorError string) map[string]any {
 	return map[string]any{
 		"goal":           goal,
 		"existingAgents": existingForPrompt(existing),
 		"roleCatalog":    roleCatalogForPrompt(roles),
 		"skillCatalog":   skillCatalogForPrompt(skills),
 		"now":            now,
+		"priorError":     priorError,
 	}
 }
 
 // analyzeGoal invokes the agentFactoryAnalyze prompt via
 // InvokeAIStructured. Returns the parsed decision struct.
-func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot) (factoryDecision, error) {
-	data := analyzeGoalPromptData(goal, existing, roles, skills, time.Now().UTC().Format(time.RFC3339))
+func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, priorError string) (factoryDecision, error) {
+	data := analyzeGoalPromptData(goal, existing, roles, skills, time.Now().UTC().Format(time.RFC3339), priorError)
 	rawJSON, err := i.engine.InvokeAIStructured(
 		ctx,
 		"agentFactoryAnalyze",
@@ -351,7 +352,11 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 	}
 	var decision factoryDecision
 	if err := json.Unmarshal([]byte(rawJSON), &decision); err != nil {
-		return factoryDecision{}, fmt.Errorf("parse agentFactoryAnalyze output: %w (raw: %s)", err, rawJSON)
+		// CORRECTABLE, not fatal: the model emitted something that is not the
+		// decision shape. Telling it so is exactly the feedback that fixes it.
+		return factoryDecision{}, &correctableDecisionError{
+			msg: fmt.Sprintf("your previous output was not valid JSON for the decision schema: %v", err),
+		}
 	}
 	return decision, nil
 }
@@ -671,12 +676,28 @@ var factoryDecisionSchema = json.RawMessage(`{
 // extractRowsFromExecuteResult pulls a slice of row-maps out of the
 // engine.Execute return. Tolerant of the two shapes the engine
 // emits: a wrapped {result: {rows: [...]}} envelope or a bare slice.
+// extractRowsFromExecuteResult reads the rows out of whatever the engine
+// handed back.
+//
+// The TYPED arm is not an optimization, it is the whole function (memql#4689).
+// i.engine.Execute returns *memql.ExecuteResult, whose rows live in an
+// unexported `output` field. json.Marshal cannot see that field, so the loose
+// walk below was handed {"Bundle":…,"Meta":…}, found no top-level "rows" or
+// "nodes", and returned nil -- EVERY time, for every caller. loadRoleCatalog
+// and loadSkillCatalog therefore fed agentFactoryAnalyze two empty catalogs; the
+// model, shown no roles, invented a plausible slug, and createAgent rejected it
+// with `roleSlug "X" not in catalog`, failing the whole goal. 97 roles and 25
+// skills were in the database at the time.
+//
+// The loose walk is kept for the map/slice shapes other callers pass, but it
+// must never be reached for an *ExecuteResult again.
 func extractRowsFromExecuteResult(raw any) []map[string]any {
 	if raw == nil {
 		return nil
 	}
-	// Try the *ExecuteResult shape via reflection-free marshalling.
-	// Easiest: JSON-roundtrip and walk the loose shape.
+	if res, ok := raw.(*memql.ExecuteResult); ok {
+		return memql.RowsFromResult(res)
+	}
 	rawJSON, err := json.Marshal(raw)
 	if err != nil {
 		return nil

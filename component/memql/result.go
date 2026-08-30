@@ -146,6 +146,28 @@ func (r *ExecuteResult) FlatOutput() (any, bool) {
 	return r.output, true
 }
 
+// NewResultWithOutput builds an ExecuteResult carrying payload as its output
+// -- the shape MemQLEngine.Execute really returns for a query or a shaped
+// construct call.
+//
+// Exported for the fake engines that integration packages stand up in tests.
+// Before this existed the only result an outside package could construct was a
+// bare &ExecuteResult{}, whose OutputPayload() is nil, so a fake engine could
+// not reproduce a populated read AT ALL. That is not a cosmetic gap: it is why
+// memql#4689 shipped -- integrations/agents' catalog parser could not read what
+// Execute returns, every catalog arrived empty in production, and the package's
+// own fake-engine tests could not have caught it because their results were
+// always empty too. A fake that cannot represent a non-empty answer tests
+// nothing about how the answer is read.
+//
+// The payload is what setOutput receives on the query path: []any of row maps
+// (each `{"id":…, "payload":{…}}`), or a scalar/map for a flat return.
+func NewResultWithOutput(payload any) *ExecuteResult {
+	r := newExecuteResult(nil)
+	r.setOutput(payload)
+	return r
+}
+
 func (r *ExecuteResult) setOutput(payload any) {
 	if r == nil {
 		return
