@@ -7,13 +7,13 @@
 // birds"), MODERATE, or COMPLEX -- and routes accordingly:
 //
 //   - trivial  -> ONE direct production turn (startPlanDirect): the
-//                 owning agent writes the deliverable in a single turn.
-//                 NO decompose recursion, NO specialist creation, NO
-//                 training. This is the cost fix -- a one-line
-//                 deliverable must never trigger the Opus+thinking
-//                 decompose loop that cost ~$250 (memql#816/#832).
+//     owning agent writes the deliverable in a single turn.
+//     NO decompose recursion, NO specialist creation, NO
+//     training. This is the cost fix -- a one-line
+//     deliverable must never trigger the Opus+thinking
+//     decompose loop that cost ~$250 (memql#816/#832).
 //   - moderate / complex -> fall through to the (bounded, guarded)
-//                 decompose loop below.
+//     decompose loop below.
 //
 // The classifier itself is a single chat54Mini call (cheap tier). A
 // classify failure never blocks the Plan -- it falls through to the
@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/memql"
 	"os"
 	"strings"
 )
@@ -193,10 +194,39 @@ func (l *PlannerAgentLoop) triageAndMaybeShortcut(ctx context.Context, planId, n
 	complexity, reasoning, sectionable, cerr := l.classifySectionable(ctx, goal, nowRFC3339)
 	if cerr != nil {
 		if isProduceArtifact {
-			l.logger.Warn("planner triage: classify failed for produceArtifact; falling back to the single direct production turn",
-				"planId", planId, "error", cerr)
+			// Same distinction on the produceArtifact arm: an unconfigured
+			// provider is expected, an outage is not, and the fallback is
+			// identical either way -- only the log level differs.
+			if memql.IsProviderUnavailable(cerr) {
+				l.logger.Debug("planner triage: no classifier provider; produceArtifact goes direct",
+					"planId", planId)
+			} else {
+				l.logger.Warn("planner triage: classify failed for produceArtifact; falling back to the single direct production turn",
+					"planId", planId, "error", cerr)
+			}
 			l.startPlanDirect(ctx, planId)
 			return true, nil
+		}
+		if memql.IsProviderUnavailable(cerr) {
+			// NOT a failure: this cluster has not configured the provider the
+			// triage prompt names (memql#4693). Triage is a cheap-path
+			// OPTIMIZATION -- skipping it costs a more expensive route to the
+			// same answer, never a wrong one -- so the plan proceeds exactly as
+			// it would with triage disabled.
+			//
+			// Said ONCE per process, not once per goal. A provider registry is
+			// built at boot from the DSL tree plus env and does not gain
+			// entries later, so the answer cannot change under a running
+			// process; repeating it per goal produced a WARN stream that read
+			// like a recurring fault and buried real ones.
+			l.triageUnavailable.Do(func() {
+				l.logger.Info("planner triage: skipped -- this cluster has no provider for the goal-complexity "+
+					"classifier, so every goal takes the fuller decompose path. Configure the provider the "+
+					"goalComplexityTriage prompt names, or set MEMQL_PLANNER_GOAL_TRIAGE_ENABLED=0 to make the "+
+					"skip explicit. This message is logged once per process.",
+					"reason", cerr.Error())
+			})
+			return false, nil
 		}
 		l.logger.Warn("planner triage: classify failed; falling through to decompose loop",
 			"planId", planId, "error", cerr)

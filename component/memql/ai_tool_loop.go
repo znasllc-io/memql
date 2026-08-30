@@ -51,7 +51,7 @@ func (e *MemQLEngine) InvokeAIChatWithTools(ctx context.Context, templateId stri
 	}
 	entry, ok := e.providers.Entry(providerName)
 	if !ok || entry == nil || !entry.Available || entry.Client == nil {
-		return "", fmt.Errorf("provider %q not available", providerName)
+		return "", ErrProviderUnavailable(providerName)
 	}
 
 	toolCaller, ok := entry.Client.(common.ToolCallingChatAIProvider)
@@ -258,7 +258,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 	}
 	entry, ok := e.providers.Entry(providerName)
 	if !ok || entry == nil || !entry.Available || entry.Client == nil {
-		return "", fmt.Errorf("provider %q not available", providerName)
+		return "", ErrProviderUnavailable(providerName)
 	}
 
 	toolCaller, ok := entry.Client.(common.ToolCallingChatAIProvider)

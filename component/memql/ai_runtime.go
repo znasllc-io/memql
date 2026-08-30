@@ -117,7 +117,7 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		if modelId, isFleet := IsFleetReference(providerName); isFleet {
 			return nil, r.providers.FleetRefusal(ctx, actingUserFromContext(ctx), modelId)
 		}
-		return nil, fmt.Errorf("provider %q not available", providerName)
+		return nil, ErrProviderUnavailable(providerName)
 	}
 
 	// Validate provider supports text modality for ai() expressions
@@ -236,7 +236,7 @@ func (r *aiRuntime) resolveProviderName(prompt *PromptTemplate, invocation *AIIn
 	if defaultName := r.providers.Default(); strings.TrimSpace(defaultName) != "" {
 		return strings.TrimSpace(defaultName), nil
 	}
-	return "", fmt.Errorf("provider %q not available", "(default)")
+	return "", ErrProviderUnavailable("(default)")
 }
 
 func (r *aiRuntime) resolvePrompt(id string) (*PromptTemplate, error) {
