@@ -73,6 +73,7 @@ prompt agentFactoryAnalyze {
   roleCatalog       []object! @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedSkillIds, defaultSkillIds, availableSkillIds, forbiddenSkillIds, maxSkills, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
   skillCatalog      []object! @description("Compact snapshot of the v1:agents:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
   now               string! @description("RFC3339 wall-clock.")
+  priorError        string @description("The validation error a PREVIOUS attempt's decision was rejected with, verbatim, when this call is a retry (memql#4690). Empty on the first attempt. The template renders it as a correction block naming what was wrong and what the valid choices are; a model handed the reason it failed picks a real catalog slug on the next try, where one that is simply re-asked repeats itself.")
 }
 
 /// Responsibility intake (issue #637 -- epic #631 / program #629). A lightweight reasoning pass

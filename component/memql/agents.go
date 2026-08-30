@@ -543,6 +543,23 @@ func extractRowList(result any) []map[string]any {
 	return out
 }
 
+// RowsFromResult flattens whatever MemQLEngine.Execute returned into row maps.
+// It is extractRowList under an exported name, and it exists so there is ONE
+// implementation of "read the rows out of an Execute result" in the tree.
+//
+// There were two. The second lived in integrations/agents and was written
+// against a guess at the shape (json.Marshal the result, then look for a
+// top-level "rows"/"nodes" key). That guess is wrong for the type Execute
+// actually returns: *ExecuteResult keeps its rows in an UNEXPORTED field, so
+// marshalling yields {"Bundle":…,"Meta":…} and the walk finds nothing. The
+// agent factory's role and skill catalogs were therefore empty on every call,
+// the model was asked to pick a role slug from an empty list, invented one, and
+// the goal failed with `roleSlug "X" not in catalog` (memql#4689).
+//
+// So: call this rather than re-deriving the shape. A copy cannot be kept
+// correct, because the field it has to read is one no copy can see.
+func RowsFromResult(result any) []map[string]any { return extractRowList(result) }
+
 // agentDefinitionFromRow builds an AgentDefinition from a single
 // v1:agents:agent row map. The materialized row's payload mirrors
 // what createAgent stamped (which in turn came from the

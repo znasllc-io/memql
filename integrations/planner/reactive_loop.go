@@ -657,10 +657,7 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 	// Stamp the owning agent (best-effort) so downstream dispatch knows
 	// who runs it. Reuse the plan-status update path.
 	if agentId != "" {
-		upd := fmt.Sprintf(
-			`mutation updatePlanStatus(planId:%s, status:"routing", ownerAgentId:%s)`,
-			langparser.QuoteString(planId), langparser.QuoteString(agentId),
-		)
+		upd := stampOwnerAgentQuery(planId, agentId)
 		if _, err := r.engine.Execute(ctx, upd); err != nil {
 			r.logger.Debug("planner reactive loop: ownerAgent stamp failed",
 				"planId", planId, "agentId", agentId, "error", err)

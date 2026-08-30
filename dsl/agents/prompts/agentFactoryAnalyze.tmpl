@@ -99,3 +99,13 @@ Return exactly ONE JSON object that conforms to this schema:
 
 targetAgentId is required when action is "match" or "extend",
 otherwise empty. Do NOT include any prose outside the JSON.
+{{if .priorError}}
+# Correction -- your previous answer was REJECTED
+
+{{.priorError}}
+
+That decision was not applied. Read the catalogs above again and answer
+with values that appear in them. Do not repeat the rejected value, and do
+not invent a slug that "should" exist -- if nothing in roleCatalog fits the
+goal well, pick the closest role that IS listed and say so in `reasoning`.
+{{end}}

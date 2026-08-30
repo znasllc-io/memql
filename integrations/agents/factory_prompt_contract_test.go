@@ -63,10 +63,28 @@ func TestAnalyzeGoalPayloadSatisfiesPromptSchema(t *testing.T) {
 		[]roleSnapshot{{Slug: "accountant", Name: "Accountant", Category: "finance", Tier: "B", MaxSkills: 8}},
 		[]skillSnapshot{{Slug: "bookkeeping", Name: "Bookkeeping", Category: "finance", Description: "Ledgers", Tier: "B", Tags: []string{"finance"}}},
 		"2026-08-13T00:00:00Z",
+		"",
 	)
 
 	if err := prompt.ValidateData(normalizeForSchema(t, data)); err != nil {
 		t.Fatalf("the payload analyzeGoal builds must satisfy the prompt schema: %v", err)
+	}
+}
+
+// TestRetryPayloadSatisfiesPromptSchema is the memql#4690 half of the same
+// contract, and the one worth stating separately: the retry payload carries an
+// EXTRA key (priorError). The schema is additionalProperties:false and is
+// validated before the template renders, so an undeclared key does not degrade
+// to "the correction is missing" -- it fails the call. Every retry would error
+// in analysis, which is precisely the failure the retry was added to prevent.
+func TestRetryPayloadSatisfiesPromptSchema(t *testing.T) {
+	prompt := loadAgentFactoryAnalyzePrompt(t)
+
+	data := analyzeGoalPromptData("a goal", nil, nil, nil, "2026-08-13T00:00:00Z",
+		`roleSlug "content-creator" is not in the role catalog. Choose one of: accountant`)
+
+	if err := prompt.ValidateData(normalizeForSchema(t, data)); err != nil {
+		t.Fatalf("the RETRY payload must satisfy the prompt schema too: %v", err)
 	}
 }
 
@@ -77,7 +95,7 @@ func TestAnalyzeGoalPayloadSatisfiesPromptSchema(t *testing.T) {
 func TestAnalyzeGoalPayloadSatisfiesPromptSchemaWhenCatalogsEmpty(t *testing.T) {
 	prompt := loadAgentFactoryAnalyzePrompt(t)
 
-	data := analyzeGoalPromptData("a goal", nil, nil, nil, "2026-08-13T00:00:00Z")
+	data := analyzeGoalPromptData("a goal", nil, nil, nil, "2026-08-13T00:00:00Z", "")
 	if err := prompt.ValidateData(normalizeForSchema(t, data)); err != nil {
 		t.Fatalf("empty catalogs must still validate (the factory tolerates them): %v", err)
 	}
@@ -98,7 +116,7 @@ func TestAnalyzeGoalPayloadCarriesNoUndeclaredKeys(t *testing.T) {
 		t.Fatal("prompt declares no arguments -- the check would pass vacuously")
 	}
 
-	data := analyzeGoalPromptData("a goal", nil, nil, nil, "2026-08-13T00:00:00Z")
+	data := analyzeGoalPromptData("a goal", nil, nil, nil, "2026-08-13T00:00:00Z", "")
 	for key := range data {
 		if !declared[key] {
 			t.Errorf("payload key %q is not declared by agentFactoryAnalyze; "+

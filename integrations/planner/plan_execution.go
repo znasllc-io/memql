@@ -128,11 +128,29 @@ type agentTurnResult struct {
 //     auto-started to running (#788) -- this is the executor that was missing,
 //     so the deliverable was never actually produced (memql#800).
 //
+//   - userGoal: the goal a person typed and then clicked Run on (memql#4688).
+//     It was excluded, and nothing else claimed it: the planner wrote its task
+//     rows during planning, the Run button flipped it to running -- and no
+//     subscriber consumed either the transition or the tasks. The plan sat in
+//     running forever, having produced nothing, with no error anywhere. The
+//     batch executor that would consume the task rows (runPhasedFanOut) is
+//     referenced only by its own tests; nothing wires it.
+//
+//     So a userGoal executes the way every other approved kind does: its goal
+//     is forwarded to its owning agent as one turn. The task list rides along
+//     as a trusted hint (buildExecutionTurn) rather than being dispatched row
+//     by row -- which is the deliberate limit of this fix. Per-task dispatch
+//     with dependency waves, per-task budget and per-task terminal rollup is
+//     what runPhasedFanOut is for, and wiring it is a separate piece of work.
+//     What matters here is that the list is not DISCARDED: the user reviewed
+//     those steps before clicking Run, so a Run that ignored them would mean
+//     something different from what the screen showed.
+//
 // Other kinds have their own dispatchers (trainSpecialist / embedDomainItems)
 // or are handled elsewhere (adHocAction / agentInvocation), so they MUST NOT
 // flow through here.
 func executableViaApprovedPath(kind string) bool {
-	return kind == "scopeElevation" || kind == produceArtifactPlanKind
+	return kind == "scopeElevation" || kind == produceArtifactPlanKind || kind == userGoalPlanKind
 }
 
 // handlePlanApprovedForExecution is the event-bus subscriber.
@@ -376,7 +394,7 @@ const produceArtifactDirective = "PRODUCE THIS DELIVERABLE NOW. You are the exec
 //     (produceArtifact only), which the agent surfaces as an un-bracketed,
 //     authoritative prompt block. This is the fix for the false injection
 //     refusal that left the deliverable unproduced.
-func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentTurnMessage, map[string]string) {
+func buildExecutionTurn(planId string, plan planExecutionRow, tasks []planTaskSummary) ([]*memqlv1.AgentTurnMessage, map[string]string) {
 	history := []*memqlv1.AgentTurnMessage{{
 		Role:    "user",
 		Content: plan.Goal,
@@ -421,6 +439,20 @@ func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentT
 	if plan.Kind == produceArtifactPlanKind {
 		hints["deliverable_surface"] = "workbench"
 		hints["production_directive"] = produceArtifactDirective
+	}
+
+	// userGoal carries the plan the user actually approved (memql#4688). Like
+	// the produce directive above, this is the SYSTEM's own instruction and so
+	// must ride as a trusted hint -- folding it into the user-role history
+	// would put it inside `[[BEGIN UNTRUSTED CONVERSATION HISTORY]]`, where the
+	// agent prompt's injection guard is entitled to refuse it. That is not
+	// hypothetical: it is exactly what happened to the produce flow in
+	// memql#1102, and the deliverable was never written.
+	if plan.Kind == userGoalPlanKind {
+		hints["execution_directive"] = userGoalDirective
+		if steps := renderTaskSteps(tasks); steps != "" {
+			hints["plan_steps"] = steps
+		}
 	}
 
 	// Opt-in "watch agent work" (memql#900): route the turn through the
@@ -581,7 +613,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	// (pure, table-tested). Critically, the produce-flow scaffolding rides
 	// as a TRUSTED hint, never inside the user-role history message -- see
 	// the helper's doc comment + memql#1102.
-	history, hints := buildExecutionTurn(planId, plan)
+	history, hints := buildExecutionTurn(planId, plan, p.loadPlanTaskSummaries(ctx, planId, plan.Kind))
 	if plan.WatchExecution {
 		p.logger.Info("plan execution: streaming opt-in (watch agent work)",
 			"plan_id", planId)

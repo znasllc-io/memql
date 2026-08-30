@@ -29,7 +29,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
-		history, hints := buildExecutionTurn(planId, plan)
+		history, hints := buildExecutionTurn(planId, plan, nil)
 
 		// History is exactly the raw user goal -- nothing else. This is the
 		// content the agent renders inside [[BEGIN UNTRUSTED CONVERSATION
@@ -81,7 +81,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
-		history, hints := buildExecutionTurn(planId, plan)
+		history, hints := buildExecutionTurn(planId, plan, nil)
 		if history[0].Content != goal {
 			t.Fatalf("history content = %q, want raw goal", history[0].Content)
 		}
@@ -98,7 +98,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
 			PartitionId: "s", OwnerAgentId: "a", RequestedBy: owner, WatchExecution: true,
 		}
-		_, hints := buildExecutionTurn(planId, plan)
+		_, hints := buildExecutionTurn(planId, plan, nil)
 		if hints["execution_lane"] != "interactive" {
 			t.Fatalf("watchExecution should set execution_lane=interactive, got %q", hints["execution_lane"])
 		}
@@ -120,7 +120,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			RequestedBy:      owner,
 			FeedbackResponse: feedback,
 		}
-		history, hints := buildExecutionTurn(planId, plan)
+		history, hints := buildExecutionTurn(planId, plan, nil)
 		if len(history) != 2 {
 			t.Fatalf("want 2 history messages (goal + feedback), got %d", len(history))
 		}
@@ -145,7 +145,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
 			PartitionId: "s", OwnerAgentId: "a", RequestedBy: owner,
 		}
-		history, _ := buildExecutionTurn(planId, plan)
+		history, _ := buildExecutionTurn(planId, plan, nil)
 		if len(history) != 1 {
 			t.Fatalf("first-run dispatch must have exactly 1 history message, got %d", len(history))
 		}
