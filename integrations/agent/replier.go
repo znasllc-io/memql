@@ -398,17 +398,27 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		}
 	}
 
-	// Workbench availability is a flat bool: the agent's expanded
-	// tool list has workbenchHost iff it holds the workbench-use slug.
-	// Universal capability -- on by default for most agents -- but we
-	// still gate the prompt block on the tool's presence so an agent
-	// explicitly stripped of workbench-use doesn't see workbench
-	// guidance it can't act on.
-	for _, name := range toolNames {
-		if name == "workbenchHost" {
-			data["workbenchAvailable"] = true
-			break
-		}
+	// Workbench availability is a flat bool. It must answer "can this agent
+	// actually CALL workbenchHost", and the two halves of that are different
+	// questions: the agent's expanded tool list carries the NAME iff it holds
+	// the workbench-use slug, and the tool REGISTRY carries a definition iff
+	// this deployment loaded the tree that defines it.
+	//
+	// Reading only the name is what memql#4692 describes. workbenchHost is
+	// pack-owned -- the engine's own conformance test records that it is NOT in
+	// this repo's embedded DSL -- so on an engine-only or minimal-pack cluster
+	// the name is always present and the definition never is. The prompt then
+	// told the model to write its file with workbenchHost while
+	// toolsForToolCallingFiltered silently dropped that tool from the function
+	// list it was given. The model could not write, re-called produceArtifact,
+	// was refused at the depth cap, and the turn aborted having produced
+	// nothing -- the invisible failure investigated on aks-memql.
+	//
+	// So the claim is gated on the REGISTRY. An agent on a cluster without the
+	// tool now gets no workbench guidance and no workbench knowledge domain,
+	// and reaches its "I can't do this here" path honestly instead of looping.
+	if r.toolIsRegistered(toolNames, "workbenchHost") {
+		data["workbenchAvailable"] = true
 	}
 
 	// RAG: retrieve top-K knowledge chunks for the agent's declared
@@ -2217,4 +2227,32 @@ func chunkTopCitation(chunks []map[string]any) string {
 	}
 	c, _ := chunks[0]["citation"].(string)
 	return c
+}
+
+// toolIsRegistered reports whether the agent BOTH holds a tool's name and this
+// deployment has a definition for it (memql#4692).
+//
+// Both halves are required, and the second is the one that was missing. The
+// name comes from capability-slug expansion, which is pure Go and knows nothing
+// about which DSL trees a binary loaded; the definition comes from the tool
+// registry, which is the only thing that decides whether the model is actually
+// handed the tool. A prompt that promises a capability the registry cannot
+// supply is worse than one that omits it: the model spends the turn trying.
+func (r *Replier) toolIsRegistered(toolNames []string, name string) bool {
+	if r == nil || r.engine == nil {
+		return false
+	}
+	held := false
+	for _, n := range toolNames {
+		if n == name {
+			held = true
+			break
+		}
+	}
+	if !held {
+		return false
+	}
+	// ToolDefinitionsForNames drops names the registry cannot resolve, so a
+	// non-empty answer IS the registry probe.
+	return len(r.engine.ToolDefinitionsForNames([]string{name})) > 0
 }

@@ -3,6 +3,7 @@ package memql
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 )
 
@@ -157,34 +158,120 @@ func HasCapabilityTag(expanded []string, tag string) bool {
 // slug (turning a silent-until-runtime failure into a loud-at-boot one) and
 // returns the full missing set so callers/tests can fail fast.
 //
+// A slug with NONE of its tools registered is NOT an error -- see above -- but
+// it is no longer SILENT either (memql#4692). It is reported through
+// UnavailableCapabilitySlugs, and the boot log states it, because "this node
+// does not provide capability X" and "this node provides it" produce identical
+// output otherwise, and an agent whose role locks that slug will name the tool
+// all the way into the model's prompt regardless. The engine cannot tell the
+// two apart on its own -- workbenchHost is legitimately pack-owned, so an
+// engine-only cluster missing it is correct, and failing boot on it would fail
+// every such cluster. What it CAN do is say so once, where an operator looking
+// at "the goal produced nothing" will find it.
+//
 // `has` is the registry membership probe (pass toolRegistry.Has at boot).
 func VerifyCapabilityToolsRegistered(has func(string) bool, logger *slog.Logger) []string {
-	if has == nil {
+	missing, unavailable := verifyCapabilityTools(has)
+	if logger != nil {
+		for _, slug := range unavailable {
+			logger.Warn("capability slug is UNAVAILABLE on this node -- none of its tools are in the registry. "+
+				"This is expected where the capability is pack-owned and this deployment does not load that pack, "+
+				"and it is NOT a boot error. But an agent whose role locks this slug still carries the tool NAMES, "+
+				"so anything reading the name list rather than the registry will believe the capability is present "+
+				"(memql#4692).",
+				"capability", slug,
+				"tools", CapabilityToolNames(slug),
+			)
+		}
+	}
+	if logger != nil {
+		logMissingCapabilityTools(missing, logger)
+	}
+	return flattenMissing(missing)
+}
+
+// UnavailableCapabilitySlugs returns the slugs with NONE of their tools
+// registered. Exported so a deployment's own boot checks and tests can assert
+// which capabilities a build actually provides, rather than inferring it from
+// the absence of an error.
+func UnavailableCapabilitySlugs(has func(string) bool) []string {
+	_, unavailable := verifyCapabilityTools(has)
+	return unavailable
+}
+
+// CapabilityToolNames returns the tools a slug expands to, or nil.
+func CapabilityToolNames(slug string) []string {
+	capMu.RLock()
+	defer capMu.RUnlock()
+	bundle, ok := capabilitySlugs[slug]
+	if !ok {
 		return nil
+	}
+	out := make([]string, len(bundle.tools))
+	copy(out, bundle.tools)
+	return out
+}
+
+// verifyCapabilityTools splits every registered slug into the two outcomes that
+// must not be conflated: PARTIALLY registered (a real bug -- a tool slice
+// failed to parse) and FULLY absent (this node does not load that surface).
+// Both lists are sorted so two boots of the same build log the same thing.
+func verifyCapabilityTools(has func(string) bool) (map[string][]string, []string) {
+	if has == nil {
+		return nil, nil
 	}
 	capMu.RLock()
 	defer capMu.RUnlock()
-	var allMissing []string
+	missing := map[string][]string{}
+	var unavailable []string
 	for slug, bundle := range capabilitySlugs {
 		anyPresent := false
-		var missing []string
+		var absent []string
 		for _, name := range bundle.tools {
 			if has(name) {
 				anyPresent = true
 			} else {
-				missing = append(missing, name)
+				absent = append(absent, name)
 			}
 		}
-		if anyPresent && len(missing) > 0 {
-			if logger != nil {
-				logger.Error("capability tool(s) MISSING from the tool registry -- a tool slice likely failed to parse and was SILENTLY skipped by the loader; the agent will hit 'tool not in registry' at runtime and can loop. Fix the tool definition (memql#1156 / #1154).",
-					"capability", slug,
-					"missing", missing,
-					"expected", bundle.tools,
-				)
-			}
-			allMissing = append(allMissing, missing...)
+		switch {
+		case anyPresent && len(absent) > 0:
+			missing[slug] = absent
+		case !anyPresent && len(bundle.tools) > 0:
+			unavailable = append(unavailable, slug)
 		}
 	}
-	return allMissing
+	sort.Strings(unavailable)
+	return missing, unavailable
+}
+
+func flattenMissing(missing map[string][]string) []string {
+	if len(missing) == 0 {
+		return nil
+	}
+	slugs := make([]string, 0, len(missing))
+	for slug := range missing {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	var out []string
+	for _, slug := range slugs {
+		out = append(out, missing[slug]...)
+	}
+	return out
+}
+
+func logMissingCapabilityTools(missing map[string][]string, logger *slog.Logger) {
+	slugs := make([]string, 0, len(missing))
+	for slug := range missing {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		logger.Error("capability tool(s) MISSING from the tool registry -- a tool slice likely failed to parse and was SILENTLY skipped by the loader; the agent will hit 'tool not in registry' at runtime and can loop. Fix the tool definition (memql#1156 / #1154).",
+			"capability", slug,
+			"missing", missing[slug],
+			"expected", CapabilityToolNames(slug),
+		)
+	}
 }

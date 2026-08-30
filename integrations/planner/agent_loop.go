@@ -33,6 +33,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -65,6 +66,12 @@ type PlannerAgentLoop struct {
 	// owner's machine (memql#4362). Nil means never delegate, which is
 	// the behaviour that predates it.
 	delegation DelegationResolver
+	// triageUnavailable latches the "this cluster has no classifier provider"
+	// notice to once per process (memql#4693). The provider registry is built
+	// at boot and gains no entries later, so the answer cannot change under a
+	// running process -- and the un-latched version logged it per goal, which
+	// read as a recurring fault.
+	triageUnavailable sync.Once
 }
 
 // NewPlannerAgentLoop constructs a loop pinned to the planner integration's
