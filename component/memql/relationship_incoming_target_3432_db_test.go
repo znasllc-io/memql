@@ -213,7 +213,11 @@ func TestRelationshipChildOf_IncomingRelationshipReachesEveryChild(t *testing.T)
 // a future regression names fetchNodesByJSONFieldValues instead of sending
 // the next reader through the relationship resolvers to find it.
 func TestFetchNodesByJSONFieldValues_OneSourceIdManyTargets(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	// Borrows the package engine (memql#4569): this case mounts no fixture and
+	// mutates no engine state -- it only calls fetchNodesByJSONFieldValues and
+	// reads rows it seeded under its own uniqueSuffix. That is exactly the
+	// borrowing rule readMergeTestEngine's doc comment states.
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3432-json")
 	sfx := uniqueSuffix("rel-3432-json")
 	owner := "kb:" + sfx
@@ -250,7 +254,7 @@ func TestFetchNodesByJSONFieldValues_OneSourceIdManyTargets(t *testing.T) {
 // one row is indistinguishable from one that created a thousand when the
 // answer is capped at the number of identities asked about.
 func TestFetchNodesByNodeFieldValues_OneSourceValueManyTargets(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3432-nodefield")
 	sfx := uniqueSuffix("rel-3432-nodefield")
 	owner := "kb:" + sfx
@@ -282,7 +286,7 @@ func TestFetchNodesByNodeFieldValues_OneSourceValueManyTargets(t *testing.T) {
 // bound the query actually stated. A traversal that asks for 4 gets 4, not
 // the whole matching set.
 func TestFetchNodesByJSONFieldValues_HonoursTheCallersLimit(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3432-limit")
 	sfx := uniqueSuffix("rel-3432-limit")
 	owner := "kb:" + sfx
