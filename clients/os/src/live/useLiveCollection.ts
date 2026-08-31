@@ -64,8 +64,10 @@ export function useLiveCollection<T>(
   const collection = useMemo(() => {
     if (connection === null || key === null) return null;
     return new LiveCollection<T>(spec(connection), connection.subscriptions ?? null, LINGER_MS);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above: the
-    // spec factory is deliberately not a dependency.
+    // DEPS ARE (connection, key) ON PURPOSE: `spec` closes over the caller's
+    // props and is a fresh function on every render, so depending on it would
+    // rebuild the collection -- and therefore re-seed and re-subscribe -- on
+    // every render. `key` is the contract that says when the read changed.
   }, [connection, key]);
 
   useEffect(() => {

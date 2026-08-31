@@ -65,8 +65,10 @@ export function RoutingSection() {
     if (touched) return;
     setDraft(fromPolicy(policy));
     baseline.current = rowIdentity;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- rowIdentity IS
-    // the policy's value-identity; `policy` changes object on every fold.
+    // DEPS ARE (rowIdentity, touched) ON PURPOSE: rowIdentity IS the policy's
+    // value-identity, while `policy` is a fresh object on every fold -- so
+    // depending on the object would reset the draft on a change that touched
+    // nothing in it.
   }, [rowIdentity, touched]);
 
   const diverged = touched && policy !== null && rowIdentity !== baseline.current;

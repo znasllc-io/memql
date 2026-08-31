@@ -48,9 +48,9 @@ export function LabelEditor({
   const serialized = JSON.stringify(chipsFromMap(operatorLabels));
   useEffect(() => {
     setLocal(operatorLabels);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- serialized IS
-    // the value-identity of operatorLabels; depending on the object would
-    // fire on every fold.
+    // THE DEP IS `serialized` ON PURPOSE: it is the value-identity of
+    // operatorLabels, while the object itself is fresh on every heartbeat
+    // fold -- depending on the object would reset the editor constantly.
   }, [serialized]);
 
   function change(next: LabelMap) {

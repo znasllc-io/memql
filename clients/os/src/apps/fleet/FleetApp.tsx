@@ -55,8 +55,9 @@ export function FleetApp({ sectionId, navigate, store }: OsAppProps & { store?: 
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
       navigate(settings.defaultSection);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately
-    // once per mount: re-running on a section change would defeat the point.
+    // AN EMPTY DEP LIST IS THE POINT: this runs once per mount, which is
+    // once per window. Re-running it on a section change would drag an
+    // operator back to their default the moment they navigated away.
   }, []);
 
   if (sectionId === "settings") {
