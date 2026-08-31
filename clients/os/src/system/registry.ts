@@ -30,8 +30,18 @@ export interface OsAppManifest {
   icon: ComponentType<{ size?: number | string; "aria-hidden"?: boolean }>;
   roles?: RoleRequirement;
   sections?: OsAppSection[];
-  /** Section id the title-bar gear jumps to. */
-  settingsSection?: string;
+  /**
+   * Section id the title-bar gear jumps to. REQUIRED on every app
+   * (memql#4743): the owner's rule is that each app carries its own
+   * settings, reachable the same way everywhere, so the gear is never a
+   * button some windows happen not to have.
+   *
+   * It must name a section this manifest declares -- a gear pointing at an
+   * id `sectionsForRole` will not return navigates the window nowhere, and
+   * that failure is silent. `settingsSectionProblem` is the check;
+   * `test/system/settingsContract.test.ts` runs it over the real registry.
+   */
+  settingsSection: string;
   component: ComponentType<OsAppProps>;
 }
 
@@ -79,4 +89,25 @@ export function sectionsForRole(app: OsAppManifest, actorRole: string): OsAppSec
 export function canOpen(registry: OsRegistry, actorRole: string, appId: string): boolean {
   const app = appById(registry, appId);
   return !!app && roleAdmits(actorRole, app.roles);
+}
+
+/**
+ * The settings-section contract, as a function rather than a test assertion
+ * so the apps index can report the same defect it gates on.
+ *
+ * Returns null when the manifest is well-formed, otherwise the sentence to
+ * show. It checks the DECLARED sections, never the role-admitted ones: a
+ * gear target gated above the viewer is a legitimate manifest (the window
+ * simply shows no gear for them), while a gear target that exists for
+ * nobody is a bug in every session.
+ */
+export function settingsSectionProblem(app: OsAppManifest): string | null {
+  const target = app.settingsSection.trim();
+  if (target === "") return `${app.id}: settingsSection is empty`;
+  const sections = app.sections ?? [];
+  if (!sections.some((s) => s.id === target)) {
+    const declared = sections.map((s) => s.id).join(", ") || "none";
+    return `${app.id}: settingsSection "${target}" names no declared section (declared: ${declared})`;
+  }
+  return null;
 }

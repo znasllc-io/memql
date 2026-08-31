@@ -36,7 +36,9 @@ const settings: OsAppManifest = {
   sections: [
     { id: "about", name: "About" },
     { id: "appearance", name: "Appearance" },
+    { id: "apps", name: "Apps" },
     { id: "cluster", name: "Cluster", roles: { min: "admin" } },
+    { id: "diagnostics", name: "Diagnostics" },
   ],
   settingsSection: "appearance",
   component: SettingsApp,
