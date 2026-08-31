@@ -1536,6 +1536,19 @@ button:not(:disabled):active {
   gap: 7px;
 }
 
+/* The local-apps group is a card like the two label groups beside it: the
+ * three read as one row of facts about a machine, and one of them sitting
+ * unframed reads as an afterthought. */
+.os-fleet-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+}
+
 .os-fleet-applist {
   list-style: none;
   margin: 0;
@@ -1564,6 +1577,19 @@ button:not(:disabled):active {
 .os-fleet-app-state {
   margin-left: auto;
   font-size: var(--os-text-xs);
+}
+
+/* An already-revoked machine states the fact quietly. It is history rather
+ * than a warning -- the credential stopped working when it was revoked, and
+ * an alarm-toned banner would say something is wrong now. */
+.os-fleet-revoked {
+  padding: 8px 11px;
+  border-left: 2px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+}
+.os-fleet-revoked .os-caption {
+  margin: 0;
 }
 
 .os-fleet-confirm {
