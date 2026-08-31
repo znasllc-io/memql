@@ -69,7 +69,19 @@ export interface OsState {
 }
 
 export interface OsActions {
-  openApp: (appId: AppId) => ShellEffect;
+  /**
+   * Open an app, focusing its existing window when it is already running.
+   *
+   * `sectionId` is the section to open a NEW window ON, and it is not the
+   * same thing as navigating afterwards: an app applies its own
+   * default-section preference on mount (Fleet does), so a window created on
+   * the shell default and navigated a tick later gets dragged back. Opening
+   * it on the requested section is what lets the app tell "the shell put me
+   * here" apart from "somebody asked for this".
+   *
+   * Omitted = the shell default (the first role-admitted section).
+   */
+  openApp: (appId: AppId, sectionId?: string) => ShellEffect;
   closeWindow: (id: WindowId) => void;
   minimizeWindow: (id: WindowId) => void;
   toggleFullscreen: (id: WindowId) => void;
@@ -364,11 +376,12 @@ export function OsProvider({
     let lastEffect: ShellEffect = { kind: "none" };
 
     actionsRef.current = {
-      openApp: (appId) => {
+      openApp: (appId, sectionId) => {
         lastEffect = { kind: "none" };
         set((s) => {
           if (!canOpen(registry, actorRoleRef.current, appId)) return s;
-          const { state: shell, effect } = openAppFn(s.shell, appId, defaultSection(registry, actorRoleRef.current, appId));
+          const target = sectionId ?? defaultSection(registry, actorRoleRef.current, appId);
+          const { state: shell, effect } = openAppFn(s.shell, appId, target);
           lastEffect = effect;
           return { ...s, shell };
         });

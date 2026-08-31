@@ -1155,6 +1155,84 @@ button:not(:disabled):active {
   border-color: var(--os-accent);
 }
 
+/* --- Settings: the apps index, diagnostics and the report (memql#4741) --- */
+
+/* A directory, not a host: icon, name, and the way in. The grid keeps the
+ * three columns aligned down the list so the entries read as one table
+ * rather than as a stack of unrelated rows. */
+.os-app-index {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.os-app-entry {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+}
+.os-app-entry-mark {
+  display: grid;
+  place-items: center;
+  color: var(--os-muted);
+}
+.os-app-entry-name {
+  font-size: var(--os-text-base);
+}
+.os-app-entry-note {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+.os-transitions,
+.os-hidden-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: var(--os-text-sm);
+}
+/* Bounded and scrollable: the buffer holds fifty entries and a panel that
+ * grew to fifty lines would push the copy button off the surface. */
+.os-transitions {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.os-caption-inline {
+  color: var(--os-muted);
+}
+
+/* Refresh sits BESIDE its stamp: the control and the answer to "how old is
+ * this" are one thought, and separating them is how a stale reading gets
+ * read as a live one. */
+.os-refresh-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* The clipboard fallback. Monospace because the report is aligned text, and
+ * a proportional font would break the columns it was written with. */
+.os-report {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-surface);
+  color: var(--os-text);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+  resize: vertical;
+}
+
 .os-stub {
   height: 100%;
   display: grid;

@@ -52,6 +52,13 @@ export function FleetApp({ sectionId, navigate, store }: OsAppProps & { store?: 
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
+    // ONLY when the window opened on the SHELL's default. A window opened
+    // on a named section -- the Settings apps index deep-linking to this
+    // app's own settings, say -- was opened by somebody who said where they
+    // wanted to be, and a preference that overrode that would make the
+    // deep-link silently not work (memql#4743).
+    const shellDefault = FLEET_SECTIONS[0]?.id ?? "";
+    if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
       navigate(settings.defaultSection);
     }
