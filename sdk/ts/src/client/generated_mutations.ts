@@ -1866,6 +1866,8 @@ QueryClient.prototype.createCapability = function (this: QueryClient, args: Crea
 /** Create the cluster record */
 // Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["createCluster"] in generated_concepts.ts).
 export interface CreateClusterArgs {
+  /** The singleton row id. Deterministic on purpose -- see the note above. */
+  clusterId: string;
   name: string;
   region?: string;
   // Enum: bootstrapping | healthy | degraded | shutting_down
@@ -1878,6 +1880,7 @@ export interface CreateClusterArgs {
 
 export function buildCreateCluster(args: CreateClusterArgs): string {
   const parts: string[] = [];
+  parts.push("clusterId: " + renderMemQLValue(args.clusterId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.region !== undefined) parts.push("region: " + renderMemQLValue(args.region));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
@@ -2013,16 +2016,30 @@ QueryClient.prototype.createComposedView = function (this: QueryClient, args: Cr
 /** Register the cluster's database in the graph */
 // Bound concept: v1:cluster:database (machine-readable: BoundConcepts["createDatabase"] in generated_concepts.ts).
 export interface CreateDatabaseArgs {
+  /** The singleton row id. Deterministic on purpose -- see the note above. */
+  databaseId: string;
   host: string;
   dbName: string;
   sslMode?: string;
+  /** From the DSN. It used to be STAMPED as the literal 5432, so every cluster whose Postgres listened anywhere else recorded the wrong port while the DSN parse had the right one sitting in the payload (memql#4766). */
+  port?: number;
+  engineVersion?: string;
+  extensions?: string[];
+  extensionVersions?: Record<string, unknown>;
+  clusterId?: string;
 }
 
 export function buildCreateDatabase(args: CreateDatabaseArgs): string {
   const parts: string[] = [];
+  parts.push("databaseId: " + renderMemQLValue(args.databaseId));
   parts.push("host: " + renderMemQLValue(args.host));
   parts.push("dbName: " + renderMemQLValue(args.dbName));
   if (args.sslMode !== undefined) parts.push("sslMode: " + renderMemQLValue(args.sslMode));
+  if (args.port !== undefined) parts.push("port: " + renderMemQLValue(args.port));
+  if (args.engineVersion !== undefined) parts.push("engineVersion: " + renderMemQLValue(args.engineVersion));
+  if (args.extensions !== undefined) parts.push("extensions: " + renderMemQLValue(args.extensions));
+  if (args.extensionVersions !== undefined) parts.push("extensionVersions: " + renderMemQLValue(args.extensionVersions));
+  if (args.clusterId !== undefined) parts.push("clusterId: " + renderMemQLValue(args.clusterId));
   return "mutation createDatabase(" + parts.join(", ") + ")";
 }
 
@@ -2438,18 +2455,28 @@ QueryClient.prototype.createIdentity = function (this: QueryClient, args: Create
 /** Register the cluster's identity provider in the graph */
 // Bound concept: v1:cluster:identityProvider (machine-readable: BoundConcepts["createIdentityProvider"] in generated_concepts.ts).
 export interface CreateIdentityProviderArgs {
+  /** The singleton row id. Deterministic on purpose -- see the note above. */
+  identityProviderId: string;
   name: string;
   issuerUrl: string;
   clientIdPrefix?: string;
   redirectUrl?: string;
+  /** Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation step, which forwarded four fields out of six (memql#4766). */
+  acceptedAudiences?: string[];
+  jwksUrl?: string;
+  clusterId?: string;
 }
 
 export function buildCreateIdentityProvider(args: CreateIdentityProviderArgs): string {
   const parts: string[] = [];
+  parts.push("identityProviderId: " + renderMemQLValue(args.identityProviderId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("issuerUrl: " + renderMemQLValue(args.issuerUrl));
   if (args.clientIdPrefix !== undefined) parts.push("clientIdPrefix: " + renderMemQLValue(args.clientIdPrefix));
   if (args.redirectUrl !== undefined) parts.push("redirectUrl: " + renderMemQLValue(args.redirectUrl));
+  if (args.acceptedAudiences !== undefined) parts.push("acceptedAudiences: " + renderMemQLValue(args.acceptedAudiences));
+  if (args.jwksUrl !== undefined) parts.push("jwksUrl: " + renderMemQLValue(args.jwksUrl));
+  if (args.clusterId !== undefined) parts.push("clusterId: " + renderMemQLValue(args.clusterId));
   return "mutation createIdentityProvider(" + parts.join(", ") + ")";
 }
 

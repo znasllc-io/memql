@@ -197,3 +197,55 @@ query releaseCut releaseCuts {
   sort     "row.createdAt", "desc"
   paginate 50
 }
+
+// ---- the cluster's own infrastructure rows (memql#4766) ----
+
+// THE FIRST READERS THESE TWO CONCEPTS HAVE EVER HAD.
+//
+// v1:cluster:database and v1:cluster:identityProvider were written at bootstrap
+// and then looked at by nothing -- which is exactly why half their fields could
+// sit unwritten for so long without anyone noticing. No query bound either
+// concept, so neither appeared in rowauthz_undeclared_gate_test.go's seed list
+// (that list is derived from queries over undeclared concepts), and no surface
+// could contradict the rows.
+//
+// Adding a reader is what makes the tier necessary. Both concepts now declare
+// @rowAuthz(clusterOwner) -- plain, like releaseCut, because neither has a
+// per-user owner field to point at. Declaring it was free: a tier narrows
+// existing reads, and there were none.
+//
+// BOTH TERMS ARE PRESENT ON PURPOSE, the same pairing releaseCuts records.
+// `requiresOwner` is the query's own gate and `actor.isClusterOwner==true` is
+// what the declared tier compares; spelling out only the spec leaves the
+// enforcement gate reporting the construct UNDECIDABLE.
+//
+// NO SHAPE, deliberately. A shapeless query projects every field of its bound
+// concept, and here that is the intent rather than an oversight: these rows are
+// a topology record an operator reads whole, and neither carries a credential
+// -- `clientIdPrefix` is the first eight characters of a client id and
+// documents itself as non-secret. (Contrast pendingUserInvitations, which was
+// shapeless over a concept holding three token digests.)
+
+/// The database backing this cluster: where it is, what engine and version, and which extensions
+/// are installed. CLUSTER OWNER ONLY.
+@unbounded("the cluster's one database row -- a singleton at a fixed id, read whole")
+@actor
+query database clusterDatabase {
+  // PINNED TO THE LITERAL ID, and that is not decoration. A cluster that
+  // predates memql#4766 still holds a database row at a GENERATED id, written
+  // by the old bootstrap and never completed. Without this term the read
+  // returns that orphan alongside the current row and a panel shows two
+  // databases, one of them wrong. Pinning makes the read what its @unbounded
+  // reason already claims it is: a singleton at a fixed id.
+  filter  row.id=="v1:cluster:database:primary" && requiresOwner && actor.isClusterOwner==true
+}
+
+/// The identity provider this cluster authenticates against: issuer, JWKS URL and accepted
+/// audiences. CLUSTER OWNER ONLY. No secrets -- clientIdPrefix is the non-secret prefix.
+@unbounded("the cluster's one identity-provider row -- a singleton at a fixed id, read whole")
+@actor
+query identityProvider clusterIdentityProvider {
+  // Pinned for the reason clusterDatabase records: a pre-memql#4766 cluster
+  // holds an orphan at a generated id.
+  filter  row.id=="v1:cluster:identityProvider:primary" && requiresOwner && actor.isClusterOwner==true
+}

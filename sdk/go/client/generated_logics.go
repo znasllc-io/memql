@@ -154,6 +154,29 @@ func BootstrapSessionBuild(args BootstrapSessionArgs) string {
 	return b.String()
 }
 
+// ClusterInfraRefresh -- True on a bff node's startup, whether or not the cluster already exists.
+// THE SECOND DECISION, SPLIT OUT OF THE FIRST (memql#4766). `bootstrapCluster` answers "should the cluster row be CREATED", which is a once-per-lifetime question and rightly gated on `existing.empty()`. The database and identity-provider rows ask something different: "what is true about this cluster's infrastructure right now".
+// Those two were the same gate, and that is the whole defect the issue is named for -- the rows were written once, at first boot, and no later start could complete or correct them. An engine upgrade never moved `engineVersion`; a new extension never appeared; a cluster that predated a field kept the gap forever.
+// Refreshing them is safe because their ids are literal: a second write is a new VERSION of the same logical row, and a read collapses to the latest, so this converges rather than accumulating rows. It is also what makes the backfill question answer itself -- an existing cluster completes its rows on the next bff start, with no migration and no rebuild.
+type ClusterInfraRefreshArgs struct {
+	Event map[string]any
+}
+
+// ClusterInfraRefresh calls the engine logic clusterInfraRefresh.
+func (qc *QueryClient) ClusterInfraRefresh(ctx context.Context, args ClusterInfraRefreshArgs) (*Result, error) {
+	call := ClusterInfraRefreshBuild(args)
+	return qc.executeNamed(ctx, "clusterInfraRefresh", call)
+}
+
+func ClusterInfraRefreshBuild(args ClusterInfraRefreshArgs) string {
+	var b strings.Builder
+	b.WriteString("logic clusterInfraRefresh(")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConflictDetection -- Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.
 type ConflictDetectionArgs struct {
 	Event map[string]any

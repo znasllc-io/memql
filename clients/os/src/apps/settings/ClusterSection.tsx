@@ -6,6 +6,7 @@ import { mailHeadline, mailTone } from "./mailStatus";
 import {
   useClusterIdentity,
   useDeploymentFacts,
+  useInfrastructureFacts,
   useMailStatus,
   useProviderStatus,
 } from "./useClusterFacts";
@@ -21,18 +22,31 @@ import {
 // `providerAuthStatus` carries no credential or fingerprint of one. The
 // panel adds no secret-bearing read of its own.
 //
-// WHAT THIS PANEL DELIBERATELY DOES NOT CLAIM. The epic's brief named
-// database engine facts and a "JWKS reachable" line off
-// `v1:cluster:identityProvider.status` + `lastVerifiedAt`. Those fields have
-// no writer: `createDatabase` stamps `engine`/`status` and never
-// `engineVersion`/`extensions`, `createIdentityProvider` never writes
-// `jwksUrl` or `lastVerifiedAt`, and `status` is stamped "connected" at
-// bootstrap and never refreshed. Rendering a frozen literal as a health
-// check is worse than omitting it -- an operator would read "JWKS
-// reachable" from a constant. The engine version shown here is the LIVE one
-// the node reports on the ServerHello, and the deployment pins come from
-// rows something actually writes. See memql#4742 for the bootstrap-path
-// work that would make the rest real.
+// WHAT THIS PANEL CLAIMS, AND WHAT IT STILL WILL NOT.
+//
+// The epic's brief named database engine facts and a "JWKS reachable" line.
+// The first half is now real and rendered: memql#4766 gave `engineVersion`,
+// `extensions`, `extensionVersions`, `jwksUrl` and `acceptedAudiences` actual
+// writers -- the database facts are probed from the live connection at
+// startup, and the two identity fields were always computed and are now
+// forwarded rather than dropped.
+//
+// The health line is not, and will not be. `identityProvider.status` and
+// `lastVerifiedAt` were REMOVED rather than filled: no writer is honest at
+// that granularity (every node refreshes JWKS on a five-minute timer, so
+// either every node writes or the row reports one node's view), and a stored
+// freshness stamp read an hour later is not a health signal.
+// `database.status` was removed as structurally unanswerable -- the row lives
+// in the database it describes, so a successful read can only ever say
+// "healthy". Rendering a frozen literal as a health check is worse than
+// omitting it. Do not add either line back off these rows; probe live and say
+// when you looked.
+//
+// The engine version in the connection block is still the LIVE one off the
+// ServerHello. It sits beside the recorded one on purpose: they answer
+// different questions -- what this node is talking to now, versus what the
+// cluster recorded at its last bff start -- and a disagreement between them
+// is worth seeing.
 
 export function ClusterSection() {
   const { access, config } = useSession();
@@ -41,6 +55,10 @@ export function ClusterSection() {
   const deployment = useDeploymentFacts(identity.cluster?.id ?? "");
   const mail = useMailStatus(true);
   const providers = useProviderStatus(true);
+  // Owner-only reads, same as providerAuthStatus: gate the CALL on the role so
+  // an admin does not issue a read whose empty answer we already know, and let
+  // the engine remain the authority either way.
+  const infra = useInfrastructureFacts(access?.clusterRole === "owner");
 
   return (
     <div className="os-settings">
@@ -112,6 +130,75 @@ export function ClusterSection() {
           </>
         )}
         {deployment.error ? <Caption>{deployment.error}</Caption> : null}
+      </section>
+
+      <section className="os-field-group" aria-label="Infrastructure">
+        <h4 className="os-subhead">Infrastructure</h4>
+        {access?.clusterRole !== "owner" ? (
+          <Caption>
+            The database and identity-provider records are cluster-owner only. This section admits
+            admins, and the engine decides that read, not this window.
+          </Caption>
+        ) : infra.error ? (
+          <Refusal role={access?.clusterRole ?? ""} message={infra.error} />
+        ) : infra.loading ? (
+          <Caption>Loading from the cluster</Caption>
+        ) : (
+          <>
+            {infra.database === null ? (
+              <Caption>
+                No database record. It is written when a bff node starts, so a cluster that has not
+                restarted since this was added will not have one yet.
+              </Caption>
+            ) : (
+              <dl className="os-facts">
+                <dt>Database</dt>
+                <dd className="os-mono">
+                  {infra.database.dbName} on {infra.database.host}:{infra.database.port}
+                </dd>
+                <dt>Recorded engine</dt>
+                <dd className="os-mono">
+                  {infra.database.engine} {infra.database.engineVersion || "--"}
+                </dd>
+                <dt>SSL mode</dt>
+                <dd className="os-mono">{infra.database.sslMode || "--"}</dd>
+                <dt>Extensions</dt>
+                <dd className="os-mono">
+                  {infra.database.extensions.length === 0
+                    ? "--"
+                    : infra.database.extensions
+                        .map((name) => {
+                          const version = infra.database?.extensionVersions[name];
+                          return version ? `${name} ${version}` : name;
+                        })
+                        .join(", ")}
+                </dd>
+              </dl>
+            )}
+            {infra.identityProvider === null ? null : (
+              <dl className="os-facts">
+                <dt>Identity provider</dt>
+                <dd className="os-mono">
+                  {infra.identityProvider.name} ({infra.identityProvider.providerType})
+                </dd>
+                <dt>Issuer</dt>
+                <dd className="os-mono">{infra.identityProvider.issuerUrl || "--"}</dd>
+                <dt>JWKS</dt>
+                <dd className="os-mono">{infra.identityProvider.jwksUrl || "--"}</dd>
+                <dt>Accepted audiences</dt>
+                <dd className="os-mono">
+                  {infra.identityProvider.acceptedAudiences.length === 0
+                    ? "--"
+                    : infra.identityProvider.acceptedAudiences.join(", ")}
+                </dd>
+              </dl>
+            )}
+            <Caption>
+              Recorded when a bff node last started -- not a live probe, and deliberately carrying
+              no health verdict.
+            </Caption>
+          </>
+        )}
       </section>
 
       <section className="os-field-group" aria-label="Mail sender">

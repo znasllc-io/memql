@@ -793,8 +793,14 @@ func (a *App) EmitSystemStartup() {
 		"node": nodePayload,
 	}
 
-	// Parse database info from DSN.
+	// Parse database info from DSN, then ASK THE DATABASE for the rest.
+	//
+	// The DSN carries where the database is; only the connection carries what
+	// it IS. `engineVersion`, `extensions` and `extensionVersions` were
+	// declared on v1:cluster:database and written by nothing (memql#4766) --
+	// not because they were hard to obtain but because nothing had asked.
 	if dbInfo := parseDatabaseInfo(); dbInfo != nil {
+		a.addDatabaseServerFacts(dbInfo)
 		payload["database"] = dbInfo
 	}
 
@@ -874,6 +880,75 @@ func parseDatabaseInfo() map[string]any {
 	}
 
 	return info
+}
+
+// addDatabaseServerFacts fills the fields only the live connection knows:
+// the engine version and the installed extensions (memql#4766).
+//
+// BEST-EFFORT, AND SILENT ON FAILURE BY DESIGN. This runs on the startup path
+// of every node; a database that cannot answer `version()` is a cluster with
+// much louder problems than an unpopulated topology row, and failing the
+// startup event here would turn a cosmetic gap into an outage. Each field is
+// probed independently for the same reason -- an unreadable pg_extension must
+// not cost the engine version.
+//
+// The extension read is the same shape component/database/timescaledb.go
+// already uses at boot; this one is unfiltered because the row's purpose is to
+// record what the cluster HAS, not to check for one name.
+func (a *App) addDatabaseServerFacts(info map[string]any) {
+	if a == nil || info == nil {
+		return
+	}
+	db := a.BunDB()
+	if db == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// `server_version` rather than `version()`: the latter is a sentence
+	// ("PostgreSQL 16.4 on aarch64-...") and the field documents itself with
+	// the example "16.4".
+	var serverVersion string
+	if err := db.NewSelect().
+		ColumnExpr("current_setting('server_version')").
+		Scan(ctx, &serverVersion); err != nil {
+		a.Logger.Warn("cluster topology: could not read the database engine version", "error", err)
+	} else if v := strings.TrimSpace(serverVersion); v != "" {
+		info["engineVersion"] = v
+	}
+
+	type extRow struct {
+		Name    string `bun:"name"`
+		Version string `bun:"version"`
+	}
+	var rows []extRow
+	if err := db.NewSelect().
+		TableExpr("pg_extension AS e").
+		ColumnExpr("e.extname AS name").
+		ColumnExpr("e.extversion AS version").
+		OrderExpr("e.extname").
+		Scan(ctx, &rows); err != nil {
+		a.Logger.Warn("cluster topology: could not read the installed extensions", "error", err)
+		return
+	}
+	// Both shapes are written, because they answer different questions and the
+	// concept declares both: `extensions` is "what is installed" (a list a
+	// surface can render or search), `extensionVersions` is "at which
+	// version" (a map keyed by the same names).
+	names := make([]string, 0, len(rows))
+	versions := make(map[string]any, len(rows))
+	for _, row := range rows {
+		if row.Name == "" {
+			continue
+		}
+		names = append(names, row.Name)
+		versions[row.Name] = row.Version
+	}
+	if len(names) > 0 {
+		info["extensions"] = names
+		info["extensionVersions"] = versions
+	}
 }
 
 // parseIdentityProviderInfo extracts non-secret identity-service

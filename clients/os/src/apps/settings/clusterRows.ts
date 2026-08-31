@@ -3,7 +3,13 @@
 // reason `apps/fleet/rows.ts` states: a projection asserted through render()
 // is asserted through three layers that can each fail for unrelated reasons.
 
-import { rowArray, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import {
+  rowArray,
+  rowNumber,
+  rowObject,
+  rowString,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../fleet/rows";
 
@@ -135,4 +141,84 @@ function rowBool(row: Row, key: string): boolean {
 
 export function stringList(row: Row, key: string): string[] {
   return (rowArray(row, key) ?? []).filter((entry): entry is string => typeof entry === "string");
+}
+
+// ---------------------------------------------------------------------------
+// The cluster's infrastructure rows (memql#4766)
+// ---------------------------------------------------------------------------
+//
+// These two carried fields that were declared and written by nothing until
+// memql#4766, which is why this panel could not render them and said so. They
+// have writers now: `engineVersion` / `extensions` / `extensionVersions` are
+// probed from the live connection at startup, and `jwksUrl` /
+// `acceptedAudiences` were always computed and are now forwarded.
+//
+// The `status` fields the brief originally wanted are NOT here because they no
+// longer exist. `database.status` was removed as structurally unanswerable --
+// the row lives in the database it describes, so a successful read can only
+// ever say "healthy" -- and `identityProvider.status` / `lastVerifiedAt` were
+// removed for want of an honest writer. Do not reintroduce a health line off
+// either concept.
+
+export interface DatabaseRow {
+  id: string;
+  host: string;
+  port: number;
+  dbName: string;
+  engine: string;
+  engineVersion: string;
+  extensions: readonly string[];
+  extensionVersions: Readonly<Record<string, string>>;
+  sslMode: string;
+}
+
+export function databaseFromRow(raw: Row): DatabaseRow {
+  const row = flatten(raw);
+  const versions = rowObject(row, "extensionVersions") ?? {};
+  const mapped: Record<string, string> = {};
+  for (const [name, version] of Object.entries(versions)) {
+    if (typeof version === "string") mapped[name] = version;
+  }
+  return {
+    id: rowString(row, "id") ?? "",
+    host: rowString(row, "host") ?? "",
+    port: rowNumber(row, "port") ?? 0,
+    dbName: rowString(row, "dbName") ?? "",
+    engine: rowString(row, "engine") ?? "",
+    engineVersion: rowString(row, "engineVersion") ?? "",
+    extensions: (rowArray(row, "extensions") ?? []).filter(
+      (v): v is string => typeof v === "string",
+    ),
+    extensionVersions: mapped,
+    sslMode: rowString(row, "sslMode") ?? "",
+  };
+}
+
+export interface IdentityProviderRow {
+  id: string;
+  name: string;
+  providerType: string;
+  issuerUrl: string;
+  jwksUrl: string;
+  acceptedAudiences: readonly string[];
+  redirectUrl: string;
+  /** The first eight characters of the OAuth client id. Documented non-secret;
+   *  it identifies the client without being one. */
+  clientIdPrefix: string;
+}
+
+export function identityProviderFromRow(raw: Row): IdentityProviderRow {
+  const row = flatten(raw);
+  return {
+    id: rowString(row, "id") ?? "",
+    name: rowString(row, "name") ?? "",
+    providerType: rowString(row, "providerType") ?? "",
+    issuerUrl: rowString(row, "issuerUrl") ?? "",
+    jwksUrl: rowString(row, "jwksUrl") ?? "",
+    acceptedAudiences: (rowArray(row, "acceptedAudiences") ?? []).filter(
+      (v): v is string => typeof v === "string",
+    ),
+    redirectUrl: rowString(row, "redirectUrl") ?? "",
+    clientIdPrefix: rowString(row, "clientIdPrefix") ?? "",
+  };
 }

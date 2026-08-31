@@ -6,6 +6,8 @@
 /// Create the cluster record
 mutate cluster createCluster {
   args {
+    /// The singleton row id. Deterministic on purpose -- see the note above.
+    clusterId           string!
     name                string!
     region              string
     status              enum("bootstrapping", "healthy", "degraded", "shutting_down")
@@ -15,6 +17,7 @@ mutate cluster createCluster {
     provider            string
   }
   insert {
+    id: args.clusterId
     args.name
     args.region
     seedNodeTypes: ["bff", "cognition", "planner"]
@@ -33,16 +36,26 @@ mutate cluster createCluster {
 /// Register the cluster's database in the graph
 mutate database createDatabase {
   args {
-    host     string!
-    dbName   string!
-    sslMode  string
+    /// The singleton row id. Deterministic on purpose -- see the note above.
+    databaseId        string!
+    host              string!
+    dbName            string!
+    sslMode           string
+    /// From the DSN. It used to be STAMPED as the literal 5432, so every cluster whose Postgres
+    /// listened anywhere else recorded the wrong port while the DSN parse had the right one sitting
+    /// in the payload (memql#4766).
+    port              int
+    engineVersion     string
+    extensions        []string
+    extensionVersions object
+    clusterId         string
   }
   insert {
-    accept { host, dbName, sslMode }
+    accept { host, dbName, sslMode, engineVersion, extensions, extensionVersions, clusterId }
     stamp {
-      port: 5432
+      id: args.databaseId
+      port: args.port ?? 5432
       engine: "postgresql"
-      status: "healthy"
     }
   }
 }
@@ -54,16 +67,23 @@ mutate database createDatabase {
 /// Register the cluster's identity provider in the graph
 mutate identityProvider createIdentityProvider {
   args {
-    name            string!
-    issuerUrl       string!
-    clientIdPrefix  string
-    redirectUrl     string
+    /// The singleton row id. Deterministic on purpose -- see the note above.
+    identityProviderId  string!
+    name                string!
+    issuerUrl           string!
+    clientIdPrefix      string
+    redirectUrl         string
+    /// Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor
+    /// by the automation step, which forwarded four fields out of six (memql#4766).
+    acceptedAudiences   []string
+    jwksUrl             string
+    clusterId           string
   }
   insert {
-    accept { name, issuerUrl, clientIdPrefix, redirectUrl }
+    accept { name, issuerUrl, clientIdPrefix, redirectUrl, acceptedAudiences, jwksUrl, clusterId }
     stamp {
+      id: args.identityProviderId
       providerType: "oidc"
-      status: "connected"
     }
   }
 }
