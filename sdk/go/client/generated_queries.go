@@ -1917,6 +1917,40 @@ func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) st
 	return "query cataloguedConstructsForOwner()"
 }
 
+// ClusterDatabase -- The database backing this cluster: where it is, what engine and version, and which extensions are installed. CLUSTER OWNER ONLY.
+//
+// Bound concept: v1:cluster:database (machine-readable: BoundConcepts["clusterDatabase"] in generated_concepts.go).
+type ClusterDatabaseArgs struct {
+}
+
+// ClusterDatabase calls the engine query clusterDatabase.
+func (qc *QueryClient) ClusterDatabase(ctx context.Context, args ClusterDatabaseArgs) (*Result, error) {
+	call := ClusterDatabaseBuild(args)
+	return qc.executeNamed(ctx, "clusterDatabase", call)
+}
+
+func ClusterDatabaseBuild(args ClusterDatabaseArgs) string {
+	_ = args
+	return "query clusterDatabase()"
+}
+
+// ClusterIdentityProvider -- The identity provider this cluster authenticates against: issuer, JWKS URL and accepted audiences. CLUSTER OWNER ONLY. No secrets -- clientIdPrefix is the non-secret prefix.
+//
+// Bound concept: v1:cluster:identityProvider (machine-readable: BoundConcepts["clusterIdentityProvider"] in generated_concepts.go).
+type ClusterIdentityProviderArgs struct {
+}
+
+// ClusterIdentityProvider calls the engine query clusterIdentityProvider.
+func (qc *QueryClient) ClusterIdentityProvider(ctx context.Context, args ClusterIdentityProviderArgs) (*Result, error) {
+	call := ClusterIdentityProviderBuild(args)
+	return qc.executeNamed(ctx, "clusterIdentityProvider", call)
+}
+
+func ClusterIdentityProviderBuild(args ClusterIdentityProviderArgs) string {
+	_ = args
+	return "query clusterIdentityProvider()"
+}
+
 // ClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 //
 // Bound concept: v1:cluster:nodeType (machine-readable: BoundConcepts["clusterNodeTypes"] in generated_concepts.go).

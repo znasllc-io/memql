@@ -18,6 +18,9 @@ const h = vi.hoisted(() => {
     specs: [] as unknown[],
     mail: [] as unknown[],
     providers: [] as unknown[],
+    database: [] as unknown[],
+    identityProvider: [] as unknown[],
+    infraError: null as Error | null,
     mailError: null as Error | null,
     providerError: null as Error | null,
     integrationCalls: 0,
@@ -39,6 +42,14 @@ const h = vi.hoisted(() => {
       providerAuthStatus: vi.fn(async () => {
         if (state.providerError) throw state.providerError;
         return reply(state.providers);
+      }),
+      clusterDatabase: vi.fn(async () => {
+        if (state.infraError) throw state.infraError;
+        return reply(state.database);
+      }),
+      clusterIdentityProvider: vi.fn(async () => {
+        if (state.infraError) throw state.infraError;
+        return reply(state.identityProvider);
       }),
     },
     onStatusChange: (fn: (ev: { status: string; attempt: number; error: string }) => void) => {
@@ -160,9 +171,102 @@ beforeEach(() => {
   h.state.providers = [
     { id: "chat54Mini", name: "chat54Mini", vendor: "OpenAI", model: "gpt-5.4-mini", available: true, authSource: "env" },
   ];
+  h.state.database = [
+    {
+      id: "v1:cluster:database:primary",
+      payload: {
+        host: "db.example.com",
+        port: 15432,
+        dbName: "memql",
+        engine: "postgresql",
+        engineVersion: "16.4",
+        extensions: ["timescaledb", "vector"],
+        extensionVersions: { timescaledb: "2.25.2", vector: "0.8.2" },
+        sslMode: "require",
+        clusterId: "v1:cluster:cluster:c1",
+      },
+    },
+  ];
+  h.state.identityProvider = [
+    {
+      id: "v1:cluster:identityProvider:primary",
+      payload: {
+        name: "MemQL Identity",
+        providerType: "oidc",
+        issuerUrl: "https://identity.example.com/",
+        jwksUrl: "https://identity.example.com/.well-known/jwks.json",
+        acceptedAudiences: ["memql-api"],
+        clientIdPrefix: "abc12345",
+        clusterId: "v1:cluster:cluster:c1",
+      },
+    },
+  ];
+  h.state.infraError = null;
   h.state.mailError = null;
   h.state.providerError = null;
   h.state.integrationCalls = 0;
+});
+
+describe("infrastructure facts (memql#4766)", () => {
+  it("renders the database and identity-provider records", async () => {
+    // These are the fields that had no writer at all until memql#4766 -- the
+    // panel could not show them and said so in its own comment.
+    await renderCluster();
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(within(section).getByText("postgresql 16.4")).toBeTruthy();
+    expect(within(section).getByText("timescaledb 2.25.2, vector 0.8.2")).toBeTruthy();
+    expect(
+      within(section).getByText("https://identity.example.com/.well-known/jwks.json"),
+    ).toBeTruthy();
+    expect(within(section).getByText("memql-api")).toBeTruthy();
+  });
+
+  it("shows the real port rather than a stamped 5432", async () => {
+    // createDatabase used to stamp the literal 5432 while the DSN parse held
+    // the true value; the fixture is on 15432 so a regression is visible.
+    await renderCluster();
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(within(section).getByText("memql on db.example.com:15432")).toBeTruthy();
+  });
+
+  it("carries no health verdict, because the status fields were removed", async () => {
+    // database.status was structurally unanswerable and identityProvider.status
+    // had no honest writer; both are gone. A panel line reading either would be
+    // a constant dressed as a health check.
+    await renderCluster();
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(within(section).queryByText(/reachable|connected|healthy/i)).toBeNull();
+    expect(within(section).getByText(/deliberately carrying no health verdict/)).toBeTruthy();
+  });
+
+  it("tells an admin the read is owner-only instead of issuing it", async () => {
+    // The section admits admin; these two reads are cluster-owner only. An
+    // admin should read WHY rather than see an empty panel -- and we should
+    // not spend a round trip on an answer we already know.
+    // mockClear FIRST: vitest isolates per FILE, not per test, and this spy is
+    // module-level -- the owner tests above have already called it, so a bare
+    // not.toHaveBeenCalled() fails on their history rather than on this
+    // render.
+    h.connection.query.clusterDatabase.mockClear();
+    h.connection.query.clusterIdentityProvider.mockClear();
+
+    await renderCluster("admin");
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(within(section).getByText(/cluster-owner only/)).toBeTruthy();
+    expect(h.connection.query.clusterDatabase).not.toHaveBeenCalled();
+    expect(h.connection.query.clusterIdentityProvider).not.toHaveBeenCalled();
+  });
+
+  it("says a cluster that has not restarted yet has no record", async () => {
+    // The rows are written when a bff starts. An existing cluster picks them
+    // up on its next restart, so "absent" is a real and temporary state that
+    // must not read as breakage.
+    h.state.database = [];
+    h.state.identityProvider = [];
+    await renderCluster();
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(within(section).getByText(/has not restarted since this was added/)).toBeTruthy();
+  });
 });
 
 describe("cluster facts (memql#4742)", () => {

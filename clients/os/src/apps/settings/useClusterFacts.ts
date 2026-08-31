@@ -9,14 +9,18 @@ import { useLiveCollection } from "../../live/useLiveCollection";
 import { roleAdmits } from "../../system/roles";
 import {
   clusterFromRow,
+  databaseFromRow,
   deploymentFromRow,
+  identityProviderFromRow,
   latestDeployment,
   nodeSpecFromRow,
   providerFromRow,
   resolvedVersion,
   ridesTheSpine,
   type ClusterRow,
+  type DatabaseRow,
   type DeploymentRow,
+  type IdentityProviderRow,
   type NodeSpecRow,
   type ProviderStatusRow,
 } from "./clusterRows";
@@ -75,6 +79,82 @@ export function useClusterIdentity(): ClusterIdentity {
   const rows = handle.snapshot.rows;
   const cluster = useMemo(() => (rows.length > 0 ? clusterFromRow(rows[0]!) : null), [rows]);
   return { cluster, loading: handle.snapshot.state === "seeding" };
+}
+
+/**
+ * The cluster's database and identity-provider rows (memql#4766).
+ *
+ * ONE HOOK FOR BOTH because they are one question -- "what is this cluster
+ * built on" -- read from two singletons, and a panel that loaded them
+ * separately would show half an answer twice as often.
+ *
+ * NOT a live collection, unlike the cluster and deployment feeds above. These
+ * rows change when a bff restarts, which is not something to hold a
+ * subscription open for; a read on open is the honest cadence and it says when
+ * it looked.
+ *
+ * CLUSTER-OWNER ONLY, while this section admits admin. That gap is deliberate
+ * and is the same one `providerAuthStatus` has: the reads carry
+ * `requiresOwner && actor.isClusterOwner==true`, so an admin gets an empty
+ * result rather than an error. `enabled` keeps us from issuing a read we know
+ * will come back empty; it is a courtesy and never the authorization.
+ */
+export interface InfrastructureFacts {
+  database: DatabaseRow | null;
+  identityProvider: IdentityProviderRow | null;
+  loading: boolean;
+  error: string;
+}
+
+export function useInfrastructureFacts(enabled: boolean): InfrastructureFacts {
+  const connection = useOsConnection();
+  const [state, setState] = useState<InfrastructureFacts>({
+    database: null,
+    identityProvider: null,
+    loading: false,
+    error: "",
+  });
+
+  useEffect(() => {
+    if (connection === null || !enabled) {
+      setState({ database: null, identityProvider: null, loading: false, error: "" });
+      return;
+    }
+    const controller = new AbortController();
+    let live = true;
+    setState((held) => ({ ...held, loading: true, error: "" }));
+    void (async () => {
+      try {
+        const [db, idp] = await Promise.all([
+          connection.query.clusterDatabase({}, { signal: controller.signal }),
+          connection.query.clusterIdentityProvider({}, { signal: controller.signal }),
+        ]);
+        if (!live) return;
+        const dbRows = [...db.rows()];
+        const idpRows = [...idp.rows()];
+        setState({
+          database: dbRows.length > 0 ? databaseFromRow(dbRows[0]!) : null,
+          identityProvider: idpRows.length > 0 ? identityProviderFromRow(idpRows[0]!) : null,
+          loading: false,
+          error: "",
+        });
+      } catch (err: unknown) {
+        if (!live) return;
+        setState({
+          database: null,
+          identityProvider: null,
+          loading: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [connection, enabled]);
+
+  return state;
 }
 
 export interface DeploymentFacts {

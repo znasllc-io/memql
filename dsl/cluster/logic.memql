@@ -42,6 +42,39 @@ logic bootstrapCluster {
   }
 }
 
+/// True on a bff node's startup, whether or not the cluster already exists.
+///
+/// THE SECOND DECISION, SPLIT OUT OF THE FIRST (memql#4766). `bootstrapCluster`
+/// answers "should the cluster row be CREATED", which is a once-per-lifetime
+/// question and rightly gated on `existing.empty()`. The database and
+/// identity-provider rows ask something different: "what is true about this
+/// cluster's infrastructure right now".
+///
+/// Those two were the same gate, and that is the whole defect the issue is
+/// named for -- the rows were written once, at first boot, and no later start
+/// could complete or correct them. An engine upgrade never moved
+/// `engineVersion`; a new extension never appeared; a cluster that predated a
+/// field kept the gap forever.
+///
+/// Refreshing them is safe because their ids are literal: a second write is a
+/// new VERSION of the same logical row, and a read collapses to the latest, so
+/// this converges rather than accumulating rows. It is also what makes the
+/// backfill question answer itself -- an existing cluster completes its rows on
+/// the next bff start, with no migration and no rebuild.
+logic clusterInfraRefresh {
+  args {
+    event object!
+  }
+  body {
+  // `cond(...)` rather than a bare `return <comparison>`: an identifier-led
+  // comparison in a terminal return position returns its own SOURCE TEXT
+  // instead of evaluating (#2655/#2693), and the loader refuses it. Its
+  // sibling above gets away with the same shape only because the comparison
+  // is one half of an `&&`.
+  return cond(args.event.payload.node.type == "bff", true, false)
+  }
+}
+
 // ---- logic/v1/cluster/pruneStaleClusterNodes.memql ----
 
 // pruneStaleClusterNodes

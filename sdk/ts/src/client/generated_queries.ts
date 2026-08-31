@@ -1947,6 +1947,46 @@ QueryClient.prototype.cataloguedConstructsForOwner = function (this: QueryClient
   return this.executeNamed("cataloguedConstructsForOwner", buildCataloguedConstructsForOwner(args), opts);
 };
 
+/** The database backing this cluster: where it is, what engine and version, and which extensions are installed. CLUSTER OWNER ONLY. */
+// Bound concept: v1:cluster:database (machine-readable: BoundConcepts["clusterDatabase"] in generated_concepts.ts).
+export interface ClusterDatabaseArgs {
+}
+
+export function buildClusterDatabase(args: ClusterDatabaseArgs): string {
+  void args;
+  return "query clusterDatabase()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterDatabase(args?: ClusterDatabaseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterDatabase = function (this: QueryClient, args: ClusterDatabaseArgs = {} as ClusterDatabaseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterDatabase", buildClusterDatabase(args), opts);
+};
+
+/** The identity provider this cluster authenticates against: issuer, JWKS URL and accepted audiences. CLUSTER OWNER ONLY. No secrets -- clientIdPrefix is the non-secret prefix. */
+// Bound concept: v1:cluster:identityProvider (machine-readable: BoundConcepts["clusterIdentityProvider"] in generated_concepts.ts).
+export interface ClusterIdentityProviderArgs {
+}
+
+export function buildClusterIdentityProvider(args: ClusterIdentityProviderArgs): string {
+  void args;
+  return "query clusterIdentityProvider()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterIdentityProvider(args?: ClusterIdentityProviderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterIdentityProvider = function (this: QueryClient, args: ClusterIdentityProviderArgs = {} as ClusterIdentityProviderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterIdentityProvider", buildClusterIdentityProvider(args), opts);
+};
+
 /** Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...) */
 // Bound concept: v1:cluster:nodeType (machine-readable: BoundConcepts["clusterNodeTypes"] in generated_concepts.ts).
 export interface ClusterNodeTypesArgs {

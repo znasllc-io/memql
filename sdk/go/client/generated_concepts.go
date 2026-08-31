@@ -345,6 +345,8 @@ var BoundConcepts = map[string]string{
 	"checkRecord":                                      "v1:data:record",
 	"clearWorkerConnectedNode":                         "v1:worker:registration",
 	"closeCall":                                        "v1:telephony:call",
+	"clusterDatabase":                                  "v1:cluster:database",
+	"clusterIdentityProvider":                          "v1:cluster:identityProvider",
 	"clusterNodeTypes":                                 "v1:cluster:nodeType",
 	"clusterNodes":                                     "v1:cluster:node",
 	"clusterSettingsCurrent":                           "v1:identity:clusterSettings",

@@ -47,34 +47,84 @@ automation bootstrapCluster {
       event
     )
   }
+  // The infrastructure rows answer a DIFFERENT question from the cluster row,
+  // so they get a different gate (memql#4766). `decide` is "create the cluster",
+  // once per lifetime; this is "what is true about the infrastructure now",
+  // every time a bff starts. Sharing one gate is what made these rows
+  // uncompletable.
+  step refreshInfra {
+    logic clusterInfraRefresh (
+      event
+    )
+  }
   // Steps renamed (was database / identityProvider): G2 shadowing rule vs the
   // synthesized args fields of the same names (#2364/#2367).
+  // ===========================================================================
+  // THE THREE IDS ARE LITERALS, AND THAT IS WHAT MAKES THE LINKS POSSIBLE
+  // ===========================================================================
+  // Each of these rows is a SINGLETON -- one cluster, one database, one
+  // identity provider -- so a deterministic id is not a shortcut, it is the
+  // accurate statement.
+  //
+  // It is also the only way the cross-links can be written here at all. Before
+  // memql#4766 `cluster.databaseId`, `cluster.identityProviderId` and both
+  // children's `clusterId` were empty, leaving NO path from the cluster
+  // singleton to either row in any direction. Filling them from generated ids
+  // would need a mutation step to hand its inserted id to a later step, which
+  // nothing in the tree does; with literals every step already knows all three.
+  //
+  // The ids are spelled out at each call rather than bound once because an
+  // automation has no let-binding, and a constant that appears three times is
+  // still one decision.
   step databaseRecord {
-    if steps.decide.result == true {
+    if steps.refreshInfra.result == true {
       mutation createDatabase (
-        host:    database.host ?? "localhost",
-        dbName:  database.dbName ?? "memql",
-        sslMode: database.sslMode ?? "disable"
+        databaseId:        "v1:cluster:database:primary",
+        clusterId:         "v1:cluster:cluster:self",
+        host:              database.host ?? "localhost",
+        dbName:            database.dbName ?? "memql",
+        sslMode:           database.sslMode ?? "disable",
+        // Forwarded rather than stamped: createDatabase used to hardcode 5432
+        // while the DSN parse had the real value in this very payload.
+        port:              database.port ?? 5432,
+        // Probed from the live connection at startup (app/cluster.go). Absent
+        // when the probe could not run, which is why each has a fallback
+        // rather than making the step conditional -- a database row with no
+        // version is still worth having.
+        engineVersion:     database.engineVersion ?? "",
+        extensions:        database.extensions ?? [],
+        extensionVersions: database.extensionVersions ?? {}
       )
     }
   }
   step idpRecord {
-    if steps.decide.result == true && exists(payload.identityProvider) {
+    if steps.refreshInfra.result == true && exists(payload.identityProvider) {
       mutation createIdentityProvider (
-        name:           identityProvider.name ?? "memql-identity",
-        issuerUrl:      identityProvider.issuerUrl ?? "",
-        clientIdPrefix: identityProvider.clientIdPrefix ?? "",
-        redirectUrl:    identityProvider.redirectUrl ?? ""
+        identityProviderId: "v1:cluster:identityProvider:primary",
+        clusterId:          "v1:cluster:cluster:self",
+        name:               identityProvider.name ?? "memql-identity",
+        issuerUrl:          identityProvider.issuerUrl ?? "",
+        clientIdPrefix:     identityProvider.clientIdPrefix ?? "",
+        redirectUrl:        identityProvider.redirectUrl ?? "",
+        // These two were COMPUTED by parseIdentityProviderInfo and dropped
+        // here -- the step forwarded four fields out of six (memql#4766).
+        acceptedAudiences:  identityProvider.acceptedAudiences ?? [],
+        jwksUrl:            identityProvider.jwksUrl ?? ""
       )
     }
   }
   step cluster {
     if steps.decide.result == true {
       mutation createCluster (
-        name:        "memql",
-        region:      "local",
-        provider:    provider ?? "",
-        version:     node.version ?? ""
+        clusterId:          "v1:cluster:cluster:self",
+        name:               "memql",
+        region:             "local",
+        provider:           provider ?? "",
+        version:            node.version ?? "",
+        // createCluster has always ACCEPTED these and the automation never
+        // passed them, which is half of why the links were dead.
+        databaseId:         "v1:cluster:database:primary",
+        identityProviderId: "v1:cluster:identityProvider:primary"
       )
     }
   }

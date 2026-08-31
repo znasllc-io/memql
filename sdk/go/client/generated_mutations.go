@@ -3183,8 +3183,10 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 //
 // Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["createCluster"] in generated_concepts.go).
 type CreateClusterArgs struct {
-	Name   string
-	Region string
+	// The singleton row id. Deterministic on purpose -- see the note above.
+	ClusterId string
+	Name      string
+	Region    string
 	// Enum: bootstrapping | healthy | degraded | shutting_down
 	Status             string
 	DatabaseId         string
@@ -3202,6 +3204,11 @@ func (qc *QueryClient) CreateCluster(ctx context.Context, args CreateClusterArgs
 func CreateClusterBuild(args CreateClusterArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createCluster(")
+	b.WriteString("clusterId: ")
+	b.WriteString(quoteMemQL(args.ClusterId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
 	b.WriteString("name: ")
 	b.WriteString(quoteMemQL(args.Name))
 	if args.Region != "" {
@@ -3549,9 +3556,17 @@ func CreateComposedViewBuild(args CreateComposedViewArgs) string {
 //
 // Bound concept: v1:cluster:database (machine-readable: BoundConcepts["createDatabase"] in generated_concepts.go).
 type CreateDatabaseArgs struct {
-	Host    string
-	DbName  string
-	SslMode string
+	// The singleton row id. Deterministic on purpose -- see the note above.
+	DatabaseId string
+	Host       string
+	DbName     string
+	SslMode    string
+	// From the DSN. It used to be STAMPED as the literal 5432, so every cluster whose Postgres listened anywhere else recorded the wrong port while the DSN parse had the right one sitting in the payload (memql#4766).
+	Port              int
+	EngineVersion     string
+	Extensions        []string
+	ExtensionVersions map[string]any
+	ClusterId         string
 }
 
 // CreateDatabase calls the engine mutation createDatabase.
@@ -3563,6 +3578,11 @@ func (qc *QueryClient) CreateDatabase(ctx context.Context, args CreateDatabaseAr
 func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createDatabase(")
+	b.WriteString("databaseId: ")
+	b.WriteString(quoteMemQL(args.DatabaseId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
 	b.WriteString("host: ")
 	b.WriteString(quoteMemQL(args.Host))
 	if b.Len() > 24 {
@@ -3576,6 +3596,41 @@ func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 		}
 		b.WriteString("sslMode: ")
 		b.WriteString(quoteMemQL(args.SslMode))
+	}
+	if args.Port != 0 {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("port: ")
+		b.WriteString(fmt.Sprintf("%v", args.Port))
+	}
+	if args.EngineVersion != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("engineVersion: ")
+		b.WriteString(quoteMemQL(args.EngineVersion))
+	}
+	if args.Extensions != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("extensions: ")
+		b.WriteString(renderMemQLValue(args.Extensions))
+	}
+	if args.ExtensionVersions != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("extensionVersions: ")
+		b.WriteString(renderMemQLValue(args.ExtensionVersions))
+	}
+	if args.ClusterId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("clusterId: ")
+		b.WriteString(quoteMemQL(args.ClusterId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4371,10 +4426,16 @@ func CreateIdentityBuild(args CreateIdentityArgs) string {
 //
 // Bound concept: v1:cluster:identityProvider (machine-readable: BoundConcepts["createIdentityProvider"] in generated_concepts.go).
 type CreateIdentityProviderArgs struct {
-	Name           string
-	IssuerUrl      string
-	ClientIdPrefix string
-	RedirectUrl    string
+	// The singleton row id. Deterministic on purpose -- see the note above.
+	IdentityProviderId string
+	Name               string
+	IssuerUrl          string
+	ClientIdPrefix     string
+	RedirectUrl        string
+	// Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation step, which forwarded four fields out of six (memql#4766).
+	AcceptedAudiences []string
+	JwksUrl           string
+	ClusterId         string
 }
 
 // CreateIdentityProvider calls the engine mutation createIdentityProvider.
@@ -4386,6 +4447,11 @@ func (qc *QueryClient) CreateIdentityProvider(ctx context.Context, args CreateId
 func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createIdentityProvider(")
+	b.WriteString("identityProviderId: ")
+	b.WriteString(quoteMemQL(args.IdentityProviderId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
 	b.WriteString("name: ")
 	b.WriteString(quoteMemQL(args.Name))
 	if b.Len() > 32 {
@@ -4406,6 +4472,27 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 		}
 		b.WriteString("redirectUrl: ")
 		b.WriteString(quoteMemQL(args.RedirectUrl))
+	}
+	if args.AcceptedAudiences != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("acceptedAudiences: ")
+		b.WriteString(renderMemQLValue(args.AcceptedAudiences))
+	}
+	if args.JwksUrl != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("jwksUrl: ")
+		b.WriteString(quoteMemQL(args.JwksUrl))
+	}
+	if args.ClusterId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("clusterId: ")
+		b.WriteString(quoteMemQL(args.ClusterId))
 	}
 	b.WriteString(")")
 	return b.String()

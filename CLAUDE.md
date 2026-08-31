@@ -1953,6 +1953,20 @@ schema does not say.
   (per-node-type child: version + replicas + imageDigest). **Engine-as-spine:**
   an empty `version` resolves against the deployment's engine version, a
   non-empty one pins the node type. Read the set via `nodeSpecsForDeployment`.
+  **`database` and `identityProvider` are singletons at LITERAL ids**
+  (`v1:cluster:database:primary`, `v1:cluster:identityProvider:primary`,
+  `v1:cluster:cluster:self`) and that is load-bearing three times over
+  (memql#4766): it is the only way the cross-links could be written at all (a
+  mutation step cannot hand its inserted id to a later one), it makes a
+  re-write a new VERSION of one logical row rather than a duplicate, and it is
+  therefore why **they refresh on every bff start** instead of being written
+  once. Their gate is `clusterInfraRefresh` ("a bff started"), NOT
+  `bootstrapCluster` ("the cluster does not exist yet") -- sharing one gate is
+  what left half their fields permanently empty. **No `status` field survives
+  on either**: `database.status` is structurally unanswerable (the row lives in
+  the database it describes, so a successful read can only say `healthy`) and
+  `identityProvider.status` / `lastVerifiedAt` had no writer honest at that
+  granularity. Do not re-add either; probe live and say when you looked.
 - **Observability** (`dsl/observability/`, loaded by every node) --
   `codeProfile` (live per-FQN verbosity override, fed to the observe runtime by
   `CodeProfileSubscriber`), `invocation` (the `code_invocation` hypertable) and
