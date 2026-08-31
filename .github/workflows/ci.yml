@@ -1581,79 +1581,77 @@ jobs:
       # they are per-test inline boots rather than shared helpers, which is why
       # they are a follow-on rather than one sweep.
       #
-      # THE BRIDGE STAYS AT 900, AND THE REASON IS NOW MEASURED RATHER THAN
-      # ASSUMED (2026-08-30, memql#4569).
+      # THE BRIDGE IS RETIRED (2026-08-31, memql#4569), AFTER THE SPLIT THAT
+      # EARNED IT. This paragraph replaces one that argued for keeping it; both
+      # readings are kept below because the second only makes sense against the
+      # first.
       #
-      # The retirement condition written here was "a CI run reports the package
-      # comfortably under 600s". A run did:
+      # WHAT WAS TRIED AND WITHDRAWN. The retirement condition was "a CI run
+      # reports the package comfortably under 600s". One did -- 472.018s -- and
+      # 600 was restored on it. Every subsequent run of the same lane, on diffs
+      # containing nothing but a comment, came in higher:
       #
-      #   PR memql#4753, db-tests   ok ... component/memql   472.018s
+      #   472.018s   482.423s   532.794s   539.025s      (before the split)
+      #   range 67.0s; max/min 1.142
       #
-      # On that single number the bridge was retired to 600. Every subsequent run
-      # of the very same lane -- on diffs that change nothing but this comment
-      # and that timeout, i.e. with NO code difference at all -- came in higher:
+      # 539.025s leaves 10.2% under 600, less than that spread, so the restore
+      # was withdrawn. The error was not the number; it was reasoning from ONE
+      # sample as though it were the mean, when it was the best case.
       #
-      #   472.018s   482.423s   532.794s   539.025s
-      #   range 67.0s, which is 13.2% of the 506.6s mean
+      # WHAT CHANGED: THE SPLIT, NOT THE RUNNER. component/memql's fixture-
+      # mounting test files booted one engine PER TEST over the same fixture --
+      # eleven identical boots in one file. They now boot once per file, under a
+      # parent test whose cleanup keeps the isolation the per-test mounts
+      # provided. Local: 233.909s -> 191.454s, -18.2%, full suite green, no test
+      # removed (25 became subtests keeping their own names).
       #
-      # The budget has to clear the WORST of those. 539.025s leaves 10.2% under
-      # 600 -- less headroom than the spread itself -- so a 600s budget is a
-      # coin flip, which is precisely the failure this file already records
-      # twice: 594.969s passing and 600.460s panicking on the same commit.
+      # MEASURED ON CI, THREE TIMES, ON THE NEW TREE:
       #
-      # AND NOTE WHICH DIRECTION THE MAXIMUM MOVED. Those four are simply the
-      # runs this change happened to trigger while it was being written, in
-      # order, and the worst case rose at almost every one: 472 -> 482 -> 533
-      # -> 539. Four samples do not bound a distribution either. What they are
-      # enough to establish is that 472.018s was the fastest of them and that
-      # acting on it was wrong -- which is the whole content of this paragraph.
+      #   425.940s   (PR memql#4756)
+      #   419.276s   (main, post-merge)
+      #   420.878s   (PR memql#4757 -- the first run under this 600s ceiling)
       #
-      # So the condition was not met. It was misread from ONE sample. One sample
-      # cannot answer a question about variance, and this lane had never had
-      # more than one before.
+      # range 6.7s, 1.6% -- against 14.2% before the split. The spread did not
+      # merely shift down, it COLLAPSED, which is itself evidence about where
+      # the variance was coming from: the per-test engine boots. Fewer boots,
+      # less to vary.
       #
-      # WHAT DID IMPROVE, AND IT IS REAL. The local figure moved on the same
-      # machine and database as the migration measurement above: 268.3s before
-      # the eight helpers, 235.9s after, 234.666s today. So the boot-sharing
-      # work genuinely paid, the package is no longer at the 595s the issue was
-      # filed against, and it grew while doing it (fleet, viewArrangement and
-      # uiAssist all added tests). None of that is enough to restore 600.
+      # THE DECISION RULE, stated so it can be checked rather than trusted.
+      # Three tight samples still do not bound a distribution -- that is the
+      # lesson above, and 1.6% over three runs is exactly what 472/482 looked
+      # like before 539 arrived. So the bound does NOT come from these samples.
+      # It comes from the OLD regime's worst observed spread (max/min 1.142)
+      # applied to the NEW regime's minimum, i.e. assuming every sample so far
+      # sits at the bottom of the range:
       #
-      # WHERE THE REMAINING COST IS (measured 2026-08-30, 234.666s local):
+      #   419.276s x 1.142 = 478.8s worst case, 20.2% under 600
       #
-      #   2032 top-level tests                      234.5s
-      #      96 tests at >= 1.0s                    178.4s   (76% of the package)
-      #     119 tests at 0.1-1.0s                    44.6s   (19%)
-      #    1817 tests at < 0.1s                      11.5s   ( 5%)
+      # And for 600 to be breached at all, the package would have to reach
+      # 419.276 x 1.431 -- a 43% swing, where the largest ever seen on this lane
+      # is 14.2%. That is three times the worst spread on record, which is the
+      # margin the previous restore did not have (it needed only 10%).
       #
-      # There is no hot test -- the slowest is 7.35s. The 96 concentrate in
-      # about twenty files:
+      # IF THIS WARNS AGAIN, SPLIT BY CONCERN AGAIN -- never raise it, never
+      # partition by -run. The next candidates, measured, with the reason each
+      # was left alone this time:
       #
-      #   19.8s / 11 tests  relationship_label_traversal_3656_db_test.go
-      #   16.6s /  8 tests  construct_catalog_test.go
-      #   14.6s /  8 tests  relationship_traversal_matrix_db_test.go
+      #   14.2s / 10 tests  lint_parity_test.go        -- each test builds a
+      #                                                   DIFFERENT fstest.MapFS
+      #                                                   root; the boot IS the
+      #                                                   thing under test
       #   14.5s /  6 tests  staged_write_test.go
-      #   14.2s / 10 tests  lint_parity_test.go
-      #   10.4s /  4 tests  build_offline_sense_test.go
-      #   10.3s /  3 tests  contract_gates_3629_test.go
+      #   10.4s /  4 tests  build_offline_sense_test.go -- as lint_parity
+      #   10.3s /  3 tests  contract_gates_3629_test.go -- feeds Init a
+      #                                                   deliberately violating
+      #                                                   bundle
       #
-      # Most are the files sharedDblessEngine's doc comment names as the ones
-      # that MAY NOT borrow a package-wide engine: they mount a fixture domain
-      # or an overlay pack, so sharing one removes the thing under test. But
-      # each mounts the SAME fixture for every test in its OWN file and boots it
-      # per test -- eleven identical boots in the first file alone. A per-FILE
-      # sync.Once engine keeps the isolation that rule protects while paying for
-      # the fixture once, and is worth roughly 60s local / 120s CI across the
-      # list. At ~410s CI, 600 would clear the measured spread with room.
-      #
-      # IT IS NOT A SWEEP, AND THE FIRST FILE SHOWS WHY. Nine of that file's
-      # eleven tests go through labelTestEngine, which calls disableResultCache
-      # -- a per-test mutation restored by t.Cleanup. On a shared engine the
-      # first test's cleanup re-enables the cache underneath the other eight.
-      # And TestRelationshipLabelIsPartOfTheResultCacheKey deliberately leaves
-      # the cache ON, so it cannot share with them at all. Each file needs that
-      # judgement made before it can share, which is why this is a separate
-      # change and not a line in a budget PR.
+      # And the shape that worked, for whoever needs it next: a file whose tests
+      # all mount the SAME fixture can share one engine, but ONLY under a parent
+      # test. A package-level sync.Once cannot be used -- those mounts restore
+      # the process-wide concept registry through t.Cleanup, and other tests here
+      # walk memorynodes.All() (rowauthz_pii_unbound_test.go,
+      # rowauthz_shadow_test.go). Leaving a fixture concept in front of them is a
+      # correctness bug, not a slow test.
       #
       # -run SHARDING WAS CONSIDERED FOR THIS STEP AND REJECTED. Partitioning
       # one package's tests across several `go test -run <pattern>` blocks
@@ -1701,8 +1699,8 @@ jobs:
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=900s ./component/memql/...
-          echo "::notice::component/memql step wall time (compile + test): $((SECONDS - start))s. The 900s bridge bounds the TEST ONLY -- read that off the 'ok github.com/znasllc-io/memql/component/memql <N>s' line in this step's log. Four runs on 2026-08-30 measured 472.018s, 482.423s, 532.794s and 539.025s with no code difference: a 67.0s range, 13.2% of the mean, so the worst leaves only 10.2% under 600 -- which is why 600 was NOT restored (memql#4569). Retire the bridge by SPLITTING BY CONCERN until the package clears 600 by more than that spread -- the measured file-by-file breakdown is in the comment above. Never raise it, and never partition by -run."
+          go test -count=1 -timeout=600s ./component/memql/...
+          echo "::notice::component/memql step wall time (compile + test): $((SECONDS - start))s. The 600s budget bounds the TEST ONLY -- read that off the 'ok github.com/znasllc-io/memql/component/memql <N>s' line in this step's log. After the per-file engine split (memql#4756) CI measured 425.940s, 419.276s and 420.878s -- a 1.6% spread, against 472-539s and 14.2% before it; the 900s bridge was retired on that (memql#4569). If this warns, SPLIT BY CONCERN -- the measured candidates and the working pattern are in the comment above. Never raise it, and never partition by -run."
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --
       # integrations/embedding (memql#4037) and component/backup, when its
