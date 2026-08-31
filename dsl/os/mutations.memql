@@ -1,0 +1,52 @@
+// mutations.memql -- os namespace
+
+/// Save the CALLER's desktop document. Creates the row on the first save and overwrites it on
+/// every save after that.
+///
+/// # One row per person, by construction
+///
+/// The id is DERIVED from the actor rather than supplied, so there is no call that writes a second
+/// desktop for one person and no read a writer has to hope was fresh. That is what makes this a
+/// single `insert{}` instead of the create-or-update pair a caller-minted id forces (compare
+/// createRoutingPolicy / updateRoutingPolicy, whose "exactly one active row per owner" is held on
+/// the write side by an editor that read first). `insert{}` is create-or-upsert at the engine's
+/// single write chokepoint (memql#1709), so the first call creates and the rest overwrite.
+///
+/// It is `hash(actor.userId)` and not `actor.userId` itself: an actor id is canonical
+/// (`v1:identity:user:<slug>`), and a canonical id under a DIFFERENT concept is refused by the
+/// storage gate (core/id.ValidateShortId). hash() gives a bare slug -- the form the gate names,
+/// derived identically on every replica.
+///
+/// UNPREFIXED, per authoring-rules.md section 20: `concat("desktop-", hash(...))` would repeat
+/// in the shortId what the canonical id already says one colon to its left. (The gate that
+/// rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and
+/// would not have caught `desktop-`; the rule is the rule regardless of whether a list has
+/// caught up with it.)
+///
+/// # Every save fires graph.node.created, including the ones that overwrite
+///
+/// Only the update() path publishes graph.node.updated; executeWrite publishes created for every
+/// write it takes, insert and update alike. So the client subscribes to created and the mesh
+/// routing rule (component/node/routing.go) forwards created -- an `updated` rule here would be a
+/// rule for an event this mutation cannot emit. Do not "complete the pair".
+///
+/// # revision is the caller's, on purpose
+///
+/// The client sends `held + 1`. The engine could compute it and does not, because the arithmetic
+/// only means anything relative to the document the caller was actually looking at -- a
+/// server-side increment would stamp a number that says the write happened, not what it was made
+/// from, and the client's "is this row newer than mine" test would have nothing to compare.
+@actor
+mutate desktop saveMyDesktop {
+  args {
+    revision  int!
+    document  object!
+  }
+  insert {
+    accept { revision, document }
+    stamp {
+      id: hash(actor.userId)
+      ownerUserId: actor.userId
+    }
+  }
+}

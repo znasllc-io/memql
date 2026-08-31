@@ -3779,6 +3779,28 @@ QueryClient.prototype.missingCapabilityByKindAndName = function (this: QueryClie
   return this.executeNamed("missingCapabilityByKindAndName", buildMissingCapabilityByKindAndName(args), opts);
 };
 
+/** The caller's own desktop document, or nothing when they have never saved one. The MemQL OS shell reads this once on connect and again on every graph.node.created event for the concept.
+Caller-scoped with no argument at all: there is one desktop per person and it is the person asking. An ownerUserId argument would be a caller-supplied id standing in for a caller check the read already has, which is the reasoning myWorkersWithStatus and routingPolicyForOwner both record. It also means there is nothing here to enumerate.
+Nothing empty comes back for a person with no row, and that is a STATE rather than an error: the shell's local document is uploaded on the first save, and until then absent is exactly right. */
+// Bound concept: v1:os:desktop (machine-readable: BoundConcepts["myDesktop"] in generated_concepts.ts).
+export interface MyDesktopArgs {
+}
+
+export function buildMyDesktop(args: MyDesktopArgs): string {
+  void args;
+  return "query myDesktop()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myDesktop(args?: MyDesktopArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myDesktop = function (this: QueryClient, args: MyDesktopArgs = {} as MyDesktopArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myDesktop", buildMyDesktop(args), opts);
+};
+
 /** List the caller's own submitted requests, newest-first. Open to any team member. */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["myRequests"] in generated_concepts.ts).
 export interface MyRequestsArgs {

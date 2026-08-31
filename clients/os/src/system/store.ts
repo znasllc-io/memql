@@ -1,7 +1,8 @@
 // DesktopStore (spec D11): the persistence seam. v1 is versioned
-// localStorage; the roaming-desktop epic implements this same interface
-// over a graph row. The document carries desks, surfaces (items/folders/
-// widget placements), dock pins and the theme pack -- never windows.
+// localStorage; GraphDesktopStore (system/graphStore.ts) implements this
+// same interface over a v1:os:desktop row with local kept as the offline
+// cache. The document carries desks, surfaces (items/folders/widget
+// placements), dock pins and the theme pack -- never windows.
 
 import type { Desk, ShellState } from "./desks";
 import type { DeskSurface } from "./desktop";
@@ -17,10 +18,39 @@ export interface DesktopDocument {
   themePack: string;
 }
 
+/**
+ * Something the store learned that the shell did not do.
+ *
+ * `document` carries a desktop the shell must take on: `hydrate` is the
+ * first one to resolve after boot (the shell was showing the local cache or
+ * a seed), `remote` is a later one, which means another machine saved.
+ * Only `remote` is worth telling the person about.
+ *
+ * `stale` says the stored desktop is from a NEWER version of this app than
+ * the one running here, so this session has stopped writing to the graph
+ * rather than overwrite a document it cannot read.
+ */
+export type DesktopStoreEvent =
+  | { kind: "document"; document: DesktopDocument; origin: "hydrate" | "remote" }
+  | { kind: "stale" };
+
 export interface DesktopStore {
   /** Null = nothing usable stored (absent, corrupt, or wrong version). */
   load(): DesktopDocument | null;
   save(doc: DesktopDocument): void;
+  /**
+   * Optional: the direction a store cannot express through `load()`, which
+   * is synchronous and answers once. A store with a remote half announces
+   * documents it did not receive from `save()` here. Returns an unsubscribe.
+   *
+   * `load()` STAYS SYNCHRONOUS, and that is the reason this exists rather
+   * than an async load: the shell has to paint a desktop on the first frame,
+   * offline included, and awaiting the cluster to do it would make every
+   * boot wait on a round trip that may never complete.
+   */
+  subscribe?(listener: (event: DesktopStoreEvent) => void): () => void;
+  /** Optional: send anything held back by a debounce, now. */
+  flush?(): void;
 }
 
 export const DESKTOP_STORE_KEY = "memql-os-desktop-v1";

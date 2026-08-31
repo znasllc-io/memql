@@ -562,6 +562,49 @@ Different payload ⇒ different id ⇒ a different row.
 **Common bug**: forgetting to set `id:` means duplicate inserts
 create new ids instead of new versions of the same id.
 
+### 9b. A per-caller singleton derives its id from the actor (memql#4746)
+
+When a concept holds exactly one row per person -- a settings blob, a
+saved layout -- derive the id from `actor.userId` and write it with a
+single `insert{}`. `insert{}` is create-or-upsert at the engine's one
+write chokepoint (memql#1709), so the first call creates and the rest
+overwrite, and "one row per person" is true by construction rather than
+by a read the writer hopes was fresh.
+
+```memql fragment
+@actor
+mutate desktop saveMyDesktop {
+  args {
+    revision  int!
+    document  object!
+  }
+  insert {
+    accept { revision, document }
+    stamp {
+      id: hash(actor.userId)
+      ownerUserId: actor.userId
+    }
+  }
+}
+```
+
+`hash()` and not `actor.userId` itself: an actor id is canonical
+(`v1:identity:user:<slug>`), and `core/id.ValidateShortId` refuses a
+canonical id carrying a **different** concept's prefix. Unprefixed, per
+section 20. The alternative -- a caller-minted id plus a create/update
+pair, chosen by a read (`createRoutingPolicy` / `updateRoutingPolicy`) --
+is what you need when the id is genuinely the caller's; for a singleton
+it lets two tabs that both read "no row" both create one.
+
+`actor.*` INSIDE a call works in every value position, id derivations
+included, since memql#4746. Before it, `id: actor.userId` rendered and
+`id: hash(actor.userId)` did not: the two spellings lower to different
+AST nodes and only one had an evaluator case, so the mutation passed
+`memqllint`, passed strict boot, and failed at render on every call. If
+you meet `unsupported expression in mutation template` for a node the
+grammar plainly accepts, that is this class (memql#2909 / memql#2925),
+not your authoring.
+
 ---
 
 ## 10. Subscriptions and event topic shape

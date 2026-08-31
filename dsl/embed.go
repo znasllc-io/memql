@@ -46,7 +46,7 @@ import (
 // coreDomains() reads THIS FS's root, so the pack registration below
 // passes ValidatePackDomain without a second list to maintain.
 //
-//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
+//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:os all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
 var embedFS embed.FS
 
 // pluginTrees holds the additional DSL subtrees registered by external

@@ -8,7 +8,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
-import { LayoutGrid, Sparkles } from "lucide-react";
+import { LayoutGrid, RefreshCw, Sparkles } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
 import { dockOrder, isPinned } from "../system/dock";
@@ -18,12 +18,20 @@ import type { AppId } from "../system/windows";
 import { useSession } from "./access";
 import { useConnectionStatus } from "./connection";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
-import { useOs } from "./state";
+import { useOs, type OsNotice } from "./state";
 
 // The one bar (spec A): Launcher at the left end; pinned then running apps
 // center (running dot beneath, right-click to pin/unpin/close, drag to
 // reorder pins); right cluster = Ask orb, connection dot, clock, avatar
 // menu. Pins persist through the DesktopStore.
+//
+// The roaming desktop's cue lives in that right cluster too (epic
+// memql#4746), beside the connection dot, and DELIBERATELY NOT AS A TOAST:
+// this app says so twice in its own source (ask/AskSurface.tsx, "never a
+// toast"; ask/sdkTransport.ts, "honest, in-surface, retryable") -- a report
+// belongs where the thing it reports on is shown, not floating over whatever
+// the person was doing. Both of these describe the cluster's relationship to
+// this desktop, which is exactly what the dot beside them describes.
 
 function DockApp({
   appId,
@@ -66,6 +74,33 @@ function DockApp({
       <Icon size={20} aria-hidden />
       <span className="os-dock-dot" data-on={running || undefined} aria-hidden="true" />
     </button>
+  );
+}
+
+/**
+ * The roaming report: another machine saved this desktop, or this tab is too
+ * old to save it. Absent the rest of the time -- there is no idle state and
+ * no dismiss control, because `roamed` clears itself and `stale` is fixed by
+ * the reload it asks for.
+ */
+function RoamNotice({ notice }: { notice: OsNotice | null }) {
+  // The live region is ALWAYS mounted, not conditionally rendered: a
+  // role="status" element that appears at the same moment its text does is
+  // not reliably announced, because there was no region for the change to
+  // happen inside.
+  return (
+    <span className="os-roam" role="status" data-os-roam={notice?.kind}>
+      {notice === null ? null : (
+        <>
+          <RefreshCw size={12} aria-hidden />
+          <span className="os-roam-text">
+            {notice.kind === "roamed"
+              ? "Desktop updated on another device"
+              : "This tab is out of date -- reload to save changes"}
+          </span>
+        </>
+      )}
+    </span>
   );
 }
 
@@ -166,7 +201,7 @@ export function Dock({
   onOpenLauncher: () => void;
   onSignOut: () => void;
 }) {
-  const { state, actions, registry, actorRole } = useOs();
+  const { state, actions, registry, actorRole, notice } = useOs();
   const { openAsk } = useAsk();
   const connection = useConnectionStatus();
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
@@ -233,6 +268,7 @@ export function Dock({
         </DndContext>
       </div>
       <div className="os-dock-status">
+        <RoamNotice notice={notice} />
         <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(null)}>
           <Sparkles size={16} aria-hidden />
         </button>
