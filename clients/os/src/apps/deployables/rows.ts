@@ -1,0 +1,334 @@
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+
+// The wire rows this app renders, projected into the shapes its surfaces read.
+//
+// PURE, and separate from every component, for the reason apps/users/rows.ts
+// is: a projection asserted through render() is asserted through three layers
+// that can each fail for unrelated reasons. Everything here is a function of a
+// row, unit-testable with no browser, no cluster and no React -- which is what
+// lets the LIST, the DETAIL and the MAP be checked against the same fixtures
+// and therefore be checked against each other.
+
+/**
+ * Unwrap a `payload`-nested row to the flat form the field helpers read.
+ *
+ * A site row reaches these functions from two places -- the SEED (`sitesAll`,
+ * already shape-flattened through `siteFull`) and the SUBSCRIPTION fold (a CDC
+ * envelope, whose concept fields sit inside `payload`) -- and the two have to
+ * produce the same object, or a site renders one way on load and another way
+ * the moment anything about it changes.
+ *
+ * The envelope wins on a collision so `id` stays the ROW's id rather than any
+ * `id` the payload happens to carry.
+ */
+export function flatten(row: Row): Row {
+  const nested = row["payload"];
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return { ...(nested as Row), ...row };
+  }
+  return row;
+}
+
+/**
+ * A boolean field that can be ABSENT, with the default the concept declares.
+ *
+ * The SDK's `rowBool` returns `false` for a missing key, which collapses
+ * "absent" and "explicitly false" into one answer. `deleted` and `systemOwned`
+ * both default to false so the collapse is harmless for them -- but a folded
+ * CDC event carries only what the write touched, so reading them through one
+ * helper that states the default keeps the next field (whose default may be
+ * true) from silently inheriting the wrong one.
+ */
+function boolOr(row: Row, key: string, fallback: boolean): boolean {
+  const v = row[key];
+  return typeof v === "boolean" ? v : fallback;
+}
+
+function objectOf(row: Row, key: string): Record<string, unknown> {
+  const v = row[key];
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return {};
+}
+
+export type SiteStatus = "draft" | "live" | "disabled" | "";
+
+export interface SiteRow {
+  id: string;
+  /** EMPTY means CLUSTER-OWNED -- the seeded portal row is the case. */
+  ownerUserId: string;
+  hostname: string;
+  /** spa | static | shopify_storefront, or "" on a row the fold has not filled. */
+  kind: string;
+  status: SiteStatus;
+  bundleRef: string;
+  /** Provenance: the Library artifact this bundle was published from, if any. */
+  artifactId: string;
+  title: string;
+  notes: string;
+  apiProxy: boolean;
+  /** Blocks deletion. The portal row only; it does NOT branch the serving path. */
+  systemOwned: boolean;
+  deleted: boolean;
+  binding: Record<string, unknown>;
+  createdAt: string;
+}
+
+export function siteFromRow(raw: Row): SiteRow {
+  const row = flatten(raw);
+  const status = rowString(row, "status");
+  return {
+    id: rowString(row, "id"),
+    ownerUserId: rowString(row, "ownerUserId"),
+    hostname: rowString(row, "hostname"),
+    kind: rowString(row, "kind"),
+    status:
+      status === "draft" || status === "live" || status === "disabled" ? status : "",
+    bundleRef: rowString(row, "bundleRef"),
+    artifactId: rowString(row, "artifactId"),
+    title: rowString(row, "title"),
+    notes: rowString(row, "notes"),
+    apiProxy: boolOr(row, "apiProxy", false),
+    systemOwned: boolOr(row, "systemOwned", false),
+    // `deleted` DEFAULTS FALSE on the concept, so absent is not deleted --
+    // reading absent as deleted would empty the list on the first folded event
+    // that did not touch the field.
+    deleted: boolOr(row, "deleted", false),
+    binding: objectOf(row, "binding"),
+    createdAt: rowString(row, "createdAt"),
+  };
+}
+
+/**
+ * What to call a deployable.
+ *
+ * The hostname, because that is what it IS -- an operator looking for a site
+ * is looking for the host it answers at, and `title` is a label somebody may
+ * never have set. NEVER blank: a nameless row is indistinguishable from a row
+ * that failed to render.
+ */
+export function siteName(site: SiteRow): string {
+  if (site.hostname.trim() !== "") return site.hostname;
+  if (site.title.trim() !== "") return site.title;
+  return site.id;
+}
+
+/**
+ * Live now.
+ *
+ * `draft` resolves for nobody and `disabled` answers 503; only `live` is
+ * being served, and that is what the row's dot is about.
+ */
+export function siteIsCurrent(site: SiteRow): boolean {
+  return site.status === "live";
+}
+
+/**
+ * The status trio (spec section F): live = the accent green, draft = muted,
+ * disabled = pending amber.
+ *
+ * `disabled` gets the WARN tone rather than the error one on purpose: a
+ * deliberately paused site answering 503 is a state somebody chose, not a
+ * fault -- which is the same distinction that made `disabled` a separate value
+ * from a deleted row in the first place.
+ */
+export type StatusTone = "ok" | "muted" | "warn";
+
+export function statusTone(site: SiteRow): StatusTone {
+  if (site.status === "live") return "ok";
+  if (site.status === "disabled") return "warn";
+  return "muted";
+}
+
+/**
+ * The same three states in the SHELL'S OWN dot language, which has three tones
+ * and one of them is silence.
+ *
+ * The kit's `ProvenanceDot` is green = reachable now, amber = not reachable,
+ * unknown = NO DOT, and it renders the dock's "running", the connection state
+ * and the fleet's "online" -- so aliveness reads identically everywhere. This
+ * maps onto it rather than inventing a fourth dot:
+ *
+ *   live      -> reachable.    It is being served.
+ *   disabled  -> unreachable.  It WAS serving and somebody paused it; a 503
+ *                              rather than a 404 exists precisely so that is
+ *                              distinguishable, and amber is what the shell
+ *                              says "not reachable" with.
+ *   draft     -> unknown, so NO dot. A site nobody has published yet has never
+ *                been reachable, and painting a screen of new deployables amber
+ *                would alarm somebody about the normal case. The muted WORD
+ *                beside it is the whole statement.
+ */
+export function statusDotTone(site: SiteRow): "reachable" | "unreachable" | "unknown" {
+  if (site.status === "live") return "reachable";
+  if (site.status === "disabled") return "unreachable";
+  return "unknown";
+}
+
+/** Cluster-owned rows carry no owner (the seeded portal is the one shipped). */
+export function siteIsClusterOwned(site: SiteRow): boolean {
+  return site.ownerUserId.trim() === "";
+}
+
+/**
+ * Who a row belongs to, in a word.
+ *
+ * A cluster owner's list is every deployable in the cluster and an ordinary
+ * caller's is their own (`sitesAll`'s filter is
+ * `ownerUserId==actor.userId || actor.isClusterOwner==true`), so "yours" is
+ * only informative in the first case. It is still rendered in both, because a
+ * list that changes its columns with the reader's role is one that cannot be
+ * described to somebody over a call.
+ */
+export function ownerLabel(site: SiteRow, viewerUserId: string): string {
+  if (siteIsClusterOwned(site)) return "cluster-owned";
+  if (viewerUserId !== "" && site.ownerUserId === viewerUserId) return "yours";
+  return "another owner";
+}
+
+/**
+ * What counts as a CHANGE to a deployable.
+ *
+ * ONE definition, read by the Sites list's `LiveList` and by the app-level
+ * `useArrivals` the map draws from. Two literals would be two literals that can
+ * disagree, and the disagreement is visible: the list pulses a row while the
+ * map beside it does not, in an app whose whole point is that the two are the
+ * same rows.
+ *
+ * A site row carries no liveness field -- there is no `lastSeenAt` here to turn
+ * the surface into a strobe -- so the risk this guards against is the opposite
+ * one: leaving `bundleRef` out would make the app's headline event, a publish,
+ * arrive in silence.
+ */
+export function siteFingerprint(site: SiteRow): string {
+  return `${site.hostname}|${site.kind}|${site.status}|${site.bundleRef}|${site.artifactId}|${site.title}`;
+}
+
+// ---------------------------------------------------------------------------
+// The bundle reference, and its three usage forms
+// ---------------------------------------------------------------------------
+
+/**
+ * `bundleRef` is a URI with three usages, and which one it is decides how a
+ * deploy and a rollback WORK -- so the form is the useful reading and the URI
+ * is the detail underneath it.
+ *
+ *   `file:///app/portal`        the platform's own portal, baked into the
+ *                               image: deploy and rollback are an image roll.
+ *   `file:///app/sites/<name>`  a site baked into the edge image at build
+ *                               time: same image roll.
+ *   `blob://sites/<id>/<v>/`    an uploaded bundle in object storage: deploy
+ *                               is an upload plus a row flip, rollback is one
+ *                               row write.
+ *
+ * A fourth answer is `other`, and it is deliberately not folded into one of
+ * the three: a reference nobody recognises is a fact worth showing as itself
+ * rather than being described as something it may not be.
+ */
+export type BundleForm = "none" | "baked-portal" | "baked-site" | "uploaded" | "other";
+
+export const BAKED_PORTAL_REF = "file:///app/portal";
+
+export function bundleForm(bundleRef: string): BundleForm {
+  const ref = bundleRef.trim();
+  if (ref === "") return "none";
+  if (ref === BAKED_PORTAL_REF) return "baked-portal";
+  if (ref.startsWith("file:///app/sites/")) return "baked-site";
+  if (ref.startsWith("blob://sites/")) return "uploaded";
+  return "other";
+}
+
+export function bundleFormLabel(form: BundleForm): string {
+  switch (form) {
+    case "none":
+      return "no bundle";
+    case "baked-portal":
+      return "baked portal";
+    case "baked-site":
+      return "baked site";
+    case "uploaded":
+      return "uploaded bundle";
+    default:
+      return "unrecognised reference";
+  }
+}
+
+/** What the form MEANS for the next deploy, in one sentence. */
+export function bundleFormNote(form: BundleForm): string {
+  switch (form) {
+    case "none":
+      return "This deployable names no bundle, so there is nothing to serve.";
+    case "baked-portal":
+      return "The platform's own console, baked into the edge image. Deploy and rollback are an image roll, not a row write.";
+    case "baked-site":
+      return "Baked into the edge image at build time. Deploy and rollback are an image roll, not a row write.";
+    case "uploaded":
+      return "An uploaded bundle in object storage. A deploy is an upload plus a row flip; a rollback is one row write.";
+    default:
+      return "Not one of the three references this cluster serves. It is shown as it is stored rather than described as something it may not be.";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The Shopify binding
+// ---------------------------------------------------------------------------
+
+export interface StorefrontBinding {
+  storeDomain: string;
+  /**
+   * The NAME of a `v1:platform:globalSecret` row. The token itself is never
+   * stored on the site row and is never fetched here: the edge dereferences it
+   * at serve time into the site's runtime-config document, and that is the only
+   * place it is resolved.
+   */
+  storefrontTokenRef: string;
+}
+
+export function storefrontBinding(site: SiteRow): StorefrontBinding {
+  const b = site.binding;
+  return {
+    storeDomain: typeof b["storeDomain"] === "string" ? b["storeDomain"] : "",
+    storefrontTokenRef:
+      typeof b["storefrontTokenRef"] === "string" ? b["storefrontTokenRef"] : "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Addresses and grouping
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the thing actually IS.
+ *
+ * ALWAYS https, never the shell's own protocol. Locally the front door
+ * terminates TLS with an mkcert wildcard and in the cloud with a real
+ * certificate, so a hosted site is https in both; deriving the scheme from
+ * `window.location` would only ever be a way to be wrong on a dev server.
+ * Returns "" for a blank hostname, so a caller renders nothing rather than a
+ * link to `https:///`.
+ */
+export function liveUrlFor(hostname: string): string {
+  const host = hostname.trim().toLowerCase();
+  return host === "" ? "" : `https://${host}/`;
+}
+
+/**
+ * The domain a hostname belongs to -- the map's grouping key.
+ *
+ * THREE OR MORE LABELS: drop the first, because every site this cluster serves
+ * is a SINGLE label under the domain (memql#3767) and the wildcard Ingress rule
+ * matches exactly one. So `shop.memql.example.com` groups under
+ * `memql.example.com` alongside `www.memql.example.com`.
+ *
+ * TWO OR FEWER: the hostname IS the domain. An apex (`example.com`) has no
+ * label to drop, and dropping one would group it under `com` -- which is not a
+ * domain this or any cluster serves, and would put every unrelated apex in the
+ * same box. A cluster-owner's custom apex therefore forms its own group, which
+ * is what it is.
+ */
+export function domainOf(hostname: string): string {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (host === "") return "";
+  const labels = host.split(".");
+  if (labels.length <= 2) return host;
+  return labels.slice(1).join(".");
+}

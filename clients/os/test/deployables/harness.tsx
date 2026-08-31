@@ -1,0 +1,328 @@
+import type { ReactNode } from "react";
+import { act, fireEvent } from "@testing-library/react";
+import { vi } from "vitest";
+import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+
+import { SessionProvider } from "../../src/chrome/access";
+import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
+
+// The Deployables app's test harness.
+//
+// ===========================================================================
+// THE FAKE SITS UNDER `executeNamed`, NOT OVER THE GENERATED METHODS
+// ===========================================================================
+// A double that stubs `query.createSite` records the ARGUMENTS and never
+// renders the call, so the generated builder -- the thing that turns those
+// arguments into MemQL text the engine has to parse -- runs in production and
+// nowhere else. That is how a feature ships green and fails at parse on every
+// call.
+//
+// So the stub is given `QueryClient.prototype` and answers at `executeNamed`,
+// which is what every generated method funnels through. `query.createSite({...})`
+// therefore runs the real `buildCreateSite` and the test asserts the STRING
+// that reaches the wire.
+//
+// Everything else is connection-shaped for the reason the Fleet's and Users'
+// harnesses are: every read goes through `connection.query`, every subscription
+// through `connection.subscriptions`, so a fake answering those two exercises
+// the real LiveCollection, the real retain/seed path and the real projections.
+
+/** The `data` envelope a SHAPE-PROJECTED query returns. */
+export function rowsResult(rows: Row[]): Result {
+  return new Result({ data: rows } as never);
+}
+
+/**
+ * A BUNDLE envelope -- a different wire shape, and not interchangeable.
+ *
+ * `getRowByConceptAndId` reads `rawNodes()`, which looks at
+ * `payload.bundle.nodes` and nothing else, so a `data` envelope makes a by-id
+ * re-read answer null. That failure is silent by design (a null re-read means
+ * "keep what you have"), so the wrong envelope would make a re-read look like
+ * it was correctly falling back when in fact it never read anything.
+ */
+export function bundleResult(rows: Row[]): Result {
+  const nodes = rows.map((row) => {
+    const { id, createdAt, ...fields } = row as Record<string, unknown>;
+    return { id, createdAt, payload: fields };
+  });
+  return new Result({ bundle: { nodes } } as never);
+}
+
+export interface FakeEvent {
+  subscriptionId: string;
+  kind: string;
+  timestamp: Date | null;
+  payload: Row | null;
+  payloadOmitted: boolean;
+  seq: number;
+  gapBefore: boolean;
+}
+
+export interface FakeSubscriptions {
+  subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
+  /** The test's hand on the wire. */
+  emit: (concept: string, payload: Row, kind?: string) => void;
+}
+
+function fakeSubscriptions(): FakeSubscriptions {
+  const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
+  return {
+    subscribeGraph(handler, opts) {
+      const concept = opts.concept ?? "*";
+      const set = handlers.get(concept) ?? new Set();
+      set.add(handler);
+      handlers.set(concept, set);
+      return () => set.delete(handler);
+    },
+    emit(concept, payload, kind = "NODE_UPDATED") {
+      for (const handler of handlers.get(concept) ?? []) {
+        handler({
+          subscriptionId: "sub-1",
+          kind,
+          timestamp: new Date(),
+          payload,
+          payloadOmitted: false,
+          seq: 0,
+          gapBefore: false,
+        });
+      }
+    },
+  };
+}
+
+export interface FakeSeed {
+  sites?: Row[];
+  artifacts?: Row[];
+  /** Rows a by-id re-read answers with, keyed by row id. */
+  byId?: Record<string, Row>;
+  /** Fails the next `createSite` with this server message. */
+  createError?: string;
+  /** Fails the next `sitePublishFromArtifact` with this server message. */
+  publishError?: string;
+}
+
+export interface FakeConnection {
+  query: QueryClient;
+  /** Every call string that reached the wire, in order. */
+  calls: string[];
+  callsNamed: (construct: string) => string[];
+  subscriptions: FakeSubscriptions;
+  dispatcher: { sendAndWait: ReturnType<typeof vi.fn> };
+}
+
+export const PUBLISH_RESULT = {
+  siteId: "site-shop",
+  artifactId: "artifact-zip",
+  fileId: "file-1",
+  version: "v7f3c19a2bb01",
+  bundleRef: "blob://sites/site-shop/v7f3c19a2bb01/",
+  fileCount: 12,
+  totalBytes: 2097152,
+};
+
+export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
+  const calls: string[] = [];
+  const sites = seed.sites ?? [];
+  const artifacts = seed.artifacts ?? [];
+
+  const stub = {
+    executeNamed: vi.fn(async (_name: string, call: string) => {
+      calls.push(call);
+
+      if (call === "query sitesAll()") return rowsResult(sites);
+      if (call === "query libraryArtifacts()") return rowsResult(artifacts);
+
+      if (call.startsWith("mutation createSite(")) {
+        if (seed.createError !== undefined) throw new Error(seed.createError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin sitePublishFromArtifact(")) {
+        if (seed.publishError !== undefined) throw new Error(seed.publishError);
+        return rowsResult([PUBLISH_RESULT as unknown as Row]);
+      }
+
+      // `getRowByConceptAndId` composes `concept==<c> && id==<id>`.
+      const match = /id==(\S+)/.exec(call);
+      const wanted = match?.[1] ?? "";
+      const row = wanted === "" ? undefined : seed.byId?.[wanted];
+      return bundleResult(row ? [row] : []);
+    }),
+  };
+
+  return {
+    query: Object.setPrototypeOf(stub, QueryClient.prototype) as QueryClient,
+    calls,
+    callsNamed: (construct: string) => calls.filter((c) => c.includes(`${construct}(`)),
+    subscriptions: fakeSubscriptions(),
+    dispatcher: { sendAndWait: vi.fn() },
+  };
+}
+
+export function withSession(
+  children: ReactNode,
+  overrides: { userId?: string; role?: string; domain?: string } = {},
+) {
+  const config: OsRuntimeConfig = {
+    ...UNKNOWN_RUNTIME_CONFIG,
+    domain: overrides.domain ?? "memql.example.com",
+  };
+  return (
+    <SessionProvider
+      value={{
+        access: {
+          userId: overrides.userId ?? "u-me",
+          primaryEmail: "owner@example.com",
+          clusterRole: overrides.role ?? "owner",
+        },
+        config,
+      }}
+    >
+      {children}
+    </SessionProvider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+export function siteRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    hostname: "example.memql.example.com",
+    kind: "spa",
+    status: "live",
+    bundleRef: "blob://sites/example/v1/",
+    artifactId: "",
+    title: "",
+    notes: "",
+    apiProxy: false,
+    systemOwned: false,
+    deleted: false,
+    binding: {},
+    createdAt: "2026-08-01T00:00:00Z",
+    ...over,
+  };
+}
+
+/** The seeded platform row: cluster-owned, system-owned, baked into the image. */
+export const PORTAL = siteRow({
+  id: "site-portal",
+  ownerUserId: "",
+  hostname: "portal.memql.example.com",
+  kind: "spa",
+  status: "live",
+  bundleRef: "file:///app/portal",
+  systemOwned: true,
+  title: "MemQL Portal",
+});
+
+/** A storefront, published from the Library. */
+export const SHOP = siteRow({
+  id: "site-shop",
+  hostname: "shop.memql.example.com",
+  kind: "shopify_storefront",
+  status: "live",
+  bundleRef: "blob://sites/site-shop/v1/",
+  artifactId: "artifact-zip",
+  title: "Storefront",
+  binding: { storeDomain: "example.myshopify.com", storefrontTokenRef: "shopify-storefront-token" },
+});
+
+/** A draft, baked into the edge image. */
+export const DOCS = siteRow({
+  id: "site-docs",
+  hostname: "docs.memql.example.com",
+  kind: "static",
+  status: "draft",
+  bundleRef: "file:///app/sites/docs",
+});
+
+/** Somebody else's site, serving THE SAME bundle as DOCS. */
+export const MIRROR = siteRow({
+  id: "site-mirror",
+  ownerUserId: "u-other",
+  hostname: "mirror.memql.example.com",
+  kind: "static",
+  status: "disabled",
+  bundleRef: "file:///app/sites/docs",
+});
+
+/** A custom apex, which forms its own domain group. */
+export const APEX = siteRow({
+  id: "site-apex",
+  hostname: "example.org",
+  kind: "static",
+  status: "live",
+  bundleRef: "blob://sites/site-apex/v3/",
+});
+
+export const DELETED = siteRow({
+  id: "site-gone",
+  hostname: "gone.memql.example.com",
+  deleted: true,
+});
+
+export function artifactRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    lens: "artifact",
+    kind: "file",
+    title: "site.zip",
+    mimeType: "application/zip",
+    archived: false,
+    createdAt: "2026-08-02T00:00:00Z",
+    ...over,
+  };
+}
+
+export const ZIP = artifactRow({ id: "artifact-zip", title: "storefront-build.zip" });
+export const PDF = artifactRow({ id: "artifact-pdf", title: "brief.pdf", mimeType: "application/pdf" });
+export const NOTE = artifactRow({
+  id: "artifact-note",
+  lens: "record",
+  kind: "note",
+  title: "Standup notes",
+  mimeType: "",
+});
+
+// ---------------------------------------------------------------------------
+// Interaction helpers
+// ---------------------------------------------------------------------------
+//
+// Clicks, typing and emitted events all go through act(): a state update
+// outside it is not flushed before the next assertion, which reads exactly like
+// a control that did nothing. They live here rather than being redeclared in
+// each test file because they are stateless -- there is no fixture to leak.
+
+export async function click(el: Element | null | undefined): Promise<void> {
+  if (!el) throw new Error("click() was handed nothing to click");
+  // `fireEvent`, not `el.click()`: an SVG element is an SVGElement, which does
+  // not inherit HTMLElement's `click()` -- and the map's nodes are SVG groups.
+  // A helper that only worked on HTML would quietly be untestable exactly on
+  // the surface this app was built for.
+  await act(async () => {
+    fireEvent.click(el);
+  });
+}
+
+export async function type(el: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+/** Push a graph event onto the fake wire and let React settle. */
+export async function emit(
+  connection: FakeConnection,
+  concept: string,
+  payload: Row,
+  kind = "NODE_UPDATED",
+): Promise<void> {
+  await act(async () => {
+    connection.subscriptions.emit(concept, payload, kind);
+  });
+}

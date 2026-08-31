@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption } from "../kit/Caption";
-import { decayTicks, emptyArrivals, observeSnapshot, TICK_TTL_MS, type ArrivalKind } from "./arrival";
+import type { ArrivalKind } from "./arrival";
+import { useArrivals } from "./useArrivals";
 
 // THE live list primitive (spec D7): every live surface in the OS renders
 // through this, so arrival behavior reads identically everywhere -- a new
@@ -49,29 +50,11 @@ export function LiveList<T>({
     () => (source ? source.snapshot : (EMPTY_SNAPSHOT as LiveSnapshot<T>)),
   );
 
-  const arrivals = useRef(emptyArrivals());
-  const [, bump] = useState(0);
-  const seenVersion = useRef(-1);
-
-  if (seenVersion.current !== snapshot.version) {
-    seenVersion.current = snapshot.version;
-    arrivals.current = observeSnapshot(
-      arrivals.current,
-      snapshot.rows.map((row) => ({ id: rowId(row), fingerprint: fingerprint(row) })),
-      snapshot.state,
-      Date.now(),
-    );
-  }
-
-  // Ticks decay on the clock, not on the next data change.
-  useEffect(() => {
-    if (arrivals.current.ticks.size === 0) return;
-    const t = setTimeout(() => {
-      arrivals.current = { ...arrivals.current, ticks: decayTicks(arrivals.current.ticks, Date.now()) };
-      bump((v) => v + 1);
-    }, TICK_TTL_MS + 50);
-    return () => clearTimeout(t);
-  });
+  // The cue itself lives in `useArrivals` (live/useArrivals.ts), because the
+  // deploy map draws the same rows as a graph and has to announce a change
+  // identically. A list and a map that disagreed about what counts as news
+  // would be one app contradicting itself.
+  const ticks = useArrivals(snapshot, rowId, fingerprint);
 
   const stateLine =
     snapshot.state === "seeding"
@@ -87,7 +70,7 @@ export function LiveList<T>({
       <ul className="os-livelist-rows" aria-label={label}>
         {snapshot.rows.map((row) => {
           const id = rowId(row);
-          const tick = arrivals.current.ticks.get(id)?.kind ?? null;
+          const tick = ticks.get(id)?.kind ?? null;
           return (
             <li key={id} className="os-livelist-row" data-arrival={tick ?? undefined}>
               {renderRow(row, tick)}

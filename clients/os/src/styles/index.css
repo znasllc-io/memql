@@ -2233,3 +2233,254 @@ button:not(:disabled):active {
   opacity: 0.72;
   border-style: dashed;
 }
+
+/* ---- deployables: the app's own surfaces (epic #4725) ----
+ *
+ * Two things live here and nothing else: the status word that rides beside a
+ * dot, and the deploy map. Everything else the app renders is the shared kit,
+ * which is the measure the Users app set -- the third app to ship should need
+ * even less vocabulary of its own than the second.
+ */
+
+/* A status word wearing the dot's own tone. The dot says it to somebody
+ * scanning; the word says it to somebody reading, and to a screen reader. Both,
+ * because "the green one" is not a thing you can say to a colleague over a
+ * call. */
+.os-deploy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+  color: var(--os-muted);
+}
+.os-deploy-status[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-deploy-status[data-tone="warn"] {
+  color: var(--os-warn);
+}
+
+.os-deploy-bundle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.os-deploy-bundle-form {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-deploy-publish {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+}
+
+/* ---- the map ----
+ *
+ * Plain SVG, every colour a token, so a theme restyles it with no code and the
+ * light mode is not a second drawing. The portal's Nexus stays the platform's
+ * one 3D surface; a map of "which host, which site, which bundle" is a flat
+ * question and pays nothing for a renderer that could answer a deeper one.
+ */
+.os-deploy-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 220px;
+}
+.os-deploy-map[data-empty] {
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.os-deploy-map-canvas {
+  width: 100%;
+  height: clamp(220px, 46vh, 560px);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  /* The canvas is dragged, so the browser's own touch panning has to get out
+   * of the way -- without this a finger scrolls the window instead of the map
+   * and the gesture simply does not exist on a phone. */
+  touch-action: none;
+  cursor: grab;
+}
+.os-deploy-map-canvas:active {
+  cursor: grabbing;
+}
+
+/* A FEED THAT IS BEHIND IS DIMMED, and the caption underneath says why. A
+ * frozen map that still looks crisp is a picture claiming to be current. */
+.os-deploy-map[data-behind] .os-deploy-map-canvas {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.os-deploy-group-box {
+  fill: var(--os-raised);
+  stroke: var(--os-line);
+}
+.os-deploy-group-label {
+  fill: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+  letter-spacing: 0.04em;
+}
+
+.os-deploy-edge {
+  fill: none;
+  stroke: var(--os-line);
+  stroke-width: 1.5;
+}
+.os-deploy-edge[data-selected] {
+  stroke: var(--os-accent);
+}
+
+.os-deploy-node {
+  cursor: pointer;
+}
+.os-deploy-node-box {
+  fill: var(--os-plate);
+  stroke: var(--os-line);
+}
+.os-deploy-node[data-kind="site"] .os-deploy-node-box {
+  fill: var(--os-ground);
+}
+.os-deploy-node[data-in-cluster] .os-deploy-node-box {
+  stroke: var(--os-accent);
+}
+.os-deploy-node[data-selected] .os-deploy-node-box {
+  fill: var(--os-accent-soft);
+  stroke: var(--os-accent);
+}
+
+.os-deploy-node-label {
+  fill: var(--os-ink);
+  font-size: var(--os-text-sm);
+}
+.os-deploy-node[data-kind="host"] .os-deploy-node-label,
+.os-deploy-node[data-kind="bundle"] .os-deploy-node-sub,
+.os-deploy-node[data-kind="artifact"] .os-deploy-node-sub {
+  font-family: var(--os-font-mono);
+}
+.os-deploy-node-sub {
+  fill: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-deploy-node-glyph {
+  fill: var(--os-muted);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+}
+
+/* The status trio, on the map, from the same tokens the dot language uses --
+ * so "live" reads identically on a site node, in a machine row and on a
+ * desktop icon. */
+.os-deploy-node-dot {
+  fill: var(--os-muted);
+}
+.os-deploy-node-dot[data-status="live"] {
+  fill: var(--os-accent);
+}
+.os-deploy-node-dot[data-status="disabled"] {
+  fill: var(--os-warn);
+}
+
+/* THE ARRIVAL CUE, IN MAP TERMS. The list's ring is a box-shadow, which SVG has
+ * no equivalent for, so a node pulses on its own stroke instead -- same
+ * duration, same easing, same decay, so a publish announces itself identically
+ * whichever surface somebody happens to be looking at. */
+.os-deploy-node[data-arrival] .os-deploy-node-box {
+  animation: os-deploy-pulse var(--os-duration-cue) var(--os-ease);
+}
+@keyframes os-deploy-pulse {
+  0% {
+    stroke: var(--os-line);
+    stroke-width: 1;
+  }
+  18% {
+    stroke: var(--os-accent);
+    stroke-width: 2.5;
+  }
+  100% {
+    stroke: var(--os-line);
+    stroke-width: 1;
+  }
+}
+
+/* Reduced motion still gets a CUE, held for the life of the tick and then
+ * gone. "No animation" on its own leaves those readers with no signal that
+ * anything changed, which is a different failure from the one the setting
+ * asks about. */
+@media (prefers-reduced-motion: reduce) {
+  .os-deploy-node[data-arrival] .os-deploy-node-box {
+    animation: none;
+    stroke: var(--os-accent);
+    stroke-width: 2;
+  }
+}
+
+/* The focus ring is the shell's, drawn on the node's own box: an SVG group
+ * takes no outline, so the ring has to be a stroke. Keyboard-only, like every
+ * other focus ring in the OS. */
+.os-deploy-node:focus {
+  outline: none;
+}
+.os-deploy-node:focus-visible .os-deploy-node-box {
+  stroke: var(--os-accent);
+  stroke-width: 2.5;
+}
+.os-deploy-map-canvas:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+
+/* LIST DENSITY, the Deployables app's own view setting.
+ *
+ * On the STACK rather than on the list, so the whole section tightens together
+ * -- a compact list under comfortable spacing reads as a rendering accident
+ * rather than as a choice somebody made. It touches spacing only: nothing here
+ * changes which rows are read or shown, which is what makes flipping it instant
+ * and what keeps it from re-baselining a single arrival cue. */
+.os-app-stack[data-density="compact"] {
+  gap: 8px;
+}
+.os-app-stack[data-density="compact"] .os-livelist-rows {
+  gap: 2px;
+}
+.os-app-stack[data-density="compact"] .os-row {
+  padding: 4px 10px;
+}
+
+/* A LINK WEARING THE BUTTON. `.os-button` was written for `<button>`, which is
+ * inline-block by default; an `<a>` is inline, so an icon beside a word sits
+ * on the text baseline with no gap between them. Scoped to the anchor form
+ * rather than folded into `.os-button` so no existing button moves, and it
+ * lives down here because there is exactly one link-shaped action in the shell
+ * so far -- the day there is a second, this goes up with the other controls. */
+a.os-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+/* A labelled field in the create form. The label sits ABOVE the control rather
+ * than only inside it as a placeholder, because a placeholder is an
+ * explanation that disappears the moment somebody starts typing. */
+.os-deploy-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.os-deploy-field-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}

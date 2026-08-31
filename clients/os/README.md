@@ -28,8 +28,8 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
-the shared kit in `src/kit/`. Settings, Fleet and Users are real; the
-remaining product apps are stubs until their epics land (#4721 #4725
+the shared kit in `src/kit/`. Settings, Fleet, Users and Deployables are
+real; the remaining product apps are stubs until their epics land (#4721
 #4737).
 
 ## Right-click belongs to the shell
@@ -195,3 +195,90 @@ THIRD app gets wrong by default.
   across apps or copied. `.os-machine` and `.os-fleet` remain as CSS aliases,
   because the shared behaviour is what had to move. The measure that it was
   the right size: Users ships two classes of its own.
+
+## Deployables, the third app (memql#4725)
+
+`src/apps/deployables/` is the sites this cluster serves, the **deploy map**,
+and the two writes that change either -- create a site, publish a Library zip
+to one. Three things about it are new rules rather than repetitions of the two
+apps before it.
+
+- **One feed, three surfaces, one selection.** The list, the map and the detail
+  panel are readings of a single `LiveCollection` retained at the app root and
+  passed down. A second `useSites()` inside the map would open a second
+  subscription and run a second seed, and the two would then be free to
+  disagree about what the cluster currently holds -- which is the one failure
+  an app that is a picture and a table of the same thing must not have. The
+  selection is shared for the same reason: walking a cluster on the map and
+  switching to the list lands on the same deployable.
+- **`v1:platform:site` broadcasts BOTH created and updated**, unlike
+  `v1:identity:user`, which broadcasts creates and deliberately not updates
+  because the row churns on `lastSeenAt`. That asymmetry is why Users re-reads
+  a person on open and this app does not, and it is what makes the epic's
+  headline true with no engine work: a CI publish through
+  `POST /sites/{id}/bundles` flips `bundleRef` on a node nobody in the browser
+  is talking to, and the row changes under the person watching it. Read the
+  ROUTING RULES before deciding what a concept's live feed does.
+- **The cue is a mechanism now, not a list feature.** `live/useArrivals.ts` is
+  the fold `LiveList` used to own. The map is the first live surface in the OS
+  that is not a list, and a site whose bundle just flipped has to announce
+  itself there exactly as it does in the list beside it. Promoted rather than
+  copied -- a second copy of a cue is a cue that drifts, and "the map pulses on
+  a heartbeat while the list does not" is the bug the fingerprint rule exists
+  to stop.
+
+### The map is plain SVG, and that is enforced
+
+The portal's Nexus is the platform's ONE 3D surface and pays for it with a lazy
+chunk and a guard of its own. This map answers a flat question -- which host,
+which site, which bundle -- so a WebGL renderer would buy it nothing while
+making every OS window carry the largest dependency the portal has.
+`test/deployables/map.test.tsx` scans the module graph for a three.js import
+AND checks the package manifest, because a static import is only one of the two
+ways one gets in. Both halves carry the reachable positive that makes an empty
+offender list evidence about the tree rather than a statement about the regex.
+
+`map/layout.ts` is a pure function from rows to positioned nodes and edges, and
+`map/viewport.ts` is the pan/zoom arithmetic -- both fixture-tested with no DOM
+and no GPU, which is the Nexus precedent for purity without its renderer. Two
+of their rules are worth knowing before editing them:
+
+- **The layout sorts its own input.** The collection folds events in the order
+  the cluster sent them, so a map that depended on input order would reshuffle
+  on an update -- exactly when somebody is watching it.
+- **A shared bundle is ONE node with two edges into it**, deduped within its
+  domain group and centred on the bands it serves. That is the fact the picture
+  carries and a table cannot. It is deduped per GROUP rather than globally
+  because an edge running the width of the canvas between two domains costs
+  more legibility than the fact is worth -- a bundle serving sites under two
+  domains is drawn once per domain, which is also a true reading of it.
+- **Zooming keeps the point under the cursor under the cursor.** It is two
+  lines of algebra and it is written down once, in `zoomAt`, rather than
+  re-derived inside a pointer handler. `touch-action: none` on the canvas is
+  load-bearing and invisible when it goes: without it a finger scrolls the
+  window and the gesture simply does not exist on a phone.
+
+### The write half
+
+The app itself carries no role. `v1:platform:site` declares the composite tier
+(`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person has
+deployables of their own to read and the engine decides how far the list
+reaches; only the **Actions** section is admin+, and that is presentation over
+writes the Go hostname policy and `sitePublishFromArtifact` remain the
+authority on.
+
+- **The slug rules are mirrored for a keystroke-rate answer, and say so.**
+  Cluster-wide uniqueness and the cluster-owner exemption are deliberately NOT
+  mirrored -- a browser cannot answer either -- so those refusals arrive from
+  the server and render verbatim, because the server's sentence names the
+  colliding site and a friendlier paraphrase would drop the one fact that
+  helps.
+- **A publish refusal is keyed by its stable reason and rendered as a
+  sentence**, never as the token. An error carrying NO known reason keeps its
+  own message: inventing a friendly sentence for an unknown failure is how a
+  real fault gets mistaken for a user error.
+- **Nothing is inserted locally.** A created site arrives on its own broadcast
+  with the arrival cue, exactly like one somebody else created. The detail
+  panel marks a `bundleRef` flip because the VALUE changed, not because a tick
+  fired -- an `updated` tick fires for a rename too, and a marker driven by it
+  would announce a publish that did not happen.
