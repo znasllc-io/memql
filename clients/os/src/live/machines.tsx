@@ -46,7 +46,18 @@ export const WORKER_REGISTRATION_CONCEPT = "v1:worker:registration";
 export type { MachineRow };
 
 interface MachinesValue {
-  collection: LiveCollection<MachineRow> | null;
+  /**
+   * RAW rows, not projected ones.
+   *
+   * The fold upserts an event's payload AS the row type with no projection
+   * hook (`liveCollection.ts`), so a collection typed with MachineRow would
+   * be correct until the first heartbeat and hold a raw wire row after it --
+   * and the machines view's own `isRevoked` predicate throws on the absent
+   * field rather than degrading. Consumers project through
+   * `apps/fleet/rows.machineFromRow`, on the read side, where it runs over
+   * whatever the collection currently holds. Same rule the portal follows.
+   */
+  collection: LiveCollection<Row> | null;
   /** Presence by BARE registration id, for the provenance dots. */
   presence: (workerId: string) => MachinePresence | null;
   /**
@@ -79,7 +90,7 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
   const collection = useMemo(() => {
     if (!connection) return null;
     const query = connection.query;
-    return new LiveCollection<MachineRow>(
+    return new LiveCollection<Row>(
       {
         concept: WORKER_REGISTRATION_CONCEPT,
         // The same read the portal's machines list uses: the caller's own
@@ -89,13 +100,13 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
         // rather than a second read.
         seed: async (_cursor, signal) => {
           const result = await query.myWorkersWithStatus({}, { signal });
-          return { rows: result.rows().map(machineFromRow), nextCursor: "" };
+          return { rows: result.rows(), nextCursor: "" };
         },
         reread: async (rowId, signal) => {
           const row = await getRowByConceptAndId(query, WORKER_REGISTRATION_CONCEPT, rowId, {
             signal,
           });
-          return row ? machineFromRow(row as Row) : null;
+          return (row as Row) ?? null;
         },
         paged: false,
       },
@@ -143,8 +154,9 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
   const { presence, count } = useMemo(() => {
     void version;
     const byId = new Map<string, MachinePresence>();
-    const rows = collection ? collection.snapshot.rows : [];
+    const rows = collection ? collection.snapshot.rows.map(machineFromRow) : [];
     for (const row of rows) {
+      if (row.id === "") continue;
       const bare = row.id.includes(":") ? row.id.slice(row.id.lastIndexOf(":") + 1) : row.id;
       const entry: MachinePresence = { name: machineName(row), online: isWorkerOnline(row) };
       byId.set(row.id, entry);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { feedIsBehind } from "../../../live/useLiveCollection";
 import { MapEditor } from "../MapEditor";
 import { chipsFromMap, type LabelMap } from "../labels";
 import {
@@ -81,7 +82,13 @@ export function RoutingSection() {
   return (
     <div className="os-fleet">
       <SectionHead title="Routing">
-        <Button onClick={state.reseed}>Re-read</Button>
+        {/* Offered only when the feed is behind -- see the workbenches
+            section for the reasoning. v1:worker:routingPolicy is broadcast,
+            so a policy edited in another tab or in the portal arrives here on
+            its own; a standing refresh button would say otherwise. */}
+        {feedIsBehind(state.liveState) ? (
+          <Button onClick={state.reseed}>Re-read</Button>
+        ) : null}
       </SectionHead>
 
       <Panel label="Routing policy">

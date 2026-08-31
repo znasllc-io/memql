@@ -141,13 +141,18 @@ describe("the routing policy editor", () => {
       expect((screen.getByRole("radio", { name: /firstFit/ }) as HTMLInputElement).checked).toBe(true),
     );
 
-    // The row changes under an editor nobody has touched.
-    connection.query.myRoutingPolicies.mockResolvedValue(
-      (await import("./harness")).rowsResult([
-        { id: "p1", strategy: "leastLoaded", fallback: "none", active: true },
-      ]),
-    );
-    await click(screen.getByRole("button", { name: "Re-read" }));
+    // Delivered as a FOLDED EVENT, which is how a policy edited in another
+    // tab or in the portal actually reaches this editor --
+    // v1:worker:routingPolicy is broadcast. The editor offers no refresh
+    // button while its feed is live, precisely because it does not need one.
+    await act(async () => {
+      connection.subscriptions.emit("v1:worker:routingPolicy", {
+        id: "p1",
+        strategy: "leastLoaded",
+        fallback: "none",
+        active: true,
+      });
+    });
 
     await waitFor(() =>
       expect((screen.getByRole("radio", { name: /leastLoaded/ }) as HTMLInputElement).checked).toBe(
@@ -188,12 +193,14 @@ describe("the routing policy editor", () => {
 
     await click(screen.getByRole("radio", { name: /labelMatch/ }));
 
-    connection.query.myRoutingPolicies.mockResolvedValue(
-      (await import("./harness")).rowsResult([
-        { id: "p1", strategy: "roundRobin", fallback: "none", active: true },
-      ]),
-    );
-    await click(screen.getByRole("button", { name: "Re-read" }));
+    await act(async () => {
+      connection.subscriptions.emit("v1:worker:routingPolicy", {
+        id: "p1",
+        strategy: "roundRobin",
+        fallback: "none",
+        active: true,
+      });
+    });
 
     // Silently discarding somebody's typing is worse than either resolution,
     // so the edit stands and the disagreement is shown.

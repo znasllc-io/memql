@@ -210,4 +210,104 @@ describe("the machines directory", () => {
     expect(screen.getByText("runnable")).toBeTruthy();
     expect(screen.getByText("not runnable -- not in the machine's apps.allow")).toBeTruthy();
   });
+
+  it("folds a live update into the list without losing the projection", async () => {
+    // THE FOLD IS NOT THE SEED. A collection's seed maps wire rows through
+    // machineFromRow; its fold upserts the event payload AS THE ROW TYPE with
+    // no projection hook in between (liveCollection.ts: `upsert(id, payload as
+    // unknown as T)`). A collection typed with a PROJECTED row therefore holds
+    // a raw wire row from the first update onward -- and every derived field
+    // the surface reads (mergedLabels, platform, the display name) is simply
+    // absent on it.
+    //
+    // Nothing caught this while the harness had no subscriptions: a seed-only
+    // test exercises the half of a live surface that runs once.
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    mount(connection);
+    await screen.findByText("Studio mini");
+
+    await act(async () => {
+      connection.subscriptions.emit(
+        "v1:worker:registration",
+        machineRow({
+          id: "v1:worker:registration:live",
+          displayName: "Studio mini renamed",
+          labels: { os: "darwin" },
+          operatorLabels: { tier: "gold" },
+        }),
+      );
+    });
+
+    // The renamed row is on screen...
+    expect(await screen.findByText("Studio mini renamed")).toBeTruthy();
+    // ...and it is still a PROJECTED row: the merged label chip is a derived
+    // field, absent on the raw payload, so this is what fails when the fold
+    // bypasses the projection.
+    expect(screen.getByText("tier=gold")).toBeTruthy();
+  });
+
+  it("cues a real change and stays SILENT on a heartbeat", async () => {
+    // The two halves of a good arrival cue, and they pull against each other:
+    // it has to fire when something happened, and it has to not fire the rest
+    // of the time. A machine heartbeats every 15 seconds forever, so a cue
+    // keyed on liveness is a permanent strobe -- the standing-badge failure
+    // this cue exists to avoid.
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    mount(connection);
+    await screen.findByText("Studio mini");
+
+    const rowOf = (name: string) =>
+      (screen.getByText(name).closest(".os-livelist-row") as HTMLElement) ?? null;
+
+    // A heartbeat: nothing but lastSeenAt moves.
+    await act(async () => {
+      connection.subscriptions.emit(
+        "v1:worker:registration",
+        machineRow({
+          id: "v1:worker:registration:live",
+          displayName: "Studio mini",
+          labels: { os: "darwin", tier: "cheap" },
+          operatorLabels: { tier: "gold", room: "studio" },
+          activeCount: 1,
+          lastSeenAt: new Date(Date.now() + 15_000).toISOString(),
+        }),
+      );
+    });
+    expect(rowOf("Studio mini").getAttribute("data-arrival")).toBeNull();
+
+    // A rename: news.
+    await act(async () => {
+      connection.subscriptions.emit(
+        "v1:worker:registration",
+        machineRow({
+          id: "v1:worker:registration:live",
+          displayName: "Studio",
+          labels: { os: "darwin", tier: "cheap" },
+          operatorLabels: { tier: "gold", room: "studio" },
+          activeCount: 1,
+          lastSeenAt: new Date(Date.now() + 30_000).toISOString(),
+        }),
+      );
+    });
+    expect(rowOf("Studio").getAttribute("data-arrival")).toBe("updated");
+  });
+
+  it("cues a machine that ARRIVES, and lets the cue decay", async () => {
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    mount(connection);
+    await screen.findByText("Studio mini");
+
+    await act(async () => {
+      connection.subscriptions.emit(
+        "v1:worker:registration",
+        machineRow({ id: "v1:worker:registration:new", displayName: "Just paired" }),
+      );
+    });
+
+    const row = screen.getByText("Just paired").closest(".os-livelist-row") as HTMLElement;
+    expect(row.getAttribute("data-arrival")).toBe("added");
+    // ...and it says so in words too, which is the cue a reduced-motion
+    // reader gets when the animation is suppressed.
+    expect(within(row).getByText("new")).toBeTruthy();
+  });
 });

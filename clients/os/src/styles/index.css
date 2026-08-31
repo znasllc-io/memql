@@ -1140,10 +1140,12 @@ button:not(:disabled):active {
   border-radius: var(--os-radius-sm);
 }
 .os-livelist-row[data-arrival="added"] {
-  animation: os-arrive var(--os-duration-med) var(--os-ease);
+  animation:
+    os-arrive var(--os-duration-med) var(--os-ease),
+    os-pulse var(--os-duration-cue) var(--os-ease);
 }
 .os-livelist-row[data-arrival="updated"] {
-  animation: os-pulse var(--os-duration-med) var(--os-ease);
+  animation: os-pulse var(--os-duration-cue) var(--os-ease);
 }
 @keyframes os-arrive {
   from {
@@ -1155,18 +1157,44 @@ button:not(:disabled):active {
     transform: none;
   }
 }
+/* A RING, NOT A BACKGROUND.
+ *
+ * The cue paints on the list ROW, and almost every row in the OS renders a
+ * child that paints its own opaque plate on top -- a machine line, a
+ * workspace card. A background animation underneath one of those is
+ * invisible, which is the worst outcome for a cue: it costs the same and
+ * announces nothing. The original version of this keyframe was exactly that,
+ * and it never fired visibly on either of the two lists it was written for.
+ *
+ * A box-shadow draws OUTSIDE the element, so it survives whatever the child
+ * paints. Fast in, slow out: the rise catches the eye and the decay is what
+ * makes it feel like something settling rather than something blinking. */
 @keyframes os-pulse {
-  0%,
-  100% {
-    background: transparent;
+  0% {
+    box-shadow:
+      0 0 0 0 var(--os-accent-soft),
+      0 0 0 0 transparent;
   }
-  40% {
-    background: var(--os-accent-soft);
+  18% {
+    box-shadow:
+      0 0 0 2px var(--os-accent),
+      0 0 14px 2px var(--os-accent-soft);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
   }
 }
+/* Reduced motion still gets a CUE, just not a moving one: the ring is held
+ * for as long as the tick lives and disappears when it decays. "No animation"
+ * on its own left these readers with no signal at all that anything had
+ * changed, which is a different accessibility failure from the one the
+ * setting asks about. */
 @media (prefers-reduced-motion: reduce) {
   .os-livelist-row[data-arrival] {
     animation: none;
+    box-shadow: 0 0 0 2px var(--os-accent-soft);
   }
 }
 

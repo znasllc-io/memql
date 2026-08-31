@@ -1,82 +1,91 @@
-import { useCallback, useEffect, useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { LiveListSource } from "../../../live/LiveList";
 import { useOsConnection } from "../../../live/connection";
 import { useLiveCollection } from "../../../live/useLiveCollection";
-import {
-  latestPerId,
-  nodeFromRow,
-  workspaceFromRow,
-  WORKBENCH_NODE_TYPE,
-  type WorkbenchNodeRow,
-  type WorkspaceRow,
-} from "../rows";
+import { nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
 
 export const WORKBENCH_WORKSPACE_CONCEPT = "v1:workbench:workspace";
 export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
 
-// The workbenches screen's state: the replicas that host workspaces, and the
-// workspaces living on them.
+// The workbenches screen's state: the replicas that host per-plan working
+// directories, and the directories on them.
 //
 // ===========================================================================
-// TWO READS, AND ONLY ONE OF THEM CAN BE LIVE
+// BOTH FEEDS ARE LIVE, AND THE SECOND ONE ONLY IS BECAUSE THIS WAS CHECKED
 // ===========================================================================
-// v1:workbench:workspace carries broadcast routing rules
-// (component/node/routing.go), so its events cross replicas to a browser and
-// the workspaces list is a genuine LiveList. v1:cluster:node does NOT: it is
-// not in that rule set, so a subscription over it would receive nothing in
-// the only topology that ships -- and a list that silently never updates is
-// worse than one that says when it was read.
+// v1:workbench:workspace carries three explicit broadcast rules
+// (component/node/routing.go), so its events reach a browser subscriber.
 //
-// So the replicas are a plain query, refreshed on request, and the surface
-// says so. The alternative -- deriving the replica set from the nodeId on
-// each workspace -- cannot answer either of the two questions this screen
-// exists for: a replica with no workspaces would be invisible, and "no
-// workbench replicas at all" would be indistinguishable from "no workspaces".
+// v1:cluster:node does too, and by a route that is easy to miss: there is no
+// rule naming it. It is covered by the `graph.node.{created,updated,deleted}
+// .v1:cluster:*` WILDCARDS in the core rule block, which have been forwarding
+// since the mesh existed. The first version of this file asserted the
+// opposite, built a polled query around it, and printed the claim on the page
+// as operator-facing copy -- a statement about the system that was simply
+// untrue. Read the rules, do not reason from the absence of a rule with the
+// concept's name in it.
+//
+// The concept also declares NO row-authz tier, so admission is open on the
+// subscription path exactly as it is on the read path (memql#4309): every
+// signed-in user sees replica rows.
 //
 // ===========================================================================
-// THE NODE READ IS clusterNodes, AND IT IS NOT NARROWED SERVER-SIDE
+// THE NODE READ IS clusterNodes, AND IT NARROWS NOWHERE BUT HERE
 // ===========================================================================
-// dsl/cluster/queries.memql declares no per-nodeType read: clusterNodes takes
-// no arguments, and nodesForDeployment / nodesNotInDeployment narrow by
-// deployment rather than by role. Adding one would be a DSL change this
-// surface does not own, so the narrowing to nodeType=workbench happens after
-// the read.
+// dsl/cluster/queries.memql declares no per-nodeType read: clusterNodes has
+// an EMPTY body -- no filter, no sort, no shape, no paginate -- and
+// nodesForDeployment / nodesNotInDeployment narrow by deployment rather than
+// by role. So the narrowing to nodeType=workbench happens here, in the seed
+// (where this read's meaning belongs) and again in `inScope`, which says the
+// same thing about arriving events. Without the second one a bff node's
+// heartbeat folds into the workbench list.
 //
-// clusterNodes ALSO returns the whole append-only history -- its own comment
-// says the CLI collapses to latest-per-id in Go -- which is what latestPerId
-// does here. Without it one replica renders once per liveness row it has ever
-// written.
+// ===========================================================================
+// AND THE HISTORY IS COLLAPSED IN THE SEED, NOT AFTER IT
+// ===========================================================================
+// v1:cluster:node is APPEND-ONLY: every liveness transition writes a new row
+// under the same id, and clusterNodes returns the whole history in NO
+// DECLARED ORDER (its body is empty, so there is no `sort`). The collection
+// folds by id and therefore keeps whichever row it saw LAST -- which, over an
+// unordered read, is an arbitrary one of a replica's lifetime.
+//
+// So latestPerId runs INSIDE the seed, over the whole history, before the
+// collection ever sees it. That makes the collapse a property of the read
+// rather than of the order the read happened to come back in. Folded events
+// need no such care: they arrive newest-last by construction.
 //
 // staleClusterNodes would have collapsed server-side, but it also filters
 // `health!="stopped"`, and a replica that STOPPED is the most interesting row
-// on a screen whose job is saying where a workspace's files went. Hiding it
-// would answer the one question the screen is for with silence.
+// on a screen whose job is saying where a workspace's files went.
 
 export interface WorkbenchesState {
-  /** The workspaces feed itself, for a LiveList (or a view over one). Null
-   *  until the connection exists, which LiveList renders as the
-   *  disconnected caption rather than as an empty list. */
-  source: LiveListSource<WorkspaceRow> | null;
+  /**
+   * The workspaces feed, carrying RAW wire rows. Null until the connection
+   * exists, which LiveList renders as the disconnected caption rather than as
+   * an empty list.
+   *
+   * Raw because the fold has to be: an arriving event's payload is upserted
+   * AS the row type with no projection hook in between, so a collection typed
+   * with a projected row holds a raw one from the first update onward.
+   * Callers wrap this in `useLiveView` and project there.
+   */
+  source: LiveListSource<Row> | null;
+  workspaceState: LiveState;
   workspaceError: string;
   reseedWorkspaces: () => void;
 
-  nodes: WorkbenchNodeRow[];
-  nodesLoading: boolean;
-  nodesError: string;
-  nodesReadAt: Date | null;
-  refreshNodes: () => void;
-}
-
-function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  /** The workbench replicas, same contract, same reason. */
+  nodeSource: LiveListSource<Row> | null;
+  nodeState: LiveState;
+  nodeError: string;
+  reseedNodes: () => void;
 }
 
 export function useWorkbenches(): WorkbenchesState {
   const connection = useOsConnection();
 
-  const { source, snapshot, reseed } = useLiveCollection<WorkspaceRow>(
+  const workspaces = useLiveCollection<Row>(
     connection === null ? null : "fleet:workspaces",
     (conn) => ({
       concept: WORKBENCH_WORKSPACE_CONCEPT,
@@ -85,69 +94,59 @@ export function useWorkbenches(): WorkbenchesState {
       // over these rows rather than a second read.
       seed: async (_cursor, signal) => {
         const result = await conn.query.myWorkspaces({}, { signal });
-        return { rows: result.rows().map(workspaceFromRow), nextCursor: "" };
+        return { rows: result.rows(), nextCursor: "" };
       },
       reread: async (rowId, signal) => {
         const row = await getRowByConceptAndId(conn.query, WORKBENCH_WORKSPACE_CONCEPT, rowId, {
           signal,
         });
-        return row ? workspaceFromRow(row as Row) : null;
+        return (row as Row) ?? null;
       },
       paged: false,
     }),
   );
 
-  const [nodes, setNodes] = useState<WorkbenchNodeRow[]>([]);
-  const [nodesLoading, setNodesLoading] = useState(false);
-  const [nodesError, setNodesError] = useState("");
-  const [nodesReadAt, setNodesReadAt] = useState<Date | null>(null);
-  const [epoch, setEpoch] = useState(0);
-
-  useEffect(() => {
-    if (connection === null) return;
-    let live = true;
-    setNodesLoading(true);
-    setNodesError("");
-
-    void connection.query
-      .clusterNodes({})
-      .then((result) => {
-        if (!live) return;
-        setNodes(
-          latestPerId(
-            result
-              .rows()
-              .map(nodeFromRow)
-              .filter((node) => node.id !== "" && node.nodeType === WORKBENCH_NODE_TYPE),
-          ),
-        );
-        setNodesReadAt(new Date());
-      })
-      .catch((err: unknown) => {
-        // The replicas already on screen are KEPT: they were true when they
-        // were read, and blanking them on a failed refresh replaces a stale
-        // answer with no answer.
-        if (live) setNodesError(describe(err));
-      })
-      .finally(() => {
-        if (live) setNodesLoading(false);
-      });
-
-    return () => {
-      live = false;
-    };
-  }, [connection, epoch]);
-
-  const refreshNodes = useCallback(() => setEpoch((n) => n + 1), []);
+  const nodes = useLiveCollection<Row>(
+    connection === null ? null : "fleet:workbench:nodes",
+    (conn) => ({
+      concept: CLUSTER_NODE_CONCEPT,
+      seed: async (_cursor, signal) => {
+        const result = await conn.query.clusterNodes({}, { signal });
+        // The collapse belongs to the READ (see the header), and it keeps the
+        // RAW row while comparing PROJECTED fields -- the collection stores
+        // what the wire sent and the surface projects on the way out.
+        const newest = new Map<string, { createdAt: string; raw: Row }>();
+        for (const raw of result.rows()) {
+          const node = nodeFromRow(raw);
+          if (node.id === "" || node.nodeType !== WORKBENCH_NODE_TYPE) continue;
+          const held = newest.get(node.id);
+          if (held === undefined || node.createdAt >= held.createdAt) {
+            newest.set(node.id, { createdAt: node.createdAt, raw });
+          }
+        }
+        return { rows: [...newest.values()].map((one) => one.raw), nextCursor: "" };
+      },
+      reread: async (rowId, signal) => {
+        const row = await getRowByConceptAndId(conn.query, CLUSTER_NODE_CONCEPT, rowId, { signal });
+        return (row as Row) ?? null;
+      },
+      // The seed's narrowing, restated for arriving events -- every other
+      // node type in the mesh heartbeats onto this same concept. Projected
+      // here for the same reason every predicate over these rows is: the row
+      // this receives is whatever the wire sent.
+      inScope: (raw) => nodeFromRow(raw).nodeType === WORKBENCH_NODE_TYPE,
+      paged: false,
+    }),
+  );
 
   return {
-    source,
-    workspaceError: snapshot.error,
-    reseedWorkspaces: reseed,
-    nodes,
-    nodesLoading,
-    nodesError,
-    nodesReadAt,
-    refreshNodes,
+    source: workspaces.source,
+    workspaceState: workspaces.snapshot.state,
+    workspaceError: workspaces.snapshot.error,
+    reseedWorkspaces: workspaces.reseed,
+    nodeSource: nodes.source,
+    nodeState: nodes.snapshot.state,
+    nodeError: nodes.snapshot.error,
+    reseedNodes: nodes.reseed,
   };
 }

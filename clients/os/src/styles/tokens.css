@@ -41,6 +41,12 @@
 
   --os-duration-fast: 140ms;
   --os-duration-med: 260ms;
+  /* The arrival cue. Longer than an interaction on purpose: it is not
+   * feedback for something the person did, it is news arriving beside them,
+   * and it has to be catchable by someone whose eyes are elsewhere on the
+   * panel. Long enough to notice, short enough that it is gone before it
+   * becomes a thing to dismiss. */
+  --os-duration-cue: 900ms;
   --os-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   --os-blur: 18px;
@@ -181,5 +187,6 @@
   [data-os-sheet] {
     --os-duration-fast: 0ms;
     --os-duration-med: 0ms;
+    --os-duration-cue: 0ms;
   }
 }

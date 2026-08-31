@@ -128,6 +128,7 @@ without one is normal.
 | `integrations/` | External service integrations + DSL capabilities (Go) | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps) | [→](clients/README.md) |
 | `clients/portal/` | MemQL Portal -- the graphical ops console, served by `component/edge` as site #1. Nexus (`src/nexus/`) is its 3D surface | [→](clients/README.md) |
+| `clients/os/` | MemQL OS -- the desktop shell, served at `os.<domain>`. **Read its README before adding an app or a live surface**: the live-collection contract (a collection does nothing until `retain()`), which concepts are actually broadcast, and the arrival-cue rule (a heartbeat is not news) are all rules a new surface gets wrong by default | [→](clients/os/README.md) |
 | `component/` | Core service components (Go) | [→](component/CLAUDE.md) |
 | `component/language/` | The MemQL front end: lexer, parser, rewriter, AST, compiler, registries | [→](component/language/CLAUDE.md) |
 | `component/node/` | Distributed node system (bootstrap, peers, mesh) | [→](component/node/CLAUDE.md) |
