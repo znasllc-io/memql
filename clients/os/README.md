@@ -31,6 +31,63 @@ in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Product apps are stubs until their epics
 land (#4721 #4725 #4733 #4737 #4741).
 
+## Right-click belongs to the shell
+
+**The browser's context menu is OFF by default and opted back INTO**, at the
+shell root (`chrome/browserMenu.ts`, attached to both `os-root` elements).
+Back / Reload / View Page Source over a desktop window is the loudest tell
+that this is a tab.
+
+The default is inverted at the ROOT rather than audited per element on
+purpose: suppressing per element means every new control is one somebody
+forgot, while suppressing at the root means a new control is silent unless it
+asks to speak. A surface with its own menu (the desk background, a desk item,
+a dock pin) still calls `preventDefault` and shows it; the root handler
+running afterwards is a no-op.
+
+**Three exceptions, because there the browser's menu IS the feature** and the
+shell has no replacement for it: an editable field (cut/copy/paste — without
+it, someone with no keyboard shortcuts cannot paste a worker token), a live
+text selection (copy), and a link with an href (copy address). The rule is
+"nothing happens where nothing is offered", not "nothing ever happens". When
+the shell grows its own clipboard menu, that list shrinks.
+
+## The rail stops short of the corner
+
+A scrolling box is a rectangle inside a container that clips to a radius, so
+the last stretch of the rail runs under the curve and is cut off. Of the three
+obvious fixes only one works: a scrollbar is painted in its own gutter at the
+box's edge and **cannot be moved inward**, and "move it up" is the same
+operation as shortening it. So the TRACK is inset -- the thumb never travels
+into the curved band, the content still scrolls end to end, and no layout
+moves.
+
+The inset is `var(--os-radius)` rather than a fitted number: a point further
+than r from the corner in either axis is outside the curve by construction, so
+it stays correct if a window is ever rounded more. A hand-fitted value would
+silently start clipping again that day.
+
+**Setting `scrollbar-width` or `scrollbar-color` switches Chrome to the
+standard scrollbar, which ignores every `::-webkit-scrollbar` rule.** This is
+the trap, and it is silent: the first cut applied both standard properties to
+`*`, which made the whole `::-webkit-` section inert -- the inset thumb, the
+transparent corner, the suppressed end buttons and the track inset -- and
+Chrome drew its own bar with stepper arrows, the bottom one sitting in the
+rounded corner. It looked deliberate, which is exactly why it survived a
+design pass: a tinted, rounded rail is what you would expect those rules to
+produce. The standard properties are therefore scoped to engines that have no
+pseudo-elements, with `@supports not selector(::-webkit-scrollbar)`.
+
+It was found by tinting `--os-rail` hot pink in a scratch harness and looking
+at it. **If a scrollbar rule seems not to apply, tint it before theorising** --
+the failure mode here is a rail that renders plausibly while none of your CSS
+is running.
+
+Firefox exposes no track geometry under `scrollbar-width: thin`, so its rail
+is still clipped there. Known, and not worth a scripted custom scrollbar --
+that trades a cosmetic clip in one engine for a scroll surface that behaves
+like the platform's in none of them.
+
 ## Live surfaces: the arrival cue (the rule, not a suggestion)
 
 Every live list in the OS renders through `kit/LiveList`, and the reason is

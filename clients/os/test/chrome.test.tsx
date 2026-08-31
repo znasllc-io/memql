@@ -271,3 +271,37 @@ describe("phone chrome (spec D13)", () => {
     expect(screen.queryByRole("heading", { name: "About this OS" })).toBeNull();
   });
 });
+
+describe("right-click (the shell owns it)", () => {
+  it("suppresses the browser menu on a control inside a window", () => {
+    renderShell();
+    // Anything the shell renders and does not offer a menu for: the browser's
+    // own Back / Reload / View Page Source over a desktop window is the
+    // loudest tell that this is a tab.
+    const dock = document.querySelector(".os-dock") as HTMLElement;
+    expect(dock).toBeTruthy();
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    dock.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("covers the PHONE shell too, which is a separate root", () => {
+    // Two roots render the shell, and a rule attached to one of them is a
+    // rule that holds on half the product.
+    renderShell({ layout: "phone" });
+    const root = document.querySelector("[data-os-root]") as HTMLElement;
+    expect(root).toBeTruthy();
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("still lets a text field have cut/copy/paste", () => {
+    renderShell();
+    const input = document.createElement("input");
+    (document.querySelector("[data-os-root]") as HTMLElement).appendChild(input);
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

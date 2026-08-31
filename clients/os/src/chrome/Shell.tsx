@@ -19,6 +19,7 @@ import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
 import { SessionProvider } from "./access";
 import { Desktop } from "./Desktop";
+import { suppressBrowserMenu } from "./browserMenu";
 import { Dock } from "./Dock";
 import { gridForViewport, OsProvider, useOs } from "./state";
 import { LauncherOverlay } from "./LauncherOverlay";
@@ -78,7 +79,12 @@ export function Shell({
             {(uploads, desktopStore) => (
               <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={desktopStore}>
                 {layout === "phone" ? (
-                  <div className="os-root" data-os-root data-layout={layout}>
+                  <div
+      className="os-root"
+      data-os-root
+      data-layout={layout}
+      onContextMenu={suppressBrowserMenu}
+    >
                     <PhoneShell onSignOut={onSignOut} />
                     <AskSheet />
                   </div>
@@ -190,7 +196,12 @@ function DesktopChrome({
   }, [actions, state.shell.desks]);
 
   return (
-    <div className="os-root" data-os-root data-layout={layout}>
+    <div
+      className="os-root"
+      data-os-root
+      data-layout={layout}
+      onContextMenu={suppressBrowserMenu}
+    >
       <Desktop viewport={viewport} placement={placement} uploads={uploads} />
       <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
       <LauncherOverlay open={launcherOpen} onClose={() => setLauncherOpen(false)} />

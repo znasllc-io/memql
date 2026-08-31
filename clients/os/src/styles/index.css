@@ -1393,11 +1393,6 @@ button:not(:disabled):active {
  * meet, the platform paints a filled square, which is the artefact that
  * shows worst at the bottom of a rounded panel.
  */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--os-rail) transparent;
-}
-
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -1406,12 +1401,37 @@ button:not(:disabled):active {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
-/* THE END BUTTONS, suppressed defensively rather than in response to one.
- * Chrome draws a stepper arrow at each end of a bar on some platforms and
- * configurations, and where it does they land exactly where a window's
- * rounded corner is. This build does not draw them -- checked, the rendering
- * is byte-identical with and without this rule -- so it is a guard for the
- * platforms that do, not a fix for something observed here. */
+
+/* THE TRACK STOPS SHORT OF THE CORNER, and that is the only one of the three
+ * obvious fixes that works.
+ *
+ * A scrolling box is a RECTANGLE inside a container that clips to a radius,
+ * so the last stretch of the rail runs under the curve and gets cut. You
+ * cannot move the rail inward -- a scrollbar is painted in its own gutter at
+ * the box's edge and has no horizontal offset -- and "move it up" is the same
+ * operation as shortening it. Shortening the TRACK is the one that costs
+ * nothing: the thumb simply never travels into the curved band, the content
+ * still scrolls end to end, and no layout moves.
+ *
+ * THE INSET IS THE RADIUS ITSELF rather than a tuned number. A point further
+ * than r from the corner in either axis is outside the curved band entirely,
+ * so `var(--os-radius)` is correct for any radius by construction -- where a
+ * hand-fitted 8px (enough for r=16, the value this shell uses today) silently
+ * starts clipping again the day someone rounds a window more.
+ *
+ * FIREFOX CANNOT DO THIS. `scrollbar-width: thin` exposes no track geometry,
+ * so its rail is still clipped by the corner. Known, and not worth reaching
+ * for a scripted custom scrollbar to fix -- that trades a cosmetic clip in
+ * one engine for a scroll surface that no longer behaves like the platform's
+ * in any of them. */
+*::-webkit-scrollbar-track:vertical {
+  margin: var(--os-radius) 0;
+}
+*::-webkit-scrollbar-track:horizontal {
+  margin: 0 var(--os-radius);
+}
+/* THE END BUTTONS. Chrome draws a stepper arrow at each end of a bar, and
+ * the bottom one lands exactly in the window's rounded corner. Gone. */
 *::-webkit-scrollbar-button {
   display: none;
   width: 0;
@@ -1434,6 +1454,33 @@ button:not(:disabled):active {
 }
 *::-webkit-scrollbar-thumb:horizontal {
   min-width: 28px;
+}
+
+/* FIREFOX GETS THE STANDARD PROPERTIES, AND IT MUST BE THE ONLY ONE THAT DOES.
+ *
+ * This was `* { scrollbar-width; scrollbar-color }` applied everywhere, and it
+ * silently disabled the whole section above it. Setting either standard
+ * property switches Chrome to the STANDARD scrollbar, which ignores every
+ * ::-webkit-scrollbar rule -- so the inset thumb, the transparent corner, the
+ * suppressed end buttons and the track inset were all inert, and Chrome drew
+ * its own bar with stepper arrows, the bottom one sitting in the rounded
+ * corner. It looked deliberate, which is why it survived a design pass: a
+ * tinted, rounded rail is exactly what you would expect these rules to
+ * produce.
+ *
+ * `@supports not selector(::-webkit-scrollbar)` says the thing that is
+ * actually true -- an engine with no scrollbar pseudo-elements needs the
+ * standard properties, and an engine that has them is already handled. A
+ * @-moz-document or a -moz-appearance probe would test the vendor rather than
+ * the capability and would go wrong the moment a third engine appears.
+ *
+ * Firefox exposes no track geometry, so its rail is still clipped by the
+ * corner. Known, and not worth a scripted custom scrollbar to fix. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--os-rail) transparent;
+  }
 }
 
 /* The dock strip already hides its bar deliberately (it scrolls sideways
