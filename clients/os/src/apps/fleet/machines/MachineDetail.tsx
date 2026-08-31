@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
 import { Button, Chip, Chips, Fact, Facts, Notice, Panel, Subhead } from "../../../kit";
-import { formatFreshness, formatMoment } from "../format";
+import { formatFreshness, formatMoment } from "../../../kit/format";
 import { isWorkerOnline } from "../online";
 import { machineName, type MachineRow } from "../rows";
 import { LabelEditor } from "./LabelEditor";

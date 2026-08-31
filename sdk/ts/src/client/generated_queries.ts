@@ -5549,6 +5549,28 @@ QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClien
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
 };
 
+/** Another person's auth-session rows, newest first, for an owner/admin operator surface. Includes revoked rows so a reader can tell a live session from a retired one. No token hashes. */
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["sessionsForSubjectAdmin"] in generated_concepts.ts).
+export interface SessionsForSubjectAdminArgs {
+  subject: string;
+}
+
+export function buildSessionsForSubjectAdmin(args: SessionsForSubjectAdminArgs): string {
+  const parts: string[] = [];
+  parts.push("subject: " + renderMemQLValue(args.subject));
+  return "query sessionsForSubjectAdmin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sessionsForSubjectAdmin(args: SessionsForSubjectAdminArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sessionsForSubjectAdmin = function (this: QueryClient, args: SessionsForSubjectAdminArgs = {} as SessionsForSubjectAdminArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sessionsForSubjectAdmin", buildSessionsForSubjectAdmin(args), opts);
+};
+
 /** One mirrored Shopify AbandonedCheckout by store and GID. */
 // Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutByGid"] in generated_concepts.ts).
 export interface ShopifyAbandonedCheckoutByGidArgs {

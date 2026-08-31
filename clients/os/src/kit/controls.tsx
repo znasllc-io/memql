@@ -311,6 +311,80 @@ export function Notice({
 }
 
 // ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+/**
+ * One line in a live list.
+ *
+ * An icon, a name, whatever the surface wants to say quietly in between, and a
+ * state cluster on the trailing edge. Fleet wrote this as `.os-machine`; the
+ * note in the stylesheet's app-local section says the day a second app wants
+ * one is the day it moves up here rather than being copied sideways, and the
+ * Users app is that second app.
+ *
+ * `current` is the row's own liveness -- online for a machine, active for a
+ * person -- and it is what takes the row from muted to full ink, so a list
+ * reads its own state before anybody has read a word of it. `dim` is the
+ * other axis: still true, no longer live (revoked, deactivated). They are
+ * independent, because a deactivated account can still have a live session.
+ *
+ * `onOpen` is what makes it a button. A row with no `onOpen` renders as a
+ * plain line -- not a button with nothing behind it, which is a control that
+ * announces itself to a screen reader and then does nothing.
+ */
+export function Row({
+  icon,
+  name,
+  children,
+  state,
+  current = false,
+  dim = false,
+  onOpen,
+  open,
+}: {
+  icon?: ReactNode;
+  name: ReactNode;
+  /** Quiet facts between the name and the state cluster. */
+  children?: ReactNode;
+  /** The trailing cluster: freshness, dots, chips, the arrival tick. */
+  state?: ReactNode;
+  current?: boolean;
+  dim?: boolean;
+  onOpen?: () => void;
+  open?: boolean;
+}) {
+  const body = (
+    <>
+      {icon}
+      <span className="os-row-name">{name}</span>
+      {children}
+      {state ? <span className="os-row-state">{state}</span> : null}
+    </>
+  );
+  if (!onOpen) {
+    return (
+      <div className="os-row" data-current={current || undefined} data-dim={dim || undefined}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="os-row"
+      data-clickable
+      data-current={current || undefined}
+      data-dim={dim || undefined}
+      aria-expanded={open}
+      onClick={onOpen}
+    >
+      {body}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Data display
 // ---------------------------------------------------------------------------
 

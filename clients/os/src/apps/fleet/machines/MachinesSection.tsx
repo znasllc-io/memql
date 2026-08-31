@@ -6,12 +6,12 @@ import { LiveList } from "../../../live/LiveList";
 import { useMachines } from "../../../live/machines";
 import { ProvenanceDot } from "../../../kit";
 import { AddMachine } from "../addMachine/AddMachine";
-import { useLiveView } from "../liveView";
-import { formatFreshness } from "../format";
+import { useLiveView } from "../../../live/liveView";
+import { formatFreshness } from "../../../kit/format";
 import { isWorkerOnline } from "../online";
 import { isRevoked, machineFromRow, machineName, type MachineRow } from "../rows";
 import { Button, Chip, Chips, Head } from "../../../kit";
-import { useNow } from "../useNow";
+import { useNow } from "../../../kit/useNow";
 import { MachineDetail } from "./MachineDetail";
 import { useMachineWrites } from "./useMachineWrites";
 

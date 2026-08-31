@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
-import type { LiveListSource } from "../../live/LiveList";
+import type { LiveListSource } from "./LiveList";
 
 // A view over a live source: the same feed, narrowed and ordered for one
 // surface.

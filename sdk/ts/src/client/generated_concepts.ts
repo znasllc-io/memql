@@ -688,6 +688,7 @@ export const BoundConcepts = {
   sendSpeechUtterance: "v1:cognition:utterance",
   sendTextUtterance: "v1:cognition:utterance",
   sendableRecipientsForAudience: "v1:campaigns:recipient",
+  sessionsForSubjectAdmin: "v1:identity:authSession",
   setAccountEntitlement: "v1:identity:accountEntitlement",
   setAgentAudioOverride: "v1:cognition:audioOverride",
   setAgentVideoOverride: "v1:cognition:videoOverride",

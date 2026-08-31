@@ -7,7 +7,7 @@ import {
   mergeLabels,
   parseLabelChip,
 } from "../../src/apps/fleet/labels";
-import { formatDuration, formatFreshness, formatMoment } from "../../src/apps/fleet/format";
+import { formatDuration, formatFreshness, formatMoment } from "../../src/kit/format";
 import {
   activePolicy,
   invocationFromRow,

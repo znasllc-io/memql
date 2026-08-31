@@ -1,4 +1,10 @@
-// The Fleet's time and duration voice.
+// The shell's time and duration voice.
+//
+// It was written for the Fleet and moved here when the Users app needed the
+// same two readings (memql#4734). That is the rule this directory states: a
+// helper earns a place in the kit when a SECOND surface needs it -- promoting
+// on the first use invents an abstraction from one example, and waiting for
+// the third means the second one has already forked.
 //
 // Two time formatters, answering different questions. `moment` is "when did
 // this happen" for a fact an operator reads once; `freshness` is "how long

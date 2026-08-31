@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Button, Notice } from "../../../kit";
-import { formatDuration, formatMoment } from "../format";
+import { formatDuration, formatMoment } from "../../../kit/format";
 import { OUTCOME_TONE, type InvocationRow } from "../rows";
 import { RoutingRecordView } from "./RoutingRecordView";
 import { useInvocations } from "./useInvocations";

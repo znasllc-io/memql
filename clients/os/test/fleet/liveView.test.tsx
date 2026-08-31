@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { LiveList, type LiveListSource } from "../../src/live/LiveList";
-import { useLiveView } from "../../src/apps/fleet/liveView";
+import { useLiveView } from "../../src/live/liveView";
 
 interface Row {
   id: string;

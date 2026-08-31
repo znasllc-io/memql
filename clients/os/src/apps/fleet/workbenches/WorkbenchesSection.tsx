@@ -3,8 +3,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { LiveList } from "../../../live/LiveList";
 import { feedIsBehind } from "../../../live/useLiveCollection";
-import { useLiveView } from "../liveView";
-import { formatFreshness, formatMoment } from "../format";
+import { useLiveView } from "../../../live/liveView";
+import { formatFreshness, formatMoment } from "../../../kit/format";
 import {
   nodeFromRow,
   RELEASE_REASON_BLURB,
@@ -14,7 +14,7 @@ import {
   type WorkspaceRow,
 } from "../rows";
 import { Button, Fact, Facts, Head, Notice, Panel, Subhead } from "../../../kit";
-import { useNow } from "../useNow";
+import { useNow } from "../../../kit/useNow";
 import { useWorkbenches } from "./useWorkbenches";
 
 // Workbenches: the replicas that host per-plan working directories, and the
