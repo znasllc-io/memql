@@ -11,6 +11,8 @@ import {
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
+import { DeployablesApp } from "./deployables/DeployablesApp";
+import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
 import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
 import { SettingsApp } from "./settings/SettingsApp";
@@ -65,21 +67,33 @@ const artifacts = stub(
   "The Library on the desktop: browse and search everything MemQL holds for you, send files to the desk, open them in VS Code.",
 );
 
-const deployables = stub(
-  {
-    id: "deployables",
-    name: "Deployables",
-    icon: Rocket,
-    sections: [
-      { id: "sites", name: "Sites" },
-      { id: "map", name: "Map" },
-      { id: "settings", name: "Settings" },
-    ],
-    settingsSection: "settings",
-  },
-  4725,
-  "Your hosted sites and the deploy map: what serves where, bound to which artifact, live at which host.",
-);
+// Deployables, in full (epic #4725). MAP is first and is therefore the section
+// a window opens on: what serves where is a shape rather than a table, and the
+// map is the surface this app was asked for. The app's own settings can point
+// it at the list instead, which it does by navigating itself on open.
+//
+// The section list is DEPLOYABLES_SECTIONS rather than a literal, for the
+// reason FLEET_SECTIONS and USERS_SECTIONS are: the settings section offers an
+// "open Deployables on" picker over exactly these ids, and a second copy of the
+// list is one that can disagree -- a preference naming a section the manifest
+// does not declare leaves the window on the first section with the nav
+// highlighting nothing.
+//
+// THE APP ITSELF CARRIES NO ROLE, and its Actions section carries admin+. That
+// split is the point: `v1:platform:site` declares the composite tier
+// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
+// has deployables of their own to read and there is nothing to gate -- the
+// engine decides how far the list reaches. The section role is PRESENTATION
+// (spec section E) over writes the Go hostname policy and
+// `sitePublishFromArtifact` remain the authority on.
+const deployables: OsAppManifest = {
+  id: "deployables",
+  name: "Deployables",
+  icon: Rocket,
+  sections: DEPLOYABLES_SECTIONS,
+  settingsSection: "settings",
+  component: DeployablesApp,
+};
 
 // Fleet, in full (epic #4729). Machines is first and therefore the section a
 // window opens on; the app's own settings can point it elsewhere, which it
