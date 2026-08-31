@@ -46,6 +46,41 @@ export function resetIdsForTest(): void {
   counter = 0;
 }
 
+/**
+ * A fresh id that is not one of `taken` (epic memql#4746).
+ *
+ * THE COUNTER ABOVE STARTS AT 0 ON EVERY PAGE LOAD, and the document that
+ * loads with the page does not. A reload therefore mints `item-1` -- an id
+ * the restored desktop is already using -- and the maps items and positions
+ * live in are keyed by id, so the new folder does not collide loudly: it
+ * REPLACES the item that had that id, and the thing that was there is gone
+ * with no error anywhere. The seeded Ask widget is `item-1`, so the very
+ * first folder created after any reload ate it.
+ *
+ * Roaming turns that from a reload bug into the normal case: every machine
+ * mints from the same low numbers, so every document arriving from elsewhere
+ * is full of ids this session is about to hand out again.
+ *
+ * The counter stays -- `desk-1` in a failure message is worth keeping, and
+ * every test that pins an id keeps passing on a fresh session, because the
+ * skip only happens when there is something to skip.
+ */
+export function nextIdAvoiding(prefix: string, taken: ReadonlySet<string>): string {
+  for (;;) {
+    const id = nextId(prefix);
+    if (!taken.has(id)) return id;
+  }
+}
+
+/** The desk ids a shell state already holds. */
+export function deskIdsOf(state: ShellState): ReadonlySet<string> {
+  return new Set(state.desks.map((d) => d.id));
+}
+
+function nextDeskId(state: ShellState): string {
+  return nextIdAvoiding("desk", deskIdsOf(state));
+}
+
 export function initialShell(): ShellState {
   const deskId = nextId("desk");
   return {
@@ -113,7 +148,7 @@ export function openApp(state: ShellState, appId: AppId, sectionId = ""): ShellR
     return { state: next, effect: { kind: "placed", deskId: current.id, windowId: win.id } };
   }
 
-  const fresh: Desk = { id: nextId("desk"), createdBy: "auto", windows: [win.id] };
+  const fresh: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [win.id] };
   const at = state.desks.findIndex((d) => d.id === current.id) + 1;
   const desks = [...state.desks.slice(0, at), fresh, ...state.desks.slice(at)];
   const next: ShellState = {
@@ -203,7 +238,7 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   let next = state;
   let targetDesk: Desk;
   if (target === "new") {
-    targetDesk = { id: nextId("desk"), createdBy: "user", windows: [] };
+    targetDesk = { id: nextDeskId(state), createdBy: "user", windows: [] };
     next = { ...next, desks: [...next.desks, targetDesk] };
   } else {
     const found = deskById(state, target);
@@ -268,6 +303,6 @@ export function gcAutoDesks(
 
 /** Add a user desk explicitly (context menu / pager "+"). */
 export function addDesk(state: ShellState): ShellState {
-  const desk: Desk = { id: nextId("desk"), createdBy: "user", windows: [] };
+  const desk: Desk = { id: nextDeskId(state), createdBy: "user", windows: [] };
   return { ...state, desks: [...state.desks, desk], activeDeskId: desk.id, focusedWindowId: null };
 }

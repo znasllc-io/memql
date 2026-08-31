@@ -188,6 +188,29 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
+		// THE ROAMING DESKTOP (epic memql#4746). A person's desktop
+		// document is written by whichever replica served the save and
+		// read by their OTHER signed-in browser, which is talking to a
+		// different one. Without this rule the second browser's
+		// subscription is correct on load and then never moves -- the
+		// same "looks like it is working" shape the worker block above
+		// describes, and the reason that block exists.
+		//
+		// CREATED ONLY, and that is not an omission. saveMyDesktop is an
+		// insert{}, and executeWrite publishes graph.node.created for
+		// every write it takes -- the overwrites included; only the
+		// update() path adds graph.node.updated. So an `updated` rule
+		// here would forward an event this concept cannot emit, and a
+		// `deleted` one an event no path produces (v1:os:desktop has no
+		// delete: a desktop is emptied by saving an empty one). Adding
+		// either to "complete the set" is the change to resist.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation
+		// in the tree triggers on v1:os:*, so there is no consumer to
+		// double-fire. Volume is one event per settled desktop edit, per
+		// person -- a drag lands as one save because the client debounces
+		// before it writes.
+		{Pattern: "graph.node.created.v1:os:desktop", TargetType: ""},
 		// Site edge cache invalidation (memql#3714, Task 9). The site row
 		// (v1:platform:site) is written wherever an admin surface writes it
 		// -- typically the bff -- and read on EVERY edge replica's own

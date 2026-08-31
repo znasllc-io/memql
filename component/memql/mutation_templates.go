@@ -998,6 +998,36 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		rt := NewRuntimeEvaluator(nil)
 		return rt.EvaluateDaysBetween(fmt.Sprintf("%v", d1), fmt.Sprintf("%v", d2))
+	case *languageParser.SpecReferenceExpr:
+		// `actor.X` NESTED INSIDE A CALL, which is a different node from the
+		// same text at the top of a value slot (memql#4746).
+		//
+		// The parser routes a dotted identifier through two places. A bare
+		// value slot -- `id: actor.userId` -- lowers to ArgRefExpr, which the
+		// case above resolves; the same text as a function ARGUMENT --
+		// `hash(actor.userId)` -- reaches parseIdentifierExpression and lowers
+		// to SpecReferenceExpr, which had no case at all. So an actor-derived
+		// id passed memqllint, passed strict boot, and died at render with
+		//
+		//	evaluate id: unsupported expression in mutation template:
+		//	  *ast.SpecReferenceExpr
+		//
+		// on EVERY call. That is the memql#2909 / memql#2925 class exactly --
+		// lint-clean in the `id:` position and unrenderable there -- and it is
+		// the third time this evaluator has been found missing a node the
+		// grammar accepts. It is also the drift memql#2840's own comment says
+		// it closed ("Both now share resolveActorReference so they cannot
+		// drift again"): the two spellings of one reference, resolved in one
+		// place and not the other.
+		//
+		// ONLY the actor prefix is handled. A SpecReferenceExpr is otherwise a
+		// bare field / spec name, which a mutation template genuinely cannot
+		// evaluate -- it names a row's field, and there is no row yet. Those
+		// keep falling to the sentinel below, unchanged.
+		if strings.HasPrefix(t.Name, "actor.") {
+			return resolveActorReference(ctx, t.Name)
+		}
+		return nil, fmt.Errorf("%w: %T (%s)", errUnsupportedTemplateExpr, expr, t.Name)
 	default:
 		return nil, fmt.Errorf("%w: %T", errUnsupportedTemplateExpr, expr)
 	}

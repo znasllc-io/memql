@@ -650,6 +650,63 @@ button:not(:disabled):active {
   letter-spacing: 0.04em;
 }
 
+/* ---- the roaming desktop's report (epic memql#4746) ---- */
+/*
+ * It sits in the dock's status cluster, beside the connection dot, and reads
+ * like the rest of that cluster: muted, small, no border, no chrome of its
+ * own. It is a REPORT rather than an alert -- nothing here is wrong, the
+ * desktop simply changed somewhere else -- so it takes the muted colour that
+ * the clock and the "off" dot take, and only the stale variant, which needs
+ * the person to do something, takes the warn colour.
+ *
+ * The element is always mounted (an empty role="status" region is what makes
+ * the announcement reliable), so every rule below is scoped to the data
+ * attribute; with no notice it occupies nothing.
+ */
+.os-roam {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    max-width var(--os-duration-med) var(--os-ease),
+    opacity var(--os-duration-med) var(--os-ease);
+}
+.os-roam[data-os-roam] {
+  max-width: 22rem;
+  opacity: 1;
+}
+.os-roam[data-os-roam="stale"] {
+  color: var(--os-warn);
+}
+/* The dock is tight on an iPad-width viewport, and the report is the one
+ * thing in the cluster that can be understood from its icon plus the fact
+ * that it appeared at all. The clock and the dot cannot give up their space;
+ * this can. */
+@media (max-width: 900px) {
+  .os-roam-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-roam {
+    transition: none;
+  }
+}
+
 .os-ask-orb {
   display: grid;
   place-items: center;

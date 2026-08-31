@@ -1,0 +1,48 @@
+// concepts.memql -- os namespace
+//
+// MemQL OS's own state. Today that is one row: the desktop document,
+// which the foundation kept per-browser in localStorage and this
+// namespace makes a thing the graph holds (epic memql#4746).
+//
+// WHY THE DOCUMENT IS ONE OPAQUE FIELD rather than desks / surfaces /
+// dock / theme as columns. The shape is the CLIENT's and it is
+// versioned there -- clients/os/src/system/store.ts carries the type
+// and `sanitizeDocument` carries the invariants. Modelling desk
+// geometry in the engine would put the same contract in two places
+// with no mechanism keeping them equal, and every desk-shell change
+// would become a DSL change. The engine's interest in a desktop is
+// exactly: whose it is, how new it is, and the bytes.
+//
+// SIZING. Ids and positions only -- an artifact's CONTENT lives in
+// v1:library:file and the desktop holds its id. A hundred icons is
+// tens of kilobytes.
+
+use identity.concepts.{ user }
+
+// @no-displayCard: the row's three fields are a foreign key, a counter
+// and an opaque blob, so every candidate primary says less than the row
+// id already does. This is also not a row anybody browses to: it is read
+// by exactly one caller, its own owner's shell, which renders it as a
+// desktop rather than as a card.
+
+/// One person's MemQL OS desktop: their desks, the items and folders on each, their dock pins and
+/// their theme -- the document `DesktopStore` loads and saves, kept where their other machines
+/// can resolve it.
+///
+/// TIER: the plain owner tier, deliberately WITHOUT `clusterOwner`. Every other owner-tier concept
+/// in this tree pairs the two because an operator has to support the person -- "why is this
+/// workbench node full", "why did this call route there". A desktop layout answers no such
+/// question; it is where somebody put their icons. The composite would let a cluster owner read it
+/// and buy nothing, so this concept is one of the few places the plain form is the right one.
+///
+/// There is no `deleted` / `active` field and no delete path. A person who wants their desktop back
+/// to nothing rearranges it, and the next save carries that; a row that can be absent would make
+/// "no desktop yet" and "desktop emptied" the same state to a reader that has to tell them apart.
+@rowAuthz(owner="ownerUserId")
+concept desktop {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id whose desktop this is. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by saveMyDesktop and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention. It is also the whole of the row's identity: the row id is derived from it, so this field and the id can never disagree.")
+  revision     int!     @description("The last-writer-wins stamp. A client writes `held + 1`, so a save carries evidence of which document it was made from. It is NOT a lock: two machines saving from revision 5 both write 6 and the second one wins, which is the model this epic chose (the conflict UX is a cue, not a merge editor). What it buys is that a client can tell a row it has already seen from one it has not, and can refuse to adopt a document older than the one it holds.")
+  document     object!  @description("The whole DesktopStore document: `version`, desks, the per-desk surfaces (items, folders, widget placements, grid positions), dock pins and the theme pack. OPAQUE HERE ON PURPOSE -- the shape and its invariants live in clients/os/src/system/store.ts, which is the only thing that reads it. `document.version` is the client's own schema generation; the engine never parses it.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

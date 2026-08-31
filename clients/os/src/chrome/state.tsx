@@ -20,6 +20,7 @@ import {
   gcAutoDesks,
   initialShell,
   nextId,
+  nextIdAvoiding,
   openApp as openAppFn,
   setWindowMode,
   setWindowSection,
@@ -97,12 +98,26 @@ export interface OsActions {
   setThemePack: (pack: string) => void;
 }
 
+/**
+ * A quiet report from the store about something the person did not do here.
+ *
+ * `roamed` -- another machine saved this desktop and the shell has taken it
+ * on. `stale` -- the stored desktop is from a newer version of this app, so
+ * this session has stopped writing to it; a reload is the fix.
+ *
+ * `roamed` clears itself; `stale` does NOT, because it describes a condition
+ * that is still true a minute later.
+ */
+export type OsNotice = { kind: "roamed" } | { kind: "stale" };
+
 export interface OsContextValue {
   state: OsState;
   actions: OsActions;
   registry: OsRegistry;
   actorRole: string;
   grid: GridSize;
+  /** Null when there is nothing to report. Rendered by the dock. */
+  notice: OsNotice | null;
 }
 
 const OsContext = createContext<OsContextValue | null>(null);
@@ -162,6 +177,79 @@ function stateFromDocument(doc: DesktopDocument): OsState {
   return { shell, surfaces: doc.surfaces, dock: doc.dock, themePack: doc.themePack };
 }
 
+/**
+ * Take on a document that arrived while the shell was running (epic
+ * memql#4746).
+ *
+ * ADOPTING IS NOT LOADING, and using stateFromDocument here would be the
+ * bug. That function builds a shell with no windows, because at boot there
+ * are none; applied to a running shell it closes everything the person has
+ * open -- and it closes it in response to something that happened on a
+ * different computer.
+ *
+ * So two things are kept, and each is kept for its own reason:
+ *
+ *   WINDOWS, because a window is session state that this document has never
+ *   carried (spec D11) -- the arriving desktop is not a statement about them
+ *   and cannot be read as one. A window whose desk no longer exists goes,
+ *   since there is nowhere to draw it.
+ *
+ *   THE DESK ON SCREEN, when it still exists, because it is where the person
+ *   is looking. Following another machine's paging would move the view under
+ *   somebody mid-drag. When the desk is gone -- a cold sign-in, where the
+ *   local desk ids are another machine's -- the document's own choice is
+ *   taken, which is what lands a new browser where you left off.
+ */
+export function adoptDocument(s: OsState, doc: DesktopDocument): OsState {
+  const desks = doc.desks.map((d) => ({
+    ...d,
+    windows: (s.shell.desks.find((local) => local.id === d.id)?.windows ?? []).filter(
+      (id) => !!s.shell.windows[id],
+    ),
+  }));
+  const kept = new Set(desks.flatMap((d) => d.windows));
+  const windows = Object.fromEntries(
+    Object.entries(s.shell.windows).filter(([id]) => kept.has(id)),
+  );
+  const focusedWindowId =
+    s.shell.focusedWindowId !== null && kept.has(s.shell.focusedWindowId)
+      ? s.shell.focusedWindowId
+      : null;
+  const deskIds = new Set(desks.map((d) => d.id));
+  return {
+    shell: {
+      desks,
+      activeDeskId: deskIds.has(s.shell.activeDeskId) ? s.shell.activeDeskId : doc.activeDeskId,
+      windows,
+      focusedWindowId,
+    },
+    surfaces: doc.surfaces,
+    dock: doc.dock,
+    themePack: doc.themePack,
+  };
+}
+
+/**
+ * Every item id the desktop is currently using, across every desk -- an item
+ * lives on exactly one surface but a new one must avoid all of them, because
+ * dragging moves items between desks.
+ */
+function itemIdsOf(surfaces: Record<DeskId, DeskSurface>): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const surface of Object.values(surfaces)) {
+    for (const id of Object.keys(surface.items)) ids.add(id);
+  }
+  return ids;
+}
+
+/** A fresh item id that nothing on this desktop already holds. */
+function mintItemId(s: OsState): string {
+  return nextIdAvoiding("item", itemIdsOf(s.surfaces));
+}
+
+/** How long a "saved on another machine" report stays up. */
+const ROAMED_NOTICE_MS = 6_000;
+
 export function OsProvider({
   children,
   registry,
@@ -176,16 +264,73 @@ export function OsProvider({
   grid: GridSize;
 }) {
   const storeRef = useRef<DesktopStore>(store ?? new LocalDesktopStore());
+  // The store can be REPLACED, once, when the cluster connection arrives and
+  // the local store gives way to the graph-backed one (epic memql#4746). Held
+  // in a ref, and updated during render exactly as gridRef and actorRoleRef
+  // below are, so the actions object built once stays valid.
+  if (store && store !== storeRef.current) storeRef.current = store;
+
   const [state, setState] = useState<OsState>(() => {
     const loaded = storeRef.current.load();
     return loaded ? stateFromDocument(loaded) : seedDocument(registry, grid);
   });
+  const [notice, setNotice] = useState<OsNotice | null>(null);
 
   // Persist on every settled change. The document never carries windows,
   // so persisting during interaction is cheap and safe.
+  //
+  // `store` IS A DEPENDENCY, and not by accident: when the graph-backed store
+  // replaces the local one mid-session, this is what hands it the desktop as
+  // it stands. Without it a store that arrives after boot holds nothing to
+  // reconcile, and a person signing in for the first time would not upload
+  // their desktop until they next moved something.
   useEffect(() => {
     storeRef.current.save(documentFromState(state.shell, state.surfaces, state.dock, state.themePack));
-  }, [state]);
+  }, [state, store]);
+
+  // The store's other direction: a desktop this shell did not produce.
+  //
+  // THE STORE IS THE ONLY DEPENDENCY, and it changes exactly once -- local
+  // gives way to graph-backed when the connection dials. Nothing else may be
+  // added here: a value that merely arrives late (an actor id resolving, a
+  // grid resize) would tear the subscription down and re-register it
+  // mid-session, which means dropping the one the cluster is delivering to
+  // and re-reading for no reason.
+  useEffect(() => {
+    const desktopStore = storeRef.current;
+    if (!desktopStore.subscribe) return;
+    return desktopStore.subscribe((event) => {
+      if (event.kind === "stale") {
+        setNotice({ kind: "stale" });
+        return;
+      }
+      setState((s) => adoptDocument(s, event.document));
+      // `hydrate` is the desktop resolving for the first time, which is not
+      // news -- it is what the person expected to see. Only a document that
+      // arrived AFTER that means somebody else's machine saved.
+      if (event.origin === "remote") setNotice({ kind: "roamed" });
+    });
+  }, [store]);
+
+  // The roamed report clears itself; `stale` stays, because it describes a
+  // condition that is still true in a minute.
+  useEffect(() => {
+    if (notice?.kind !== "roamed") return;
+    const timer = setTimeout(() => setNotice(null), ROAMED_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // A save the store is still holding behind its debounce, sent as the page
+  // goes away -- so "arrange a desk, close the laptop, open the other
+  // machine" carries the last change rather than the one before it. Local
+  // already has it either way; this is only about the cluster.
+  useEffect(() => {
+    const desktopStore = storeRef.current;
+    if (!desktopStore.flush) return;
+    const flush = () => desktopStore.flush?.();
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [store]);
 
   const surfaceOf = useCallback(
     (s: OsState, deskId: DeskId): DeskSurface => s.surfaces[deskId] ?? emptySurface(),
@@ -284,7 +429,7 @@ export function OsProvider({
       createFolder: (name, preferred) =>
         set((s) => {
           const deskId = s.shell.activeDeskId;
-          return withSurface(s, deskId, createFolderFn(surfaceOf(s, deskId), nextId("item"), name, preferred, gridRef.current));
+          return withSurface(s, deskId, createFolderFn(surfaceOf(s, deskId), mintItemId(s), name, preferred, gridRef.current));
         }),
       renameFolder: (folderId, name) =>
         set((s) => {
@@ -322,7 +467,7 @@ export function OsProvider({
           }
           const item: DesktopItem = {
             kind: "widget",
-            id: nextId("item"),
+            id: mintItemId(s),
             widgetId,
             w: manifest.size.w,
             h: manifest.size.h,
@@ -349,8 +494,8 @@ export function OsProvider({
   actorRoleRef.current = actorRole;
 
   const value = useMemo<OsContextValue>(
-    () => ({ state, actions: actionsRef.current!, registry, actorRole, grid }),
-    [state, registry, actorRole, grid],
+    () => ({ state, actions: actionsRef.current!, registry, actorRole, grid, notice }),
+    [state, registry, actorRole, grid, notice],
   );
 
   useEffect(() => {

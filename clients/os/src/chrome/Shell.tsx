@@ -10,11 +10,13 @@ import type { OsAuthSource } from "../auth/source";
 import type { OsRuntimeConfig } from "../cluster/config";
 import { EdgeUploadProvider } from "../items/edgeUpload";
 import { type UploadProvider } from "../items/upload";
+import { SdkDesktopGateway } from "../live/desktopGateway";
 import { MachinesProvider } from "../live/machines";
 import { OsConnectionProvider, useOsConnection } from "../live/connection";
 import type { ProfileAccess } from "../modules/profile/access";
 import type { PlacementTokens } from "../system/placement";
-import type { DesktopStore } from "../system/store";
+import { GraphDesktopStore } from "../system/graphStore";
+import { LocalDesktopStore, type DesktopStore } from "../system/store";
 import { SessionProvider } from "./access";
 import { Desktop } from "./Desktop";
 import { Dock } from "./Dock";
@@ -73,8 +75,8 @@ export function Shell({
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
-            {(uploads) => (
-              <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={ports.store}>
+            {(uploads, desktopStore) => (
+              <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={desktopStore}>
                 {layout === "phone" ? (
                   <div className="os-root" data-os-root data-layout={layout}>
                     <PhoneShell onSignOut={onSignOut} />
@@ -106,7 +108,7 @@ function ShellTransports({
 }: {
   source: OsAuthSource;
   ports: ShellPorts;
-  children: (uploads: UploadProvider) => ReactNode;
+  children: (uploads: UploadProvider, store: DesktopStore) => ReactNode;
 }) {
   const connection = useOsConnection();
   const askTransport = useMemo<AskTransport>(
@@ -117,7 +119,25 @@ function ShellTransports({
     () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer()),
     [ports.uploads, source],
   );
-  return <AskProvider transport={askTransport}>{children(uploads)}</AskProvider>;
+  // The desktop store, which is the local one until there is a cluster to
+  // roam to (epic memql#4746).
+  //
+  // IT IS BUILT FROM THE CONNECTION rather than given a getter for it, unlike
+  // the Ask transport above, because it SUBSCRIBES: `watch` has to be handed
+  // a live SubscriptionManager at the moment it registers, and a getter that
+  // was null then would leave a store that reads and writes but never hears
+  // another machine -- working, and silently half a feature.
+  //
+  // The identity therefore changes exactly once in a session, null -> dialed.
+  // The SDK owns reconnect (memql#4537: it redials and replays subscriptions
+  // on the same Connection), so a dropped socket does NOT rebuild this and
+  // does not restart the resolve-then-write sequence.
+  const desktopStore = useMemo<DesktopStore>(() => {
+    if (ports.store) return ports.store;
+    if (connection === null) return new LocalDesktopStore();
+    return new GraphDesktopStore(new LocalDesktopStore(), new SdkDesktopGateway(connection));
+  }, [ports.store, connection]);
+  return <AskProvider transport={askTransport}>{children(uploads, desktopStore)}</AskProvider>;
 }
 
 function DesktopChrome({

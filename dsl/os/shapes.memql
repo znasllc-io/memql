@@ -1,0 +1,16 @@
+// shapes.memql -- os namespace
+
+/// Full projection of a v1:os:desktop row: the document, the revision it was written at, and who
+/// it belongs to. Backs myDesktop, which is the only read.
+///
+/// `revision` is here because the client's last-writer-wins arithmetic is done against it, and a
+/// concept field no shape projects does not reach a client at all -- it would leave the shell
+/// stamping every save as revision 1.
+@row
+shape desktop desktopDocument {
+  row.id
+  ownerUserId
+  revision
+  document
+  row.createdAt
+}
