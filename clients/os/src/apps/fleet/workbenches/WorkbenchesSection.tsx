@@ -13,7 +13,7 @@ import {
   type WorkbenchNodeRow,
   type WorkspaceRow,
 } from "../rows";
-import { Button, Fact, Facts, FleetError, Panel, SectionHead } from "../ui";
+import { Button, Fact, Facts, Head, Notice, Panel, Subhead } from "../../../kit";
 import { useNow } from "../useNow";
 import { useWorkbenches } from "./useWorkbenches";
 
@@ -81,8 +81,8 @@ export function WorkbenchesSection() {
 
   return (
     <div className="os-fleet">
-      <SectionHead title="Workbenches">
-        <label className="os-fleet-check">
+      <Head title="Workbenches">
+        <label className="os-check">
           <input
             type="checkbox"
             checked={showReleased}
@@ -99,7 +99,7 @@ export function WorkbenchesSection() {
         {feedIsBehind(state.workspaceState) ? (
           <Button onClick={state.reseedWorkspaces}>Re-read</Button>
         ) : null}
-      </SectionHead>
+      </Head>
 
       <p className="os-caption">
         A workspace is a sandboxed working directory for one plan, on one workbench replica's
@@ -115,11 +115,18 @@ export function WorkbenchesSection() {
       />
 
       {state.workspaceError ? (
-        <FleetError
+        <Notice
+          tone="error"
           sentence="The workspaces feed reported an error."
           detail={state.workspaceError}
         />
       ) : null}
+
+      {/* The section's two halves are parallel: replicas are supporting
+          context and sit in a panel, workspaces are the subject and run full
+          width. Both carry a heading, or the per-replica group bars below
+          read as belonging to nothing. */}
+      <Subhead>Workspaces</Subhead>
 
       {/* Keyed on the toggle so revealing released rows re-baselines the
           arrival cues: without it they would flash "new" on the next
@@ -167,9 +174,9 @@ function ReplicaPanel({
 }) {
   return (
     <Panel label="Workbench replicas">
-      <div className="os-fleet-head">
-        <h4 className="os-fleet-subhead">Replicas</h4>
-        <div className="os-fleet-head-actions">
+      <div className="os-head">
+        <Subhead>Replicas</Subhead>
+        <div className="os-head-actions">
           {feedIsBehind(state.nodeState) ? (
             <Button onClick={state.reseedNodes}>Re-read</Button>
           ) : null}
@@ -177,7 +184,8 @@ function ReplicaPanel({
       </div>
 
       {state.nodeError ? (
-        <FleetError
+        <Notice
+          tone="error"
           sentence="The workbench replicas feed reported an error."
           next={
             nodes.length > 0
@@ -260,7 +268,11 @@ function WorkspaceLine({
             replica, they were NOT migrated, and the plan was given a fresh
             workspace elsewhere. An operator reading "node_lost" alone would
             reasonably go looking for the directory. */}
-        {released && blurb ? <p className="os-fleet-note">{blurb}</p> : null}
+        {released && blurb ? (
+          <Notice tone={reason === "node_lost" ? "warn" : "info"}>
+            <p className="os-notice-line">{blurb}</p>
+          </Notice>
+        ) : null}
         {released && !blurb && reason !== "" ? (
           <p className="os-caption">
             Released for a reason this build does not have copy for: {reason}.

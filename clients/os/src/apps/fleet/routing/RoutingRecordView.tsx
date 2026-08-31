@@ -1,4 +1,4 @@
-import { Chip, ChipRow } from "../ui";
+import { Chip, Chips } from "../../../kit";
 import type { LabelMap } from "../labels";
 import type { RoutingRecord } from "../rows";
 
@@ -81,11 +81,11 @@ function LabelSet({ label, labels }: { label: string; labels: LabelMap }) {
   return (
     <div className="os-fleet-labelset">
       <span className="os-caption">{label}</span>
-      <ChipRow label={`${label} labels`}>
+      <Chips label={`${label} labels`}>
         {keys.map((key) => (
           <Chip key={key} tone="neutral">{`${key}=${labels[key] ?? ""}`}</Chip>
         ))}
-      </ChipRow>
+      </Chips>
     </div>
   );
 }

@@ -81,6 +81,8 @@
   --os-field-dot: inherit;
   --os-field-link: inherit;
   --os-field-numeral: inherit;
+  --os-rail: inherit;
+  --os-rail-hover: inherit;
 }
 
 /* ---- dark (the OS default look) ---- */
@@ -105,6 +107,8 @@
     --os-field-dot: rgba(232, 230, 221, 0.055);
     --os-field-link: rgba(92, 205, 167, 0.05);
     --os-field-numeral: rgba(232, 230, 221, 0.04);
+    --os-rail: rgba(232, 230, 221, 0.14);
+    --os-rail-hover: rgba(232, 230, 221, 0.3);
   }
 }
 
@@ -130,6 +134,8 @@
     --os-field-dot: rgba(25, 29, 26, 0.05);
     --os-field-link: rgba(4, 125, 90, 0.05);
     --os-field-numeral: rgba(25, 29, 26, 0.045);
+    --os-rail: rgba(25, 29, 26, 0.16);
+    --os-rail-hover: rgba(25, 29, 26, 0.34);
   }
 }
 
@@ -155,6 +161,8 @@
   --os-field-dot: rgba(232, 230, 221, 0.055);
   --os-field-link: rgba(92, 205, 167, 0.05);
   --os-field-numeral: rgba(232, 230, 221, 0.04);
+  --os-rail: rgba(232, 230, 221, 0.14);
+  --os-rail-hover: rgba(232, 230, 221, 0.3);
 }
 
 :root[data-theme="light"] {
@@ -178,6 +186,8 @@
   --os-field-dot: rgba(25, 29, 26, 0.05);
   --os-field-link: rgba(4, 125, 90, 0.05);
   --os-field-numeral: rgba(25, 29, 26, 0.045);
+  --os-rail: rgba(25, 29, 26, 0.16);
+  --os-rail-hover: rgba(25, 29, 26, 0.34);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -10,7 +10,7 @@ import { useLiveView } from "../liveView";
 import { formatFreshness } from "../format";
 import { isWorkerOnline } from "../online";
 import { isRevoked, machineFromRow, machineName, type MachineRow } from "../rows";
-import { Button, Chip, ChipRow, SectionHead } from "../ui";
+import { Button, Chip, Chips, Head } from "../../../kit";
 import { useNow } from "../useNow";
 import { MachineDetail } from "./MachineDetail";
 import { useMachineWrites } from "./useMachineWrites";
@@ -42,7 +42,7 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
 
   return (
     <div className="os-fleet">
-      <SectionHead title="Machines">
+      <Head title="Machines">
         <Button
           tone={adding ? "quiet" : "primary"}
           onClick={() => setAdding((v) => !v)}
@@ -50,7 +50,7 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
         >
           {adding ? "Close" : "Add machine"}
         </Button>
-      </SectionHead>
+      </Head>
 
       {adding ? <AddMachine machineCount={count} onClose={() => setAdding(false)} /> : null}
 
@@ -163,11 +163,11 @@ function MachineLine({
       <span className="os-machine-name">{machineName(machine)}</span>
       {machine.platform ? <span className="os-caption">{machine.platform}</span> : null}
       {labels.length > 0 ? (
-        <ChipRow label={`Labels on ${machineName(machine)}`}>
+        <Chips label={`Labels on ${machineName(machine)}`}>
           {labels.slice(0, 4).map((one) => (
             <Chip
               key={one.key}
-              tone={one.source === "operator" ? "operator" : "reported"}
+              tone={one.source === "operator" ? "accent" : "muted"}
               title={
                 one.overrides
                   ? "You set this, replacing the value the machine reported"
@@ -180,7 +180,7 @@ function MachineLine({
             </Chip>
           ))}
           {labels.length > 4 ? <span className="os-caption">+{labels.length - 4}</span> : null}
-        </ChipRow>
+        </Chips>
       ) : null}
       <span className="os-machine-state">
         <span className="os-caption">{formatFreshness(machine.lastSeenAt, now)}</span>

@@ -16,6 +16,14 @@ const { fakeConnection, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
+// The picker is the shell's own selection control (a button carrying
+// role="radio" + aria-checked), not the platform's radio input. Asserting on
+// aria-checked and the accessible name is what a person -- or a screen reader
+// -- actually perceives, and it survives the control being restyled again.
+function isChosen(name: RegExp): boolean {
+  return screen.getByRole("radio", { name }).getAttribute("aria-checked") === "true";
+}
+
 async function click(el: Element) {
   await act(async () => {
     (el as HTMLElement).click();
@@ -56,7 +64,7 @@ describe("the routing policy editor", () => {
     const strategies = screen.getByRole("radiogroup", { name: "Routing strategy" });
     const strategyNames = within(strategies)
       .getAllByRole("radio")
-      .map((el) => (el as HTMLInputElement).value);
+      .map((el) => el.querySelector(".os-choice-card-name")?.textContent ?? "");
     expect(strategyNames).toEqual(["firstFit", "roundRobin", "leastLoaded", "labelMatch"]);
     expect(within(strategies).getByText(/Registration order/)).toBeTruthy();
     expect(within(strategies).getByText(/Fewest calls in flight/)).toBeTruthy();
@@ -65,7 +73,7 @@ describe("the routing policy editor", () => {
     expect(
       within(fallbacks)
         .getAllByRole("radio")
-        .map((el) => (el as HTMLInputElement).value),
+        .map((el) => el.querySelector(".os-choice-card-name")?.textContent ?? ""),
     ).toEqual(["none", "nextMatching"]);
     // The one thing an operator has to know about nextMatching.
     expect(within(fallbacks).getByText(/never a re-run/)).toBeTruthy();
@@ -108,7 +116,7 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect((screen.getByRole("radio", { name: /roundRobin/ }) as HTMLInputElement).checked).toBe(
+      expect(isChosen(/roundRobin/)).toBe(
         true,
       ),
     );
@@ -138,7 +146,7 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect((screen.getByRole("radio", { name: /firstFit/ }) as HTMLInputElement).checked).toBe(true),
+      expect(isChosen(/firstFit/)).toBe(true),
     );
 
     // Delivered as a FOLDED EVENT, which is how a policy edited in another
@@ -155,7 +163,7 @@ describe("the routing policy editor", () => {
     });
 
     await waitFor(() =>
-      expect((screen.getByRole("radio", { name: /leastLoaded/ }) as HTMLInputElement).checked).toBe(
+      expect(isChosen(/leastLoaded/)).toBe(
         true,
       ),
     );
@@ -169,7 +177,7 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect((screen.getByRole("radio", { name: /firstFit/ }) as HTMLInputElement).checked).toBe(true),
+      expect(isChosen(/firstFit/)).toBe(true),
     );
 
     await click(screen.getByRole("radio", { name: /labelMatch/ }));
@@ -188,7 +196,7 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect((screen.getByRole("radio", { name: /firstFit/ }) as HTMLInputElement).checked).toBe(true),
+      expect(isChosen(/firstFit/)).toBe(true),
     );
 
     await click(screen.getByRole("radio", { name: /labelMatch/ }));
@@ -205,7 +213,7 @@ describe("the routing policy editor", () => {
     // Silently discarding somebody's typing is worse than either resolution,
     // so the edit stands and the disagreement is shown.
     await waitFor(() => expect(screen.getByText(/changed somewhere else/)).toBeTruthy());
-    expect((screen.getByRole("radio", { name: /labelMatch/ }) as HTMLInputElement).checked).toBe(true);
+    expect(isChosen(/labelMatch/)).toBe(true);
   });
 
   it("renders a refusal in surface, keeping the edits", async () => {
@@ -218,7 +226,7 @@ describe("the routing policy editor", () => {
     await click(screen.getByRole("button", { name: "Create policy" }));
 
     await waitFor(() => expect(screen.getByText("policy refused")).toBeTruthy());
-    expect((screen.getByRole("radio", { name: /labelMatch/ }) as HTMLInputElement).checked).toBe(true);
+    expect(isChosen(/labelMatch/)).toBe(true);
   });
 });
 

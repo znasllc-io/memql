@@ -79,7 +79,7 @@ describe("the per-machine call history", () => {
     await click(screen.getByRole("button", { name: "Recent calls on Studio mini" }));
     await waitFor(() => expect(connection.query.invocationsForWorker).toHaveBeenCalledTimes(1));
 
-    await click(screen.getByRole("button", { name: "Refresh" }));
+    await click(screen.getByRole("button", { name: "Re-read" }));
     await waitFor(() => expect(connection.query.invocationsForWorker).toHaveBeenCalledTimes(2));
   });
 
@@ -115,7 +115,7 @@ describe("the per-machine call history", () => {
     expect(await screen.findByText("No calls recorded for this machine.")).toBeTruthy();
 
     connection.query.invocationsForWorker.mockRejectedValue(new Error("read refused"));
-    await click(screen.getByRole("button", { name: "Refresh" }));
+    await click(screen.getByRole("button", { name: "Re-read" }));
     await waitFor(() => expect(screen.getByText("read refused")).toBeTruthy());
     expect(screen.getByText("The call history could not be read.")).toBeTruthy();
   });
@@ -127,7 +127,7 @@ describe("the per-machine call history", () => {
     await screen.findByText("rerouted");
 
     connection.query.invocationsForWorker.mockRejectedValue(new Error("read refused"));
-    await click(screen.getByRole("button", { name: "Refresh" }));
+    await click(screen.getByRole("button", { name: "Re-read" }));
 
     await waitFor(() => expect(screen.getByText("read refused")).toBeTruthy());
     // A stale answer beats no answer.

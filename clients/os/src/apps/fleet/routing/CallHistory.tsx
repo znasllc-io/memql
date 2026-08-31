@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, FleetError } from "../ui";
+import { Button, Notice } from "../../../kit";
 import { formatDuration, formatMoment } from "../format";
 import { OUTCOME_TONE, type InvocationRow } from "../rows";
 import { RoutingRecordView } from "./RoutingRecordView";
@@ -25,13 +25,17 @@ export function CallHistory({ workerId, machineLabel }: { workerId: string; mach
 
   return (
     <div className="os-fleet-history">
-      <div className="os-fleet-head-actions">
+      <div className="os-head-actions">
         <Button onClick={() => setOpen((v) => !v)} ariaLabel={`Recent calls on ${machineLabel}`}>
           {open ? "Hide recent calls" : "Recent calls"}
         </Button>
+        {/* "Re-read" everywhere, deliberately. This said "Refresh" while
+            three other controls in the same app said "Re-read" for the same
+            act -- one action keeps one name through the whole product, or the
+            vocabulary stops being signposting and becomes noise. */}
         {open ? (
           <Button onClick={refresh} busy={loading} busyLabel="Reading...">
-            Refresh
+            Re-read
           </Button>
         ) : null}
       </div>
@@ -48,7 +52,8 @@ export function CallHistory({ workerId, machineLabel }: { workerId: string; mach
           </p>
 
           {error ? (
-            <FleetError
+            <Notice
+              tone="error"
               sentence="The call history could not be read."
               next={
                 invocations.length > 0

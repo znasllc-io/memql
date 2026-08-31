@@ -7,6 +7,26 @@ import type { FileEntry } from "../system/desktop";
 import { roleAdmits, ROLE_LADDER, type ClusterRole, type RoleRequirement } from "../system/roles";
 
 export { Caption } from "./Caption";
+export {
+  Button,
+  Check,
+  Chip,
+  Chips,
+  ChoiceStack,
+  Fact,
+  Facts,
+  FormRow,
+  Head,
+  Input,
+  Notice,
+  Panel,
+  Select,
+  Subhead,
+  type ButtonTone,
+  type ChipTone,
+  type ChoiceOption,
+  type NoticeTone,
+} from "./controls";
 export { LiveList, type LiveListSource } from "../live/LiveList";
 export { deriveProvenance, roleAdmits, ROLE_LADDER };
 export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement };
