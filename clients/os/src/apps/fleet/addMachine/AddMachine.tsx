@@ -3,7 +3,7 @@ import { createWorkerToken } from "@znasllc-io/memql-sdk-core/identity";
 
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
-import { Button, FleetError, Panel } from "../ui";
+import { Button, Notice, Panel } from "../../../kit";
 import {
   CLUSTER_URL_PLACEHOLDER,
   INSTALL_PLATFORMS,
@@ -134,7 +134,7 @@ export function AddMachine({
 
   return (
     <Panel label="Add a machine">
-      <form onSubmit={submit} className="os-fleet-form">
+      <form onSubmit={submit} className="os-form">
         {connection === null ? (
           <p className="os-caption">
             A token can only be minted over a live connection to the cluster.
@@ -142,29 +142,30 @@ export function AddMachine({
         ) : null}
 
         {error ? (
-          <FleetError
+          <Notice
+            tone="error"
             sentence="The token was not minted."
             next="Nothing was created; try again."
             detail={error}
           />
         ) : null}
 
-        <div className="os-fleet-inline-form">
+        <div className="os-form-row">
           <label className="os-sr-only" htmlFor="fleet-add-name">
             What is this machine called
           </label>
           <input
             id="fleet-add-name"
-            className="os-fleet-input"
+            className="os-input"
             value={name}
             placeholder="studio-mac-mini"
             onChange={(e) => setName(e.target.value)}
           />
-          <label className="os-fleet-select-label" htmlFor="fleet-add-platform">
+          <label className="os-select-label" htmlFor="fleet-add-platform">
             <span className="os-sr-only">Operating system</span>
             <select
               id="fleet-add-platform"
-              className="os-fleet-select"
+              className="os-select"
               value={platform}
               onChange={(e) => setPlatform(e.target.value as InstallPlatform)}
             >
@@ -189,7 +190,7 @@ export function AddMachine({
         {/* The build choice is an INPUT to the mint -- it decides which
             install command the panel then shows -- so it stays with the
             controls that produce it. */}
-        <label className="os-fleet-check">
+        <label className="os-check">
           <input
             type="checkbox"
             checked={computerUse}
@@ -209,11 +210,13 @@ export function AddMachine({
 
       {token === "" ? null : (
         <div className="os-fleet-token">
-          <p className="os-fleet-warn" role="alert">
-            Copy this token now. It is not shown again -- the cluster keeps only its hash, so
-            there is nowhere to look it up. If it is lost, mint another one and revoke this
-            machine.
-          </p>
+          <Notice tone="warn">
+            <p className="os-notice-line" role="alert">
+              Copy this token now. It is not shown again -- the cluster keeps only its hash, so
+              there is nowhere to look it up. If it is lost, mint another one and revoke this
+              machine.
+            </p>
+          </Notice>
 
           <div className="os-fleet-secret">
             <code className="os-mono os-fleet-secret-value">{token}</code>
@@ -243,7 +246,7 @@ export function AddMachine({
             in the workers runbook.
           </p>
 
-          <p role="status" className="os-fleet-status">
+          <p role="status" className="os-status-line">
             {registered
               ? "A new machine has registered. It is in the list below."
               : "Waiting for the machine to connect. It appears in the list on its own the moment it registers -- this list is live, so there is nothing to reload."}
@@ -252,7 +255,7 @@ export function AddMachine({
           {/* The acknowledgment gate. Closing the panel is the moment the
               token stops being visible anywhere, so it is not a click that
               should be possible to make by accident while reading. */}
-          <label className="os-fleet-check">
+          <label className="os-check">
             <input
               type="checkbox"
               checked={acknowledged}
@@ -266,11 +269,6 @@ export function AddMachine({
         </div>
       )}
 
-      {token === "" ? (
-        <div className="os-fleet-head-actions">
-          <Button onClick={onClose}>Cancel</Button>
-        </div>
-      ) : null}
     </Panel>
   );
 }

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { MonitorSmartphone } from "lucide-react";
 
 import { LiveList } from "../../../live/LiveList";
@@ -8,8 +9,8 @@ import { AddMachine } from "../addMachine/AddMachine";
 import { useLiveView } from "../liveView";
 import { formatFreshness } from "../format";
 import { isWorkerOnline } from "../online";
-import { isRevoked, machineName, type MachineRow } from "../rows";
-import { Button, Chip, ChipRow, SectionHead } from "../ui";
+import { isRevoked, machineFromRow, machineName, type MachineRow } from "../rows";
+import { Button, Chip, Chips, Head } from "../../../kit";
 import { useNow } from "../useNow";
 import { MachineDetail } from "./MachineDetail";
 import { useMachineWrites } from "./useMachineWrites";
@@ -30,13 +31,18 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
   // produces NO event: the row simply stops being bumped.
   const now = useNow(15_000);
 
-  const source = useLiveView<MachineRow>(collection, `revoked:${showRevoked}`, (rows) =>
-    showRevoked ? [...rows] : rows.filter((m) => !isRevoked(m)),
-  );
+  // PROJECT, then narrow -- in that order and in one pass. The collection
+  // holds raw wire rows (see live/machines.tsx), so every predicate below has
+  // to run on a machineFromRow result; `isRevoked` reading a raw row's absent
+  // `revokedAt` is a throw, not a false.
+  const source = useLiveView<Row, MachineRow>(collection, `revoked:${showRevoked}`, (rows) => {
+    const machines = rows.map(machineFromRow).filter((m) => m.id !== "");
+    return showRevoked ? machines : machines.filter((m) => !isRevoked(m));
+  });
 
   return (
     <div className="os-fleet">
-      <SectionHead title="Machines">
+      <Head title="Machines">
         <Button
           tone={adding ? "quiet" : "primary"}
           onClick={() => setAdding((v) => !v)}
@@ -44,7 +50,7 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
         >
           {adding ? "Close" : "Add machine"}
         </Button>
-      </SectionHead>
+      </Head>
 
       {adding ? <AddMachine machineCount={count} onClose={() => setAdding(false)} /> : null}
 
@@ -57,8 +63,20 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
         key={`machines:${showRevoked}`}
         source={source}
         rowId={(m) => m.id}
+        // A HEARTBEAT IS NOT NEWS, and this is the line that decides it.
+        //
+        // The fingerprint drives the arrival cue, so anything named here
+        // announces itself when it changes. `lastSeenAt` moves every 15
+        // seconds for every machine, forever -- naming it made the whole list
+        // pulse on a timer, which is precisely the standing badge this cue is
+        // supposed not to be. Liveness already has a continuous display, the
+        // dot, and it needs no cue on top of it.
+        //
+        // What is left is what a person would call a change to a machine:
+        // its name, its labels, whether it was revoked, whether it picked up
+        // work.
         fingerprint={(m) =>
-          `${m.lastSeenAt}|${m.revokedAt}|${m.displayName}|${m.activeCount}|${JSON.stringify(m.operatorLabels)}`
+          `${m.revokedAt}|${m.displayName}|${m.activeCount}|${JSON.stringify(m.operatorLabels)}`
         }
         label="Your machines"
         emptyText={
@@ -77,27 +95,36 @@ export function MachinesSection({ showRevoked }: { showRevoked: boolean }) {
         )}
       />
 
-      {openId === "" ? null : <DetailFor id={openId} writes={writes} now={now} />}
+      {openId === "" ? null : (
+        <DetailFor id={openId} source={source} writes={writes} now={now} />
+      )}
     </div>
   );
 }
 
 function DetailFor({
   id,
+  source,
   writes,
   now,
 }: {
   id: string;
+  source: ReturnType<typeof useLiveView<Row, MachineRow>>;
   writes: ReturnType<typeof useMachineWrites>;
   now: Date;
 }) {
-  const { collection } = useMachines();
-  // Read the machine out of the SNAPSHOT rather than holding the row the list
-  // handed us: the detail panel has to show what the feed is showing, and a
-  // captured row would go stale the moment its next heartbeat lands -- the
-  // panel would render a "last heartbeat" that stopped advancing while the
-  // list beside it kept moving.
-  const machine = collection?.snapshot.rows.find((m) => m.id === id);
+  // Read the machine out of the same VIEW the list renders, rather than
+  // holding the row the list handed us: the detail panel has to show what the
+  // feed is showing, and a captured row would go stale the moment its next
+  // heartbeat lands -- the panel would render a "last heartbeat" that stopped
+  // advancing while the list beside it kept moving.
+  //
+  // The view rather than the collection, because the collection's rows are
+  // raw and this panel reads derived fields on every line.
+  const machine = useMemo(
+    () => source?.snapshot.rows.find((m) => m.id === id),
+    [source, source?.snapshot, id],
+  );
   if (!machine) return null;
   return <MachineDetail machine={machine} writes={writes} now={now} />;
 }
@@ -136,11 +163,11 @@ function MachineLine({
       <span className="os-machine-name">{machineName(machine)}</span>
       {machine.platform ? <span className="os-caption">{machine.platform}</span> : null}
       {labels.length > 0 ? (
-        <ChipRow label={`Labels on ${machineName(machine)}`}>
+        <Chips label={`Labels on ${machineName(machine)}`}>
           {labels.slice(0, 4).map((one) => (
             <Chip
               key={one.key}
-              tone={one.source === "operator" ? "operator" : "reported"}
+              tone={one.source === "operator" ? "accent" : "muted"}
               title={
                 one.overrides
                   ? "You set this, replacing the value the machine reported"
@@ -153,7 +180,7 @@ function MachineLine({
             </Chip>
           ))}
           {labels.length > 4 ? <span className="os-caption">+{labels.length - 4}</span> : null}
-        </ChipRow>
+        </Chips>
       ) : null}
       <span className="os-machine-state">
         <span className="os-caption">{formatFreshness(machine.lastSeenAt, now)}</span>

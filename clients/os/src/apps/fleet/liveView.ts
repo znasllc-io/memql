@@ -27,25 +27,42 @@ import type { LiveListSource } from "../../live/LiveList";
 // read through a ref, so a closure recreated on every render does not rebuild
 // the view; the key is what says the transform now MEANS something different.
 
-export interface LiveView<T> extends LiveListSource<T> {
-  readonly snapshot: LiveSnapshot<T>;
+export interface LiveView<U> extends LiveListSource<U> {
+  readonly snapshot: LiveSnapshot<U>;
 }
 
-export function useLiveView<T>(
+/**
+ * `T` is the collection's row type and `U` the surface's. They differ, and
+ * that is the point.
+ *
+ * A collection holds RAW wire rows, because its fold has to: an arriving
+ * event's payload is upserted AS the row type with no projection hook in
+ * between (`liveCollection.ts`: `upsert(id, payload as unknown as T)`). A
+ * collection typed with a projected row is therefore correct exactly until
+ * the first update, and then holds a raw row that every derived field is
+ * missing from -- which is not a rendering glitch but a throw, the moment a
+ * predicate touches a field the wire row does not carry.
+ *
+ * So projection belongs HERE, on the read side, where it runs over whatever
+ * the collection currently holds. That is also what the portal does
+ * (`useLive<Row>` everywhere, projected in a useMemo); this is the same rule
+ * with the filtering and ordering folded into the same pass.
+ */
+export function useLiveView<T, U = T>(
   source: LiveListSource<T> | null,
   viewKey: string,
-  transform: (rows: readonly T[]) => T[],
-): LiveView<T> | null {
+  transform: (rows: readonly T[]) => U[],
+): LiveView<U> | null {
   const transformRef = useRef(transform);
   transformRef.current = transform;
 
   return useMemo(() => {
     if (source === null) return null;
     let cachedFrom: LiveSnapshot<T> | null = null;
-    let cached: LiveSnapshot<T> | null = null;
+    let cached: LiveSnapshot<U> | null = null;
     return {
       subscribe: (listener: () => void) => source.subscribe(listener),
-      get snapshot(): LiveSnapshot<T> {
+      get snapshot(): LiveSnapshot<U> {
         const upstream = source.snapshot;
         if (cachedFrom === upstream && cached !== null) return cached;
         cachedFrom = upstream;

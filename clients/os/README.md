@@ -31,6 +31,44 @@ in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Product apps are stubs until their epics
 land (#4721 #4725 #4733 #4737 #4741).
 
+## Live surfaces: the arrival cue (the rule, not a suggestion)
+
+Every live list in the OS renders through `kit/LiveList`, and the reason is
+this cue. When a subscription changes something a person is looking at, the
+change announces itself **once, quietly, and then it is gone**. It is never a
+count, never a badge, never anything that waits to be dismissed -- an unread
+marker turns news into a chore, and this is the opposite of that.
+
+The mechanism is already built; what a new surface has to get right is what it
+feeds it.
+
+- **A new row rises and rings.** An updated row rings only. Both decay on the
+  clock (`live/arrival.ts`, `TICK_TTL_MS`), not on the next data change, so a
+  quiet list settles by itself.
+- **The ring is a `box-shadow`, never a background.** Almost every row paints
+  its own opaque plate, and a background animation underneath one is invisible
+  -- it costs the same and announces nothing. This was live for a while and
+  fired on nothing.
+- **Reduced motion still gets a cue**, held for the life of the tick and then
+  removed. "No animation" left those readers with no signal at all, which is a
+  different failure from the one the setting asks about.
+- **A HEARTBEAT IS NOT NEWS. This is the one that goes wrong.** The
+  `fingerprint` prop decides what counts as a change, so anything named in it
+  announces itself. Liveness fields -- `lastSeenAt`, `lastSeen`, `lastUsedAt`
+  -- move on a timer for every row forever, and naming one turns the whole
+  list into a strobe on a 15-second cycle: the standing badge this cue exists
+  not to be. Fingerprint what a **person** would call a change (a rename, a
+  revocation, a status flip, a label edit) and leave liveness to the thing
+  that already displays it continuously, the dot.
+- **A resync is not an arrival.** The reducer treats any snapshot following a
+  non-live state as a baseline, so a reconnect does not re-animate the world.
+  Re-baseline deliberately when a FILTER changes, by keying the `LiveList` on
+  it -- revealing rows the browser already had is not the cluster sending
+  them.
+
+`test/fleet/machines.test.tsx` pins both directions: the cue fires on a
+rename, and stays silent on a heartbeat.
+
 ## Fleet, the first real app (memql#4729)
 
 `src/apps/fleet/` is the promotion of the foundation's read-only exemplar
@@ -46,12 +84,16 @@ after it:
   retaining renders "Loading from the cluster" forever, with nothing thrown
   and nothing logged. `live/useLiveCollection.ts` is the one place that
   contract is honoured — use it rather than constructing a collection.
-- **Not every concept is live.** `v1:worker:registration`,
-  `v1:worker:routingPolicy` and `v1:workbench:workspace` carry broadcast
-  routing rules (`component/node/routing.go`); `v1:worker:invocation` and
-  `v1:cluster:node` do NOT. A subscription over those two receives nothing
-  in the only topology that ships, so they are on-demand queries that say
-  when they were read.
+- **Check the routing rules before deciding a concept is dark.**
+  `v1:worker:registration`, `v1:worker:routingPolicy` and
+  `v1:workbench:workspace` carry explicit broadcast rules
+  (`component/node/routing.go`); `v1:cluster:node` carries one through the
+  `v1:cluster:*` wildcards in the same file. Only `v1:worker:invocation` is
+  excluded, on volume grounds, so only the per-machine call history is an
+  on-demand query that says when it was read. The first cut of Fleet got
+  `v1:cluster:node` wrong -- reasoning from the absence of a rule with the
+  concept's NAME in it, rather than reading the patterns -- and printed the
+  mistake on the page as operator-facing copy.
 - **Errors render in surface, never as toasts** (`fleet/ui.tsx`): a
   refusal is usually the server's own sentence and belongs beside the
   control that produced it.

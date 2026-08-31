@@ -8,14 +8,17 @@ import { invocationFromRow, type InvocationRow } from "../rows";
 // ===========================================================================
 // THIS ONE IS A QUERY, AND THAT IS A DESIGN DECISION, NOT AN OVERSIGHT
 // ===========================================================================
-// Every other Fleet feed in the OS is a LiveList, because
-// v1:worker:registration, v1:worker:routingPolicy and v1:workbench:workspace
-// all carry broadcast routing rules (component/node/routing.go) and their
-// events cross replicas to a browser subscriber. v1:worker:invocation is
-// deliberately EXCLUDED from that set on volume grounds -- one row per tool
-// call, which on a busy fleet is orders of magnitude more traffic than the
-// rest of the concept list combined -- and routing.go says so in as many
-// words.
+// EVERY other Fleet feed in the OS is a LiveList. v1:worker:registration,
+// v1:worker:routingPolicy and v1:workbench:workspace carry explicit broadcast
+// rules (component/node/routing.go); v1:cluster:node carries one through the
+// `v1:cluster:*` wildcards in the same file. v1:worker:invocation is the ONLY
+// one deliberately EXCLUDED, on volume grounds -- one row per tool call,
+// which on a busy fleet is orders of magnitude more traffic than the rest of
+// the concept list combined -- and routing.go says so in as many words.
+//
+// Check the rules before concluding a concept is dark: the absence of a rule
+// NAMING a concept is not the absence of a rule MATCHING it, and this file's
+// neighbour got that wrong about v1:cluster:node.
 //
 // So subscribing here would not be "live": it would be a subscription that
 // silently receives nothing in the only topology that ships, and a panel that

@@ -11,7 +11,7 @@ import {
   type FleetSettings,
   type FleetSettingsStore,
 } from "./settings";
-import { Panel, SectionHead } from "./ui";
+import { Panel, Head } from "../../kit";
 
 // Fleet: the machines you own, how work is routed to them, and the
 // workbenches that run the work that does not need them (epic memql#4729).
@@ -77,7 +77,7 @@ function FleetSettingsSection({
 }) {
   return (
     <div className="os-settings">
-      <SectionHead title="Fleet settings" />
+      <Head title="Fleet settings" />
       <Panel label="Fleet settings">
         <fieldset className="os-field-group">
           <legend>Open Fleet on</legend>
@@ -103,7 +103,7 @@ function FleetSettingsSection({
 
         <fieldset className="os-field-group">
           <legend>Revoked machines</legend>
-          <label className="os-fleet-check">
+          <label className="os-check">
             <input
               type="checkbox"
               checked={settings.showRevoked}

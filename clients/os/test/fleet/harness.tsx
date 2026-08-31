@@ -37,10 +37,61 @@ export interface FakeQuery {
   updateRoutingPolicy: ReturnType<typeof vi.fn>;
 }
 
+// The subscription seam, faithful to the one bit of it a collection uses:
+// `subscribeGraph(handler, opts)` returning an unregister. `emit` is the
+// test's hand on the wire.
+//
+// WITHOUT THIS EVERY TEST IS SEED-ONLY, and a seed-only test cannot see the
+// fold -- which is the half of a live surface that runs for the rest of the
+// session. That gap hid a real defect: the collection upserts a folded
+// event's payload AS THE ROW TYPE, with no projection, so a collection typed
+// with a projected row holds raw wire rows the moment anything updates.
+export interface FakeSubscriptions {
+  subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
+  /** Push an event to every handler subscribed to `concept`. */
+  emit: (concept: string, payload: Row, kind?: string) => void;
+}
+
+export interface FakeEvent {
+  subscriptionId: string;
+  kind: string;
+  timestamp: Date | null;
+  payload: Row | null;
+  payloadOmitted: boolean;
+  seq: number;
+  gapBefore: boolean;
+}
+
 export interface FakeConnection {
   query: FakeQuery;
-  subscriptions: null;
+  subscriptions: FakeSubscriptions;
   dispatcher: { sendAndWait: ReturnType<typeof vi.fn> };
+}
+
+function fakeSubscriptions(): FakeSubscriptions {
+  const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
+  return {
+    subscribeGraph(handler, opts) {
+      const concept = opts.concept ?? "*";
+      const set = handlers.get(concept) ?? new Set();
+      set.add(handler);
+      handlers.set(concept, set);
+      return () => set.delete(handler);
+    },
+    emit(concept, payload, kind = "NODE_UPDATED") {
+      for (const handler of handlers.get(concept) ?? []) {
+        handler({
+          subscriptionId: "sub-1",
+          kind,
+          timestamp: new Date(),
+          payload,
+          payloadOmitted: false,
+          seq: 0,
+          gapBefore: false,
+        });
+      }
+    },
+  };
 }
 
 export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {}): FakeConnection {
@@ -58,7 +109,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       createRoutingPolicy: vi.fn(async () => rowsResult([])),
       updateRoutingPolicy: vi.fn(async () => rowsResult([])),
     },
-    subscriptions: null,
+    subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
   };
 }

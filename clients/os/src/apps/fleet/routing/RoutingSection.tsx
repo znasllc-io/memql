@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { feedIsBehind } from "../../../live/useLiveCollection";
 import { MapEditor } from "../MapEditor";
 import { chipsFromMap, type LabelMap } from "../labels";
 import {
@@ -12,7 +13,7 @@ import {
   type RoutingFallback,
   type RoutingStrategy,
 } from "../rows";
-import { Button, FleetError, Panel, SectionHead } from "../ui";
+import { Button, ChoiceStack, Notice, Panel, Head } from "../../../kit";
 import { useRoutingPolicy, type RoutingPolicyDraft } from "./useRoutingPolicy";
 
 // The routing policy: how the router orders the machines it could send a call
@@ -80,15 +81,22 @@ export function RoutingSection() {
 
   return (
     <div className="os-fleet">
-      <SectionHead title="Routing">
-        <Button onClick={state.reseed}>Re-read</Button>
-      </SectionHead>
+      <Head title="Routing">
+        {/* Offered only when the feed is behind -- see the workbenches
+            section for the reasoning. v1:worker:routingPolicy is broadcast,
+            so a policy edited in another tab or in the portal arrives here on
+            its own; a standing refresh button would say otherwise. */}
+        {feedIsBehind(state.liveState) ? (
+          <Button onClick={state.reseed}>Re-read</Button>
+        ) : null}
+      </Head>
 
       <Panel label="Routing policy">
         {state.loading ? <p className="os-caption">Reading your routing policy.</p> : null}
 
         {state.error ? (
-          <FleetError
+          <Notice
+            tone="error"
             sentence="Your routing policy could not be read."
             next="The controls below show the defaults until it loads."
             detail={state.error}
@@ -101,59 +109,52 @@ export function RoutingSection() {
             configured this" and "this is not configured", which are
             different claims about whether routing is happening. */}
         {policy === null && !state.loading ? (
-          <p className="os-fleet-note">
-            No policy set -- the defaults apply: <strong>{DEFAULT_STRATEGY}</strong> ordering with{" "}
-            <strong>{DEFAULT_FALLBACK}</strong> on a refusal. Nothing is written until you save.
-          </p>
+          <Notice tone="info">
+            <p className="os-notice-line">
+              No policy set -- the defaults apply: <strong>{DEFAULT_STRATEGY}</strong> ordering
+              with <strong>{DEFAULT_FALLBACK}</strong> on a refusal. Nothing is written until you
+              save.
+            </p>
+          </Notice>
         ) : null}
 
         {diverged ? (
-          <p className="os-fleet-note" role="status">
-            This policy changed somewhere else while you were editing. Your edits are still here;
-            saving will overwrite the newer row.
-          </p>
+          <Notice tone="warn">
+            <p className="os-notice-line" role="status">
+              This policy changed somewhere else while you were editing. Your edits are still
+              here; saving will overwrite the newer row.
+            </p>
+          </Notice>
         ) : null}
 
         <fieldset className="os-field-group">
           <legend>Strategy</legend>
-          <div className="os-choice-column" role="radiogroup" aria-label="Routing strategy">
-            {ROUTING_STRATEGIES.map((one) => (
-              <label key={one} className="os-fleet-radio">
-                <input
-                  type="radio"
-                  name="fleet-strategy"
-                  value={one}
-                  checked={draft.strategy === one}
-                  onChange={() => edit({ strategy: one })}
-                />
-                <span>
-                  <span className="os-mono">{one}</span>
-                  <span className="os-caption">{STRATEGY_BLURB[one as RoutingStrategy]}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+          <ChoiceStack
+            name="fleet-strategy"
+            label="Routing strategy"
+            value={draft.strategy}
+            onChange={(strategy) => edit({ strategy })}
+            options={ROUTING_STRATEGIES.map((one) => ({
+              value: one,
+              label: one,
+              description: STRATEGY_BLURB[one as RoutingStrategy],
+            }))}
+          />
         </fieldset>
 
         <fieldset className="os-field-group">
           <legend>When the chosen machine refuses before the call starts</legend>
-          <div className="os-choice-column" role="radiogroup" aria-label="Routing fallback">
-            {ROUTING_FALLBACKS.map((one) => (
-              <label key={one} className="os-fleet-radio">
-                <input
-                  type="radio"
-                  name="fleet-fallback"
-                  value={one}
-                  checked={draft.fallback === one}
-                  onChange={() => edit({ fallback: one })}
-                />
-                <span>
-                  <span className="os-mono">{one}</span>
-                  <span className="os-caption">{FALLBACK_BLURB[one as RoutingFallback]}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+          <ChoiceStack
+            name="fleet-fallback"
+            label="Routing fallback"
+            value={draft.fallback}
+            onChange={(fallback) => edit({ fallback })}
+            options={ROUTING_FALLBACKS.map((one) => ({
+              value: one,
+              label: one,
+              description: FALLBACK_BLURB[one as RoutingFallback],
+            }))}
+          />
         </fieldset>
 
         <fieldset className="os-field-group">
@@ -191,14 +192,15 @@ export function RoutingSection() {
         </fieldset>
 
         {state.saveError ? (
-          <FleetError
+          <Notice
+            tone="error"
             sentence="The policy was not saved."
             next="Nothing was written; your edits are still here."
             detail={state.saveError}
           />
         ) : null}
 
-        <div className="os-fleet-head-actions">
+        <div className="os-head-actions">
           <Button
             tone="primary"
             busy={state.saving}
@@ -228,7 +230,7 @@ export function RoutingSection() {
           </Button>
         </div>
 
-        <p role="status" className="os-fleet-status">
+        <p role="status" className="os-status-line">
           {state.announcement}
         </p>
 

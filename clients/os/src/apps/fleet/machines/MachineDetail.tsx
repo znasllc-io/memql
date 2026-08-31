@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
-import { Button, Chip, ChipRow, Fact, Facts, FleetError, Panel } from "../ui";
+import { Button, Chip, Chips, Fact, Facts, Notice, Panel, Subhead } from "../../../kit";
 import { formatFreshness, formatMoment } from "../format";
 import { isWorkerOnline } from "../online";
 import { machineName, type MachineRow } from "../rows";
@@ -64,7 +64,8 @@ export function MachineDetail({
       <RevokeControl machine={machine} busy={busy} revoke={writes.revoke} />
 
       {writes.actionError ? (
-        <FleetError
+        <Notice
+          tone="error"
           sentence="The cluster refused that change."
           next="Nothing was written."
           detail={writes.actionError}
@@ -97,7 +98,7 @@ function RenameField({
 
   return (
     <form
-      className="os-fleet-inline-form"
+      className="os-form-row"
       onSubmit={(e) => {
         e.preventDefault();
         if (!changed) return;
@@ -113,7 +114,7 @@ function RenameField({
       </label>
       <input
         id={`fleet-rename-${machine.id}`}
-        className="os-fleet-input"
+        className="os-input"
         value={draft}
         disabled={busy}
         placeholder={machine.name || "Name this machine"}
@@ -140,7 +141,7 @@ function LabelGroups({
   return (
     <div className="os-fleet-labels">
       <div className="os-fleet-labelgroup">
-        <h4 className="os-fleet-subhead">Reported by the machine</h4>
+        <Subhead>Reported by the machine</Subhead>
         {/* The caveat is UI copy rather than a comment, because the person
             who needs it is the one about to look for an edit control here
             and not find one. */}
@@ -150,7 +151,7 @@ function LabelGroups({
           machine's next restart, leaving a routing rule that still reads correctly against a
           machine that quietly stopped matching it.
         </p>
-        <ChipRow label="Reported labels">
+        <Chips label="Reported labels">
           {reportedKeys.length === 0 ? (
             <span className="os-caption">None reported.</span>
           ) : (
@@ -159,7 +160,7 @@ function LabelGroups({
               return (
                 <Chip
                   key={key}
-                  tone="reported"
+                  tone="muted"
                   title={overridden ? "Overridden by an operator label below" : undefined}
                 >
                   {`${key}=${machine.reportedLabels[key] ?? ""}`}
@@ -168,11 +169,11 @@ function LabelGroups({
               );
             })
           )}
-        </ChipRow>
+        </Chips>
       </div>
 
       <div className="os-fleet-labelgroup">
-        <h4 className="os-fleet-subhead">Set by you</h4>
+        <Subhead>Set by you</Subhead>
         <p className="os-caption">
           Yours, and the only editable set. The router matches on both maps merged with these
           winning.
@@ -190,7 +191,7 @@ function LabelGroups({
 function AppsGroup({ machine }: { machine: MachineRow }) {
   return (
     <div className="os-fleet-apps">
-      <h4 className="os-fleet-subhead">Local apps</h4>
+      <Subhead>Local apps</Subhead>
       {machine.apps.length === 0 ? (
         <p className="os-caption">
           None reported. A cockpit reports the apps it found on the machine; an older one reports
@@ -253,7 +254,7 @@ function RevokeControl({
   // wrong one because nothing on the dialog said which.
   if (!confirming) {
     return (
-      <div className="os-fleet-head-actions">
+      <div className="os-head-actions">
         <Button tone="danger" onClick={() => setConfirming(true)}>
           Revoke this machine
         </Button>
@@ -273,13 +274,13 @@ function RevokeControl({
       </label>
       <input
         id={`fleet-revoke-reason-${machine.id}`}
-        className="os-fleet-input"
+        className="os-input"
         value={reason}
         disabled={busy}
         placeholder="Reason (optional)"
         onChange={(e) => setReason(e.target.value)}
       />
-      <div className="os-fleet-head-actions">
+      <div className="os-head-actions">
         <Button
           tone="danger"
           busy={busy}

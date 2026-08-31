@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
-import { getRowByConceptAndId, newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import {
+  getRowByConceptAndId,
+  newShortId,
+  type LiveState,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../../live/connection";
 import { useLiveCollection } from "../../../live/useLiveCollection";
@@ -60,7 +65,7 @@ export interface RoutingPolicyState {
   policy: RoutingPolicyRow | null;
   loading: boolean;
   /** The feed's own condition, for the caption. */
-  liveState: string;
+  liveState: LiveState;
   error: string;
   saving: boolean;
   saveError: string;
@@ -89,13 +94,19 @@ export function useRoutingPolicy(): RoutingPolicyState {
   const [saveError, setSaveError] = useState("");
   const [announcement, setAnnouncement] = useState("");
 
-  const { snapshot, reseed } = useLiveCollection<RoutingPolicyRow>(
+  // RAW rows. The fold upserts an arriving event's payload AS the row type
+  // with no projection hook in between, so a collection typed with
+  // RoutingPolicyRow would be correct until the first edit landed from
+  // anywhere and hold a raw wire row after it -- and `activePolicy` reads
+  // `active`, which is exactly the field a raw row spells differently from a
+  // projected one. Projected on the way out, below.
+  const { snapshot, reseed } = useLiveCollection<Row>(
     connection === null ? null : "fleet:routingPolicy",
     (conn) => ({
       concept: WORKER_ROUTING_POLICY_CONCEPT,
       seed: async (_cursor, signal) => {
         const result = await conn.query.myRoutingPolicies({}, { signal });
-        return { rows: result.rows().map(routingPolicyFromRow), nextCursor: "" };
+        return { rows: result.rows(), nextCursor: "" };
       },
       reread: async (rowId, signal) => {
         const row = await getRowByConceptAndId(
@@ -104,7 +115,7 @@ export function useRoutingPolicy(): RoutingPolicyState {
           rowId,
           { signal },
         );
-        return row ? routingPolicyFromRow(row as Row) : null;
+        return (row as Row) ?? null;
       },
       paged: false,
     }),
@@ -116,7 +127,10 @@ export function useRoutingPolicy(): RoutingPolicyState {
   // the router reads would write its edits somewhere nothing dispatches
   // through. The collection preserves the read's order, and a superseded row
   // folding in later has active=false and cannot displace it.
-  const policy = useMemo(() => activePolicy(snapshot.rows), [snapshot.rows]);
+  const policy = useMemo(
+    () => activePolicy(snapshot.rows.map(routingPolicyFromRow)),
+    [snapshot.rows],
+  );
 
   const save = useCallback(
     async (draft: RoutingPolicyDraft): Promise<boolean> => {

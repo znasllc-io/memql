@@ -4,6 +4,7 @@ import {
   type Connection,
   type LiveCollectionSpec,
   type LiveSnapshot,
+  type LiveState,
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "./connection";
@@ -35,6 +36,21 @@ import type { LiveListSource } from "./LiveList";
 const EMPTY: LiveSnapshot<never> = { rows: [], state: "disconnected", error: "", version: 0 };
 
 const LINGER_MS = 5_000;
+
+/**
+ * Whether a feed is BEHIND -- showing rows it can no longer promise are
+ * current.
+ *
+ * `seeding` is deliberately not behind: it is work in progress, and offering
+ * a re-read for it invites a second read of the one already running.
+ * `degraded` and `disconnected` are the two states where the rows on screen
+ * are the last known answer, which is the only condition under which a manual
+ * re-read is worth offering -- on a healthy feed a refresh control quietly
+ * contradicts the thing it sits next to.
+ */
+export function feedIsBehind(state: LiveState): boolean {
+  return state === "degraded" || state === "disconnected";
+}
 
 export interface LiveCollectionHandle<T> {
   /** Null until the connection exists. LiveList renders the disconnected

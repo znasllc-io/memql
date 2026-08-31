@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Chip, ChipRow } from "./ui";
+import { Button, Chip, Chips, type ChipTone } from "../../kit";
 import { chipsFromMap, parseLabelChip, type LabelMap } from "./labels";
 
 // A controlled label-map editor: chips in, chips out, no writes of its own.
@@ -23,7 +23,7 @@ export function MapEditor({
   busy = false,
   label,
   idPrefix,
-  tone = "operator",
+  tone = "accent",
 }: {
   value: LabelMap;
   onChange: (next: LabelMap) => void;
@@ -33,7 +33,7 @@ export function MapEditor({
   /** Unique across the surface: two editors on one screen must not share an
    *  input id, or a label points at the wrong control. */
   idPrefix: string;
-  tone?: "operator" | "neutral";
+  tone?: ChipTone;
 }) {
   const [draft, setDraft] = useState("");
   const [hint, setHint] = useState("");
@@ -67,7 +67,7 @@ export function MapEditor({
 
   return (
     <div className="os-fleet-labeledit">
-      <ChipRow label={label}>
+      <Chips label={label}>
         {chips.length === 0 ? (
           <span className="os-caption">None set.</span>
         ) : (
@@ -75,11 +75,11 @@ export function MapEditor({
             const pair = parseLabelChip(chip);
             const key = pair?.key ?? chip;
             return (
-              <span key={key} className="os-fleet-chip-editable" role="listitem">
+              <span key={key} className="os-chip-editable" role="listitem">
                 <Chip tone={tone}>{chip}</Chip>
                 <button
                   type="button"
-                  className="os-fleet-chip-remove"
+                  className="os-chip-remove"
                   aria-label={`Remove ${chip}`}
                   disabled={busy}
                   onClick={() => remove(key)}
@@ -90,17 +90,17 @@ export function MapEditor({
             );
           })
         )}
-      </ChipRow>
+      </Chips>
       {/* A nested <form> is invalid HTML, so this is a div: the policy editor
           mounts two of these INSIDE its own form, and a submit here would
           otherwise submit that one. Enter is handled explicitly instead. */}
-      <div className="os-fleet-inline-form">
+      <div className="os-form-row">
         <label className="os-sr-only" htmlFor={inputId}>
           {label}
         </label>
         <input
           id={inputId}
-          className="os-fleet-input"
+          className="os-input"
           value={draft}
           disabled={busy}
           placeholder="key=value"
