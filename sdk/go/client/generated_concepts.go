@@ -311,7 +311,7 @@ var BoundConcepts = map[string]string{
 	"authSessionByRefreshTokenHash":                    "v1:identity:authSession",
 	"authSessionByTokenHash":                           "v1:identity:authSession",
 	"authSessionsForSelf":                              "v1:identity:authSession",
-	"authSessionsForSubject":                           "v1:identity:authSession",
+	"authSessionsForSelfIncludingRevoked":              "v1:identity:authSession",
 	"authoringBundleById":                              "v1:authoring:bundle",
 	"authoringBundleForPlan":                           "v1:authoring:bundle",
 	"authoringBundleForResponsibility":                 "v1:authoring:bundle",

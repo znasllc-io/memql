@@ -1438,26 +1438,21 @@ func AuthSessionsForSelfBuild(args AuthSessionsForSelfArgs) string {
 	return "query authSessionsForSelf()"
 }
 
-// AuthSessionsForSubject -- Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.
+// AuthSessionsForSelfIncludingRevoked -- Returns every auth-session row belonging to the CALLER, newest first, including revoked and expired ones. No argument: the caller is the scope. No token hashes.
 //
-// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSubject"] in generated_concepts.go).
-type AuthSessionsForSubjectArgs struct {
-	Subject string
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSelfIncludingRevoked"] in generated_concepts.go).
+type AuthSessionsForSelfIncludingRevokedArgs struct {
 }
 
-// AuthSessionsForSubject calls the engine query authSessionsForSubject.
-func (qc *QueryClient) AuthSessionsForSubject(ctx context.Context, args AuthSessionsForSubjectArgs) (*Result, error) {
-	call := AuthSessionsForSubjectBuild(args)
-	return qc.executeNamed(ctx, "authSessionsForSubject", call)
+// AuthSessionsForSelfIncludingRevoked calls the engine query authSessionsForSelfIncludingRevoked.
+func (qc *QueryClient) AuthSessionsForSelfIncludingRevoked(ctx context.Context, args AuthSessionsForSelfIncludingRevokedArgs) (*Result, error) {
+	call := AuthSessionsForSelfIncludingRevokedBuild(args)
+	return qc.executeNamed(ctx, "authSessionsForSelfIncludingRevoked", call)
 }
 
-func AuthSessionsForSubjectBuild(args AuthSessionsForSubjectArgs) string {
-	var b strings.Builder
-	b.WriteString("query authSessionsForSubject(")
-	b.WriteString("subject: ")
-	b.WriteString(quoteMemQL(args.Subject))
-	b.WriteString(")")
-	return b.String()
+func AuthSessionsForSelfIncludingRevokedBuild(args AuthSessionsForSelfIncludingRevokedArgs) string {
+	_ = args
+	return "query authSessionsForSelfIncludingRevoked()"
 }
 
 // AuthoringBundleById -- One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.

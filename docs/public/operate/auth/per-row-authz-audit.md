@@ -699,6 +699,20 @@ gate at all, so stamping it there would open *every* server-only
 construct for the remainder of that request.
 `TestOnlyAllowlistedPackagesStampInternalOrigin` catches exactly this.
 
+**This has since happened again on the read side, with the same answer.**
+`authSessionsForSubject(subject: ...)` filtered on a caller-supplied id and
+nothing else, so any signed-in caller could read anyone's sessions; the
+`@serverOnly` route was unavailable for the same reason as here (both callers
+live in `component/grpc`, which may never stamp). It became
+`authSessionsForSelfIncludingRevoked()` — no argument, `filter
+subject==actor.userId` — which is this section's `stamp { ownerUserId:
+actor.userId }` fix in read form (memql#4768). The preference order both cases
+landed on is now written down at the ban itself, in
+`component/auth/call_origin.go`: caller-scope the construct first; if the
+operation is genuinely about somebody else, use a purpose-built allowlisted
+package with a precondition test (`adminops`); never stamp in a handler
+(memql#4769).
+
 The actual fix was three `stamp { ownerUserId: actor.userId }` lines
 **plus a correction to the synthetic-actor helper they depend on**, and
 the second half is the part worth reading.

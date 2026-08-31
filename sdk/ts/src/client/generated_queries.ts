@@ -1468,26 +1468,24 @@ QueryClient.prototype.authSessionsForSelf = function (this: QueryClient, args: A
   return this.executeNamed("authSessionsForSelf", buildAuthSessionsForSelf(args), opts);
 };
 
-/** Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows. */
-// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSubject"] in generated_concepts.ts).
-export interface AuthSessionsForSubjectArgs {
-  subject: string;
+/** Returns every auth-session row belonging to the CALLER, newest first, including revoked and expired ones. No argument: the caller is the scope. No token hashes. */
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSelfIncludingRevoked"] in generated_concepts.ts).
+export interface AuthSessionsForSelfIncludingRevokedArgs {
 }
 
-export function buildAuthSessionsForSubject(args: AuthSessionsForSubjectArgs): string {
-  const parts: string[] = [];
-  parts.push("subject: " + renderMemQLValue(args.subject));
-  return "query authSessionsForSubject(" + parts.join(", ") + ")";
+export function buildAuthSessionsForSelfIncludingRevoked(args: AuthSessionsForSelfIncludingRevokedArgs): string {
+  void args;
+  return "query authSessionsForSelfIncludingRevoked()";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    authSessionsForSubject(args: AuthSessionsForSubjectArgs, opts?: QueryCallOptions): Promise<Result>;
+    authSessionsForSelfIncludingRevoked(args?: AuthSessionsForSelfIncludingRevokedArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.authSessionsForSubject = function (this: QueryClient, args: AuthSessionsForSubjectArgs = {} as AuthSessionsForSubjectArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("authSessionsForSubject", buildAuthSessionsForSubject(args), opts);
+QueryClient.prototype.authSessionsForSelfIncludingRevoked = function (this: QueryClient, args: AuthSessionsForSelfIncludingRevokedArgs = {} as AuthSessionsForSelfIncludingRevokedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("authSessionsForSelfIncludingRevoked", buildAuthSessionsForSelfIncludingRevoked(args), opts);
 };
 
 /** One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view. */

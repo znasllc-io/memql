@@ -309,12 +309,29 @@ const undeclared4306SelfSessionsReason = "memql#4306 -- self-scoped by its own f
 // break the thing the gate is protecting.
 //
 // So the query gates ITSELF, and it is a new query rather than a reuse of
-// authSessionsForSubject precisely because of that. Its sibling is a SERVER
-// read -- one Go caller, the all-sessions revoke handler, passing the caller's
-// own JWT sub -- and carries authSessionFull, hashes included. This one is
+// authSessionsForSelfIncludingRevoked precisely because of that. Its sibling
+// is a SERVER read -- two Go callers in the revoke handlers, scoped to the
+// caller with no argument at all since memql#4768. This one is
 // reached from a browser with an id the reader clicked, so it takes
 // requiresOwnerOrAdmin as a top-level conjunct and projects
 // authSessionAdminSummary, which has no token digests in it at all.
+// undeclared4768OwnSessionsReason covers the read behind the two revoke
+// handlers, after memql#4768 caller-scoped it.
+//
+// It was `authSessionsForSubject(subject: ...)` and carried the grandfather
+// marker -- filtered on a caller-supplied id, with no role gate and no
+// @serverOnly, so any signed-in caller could read anyone's sessions. It now
+// takes no argument at all and filters `subject==actor.userId`, so there is
+// nothing left to enumerate: the caller IS the scope.
+//
+// The CONCEPT still cannot carry a tier (see
+// undeclared4306SelfSessionsReason: authSessionByTokenHash is the pre-actor
+// read that builds the actor), and @serverOnly is unreachable because both
+// callers live in component/grpc, which may never stamp internal origin --
+// that gap is memql#4769. Caller-scoping is what closes this one without
+// depending on either.
+const undeclared4768OwnSessionsReason = "memql#4768 -- caller-scoped with no argument (subject==actor.userId), so there is nothing to enumerate; the concept cannot carry a tier because authSessionByTokenHash is the pre-actor read that builds the actor, and @serverOnly is unreachable from component/grpc (memql#4769)"
+
 const undeclared4734SessionsForSubjectAdminReason = "memql#4734 -- owner/admin operator read of another person's sessions; the concept cannot carry a tier because authSessionByTokenHash is the pre-actor read that builds the actor, so this query gates itself with requiresOwnerOrAdmin and projects a hash-free shape"
 
 const undeclared4301MagicLinkByIdReason = "memql#4301 -- device-bound flow's by-id read; pre-actor by construction AND the row names an email rather than a user, so no owner field exists to compare; @serverOnly, authorized by the binding cookie in Go"
@@ -726,7 +743,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"authSessionByPreviousRefreshTokenHash": {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionByRefreshTokenHash":         {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionByTokenHash":                {"v1:identity:authSession", undeclaredGrandfatherReason},
-	"authSessionsForSubject":                {"v1:identity:authSession", undeclaredGrandfatherReason},
+	"authSessionsForSelfIncludingRevoked":   {"v1:identity:authSession", undeclared4768OwnSessionsReason},
 	"authSessionsForSelf":                   {"v1:identity:authSession", undeclared4306SelfSessionsReason},
 	"sessionsForSubjectAdmin":               {"v1:identity:authSession", undeclared4734SessionsForSubjectAdminReason},
 
