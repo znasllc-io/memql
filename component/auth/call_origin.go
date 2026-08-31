@@ -69,6 +69,47 @@ func (o CallOrigin) IsInternal() bool { return o == OriginInternal }
 // the same bit, which they are not.
 const callOriginKey contextKey = "callOrigin"
 
+// # WHAT TO DO WHEN YOU HIT THE BAN (memql#4769)
+//
+// A gRPC or node handler that needs a @serverOnly construct finds the door
+// shut: the ban above is unconditional for component/grpc and component/node.
+// That is correct, and it is NOT "there is no way to do this". There are two
+// sanctioned answers and one forbidden one, in this order.
+//
+//  1. MAKE THE CONSTRUCT CALLER-SCOPED, and need no origin signal at all.
+//     If the operation is about the CALLER's own rows, say so in the
+//     construct: `filter subject==actor.userId` on a read,
+//     `stamp { ownerUserId: actor.userId }` on a write. The caller-supplied
+//     id disappears, and with it the reason @serverOnly was wanted.
+//
+//     This is the established answer, twice over. memql#2989 refuted the
+//     @serverOnly route for two library mutations and fixed them with three
+//     stamp lines (docs/public/operate/auth/per-row-authz-audit.md). memql#4768
+//     did the read-side twin: authSessionsForSubject(subject:) became
+//     authSessionsForSelfIncludingRevoked() with no argument at all. Reach for
+//     this FIRST -- it removes the enumeration surface instead of gating it.
+//
+//  2. IF THE OPERATION IS GENUINELY ABOUT SOMEBODY ELSE, put it in a
+//     purpose-built package, allowlist THAT package, and assert its
+//     precondition with a test of its own.
+//
+//     component/identity/adminops is the worked example: request-derived and
+//     allowlisted, with the precondition -- every path downstream of the
+//     owner/admin gate in the same function -- verified by
+//     component/identity/adminops/gate_test.go, which drives every operation
+//     with every role against an engine that refuses everything and counts the
+//     attempts. The allowlist entry is not the safety property; that test is.
+//
+//     Note what makes this different from allowlisting component/grpc itself:
+//     the package is small, exists for one operation family, and every call
+//     site in it is downstream of one gate that a test can enumerate. None of
+//     those is true of component/grpc.
+//
+//  3. NEVER: stamp in the handler, or move one call into an allowlisted
+//     package purely so the stamp compiles there. The second is the first with
+//     an extra hop, and it defeats the "a reviewer sees it" property the
+//     per-package allowlist is built on.
+//
 // ContextWithInternalOrigin marks ctx as trusted server-side Go.
 //
 // Call this ONLY from Go that is itself the caller of a @serverOnly construct,

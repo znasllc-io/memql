@@ -218,11 +218,12 @@ logic accountDeletionSweep {
   candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, concat("P-", cooldownDays.first().payload.value ?? "30", "D")) )
 
   // Auth-session revocation gap (intentional): the user concept holds
-  // user.id, but authSessionsForSubject is keyed on the JWT
-  // `sub` claim (the canonical v1:identity:user.id our identity
-  // service issues). There is no query today that returns sessions
-  // by userId expansion, and no helper to enumerate all sub claims
-  // for a user. Session expiry on its own retires the row
+  // user.id, and the only session read keyed on the JWT `sub` claim is
+  // authSessionsForSelfIncludingRevoked, which since memql#4768 is
+  // caller-scoped and takes no argument -- so a sweep cannot point it at
+  // somebody else, deliberately. There is no query today that returns
+  // sessions by userId expansion, and no helper to enumerate all sub
+  // claims for a user. Session expiry on its own retires the row
   // eventually, so the worst case is a deleted user's bearer token
   // continues to authenticate until its JWT expires.
   //

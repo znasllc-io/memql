@@ -182,12 +182,14 @@ THIRD app gets wrong by default.
   the narrow shape rather than ignoring the field. `authSessionAdminSummary`
   and `invitationAdminSummary` are what that looks like.
 - **A server read and a browser read are not the same read.**
-  `authSessionsForSubject` is filtered on its argument and nothing else, which
-  is safe when the one caller passes the caller's own JWT `sub` and unsafe the
-  moment a browser passes an id somebody clicked. The answer was a second
-  query (`sessionsForSubjectAdmin`) with its own gate and its own shape, not a
-  narrowing of the first -- narrowing it would have refused the self-service
-  revoke path for every non-admin in the cluster.
+  the session read was filtered on its argument and nothing else, which is
+  safe when the one caller passes the caller's own JWT `sub` and unsafe the
+  moment a browser passes an id somebody clicked. It became two queries:
+  `sessionsForSubjectAdmin` for the operator surface, gated and hash-free, and
+  `authSessionsForSelfIncludingRevoked` for the revoke handlers, which now
+  take no argument at all (memql#4768). Neither is a narrowing of the old one
+  -- gating it would have refused the self-service revoke path for every
+  non-admin in the cluster.
 - **Promote on the second use, which is now.** Fleet's row, live view, clock
   and time formatters moved into `kit/` and `live/` rather than being imported
   across apps or copied. `.os-machine` and `.os-fleet` remain as CSS aliases,

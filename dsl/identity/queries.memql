@@ -714,43 +714,78 @@ query authSession authSessionByTokenHash {
   shape   authSessionFull
 }
 
-// ---- queries/v1/identity/authSessionsForSubject.memql ----
+// ---- queries/v1/identity/authSessionsForSelfIncludingRevoked.memql ----
 
-// authSessionsForSubject - List bearer-token sessions for a JWT subject
-// ======================================================================
+// authSessionsForSelfIncludingRevoked - the caller's sessions, dead ones too
+// ==========================================================================
 //
-// Backs the all-sessions revoke fan-out: the gRPC handler reads the
-// caller's JWT `sub` from the AccessContext, then runs this query to
-// list every row to revoke. Subject is the canonical key because
-// session rows are written at token-issuance time -- which can race
-// ahead of the magic-link verifier's user-row insert on first-time
-// logins, leaving userId transiently empty.
+// Backs the two revoke handlers: revoke-all fans out over this set, and
+// revoke-one resolves a supplied session id against it before writing
+// anything (`revokeAuthSession` carries no owner predicate of its own, so
+// that resolution IS the ownership check -- see
+// component/grpc/revoke_session_ownership_test.go).
 //
-// Intentionally does NOT filter on isActiveRecord -- callers want
-// to see revoked rows too (to skip them, not to revoke them again).
-// The authSession concept carries no `deleted` field, so there is no
-// tombstone state to exclude.
+// # IT TAKES NO ARGUMENT, AND THAT IS THE FIX (memql#4768)
 //
-// Arguments:
-//   subject (string) - JWT sub claim (canonical v1:identity:user.id)
+// It was `authSessionsForSubject(subject: ...)`, filtered on that argument and
+// NOTHING else -- no role gate, not @serverOnly -- so any signed-in caller
+// could pass any user id and read that person's sessions: device labels,
+// sign-in source, activity and expiry times, plus the three token digests
+// authSessionFull carries. Its two Go callers only ever passed the caller's
+// own verified JWT `sub`, so the argument bought nothing and cost everything.
 //
-// Returns:
-//   Zero or more session rows in authSessionFull shape.
+// Caller-scoping it removes the enumeration surface rather than gating it,
+// which is the same reasoning myWorkersWithStatus and routingPolicyForOwner
+// both record: a caller-supplied id standing in for a caller check the read
+// already has is not an argument, it is an attack surface. There is now
+// nothing here to enumerate.
 //
+// `subject` rather than `userId` is still the key, for the reason the old
+// header gave: session rows are written at token-issuance time, which can race
+// ahead of the magic-link verifier's user-row insert, leaving `userId`
+// transiently empty. Comparing it to `actor.userId` is exact rather than
+// approximate -- IdentityResolver.LoadFromClaims sets `UserId = subject` after
+// requiring the `v1:identity:user:` prefix, and FallbackFromClaims sets the
+// same value from the same claim, so the two spellings cannot diverge.
+//
+// # WHY NOT @serverOnly, WHICH IS WHAT A SERVER READ USUALLY WANTS
+//
+// Because it is unreachable here. @serverOnly is enforced by call origin, and
+// both callers live in component/grpc -- a package
+// TestOnlyAllowlistedPackagesStampInternalOrigin forbids from stamping
+// internal origin UNCONDITIONALLY, because every context there descends from
+// an inbound request and stamping would launder client origin into internal.
+// Moving the call to an allowlisted package to get around that is the same
+// laundering with an extra hop. Caller-scoping needs no origin signal at all,
+// so it is the fix that does not depend on the gap. The gap itself is
+// memql#4769.
+//
+// Intentionally does NOT filter on isActiveRecord -- both callers want to SEE
+// revoked rows, to skip them rather than revoke them twice. The authSession
+// concept carries no `deleted` field, so there is no tombstone state to
+// exclude. That is the whole difference from authSessionsForSelf, which is
+// live-only because it backs a device list a person reads.
+//
+// NO TOKEN HASHES. authSessionFull carries tokenHash, refreshTokenHash and
+// previousRefreshTokenHash and NOTHING on either caller's path reads one --
+// the revoke write takes a session id, and the list is filtered on revokedAt
+// and expiresAt. A query a browser can still reach has no business projecting
+// the digests the auth hot path looks rows up by, so it projects
+// authSessionAdminSummary, which carries the operational fields and none of
+// the credentials. (Shared with sessionsForSubjectAdmin: same fields, same
+// reason, and a second identical shape would be one that drifts.)
 
-/// Returns every auth-session row owned by the given JWT subject. Latest version per row, including
-/// revoked rows.
-query authSession authSessionsForSubject {
-  args {
-    subject  string!
-  }
-  filter  subject==args.subject
+/// Returns every auth-session row belonging to the CALLER, newest first, including revoked and
+/// expired ones. No argument: the caller is the scope. No token hashes.
+@actor
+query authSession authSessionsForSelfIncludingRevoked {
+  filter  subject==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
   sort     "row.createdAt", "desc"
   paginate 50
-  shape   authSessionFull
+  shape   authSessionAdminSummary
 }
 
 // ---- sessionsForSubjectAdmin ----
@@ -759,30 +794,33 @@ query authSession authSessionsForSubject {
 // ============================================================================
 //
 // The read behind "recent sessions" on a people surface (memql#4734). It is a
-// SECOND query over the same rows as authSessionsForSubject rather than a
-// reuse of it, and both differences are the point.
+// SECOND query over the same rows as authSessionsForSelfIncludingRevoked
+// rather than a reuse of it, and the difference is the point.
 //
-// THE GATE. authSessionsForSubject filters on `subject` and nothing else. It
-// is a SERVER read -- its one caller is the all-sessions revoke handler in
-// component/grpc/auth_session_handlers.go, which passes the caller's own JWT
-// `sub` -- so the argument is never attacker-chosen there. This one is reached
-// from a browser with an id the caller typed a click away from, so it carries
+// THE GATE. Its sibling answers about the CALLER and takes no argument at all
+// (memql#4768) -- exactly right for the revoke handlers it backs, and useless
+// to an operator looking at somebody else. This one is reached from a browser
+// with an id the reader clicked, so it takes the id AND carries
 // requiresOwnerOrAdmin as a top-level conjunct: the engine empties the result
 // below the floor whatever the surface renders.
+//
+// Those are the only two shapes a session read may take. What must never come
+// back is the third: an argument with no gate, which is what the sibling was
+// until memql#4768 and what let any signed-in caller read anyone's sessions.
 //
 // THE SHAPE. authSessionFull carries tokenHash, refreshTokenHash and
 // previousRefreshTokenHash. Rendering a COUNT does not need the digests the
 // auth hot path looks rows up by, and pulling every session digest in the
 // cluster into an admin's browser to do it would be a strictly worse trade
-// than adding a projection. authSessionAdminSummary is that projection; it is
-// the cross-account sibling of authSessionSelf, which records the same rule.
+// than adding a projection. authSessionAdminSummary is that projection --
+// shared with the sibling, which stopped projecting the hashes for the same
+// reason and has no caller that reads one.
 //
-// WHY NOT JUST NARROW authSessionsForSubject. Because its gate cannot move:
-// adding requiresOwnerOrAdmin there would refuse the self-service
-// revoke-all-my-sessions path for every non-admin in the cluster, and its
-// shape cannot lose the hashes either without checking what the Go handler
-// reads. Leaving the server read exactly as it is and giving the browser its
-// own narrower one is the change that cannot break the auth path.
+// WHY TWO QUERIES RATHER THAN ONE. The sibling's gate cannot become
+// requiresOwnerOrAdmin: that would refuse the self-service
+// revoke-all-my-sessions path for every non-admin in the cluster. And this
+// one cannot be caller-scoped, because an operator surface is by definition
+// asking about somebody else. Two scopes, two reads, each stating its own.
 //
 // v1:identity:authSession still declares no @rowAuthz tier, which is why this
 // query has to carry its own gate rather than inheriting one. That is tracked
@@ -816,8 +854,8 @@ query authSession sessionsForSubjectAdmin {
 // and nobody else -- there is no argument to point it at another person,
 // which is what makes it safe to reach from a browser at all.
 //
-// WHY userId AND NOT subject. authSessionsForSubject keys on `subject`
-// because it runs BEFORE anything is certain about the user row: a session
+// WHY userId AND NOT subject. authSessionsForSelfIncludingRevoked keys on
+// `subject` because it runs BEFORE anything is certain about the user row: a session
 // is written at token-issuance time, which can race ahead of the first-login
 // user insert. This query runs for a signed-in caller, so actor.userId is
 // populated by definition. The concept's own description says subject is the

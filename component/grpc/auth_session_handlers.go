@@ -32,7 +32,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -106,23 +105,45 @@ func LookupAuthSessionByTokenHash(ctx context.Context, engine *memqlengine.MemQL
 	return parseAuthSessionNode(result.Bundle.Nodes[0]), nil
 }
 
-// listAuthSessionsForSubject returns every session row owned by the
-// JWT subject (revoked + active). The all-sessions revoke handler
-// iterates over the result and only re-revokes rows still in scope.
-// Subject is the canonical key because it's set unconditionally at
-// token-issuance time, even before the user row has been written by
-// the magic-link verifier on a first-time login.
-func listAuthSessionsForSubject(ctx context.Context, engine *memqlengine.MemQLEngine, subject string) ([]*authSessionSummary, error) {
+// listOwnSessions returns every session row belonging to the CALLER of ctx
+// (revoked and expired included). Both revoke handlers iterate the result:
+// revoke-all skips rows already dead, and revoke-one resolves a supplied id
+// against this set, which IS the ownership check.
+//
+// # IT TAKES NO SUBJECT, AND ctx MUST CARRY THE CALLER (memql#4768)
+//
+// It was listAuthSessionsForSubject(ctx, engine, subject), running
+// `authSessionsForSubject(subject: ...)` -- a query filtered on that argument
+// and nothing else, with no role gate and no @serverOnly, so any signed-in
+// caller could point it at anyone. Both call sites here only ever passed the
+// caller's own verified JWT `sub`, so the argument was pure enumeration
+// surface on the wire.
+//
+// The query is now caller-scoped (`subject==actor.userId`), so the context
+// handed in is what decides the answer. The callers below pass the STREAM
+// context for this read and keep their elevated one for the WRITES.
+//
+// That split is DEFENCE, not a repair -- and the distinction is worth stating
+// exactly, because the obvious version of this note is wrong. `actor.*` binds
+// from the AccessContext (`resolveActorReference` -> `auth.AccessFromContext`),
+// while `contextWithSystemActor` replaces only claims + TokenInfo and leaves
+// the AccessContext alone. So today the read would resolve to the caller under
+// EITHER context, and passing the elevated one would work.
+//
+// It would work by accident: by which fields the elevation helper happens not
+// to touch. The day somebody makes the system actor real by attaching an
+// AccessContext to it -- the natural way to write that change -- this read
+// would silently start matching nothing, and "revoke all my sessions" would
+// report revoking zero on a healthy account with no error and no log line.
+// Taking the caller's context for a caller-scoped read costs nothing and does
+// not depend on that coupling holding.
+func listOwnSessions(ctx context.Context, engine *memqlengine.MemQLEngine) ([]*authSessionSummary, error) {
 	if engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
-	if strings.TrimSpace(subject) == "" {
-		return nil, fmt.Errorf("subject required")
-	}
-	query := fmt.Sprintf(`query authSessionsForSubject(subject: %s)`, langparser.QuoteString(subject))
-	result, err := engine.Execute(ctx, query)
+	result, err := engine.Execute(ctx, `query authSessionsForSelfIncludingRevoked()`)
 	if err != nil {
-		return nil, fmt.Errorf("query auth sessions for subject: %w", err)
+		return nil, fmt.Errorf("query own auth sessions: %w", err)
 	}
 	if result == nil || result.Bundle == nil {
 		return nil, nil
@@ -296,11 +317,15 @@ func (s *streamSession) handleRevokeAllSessions(envelope *memqlv1.MemqlClientMes
 		})
 	}
 
-	ctx := contextWithSystemActor(s.stream.Context())
-	sessions, err := listAuthSessionsForSubject(ctx, s.service.engine, subject)
+	// THE READ RUNS AS THE CALLER; THE WRITES RUN ELEVATED. The read's scope
+	// comes from its own context now, so it takes the one that defines it
+	// rather than the elevated one (see listOwnSessions for why that is
+	// deliberate even though both happen to work today).
+	sessions, err := listOwnSessions(s.stream.Context(), s.service.engine)
 	if err != nil {
 		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke all: list", err)
 	}
+	ctx := contextWithSystemActor(s.stream.Context())
 
 	now := time.Now().UTC()
 	revoked := int32(0)
@@ -489,18 +514,20 @@ func (s *streamSession) handleRevokeSession(envelope *memqlv1.MemqlClientMessage
 	// may still be the claims fallback on the first request after signup. Same
 	// authority handleRevokeAllSessions uses, for the same reason.
 	//
-	// authSessionsForSubject pages at 50, newest first, so an account holding
+	// authSessionsForSelfIncludingRevoked pages at 50, newest first, so an account holding
 	// more than 50 rows can have an old one fall outside the window and answer
 	// not_found. That bound is the query's and is shared with the revoke-all
 	// fan-out; it is stated here rather than worked around because the failure
 	// is safe (a refusal, never somebody else's row) and widening it belongs
 	// with the query rather than in a handler that would then disagree with
 	// its sibling.
-	ctx := contextWithSystemActor(s.stream.Context())
-	sessions, err := listAuthSessionsForSubject(ctx, s.service.engine, subject)
+	// Same split as handleRevokeAllSessions: the read is the caller's, the
+	// write is elevated.
+	sessions, err := listOwnSessions(s.stream.Context(), s.service.engine)
 	if err != nil {
 		return s.sendAuthSessionError(requestId, correlate, codes.Internal, "revoke session: list", err)
 	}
+	ctx := contextWithSystemActor(s.stream.Context())
 
 	owned := pickOwnedLiveSession(sessions, target, time.Now().UTC())
 	if owned == nil {

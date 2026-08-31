@@ -5,16 +5,15 @@ import { useOsConnection } from "../../live/connection";
 // How many sessions a person currently has, for the detail panel.
 //
 // ===========================================================================
-// WHY THIS READS sessionsForSubjectAdmin AND NOT authSessionsForSubject
+// WHY THIS READS sessionsForSubjectAdmin AND NOT THE SELF-SCOPED SIBLING
 // ===========================================================================
 // They are two queries over the same rows, and the difference is what makes
 // one of them safe to run from a browser.
 //
-// `authSessionsForSubject` filters on `subject` and NOTHING else -- no role
-// gate -- and projects `authSessionFull`, which carries `tokenHash`,
-// `refreshTokenHash` and `previousRefreshTokenHash`. It is a SERVER read: its
-// one caller is the all-sessions revoke handler, which passes the caller's own
-// JWT `sub`, so the argument is never attacker-chosen there.
+// `authSessionsForSelfIncludingRevoked` answers about the CALLER and takes no
+// argument at all (memql#4768) -- which is exactly right for the revoke
+// handlers it backs, and useless here: this panel is an operator looking at
+// somebody else.
 //
 // This panel passes an id the reader clicked, from a browser. So it uses
 // `sessionsForSubjectAdmin` (memql#4734), which carries `requiresOwnerOrAdmin`
