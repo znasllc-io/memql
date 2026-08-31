@@ -29,4 +29,32 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Product apps are stubs until their epics
-land (#4721 #4725 #4729 #4733 #4737 #4741).
+land (#4721 #4725 #4733 #4737 #4741).
+
+## Fleet, the first real app (memql#4729)
+
+`src/apps/fleet/` is the promotion of the foundation's read-only exemplar
+into the whole app: **Machines** (rename, operator labels, revoke,
+per-machine detail, add a machine), **Routing** (the policy editor and each
+call's routing record), **Workbenches** (per-plan workspaces by replica),
+and its own **Settings**. Four things about it generalize to every app epic
+after it:
+
+- **A live surface must be RETAINED.** A `LiveCollection` opens its
+  subscription and runs its seed from `retain()` and from nowhere else;
+  `subscribe()` only registers a listener. A surface that subscribes without
+  retaining renders "Loading from the cluster" forever, with nothing thrown
+  and nothing logged. `live/useLiveCollection.ts` is the one place that
+  contract is honoured — use it rather than constructing a collection.
+- **Not every concept is live.** `v1:worker:registration`,
+  `v1:worker:routingPolicy` and `v1:workbench:workspace` carry broadcast
+  routing rules (`component/node/routing.go`); `v1:worker:invocation` and
+  `v1:cluster:node` do NOT. A subscription over those two receives nothing
+  in the only topology that ships, so they are on-demand queries that say
+  when they were read.
+- **Errors render in surface, never as toasts** (`fleet/ui.tsx`): a
+  refusal is usually the server's own sentence and belongs beside the
+  control that produced it.
+- **Per-app settings** are their own versioned, sanitized store
+  (`fleet/settings.ts`) rather than a corner of the desktop document, so an
+  app learning a checkbox cannot cost anyone their desks.

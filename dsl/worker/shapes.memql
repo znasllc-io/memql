@@ -51,6 +51,7 @@ shape registration workerRegistrationFull {
   concurrency
   platformInfo
   permissions
+  apps
   version
   buildTag
   registeredAt

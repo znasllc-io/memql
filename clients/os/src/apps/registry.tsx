@@ -12,6 +12,7 @@ import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { FleetApp } from "./fleet/FleetApp";
+import { FLEET_SECTIONS } from "./fleet/settings";
 import { SettingsApp } from "./settings/SettingsApp";
 import { StubApp } from "./StubApp";
 
@@ -72,16 +73,20 @@ const deployables = stub(
   "Your hosted sites and the deploy map: what serves where, bound to which artifact, live at which host.",
 );
 
-// Fleet is the live exemplar (spec D7): its Machines section is a real
-// LiveList over the caller's worker registrations. The rest is #4729.
+// Fleet, in full (epic #4729). Machines is first and therefore the section a
+// window opens on; the app's own settings can point it elsewhere, which it
+// does by navigating itself on open.
+//
+// The section list is FLEET_SECTIONS rather than a literal, because the
+// settings section offers a "open Fleet on" picker over exactly these ids and
+// a second copy of the list is one that can disagree -- a preference naming a
+// section the manifest does not declare would leave the window on Machines
+// with the nav highlighting nothing.
 const fleet: OsAppManifest = {
   id: "fleet",
   name: "Fleet",
   icon: MonitorSmartphone,
-  sections: [
-    { id: "machines", name: "Machines" },
-    { id: "settings", name: "Settings" },
-  ],
+  sections: FLEET_SECTIONS,
   settingsSection: "settings",
   component: FleetApp,
 };
