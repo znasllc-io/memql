@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 
-// A ticking clock, for the one reading on this surface that changes with no
-// event behind it.
+// A ticking clock, for the readings that change with no event behind them.
+//
+// Written for the Fleet, promoted here when the Users app needed the same
+// thing (memql#4734): every surface that renders elapsed time needs ONE clock
+// per section, or two rows on one screen disagree about what "now" is.
 //
 // A machine going OFFLINE produces nothing: `lastSeenAt` simply stops being
 // bumped, and the row on screen is already correct. Without a clock the dot

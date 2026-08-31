@@ -753,6 +753,54 @@ query authSession authSessionsForSubject {
   shape   authSessionFull
 }
 
+// ---- sessionsForSubjectAdmin ----
+
+// sessionsForSubjectAdmin - another person's sessions, for an operator surface
+// ============================================================================
+//
+// The read behind "recent sessions" on a people surface (memql#4734). It is a
+// SECOND query over the same rows as authSessionsForSubject rather than a
+// reuse of it, and both differences are the point.
+//
+// THE GATE. authSessionsForSubject filters on `subject` and nothing else. It
+// is a SERVER read -- its one caller is the all-sessions revoke handler in
+// component/grpc/auth_session_handlers.go, which passes the caller's own JWT
+// `sub` -- so the argument is never attacker-chosen there. This one is reached
+// from a browser with an id the caller typed a click away from, so it carries
+// requiresOwnerOrAdmin as a top-level conjunct: the engine empties the result
+// below the floor whatever the surface renders.
+//
+// THE SHAPE. authSessionFull carries tokenHash, refreshTokenHash and
+// previousRefreshTokenHash. Rendering a COUNT does not need the digests the
+// auth hot path looks rows up by, and pulling every session digest in the
+// cluster into an admin's browser to do it would be a strictly worse trade
+// than adding a projection. authSessionAdminSummary is that projection; it is
+// the cross-account sibling of authSessionSelf, which records the same rule.
+//
+// WHY NOT JUST NARROW authSessionsForSubject. Because its gate cannot move:
+// adding requiresOwnerOrAdmin there would refuse the self-service
+// revoke-all-my-sessions path for every non-admin in the cluster, and its
+// shape cannot lose the hashes either without checking what the Go handler
+// reads. Leaving the server read exactly as it is and giving the browser its
+// own narrower one is the change that cannot break the auth path.
+//
+// v1:identity:authSession still declares no @rowAuthz tier, which is why this
+// query has to carry its own gate rather than inheriting one. That is tracked
+// debt, not an oversight here -- see the concept and
+// component/memql/rowauthz_undeclared_gate_test.go.
+
+/// Another person's auth-session rows, newest first, for an owner/admin operator surface. Includes
+/// revoked rows so a reader can tell a live session from a retired one. No token hashes.
+query authSession sessionsForSubjectAdmin {
+  args {
+    subject  string!
+  }
+  filter   subject==args.subject && requiresOwnerOrAdmin
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    authSessionAdminSummary
+}
+
 // ---- queries/v1/identity/authSessionsForSelf.memql ----
 
 // authSessionsForSelf - The caller's own live sessions
@@ -2731,4 +2779,22 @@ query identity activeRecoveryKeys {
 query invitation pendingUserInvitations {
   filter  kind=="user" && statusIsPending && isActiveRecord && requiresOwnerOrAdmin
   sort    "row.createdAt", "desc"
+  // AN EXPLICIT SHAPE, ADDED LATE (memql#4735). This query declared none, and a query with no
+  // shape projects the bound concept's EVERY field -- so it handed `tokenHash`,
+  // `previousTokenHash` and `bindingHash` to the browser of every owner and admin who opened a
+  // people list. Those are not the plaintext token, but they are the key the resolve path looks
+  // an invitation up BY, and a pending-invitations table has never read them.
+  //
+  // The shape also ADDS the three delivery fields, which is the half of this change a reader
+  // notices: `invitationFull` never carried them, so nothing that named a shape here could have
+  // shown whether the mail went out either.
+  //
+  // ADDING A SHAPE CHANGES THE RESPONSE ENVELOPE, AND THAT IS THE TRAP. A shaped result sets
+  // `output` and `maybeClearBundle` then NILS the bundle (component/memql/result.go), so a caller
+  // reading `result.rawNodes()` -- which looks at `payload.bundle.nodes` and nothing else -- gets
+  // an empty list from a query that answered perfectly well. The portal's pending-invitations
+  // panel read exactly that way and had to move to `rows()`; it would otherwise have rendered
+  // "nobody is waiting" on a cluster full of outstanding invitations, with nothing thrown and
+  // nothing logged. Before adding a shape to an existing query, check every caller's accessor.
+  shape   invitationAdminSummary
 }

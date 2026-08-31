@@ -297,6 +297,26 @@ const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-
 // stronger one than most entries here can claim.
 const undeclared4306SelfSessionsReason = "memql#4306 -- self-scoped by its own filter (userId==actor.userId, no arguments); the CONCEPT cannot carry a tier because authSessionByTokenHash is the pre-actor read that builds the actor"
 
+// undeclared4734SessionsForSubjectAdminReason covers the operator read
+// memql#4734 added so the MemQL OS Users app can show how many sessions a
+// person currently has.
+//
+// The CONCEPT still cannot carry a tier, for the reason already written on
+// undeclared4306SelfSessionsReason: authSessionByTokenHash is the PRE-ACTOR
+// read that builds the actor, so an owner tier would compare every session
+// against actor.userId == "" and match nothing -- every request in the cluster
+// would fail to authenticate. Declaring a tier to satisfy this gate would
+// break the thing the gate is protecting.
+//
+// So the query gates ITSELF, and it is a new query rather than a reuse of
+// authSessionsForSubject precisely because of that. Its sibling is a SERVER
+// read -- one Go caller, the all-sessions revoke handler, passing the caller's
+// own JWT sub -- and carries authSessionFull, hashes included. This one is
+// reached from a browser with an id the reader clicked, so it takes
+// requiresOwnerOrAdmin as a top-level conjunct and projects
+// authSessionAdminSummary, which has no token digests in it at all.
+const undeclared4734SessionsForSubjectAdminReason = "memql#4734 -- owner/admin operator read of another person's sessions; the concept cannot carry a tier because authSessionByTokenHash is the pre-actor read that builds the actor, so this query gates itself with requiresOwnerOrAdmin and projects a hash-free shape"
+
 const undeclared4301MagicLinkByIdReason = "memql#4301 -- device-bound flow's by-id read; pre-actor by construction AND the row names an email rather than a user, so no owner field exists to compare; @serverOnly, authorized by the binding cookie in Go"
 
 // undeclared4270InvitationReason covers the console read memql#4270 added when
@@ -708,6 +728,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"authSessionByTokenHash":                {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionsForSubject":                {"v1:identity:authSession", undeclaredGrandfatherReason},
 	"authSessionsForSelf":                   {"v1:identity:authSession", undeclared4306SelfSessionsReason},
+	"sessionsForSubjectAdmin":               {"v1:identity:authSession", undeclared4734SessionsForSubjectAdminReason},
 
 	// v1:identity:clusterSettings
 	"clusterSettingsCurrent": {"v1:identity:clusterSettings", undeclaredGrandfatherReason},

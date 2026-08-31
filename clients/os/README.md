@@ -28,8 +28,9 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
-the shared kit in `src/kit/`. Product apps are stubs until their epics
-land (#4721 #4725 #4733 #4737 #4741).
+the shared kit in `src/kit/`. Settings, Fleet and Users are real; the
+remaining product apps are stubs until their epics land (#4721 #4725
+#4737).
 
 ## Right-click belongs to the shell
 
@@ -157,3 +158,38 @@ after it:
 - **Per-app settings** are their own versioned, sanitized store
   (`fleet/settings.ts`) rather than a corner of the desktop document, so an
   app learning a checkbox cannot cost anyone their desks.
+
+## Users, the second app (memql#4733)
+
+`src/apps/users/` is the People list, the invitations, and the three admin
+actions the identity service exposes. Four things about it are the rules a
+THIRD app gets wrong by default.
+
+- **Read the routing rules for BOTH your concepts, and expect them to
+  differ.** `v1:identity:user` carries a `created` broadcast and deliberately
+  NO `updated` one -- the row churns on `lastSeenAt`, so broadcasting updates
+  would strobe the mesh forever. `v1:identity:invitation` carries both,
+  because an invitation is a human action. That asymmetry is the whole
+  exemplar (an acceptance moves a row off one list and onto the other live)
+  AND the whole cost: an admin action produces no event, so the detail panel
+  re-reads **on open** and every write hands its accepted value back to the
+  panel. Do not add the missing rule.
+- **A query with NO shape projects every field of its concept.**
+  `pendingUserInvitations` declared none, so it handed `tokenHash`,
+  `previousTokenHash` and `bindingHash` to every admin browser that opened a
+  people list. Before rendering a concept you have not rendered before, read
+  what its shape actually projects -- and if it is credential-adjacent, add
+  the narrow shape rather than ignoring the field. `authSessionAdminSummary`
+  and `invitationAdminSummary` are what that looks like.
+- **A server read and a browser read are not the same read.**
+  `authSessionsForSubject` is filtered on its argument and nothing else, which
+  is safe when the one caller passes the caller's own JWT `sub` and unsafe the
+  moment a browser passes an id somebody clicked. The answer was a second
+  query (`sessionsForSubjectAdmin`) with its own gate and its own shape, not a
+  narrowing of the first -- narrowing it would have refused the self-service
+  revoke path for every non-admin in the cluster.
+- **Promote on the second use, which is now.** Fleet's row, live view, clock
+  and time formatters moved into `kit/` and `live/` rather than being imported
+  across apps or copied. `.os-machine` and `.os-fleet` remain as CSS aliases,
+  because the shared behaviour is what had to move. The measure that it was
+  the right size: Users ships two classes of its own.

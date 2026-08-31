@@ -1346,6 +1346,23 @@ button:not(:disabled):active {
   margin-top: 8px;
 }
 
+/* ---- the list row ----
+ *
+ * One line in a LiveList: an icon, a name, some quiet facts, and a state
+ * cluster pushed to the trailing edge. It was `.os-machine`, written for the
+ * Fleet, and the note at the top of the app-local section says what to do the
+ * day a second app wants one: promote it upward rather than copy it sideways.
+ * The Users app is that second app, so this is that promotion.
+ *
+ * `.os-machine` stays as an alias, for the same reason `.os-fleet` does --
+ * the shared behaviour is what had to move, not every selector in an app that
+ * already works.
+ *
+ * `data-dim` is the generic form of what `[data-revoked]` said locally: this
+ * row is still true, and is no longer live. A revoked machine and a
+ * deactivated person are the same rendering problem.
+ */
+.os-row,
 .os-machine {
   display: flex;
   align-items: center;
@@ -1356,18 +1373,44 @@ button:not(:disabled):active {
   background: var(--os-plate);
   color: var(--os-muted);
 }
+/* The row is at full ink when it is CURRENT -- online for a machine, active
+ * for a person. Everything else stays muted, so a list reads its own liveness
+ * before anybody has read a word of it. */
+.os-row[data-current],
 .os-machine[data-online] {
   color: var(--os-ink);
 }
+.os-row-name,
 .os-machine-name {
   font-weight: 600;
   font-size: var(--os-text-base);
 }
+.os-row-state,
 .os-machine-state {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A row that opens something is a button, and has to look and focus like the
+ * rest of the shell rather than like the platform's default. */
+.os-row[data-clickable],
+.os-machine {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.os-row[data-dim],
+.os-machine[data-revoked] {
+  opacity: 0.62;
+  border-style: dashed;
+}
+.os-row:focus-visible,
+.os-machine:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
 }
 
 /* ---- phone chrome ---- */
@@ -1586,7 +1629,13 @@ button:not(:disabled):active {
  * stays the shell's and "reachable" reads identically in a machine row and on
  * a desktop icon.
  */
-.os-fleet {
+/* The vertical stack every app section sits in. `.os-fleet` is the name it
+ * was born with and is kept as an alias rather than swept through Fleet's
+ * markup: renaming a container is a diff across every file in an app for no
+ * behavioural change, and a second app adopting the shared name is what the
+ * promotion is actually for. */
+.os-fleet,
+.os-app-stack {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1882,21 +1931,44 @@ button:not(:disabled):active {
  * promote it upward rather than to copy it sideways.
  */
 
+/* ---- users ----
+ *
+ * Two classes, and that is the whole app. Everything else it renders is the
+ * shared kit -- which is the point of promoting the row: the second app to
+ * ship should not need a vocabulary of its own to look like the first.
+ */
+
+/* Still a real account, no longer current. The `.os-row[data-dim]` treatment
+ * says it too; this names it, because "faded" is a reading somebody has to
+ * make and "inactive" is one they don't. */
+.os-users-inactive-tag {
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+  color: var(--os-muted);
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+/* A credential shown exactly once -- an enrolment link, an invitation link.
+ * It wraps rather than truncating: this is the only time the value exists, so
+ * a surface that hid half of it behind an ellipsis would be hiding the thing
+ * it was opened to show. Selectable by construction (it is a <code>), which
+ * is what makes the copy button a convenience rather than the only route. */
+.os-users-secret {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  padding: 6px 8px;
+  user-select: all;
+}
+
 /* ---- machines ---- */
-.os-machine {
-  width: 100%;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.os-machine[data-revoked] {
-  opacity: 0.62;
-  border-style: dashed;
-}
-.os-machine:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
 .os-fleet-revoked-tag {
   font-size: var(--os-text-xs);
   font-family: var(--os-font-mono);

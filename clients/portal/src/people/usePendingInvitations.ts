@@ -51,7 +51,15 @@ export function usePendingInvitations(enabled: boolean): PendingInvitationsState
     seed: async (_cursor, signal) => {
       if (query === null) return { rows: [], nextCursor: "" };
       const result = await query.pendingUserInvitations({}, { signal });
-      return { rows: result.rawNodes(), nextCursor: "" };
+      // `rows()`, NOT `rawNodes()` (memql#4735). This query now declares a
+      // shape (`invitationAdminSummary`, which drops the three token digests
+      // it used to project), and a shaped query's response OMITS the bundle
+      // -- `maybeClearBundle` nils it whenever a shape was applied without an
+      // explicit includeBundle. `rawNodes()` reads `payload.bundle.nodes` and
+      // nothing else, so it would return an empty list here and this panel
+      // would render "nobody is waiting" on a cluster with outstanding
+      // invitations, with nothing thrown and nothing logged.
+      return { rows: result.rows(), nextCursor: "" };
     },
     reread: async (rowId, signal) => {
       if (query === null) return null;

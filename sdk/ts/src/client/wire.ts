@@ -343,7 +343,22 @@ export type IdentityAdminRequestPayload =
   | { revokeEnrolmentLink: IdentityAdminRevokeEnrolmentLinkPayload }
   | { rotateRecoveryKey: IdentityAdminRotateRecoveryKeyPayload }
   | { issueUserInvitation: IdentityAdminIssueUserInvitationPayload }
-  | { revokeUserInvitation: IdentityAdminRevokeUserInvitationPayload };
+  | { revokeUserInvitation: IdentityAdminRevokeUserInvitationPayload }
+  | { resetSignInPolicy: IdentityAdminResetSignInPolicyPayload };
+
+/**
+ * Put a person's sign-in policy back to `any` (memql#4304).
+ *
+ * A RESET, and the message carries no policy field on purpose. An admin can
+ * turn sign-in links back ON for somebody who chose `passkey_only` and then
+ * lost their passkey; they cannot turn them OFF for somebody else, which
+ * would be a one-call lockout of a colleague's own account. A message with no
+ * value field cannot express the wrong direction, so there is no rule here
+ * that can be got wrong.
+ */
+export interface IdentityAdminResetSignInPolicyPayload {
+  userId: string;
+}
 
 /**
  * Rotate the cluster's owner recovery key (memql#3970).

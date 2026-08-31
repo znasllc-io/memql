@@ -193,6 +193,34 @@ shape authSession authSessionSelf {
   row.createdAt
 }
 
+/// Another person's sessions, as an owner/admin sees them on a people surface (memql#4736).
+///
+/// NO TOKEN HASHES, for the reason authSessionSelf states and one more. authSessionSelf omits them
+/// because a device list a person loads about THEMSELVES has no use for the digests the auth hot
+/// path looks rows up by; this shape omits them because it is read ACROSS accounts, so a projection
+/// that carried them would put every session digest in the cluster in front of any admin's browser
+/// to render a count.
+///
+/// It carries what authSessionSelf deliberately does not -- `userId`, `subject`, `revokedAt` and
+/// `revokedReason` -- because the reader is looking at somebody else: a row has to name whose it is,
+/// and a session list that cannot show revoked state cannot tell "signed in on three devices" from
+/// "signed in once and revoked twice".
+@row
+shape authSession authSessionAdminSummary {
+  row.id
+  userId
+  subject
+  source
+  clientLabel
+  firstAuthenticatedAt
+  lastActivityAt
+  lastRefreshedAt
+  expiresAt
+  revokedAt
+  revokedReason
+  row.createdAt
+}
+
 /// Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster
 /// configuration row.
 @row
@@ -281,6 +309,42 @@ shape invitation invitationFull {
   expiresAt
   status
   respondedAt
+  row.createdAt
+}
+
+/// An invitation as an operator surface shows it: who was invited, at what role, by whom, whether
+/// the mail went out, and when it expires (memql#4735).
+///
+/// NO TOKEN HASHES -- not `tokenHash`, not `previousTokenHash`, not `bindingHash` -- and that is the
+/// whole reason this exists beside invitationFull. `pendingUserInvitations` declared no shape at
+/// all, so it projected the concept's every field and handed all three digests to the browser of
+/// every owner and admin who opened a people list. They are not the plaintext token, but they are
+/// the key the resolve path looks an invitation up BY, and a pending-invitations table has no use
+/// for them. Same rule authSessionSelf records for sessions.
+///
+/// It ADDS the three delivery fields invitationFull has never carried (memql#4587). Whether the
+/// invitation email was attempted, sent or failed is the first thing an operator needs from this
+/// row -- an invitation that looks issued and was never delivered is the failure this list exists to
+/// make visible -- and `deliveryState` alone cannot say it: `not_attempted` means no mail is wired
+/// on this cluster, which is a configuration statement, while `failed` plus `deliveryError` is an
+/// incident.
+@row
+shape invitation invitationAdminSummary {
+  row.id
+  kind
+  active
+  inviterId
+  inviterName
+  inviteeId
+  inviteeEmail
+  inviteeName
+  inviteeRole
+  expiresAt
+  status
+  respondedAt
+  deliveryState
+  deliveryError
+  deliveryAttemptedAt
   row.createdAt
 }
 

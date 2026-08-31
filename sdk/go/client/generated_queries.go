@@ -5640,6 +5640,28 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	return b.String()
 }
 
+// SessionsForSubjectAdmin -- Another person's auth-session rows, newest first, for an owner/admin operator surface. Includes revoked rows so a reader can tell a live session from a retired one. No token hashes.
+//
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["sessionsForSubjectAdmin"] in generated_concepts.go).
+type SessionsForSubjectAdminArgs struct {
+	Subject string
+}
+
+// SessionsForSubjectAdmin calls the engine query sessionsForSubjectAdmin.
+func (qc *QueryClient) SessionsForSubjectAdmin(ctx context.Context, args SessionsForSubjectAdminArgs) (*Result, error) {
+	call := SessionsForSubjectAdminBuild(args)
+	return qc.executeNamed(ctx, "sessionsForSubjectAdmin", call)
+}
+
+func SessionsForSubjectAdminBuild(args SessionsForSubjectAdminArgs) string {
+	var b strings.Builder
+	b.WriteString("query sessionsForSubjectAdmin(")
+	b.WriteString("subject: ")
+	b.WriteString(quoteMemQL(args.Subject))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyAbandonedCheckoutByGid -- One mirrored Shopify AbandonedCheckout by store and GID.
 //
 // Bound concept: v1:shopify:abandonedCheckout (machine-readable: BoundConcepts["shopifyAbandonedCheckoutByGid"] in generated_concepts.go).

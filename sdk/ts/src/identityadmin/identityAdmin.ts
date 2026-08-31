@@ -366,6 +366,33 @@ export class IdentityAdminClient {
   }
 
   /**
+   * Put a person's sign-in policy back to `any` -- the rescue path for
+   * somebody who chose `passkey_only` and then lost their passkey
+   * (memql#4304).
+   *
+   * ONE DIRECTION, and the absence of a policy argument is the reason. An
+   * admin can turn sign-in links back ON for another person; there is
+   * deliberately no call that turns them OFF for another person, because that
+   * would lock a colleague out of their own account in a single request.
+   * Turning them off is self-service and requires the person's own active
+   * passkey (`setSignInPolicy`, on the self surface).
+   *
+   * A surface that offers this should render it only for a target actually on
+   * `passkey_only`: resetting a policy that is already `any` is a no-op the
+   * server audits, and a control that is always available teaches nobody what
+   * it is for.
+   *
+   * Audited as `sign_in_policy_reset_by_admin`.
+   */
+  async resetSignInPolicy(
+    userId: string,
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<AdminWriteResult> {
+    requireArg("resetSignInPolicy", "userId", userId);
+    return this.call("resetting a sign-in policy", { resetSignInPolicy: { userId } }, opts);
+  }
+
+  /**
    * Rotate the cluster's owner recovery key: mint a replacement, retire the
    * current one, and return the new key ONCE.
    *

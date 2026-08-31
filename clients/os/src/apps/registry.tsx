@@ -14,12 +14,18 @@ import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/regi
 import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
 import { SettingsApp } from "./settings/SettingsApp";
+import { UsersApp } from "./users/UsersApp";
+import { USERS_SECTIONS } from "./users/settings";
 import { StubApp } from "./StubApp";
 
-// The installed roster (spec D12): Settings is real; the five product apps
-// are honest stubs replaced by their epics; the Ask widget is the widget
-// framework's first resident. Static by design -- runtime app delivery is
-// deliberately not a foundation question.
+// The installed roster (spec D12). Settings, Fleet and Users are real; the
+// remaining product apps are honest stubs replaced by their epics, and the Ask
+// widget is the widget framework's first resident. Static by design --
+// runtime app delivery is deliberately not a foundation question.
+//
+// The `stub` helper stays for as long as anything uses it, and goes with the
+// last one: keeping a factory nothing calls is how a file grows a shape
+// nobody can explain.
 
 function stub(manifest: Omit<OsAppManifest, "component">, epicIssue: number, summary: string): OsAppManifest {
   const full: OsAppManifest = {
@@ -93,22 +99,28 @@ const fleet: OsAppManifest = {
   component: FleetApp,
 };
 
-const users = stub(
-  {
-    id: "users",
-    name: "Users",
-    icon: Users,
-    roles: { min: "admin" },
-    sections: [
-      { id: "people", name: "People" },
-      { id: "invites", name: "Invites" },
-      { id: "settings", name: "Settings" },
-    ],
-    settingsSection: "settings",
-  },
-  4733,
-  "The people of this cluster: roles, invitations, and a list that updates the moment someone accepts.",
-);
+// Users, in full (epic #4733). People is first and is therefore the section a
+// window opens on; the app's own settings can point it elsewhere, which it
+// does by navigating itself on open.
+//
+// The section list is USERS_SECTIONS rather than a literal, for the reason
+// FLEET_SECTIONS is: the settings section offers an "open Users on" picker
+// over exactly these ids, and a second copy of the list is one that can
+// disagree -- a preference naming a section the manifest does not declare
+// leaves the window on People with the nav highlighting nothing.
+//
+// `roles: { min: "admin" }` is PRESENTATION (spec section E). The engine's
+// `requiresOwnerOrAdmin` specs, `adminops.authorize` and row admission remain
+// the authority on every read and write this app makes.
+const users: OsAppManifest = {
+  id: "users",
+  name: "Users",
+  icon: Users,
+  roles: { min: "admin" },
+  sections: USERS_SECTIONS,
+  settingsSection: "settings",
+  component: UsersApp,
+};
 
 const training = stub(
   {
