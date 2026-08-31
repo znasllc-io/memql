@@ -70,7 +70,7 @@ import (
 //     through; it is a READER of the struct, and the same silent-miss class.
 //     Worse than returning the union, because the answer depended on which
 //     query ran first.
-//   - TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError. Four of the eight
+//   - labelLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError. Four of the eight
 //     functions carry a SECOND, post-loop gate that refused the empty
 //     collection the label filter produced, so half the surface still failed
 //     the whole query on a label miss.
@@ -501,25 +501,113 @@ func bootLabelEngine(t *testing.T) (*MemQLEngine, *bun.DB) {
 	return eng, db
 }
 
+// labelSuite is the engine every case in this file borrows, booted once by
+// TestRelationshipLabelTraversal (memql#4569).
+//
+// Package-level rather than passed down only because the cases keep their
+// original one-argument signatures; it is written once before any case runs and
+// cleared after the last, and nothing in this package runs tests in parallel.
+type labelSuite struct {
+	eng *MemQLEngine
+	db  *bun.DB
+}
+
+var labelShared *labelSuite
+
+// sharedLabelEngine hands a case the suite engine, refusing loudly if it is
+// reached from outside the parent. A nil-deref here would present as a panic in
+// whichever case happened to run first, which says nothing about the cause.
+func sharedLabelEngine(t *testing.T) (*MemQLEngine, *bun.DB) {
+	t.Helper()
+	if labelShared == nil {
+		t.Fatal("this case borrows the suite engine and must run under " +
+			"TestRelationshipLabelTraversal; a new case added as a top-level Test function " +
+			"will not have one (memql#4569)")
+	}
+	return labelShared.eng, labelShared.db
+}
+
 // labelTestEngine is bootLabelEngine plus a seeded world and the result cache
 // turned off (see disableResultCache for why).
+// labelTestEngine hands a case the SUITE engine plus its own freshly-seeded
+// world. It no longer boots (memql#4569): the boot is the suite's, and the
+// result cache is already off on it.
+//
+// Isolation between cases is unchanged and never rested on the engine anyway --
+// each seeds under its own uniqueSuffix(name), so two cases never read each
+// other's rows.
 func labelTestEngine(t *testing.T, name string) (*MemQLEngine, context.Context, labelWorld) {
 	t.Helper()
-	eng, db := bootLabelEngine(t)
-	disableResultCache(t, eng)
+	eng, db := sharedLabelEngine(t)
 	ctx := clusterOwnerCtx("u-" + name)
 	return eng, ctx, seedLabelWorld(t, ctx, db, uniqueSuffix(name))
 }
 
-// TestRelationshipLabelFixtureLoads asserts the fixture actually reached the
+// labelFixtureLoads asserts the fixture actually reached the
 // engine before anything else leans on it.
 //
 // Without this, a fixture that failed to mount would make several tests in
 // this file pass VACUOUSLY: a labelled traversal against a concept the engine
 // has never heard of resolves nothing, which is indistinguishable from
 // correct scoping whenever the assertion is "the wrong rows are absent".
-func TestRelationshipLabelFixtureLoads(t *testing.T) {
-	eng, _ := bootLabelEngine(t)
+// TestRelationshipLabelTraversal is the label-scoped traversal suite, and it is
+// one test function rather than ten because the fixture domain these cases need
+// costs a full engine boot -- ~1.8s -- and as ten top-level tests this file paid
+// for that boot ten times. 19.9s of the package's 234s, for one file
+// (memql#4569).
+//
+// THE FIXTURE CANNOT INSTEAD BE MOUNTED ONCE FOR THE PACKAGE, and that is the
+// constraint that decides the shape. mountLabelFixture snapshots and restores
+// the process-wide concept registry through t.Cleanup, and tests elsewhere in
+// this package enumerate that registry -- rowauthz_pii_unbound_test.go and
+// rowauthz_shadow_test.go both walk memorynodes.All(). A package-level
+// sync.Once would leave this file's fixture concept sitting in front of them,
+// which is a correctness problem, not a slow one. A parent test's cleanup runs
+// when the parent finishes, so the sharing is exactly as isolated as ten
+// separate mounts were, at one boot instead of ten.
+//
+// Cases keep their own names as subtests, so a failure still reports
+// TestRelationshipLabelTraversal/IdsRefusesALabel rather than a bare index.
+//
+// ADDING A CASE: write it as `func label<Name>(t *testing.T)` and list it
+// below. A case added as a top-level `func Test...` compiles and then fails on
+// sharedLabelEngine with a message saying so -- deliberately, because the
+// alternative is it silently booting its own engine and putting the eleventh
+// boot back.
+func TestRelationshipLabelTraversal(t *testing.T) {
+	mountLabelFixture(t)
+	eng, db, _ := readMergeTestEngine(t)
+	t.Cleanup(func() { _ = db.Close() })
+	// Off for the whole suite, for the reason disableResultCache documents:
+	// every case here asks two differently-labelled questions about one set of
+	// rows, and the label does not reach the cache key. The one case that needs
+	// it ON boots privately, outside this suite.
+	disableResultCache(t, eng)
+
+	labelShared = &labelSuite{eng: eng, db: db}
+	t.Cleanup(func() { labelShared = nil })
+
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"FixtureLoads", labelFixtureLoads},
+		{"InteractsWithLabelReturnsOnlyThatLabelsTargets", labelInteractsWithLabelReturnsOnlyThatLabelsTargets},
+		{"UnlabelledInteractsWithStillReturnsTheUnion", labelUnlabelledInteractsWithStillReturnsTheUnion},
+		{"LabelScopedTraversalWorksForEveryTraversalFunction", labelLabelScopedTraversalWorksForEveryTraversalFunction},
+		{"LabelMatchingNoEdgeIsAnEmptyAnswerNotAnError", labelLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError},
+		{"ContainsIsExcludedFromTheLabelForm", labelContainsIsExcludedFromTheLabelForm},
+		{"IdsRefusesALabel", labelIdsRefusesALabel},
+		{"GraphEdgeCarriesTheAsLabelPerEdge", labelGraphEdgeCarriesTheAsLabelPerEdge},
+		{"RelationshipLabelSurvivesEveryConstructionSite", labelRelationshipLabelSurvivesEveryConstructionSite},
+		{"RelationshipLabelMatchingIsTrimmedAndCaseSensitive", labelRelationshipLabelMatchingIsTrimmedAndCaseSensitive},
+	} {
+		t.Run(tc.name, tc.run)
+	}
+}
+
+func labelFixtureLoads(t *testing.T) {
+	eng, _ := sharedLabelEngine(t)
 
 	require.Contains(t, eng.relationships.ByConcept, labelHubConcept,
 		"the memql#3656 fixture concept did not reach the engine; every label assertion in "+
@@ -545,7 +633,7 @@ func TestRelationshipLabelFixtureLoads(t *testing.T) {
 			"the spec-validator path would then prove nothing")
 }
 
-// TestInteractsWithLabelReturnsOnlyThatLabelsTargets is the headline of
+// labelInteractsWithLabelReturnsOnlyThatLabelsTargets is the headline of
 // memql#3656 and, with the test below it, the pair the whole issue reduces to.
 //
 // Five interactsWith edges leave one hub row. They differ in NOTHING the
@@ -562,7 +650,7 @@ func TestRelationshipLabelFixtureLoads(t *testing.T) {
 // for respondsAs must not return the actsFor user. A dropped label at any
 // construction site turns each of these into the full five-row union, so the
 // exact-match assertion is what catches it.
-func TestInteractsWithLabelReturnsOnlyThatLabelsTargets(t *testing.T) {
+func labelInteractsWithLabelReturnsOnlyThatLabelsTargets(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-scoped")
 
 	require.ElementsMatch(t,
@@ -584,7 +672,7 @@ func TestInteractsWithLabelReturnsOnlyThatLabelsTargets(t *testing.T) {
 			"\"every edge meaning collaboratesWith\"")
 }
 
-// TestUnlabelledInteractsWithStillReturnsTheUnion is the backward-
+// labelUnlabelledInteractsWithStillReturnsTheUnion is the backward-
 // compatibility criterion, and it is deliberately its own test.
 //
 // Every traversal in the shipped corpus and in every downstream bundle is
@@ -593,7 +681,7 @@ func TestInteractsWithLabelReturnsOnlyThatLabelsTargets(t *testing.T) {
 // over exactly the rows the scoped test above split apart. Read together, the
 // two say: same data, different questions, different answers, and the old
 // question still gets the old answer.
-func TestUnlabelledInteractsWithStillReturnsTheUnion(t *testing.T) {
+func labelUnlabelledInteractsWithStillReturnsTheUnion(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-unscoped")
 
 	require.ElementsMatch(t,
@@ -620,7 +708,7 @@ func TestUnlabelledInteractsWithStillReturnsTheUnion(t *testing.T) {
 			"unlabelled one")
 }
 
-// TestLabelScopedTraversalWorksForEveryTraversalFunction walks the whole
+// labelLabelScopedTraversalWorksForEveryTraversalFunction walks the whole
 // surface. Every wrapper function that takes the label form gets the same
 // two-part check: the labelled call returns its own target, and it does NOT
 // return a sibling edge's target.
@@ -631,7 +719,7 @@ func TestUnlabelledInteractsWithStillReturnsTheUnion(t *testing.T) {
 // dropped by the eighth with nothing else to show for it.
 //
 // contains() and ids() are absent and each has its own test explaining why.
-func TestLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
+func labelLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-every-fn")
 
 	cases := []struct {
@@ -688,7 +776,7 @@ func TestLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
 	}
 }
 
-// TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError covers the criterion that
+// labelLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError covers the criterion that
 // "no edge on this concept means that label" is an ordinary question with an
 // ordinary negative answer.
 //
@@ -712,7 +800,7 @@ func TestLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
 // gates. Nothing ever read them -- the loop asserts require.Empty for every
 // case -- so they were removed with the gates rather than left describing
 // error strings that no longer exist.
-func TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
+func labelLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-empty")
 
 	cases := []struct {
@@ -752,7 +840,7 @@ func TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
 	}
 }
 
-// TestContainsIsExcludedFromTheLabelForm pins the deliberate exclusion at the
+// labelContainsIsExcludedFromTheLabelForm pins the deliberate exclusion at the
 // engine level: the unlabelled contains() traversal is untouched by #3656.
 //
 // contains() is the ONE traversal function absent from the parser's
@@ -768,7 +856,7 @@ func TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
 // Its survival is asserted where it lives, in the parser suite --
 // TestContainsKeepsExactlyTwoReadings in
 // component/language/parser/relationship_label_arity_3656_test.go.
-func TestContainsIsExcludedFromTheLabelForm(t *testing.T) {
+func labelContainsIsExcludedFromTheLabelForm(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-contains")
 
 	require.ElementsMatch(t,
@@ -788,7 +876,7 @@ func TestContainsIsExcludedFromTheLabelForm(t *testing.T) {
 			"contains keeps two readings, and neither of them is that")
 }
 
-// TestIdsRefusesALabel pins the one traversal function that answers a label
+// labelIdsRefusesALabel pins the one traversal function that answers a label
 // with an error instead of a result.
 //
 // ids() projects the rows it is handed. It follows no edge and reads no
@@ -796,7 +884,7 @@ func TestContainsIsExcludedFromTheLabelForm(t *testing.T) {
 // only be a mistake. Refusing beats ignoring: a silently-dropped label is the
 // declaration theatre this epic exists to remove, and it would be invisible
 // precisely because ids() would still return the right rows.
-func TestIdsRefusesALabel(t *testing.T) {
+func labelIdsRefusesALabel(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-ids")
 
 	agentFilter := fmt.Sprintf(`concept==%s && row.createdBy==%q`, labelAgentConcept, w.owner)
@@ -815,7 +903,7 @@ func TestIdsRefusesALabel(t *testing.T) {
 		"unlabelled ids() must still project the rows it was given")
 }
 
-// TestGraphEdgeCarriesTheAsLabelPerEdge is the wire half: GraphEdge.as, the
+// labelGraphEdgeCarriesTheAsLabelPerEdge is the wire half: GraphEdge.as, the
 // field a client reads to learn what an edge MEANS.
 //
 // Asserted over ONE bundle from ONE query, and that is the point. Graph
@@ -825,7 +913,7 @@ func TestIdsRefusesALabel(t *testing.T) {
 // per EDGE -- the plausible way to get this wrong -- every edge in this bundle
 // would carry the same value, and asserting them together is the only way to
 // see that.
-func TestGraphEdgeCarriesTheAsLabelPerEdge(t *testing.T) {
+func labelGraphEdgeCarriesTheAsLabelPerEdge(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-wire")
 
 	res, err := eng.Execute(ctx, w.hubFilter())
@@ -963,7 +1051,7 @@ func TestGraphEdgeAsSurvivesBareIdRewriting(t *testing.T) {
 		"the input bundle must be untouched")
 }
 
-// TestRelationshipLabelSurvivesEveryConstructionSite is the test whose PURPOSE
+// labelRelationshipLabelSurvivesEveryConstructionSite is the test whose PURPOSE
 // is its name.
 //
 // RelationshipExpression is built from scratch at ten sites across eight
@@ -984,7 +1072,7 @@ func TestGraphEdgeAsSurvivesBareIdRewriting(t *testing.T) {
 // Each must return the respondsAs agent ALONE. The peer agents are the trap:
 // they belong to the same owner and the same concept, so an unscoped
 // traversal returns them too and only an exact match notices.
-func TestRelationshipLabelSurvivesEveryConstructionSite(t *testing.T) {
+func labelRelationshipLabelSurvivesEveryConstructionSite(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-sites")
 
 	scoped := []string{w.respondsAsAgentId}
@@ -1107,6 +1195,10 @@ func TestEveryRelationshipExpressionLiteralSetsTheLabel(t *testing.T) {
 // struct, and the same class of miss: a place that must learn the new field
 // or silently ignore it.
 func TestRelationshipLabelIsPartOfTheResultCacheKey(t *testing.T) {
+	// The ONE case in this file that boots privately, and the reason the suite
+	// could not simply absorb everything: it needs the result cache ON, while
+	// every sibling needs it off. Sharing an engine with them would mean this
+	// case measures a cache that its neighbours disabled.
 	eng, db := bootLabelEngine(t) // result cache deliberately LEFT ON
 	ctx := clusterOwnerCtx("u-rel-3656-cache")
 	w := seedLabelWorld(t, ctx, db, uniqueSuffix("rel-3656-cache"))
@@ -1127,7 +1219,7 @@ func TestRelationshipLabelIsPartOfTheResultCacheKey(t *testing.T) {
 		"the unlabelled traversal must not be served a labelled traversal's cached rows")
 }
 
-// TestRelationshipLabelMatchingIsTrimmedAndCaseSensitive pins the two edges of
+// labelRelationshipLabelMatchingIsTrimmedAndCaseSensitive pins the two edges of
 // how a label is compared, both of which follow from `as` being an open
 // vocabulary that is never checked against a list.
 //
@@ -1136,7 +1228,7 @@ func TestRelationshipLabelIsPartOfTheResultCacheKey(t *testing.T) {
 // "RespondsAs" is not a spelling of "respondsAs" -- it is a different label
 // nobody declared, and the honest answer is nothing. Case-insensitive matching
 // would be a small kindness that makes the vocabulary ambiguous.
-func TestRelationshipLabelMatchingIsTrimmedAndCaseSensitive(t *testing.T) {
+func labelRelationshipLabelMatchingIsTrimmedAndCaseSensitive(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-matching")
 
 	require.ElementsMatch(t, []string{w.respondsAsAgentId},

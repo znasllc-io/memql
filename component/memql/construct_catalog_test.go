@@ -121,11 +121,60 @@ func findEntry(entries []ConstructCatalogEntry, kind, name string) (ConstructCat
 	return ConstructCatalogEntry{}, false
 }
 
-// TestConstructCatalogEnumeratesEveryKind asserts the catalog reports every
+// catalogEnumeratesEveryKind asserts the catalog reports every
 // kind the engine holds a registry for, and that each kind's count is the
 // registry's own count rather than a file count.
-func TestConstructCatalogEnumeratesEveryKind(t *testing.T) {
-	eng := mountCatalogFixture(t)
+var catalogShared *MemQLEngine
+
+// sharedCatalogEngine hands a case the suite engine (memql#4569).
+func sharedCatalogEngine(t *testing.T) *MemQLEngine {
+	t.Helper()
+	if catalogShared == nil {
+		t.Fatal("this case borrows the suite engine and must run under " +
+			"TestConstructCatalog; a new case added as a top-level Test function " +
+			"will not have one (memql#4569)")
+	}
+	return catalogShared
+}
+
+// TestConstructCatalog is the catalog suite. Seven cases each mounted the SAME
+// fixture domain and booted their OWN engine over core+fixture -- ~2.3s apiece,
+// 16.6s of the package's 234s for one file (memql#4569).
+//
+// The fixture cannot be mounted once for the package. mountCatalogFixture
+// REPLACES the process-wide concept registry (concept.ReplaceAll(nil) then a
+// reload) and restores it through t.Cleanup, and tests elsewhere here walk
+// memorynodes.All(). A parent test's cleanup runs when the parent finishes, so
+// this is exactly as isolated as seven mounts were, at one boot.
+//
+// Every case here READS the catalog -- none mutates the engine -- which is the
+// borrowing rule sharedDblessEngine's doc comment states. The three cases in
+// this file that build their own bare engine stay top-level: they construct
+// `&MemQLEngine{...}` directly and never touch the fixture.
+//
+// ADDING A CASE: write `func catalog<Name>(t *testing.T)` and list it below.
+func TestConstructCatalog(t *testing.T) {
+	catalogShared = mountCatalogFixture(t)
+	t.Cleanup(func() { catalogShared = nil })
+
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"EnumeratesEveryKind", catalogEnumeratesEveryKind},
+		{"ReportsWiredAutomations", catalogReportsWiredAutomations},
+		{"OriginAcrossSources", catalogOriginAcrossSources},
+		{"ArgsComeFromTheLanguageServer", catalogArgsComeFromTheLanguageServer},
+		{"ViewOnlyKindsCarryNoArgs", catalogViewOnlyKindsCarryNoArgs},
+		{"CarriesSourceOnlyWithoutAFile", catalogCarriesSourceOnlyWithoutAFile},
+		{"IsDeterministic", catalogIsDeterministic},
+	} {
+		t.Run(tc.name, tc.run)
+	}
+}
+
+func catalogEnumeratesEveryKind(t *testing.T) {
+	eng := sharedCatalogEngine(t)
 	groups := byKind(eng.ConstructCatalog())
 
 	// Kinds that come out of a registry with no per-kind discrimination: count
@@ -190,10 +239,10 @@ type fakeAutomationCataloger struct{ entries []AutomationCatalogEntry }
 
 func (f fakeAutomationCataloger) CatalogAutomations() []AutomationCatalogEntry { return f.entries }
 
-// TestConstructCatalogReportsWiredAutomations: automations reach the catalog
+// catalogReportsWiredAutomations: automations reach the catalog
 // through the injected cataloger, and are runnable.
-func TestConstructCatalogReportsWiredAutomations(t *testing.T) {
-	eng := mountCatalogFixture(t)
+func catalogReportsWiredAutomations(t *testing.T) {
+	eng := sharedCatalogEngine(t)
 	eng.SetAutomationCataloger(fakeAutomationCataloger{entries: []AutomationCatalogEntry{
 		{Name: "autoJoinSI", Description: "auto join", Origin: "unified:cognition/automations.memql"},
 	}})
@@ -210,11 +259,11 @@ func TestConstructCatalogReportsWiredAutomations(t *testing.T) {
 	}
 }
 
-// TestConstructCatalogOriginAcrossSources covers the derivation over the two
+// catalogOriginAcrossSources covers the derivation over the two
 // file-backed sources. `promoted` gets its own test below, because it is the
 // one that cannot be produced by mounting anything.
-func TestConstructCatalogOriginAcrossSources(t *testing.T) {
-	entries := mountCatalogFixture(t).ConstructCatalog()
+func catalogOriginAcrossSources(t *testing.T) {
+	entries := sharedCatalogEngine(t).ConstructCatalog()
 
 	// A core construct: from the embedded tree, with a path and a hash.
 	core, ok := findEntry(entries, ConstructKindConcept, "v1:identity:user")
@@ -257,12 +306,12 @@ func TestConstructCatalogOriginAcrossSources(t *testing.T) {
 	}
 }
 
-// TestConstructCatalogArgsComeFromTheLanguageServer pins the argument form to
+// catalogArgsComeFromTheLanguageServer pins the argument form to
 // Sense's own analysis. If these ever diverge the generated argument form
 // disagrees with the compiler about what the construct accepts, and the
 // developer finds out by running the wrong thing.
-func TestConstructCatalogArgsComeFromTheLanguageServer(t *testing.T) {
-	entries := mountCatalogFixture(t).ConstructCatalog()
+func catalogArgsComeFromTheLanguageServer(t *testing.T) {
+	entries := sharedCatalogEngine(t).ConstructCatalog()
 	entry, ok := findEntry(entries, ConstructKindQuery, "catalogFixtureWidgets")
 	if !ok {
 		t.Fatal("fixture query missing from the catalog")
@@ -300,11 +349,11 @@ func TestConstructCatalogArgsComeFromTheLanguageServer(t *testing.T) {
 	}
 }
 
-// TestConstructCatalogViewOnlyKindsCarryNoArgs: an argument form implies a run,
+// catalogViewOnlyKindsCarryNoArgs: an argument form implies a run,
 // and the runnable set is deliberately five. A view-only kind that reported an
 // argument form would be offering an execution semantic the design defers.
-func TestConstructCatalogViewOnlyKindsCarryNoArgs(t *testing.T) {
-	for _, e := range mountCatalogFixture(t).ConstructCatalog() {
+func catalogViewOnlyKindsCarryNoArgs(t *testing.T) {
+	for _, e := range sharedCatalogEngine(t).ConstructCatalog() {
 		if e.Runnable {
 			continue
 		}
@@ -359,12 +408,12 @@ func TestConstructCatalogPromotedAppearsAndDisappears(t *testing.T) {
 	}
 }
 
-// TestConstructCatalogCarriesSourceOnlyWithoutAFile: `source` is populated
+// catalogCarriesSourceOnlyWithoutAFile: `source` is populated
 // exactly when there is no file to read it from. Populating it for a
 // file-backed construct too would duplicate what the pack browser already
 // serves -- at the cost of every construct body on every catalog read.
-func TestConstructCatalogCarriesSourceOnlyWithoutAFile(t *testing.T) {
-	for _, e := range mountCatalogFixture(t).ConstructCatalog() {
+func catalogCarriesSourceOnlyWithoutAFile(t *testing.T) {
+	for _, e := range sharedCatalogEngine(t).ConstructCatalog() {
 		if e.OriginPath != "" && e.Source != "" {
 			t.Errorf("%s %q has a file (%s) AND carries its source; read the file instead",
 				e.Kind, e.Name, e.OriginPath)
@@ -439,10 +488,10 @@ func TestDeriveConstructOrigin(t *testing.T) {
 	}
 }
 
-// TestConstructCatalogIsDeterministic: two calls against an unchanged engine
+// catalogIsDeterministic: two calls against an unchanged engine
 // return the same list in the same order, so a client can diff two reads.
-func TestConstructCatalogIsDeterministic(t *testing.T) {
-	eng := mountCatalogFixture(t)
+func catalogIsDeterministic(t *testing.T) {
+	eng := sharedCatalogEngine(t)
 	first := eng.ConstructCatalog()
 	second := eng.ConstructCatalog()
 	if len(first) != len(second) {

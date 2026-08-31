@@ -192,7 +192,7 @@ concept auditEntry {
 
 /// squad/cadet is owns declared from both ends over an ARRAY field. The
 /// outgoing half works; the incoming half is the subject of
-/// TestRelationshipOwns_IncomingArrayField_FindsEveryOwner.
+/// traversalOwnsIncomingArrayFieldFindsEveryOwner.
 concept squad {
   memberIds []string @description("The v1:reltrav:cadet.ids this squad owns.")
   label     string   @description("Human label.")
@@ -349,16 +349,75 @@ func seedTraversalWorld(t *testing.T, s *traversalSeeder) traversalWorld {
 	return w
 }
 
-// TestRelationshipFixture_DeclaresEveryShapeUnderTest asserts the fixture
+// traversalFixtureDeclaresEveryShapeUnderTest asserts the fixture
 // actually reached the engine before anything traverses it.
 //
 // Without this, a fixture that failed to mount would not fail loudly: several
 // resolvers return an empty set rather than an error when a concept declares
 // no matching relationship, so a silently-absent fixture would turn the whole
 // matrix green while measuring nothing.
-func TestRelationshipFixture_DeclaresEveryShapeUnderTest(t *testing.T) {
+// traversalSuite is the engine every case in this file borrows, booted once by
+// TestRelationshipTraversal (memql#4569). See TestRelationshipLabelTraversal for
+// why this is a parent test rather than a package-level sync.Once.
+type traversalSuite struct {
+	eng *MemQLEngine
+	db  *bun.DB
+}
+
+var traversalShared *traversalSuite
+
+func sharedTraversalEngine(t *testing.T) (*MemQLEngine, *bun.DB) {
+	t.Helper()
+	if traversalShared == nil {
+		t.Fatal("this case borrows the suite engine and must run under " +
+			"TestRelationshipTraversal; a new case added as a top-level Test function " +
+			"will not have one (memql#4569)")
+	}
+	return traversalShared.eng, traversalShared.db
+}
+
+// TestRelationshipTraversal is the traversal-matrix suite. Every case mounted
+// the SAME fixture domain and booted its OWN engine -- eight identical boots at
+// ~1.8s, 14.6s of the package's 234s for one file (memql#4569).
+//
+// The fixture cannot be mounted once for the package: mountTraversalFixture
+// restores the process-wide concept registry through t.Cleanup, and tests
+// elsewhere here walk memorynodes.All(). A parent test's cleanup runs when the
+// parent finishes, so this is as isolated as eight mounts were, at one boot.
+//
+// Isolation between cases never rested on the engine: each seeds under its own
+// uniqueSuffix, so no case reads another's rows.
+//
+// ADDING A CASE: write `func traversal<Name>(t *testing.T)` and list it below.
+// A top-level `func Test...` calling sharedTraversalEngine fails with a message
+// saying so, rather than quietly booting a ninth engine.
+func TestRelationshipTraversal(t *testing.T) {
 	mountTraversalFixture(t)
-	eng, _, _ := readMergeTestEngine(t)
+	eng, db, _ := readMergeTestEngine(t)
+	t.Cleanup(func() { _ = db.Close() })
+
+	traversalShared = &traversalSuite{eng: eng, db: db}
+	t.Cleanup(func() { traversalShared = nil })
+
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"FixtureDeclaresEveryShapeUnderTest", traversalFixtureDeclaresEveryShapeUnderTest},
+		{"TraversalMatrix", traversalTraversalMatrix},
+		{"IdsStripPayloadAndCollapseClusteredVersions", traversalIdsStripPayloadAndCollapseClusteredVersions},
+		{"OwnsIncomingArrayFieldFindsEveryOwner", traversalOwnsIncomingArrayFieldFindsEveryOwner},
+		{"EmptyAnswerEveryResolverAnswersEmpty", traversalEmptyAnswerEveryResolverAnswersEmpty},
+		{"PaginateBoundsTheResult", traversalPaginateBoundsTheResult},
+		{"GraphExpansionStopsAtRequestedDepth", traversalGraphExpansionStopsAtRequestedDepth},
+		{"DispatchRejectsAnUnknownFunction", traversalDispatchRejectsAnUnknownFunction},
+	} {
+		t.Run(tc.name, tc.run)
+	}
+}
+
+func traversalFixtureDeclaresEveryShapeUnderTest(t *testing.T) {
+	eng, _ := sharedTraversalEngine(t)
 
 	cases := []struct {
 		concept     string
@@ -404,7 +463,7 @@ func TestRelationshipFixture_DeclaresEveryShapeUnderTest(t *testing.T) {
 	}
 }
 
-// TestRelationshipTraversalMatrix drives all NINE relationship functions
+// traversalTraversalMatrix drives all NINE relationship functions
 // through Execute against one shared world, which is also what covers
 // evaluateRelationshipExpression's dispatch switch: each case reaches a
 // different arm of it.
@@ -417,9 +476,8 @@ func TestRelationshipFixture_DeclaresEveryShapeUnderTest(t *testing.T) {
 //     declares.
 //   - ids consults no relationship definition whatsoever; it strips payload +
 //     schema off the rows the inner expression already produced.
-func TestRelationshipTraversalMatrix(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalTraversalMatrix(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-matrix")
 	sfx := uniqueSuffix("rel-matrix")
 	owner := "kb:" + sfx
@@ -537,7 +595,7 @@ func TestRelationshipTraversalMatrix(t *testing.T) {
 	}
 }
 
-// TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions is the
+// traversalIdsStripPayloadAndCollapseClusteredVersions is the
 // clustered-versions case for ids(), which the matrix above covers only for
 // its id set.
 //
@@ -546,9 +604,8 @@ func TestRelationshipTraversalMatrix(t *testing.T) {
 // however many versions that id has, and payload + schema removed. Seeded with
 // deep clustered runs so the dedupe is doing work rather than passing on a
 // single-version happy path.
-func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalIdsStripPayloadAndCollapseClusteredVersions(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-ids")
 	sfx := uniqueSuffix("rel-ids")
 	owner := "kb:" + sfx
@@ -580,7 +637,7 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 	}
 }
 
-// TestRelationshipOwns_IncomingArrayField_FindsEveryOwner is the array shape of
+// traversalOwnsIncomingArrayFieldFindsEveryOwner is the array shape of
 // the INCOMING lookup: "which squads have this cadet in their memberIds".
 //
 // SKIPPED, and the skip is the finding. fetchNodesByJSONFieldValues compiles
@@ -612,9 +669,8 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 // The assertion below is what the engine SHOULD answer; unskip it when the
 // containment predicate lands. Verified to FAIL as written, with an empty
 // result set against two seeded squads.
-func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalOwnsIncomingArrayFieldFindsEveryOwner(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-owns-array-in")
 	sfx := uniqueSuffix("rel-owns-array-in")
 	owner := "kb:" + sfx
@@ -643,7 +699,7 @@ func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
 		"an incoming owns lookup must find every row whose ARRAY field contains this id")
 }
 
-// TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty pins what each
+// traversalEmptyAnswerEveryResolverAnswersEmpty pins what each
 // resolver does when the honest answer is "nothing".
 //
 // Same question -- "traverse this edge from rows that have none" -- and now
@@ -687,9 +743,8 @@ func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
 // empty" is satisfied completely by a resolver that answers empty to
 // everything, so the populated cases have to be asserted in the same test or
 // it proves nothing.
-func TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalEmptyAnswerEveryResolverAnswersEmpty(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-empty")
 	sfx := uniqueSuffix("rel-empty")
 	owner := "kb:" + sfx
@@ -766,16 +821,15 @@ func TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty(t *testing.T) {
 	})
 }
 
-// TestRelationshipTraversal_PaginateBoundsTheResult pins the limit the
+// traversalPaginateBoundsTheResult pins the limit the
 // traversal is given.
 //
 // Worth its own test rather than an assertion tacked onto the childOf case:
 // every resolver threads `limit` through several distinct places (the id-set
 // accumulation loop, the per-definition break, the fetch, and a final trim),
 // and memql#3432 was precisely a bound applied in the wrong one of those.
-func TestRelationshipTraversal_PaginateBoundsTheResult(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalPaginateBoundsTheResult(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-limit")
 	sfx := uniqueSuffix("rel-limit")
 	owner := "kb:" + sfx
@@ -806,7 +860,7 @@ func TestRelationshipTraversal_PaginateBoundsTheResult(t *testing.T) {
 	}
 }
 
-// TestRelationshipGraphExpansion_StopsAtRequestedDepth covers expandGraph,
+// traversalGraphExpansionStopsAtRequestedDepth covers expandGraph,
 // which reaches the same resolvers from the other side: not from a query
 // naming a traversal function, but from buildGraphBundle walking every
 // relationship a returned row declares.
@@ -818,9 +872,8 @@ func TestRelationshipTraversal_PaginateBoundsTheResult(t *testing.T) {
 // at depth 1 the docs are reached and their author is not; at depth 2 the
 // author is. Each hop also asserts its EDGE, since a node can enter the bundle
 // as a root without any traversal having happened.
-func TestRelationshipGraphExpansion_StopsAtRequestedDepth(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalGraphExpansionStopsAtRequestedDepth(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-depth")
 	sfx := uniqueSuffix("rel-depth")
 	owner := "kb:" + sfx
@@ -878,15 +931,14 @@ func TestRelationshipGraphExpansion_StopsAtRequestedDepth(t *testing.T) {
 		"the doc -> author createdBy edge must be recorded at depth 2")
 }
 
-// TestRelationshipDispatch_RejectsAnUnknownFunction covers the dispatch
+// traversalDispatchRejectsAnUnknownFunction covers the dispatch
 // switch's default arm, which no query string can reach: the parser turns an
 // unrecognised wrapper name into a generic FunctionCallExpr rather than a
 // RelationshipExpression, so the only caller that can present an unknown
 // function is Go code constructing the node itself -- which is exactly what a
 // future relationship function would be mid-wiring.
-func TestRelationshipDispatch_RejectsAnUnknownFunction(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
+func traversalDispatchRejectsAnUnknownFunction(t *testing.T) {
+	eng, db := sharedTraversalEngine(t)
 	ctx := clusterOwnerCtx("u-rel-dispatch")
 	sfx := uniqueSuffix("rel-dispatch")
 	owner := "kb:" + sfx
@@ -906,4 +958,3 @@ func TestRelationshipDispatch_RejectsAnUnknownFunction(t *testing.T) {
 	require.Contains(t, err.Error(), "siblingOf",
 		"an unsupported relationship function must be refused by name, not silently resolved to nothing")
 }
-
