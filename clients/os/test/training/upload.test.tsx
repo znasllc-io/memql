@@ -349,3 +349,101 @@ describe("the dropzone", () => {
     expect(screen.getByText("read refused")).toBeTruthy();
   });
 });
+
+describe("cancelling an upload", () => {
+  it("aborts the request and drops the entry", async () => {
+    const uploads = fakeUploads();
+    const connection = fakeConnection({ activeSpaceId: "space-daily" });
+    mount(connection, { uploads: uploads.provider });
+    await screen.findByText("Choose files");
+
+    const input = drop([new File(["x"], "notes.pdf", { type: "application/pdf" })]);
+    const { fireEvent, act } = await import("@testing-library/react");
+    await act(async () => {
+      fireEvent.change(input);
+    });
+    expect(screen.getByText("sending")).toBeTruthy();
+
+    await click(screen.getByText("Cancel"));
+    await settle();
+
+    // The row is gone, and the abort did NOT leave a failure behind: an abort
+    // is what the person asked for, not something to report back to them.
+    expect(screen.queryByText("notes.pdf")).toBeNull();
+    expect(screen.queryByText("aborted")).toBeNull();
+  });
+});
+
+describe("auto-open review", () => {
+  it("is OFF by default, so a finished analysis moves nobody", async () => {
+    const navigate = vi.fn();
+    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
+    mount(connection, { navigate });
+    await screen.findByText("contract.pdf");
+
+    await emit(connection, PLAN_CONCEPT, { ...RUNNING_PLAN, status: "succeeded" });
+    expect(navigate).not.toHaveBeenCalledWith("review");
+  });
+
+  it("does NOT fire for a plan that had already succeeded when the window opened", async () => {
+    // The first observation is a BASELINE, exactly as the arrival cue treats
+    // its first snapshot. Without it, opening the window on a history of
+    // finished analyses would bounce somebody straight to the queue.
+    const navigate = vi.fn();
+    const connection = fakeConnection({ plans: [DONE_PLAN], activeSpaceId: "space-1" });
+    h.connection = connection;
+    render(
+      withSession(
+        <TrainingApp
+          sectionId="upload"
+          navigate={navigate}
+          askContext={vi.fn()}
+          store={autoOpenStore()}
+        />,
+      ),
+    );
+    await screen.findByText("handbook.docx");
+    await settle();
+    expect(navigate).not.toHaveBeenCalledWith("review");
+  });
+
+  it("fires on a plan REACHING succeeded, and never on a failure", async () => {
+    const navigate = vi.fn();
+    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
+    h.connection = connection;
+    render(
+      withSession(
+        <TrainingApp
+          sectionId="upload"
+          navigate={navigate}
+          askContext={vi.fn()}
+          store={autoOpenStore()}
+        />,
+      ),
+    );
+    await screen.findByText("contract.pdf");
+
+    // A FAILURE moves nobody: there is nothing to review, and navigating away
+    // would hide the only account of what happened.
+    await emit(connection, PLAN_CONCEPT, {
+      ...RUNNING_PLAN,
+      status: "failed",
+      errorMessage: "extract failed",
+    });
+    expect(navigate).not.toHaveBeenCalledWith("review");
+
+    await emit(connection, PLAN_CONCEPT, planRow({ id: "plan-new", status: "succeeded" }), "NODE_CREATED");
+    expect(navigate).toHaveBeenCalledWith("review");
+  });
+});
+
+/** A settings store with auto-open already on. */
+function autoOpenStore() {
+  const data = new Map<string, string>([
+    ["memql-os-training-v1", JSON.stringify({ version: 1, defaultSection: "upload", autoOpenReview: true })],
+  ]);
+  return new LocalTrainingSettingsStore({
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+  });
+}

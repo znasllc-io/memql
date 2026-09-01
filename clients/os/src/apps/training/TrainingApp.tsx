@@ -173,25 +173,34 @@ export function TrainingApp({
   // It fires only on `succeeded`: there is nothing to review after a failure,
   // and navigating away from the error message would hide the only account of
   // what happened.
-  const succeeded = useRef<Set<string> | null>(null);
+  //
+  // A SNAPSHOT THAT FOLLOWS A NON-LIVE ONE IS A BASELINE, which is
+  // `arrival.ts`'s rule applied to a second consumer and for the same reason.
+  // Keying the baseline on "the first time this effect ran" is what does NOT
+  // work: the effect runs once on mount with an EMPTY snapshot, so the seed
+  // that lands a moment later looks like every plan in it just succeeded --
+  // opening the window on a history of finished analyses would bounce
+  // somebody straight to the queue. The same reading also stops a reconnect's
+  // resync from firing, which is the failure the cue's own version guards.
+  const succeeded = useRef<{ ids: Set<string>; wasLive: boolean }>({
+    ids: new Set(),
+    wasLive: false,
+  });
   useEffect(() => {
     const finished = new Set(
       snapshot.rows.filter((p) => p.status === "succeeded").map((p) => p.id),
     );
     const held = succeeded.current;
-    succeeded.current = finished;
-    // The FIRST observation is a baseline, exactly as the arrival cue treats
-    // its first snapshot: everything already succeeded when this window opened
-    // is history, not news.
-    if (held === null) return;
+    succeeded.current = { ids: finished, wasLive: snapshot.state === "live" };
+    if (!held.wasLive) return;
     if (!settings.autoOpenReview) return;
     for (const id of finished) {
-      if (!held.has(id)) {
+      if (!held.ids.has(id)) {
         navigate("review");
         return;
       }
     }
-  }, [snapshot.rows, settings.autoOpenReview, navigate]);
+  }, [snapshot.rows, snapshot.state, settings.autoOpenReview, navigate]);
 
   if (sectionId === "settings") {
     return <TrainingSettingsSection settings={settings} update={update} />;
