@@ -11,7 +11,7 @@ import {
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
-import { flatten } from "../fleet/rows";
+import { flatten } from "../../kit/rows";
 
 export interface ClusterRow {
   id: string;

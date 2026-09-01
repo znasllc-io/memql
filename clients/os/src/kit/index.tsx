@@ -32,6 +32,7 @@ export { LiveList, type LiveListSource } from "../live/LiveList";
 export { useLiveView, type LiveView } from "../live/liveView";
 export { useNow } from "./useNow";
 export { formatDuration, formatFreshness, formatMoment } from "./format";
+export { boolOr, flatten, stringsOf } from "./rows";
 export { deriveProvenance, roleAdmits, ROLE_LADDER };
 export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement };
 

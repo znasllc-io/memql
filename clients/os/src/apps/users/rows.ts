@@ -1,5 +1,7 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { boolOr, flatten } from "../../kit/rows";
+
 // The wire rows the Users app renders, projected into the shapes its surfaces
 // read.
 //
@@ -7,41 +9,13 @@ import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 // is: a projection asserted through render() is asserted through three layers
 // that can each fail for unrelated reasons. Everything here is a function of a
 // row and is unit-testable with no browser, no cluster and no React.
-
-/**
- * Unwrap a `payload`-nested row to the flat form the field helpers read.
- *
- * A row reaches these functions from two places -- the SEED (a named query's
- * result, already shape-flattened) and the SUBSCRIPTION fold (a CDC envelope,
- * which carries the concept fields inside `payload`) -- and the two paths have
- * to produce the same object. Otherwise a person renders one way on load and
- * another way the moment anything about them changes.
- *
- * The envelope wins on a collision so `id` stays the ROW's id rather than any
- * `id` the payload happens to carry.
- */
-export function flatten(row: Row): Row {
-  const nested = row["payload"];
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    return { ...(nested as Row), ...row };
-  }
-  return row;
-}
-
-/**
- * A boolean field that can be ABSENT, with the default the concept declares.
- *
- * The SDK's `rowBool` returns `false` for a missing key, which collapses
- * "absent" and "explicitly false" into one answer. That is fine for a field
- * whose default is false, and wrong for every field here: `user.active` and
- * `invitation.active` both default to TRUE, and a folded CDC event carries
- * only what the write touched -- so reading absent as false makes everybody
- * vanish from the list the first time anything about them changes.
- */
-function boolOr(row: Row, key: string, fallback: boolean): boolean {
-  const v = row[key];
-  return typeof v === "boolean" ? v : fallback;
-}
+//
+// `flatten` and `boolOr` moved to kit/rows.ts when the third app copied them.
+// `boolOr` matters here more than anywhere: `user.active` and
+// `invitation.active` both default to TRUE, and a folded CDC event carries
+// only what the write touched -- so reading absent as false through the SDK's
+// own `rowBool` makes everybody vanish from the list the first time anything
+// about them changes.
 
 // ---------------------------------------------------------------------------
 // A person
