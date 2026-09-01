@@ -3,13 +3,17 @@ import { useSession } from "../../chrome/access";
 import type { RoleRequirement } from "../../system/roles";
 import {
   configurableCards,
+  lanesOf,
   silentCards,
+  visibleReasons,
   type IntegrationCard,
+  type IntegrationReason,
   type IntegrationSlot,
 } from "./integrationsReport";
 import {
   integrationBlurb,
   integrationLabel,
+  laneLabel,
   slotLabel,
   sourceLabel,
   stateLabel,
@@ -27,13 +31,19 @@ import { useIntegrations, type IntegrationsFacts } from "./useIntegrations";
 // manifest is where the section declares it; this constant is the one copy of
 // the value.
 //
-// AND THE ENGINE DOES NOT AGREE YET. `integrations/email/status.go`'s
-// `statusAuthorized` admits owner and ADMIN -- so a developer, the role this
-// section exists for, is refused the read today and an admin who reached the
-// section by deep link would be served. Neither is papered over: the refusal
-// renders in surface in the engine's own words with a line saying which gate
-// disagreed, because a developer seeing an empty section would read it as
-// "nothing is configured" -- and A REFUSAL IS NOT A ZERO.
+// THE ENGINE ADMITS ONE ROLE MORE, AND THAT IS NOT A DISAGREEMENT.
+// `integrations/email/status.go`'s `statusAuthorized` admits owner, developer
+// and admin (memql#4826 added developer -- its absence refused the read to the
+// role this section exists for). Admin is kept there on purpose: P6 is about
+// who may CONFIGURE, this read carries no secret, and narrowing it would take
+// a capability from every admin in every deployment to make a sentence
+// symmetrical. Declining to OFFER an admin the section is this manifest's job,
+// and that is where the distinction belongs -- the gate here is presentation
+// and the engine's is the authority, which is the shell's standing rule.
+//
+// A refusal still renders in surface in the engine's own words, because
+// somebody below the floor who saw an empty section would read it as "nothing
+// is configured" -- and A REFUSAL IS NOT A ZERO.
 //
 // THREE RULES, and they are the design of this surface:
 //
@@ -153,6 +163,8 @@ function IntegrationPanel({
           labels say what each answers rather than repeating the chip's word,
           which is also what stops "Configured" naming two things on one
           card. */}
+      <Reasons reasons={visibleReasons(card)} />
+
       <Facts>
         <Fact label="Set up" value={card.configured} />
         <Fact label="Provider check" value={card.health} />
@@ -169,22 +181,39 @@ function IntegrationPanel({
         <Caption>This integration reports no configuration keys.</Caption>
       ) : (
         <>
-          {/* Each key is its own bordered box (`os-field-group`, the shape
-              every other Settings group already uses) rather than a line in a
-              flat list: a slot is four blocks -- state, field, purpose, and
-              for a credential the rotate command -- and four blocks at a
-              four-pixel gap run into the next slot's four. No new CSS: this
-              section is built from the vocabulary that exists. */}
-          <ul className="os-hidden-list" aria-label={`${label} configuration`}>
-            {card.slots.map((slot) => (
-              <li
-                className="os-field-group"
-                key={`${slot.secret ? "secret" : "setting"}:${slot.name}`}
+          {lanesOf(card).map((lane) => (
+            <div key={lane.name} role="group" aria-label={`${label} -- ${laneLabel(lane.name)}`}>
+              <h5 className="os-subhead">{laneLabel(lane.name)}</h5>
+              {/* Each key is its own bordered box (`os-field-group`, the shape
+                  every other Settings group already uses) rather than a line
+                  in a flat list: a slot is four blocks -- state, field,
+                  purpose, and for a credential the rotate command -- and four
+                  blocks at a four-pixel gap run into the next slot's four. No
+                  new CSS: this section is built from the vocabulary that
+                  exists. */}
+              <ul
+                className="os-hidden-list"
+                aria-label={`${label} ${laneLabel(lane.name)} configuration`}
               >
-                <SlotRow slot={slot} />
-              </li>
-            ))}
-          </ul>
+                {lane.slots.map((slot) => (
+                  <li
+                    className="os-field-group"
+                    key={`${slot.secret ? "secret" : "setting"}:${slot.name}`}
+                  >
+                    <SlotRow slot={slot} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {lanesOf(card).length > 1 ? (
+            <Caption>
+              These are alternatives, and a lane is taken WHOLE or not at all --
+              from this node&apos;s environment, or from settings stored in the
+              cluster, never half of each. Filling in some of both is the one
+              arrangement that resolves to nothing.
+            </Caption>
+          ) : null}
           {INTEGRATION_WRITES.available ? null : (
             <Notice
               tone="warn"
@@ -229,6 +258,10 @@ function SlotRow({ slot }: { slot: IntegrationSlot }) {
           </Chip>
         ) : null}
         {slot.secret ? <Chip tone="muted">Write-only</Chip> : null}
+        {/* Only OPTIONAL is worth a chip. Marking eleven slots "Required"
+            marks nothing; marking the two that are not is what tells somebody
+            which fields they can leave alone. */}
+        {slot.required ? null : <Chip tone="muted">Optional</Chip>}
       </Chips>
       <Field label={`${label}${slot.envVar ? ` -- ${slot.envVar}` : ""}`}>
         {slot.secret ? (
@@ -258,9 +291,47 @@ function SlotRow({ slot }: { slot: IntegrationSlot }) {
         )}
       </Field>
       {slot.purpose ? <p className="os-caption">{slot.purpose}</p> : null}
+      {/* The engine writes TWO sentences about a slot that is wrong -- a short
+          one for this position and a longer one for the card's summary -- and
+          both are rendered where their author put them. `reason` is empty
+          whenever nothing is wrong, which is what keeps a healthy list quiet. */}
+      {slot.reason ? <Notice tone="warn" detail={slot.reason} /> : null}
       {slot.secret && slot.rotate ? (
         <p className="os-caption os-mono">{slot.rotate}</p>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * Why the state is not `configured`, one entry per thing somebody would do.
+ *
+ * VERBATIM AND IN THE ENGINE'S ORDER. The reasons are built per lane and each
+ * names its own env var, so this is the scannable answer to "what do I have to
+ * set" -- and the `code` is used to decide EMPHASIS and nothing else. A
+ * surface that branched on a code to compose its own sentence would be writing
+ * the message it was checking.
+ *
+ * A reason with no `slot` belongs to no field -- a split lane, a failed probe,
+ * a refused mode -- and that is exactly the kind the slot list below cannot
+ * carry, which is why this list is not a duplicate of it.
+ */
+function Reasons({ reasons }: { reasons: readonly IntegrationReason[] }) {
+  if (reasons.length === 0) return null;
+  return (
+    <>
+      <h5 className="os-subhead">What has to happen</h5>
+      <ul className="os-hidden-list" aria-label="What has to happen">
+        {reasons.map((reason, index) => (
+          <li key={`${reason.code}:${reason.lane}:${reason.slot}:${index}`}>
+            <Chips label={`Reason ${index + 1}`}>
+              {reason.lane ? <Chip tone="neutral">{laneLabel(reason.lane)}</Chip> : null}
+              {reason.slot ? <Chip tone="muted">{slotLabel(reason.slot)}</Chip> : null}
+            </Chips>
+            <p className="os-caption">{reason.detail}</p>
+          </li>
+        ))}
+      </ul>
     </>
   );
 }
@@ -326,21 +397,17 @@ function SilentRollCall({ cards }: { cards: readonly IntegrationCard[] }) {
 /**
  * A refusal renders WHERE THE PANEL WOULD BE, in the engine's own words.
  *
- * The gap is named rather than smoothed over. This section is gated
- * owner-or-developer; `integration.email.status` admits owner and ADMIN. A
- * developer refused here has hit that disagreement, and telling them so is
- * the difference between a bug report and a shrug.
+ * Never rewritten: the engine's sentence names the roles its own check admits,
+ * and this window's role gate is presentation over it rather than a second
+ * authority. Saying so is what stops a refusal reading as a defect in either
+ * half.
  */
 function Refusal({ role, message }: { role: string; message: string }) {
   return (
     <Notice
       tone="warn"
       sentence={`The cluster declined this read for ${role || "your role"}.`}
-      next={
-        role === "developer"
-          ? "This section is offered to owners and developers; the engine's own check on this read admits owners and admins. Closing that gap is engine work, and until it lands a developer cannot read it."
-          : "Nothing is inferred from a refusal -- this is not an empty configuration, it is a read that did not happen."
-      }
+      next="Nothing here is inferred from a refusal -- this is not an empty configuration, it is a read that did not happen. Which roles this window OFFERS the section to is presentation; which roles the cluster serves is the cluster's own decision, and it is the one that counts."
       detail={message}
     />
   );

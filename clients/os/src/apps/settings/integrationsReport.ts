@@ -69,6 +69,37 @@ export interface IntegrationSlot {
   editable: boolean;
   /** The operator command that rotates a secret. "" for a setting. */
   rotate: string;
+  /** Which way-of-being-configured this slot belongs to: `graph`, `smtp`.
+   *  Empty where an integration declares no lanes. */
+  lane: string;
+  /** Whether the lane can work without it. An OPTIONAL slot left unset is a
+   *  normal state and never a reason. */
+  required: boolean;
+  /** The engine's sentence for what is wrong with THIS slot, written for the
+   *  position under the field. Empty when nothing is. */
+  reason: string;
+}
+
+/**
+ * One machine-readable explanation of why a state is not `configured`.
+ *
+ * `code` is what a surface branches on and `detail` is what it renders --
+ * never the other way round. A reason NEVER carries a resolved value, which is
+ * the same invariant the slot list is under; `TestReasonsNeverCarryAValue`
+ * holds the server half.
+ *
+ * `slot` / `envVar` / `lane` are what let a surface point at the field
+ * responsible. They are empty on a reason that belongs to no single slot -- a
+ * split lane, a failed probe, a refused mode -- and that emptiness is the
+ * distinction, not a gap.
+ */
+export interface IntegrationReason {
+  /** missing_slot | split_lane | probe_failed | refused. Closed. */
+  code: string;
+  lane: string;
+  slot: string;
+  envVar: string;
+  detail: string;
 }
 
 export interface IntegrationCard {
@@ -82,6 +113,9 @@ export interface IntegrationCard {
   health: string;
   /** The engine's own sentences. The most useful text on the screen. */
   detail: string;
+  /** Why `state` is not `configured`, one entry per thing a person would have
+   *  to do. Empty when there is nothing to say. */
+  reasons: readonly IntegrationReason[];
   /** The resolved lane: graph | smtp | log, or "" where the integration has none. */
   mode: string;
   probed: boolean;
@@ -153,6 +187,13 @@ function cardOf(entry: Record<string, unknown>): IntegrationCard {
     configured: str(entry, "configured"),
     health: str(entry, "health"),
     detail: str(entry, "detail"),
+    reasons: objects(entry, "reasons").map((raw) => ({
+      code: str(raw, "code"),
+      lane: str(raw, "lane"),
+      slot: str(raw, "slot"),
+      envVar: str(raw, "envVar"),
+      detail: str(raw, "detail"),
+    })),
     mode: str(entry, "mode"),
     probed: bool(entry, "probed"),
     slots: slotsOf(entry),
@@ -198,16 +239,7 @@ export function stateOf(entry: Record<string, unknown>): IntegrationState {
   return str(entry, "health") === "unhealthy" ? "unhealthy" : "configured";
 }
 
-/**
- * The two arrays, folded into one list in the engine's own order.
- *
- * NOT REGROUPED BY LANE, though for email the Graph and SMTP slots really are
- * alternatives. Which slot belongs to which lane is not in the reply, so
- * grouping would mean keying on the `smtp` prefix in a name -- this window
- * inventing structure the node did not send, and getting it wrong the first
- * time a lane is named differently. The engine's `detail` states the lane
- * rule verbatim, which is where that fact actually lives.
- */
+/** The two arrays, folded into one list in the engine's own order. */
 function slotsOf(entry: Record<string, unknown>): IntegrationSlot[] {
   const out: IntegrationSlot[] = [];
   for (const raw of objects(entry, "settings")) {
@@ -222,6 +254,9 @@ function slotsOf(entry: Record<string, unknown>): IntegrationSlot[] {
       value: str(raw, "value"),
       editable: bool(raw, "editable"),
       rotate: "",
+      lane: str(raw, "lane"),
+      required: bool(raw, "required"),
+      reason: str(raw, "reason"),
     });
   }
   for (const raw of objects(entry, "credentials")) {
@@ -240,9 +275,70 @@ function slotsOf(entry: Record<string, unknown>): IntegrationSlot[] {
       // only write path is the operator command below.
       editable: false,
       rotate: str(raw, "rotate"),
+      lane: str(raw, "lane"),
+      required: bool(raw, "required"),
+      reason: str(raw, "reason"),
     });
   }
   return out;
+}
+
+/**
+ * The reasons worth rendering beside the card's own summary.
+ *
+ * The engine emits a probe verdict and a refusal BOTH as a reason and, by
+ * concatenation, inside `detail` -- so a surface that renders the summary and
+ * the list puts the same sentence on the screen twice, a few centimetres
+ * apart, and a reader assumes something is broken. Dropping the summary
+ * instead is not the fix: it carries the log-only sentence (memql#4477) that
+ * no reason states, and that is the most important sentence this feature has.
+ *
+ * The test is CONTAINMENT rather than a list of codes, deliberately. It is
+ * self-correcting: the day the engine stops concatenating, the reason appears
+ * on its own with no edit here -- where a code list would keep hiding it. And
+ * the failure direction is safe: a miss shows a sentence twice, never zero
+ * times.
+ */
+export function visibleReasons(card: IntegrationCard): readonly IntegrationReason[] {
+  const summary = card.detail.trim();
+  return card.reasons.filter((reason) => {
+    const detail = reason.detail.trim();
+    return detail !== "" && !summary.includes(detail);
+  });
+}
+
+export interface IntegrationLane {
+  /** The engine's lane name, or "" for slots belonging to no lane. */
+  name: string;
+  slots: readonly IntegrationSlot[];
+}
+
+/**
+ * The slots, grouped by lane, in the order the lanes first appear.
+ *
+ * GROUPED BECAUSE THE ENGINE SAYS SO, not because it looks tidier. A lane is
+ * an alternative way of being configured and the resolver takes one WHOLE or
+ * not at all, so eleven flat fields invite somebody to fill half of each --
+ * the one arrangement that resolves to nothing. `lane` is carried on every
+ * slot for exactly this (memql#4825); grouping by a prefix in the slot NAME,
+ * which is what a client would have had to do before, would have been this
+ * window inventing structure the node did not send.
+ *
+ * Order is FIRST APPEARANCE rather than sorted: the manifest lists lanes in
+ * preference order (the first that resolves whole wins), so the reply's own
+ * order is the one an operator should read them in.
+ */
+export function lanesOf(card: IntegrationCard): readonly IntegrationLane[] {
+  const order: string[] = [];
+  const byLane = new Map<string, IntegrationSlot[]>();
+  for (const slot of card.slots) {
+    if (!byLane.has(slot.lane)) {
+      byLane.set(slot.lane, []);
+      order.push(slot.lane);
+    }
+    byLane.get(slot.lane)!.push(slot);
+  }
+  return order.map((name) => ({ name, slots: byLane.get(name)! }));
 }
 
 /** The integrations with something to configure. */

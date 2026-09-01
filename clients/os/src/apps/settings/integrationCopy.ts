@@ -45,6 +45,27 @@ const INTEGRATION_BLURBS: Readonly<Record<string, string>> = {
     "Sends this cluster's mail: sign-in links, guest invitations, new-sign-in notices and campaign sends.",
 };
 
+/**
+ * A lane, by what an operator would call it.
+ *
+ * The manifest carries a one-sentence Description per lane and the report does
+ * NOT forward it, so the heading is named here with the same
+ * unknown-names-are-still-words fallback everything else in this file uses. If
+ * the description ever reaches the reply, render that instead of adding a
+ * second sentence beside this.
+ */
+const LANE_LABELS: Readonly<Record<string, string>> = {
+  graph: "Microsoft Graph",
+  smtp: "SMTP relay",
+};
+
+export function laneLabel(name: string): string {
+  // An integration that declares no lanes sends "" on every slot, and its one
+  // group is just its settings.
+  if (name === "") return "Settings";
+  return LANE_LABELS[name] ?? humanize(name);
+}
+
 export function slotLabel(name: string): string {
   return SLOT_LABELS[name] ?? humanize(name);
 }

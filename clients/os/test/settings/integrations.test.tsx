@@ -126,6 +126,8 @@ const CREDENTIALS = [
     source: "globalSecret",
     envVar: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
     purpose: "Client-credentials secret for the app registration.",
+    lane: "graph",
+    required: true,
     rotate: "make secret-set NAME=MEMQL_EMAIL_AZURE_CLIENT_SECRET VALUE=<new value> SCOPE=global",
     // None of these three is a key the reply carries. They are here so that a
     // renderer that ever reached for one fails loudly.
@@ -142,14 +144,8 @@ const SETTINGS = [
     source: "globalVariable",
     envVar: "MEMQL_EMAIL_SENDER",
     purpose: "The mailbox mail is sent AS.",
-    editable: true,
-  },
-  {
-    name: "smtpHost",
-    value: "",
-    source: "unset",
-    envVar: "SMTP_HOST",
-    purpose: "Relay hostname.",
+    lane: "graph",
+    required: true,
     editable: true,
   },
   {
@@ -158,9 +154,31 @@ const SETTINGS = [
     source: "env",
     envVar: "MEMQL_EMAIL_AZURE_TENANT_ID",
     purpose: "Entra tenant the app registration lives in.",
+    lane: "graph",
+    required: true,
     // The boot-envelope boundary, DECLARED by the engine. The section renders
     // this flag and never re-derives it.
     editable: false,
+  },
+  {
+    name: "fromName",
+    value: "",
+    source: "unset",
+    envVar: "MEMQL_EMAIL_FROM_NAME",
+    purpose: "Display name on the From header.",
+    lane: "graph",
+    required: false,
+    editable: true,
+  },
+  {
+    name: "smtpHost",
+    value: "",
+    source: "unset",
+    envVar: "SMTP_HOST",
+    purpose: "Relay hostname.",
+    lane: "smtp",
+    required: true,
+    editable: true,
   },
 ];
 
@@ -168,6 +186,8 @@ const CONFIGURED = {
   name: "email",
   registered: true,
   capabilities: ["sendEmail"],
+  state: "configured",
+  reasons: [],
   configured: "yes",
   health: "unknown",
   mode: "graph",
@@ -179,6 +199,27 @@ const CONFIGURED = {
 
 const NEEDS_CONFIGURATION = {
   ...CONFIGURED,
+  state: "needs_configuration",
+  // Per LANE, each naming its own env var. Built by the engine
+  // (ConfigResolution.Reasons) and rendered verbatim.
+  reasons: [
+    {
+      code: "missing_slot",
+      lane: "graph",
+      slot: "clientSecret",
+      envVar: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
+      detail:
+        "MEMQL_EMAIL_AZURE_CLIENT_SECRET is not set anywhere, and the graph lane cannot work without it.",
+    },
+    {
+      code: "split_lane",
+      lane: "graph",
+      slot: "",
+      envVar: "",
+      detail:
+        "Every value the graph lane needs is present, but they are not all in the same place. Move them together.",
+    },
+  ],
   configured: "no",
   health: "degraded",
   mode: "log",
@@ -189,16 +230,33 @@ const NEEDS_CONFIGURATION = {
 
 const UNHEALTHY = {
   ...CONFIGURED,
+  state: "unhealthy",
+  reasons: [
+    {
+      code: "probe_failed",
+      lane: "graph",
+      slot: "",
+      envVar: "",
+      // WORD FOR WORD what the engine concatenates into `detail`. The card
+      // must show it ONCE, which is what visibleReasons is for.
+      detail:
+        "Live check failed: the Entra token endpoint refused these credentials -- AADSTS7000215: Invalid client secret provided.",
+    },
+  ],
   health: "unhealthy",
   probed: true,
   detail:
-    "Sending via graph, configured from globalVariable. Live check failed: the Entra token endpoint refused these credentials.",
+    "Sending via graph, configured from globalVariable. Live check failed: the Entra token endpoint refused these credentials -- AADSTS7000215: Invalid client secret provided.",
 };
 
 const SILENT = {
   name: "telephony",
   registered: true,
   capabilities: [],
+  // An integration with no self-report has NO state -- the empty string, which
+  // must be read as unknown rather than as a member of the closed set.
+  state: "",
+  reasons: [],
   configured: "unknown",
   health: "unknown",
   detail: "Registered on this node. This integration publishes no configuration self-report.",
@@ -266,6 +324,99 @@ describe("the three states come from the engine", () => {
   });
 });
 
+describe("the reasons and the lanes (memql#4825)", () => {
+  it("lists what has to happen, verbatim, with the lane and slot it points at", async () => {
+    await renderIntegrations();
+    const list = screen.getByRole("list", { name: "What has to happen" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(within(list).getByText(/is not set anywhere, and the graph lane/)).toBeTruthy();
+    expect(within(list).getByText(/not all in the same place/)).toBeTruthy();
+    // A missing-slot reason points AT a field; a split-lane reason belongs to
+    // no field, and that difference is what makes this list more than a copy
+    // of the slot list below it.
+    expect(within(items[0]!).getByText("Application secret")).toBeTruthy();
+    expect(within(items[1]!).queryByText("Application secret")).toBeNull();
+    expect(within(items[1]!).getByText("Microsoft Graph")).toBeTruthy();
+  });
+
+  it("does not print a reason the summary already contains", async () => {
+    // The engine emits a probe verdict BOTH as a reason and, by
+    // concatenation, inside `detail`. Rendering both puts one sentence on the
+    // screen twice a few centimetres apart.
+    h.state.report = envelope(UNHEALTHY);
+    await renderIntegrations();
+    expect(screen.queryByRole("list", { name: "What has to happen" })).toBeNull();
+    expect(screen.getAllByText(/AADSTS7000215/)).toHaveLength(1);
+  });
+
+  it("says nothing when there is nothing to say", async () => {
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    expect(screen.queryByRole("list", { name: "What has to happen" })).toBeNull();
+  });
+
+  it("groups the keys by LANE, in the order the reply sends them", async () => {
+    // A lane is an alternative taken WHOLE, so eleven flat fields invite
+    // somebody to fill half of each -- the one arrangement that resolves to
+    // nothing. `lane` is on every slot for exactly this; grouping by a prefix
+    // in the name would be this window inventing structure.
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    const groups = within(card).getAllByRole("group");
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Email -- Microsoft Graph",
+      "Email -- SMTP relay",
+    ]);
+    const graph = within(card).getByRole("list", {
+      name: "Email Microsoft Graph configuration",
+    });
+    expect(within(graph).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(card).getByText(/one arrangement that resolves to nothing/)).toBeTruthy();
+  });
+
+  it("marks the OPTIONAL keys, not the required ones", async () => {
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    // Marking eleven slots "Required" marks nothing; marking the one that is
+    // not is what says which field can be left alone.
+    expect(within(card).getAllByText("Optional")).toHaveLength(1);
+    expect(within(card).queryByText("Required")).toBeNull();
+    const optional = within(card).getByRole("list", { name: "From name state" });
+    expect(within(optional).getByText("Optional")).toBeTruthy();
+  });
+
+  it("renders the engine's own sentence under the field it is about", async () => {
+    h.state.report = envelope({
+      ...CONFIGURED,
+      settings: [
+        {
+          ...SETTINGS[0],
+          source: "unset",
+          reason:
+            "Required by the graph lane and not set anywhere. Set MEMQL_EMAIL_SENDER.",
+        },
+      ],
+      credentials: [],
+    });
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    expect(within(card).getByText(/Required by the graph lane and not set anywhere/)).toBeTruthy();
+  });
+
+  it("keeps a healthy field quiet", async () => {
+    // `reason` is empty whenever nothing is wrong -- including for an OPTIONAL
+    // slot nobody set, which is a normal state. A mark there trains an
+    // operator to ignore the marks that mean something.
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    expect(within(card).queryByText(/not set anywhere/)).toBeNull();
+  });
+});
+
 describe("a secret is write-only", () => {
   it("renders no credential value anywhere in the DOM", async () => {
     const { container } = await renderIntegrations();
@@ -295,7 +446,11 @@ describe("a secret is write-only", () => {
     const boxes = within(card)
       .getAllByRole("textbox")
       .map((box) => box.getAttribute("id"));
-    expect(boxes).toEqual(["integration-slot-senderAddress", "integration-slot-smtpHost"]);
+    expect(boxes).toEqual([
+      "integration-slot-senderAddress",
+      "integration-slot-fromName",
+      "integration-slot-smtpHost",
+    ]);
     for (const credential of ["clientSecret", "smtpPassword"]) {
       expect(boxes.some((id) => id?.includes(credential))).toBe(false);
     }
@@ -410,16 +565,21 @@ describe("what the section will not invent", () => {
   });
 
   it("renders a refusal in surface, in the engine's own words -- never a zero", async () => {
+    // The engine admits owner, developer and admin (memql#4826 added
+    // developer). A reader below that floor gets the engine's own sentence,
+    // which names the roles -- this window never rewrites it, and never
+    // renders a zero in its place.
     h.state.error = new Error(
-      'email.status: role "developer" may not read integration configuration (owner or admin required)',
+      'email.status: role "writer" may not read integration configuration (owner, developer or admin required)',
     );
-    await renderIntegrations("developer");
-    expect(screen.getByText(/declined this read for developer/)).toBeTruthy();
-    expect(screen.getByText(/may not read integration configuration/)).toBeTruthy();
-    // The gap is NAMED. A developer is the role this section exists for and
-    // the engine's own check does not admit one yet.
-    expect(screen.getByText(/Closing that gap is engine work/)).toBeTruthy();
-    // And nothing is rendered as though it were configuration.
+    await renderIntegrations("writer");
+    expect(screen.getByText(/declined this read for writer/)).toBeTruthy();
+    expect(screen.getByText(/owner, developer or admin required/)).toBeTruthy();
+    // And it says which half is the authority, rather than implying the two
+    // gates disagree: this window's role set decides what it OFFERS; the
+    // cluster decides what it serves.
+    expect(screen.getByText(/it is the one that counts/)).toBeTruthy();
+    // Nothing is rendered as though it were configuration.
     expect(screen.queryByRole("region", { name: "Email" })).toBeNull();
   });
 
