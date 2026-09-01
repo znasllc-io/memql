@@ -221,9 +221,13 @@ function SlotRow({ slot }: { slot: IntegrationSlot }) {
     <>
       <Chips label={`${label} state`}>
         <Chip tone={slot.present ? "accent" : "muted"}>{slot.present ? "Set" : "Not set"}</Chip>
-        <Chip tone="neutral" title={slot.envVar || undefined}>
-          {sourceLabel(slot.source)}
-        </Chip>
+        {/* A slot that is not set has no source, and a second chip reading
+            "No source" beside "Not set" says the same thing twice. */}
+        {slot.present ? (
+          <Chip tone="neutral" title={slot.envVar || undefined}>
+            {sourceLabel(slot.source)}
+          </Chip>
+        ) : null}
         {slot.secret ? <Chip tone="muted">Write-only</Chip> : null}
       </Chips>
       <Field label={`${label}${slot.envVar ? ` -- ${slot.envVar}` : ""}`}>

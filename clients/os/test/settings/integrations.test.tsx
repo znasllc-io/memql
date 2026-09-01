@@ -145,6 +145,14 @@ const SETTINGS = [
     editable: true,
   },
   {
+    name: "smtpHost",
+    value: "",
+    source: "unset",
+    envVar: "SMTP_HOST",
+    purpose: "Relay hostname.",
+    editable: true,
+  },
+  {
     name: "tenantId",
     value: "11111111-2222-3333-4444-555555555555",
     source: "env",
@@ -281,10 +289,16 @@ describe("a secret is write-only", () => {
     h.state.report = envelope(CONFIGURED);
     await renderIntegrations();
     const card = screen.getByRole("region", { name: "Email" });
-    // One textbox on the card: the editable non-secret slot. Not two.
-    const boxes = within(card).getAllByRole("textbox");
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0]?.getAttribute("id")).toBe("integration-slot-senderAddress");
+    // Every field on the card belongs to a non-secret slot, and the two
+    // credentials have none. Asserted by NAME rather than by count: a count
+    // passes for the wrong reason the moment the fixture grows a setting.
+    const boxes = within(card)
+      .getAllByRole("textbox")
+      .map((box) => box.getAttribute("id"));
+    expect(boxes).toEqual(["integration-slot-senderAddress", "integration-slot-smtpHost"]);
+    for (const credential of ["clientSecret", "smtpPassword"]) {
+      expect(boxes.some((id) => id?.includes(credential))).toBe(false);
+    }
     expect(within(card).getByText(/never from a browser/)).toBeTruthy();
     expect(within(card).getByText("Write-only")).toBeTruthy();
   });
@@ -296,6 +310,11 @@ describe("a secret is write-only", () => {
     const chips = within(card).getByRole("list", { name: "Application secret state" });
     expect(within(chips).getByText("Set")).toBeTruthy();
     expect(within(chips).getByText("Sealed in the cluster")).toBeTruthy();
+    // ...and an UNSET slot carries no source chip: "No source" beside "Not
+    // set" says the same thing twice.
+    const unset = within(card).getByRole("list", { name: "Relay host state" });
+    expect(within(unset).getByText("Not set")).toBeTruthy();
+    expect(within(unset).queryByText("No source")).toBeNull();
   });
 });
 

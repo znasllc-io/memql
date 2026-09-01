@@ -72,10 +72,14 @@ export function stateLabel(state: IntegrationState): string {
  * source, it is the reason the field below it is not a field.
  */
 export function sourceLabel(source: string): string {
-  if (source === "env") return "Set in this node's environment";
+  // None of these starts with "Set". The presence chip beside it says "Set" or
+  // "Not set", and a source reading "Set in this node's environment" put two
+  // chips saying almost the same word next to each other -- which is how a
+  // reader stops reading either.
+  if (source === "env") return "From this node's environment";
   if (source === "globalVariable") return "Stored in the cluster";
   if (source === "globalSecret") return "Sealed in the cluster";
-  return "Not set";
+  return "No source";
 }
 
 /** camelCase to a sentence: `senderAddress` becomes `Sender address`. */
