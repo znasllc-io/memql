@@ -3347,6 +3347,14 @@ mutate invitation revokeUserInvitation {
 /// can be filtered on. On the wire it is a credential-FORGING primitive: the caller supplies
 /// tokenHash, so they could mint a row carrying a digest they chose and then present its preimage
 /// to the guest-auth interceptor. The handlers hold the real check; the boundary sits there.
+///
+/// `accountId` is the client tie (epic memql#4800, D5): which client's person this guest is.
+/// OPTIONAL, and in accept{} rather than stamp{}, so an omitted arg is dropped from the payload
+/// entirely and an inviter who never mentioned an account writes no key at all -- every existing
+/// caller's behaviour is byte-identical. It GRANTS NOTHING: an account is a record, never an
+/// authorization boundary (D1), so a guest invited "for" a client reaches exactly the one space
+/// this invitation already named and not a byte more. The field is what lets the Users app say
+/// who a guest is for, and what a future client-access feature would point at.
 @serverOnly
 mutate invitation createGuestInvitation {
   args {
@@ -3359,9 +3367,10 @@ mutate invitation createGuestInvitation {
     inviteeName   string
     tokenHash     string!
     expiresAt     datetime!
+    accountId     string
   }
   insert {
-    accept { tokenHash, expiresAt, inviterId, inviteeEmail }
+    accept { tokenHash, expiresAt, inviterId, inviteeEmail, accountId }
     stamp {
       id: args.invitationId
       kind: "guest"

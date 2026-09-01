@@ -424,6 +424,30 @@ QueryClient.prototype.archiveAudience = function (this: QueryClient, args: Archi
   return this.executeNamed("archiveAudience", buildArchiveAudience(args), opts);
 };
 
+/** File a client away.
+A STATUS FLIP, never a delete, and the ties are the reason. Four concepts carry an optional reference to this row, and every one of them keeps resolving after this write: a site tied to an archived account still serves, a file still carries its label, an invitation still names who it was for. Unfiling a client must not rewrite the record of what was done for them.
+There is no unarchive mutation and that is not an omission -- `updateClientAccount` cannot reach `status`, so bringing a client back is deliberately a second decision rather than a field on the edit form. Restoring one today means an operator write; a control for it belongs with whatever surface eventually answers the same question for the Bin (memql#4784), and inventing a second half-answer here would be the thing to undo when it lands. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["archiveClientAccount"] in generated_concepts.ts).
+export interface ArchiveClientAccountArgs {
+  accountId: string;
+}
+
+export function buildArchiveClientAccount(args: ArchiveClientAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "mutation archiveClientAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveClientAccount(args: ArchiveClientAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveClientAccount = function (this: QueryClient, args: ArchiveClientAccountArgs = {} as ArchiveClientAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveClientAccount", buildArchiveClientAccount(args), opts);
+};
+
 /** Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own. */
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.ts).
 export interface ArchiveComposedViewArgs {
@@ -1885,6 +1909,44 @@ declare module "./query.js" {
 
 QueryClient.prototype.createCapability = function (this: QueryClient, args: CreateCapabilityArgs = {} as CreateCapabilityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createCapability", buildCreateCapability(args), opts);
+};
+
+/** Add a client to the registry -- and, once per cluster lifetime, materialize the owner's own company as `v1:accounts:account:self`.
+=========================================================================== WHY THIS IS NOT NAMED createAccount =========================================================================== `createAccount` is TAKEN. `dsl/identity/mutations.memql` has declared it, with `updateAccount`, `archiveAccount` and the query `accountById`, since long before this domain existed -- they write `v1:identity:account`, the PAYING account of the isolation model, which shares a word with this concept and nothing else. Function names resolve in one flat registry and the first registration wins, so a second `createAccount` does not conflict loudly: it simply never registers, and every call in this domain reaches identity's mutation instead. Measured, not assumed -- memqllint reported all four of this domain's constructs as tools whose handler named no registered function, which is what an unregistered mutation looks like from the outside.
+So the four names carry `client`, which is the word for what this concept is (see the disambiguation note in concepts.memql). The CONCEPT keeps its name -- `v1:accounts:account`, and the singleton `v1:accounts:account:self` -- because that id is what the OS, the design record and the custom-domains epic all key on, and because a concept id is namespaced where a function name is not.
+=========================================================================== @createOnly IS THE SECOND HALF OF CREATE-IF-ABSENT (D3) =========================================================================== The `self` row is materialized by the `seedSelfAccount` automation, which gates on the row's absence -- so on an ordinary boot this mutation is not called at all. `@createOnly` closes the narrow race that gate cannot: two bff replicas boot together, both read absent, one creates, an operator edits the name, and the slow replica's create then lands on a row that is no longer empty. Naming every payload field here drops them all from that delta, so the read-merge inherits the operator's values and the late write is a no-op rather than a silent revert.
+It is a property of the WRITE, so it holds for any future caller, not just the boot path. Every payload field is named, `status` included: an operator who archived their own company row must not find it active again after a restart. `ownerUserId` is absent because it is not accepted -- it is stamped, and executeWrite undoes the stamp for a system actor, which is how the seeded row lands cluster-owned like the portal site does.
+`configuredAt` IS NOT STAMPED HERE, and that is the first-run card (D7). The card asks the one question a boot cannot answer -- what is this company called -- and `updateClientAccount` stamping the field is what retires it. A create-time stamp would retire the card before it was ever shown.
+`name` is `string!` on the concept and required here; everything else is optional and sits in accept{} rather than stamp{}, so an omitted argument is OMITTED FROM THE PAYLOAD rather than written as an explicit blank (missing args are dropped -- mutation_templates.go). `args.domain ?? ""` would put an empty string in the delta, which reads back as "we asked and they have no domain" rather than "nobody has said". */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["createClientAccount"] in generated_concepts.ts).
+export interface CreateClientAccountArgs {
+  accountId: string;
+  name: string;
+  domain?: string;
+  primaryContactName?: string;
+  primaryContactEmail?: string;
+  notes?: string;
+}
+
+export function buildCreateClientAccount(args: CreateClientAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.domain !== undefined) parts.push("domain: " + renderMemQLValue(args.domain));
+  if (args.primaryContactName !== undefined) parts.push("primaryContactName: " + renderMemQLValue(args.primaryContactName));
+  if (args.primaryContactEmail !== undefined) parts.push("primaryContactEmail: " + renderMemQLValue(args.primaryContactEmail));
+  if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
+  return "mutation createClientAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createClientAccount(args: CreateClientAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createClientAccount = function (this: QueryClient, args: CreateClientAccountArgs = {} as CreateClientAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createClientAccount", buildCreateClientAccount(args), opts);
 };
 
 /** Create the cluster record */
@@ -8511,6 +8573,41 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateCampaignProgress = function (this: QueryClient, args: UpdateCampaignProgressArgs = {} as UpdateCampaignProgressArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateCampaignProgress", buildUpdateCampaignProgress(args), opts);
+};
+
+/** Correct a client's facts, and record that a human said so.
+THE configuredAt STAMP IS THE POINT, not a side effect (D7). This mutation is what retires the OS first-run card: the seeded `self` row carries facts a boot derived and a name nobody chose, and the card asks for the name. The moment this write lands, the row has been stated by a person and the card yields to the ordinary surface. Nothing else in the tree writes the field.
+EVERY EDITABLE FIELD IS IN accept{} AND NONE IS REQUIRED, because `update{}` read-merges the persisted row (memql#1628): an omitted field inherits rather than blanking, so the detail view can send only what changed and two people editing different fields do not overwrite each other. `name` is omissible here even though the concept declares it `string!` -- the merge supplies the stored value, and requiring it would invite callers to pass back a row they read a moment ago, which is a lost update waiting for two concurrent writers.
+`status` is deliberately NOT here. Archiving is its own write below, because it is its own decision and it asks its own confirm. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["updateClientAccount"] in generated_concepts.ts).
+export interface UpdateClientAccountArgs {
+  accountId: string;
+  name?: string;
+  domain?: string;
+  primaryContactName?: string;
+  primaryContactEmail?: string;
+  notes?: string;
+}
+
+export function buildUpdateClientAccount(args: UpdateClientAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.domain !== undefined) parts.push("domain: " + renderMemQLValue(args.domain));
+  if (args.primaryContactName !== undefined) parts.push("primaryContactName: " + renderMemQLValue(args.primaryContactName));
+  if (args.primaryContactEmail !== undefined) parts.push("primaryContactEmail: " + renderMemQLValue(args.primaryContactEmail));
+  if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
+  return "mutation updateClientAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateClientAccount(args: UpdateClientAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateClientAccount = function (this: QueryClient, args: UpdateClientAccountArgs = {} as UpdateClientAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateClientAccount", buildUpdateClientAccount(args), opts);
 };
 
 /** Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them. `bootstrappedAt` is additionally @noUnset: the verifier's stamp (empty -> set) still lands, but no admin edit can take a stamped cluster back to un-bootstrapped by passing it explicitly empty -- un-bootstrapping is not an ordinary write (memql#3415). */

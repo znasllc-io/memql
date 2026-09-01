@@ -417,6 +417,22 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		"tokenHash":    tokenHash,
 		"expiresAt":    expiresAt.Format(time.RFC3339),
 	}
+	// The client tie, OMITTED WHEN ABSENT (epic memql#4800, D5). Adding the
+	// key with an empty value would write `accountId: ""` into the payload --
+	// createGuestInvitation accepts the arg, and an accepted arg that is
+	// present in the map is present in the delta. An invitation from a client
+	// that never mentioned an account must be byte-identical to one created
+	// before the field existed, which is what makes this addition
+	// wire-compatible rather than merely backward-parsing.
+	//
+	// NOT VALIDATED against the account registry, deliberately. An account is
+	// a record with no read effect (D1), so an id naming no row costs nothing
+	// -- the Users list resolves what it can and renders the rest as untied --
+	// while a lookup here would put a second failure mode (and a second round
+	// trip) in front of the invite path for a label.
+	if accountId := strings.TrimSpace(msg.GetAccountId()); accountId != "" {
+		args["accountId"] = accountId
+	}
 	argsJSON, _ := json.Marshal(args)
 	query := fmt.Sprintf("createGuestInvitation(%s)", renderQueryArgs(argsJSON))
 

@@ -685,6 +685,30 @@ QueryClient.prototype.revokeExpiredDelegations = function (this: QueryClient, ar
   return this.executeNamed("revokeExpiredDelegations", buildRevokeExpiredDelegations(args), opts);
 };
 
+/** True when the owner's own company has not been materialized yet, on a bff.
+=========================================================================== THE DELIBERATE INVERSION OF THE CLUSTER SINGLETONS (D3) =========================================================================== `clusterInfraRefresh` (dsl/cluster/logic.memql) answers "what is true about this cluster's infrastructure right now" and is therefore ungated: the SYSTEM is the writer of `v1:cluster:database:primary`, so a boot rewriting it is a boot telling the truth, and memql#4766 exists because those rows were once gated like a create and froze at first boot.
+This row is the opposite case and takes `bootstrapCluster`'s gate rather than its sibling's: the writer of `v1:accounts:account:self` is a HUMAN. The first-run card asks them what their company is called, and a boot that rewrote the row would undo that answer on a schedule nobody watches. So the question here is the once-per-lifetime one -- "should this row be CREATED" -- and `existing.empty()` is what asks it.
+The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it a cognition, agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times. */
+export interface SelfAccountAbsentArgs {
+  event: Record<string, unknown>;
+}
+
+export function buildSelfAccountAbsent(args: SelfAccountAbsentArgs): string {
+  const parts: string[] = [];
+  parts.push("event: " + renderMemQLValue(args.event));
+  return "logic selfAccountAbsent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    selfAccountAbsent(args: SelfAccountAbsentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.selfAccountAbsent = function (this: QueryClient, args: SelfAccountAbsentArgs = {} as SelfAccountAbsentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("selfAccountAbsent", buildSelfAccountAbsent(args), opts);
+};
+
 /** PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns "" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368. */
 export interface TransitionEventKindArgs {
   status?: unknown;

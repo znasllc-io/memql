@@ -4,3 +4,30 @@
 // files cover the other construct kinds.
 
 
+/// Full projection of v1:knowledge:knowledgeDomain -- what the Training app
+/// renders on a domain card, and what the Accounts app's tagged-domains rollup
+/// reads (epic memql#4800).
+///
+/// A CONCEPT FIELD IS NOT A READABLE FIELD, and this shape is the whole reason
+/// the concept declaration beside it is worth anything: without a projection,
+/// `name` and `accountId` would be invisible to every client and nothing on any
+/// path would say so. This file's own history is the argument -- the Training
+/// review queue nearly shipped against a shape that projected none of the
+/// fields it selected on.
+///
+/// Nothing here is credential-adjacent: a knowledge domain is a catalog entry.
+@row
+shape knowledgeDomain knowledgeDomainFull {
+  row.id
+  name
+  description
+  category
+  tier
+  active
+  predefined
+  source
+  relevantForRoles
+  requiredByToolSlugs
+  accountId
+  row.createdAt
+}

@@ -3,6 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use accounts.concepts.{ account }
 use agents.concepts.{ agent }
 use identity.concepts.{ user }
 use library.concepts.{ artifact }
@@ -216,8 +217,11 @@ concept site {
   binding      object   @description("Per-kind connection to the system this site fronts. Shape is decided by `kind`, and only one kind declares one today: shopify_storefront => {storeDomain, storefrontTokenRef}, where storeDomain is the myshopify.com host and storefrontTokenRef NAMES a v1:platform:globalSecret row holding the Storefront API token -- the token itself is never stored here, and the Admin API token never appears in either field. Empty for spa and static. A Storefront token is a client-side credential by Shopify's design, so the edge resolves the named secret at serve time into the site's runtime-config document; that is the only place it is dereferenced.")
   deleted      bool     @default("false") @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
 
+  accountId    string   @description("The v1:accounts:account this deployable is FOR -- the client whose storefront or site this is (epic memql#4800, D5). Optional, and a plain reference with NO read effect: row authorization on this concept is exactly what it was, no query narrows on this field, and a site with no tie resolves, serves and lists precisely as it always has. An account is a record of who work is for, never a visibility scope (D1) -- the pressure to make it one will arrive because a registry of clients looks like a tenancy model, and the answer is that client ACCESS rides the guest-invitation machinery pointed at an account instead. Together with v1:accounts:account.domain this is the whole of what the custom-domains epic consumes from the registry (D9): a site tied to a client suggests that client's own domain when an operator adds one. Set and cleared from the Deployables site detail's account picker.")
+
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="publishedFrom", field="artifactId", target=artifact, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
 /// Per-instance pack enablement state (module-registry design,

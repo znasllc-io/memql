@@ -3,6 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use accounts.concepts.{ account }
 use agents.concepts.{ agent }
 
 /// Self-service access request placed on the waitlist queue. Created when an unknown email submits
@@ -506,8 +507,11 @@ concept invitation {
   deliveryAttemptedAt   datetime                                                              @description("When the delivery verdict on this row was last recorded. Equal to the issue time for a first attempt, and updated by a resend -- which is why it is not simply row.createdAt. Empty on rows predating memql#4587.")
   bindingHash           string                                                                @description("SHA-256 hex digest of the 32-byte CSPRNG nonce handed to the browser that FIRST opened this invitation link, delivered to it as a cookie. The plaintext nonce is never stored. An invitation only ACCEPTS in a browser that presents a cookie hashing to this value, which is what stops a forwarded email from being redeemed by whoever it was forwarded to: the credential arrives by mail, so on its own its holder is anybody who can read the mailbox, and first-touch binding narrows that to the one browser that opened the link (memql#4601 -- the same design D2 magicLinkRequest.bindingHash below carries for memql#4302). Written FIRST-TOUCH ONLY, by bindUserInvitation, and never overwritten: a row a second browser could re-bind is an unbound row, so the no-overwrite rule IS the control rather than a detail of it. Empty means no browser has touched the row yet, or that it predates first-touch binding; both read as a no-cookie touch, and what that is worth is the accept path's decision rather than this row's.")
 
+  accountId             string  @description("The v1:accounts:account this invitation is on behalf of -- which client's person is being invited (epic memql#4800, D5). Optional, and a plain reference with NO read effect: the invitation lifecycle, the token hash, the guest-auth interceptor and every existing query are untouched, and an invitation with no tie behaves exactly as every invitation did before this field existed. It is a LABEL on an invitation, never a grant: tying an invite to an account gives the invitee nothing they would not otherwise have had, because an account admits nobody (D1). Arrives through one new OPTIONAL field on SendGuestInviteMsg, threaded to createGuestInvitation by component/grpc/guest_handlers.go; a client that omits it sends exactly as before. Rendered on the Users app's invite list and set by the optional account picker in its send flow.")
+
   @relationship(type="parent", field="inviterId", target=user, direction="outgoing")
   @relationship(type="parent", field="inviteeId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
 /// Pending magic-link authentication request. One row per /auth/magic-link issuance. The plain

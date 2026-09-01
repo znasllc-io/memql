@@ -41,3 +41,26 @@ query documentChunk documentChunksForDomain {
 // of the three is declared in this file, or anywhere in dsl/knowledge/.
 // Removed.
 
+
+/// Every knowledge domain this cluster holds.
+///
+/// The read the Training app's domain cards have never had (epic memql#4800).
+/// Until this landed, that page was entirely CHUNK-derived: it rolled domains
+/// up out of `v1:knowledge:documentChunk.domainId` and labelled each card with
+/// the raw id, because the domain row itself had no client read surface and no
+/// concept declaration behind it. With this, a card can say the domain's name
+/// and render the account it is tagged with.
+///
+/// NO ACTOR TERM, because the concept declares no row-authz tier -- see the
+/// concept for why that matches its sibling `documentChunk` rather than
+/// departing from it. A caller reads the cluster's catalog, which is the same
+/// catalog for everybody.
+///
+/// `active` is NOT filtered here. The seeder's own existence probe treats a
+/// missing key and true alike, and a surface that wants only live domains can
+/// fold on the field; a query that pre-filtered it would hide exactly the rows
+/// an operator asking "why is this domain not working" needs to see.
+query knowledgeDomain knowledgeDomainsAll {
+  shape  knowledgeDomainFull
+  sort   "name", "asc"
+}
