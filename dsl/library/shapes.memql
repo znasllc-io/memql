@@ -130,6 +130,8 @@ shape file libraryFileFull {
   uploadedFromWorkerId
   uploadedFromWorkerName
   uploadedFromPath
+  linkState
+  linkCheckedAt
   versionNumber
   versionUploadedAt
   row.createdAt

@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // artifact_handler.go -- the Library's two byte-bearing HTTP routes
@@ -92,9 +93,20 @@ const (
 	// The person NAMES the target, which is the whole identity story: a
 	// browser upload carries no honest machine or path identity, and guessing
 	// by filename would silently merge two different files (#4721's D5
-	// reasoning, unchanged). The key-matched half lives in #4783 and resolves
-	// to this same seam.
+	// reasoning, unchanged). The KEY-MATCHED half landed in epic memql#4783
+	// and resolves to this same seam: resolveKeyedVersionTarget runs only when
+	// this form key is absent, because a person naming a row outranks a key
+	// that might disagree with them.
 	libraryFormTargetKey = "targetArtifactId"
+
+	// libraryLinkStateSynced is the ONE link state the engine writes (epic
+	// memql#4783). It is stamped on any push that named a (machine, path),
+	// because at the instant those exact bytes arrived the copy did equal its
+	// origin. The other two -- "stale" and "origin_gone" -- are answers only
+	// something looking at the origin can give, so the cockpit's verify lane
+	// reports them through setLibraryFileLinkState and nothing here invents
+	// one.
+	libraryLinkStateSynced = "synced"
 
 	// libraryVersionQueryKey selects which version of a file the content
 	// route serves (design D8). Absent means the head, which is what every
@@ -286,6 +298,16 @@ type LibraryFileRow struct {
 	UploadedFromWorkerId   string
 	UploadedFromWorkerName string
 	UploadedFromPath       string
+	// LinkState is "" for a file with no origin link -- a browser upload has
+	// none to have. It is never a fourth state: "we do not track this file"
+	// and "we track it and it is fine" are different answers (epic memql#4783).
+	LinkState     string
+	LinkCheckedAt string
+	// Archived is the soft delete (memql#4340). libraryFileByUploadedFrom
+	// filters it out, so a re-push never lands in the Bin; libraryFileById
+	// does NOT, because a caller asking about a specific id deserves the
+	// honest answer and this field is how they get it.
+	Archived bool
 }
 
 // LibraryFileVersionRow is one superseded version, as the history read and
@@ -349,6 +371,11 @@ type LibraryStore interface {
 	// File reads one v1:library:file row under the caller's actor, by the
 	// canonical ref the artifact carries. Returns nil when absent or denied.
 	File(ctx context.Context, fileRef string) (*LibraryFileRow, error)
+	// FileByUploadedFrom resolves the LIVE file a machine pushed from a given
+	// path -- the (machine, path) key the watched-folder backup versions on
+	// (epic memql#4783). Nil when nothing matches, which is the ordinary
+	// answer for a first push and for every browser upload.
+	FileByUploadedFrom(ctx context.Context, workerId, path string) (*LibraryFileRow, error)
 	// ExportBody reads a text-bearing backing row (note / generated output /
 	// memory) under the caller's actor. Returns nil when the kind has no
 	// exportable body, or the row is absent or denied.
@@ -387,6 +414,13 @@ type LibraryStore interface {
 	// list immediately rather than whenever the analysis pass finishes.
 	// Idempotent and information-free; best-effort at every call site.
 	RestampFileArtifact(ctx context.Context, fileId string) error
+
+	// SetFileLinkState records how a file's copy stands against the machine it
+	// was pushed from (epic memql#4783). The upload route calls it with
+	// "synced" whenever a push named a (machine, path), because at the instant
+	// those exact bytes arrived the copy DID equal the origin; the cockpit's
+	// verify lane reports every later transition.
+	SetFileLinkState(ctx context.Context, fileId, state string) error
 }
 
 // LibraryVersionSnapshot is the OUTGOING head, frozen. Mirrors
@@ -735,6 +769,24 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	workerName = resolvedName
 
+	// --- the KEYED version target (epic memql#4783, design E) ---
+	//
+	// Only when the person named nothing: an explicit targetArtifactId is a
+	// person pointing at a row, and a key that disagreed with them would
+	// silently write somewhere else. AFTER verifyProvenance, so the machine
+	// half of the key has been checked against the caller's own fleet before
+	// it is used to find anything.
+	if targetArtifact == nil {
+		keyedArtifact, keyedHead, keyedStatus, keyedMsg := h.resolveKeyedVersionTarget(ctx, workerId, fromPath)
+		if keyedStatus != 0 {
+			http.Error(w, keyedMsg, keyedStatus)
+			return
+		}
+		if keyedHead != nil {
+			targetArtifact, head = keyedArtifact, keyedHead
+		}
+	}
+
 	// The quota (memql#4782, design C4): stored bytes plus open sessions'
 	// declared sizes plus THIS file. Checked before any byte reaches
 	// storage, like every other refusal on this path.
@@ -863,6 +915,23 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- the origin link, stamped from the strongest evidence there is ---
+	//
+	// A push that named a (machine, path) is a copy that equalled its origin
+	// at the moment those exact bytes arrived, so "synced" here is a fact
+	// rather than an assumption -- and it is what makes the Files app's link
+	// states work before any watcher exists to report on them. Re-stamped on
+	// a supersede too: a re-push is what clears a "stale".
+	//
+	// BEST EFFORT, like RestampFileArtifact. The upload succeeded; a file that
+	// is stored and unlabelled is a smaller problem than a 500 telling
+	// somebody their bytes did not land when they did.
+	if workerId != "" && fromPath != "" {
+		if err := h.store.SetFileLinkState(ctx, fileId, libraryLinkStateSynced); err != nil {
+			h.logger.Warn("stamp library file link state", "error", err, "fileId", fileId)
+		}
+	}
+
 	if storageErr != "" {
 		if err := h.store.SetFileStatus(ctx, LibraryFileStatusParams{
 			FileId:        fileId,
@@ -959,6 +1028,59 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 // the whole download route already takes. A non-file target is 400 and NAMES
 // THE FLOW that does version documents: the person asking is not wrong, they
 // are in the wrong place.
+// resolveKeyedVersionTarget resolves the version target from the PROVENANCE
+// KEY rather than from a named artifact -- the half memql#4779's sibling
+// comment on libraryFormTargetKey promised would live in epic memql#4783, and
+// it resolves to this same seam.
+//
+// The two halves answer the same question from opposite ends and neither can
+// do the other's job. A browser NAMES the target, because it has no honest
+// machine or path identity to key on and matching by filename would silently
+// merge two different files. A cockpit KEYS on (machine, path), because it has
+// no artifact id to name -- a watcher pushes a file that changed on disk and
+// has never held the id of the row that file became.
+//
+// It is a NO-OP wherever the key is absent or matches nothing, which is the
+// ordinary case: a first push, and every browser upload. A nil head means "a
+// new file", exactly as it did before this existed.
+//
+// The caller has ALREADY verified the worker id against the caller's own
+// fleet by the time this runs, so a matched row was pushed from a machine this
+// person owns. The read is under their actor besides, which is what makes the
+// key safe to trust: it can only ever find their own file.
+func (h *ArtifactHandler) resolveKeyedVersionTarget(ctx context.Context, workerId, fromPath string) (*LibraryArtifactRow, *LibraryFileRow, int, string) {
+	if strings.TrimSpace(workerId) == "" || strings.TrimSpace(fromPath) == "" {
+		return nil, nil, 0, ""
+	}
+	head, err := h.store.FileByUploadedFrom(ctx, workerId, fromPath)
+	if err != nil {
+		return nil, nil, http.StatusInternalServerError, "could not resolve the file this path was last pushed as"
+	}
+	if head == nil {
+		return nil, nil, 0, ""
+	}
+	artifactId, err := h.store.ArtifactForFile(ctx, head.ID)
+	if err != nil {
+		return nil, nil, http.StatusInternalServerError, "could not resolve the Library row for this file"
+	}
+	if strings.TrimSpace(artifactId) == "" {
+		// The file exists and its promotion has not landed. Versioning it
+		// anyway would move the head under an index row that is about to be
+		// written from the OLD bytes, so this push becomes a new file instead
+		// -- a duplicate is recoverable and a head/index disagreement is not.
+		return nil, nil, 0, ""
+	}
+	artifact, err := h.store.Artifact(ctx, artifactId)
+	if err != nil {
+		return nil, nil, http.StatusInternalServerError, "could not read the Library row for this file"
+	}
+	if artifact == nil || artifact.Kind != libraryKindFile {
+		return nil, nil, 0, ""
+	}
+	head.VersionNumber = headVersionNumber(head.VersionNumber)
+	return artifact, head, 0, ""
+}
+
 func (h *ArtifactHandler) resolveVersionTarget(ctx context.Context, targetArtifactId string) (*LibraryArtifactRow, *LibraryFileRow, int, string) {
 	targetArtifactId = strings.TrimSpace(targetArtifactId)
 	if targetArtifactId == "" {
@@ -1827,7 +1949,47 @@ func (s *EngineLibraryStore) File(ctx context.Context, fileRef string) (*Library
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	r := rows[0]
+	return libraryFileRowFrom(rows[0]), nil
+}
+
+// FileByUploadedFrom resolves the LIVE file a machine pushed from a path --
+// the (machine, path) key the watched-folder backup versions on (epic
+// memql#4783, design E).
+//
+// Under the caller's actor like every read here, so somebody else's file at
+// the same path on the same machine id comes back as the nil a missing one
+// does. Blank on either half answers nil WITHOUT running the read: the query
+// guards both arguments, so a half-supplied key would return the caller's
+// whole live file set and the first row of it is not the answer to anything.
+func (s *EngineLibraryStore) FileByUploadedFrom(ctx context.Context, workerId, path string) (*LibraryFileRow, error) {
+	workerId = strings.TrimSpace(workerId)
+	path = strings.TrimSpace(path)
+	if workerId == "" || path == "" {
+		return nil, nil
+	}
+	res, err := s.exec(ctx, "libraryFileByUploadedFrom", map[string]any{
+		"workerId": workerId,
+		"path":     path,
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	// A key that matched more than one live file is a state this design says
+	// cannot happen -- a re-push versions the row it found -- so the NEWEST is
+	// taken rather than an arbitrary one, and the read is sorted by the
+	// engine's own default. Taking the first quietly would pick by wire order.
+	return libraryFileRowFrom(rows[0]), nil
+}
+
+// libraryFileRowFrom materialises one v1:library:file row. Shared by every
+// file read so a field added to the shape reaches all of them at once -- the
+// version-target resolve and the (machine, path) resolve differ in how they
+// FIND the row and not at all in what it is.
+func libraryFileRowFrom(r map[string]any) *LibraryFileRow {
 	return &LibraryFileRow{
 		ID:       rowString(r, "id"),
 		Name:     rowString(r, "name"),
@@ -1847,7 +2009,28 @@ func (s *EngineLibraryStore) File(ctx context.Context, fileRef string) (*Library
 		UploadedFromWorkerId:   rowString(r, "uploadedFromWorkerId"),
 		UploadedFromWorkerName: rowString(r, "uploadedFromWorkerName"),
 		UploadedFromPath:       rowString(r, "uploadedFromPath"),
-	}, nil
+		LinkState:              rowString(r, "linkState"),
+		LinkCheckedAt:          rowString(r, "linkCheckedAt"),
+		// ABSENT IS NOT ARCHIVED: every file stored before memql#4340 has no
+		// member at all, which is why the query spells the filter `!= true`.
+		Archived: rowBool(r, "archived"),
+	}
+}
+
+// SetFileLinkState runs setLibraryFileLinkState. The moment is stamped by the
+// mutation rather than passed, so a caller cannot claim to have checked at a
+// time it did not.
+func (s *EngineLibraryStore) SetFileLinkState(ctx context.Context, fileId, state string) error {
+	fileId = strings.TrimSpace(fileId)
+	state = strings.TrimSpace(state)
+	if fileId == "" || state == "" {
+		return nil
+	}
+	_, err := s.exec(ctx, "setLibraryFileLinkState", map[string]any{
+		"fileId":    fileId,
+		"linkState": state,
+	})
+	return err
 }
 
 // headVersionNumber reads a file row's versionNumber, treating absent (and
@@ -2008,17 +2191,34 @@ func rowString(row map[string]any, key string) string {
 
 // rowInt reads an int field off a materialized row, tolerating the float64 a
 // JSON round-trip produces.
+//
+// SATURATES out of range (memql#4779). The values are byte SIZES and version
+// ORDINALS, and both readings need the order: the quota total sums sizes, and
+// a negative one would credit a user back storage they are using.
+// rowBool reads a boolean field off a materialized row.
+//
+// ABSENT READS FALSE, and for `archived` that is exactly right: every file
+// stored before memql#4340 has no member at all and genuinely is not archived,
+// which is the same asymmetry the query spells as `archived != true`. It is
+// NOT right for a field whose default is true, and there is no such field
+// here -- a reader that needed to tell absent from false would need a second
+// return value this signature does not have.
+func rowBool(row map[string]any, key string) bool {
+	b, _ := row[key].(bool)
+	return b
+}
+
 func rowInt(row map[string]any, key string) int {
 	switch v := row[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case json.Number:
 		if n, err := v.Int64(); err == nil {
-			return int(n)
+			return num.ClampInt64(n)
 		}
 	}
 	return 0

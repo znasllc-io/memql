@@ -6,6 +6,10 @@
 export const ARTIFACT_CONCEPT = "v1:library:artifact";
 export const FOLDER_CONCEPT = "v1:library:folder";
 
+/** The backing rows. Read for the origin link states (epic memql#4783), which
+ *  live here and are deliberately never promoted to the index. */
+export const FILE_CONCEPT = "v1:library:file";
+
 /**
  * The kinds this app shows (design D2): content-bearing only. Notes, todos,
  * calendar events, memories and live sources stay indexed and wait for their

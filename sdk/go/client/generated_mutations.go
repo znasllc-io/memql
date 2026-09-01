@@ -11943,6 +11943,73 @@ func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 	return b.String()
 }
 
+// RestoreArtifact -- Bring a Library artifact index row back out of the Bin (memql#4784) -- the exact inverse of archiveArtifact, and the write that makes archiving a door rather than a one-way door. Nothing was destroyed by the archive, so nothing has to be reconstructed here: the row keeps its labels, its folder, its provenance and its sourceConceptRef throughout, and this write only flips the flag back. updatedAt advances because a restore IS a change a person made.
+// THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["restoreArtifact"] in generated_concepts.go).
+type RestoreArtifactArgs struct {
+	ArtifactId string
+}
+
+// RestoreArtifact calls the engine mutation restoreArtifact.
+func (qc *QueryClient) RestoreArtifact(ctx context.Context, args RestoreArtifactArgs) (*Result, error) {
+	call := RestoreArtifactBuild(args)
+	return qc.executeNamed(ctx, "restoreArtifact", call)
+}
+
+func RestoreArtifactBuild(args RestoreArtifactArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreArtifact(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RestoreLibraryFile -- Bring a Library file back out of the Bin (memql#4784) -- the inverse of archiveLibraryFile, and the second half of the client-driven restore pair restoreArtifact's header describes. The bytes never went anywhere: an archive is an append-only re-version carrying archived=true, so this write is a re-version carrying false and the blobUrl, the provenance and every earlier version are exactly where they were.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["restoreLibraryFile"] in generated_concepts.go).
+type RestoreLibraryFileArgs struct {
+	FileId string
+}
+
+// RestoreLibraryFile calls the engine mutation restoreLibraryFile.
+func (qc *QueryClient) RestoreLibraryFile(ctx context.Context, args RestoreLibraryFileArgs) (*Result, error) {
+	call := RestoreLibraryFileBuild(args)
+	return qc.executeNamed(ctx, "restoreLibraryFile", call)
+}
+
+func RestoreLibraryFileBuild(args RestoreLibraryFileArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreLibraryFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RestoreLibraryFolder -- Bring a folder back out of the Bin (memql#4784) -- the inverse of archiveLibraryFolder. The CLIENT drives the recursive walk here too, and in the opposite ORDER from the archive: parents OUTWARD-first, so a restored item never appears under a parent that is still archived. A folder restored on its own comes back empty and that is the honest result -- its contents are their own rows and each one is its own decision, which is what lets somebody take one file back out of the Bin without undoing everything they filed there.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["restoreLibraryFolder"] in generated_concepts.go).
+type RestoreLibraryFolderArgs struct {
+	FolderId string
+}
+
+// RestoreLibraryFolder calls the engine mutation restoreLibraryFolder.
+func (qc *QueryClient) RestoreLibraryFolder(ctx context.Context, args RestoreLibraryFolderArgs) (*Result, error) {
+	call := RestoreLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "restoreLibraryFolder", call)
+}
+
+func RestoreLibraryFolderBuild(args RestoreLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ResumeCampaign -- Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and completedAt is the number a deliverability review reads as "how long did this run take", and resetting it on every resume would erase the pause it is meant to reveal. Owned.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["resumeCampaign"] in generated_concepts.go).
@@ -13592,6 +13659,37 @@ func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetLibraryFileLinkState -- Record how a file's copy stands against the machine it was pushed from (epic memql#4783). Called by the cockpit's verify lane, which is the only party that can see the origin at all -- the engine knows what it received and when, and nothing more.
+// IT ONLY EVER FLAGS. There is no state here that removes, hides or supersedes the MemQL copy, and that is the epic's load-bearing invariant rather than an omission: a backup whose copy follows the original into the bin is not a backup. origin_gone is a LABEL on a file that is still whole and still downloadable.
+// Deliberately NOT a data-origins mirror (memql#4378). A mirror reconciles deletions and a connector owns its concept; this retains and flags, and Library files stay native.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["setLibraryFileLinkState"] in generated_concepts.go).
+type SetLibraryFileLinkStateArgs struct {
+	FileId string
+	// Enum: synced | stale | origin_gone
+	LinkState string
+}
+
+// SetLibraryFileLinkState calls the engine mutation setLibraryFileLinkState.
+func (qc *QueryClient) SetLibraryFileLinkState(ctx context.Context, args SetLibraryFileLinkStateArgs) (*Result, error) {
+	call := SetLibraryFileLinkStateBuild(args)
+	return qc.executeNamed(ctx, "setLibraryFileLinkState", call)
+}
+
+func SetLibraryFileLinkStateBuild(args SetLibraryFileLinkStateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setLibraryFileLinkState(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("linkState: ")
+	b.WriteString(quoteMemQL(args.LinkState))
 	b.WriteString(")")
 	return b.String()
 }
