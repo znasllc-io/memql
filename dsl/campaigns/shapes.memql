@@ -97,6 +97,7 @@ shape delivery deliveryFull {
   skipReason
   lastError
   sentAt
+  emailRuleId
   row.createdAt
 }
 

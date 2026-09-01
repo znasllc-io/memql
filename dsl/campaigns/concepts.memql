@@ -273,12 +273,14 @@ concept delivery {
   lastError          string   @description("The transport's error for a 'failed' or retrying 'pending' delivery, truncated to 4KB. Empty otherwise.")
   sentAt             datetime  @description("When the transport accepted the message. Empty unless status is 'sent'.")
   attempts           int  @default("0")  @description("Delivery attempts made for this recipient. Incremented on each transport failure and bounded by MEMQL_CAMPAIGNS_MAX_ATTEMPTS, past which the row goes terminal 'failed'. Zero on a 'skipped' row, which never reaches the transport.")
+  emailRuleId        string   @description("v1:campaigns:emailRule.id of the event rule that produced this send, when one did (memql#4829). Empty on every ordinary campaign delivery, which is the overwhelming majority. It exists because an event rule mails one person at a time in response to something that happened, and 'which rule mailed this person, and why' is the FIRST question anybody asks about automated mail -- a question the campaign id alone cannot answer, because a rule's sends carry no campaign at all.")
   nextAttemptAt      datetime  @description("When a retryable 'pending' row becomes eligible again -- bounded exponential backoff with jitter, or the provider's own Retry-After when it supplied one. Compared Go-side by the drain worker, which is why it is a stored instant rather than a computed one.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="references", field="outboundRequestId", target=outboundRequest, direction="outgoing")
+  @relationship(type="references", as="sentByRule", field="emailRuleId", target=emailRule, direction="outgoing")
 }
 
 /// One tracked interaction with one delivered message -- an open or a click (memql#4823). Append-only:

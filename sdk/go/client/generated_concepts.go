@@ -658,6 +658,7 @@ var BoundConcepts = map[string]string{
 	"recentAuditEvents":                                "v1:identity:auditEvent",
 	"recentAuthActivity":                               "v1:identity:authActivity",
 	"recentSendJobs":                                   "v1:campaigns:sendJob",
+	"recipientById":                                    "v1:campaigns:recipient",
 	"recipientsForAudience":                            "v1:campaigns:recipient",
 	"recordActionCandidate":                            "v1:actions:candidate",
 	"recordApprovalDecision":                           "v1:commerce:approvalChain",

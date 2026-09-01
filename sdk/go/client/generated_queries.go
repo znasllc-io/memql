@@ -5893,6 +5893,30 @@ func RecentSendJobsBuild(args RecentSendJobsArgs) string {
 	return "query recentSendJobs()"
 }
 
+// RecipientById -- One recipient by id.
+// IT EXISTS TO REMOVE A SCAN FROM A SEND PATH (memql#4829). Every other read of this concept is audience-scoped, which is right for a roster and wrong for the single-recipient send the marketing lane makes: that path holds a recipient id and needs the row, and without this query it had to find the audience first -- from the rule when one named it, and otherwise by walking the caller's audiences and refusing past a bound rather than answering "not found". A bounded scan standing in for a by-id read is a correct answer that gets slower as an operator succeeds, and it refuses at exactly the point somebody has enough audiences to care.
+// The tier conjunct is what keeps it safe to expose an unscoped by-id read: an id is not a capability here, and a recipient the caller does not own is simply not found -- the same answer campaignById gives.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientById"] in generated_concepts.go).
+type RecipientByIdArgs struct {
+	RecipientId string
+}
+
+// RecipientById calls the engine query recipientById.
+func (qc *QueryClient) RecipientById(ctx context.Context, args RecipientByIdArgs) (*Result, error) {
+	call := RecipientByIdBuild(args)
+	return qc.executeNamed(ctx, "recipientById", call)
+}
+
+func RecipientByIdBuild(args RecipientByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientById(")
+	b.WriteString("recipientId: ")
+	b.WriteString(quoteMemQL(args.RecipientId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).

@@ -417,9 +417,10 @@ mutate delivery recordCampaignDelivery {
     attempts           int
     nextAttemptAt      datetime
     outboundRequestId  string
+    emailRuleId        string
   }
   insert {
-    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId }
+    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId }
     stamp {
       id: hash(concat(
         hash(canonicalId(args.campaignId, campaign)),
