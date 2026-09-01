@@ -426,3 +426,19 @@ func (s *Store) BundleVersion(ctx context.Context, bundleID string) int {
 	}
 	return integer(rows[0], "version")
 }
+
+// AudienceByID reads the audience a marketing rule mails. Used at ARM time, not
+// only at fire time: see Activator.verifyReadable.
+func (s *Store) AudienceByID(ctx context.Context, audienceID string) (bool, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", memql.BareShortId(audienceID)}))
+	return len(rows) > 0, err
+}
+
+// SenderIdentityByID reads the identity a rule sends as.
+func (s *Store) SenderIdentityByID(ctx context.Context, identityID string) (map[string]any, bool, error) {
+	rows, err := s.rows(ctx, call("query", "senderIdentityById", arg{"senderIdentityId", memql.BareShortId(identityID)}))
+	if err != nil || len(rows) == 0 {
+		return nil, false, err
+	}
+	return rows[0], true, nil
+}

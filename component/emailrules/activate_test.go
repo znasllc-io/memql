@@ -19,6 +19,12 @@ type fakeEngine struct {
 	internal []bool
 	rule     map[string]any
 	bundle   map[string]any
+	template map[string]any
+	audience map[string]any
+	identity map[string]any
+	// noTemplate makes templateById answer empty, which is what an
+	// unreadable template looks like from the author's envelope.
+	noTemplate bool
 	activate func(owner, bundleID string) error
 	retire   func(owner, bundleID string) error
 }
@@ -37,6 +43,26 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope(nil), nil
 		}
 		return rowsEnvelope([]map[string]any{e.bundle}), nil
+	case strings.HasPrefix(q, "query templateById"):
+		if e.noTemplate {
+			return rowsEnvelope(nil), nil
+		}
+		t := e.template
+		if t == nil {
+			t = map[string]any{"id": "v1:campaigns:template:t1", "subject": "s", "textBody": "b", "status": "ready"}
+		}
+		return rowsEnvelope([]map[string]any{t}), nil
+	case strings.HasPrefix(q, "query audienceById"):
+		a := e.audience
+		if a == nil {
+			a = map[string]any{"id": "v1:campaigns:audience:a1", "status": "active"}
+		}
+		return rowsEnvelope([]map[string]any{a}), nil
+	case strings.HasPrefix(q, "query senderIdentityById"):
+		if e.identity == nil {
+			return rowsEnvelope(nil), nil
+		}
+		return rowsEnvelope([]map[string]any{e.identity}), nil
 	}
 	return rowsEnvelope(nil), nil
 }
@@ -250,4 +276,45 @@ func TestUnboundNodeRefusesRatherThanPanics(t *testing.T) {
 	if _, err := a.Retire(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "r"); err == nil {
 		t.Error("an unwired node retired a rule")
 	}
+}
+
+// A rule whose world the AUTHOR cannot read fires forever and mails nobody --
+// correctly, silently, on every matching row. The check belongs at arm time,
+// where the operator is still looking at the form.
+func TestArmingVerifiesTheRulesWorldIsReadable(t *testing.T) {
+	t.Run("an unreadable template refuses", func(t *testing.T) {
+		e := &fakeEngine{rule: ruleRow(), noTemplate: true}
+		_, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34")
+		if err == nil {
+			t.Fatal("a rule naming a template its author cannot read was armed")
+		}
+		if !strings.Contains(err.Error(), "mail nobody") {
+			t.Errorf("the refusal does not say what would happen: %v", err)
+		}
+		if call, _, found := e.find("mutation recordEmailRuleGeneration"); !found || !strings.Contains(call, `status: "failed"`) {
+			t.Error("the refusal was not stamped on the rule row, so the operator would never see it")
+		}
+	})
+
+	t.Run("a disabled sending identity refuses rather than falling back", func(t *testing.T) {
+		r := ruleRow()
+		r["senderIdentityId"] = "v1:campaigns:senderIdentity:s1"
+		e := &fakeEngine{
+			rule:     r,
+			identity: map[string]any{"id": "v1:campaigns:senderIdentity:s1", "status": "disabled"},
+		}
+		_, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34")
+		if err == nil {
+			t.Fatal("a rule naming a disabled identity was armed; it would silently fall back to the default mailbox")
+		}
+	})
+
+	t.Run("the operational lane does not require an audience", func(t *testing.T) {
+		// cluster_roles never reads an audience, so a rule that names none
+		// must still arm -- the check has to follow the lane, not the schema.
+		e := &fakeEngine{rule: ruleRow()}
+		if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34"); err != nil {
+			t.Fatalf("an operational rule with no audience was refused: %v", err)
+		}
+	})
 }

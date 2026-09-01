@@ -152,6 +152,20 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 
 	res := Result{RuleID: rule.ID, Lane: LaneFor(rule.RecipientMode)}
 
+	// 0. Verify the rule's world is readable FROM THE ENVELOPE THE RULE WILL
+	// RUN UNDER. The construct runs as its author, role writer, no internal
+	// origin -- so a rule naming a template, audience or identity the author
+	// cannot read is a rule that fires forever and mails nobody, correctly,
+	// silently, on every matching row. Checking at arm time turns that into a
+	// refusal the operator reads once, at the moment they can still fix it.
+	//
+	// The check runs under the ARMING caller's ctx, which is the author's --
+	// the ownership gate above has already established that they are the same
+	// person, which is what makes this check mean what it says.
+	if err := a.verifyReadable(ctx, rule); err != nil {
+		return a.fail(ctx, rule.ID, res, err)
+	}
+
 	// 1. Generate. A form the generator refuses never reaches the pipeline, and
 	// the refusal is about the FORM, in the operator's own vocabulary.
 	source, err := GenerateAutomation(rule)
@@ -232,6 +246,42 @@ func (a *Activator) Retire(ctx context.Context, owner, ruleID string) (Result, e
 	}
 	res.Status = "paused"
 	return res, a.record(ctx, rule.ID, "paused", "", "", "")
+}
+
+// verifyReadable re-reads everything the rule will need, under the caller's own
+// actor. It is deliberately not a null check on the ids: an id that is present
+// and unreadable is exactly the case that looks correct on the form and fails
+// at fire time.
+func (a *Activator) verifyReadable(ctx context.Context, rule Rule) error {
+	if _, ok, err := a.store.TemplateByID(ctx, rule.TemplateID); err != nil {
+		return fmt.Errorf("emailrules: could not read template %q: %w", rule.TemplateID, err)
+	} else if !ok {
+		return fmt.Errorf("emailrules: template %q is not readable by this rule's author, so the rule would fire and mail nobody", rule.TemplateID)
+	}
+	if LaneFor(rule.RecipientMode) == "marketing" {
+		if ok, err := a.store.AudienceByID(ctx, rule.AudienceID); err != nil {
+			return fmt.Errorf("emailrules: could not read audience %q: %w", rule.AudienceID, err)
+		} else if !ok {
+			return fmt.Errorf("emailrules: audience %q is not readable by this rule's author, so the rule would fire and mail nobody", rule.AudienceID)
+		}
+	}
+	if id := strings.TrimSpace(rule.SenderIdentity); id != "" {
+		row, ok, err := a.store.SenderIdentityByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("emailrules: could not read sending identity %q: %w", id, err)
+		}
+		if !ok {
+			return fmt.Errorf("emailrules: sending identity %q is not readable by this rule's author", id)
+		}
+		// A disabled identity is refused HERE for the same reason a campaign
+		// naming one is refused at preflight: a silent fallback to the default
+		// mailbox mails a client's list from the wrong address, and nothing
+		// says so.
+		if st := str(row, "status"); st == "disabled" {
+			return fmt.Errorf("emailrules: sending identity %q is disabled; enable it or pick another rather than letting the rule fall back to the default mailbox", id)
+		}
+	}
+	return nil
 }
 
 func (a *Activator) writeBundle(ctx context.Context, bundleID string, rule Rule, state RuleState, source string) error {
