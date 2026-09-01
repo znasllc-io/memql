@@ -130,6 +130,38 @@ func RoutingExclusions() []RoutingExclusion {
 				"counting rows rather than by watching them arrive.",
 		},
 		{
+			Pattern: "graph.node.*.v1:campaigns:engagementEvent",
+			Reason: "One row per open and per click, which is the delivery row's volume " +
+				"and then some: a pixel is fetched every time a message is " +
+				"OPENED, and mail-client prefetchers fetch it on arrival, so a " +
+				"campaign produces more engagement rows than it sent messages. " +
+				"Recorded beside its delivery sibling deliberately (memql#4827): " +
+				"the five operator-facing campaigns concepts ARE forwarded now, " +
+				"so without this entry these two would be indistinguishable from " +
+				"the concepts nobody had thought about -- which is what all of " +
+				"them were until that issue. Stats read the rows through " +
+				"campaignStats, an aggregate that computes unique by (delivery, " +
+				"kind), rather than by tailing them.",
+		},
+		{
+			Pattern: "graph.node.*.v1:campaigns:recipient",
+			Reason: "A roster row, and the judgment call of the three campaigns " +
+				"entries rather than a flat volume denial. Hand-editing an " +
+				"audience is human-paced and would be affordable; CSV IMPORT is " +
+				"not, and it is the same concept. An import writes one row per " +
+				"address in one pass, so a 20k-address list is a 20k-event burst " +
+				"proportional to the file somebody dropped rather than to " +
+				"anything a person did -- the property that separates this table's " +
+				"forwarded rules from its exclusions. The cost is stated rather " +
+				"than hidden: an address added in one tab does not appear in " +
+				"another, and an unsubscribe does not flip the roster row live; " +
+				"the roster re-reads on navigation and the app pages it. " +
+				"Reversible, and the natural repair is narrower than a reversal " +
+				"-- forwarding UPDATED only would buy the live unsubscribe flip " +
+				"without the import burst, in the shape the v1:identity:user " +
+				"entry above uses in the other direction.",
+		},
+		{
 			Pattern: "graph.node.*.v1:identity:authActivity",
 			Reason: "The refresh-rotation mechanics log, split out from " +
 				"v1:identity:auditEvent by memql#4328 precisely because it is " +

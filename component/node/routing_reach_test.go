@@ -98,6 +98,25 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:worker:registration", []string{"created", "updated", "deleted"}, "the Fleet machines page -- deletes were the hole"},
 		{"v1:workbench:workspace", []string{"created", "updated", "deleted"}, "the Fleet workbenches page -- deletes were the hole"},
 		{"v1:worker:routingPolicy", []string{"created", "updated", "deleted"}, "the Fleet routing policy editor"},
+		// The campaigns operator rows (epic memql#4827). The OS Campaigns
+		// app is the surface, and it is being built in the same epic these
+		// rules landed in -- so unlike every row above, the claim here is
+		// "this rule exists FOR that surface", not "that surface is
+		// already subscribing today". Recorded anyway, and recorded as
+		// what it is: the rules were added ahead of the app precisely so
+		// the app is live on arrival rather than correct-on-load-and-frozen,
+		// and without an entry here a cleanup could delete them between now
+		// and then with nothing to notice.
+		//
+		// CREATED + UPDATED only. Nothing hard-deletes a campaigns row --
+		// the lifecycle is archive-not-delete -- and nothing in the engine
+		// publishes graph.node.deleted for any concept at all, so a deleted
+		// verb here would be asserting about surface nothing sends.
+		{"v1:campaigns:campaign", []string{"created", "updated"}, "the OS Campaigns app's campaign list"},
+		{"v1:campaigns:audience", []string{"created", "updated"}, "the OS Campaigns app's Audiences section"},
+		{"v1:campaigns:template", []string{"created", "updated"}, "the OS Campaigns app's Templates section"},
+		{"v1:campaigns:senderIdentity", []string{"created", "updated"}, "the sender-identity picker and its verification state"},
+		{"v1:campaigns:emailRule", []string{"created", "updated"}, "the event-email rules surface"},
 	}
 
 	for _, c := range cases {
@@ -129,6 +148,8 @@ func TestRecordedExclusionsStayExcluded(t *testing.T) {
 		"graph.node.updated.v1:identity:user",
 		"graph.node.created.v1:worker:invocation",
 		"graph.node.created.v1:campaigns:delivery",
+		"graph.node.created.v1:campaigns:engagementEvent",
+		"graph.node.created.v1:campaigns:recipient",
 		"graph.node.created.v1:identity:authActivity",
 		"graph.node.created.v1:observability:invocation",
 		"graph.node.created.v1:observability:codeMetric",

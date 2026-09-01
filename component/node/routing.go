@@ -444,6 +444,78 @@ func defaultRoutingRules() []RoutingRule {
 		// delete rule would be surface nothing sends.
 		{Pattern: "graph.node.created.v1:accounts:account", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:accounts:account", TargetType: ""},
+		// The campaigns operator surface (epic memql#4827). Five
+		// low-volume, operator-facing rows: a campaign, the audience it
+		// sends to, the template it renders, the sender identity it sends
+		// as, and the rule that fires an automated one. Every one of them
+		// is written on a node other than the one that serves the browser
+		// reading it, which is the whole reason this block exists:
+		//
+		//   * an operator's create or edit lands on whichever bff replica
+		//     the front door picked, and their OTHER tab is talking to the
+		//     other replica;
+		//   * updateCampaignProgress is written by the campaigns drain
+		//     worker on whichever replica CLAIMED the send job, and the
+		//     person watching a send is watching exactly that field move;
+		//   * setSenderIdentityStatus is written by the verification sweep,
+		//     which runs wherever the automations cron leader elected.
+		//
+		// Without these rules default-deny leaves the Campaigns app correct
+		// on load and frozen after -- the failure that looks like it is
+		// working, and the one clients/os/README.md names as the mistake a
+		// new app makes by default.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on any v1:campaigns:* concept. The domain has
+		// exactly one automation, ingestCampaignFeedback
+		// (dsl/campaigns/automations.memql), and it triggers on
+		// v1:platform:inboundRequest -- so there is no consumer here to
+		// double-fire.
+		//
+		// BOTH VERBS, and unlike the v1:os:desktop block above that is a
+		// verb set CHOSEN rather than completed: all five concepts carry
+		// real update{} mutations (updateCampaign, updateCampaignProgress,
+		// archiveAudience, updateTemplate, setSenderIdentityStatus,
+		// setEmailRuleStatus, ...), and on the campaign row the updates ARE
+		// the feature -- a send is a status walking from scheduled to
+		// sending to sent while somebody watches.
+		//
+		// NO DELETE RULE, for the reason the v1:accounts:account block
+		// above gives and one stronger one. The campaigns lifecycle is
+		// archive-not-delete: archiveAudience, cancelCampaign,
+		// setEmailRuleStatus and setSenderIdentityStatus are all UPDATES,
+		// and nothing in dsl/campaigns/mutations.memql removes a row. More
+		// broadly, checked over component/memql rather than assumed:
+		// nothing in the engine constructs an events.KindNodeDeleted at
+		// all, so no graph.node.deleted is published for any concept today.
+		// A deleted rule here would be surface nothing sends, which is
+		// exactly the "completing the set" change the desktop block says to
+		// resist.
+		//
+		// Volume is bounded by human action -- a campaign is a thing
+		// somebody wrote -- with one caveat worth stating because it is the
+		// only field here that moves on a timer: updateCampaignProgress
+		// fires once per drain tick per RUNNING job, not once per
+		// recipient, so a send is single-digit events per minute rather
+		// than one per message. That is nowhere near the ground
+		// v1:campaigns:delivery is excluded on, and it is why the app's
+		// arrival cue fingerprints name/status/scheduledAt and deliberately
+		// EXCLUDES the send counters: the row must re-render live without
+		// ringing.
+		//
+		// v1:campaigns:delivery, engagementEvent and recipient are
+		// deliberately NOT here; each is a recorded exclusion with its
+		// reason in RoutingExclusions().
+		{Pattern: "graph.node.created.v1:campaigns:campaign", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:campaign", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:audience", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:audience", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:template", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:template", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:senderIdentity", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:senderIdentity", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:emailRule", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:emailRule", TargetType: ""},
 		// Self-healing precondition-miss signal (Epic 4 / memql#2139). A
 		// first-class automation precondition that evaluates false emits
 		// healing.precondition.missed; the LLM repair loop (E4.4) subscribes.
