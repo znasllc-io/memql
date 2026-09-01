@@ -257,20 +257,75 @@ func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg 
 // outcome -- status, body, and the Retry-After header, which the caller
 // needs to classify a throttle.
 func (g *GraphSender) post(ctx context.Context, endpoint, token, contentType string, body []byte) (int, []byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, "", fmt.Errorf("graph: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", contentType)
-
-	resp, err := g.http.Do(req)
+	status, respBody, retryAfter, err := g.do(ctx, http.MethodPost, endpoint, token, contentType, body)
 	if err != nil {
 		// A transport error never reached a status, so it cannot be
 		// classified as permanent. Returned as an error rather than a
 		// SendError because the caller's classifier only sees responses;
 		// the campaign worker treats any unclassified error as retryable.
 		return 0, nil, "", fmt.Errorf("graph: sendMail network: %w", err)
+	}
+	return status, respBody, retryAfter, nil
+}
+
+// get issues one authenticated Graph READ (memql#4824). The NDR poller's
+// half of the credential: the same app registration, the same token cache,
+// the same client, pointed at the mailbox instead of at sendMail.
+//
+// It returns the status rather than judging it, for the same reason post
+// does: the status and the Retry-After header are the only place a throttle
+// is visible, and Graph throttles a mailbox READ exactly as it throttles a
+// send. classifyHTTPSend is what the caller runs on the pair, so a 429 while
+// listing the inbox backs off instead of hammering.
+func (g *GraphSender) get(ctx context.Context, endpoint, token string) (int, []byte, error) {
+	status, body, retryAfter, err := g.do(ctx, http.MethodGet, endpoint, token, "", nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("graph: read network: %w", err)
+	}
+	if status/100 != 2 {
+		return status, body, classifyHTTPSend(status, retryAfter,
+			fmt.Sprintf("graph: GET %d: %s", status, string(body)))
+	}
+	return status, body, nil
+}
+
+// patch issues one authenticated Graph WRITE against a mailbox resource --
+// used only to stamp a processed message read and categorized. Same
+// classification story as get.
+func (g *GraphSender) patch(ctx context.Context, endpoint, token string, body []byte) (int, []byte, error) {
+	status, respBody, retryAfter, err := g.do(ctx, http.MethodPatch, endpoint, token, "application/json", body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("graph: patch network: %w", err)
+	}
+	if status/100 != 2 {
+		return status, respBody, classifyHTTPSend(status, retryAfter,
+			fmt.Sprintf("graph: PATCH %d: %s", status, string(respBody)))
+	}
+	return status, respBody, nil
+}
+
+// do is the one authenticated Graph round trip every verb above goes
+// through. Extracted rather than copied when the reader arrived
+// (memql#4824): the bearer header, the client and the Retry-After read are
+// the three things every Graph call needs identically, and three copies of
+// them is three places to forget one.
+func (g *GraphSender) do(ctx context.Context, method, endpoint, token, contentType string, body []byte) (int, []byte, string, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("graph: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
 

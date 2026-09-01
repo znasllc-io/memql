@@ -55,20 +55,30 @@ func newGraphTestServer(t *testing.T) *graphTestServer {
 // the production URL-building code under test instead of replacing it.
 func graphSenderAgainst(t *testing.T, srv *graphTestServer, cfg GraphConfig) *GraphSender {
 	t.Helper()
+	return NewGraphSender(cfg, graphRoutedClient(srv.Server), nil)
+}
+
+// graphRoutedClient rewrites every absolute graph.microsoft.com /
+// login.microsoftonline.com URL onto a test server, preserving the PATH and
+// the QUERY. Both matter: the path segment is where the send-as mailbox
+// lands, and the query is where the mailbox reader's $filter and $select go.
+func graphRoutedClient(srv *httptest.Server) *http.Client {
 	base := srv.Client().Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		u := *r.URL
-		target, err := http.NewRequestWithContext(r.Context(), r.Method, srv.URL+u.Path, r.Body)
+	return &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		target := srv.URL + r.URL.Path
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		out, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 		if err != nil {
 			return nil, err
 		}
-		target.Header = r.Header
-		return base.RoundTrip(target)
+		out.Header = r.Header
+		return base.RoundTrip(out)
 	})}
-	return NewGraphSender(cfg, client, nil)
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)

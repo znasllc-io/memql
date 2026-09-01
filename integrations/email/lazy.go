@@ -78,12 +78,25 @@ func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if l == nil {
 		return fmt.Errorf("email: lazy sender not initialized")
 	}
+	return l.Resolve(ctx).Send(ctx, msg, as)
+}
+
+// Resolve returns the concrete Sender this wrapper stands for, running the
+// one-time resolution if it has not run yet. Never nil.
+//
+// Exported for the NDR poller (memql#4824), which needs to know whether this
+// node's sender is Graph before any message has been sent -- a node that
+// only READS the mailbox would otherwise sit behind an unresolved lazy
+// wrapper forever and conclude it had no Graph sender. Asking is the same
+// act a send performs, so it runs the same sync.Once and produces the same
+// answer; it is not a second resolution path.
+func (l *LazySender) Resolve(ctx context.Context) Sender {
 	l.once.Do(func() { l.resolved = l.resolve(ctx) })
 	if l.resolved == nil {
 		// Defensive -- resolve always returns at least a LogSender.
 		l.resolved = NewLogSender(l.logger)
 	}
-	return l.resolved.Send(ctx, msg, as)
+	return l.resolved
 }
 
 // resolve picks the best Sender available, in priority order. Env
