@@ -14,8 +14,13 @@ package azureblob
 //
 //	docker run -d --name azurite -p 127.0.0.1:10010:10000 \
 //	  mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0
-//	MEMQL_AZURITE_TEST_CONNECTION_STRING='DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10010/devstoreaccount1;' \
+//	MEMQL_AZURITE_TEST_CONNECTION_STRING='DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=<the Azurite well-known dev key, from the Azurite README>;BlobEndpoint=http://127.0.0.1:10010/devstoreaccount1;' \
 //	  go test ./integrations/azureblob/ -run Azurite -v
+//
+// The account key is Azurite's PUBLISHED dev credential, the same for every
+// install -- it is spelled by name rather than pasted because a scanner
+// judges a test file exactly like production, and an 88-character base64
+// literal is a finding whether or not it is a secret.
 //
 // Skips -- loudly, naming the variable -- when the emulator is not there.
 
