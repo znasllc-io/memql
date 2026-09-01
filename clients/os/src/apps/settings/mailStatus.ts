@@ -5,11 +5,19 @@
 // module exists -- and it reads only the mail-relevant slice: the resolved
 // sender mode, the configured/health verdict, and the operator prose. It
 // deliberately does NOT read `credentials`: that array carries no values,
-// but WHICH slots are filled is reconnaissance, and the OS has no reason to
-// put it on a desktop when the portal's integrations console already owns
-// the credential-rotation surface.
+// but WHICH slots are filled is reconnaissance, and the Cluster panel has no
+// reason to put it on a desktop when Settings' own Integrations section is
+// the credential surface.
+//
+// The ENVELOPE WALK moved to integrationsReport.ts when that section landed
+// (issue #4826) and this is a projection of it. Two walks over one reply
+// would be two things free to disagree about where the report is, and the
+// disagreement presents as "the Cluster panel shows mail and the Integrations
+// section does not".
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
+
+import { readIntegrationsReport } from "./integrationsReport";
 
 export interface MailStatus {
   /** RFC3339, stamped SERVER-side by the handler. Not a client clock. */
@@ -24,58 +32,19 @@ export interface MailStatus {
   detail: string;
 }
 
-const MAX_ENVELOPE_DEPTH = 4;
-
-/**
- * Dig the report out of the builtin envelope.
- *
- * A top-level `builtin X(...)` does not come back as a row set: the engine
- * marshals the handler's node map into one value keyed by node id, and that
- * id is bare-ified on the way out. So this SEARCHES for the object carrying
- * an `integrations` array rather than walking a fixed path a rename would
- * silently turn into `undefined`.
- */
 export function readMailStatus(rows: readonly Row[]): MailStatus | null {
-  for (const row of rows) {
-    const found = find(row, 0);
-    if (found) return found;
-  }
-  return null;
-}
-
-function find(value: unknown, depth: number): MailStatus | null {
-  if (depth > MAX_ENVELOPE_DEPTH || value === null || typeof value !== "object") return null;
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const found = find(entry, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  const bag = value as Record<string, unknown>;
-  const integrations = bag["integrations"];
-  if (Array.isArray(integrations)) {
-    const email = integrations
-      .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
-      .find((e) => e["name"] === "email");
-    if (email) {
-      return {
-        checkedAt: str(bag, "checkedAt"),
-        probed: bool(bag, "probed"),
-        mode: str(email, "mode"),
-        configured: str(email, "configured"),
-        health: str(email, "health"),
-        detail: str(email, "detail"),
-      };
-    }
-  }
-
-  for (const nested of Object.values(bag)) {
-    const found = find(nested, depth + 1);
-    if (found) return found;
-  }
-  return null;
+  const report = readIntegrationsReport(rows);
+  if (report === null) return null;
+  const email = report.integrations.find((entry) => entry.name === "email");
+  if (!email) return null;
+  return {
+    checkedAt: report.checkedAt,
+    probed: report.probed,
+    mode: email.mode,
+    configured: email.configured,
+    health: email.health,
+    detail: email.detail,
+  };
 }
 
 /**
@@ -99,15 +68,4 @@ export function mailTone(status: MailStatus): "reachable" | "unreachable" | "off
   if (status.health === "healthy") return "reachable";
   if (status.health === "unknown") return "off";
   return "unreachable";
-}
-
-function str(bag: Record<string, unknown>, key: string): string {
-  const value = bag[key];
-  return typeof value === "string" ? value : "";
-}
-
-function bool(bag: Record<string, unknown>, key: string): boolean {
-  const value = bag[key];
-  if (typeof value === "boolean") return value;
-  return value === "true";
 }
