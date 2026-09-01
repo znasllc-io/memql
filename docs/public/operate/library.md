@@ -57,26 +57,73 @@ Bearer-authenticated, and the actor owns the result. Answers
 unknown type is stored opaquely, never executed, and goes straight to
 `status: ready` with no chunks.
 
-The cap is `MEMQL_LIBRARY_MAX_UPLOAD_BYTES`, default 268435456 (256 MB) --
-sized so a site bundle fits, since the deployables path publishes from one.
-Over the cap is `413`, enforced in two layers so that a client's
-`Content-Length` is treated as a claim rather than as the limit. A value that
-is set but unparseable or non-positive falls back to the default: an
-unbounded upload route is the one outcome a misconfigured cap must never
-produce. The in-memory multipart threshold is a separate fixed 32 MB and
-deliberately does not scale with the cap.
+The one-shot route also accepts `folderId` and the provenance trio
+(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`) as
+form fields -- see Upload provenance below.
+
+**Two caps apply, and their refusals name their numbers.**
+
+- `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4294967296, 4 GiB) caps one
+  FILE -- a one-shot body, or a chunked session's declared size. Over it is
+  `413`. On the one-shot route enforcement is two-layer so a client's
+  `Content-Length` stays a claim rather than the limit; on the chunked path
+  the declared size is checked at init and the staged bytes must EQUAL it at
+  complete. A value that is set but unparseable or non-positive falls back
+  to the default: an unbounded upload route is the one outcome a
+  misconfigured cap must never produce.
+- `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 107374182400, 100 GiB) caps one
+  USER's whole Library: stored file bytes -- **archived files keep counting;
+  retention is real** -- plus the declared sizes of their open upload
+  sessions, plus the new upload. Over it is `507`, naming the would-be total
+  and the quota. It exists because a per-file cap alone cannot stop one
+  person filling the account.
 
 This is one of the documented HTTP exceptions to the gRPC-first policy. It is
 an **authenticated** route, so it appears in none of `PublicPaths()`,
 `HandlerAuthorizedPaths()` or `SelfAuthenticatedPaths()` -- exactly the class
 `cmd/frontdoorpaths` exists to route.
 
+### Chunked resumable uploads -- `POST /artifacts/uploads`
+
+Files past the one-shot threshold arrive as sessions over Azure block-blob
+staging (memql#4782, design D8): open a session, PUT 16 MiB chunks,
+commit.
+
+| Route | Purpose |
+|---|---|
+| `POST /artifacts/uploads` | Open a session: `{name, size, mimeType, folderId, labels, uploadedFrom*}` answers `201 {uploadId, chunkSize}`. The quota check and provenance verification happen HERE, before anyone streams gigabytes |
+| `GET /artifacts/uploads/{id}` | The staged-chunk inventory -- what resume reads: `{uploadId, status, size, chunkSize, staged: [{n, size}]}` |
+| `PUT /artifacts/uploads/{id}/chunks/{n}` | One raw chunk (16 MiB constant), streamed to a staged block. `n` runs 1..ceil(size/chunkSize); out-of-range is refused, so staging is bounded by the declaration. Re-staging the same `n` replaces it, which is what makes retries coordination-free |
+| `POST /artifacts/uploads/{id}/complete` | Verify staged bytes == declared size (a mismatch is `409` and the session STAYS OPEN), commit the block list in order, create the rows, answer the one-shot's own `201 {artifactId, fileId}`. Completing a completed session answers the same ids with `200` -- the kill-after-commit resume case |
+
+Three properties are load-bearing:
+
+- **Replica-agnostic by construction.** The session row lives in the graph
+  and staged blocks live with the blob, so ANY bff serves any chunk and
+  completes any session. No replica holds session state in memory; a test
+  completes one upload through two independent handler instances.
+- **The session row IS the per-chunk authorization.** Every route resolves
+  it under the caller's own actor, and row admission is the owner check --
+  "not yours" and "not there" are one `404`.
+- **No sweeper.** An abandoned session's staged blocks garbage-collect on
+  Azure's ~7-day uncommitted-block clock; the row is inert. Clients purge
+  their local resume records on the same clock.
+
+`sha256` on a chunked file is stamped by the ANALYSIS pass, which streams
+the committed blob once -- the handler never held the whole file. Until the
+pass runs, the field is absent: "not measured", never "no hash".
+
 ### Exporting -- `GET /artifacts/{id}/content`
 
 One route exports the whole Library.
 
-- A **file** streams its bytes with `Content-Type`, `Content-Length` and
-  `Content-Disposition: attachment`.
+- A **file** streams its bytes with `Content-Type`, `Content-Length` (from
+  the ROW, not from buffering), `Accept-Ranges: bytes` and
+  `Content-Disposition: attachment` -- constant memory through the bff, and
+  a single-range `Range` header answers `206` with `Content-Range`
+  (memql#4782, design C5). An unsatisfiable range is `416`; a malformed or
+  multi-range header is ignored and the full body served, which RFC 9110
+  permits.
 - A **note**, **generated output** or **memory** renders its body as
   `text/markdown` or `text/plain` with a filename derived from the title.
 - A **todo**, **calendar event**, **document** or **live source** has no body

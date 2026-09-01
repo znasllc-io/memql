@@ -67,6 +67,12 @@ type fakeLibraryStore struct {
 	workers      map[string]*LibraryWorkerRef
 	ownedWorkerN int
 
+	// fileBytes / sessionBytes answer StorageFootprint -- the two halves of
+	// the quota sum (memql#4782): stored files (archived included) and open
+	// sessions' declared sizes.
+	fileBytes    int64
+	sessionBytes int64
+
 	// artifactForFile answers ArtifactForFile, but only after promoteAfter
 	// calls -- the promotion is an automation off graph.node.created, so the
 	// first read genuinely can miss.
@@ -102,6 +108,18 @@ func (f *fakeLibraryStore) ownedWorkerCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ownedWorkerN
+}
+
+func (f *fakeLibraryStore) setFootprint(fileBytes, sessionBytes int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileBytes, f.sessionBytes = fileBytes, sessionBytes
+}
+
+func (f *fakeLibraryStore) StorageFootprint(_ context.Context) (int64, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fileBytes, f.sessionBytes, nil
 }
 
 func actorUserId(ctx context.Context) string {
@@ -1130,6 +1148,10 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 			_, err := store.OwnedWorker(ctx, "wrk-1")
 			return err
 		}},
+		{"storage footprint (libraryFileSizesForOwner + openUploadSessionsForOwner)", func() error {
+			_, _, err := store.StorageFootprint(ctx)
+			return err
+		}},
 		{"setLibraryFileStatus ready", func() error {
 			return store.SetFileStatus(ctx, LibraryFileStatusParams{
 				FileId: "file-1", Status: "ready", EmbeddingStatus: "none",
@@ -1175,10 +1197,12 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 		}
 	}
 
-	// A loop that rendered nothing would pass every assertion above.
-	if len(rec.statements) != len(calls) {
-		t.Fatalf("rendered %d statements for %d call sites; the store is not calling the engine",
-			len(rec.statements), len(calls))
+	// A loop that rendered nothing would pass every assertion above. One
+	// call site (StorageFootprint) renders TWO statements -- its two quota
+	// queries -- hence the +1.
+	if want := len(calls) + 1; len(rec.statements) != want {
+		t.Fatalf("rendered %d statements for %d call sites (want %d); the store is not calling the engine",
+			len(rec.statements), len(calls), want)
 	}
 }
 

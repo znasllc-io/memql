@@ -82,10 +82,13 @@ const (
 	libraryFormPathKey       = "uploadedFromPath"
 
 	// DefaultLibraryMaxUploadBytes is the cap when MEMQL_LIBRARY_MAX_UPLOAD_BYTES
-	// is unset. 256 MB, sized so a site bundle fits (design 3.4) -- ten times
-	// the attachment cap, because a Library file is not a chat attachment and
-	// the deployables path publishes from one.
-	DefaultLibraryMaxUploadBytes int64 = 256 * 1024 * 1024
+	// is unset. 4 GiB since memql#4782 (design D9): the chunked session path
+	// carries big files -- videos are the named case -- in bounded 16 MiB
+	// pieces, so the per-FILE cap no longer implies a same-sized request
+	// body anywhere; the front-door body allowance stays ~48m and bounds the
+	// individual REQUESTS. Still an operator knob, and a client's declared
+	// size stays a claim the commit verifies.
+	DefaultLibraryMaxUploadBytes int64 = 4 << 30
 
 	// libraryMultipartMemory is the in-memory buffering threshold handed to
 	// ParseMultipartForm; larger parts spill to temp files, which is why
@@ -287,6 +290,12 @@ type LibraryStore interface {
 	// hostname), so an upload's provenance label can never disagree with the
 	// fleet page.
 	OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error)
+	// StorageFootprint sums the CALLER's Library storage (memql#4782,
+	// design C4): stored file bytes -- archived included, retention is real
+	// -- and the declared sizes of their open upload sessions. Both reads
+	// are deliberately unbounded (a truncated page fails the quota OPEN),
+	// and both run under the caller's actor.
+	StorageFootprint(ctx context.Context) (fileBytes, sessionBytes int64, err error)
 }
 
 // LibraryAnalysisRequest is the whole of what the analysis pass needs to run.
@@ -351,16 +360,31 @@ type ArtifactHandlerOptions struct {
 	Store      LibraryStore
 	// Analyzer is optional. Absent, every stored file goes straight to ready.
 	Analyzer LibraryAnalyzer
+	// Sessions + Blocks wire the chunked upload path (memql#4782). Either
+	// absent answers 501 on the session routes; the one-shot route is
+	// unaffected.
+	Sessions UploadSessionStore
+	Blocks   BlockStore
+	// Streamer is the constant-memory download seam. Absent, the content
+	// route keeps the buffered DownloadURL path and serves no Range.
+	Streamer StreamDownloader
 	// MaxUploadBytes overrides LibraryMaxUploadBytes(); zero means "read the
 	// environment". Tests set it; production does not.
 	MaxUploadBytes int64
+	// UserQuotaBytes overrides LibraryUserQuotaBytes(); zero means "read the
+	// environment"; negative disables the quota entirely (tests only).
+	UserQuotaBytes int64
+	// ChunkSizeBytes overrides LibraryChunkSizeBytes. Tests set it small;
+	// production takes the constant.
+	ChunkSizeBytes int64
 	// PromotionWait / PromotionPoll bound the wait for indexFileOnCreate to
 	// land the artifact index row. Zero takes the defaults below.
 	PromotionWait time.Duration
 	PromotionPoll time.Duration
 }
 
-// ArtifactHandler serves POST /artifacts and GET /artifacts/{id}/content.
+// ArtifactHandler serves the Library's byte routes: the one-shot upload,
+// the chunked session family, and the content export.
 type ArtifactHandler struct {
 	logger         *slog.Logger
 	bucket         string
@@ -368,7 +392,12 @@ type ArtifactHandler struct {
 	downloader     FileDownloader
 	store          LibraryStore
 	analyzer       LibraryAnalyzer
+	sessions       UploadSessionStore
+	blocks         BlockStore
+	streamer       StreamDownloader
 	maxUploadBytes int64
+	userQuotaBytes int64
+	chunkSizeBytes int64
 	promotionWait  time.Duration
 	promotionPoll  time.Duration
 }
@@ -390,6 +419,14 @@ func NewArtifactHandler(opts ArtifactHandlerOptions) *ArtifactHandler {
 	if maxBytes <= 0 {
 		maxBytes = LibraryMaxUploadBytes()
 	}
+	quota := opts.UserQuotaBytes
+	if quota == 0 {
+		quota = LibraryUserQuotaBytes()
+	}
+	chunkSize := opts.ChunkSizeBytes
+	if chunkSize <= 0 {
+		chunkSize = LibraryChunkSizeBytes
+	}
 	wait := opts.PromotionWait
 	if wait <= 0 {
 		wait = defaultPromotionWait
@@ -405,24 +442,51 @@ func NewArtifactHandler(opts ArtifactHandlerOptions) *ArtifactHandler {
 		downloader:     opts.Downloader,
 		store:          opts.Store,
 		analyzer:       opts.Analyzer,
+		sessions:       opts.Sessions,
+		blocks:         opts.Blocks,
+		streamer:       opts.Streamer,
 		maxUploadBytes: maxBytes,
+		userQuotaBytes: quota,
+		chunkSizeBytes: chunkSize,
 		promotionWait:  wait,
 		promotionPoll:  poll,
 	}
 }
 
-// ServeHTTP dispatches the two routes. Registered by app/transport_artifacts.go
-// on every path server.ArtifactPaths() returns.
+// ServeHTTP dispatches the route family. Registered by
+// app/transport_artifacts.go on every path server.ArtifactPaths() returns
+// -- the session routes live UNDER the /artifacts prefix, so the same
+// Ingress rules and the same mux registrations carry them; PUT joined the
+// registration for the chunk route (memql#4782).
 func (h *ArtifactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
 	switch {
-	case r.Method == http.MethodPost && isArtifactCollectionPath(r.URL.Path):
-		h.handleUpload(w, r)
-	case r.Method == http.MethodGet:
-		h.handleContent(w, r)
+	case r.Method == http.MethodPost && isUploadInitPath(path):
+		h.handleUploadInit(w, r)
 	case r.Method == http.MethodPost:
+		if uploadId, ok := parseUploadCompletePath(path); ok {
+			h.handleUploadComplete(w, r, uploadId)
+			return
+		}
+		if isArtifactCollectionPath(path) {
+			h.handleUpload(w, r)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
+	case r.Method == http.MethodPut:
+		if uploadId, n, ok := parseUploadChunkPath(path); ok {
+			h.handleUploadChunk(w, r, uploadId, n)
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	case r.Method == http.MethodGet:
+		if uploadId, ok := parseUploadSessionPath(path); ok {
+			h.handleUploadInventory(w, r, uploadId)
+			return
+		}
+		h.handleContent(w, r)
 	default:
-		methodNotAllowed(w, r, http.MethodGet+", "+http.MethodPost)
+		methodNotAllowed(w, r, http.MethodGet+", "+http.MethodPost+", "+http.MethodPut)
 	}
 }
 
@@ -518,32 +582,19 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	workerId := strings.TrimSpace(r.FormValue(libraryFormWorkerIdKey))
 	workerName := strings.TrimSpace(r.FormValue(libraryFormWorkerNameKey))
 	fromPath := strings.TrimSpace(r.FormValue(libraryFormPathKey))
-	if (fromPath != "" || workerName != "") && workerId == "" {
-		// A path or a machine name with no machine ID is half a claim, and
-		// nothing can verify half a claim.
-		http.Error(w, fmt.Sprintf("%s and %s need %s: machine provenance is anchored on the registration id",
-			libraryFormPathKey, libraryFormWorkerNameKey, libraryFormWorkerIdKey), http.StatusBadRequest)
+	resolvedName, status, msg := h.verifyProvenance(ctx, workerId, workerName, fromPath)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
-	if workerId != "" {
-		ref, err := h.store.OwnedWorker(ctx, workerId)
-		if err != nil {
-			h.logger.Error("verify upload provenance", "error", err, "workerId", workerId)
-			http.Error(w, "provenance verification failed", http.StatusInternalServerError)
-			return
-		}
-		if ref == nil {
-			http.Error(w, fmt.Sprintf(
-				"the worker registration %q is not one of your machines, so the upload's provenance claim was refused",
-				workerId), http.StatusForbidden)
-			return
-		}
-		// The fleet's own label for the machine wins over whatever the form
-		// said: the inspector must never disagree with the fleet page about
-		// what a machine is called.
-		if resolved := strings.TrimSpace(ref.Name); resolved != "" {
-			workerName = resolved
-		}
+	workerName = resolvedName
+
+	// The quota (memql#4782, design C4): stored bytes plus open sessions'
+	// declared sizes plus THIS file. Checked before any byte reaches
+	// storage, like every other refusal on this path.
+	if status, msg := h.checkQuota(ctx, int64(len(data))); status != 0 {
+		http.Error(w, msg, status)
+		return
 	}
 
 	fileId := id.NewShortId()
@@ -710,7 +761,13 @@ func (h *ArtifactHandler) applyLabels(ctx context.Context, artifactId, raw strin
 func (h *ArtifactHandler) startAnalysis(userId, artifactId string, p LibraryFileCreateParams, data []byte) {
 	ctx := auth.ContextWithUserActor(context.Background(), userId)
 
-	if h.analyzer == nil || p.Format == libraryFormatOther {
+	// Opaque files short-circuit to ready -- EXCEPT when the hash is still
+	// absent (a chunked upload, memql#4782 D10): those go to the pass even
+	// though nothing is extractable, because the pass is what streams the
+	// committed blob once and stamps sha256. With no analyzer wired at all,
+	// ready-without-hash is the honest degraded state and the row says
+	// nothing false -- absent means "not measured".
+	if h.analyzer == nil || (p.Format == libraryFormatOther && p.Sha256 != "") {
 		// Opaque, or nothing to analyze with. Either way the file is as
 		// finished as it is going to get, and leaving it in `stored` would
 		// read as "analysis pending" forever.
@@ -798,6 +855,14 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 	}
 	if row == nil {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// The constant-memory path (memql#4782, design C5): stream, with
+	// Content-Length from the ROW, honouring a single-range Range. The
+	// buffered fallback below survives for nodes whose downloader cannot
+	// stream -- correct, just not constant-memory and Range-blind.
+	if h.streamer != nil {
+		h.streamFileBytes(w, r, row, sanitizeLibraryFileName(firstNonBlank(row.Name, artifact.Title)))
 		return
 	}
 	if h.downloader == nil {
@@ -1153,6 +1218,34 @@ func (s *EngineLibraryStore) CreateFile(ctx context.Context, p LibraryFileCreate
 // tolerant matching in OwnedWorker: the OS sends the bare id (the client
 // contract), while a materialized row's id is canonical.
 const libraryWorkerConcept = "v1:worker:registration"
+
+// StorageFootprint sums the caller's stored file bytes and open-session
+// declared bytes through the two unbounded quota reads (memql#4782). Both
+// run under the caller's actor; both are @unbounded in the DSL precisely so
+// this sum cannot silently undercount past a page boundary and fail the
+// quota open.
+func (s *EngineLibraryStore) StorageFootprint(ctx context.Context) (int64, int64, error) {
+	sum := func(fn string) (int64, error) {
+		res, err := s.exec(ctx, fn, nil)
+		if err != nil {
+			return 0, err
+		}
+		var total int64
+		for _, r := range memql.MaterializeRows(res) {
+			total += int64(rowInt(r, "size"))
+		}
+		return total, nil
+	}
+	fileBytes, err := sum("libraryFileSizesForOwner")
+	if err != nil {
+		return 0, 0, err
+	}
+	sessionBytes, err := sum("openUploadSessionsForOwner")
+	if err != nil {
+		return 0, 0, err
+	}
+	return fileBytes, sessionBytes, nil
+}
 
 // OwnedWorker resolves a registration in the caller's own fleet through
 // myWorkersWithStatus -- the SAME read the fleet router runs, chosen over a

@@ -165,7 +165,7 @@ func (s *libStub) Execute(ctx context.Context, query string) (*memql.ExecuteResu
 		// written, so a stub that wrote zero values for the missing ones
 		// could not catch a pass that blanks a summary on its way to
 		// `ready`.
-		for _, key := range []string{"status", "summary", "embeddingStatus", "failureReason"} {
+		for _, key := range []string{"status", "summary", "embeddingStatus", "failureReason", "sha256"} {
 			if v, present := args[key]; present {
 				row[key] = v
 			}

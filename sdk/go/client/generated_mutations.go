@@ -4566,11 +4566,13 @@ func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
 	}
 	b.WriteString("size: ")
 	b.WriteString(fmt.Sprintf("%v", args.Size))
-	if b.Len() > 27 {
-		b.WriteString(", ")
+	if args.Sha256 != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sha256: ")
+		b.WriteString(quoteMemQL(args.Sha256))
 	}
-	b.WriteString("sha256: ")
-	b.WriteString(quoteMemQL(args.Sha256))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -13389,6 +13391,7 @@ type SetLibraryFileStatusArgs struct {
 	// Enum: none | partial | complete
 	EmbeddingStatus string
 	FailureReason   string
+	Sha256          string
 }
 
 // SetLibraryFileStatus calls the engine mutation setLibraryFileStatus.
@@ -13427,6 +13430,13 @@ func SetLibraryFileStatusBuild(args SetLibraryFileStatusArgs) string {
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(quoteMemQL(args.FailureReason))
+	}
+	if args.Sha256 != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sha256: ")
+		b.WriteString(quoteMemQL(args.Sha256))
 	}
 	b.WriteString(")")
 	return b.String()
