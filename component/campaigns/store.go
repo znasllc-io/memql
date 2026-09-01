@@ -141,7 +141,52 @@ type Campaign struct {
 	// (memql#3459). The job row carries a copy for the operator to look at;
 	// this is the one the worker compares against the clock.
 	ScheduledAt time.Time
+
+	// SenderIdentityID names the mailbox this campaign sends AS
+	// (memql#4821). Empty is the ordinary case and means the env-configured
+	// default -- which is exactly what every campaign did before identities
+	// existed, so plurality is additive. The engine NEVER infers it from
+	// AccountID: the app prefills the picker from the account's identities,
+	// and prefill is UX while resolution is explicit (design D4).
+	SenderIdentityID string
+
+	// AccountID is the client this campaign is FOR. A record, never a
+	// visibility scope (accounts D1). It reaches the send path for exactly
+	// one reason: {{accountName}} (design D10).
+	AccountID string
+
+	// TrackOpens and TrackClicks decide whether the HTML part carries a
+	// pixel and rewritten links (memql#4823).
+	//
+	// Read with a TRUE default rather than off the raw row, and that is
+	// load-bearing. The concept declares @default("true"), and a concept
+	// @default is never applied on insert -- so every campaign row written
+	// before these fields existed, and every one written by a client that
+	// omits them, carries no value at all. Reading a missing key as `false`
+	// would silently turn tracking off for the whole existing corpus while
+	// the schema said it was on.
+	TrackOpens  bool
+	TrackClicks bool
 }
+
+// SenderIdentity is a declared sending mailbox (memql#4821). No secret
+// material: authentication stays the cluster's one credential, and this row
+// is the operator's statement that the mailbox exists and may be used.
+type SenderIdentity struct {
+	ID          string
+	OwnerUserID string
+	Address     string
+	FromName    string
+	ReplyTo     string
+	AccountID   string
+	Status      string
+	Notes       string
+}
+
+// Disabled reports whether this identity has been retired. Retiring is a
+// status flip and never a delete, because past campaigns name the row and
+// the reputation history is keyed on its address.
+func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
@@ -258,7 +303,59 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 		ReplyTo:     str(r, "replyTo"),
 		Status:      str(r, "status"),
 		ScheduledAt: parseTime(str(r, "scheduledAt")),
+
+		SenderIdentityID: bare(str(r, "senderIdentityId")),
+		AccountID:        bare(str(r, "accountId")),
+		TrackOpens:       booleanOr(r, "trackOpens", true),
+		TrackClicks:      booleanOr(r, "trackClicks", true),
 	}, true, nil
+}
+
+// SenderIdentityByID reads one sending identity. COMPOSITE tier
+// (owner-or-cluster-owner), and the send path issues it under the CAMPAIGN
+// OWNER'S borrowed actor -- so an identity the owner cannot read is an
+// identity the send refuses to use, which is the same answer as it not
+// existing. That equivalence is deliberate: the alternative is a send path
+// that can reach a mailbox declaration its own operator cannot see.
+func (s *Store) SenderIdentityByID(ctx context.Context, senderIdentityID string) (SenderIdentity, bool, error) {
+	rows, err := s.rows(ctx, call("query", "senderIdentityById", arg{"senderIdentityId", senderIdentityID}))
+	if err != nil || len(rows) == 0 {
+		return SenderIdentity{}, false, err
+	}
+	r := rows[0]
+	return SenderIdentity{
+		ID:          bare(str(r, "id")),
+		OwnerUserID: bare(str(r, "ownerUserId")),
+		Address:     str(r, "address"),
+		FromName:    str(r, "fromName"),
+		ReplyTo:     str(r, "replyTo"),
+		AccountID:   bare(str(r, "accountId")),
+		// No @default is applied on insert, so an identity row written
+		// without a status is ACTIVE -- the value the schema promises. The
+		// alternative reading, "unknown means disabled", would refuse every
+		// campaign naming an identity created through a path that omitted
+		// the field, and the refusal is terminal.
+		Status: strOr(r, "status", "active"),
+		Notes:  str(r, "notes"),
+	}, true, nil
+}
+
+// AccountName resolves one account's display name. COMPOSITE tier, issued
+// under the campaign owner's actor.
+//
+// Its ONLY caller is the {{accountName}} merge tag (design D10), and it
+// returns "" rather than an error for an account that does not resolve. That
+// is the tag's documented behaviour -- an untied campaign renders it empty --
+// and it means a client the operator archived cannot stop a send.
+func (s *Store) AccountName(ctx context.Context, accountID string) (string, error) {
+	if strings.TrimSpace(accountID) == "" {
+		return "", nil
+	}
+	rows, err := s.rows(ctx, call("query", "clientAccountById", arg{"accountId", accountID}))
+	if err != nil || len(rows) == 0 {
+		return "", err
+	}
+	return str(rows[0], "name"), nil
 }
 
 // ScheduledJobs returns every send job still waiting for its time, oldest
@@ -877,6 +974,48 @@ func boolean(m map[string]any, key string) bool {
 	default:
 		return false
 	}
+}
+
+// booleanOr reads a boolean that has a NON-FALSE default, which `boolean`
+// structurally cannot express.
+//
+// A concept-level @default is never applied on insert (authoring rules), so a
+// field declared @default("true") is simply ABSENT from every row written
+// before it existed and from every write that omits it. `boolean` collapses
+// absent and false into one answer, and for trackOpens / trackClicks the two
+// are opposite: absent means the documented default (on), false means an
+// operator turned it off. Reading absent as false would silently disable
+// tracking across the whole existing corpus while the schema still said it
+// was enabled -- the memql#4823 shape of "a declared default nothing writes".
+func booleanOr(m map[string]any, key string, fallback bool) bool {
+	v, present := m[key]
+	if !present || v == nil {
+		return fallback
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.TrimSpace(strings.ToLower(t)) {
+		case "true":
+			return true
+		case "false":
+			return false
+		default:
+			return fallback
+		}
+	default:
+		return fallback
+	}
+}
+
+// strOr is the string twin of booleanOr, for a field whose absence means a
+// value other than the empty string.
+func strOr(m map[string]any, key, fallback string) string {
+	if v := strings.TrimSpace(str(m, key)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // bare normalizes a stored canonical id to the short form.

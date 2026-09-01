@@ -208,6 +208,17 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign) 
 		return "no email sender is registered on this node, so the scheduled send cannot leave; it will retry", false
 	}
 
+	// The identity, re-read (memql#4821). This is the check the whole
+	// fire-time preflight exists for, applied to the newest thing it can
+	// refuse: the operator picked a mailbox when they committed to the time,
+	// and a mailbox can be retired in the hours since. identity.go's own
+	// split lines up exactly with this function's -- a missing or disabled
+	// row is AUTHORING and terminal, a failed read is ENVIRONMENT and waits
+	// -- so the classification is carried through rather than re-decided.
+	if _, refusal := w.resolveSendIdentity(ownerCtx, campaign); refusal.refused() {
+		return refusal.Reason, refusal.Terminal
+	}
+
 	tmpl, found, err := w.store.TemplateByID(ownerCtx, campaign.TemplateID)
 	if err != nil {
 		return "could not read the template: " + err.Error(), false

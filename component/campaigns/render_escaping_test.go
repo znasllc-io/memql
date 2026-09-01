@@ -25,7 +25,7 @@ func renderFixture(displayName string) (text string, html string) {
 		HTMLBody: "<p>Hi {{displayName}}, welcome.</p>",
 	}
 	r := Recipient{ID: "r1", Email: "someone@example.com", DisplayName: displayName}
-	msg, err := renderMessage(c, t, r, "https://example.com/unsubscribe?token=abc")
+	msg, err := renderMessage(c, t, r, "https://example.com/unsubscribe?token=abc", RenderOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -83,7 +83,7 @@ func TestFooterNeutralisesAJavascriptURL(t *testing.T) {
 	tpl := Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: "<p>body</p>"}
 	r := Recipient{ID: "r1", Email: "a@example.com", DisplayName: "Ada"}
 
-	msg, err := renderMessage(c, tpl, r, "javascript:alert(1)")
+	msg, err := renderMessage(c, tpl, r, "javascript:alert(1)", RenderOptions{})
 	if err != nil {
 		t.Fatalf("renderMessage: %v", err)
 	}

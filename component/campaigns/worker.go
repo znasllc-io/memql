@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,7 +109,7 @@ type Worker struct {
 	cfg      Config
 	limiter  *rateLimiter
 	now      func() time.Time
-	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
+	sendHook func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
 
 	// shopifyConfigured is the #4140 "catalog in play" half. Tests inject
 	// it; production leaves it nil and asks whether a v1:shopify:store row
@@ -122,6 +123,14 @@ type Worker struct {
 	// warmupEvaluatedAt bounds how often the ramp re-reads the evidence.
 	// Guarded by mu.
 	warmupEvaluatedAt time.Time
+	// activeIdentities is every sending identity this process has actually
+	// mailed as (memql#4821). The warming ramp evaluates one state row per
+	// entry, so a deployment sending from three mailboxes ramps three
+	// ladders instead of one -- which is what warmupStateForIdentity's name
+	// promised while there was only ever one member. Guarded by mu; nil
+	// until the first send, and the ramp seeds the configured default so a
+	// deployment that has sent nothing still has a ladder to start.
+	activeIdentities map[string]bool
 
 	cancel      context.CancelFunc
 	running     atomic.Bool
@@ -473,6 +482,32 @@ func (w *Worker) sendBatch(
 		w.failJob(systemCtx, *job, reason)
 		return errors.New(reason)
 	}
+
+	// THE IMMEDIATE-START WINDOW (memql#4821). campaignStartSend resolved the
+	// identity when the operator pressed the button and then enqueued a job;
+	// nothing between that moment and this one re-reads it, and the scheduled
+	// path's fire-time check does not run on a job that was never scheduled.
+	// So this is the only place covering "the identity was disabled while the
+	// job sat in the queue" for a send started by hand.
+	//
+	// The refusal obeys the environment-versus-authoring split identity.go
+	// states: an authoring problem fails the job, because retrying cannot fix
+	// it and a job that spins forever tells the operator nothing; an
+	// environment problem leaves the job alone with the reason stamped on the
+	// campaign row, so a slow engine on one tick does not destroy a send.
+	identity, refusal := w.resolveSendIdentity(ownerCtx, campaign)
+	if refusal.refused() {
+		if refusal.Terminal {
+			w.failJob(systemCtx, *job, refusal.Reason)
+			w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
+			return errors.New(refusal.Reason)
+		}
+		w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
+		w.logger.Warn("campaigns worker: cannot resolve the campaign's sending identity yet; will retry",
+			"job", job.ID, "campaign", campaign.ID, "reason", refusal.Reason)
+		return errors.New(refusal.Reason)
+	}
+
 	if job.StartedAt.IsZero() {
 		started := w.nowUTC()
 		running := "running"
@@ -503,7 +538,7 @@ func (w *Worker) sendBatch(
 		if !w.limiter.Allow() {
 			return nil
 		}
-		stop, err := w.processRecipient(ctx, systemCtx, ownerCtx, job, campaign, tmpl, item)
+		stop, err := w.processRecipient(ctx, systemCtx, ownerCtx, job, campaign, tmpl, identity, item)
 		if err != nil {
 			return err
 		}
@@ -522,6 +557,7 @@ func (w *Worker) processRecipient(
 	job *SendJob,
 	campaign Campaign,
 	tmpl Template,
+	identity resolvedIdentity,
 	item batchItem,
 ) (bool, error) {
 	r := item.recipient
@@ -576,7 +612,7 @@ func (w *Worker) processRecipient(
 		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token))
+	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity))
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
@@ -585,7 +621,7 @@ func (w *Worker) processRecipient(
 	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
-	err = w.deliver(sendCtx, msg)
+	err = w.deliver(sendCtx, msg, identity.SendAs)
 	cancel()
 
 	attempts := item.attempts + 1
@@ -593,8 +629,11 @@ func (w *Worker) processRecipient(
 		job.SentCount++
 		w.sentTotal.Add(1)
 		// `accepted`, not `delivered`: the transport took it, and whether it
-		// lands is what the feedback path reports later (memql#3462).
-		w.reputation.observe(now, r.Email, "accepted")
+		// lands is what the feedback path reports later (memql#3462). Keyed on
+		// the RESOLVED identity since memql#4821, which is what finally gives
+		// reputationWindow.sendingIdentity more than one possible value.
+		w.reputation.observeAs(now, identity.Label, r.Email, "accepted")
+		w.noteActiveIdentity(identity.Label)
 		if derr := w.store.RecordDelivery(ownerCtx, Delivery{
 			CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 			Status: "sent", SentAt: now, Attempts: attempts,
@@ -648,15 +687,36 @@ func (w *Worker) processRecipient(
 	return false, nil
 }
 
-func (w *Worker) deliver(ctx context.Context, msg email.Message) error {
+// deliver hands one message to the transport as the resolved identity.
+//
+// `as` is a PARAMETER rather than a header on the message, and that placement
+// is the SPF/DKIM argument made structural (design D5): Message stays
+// From-less and the renderer still refuses a caller-supplied From, so the
+// only thing that can name a sending mailbox is a senderIdentity row the
+// operator declared. A zero-valued SendAs means the configured default, which
+// is what every campaign sent before identities existed.
+func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs) error {
 	sender := w.resolveSender()
 	if sender == nil {
 		return errors.New("campaigns: no email sender registered")
 	}
 	if w.sendHook != nil {
-		return w.sendHook(ctx, sender, msg)
+		return w.sendHook(ctx, sender, msg, as)
 	}
-	return sender.Send(ctx, msg, email.SendAs{})
+	return sender.Send(ctx, msg, as)
+}
+
+// renderOptions assembles everything one rendered message needs beyond the
+// campaign / template / recipient triple.
+//
+// It runs under the OWNER's context because the one read it makes -- the
+// account's display name for {{accountName}} -- is composite-tier and belongs
+// to the campaign's owner. A failure there is deliberately not an error: an
+// account that does not resolve renders the tag empty, which is the tag's
+// documented behaviour for an untied campaign, and an archived client must
+// not be able to stop a send.
+func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity) RenderOptions {
+	return RenderOptions{ReplyTo: replyToFor(campaign, identity)}
 }
 
 // nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests
@@ -695,6 +755,41 @@ func (w *Worker) recordFailed(ownerCtx context.Context, job *SendJob, campaignID
 		Status: "failed", Attempts: attempts, LastError: detail,
 	}); err != nil {
 		w.logger.Warn("campaigns worker: could not record a failed delivery", "error", err)
+	}
+}
+
+// noteActiveIdentity records that this process has mailed as one identity, so
+// the warming ramp knows there is a ladder to evaluate for it.
+//
+// Process-local and deliberately not persisted. The ramp's own state rows are
+// the durable record; this set only decides which of them THIS replica
+// re-evaluates on its next pass, and a replica that has sent nothing has
+// nothing to re-evaluate beyond the configured default.
+func (w *Worker) noteActiveIdentity(label string) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.activeIdentities == nil {
+		w.activeIdentities = map[string]bool{}
+	}
+	w.activeIdentities[label] = true
+}
+
+// stampCampaignError puts a send-level refusal where the operator reads it.
+//
+// The same reasoning refuseScheduledSend records: a reason that lives only in
+// a node log recreates the silence these features exist to remove. It writes
+// lastError and NOTHING else -- in particular not a status -- so an
+// environment refusal leaves the campaign exactly as it was, still sending,
+// with an explanation attached.
+func (w *Worker) stampCampaignError(ownerCtx context.Context, campaignID, reason string) {
+	detail := truncateError(reason)
+	if err := w.store.UpdateCampaignProgress(ownerCtx, campaignID, CampaignProgress{LastError: &detail}); err != nil {
+		w.logger.Warn("campaigns worker: could not record a send-level refusal on the campaign",
+			"campaign", campaignID, "error", err)
 	}
 }
 

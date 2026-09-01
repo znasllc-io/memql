@@ -78,6 +78,18 @@ type fakeEngine struct {
 	// catalog is in play at all.
 	shopifyStores []map[string]any
 
+	// senderIdentities backs senderIdentityById (memql#4821), keyed by BARE
+	// id -- the form the campaign row's senderIdentityId is bare-ified to
+	// before it becomes a query argument.
+	senderIdentities map[string]map[string]any
+	// identityReadErr makes senderIdentityById FAIL rather than answer
+	// empty. The two are different outcomes and the difference is the whole
+	// environment-versus-authoring split: an empty answer is an authoring
+	// mistake and terminal, a failure is the cluster's and waits.
+	identityReadErr error
+	// accounts backs clientAccountById, keyed by bare id.
+	accounts map[string]map[string]any
+
 	calls []recordedCall
 }
 
@@ -127,6 +139,19 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(e.shopifyProducts), nil
 	case strings.HasPrefix(q, "query stores"):
 		return rowsEnvelope(e.shopifyStores), nil
+	case strings.HasPrefix(q, "query senderIdentityById"):
+		if e.identityReadErr != nil {
+			return nil, e.identityReadErr
+		}
+		if row, ok := e.senderIdentities[argOf(q, "senderIdentityId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query clientAccountById"):
+		if row, ok := e.accounts[argOf(q, "accountId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	default:
 		return nil, nil
 	}
@@ -337,6 +362,18 @@ func recipientRow(id, addr, status string) map[string]any {
 		"id":                 "v1:campaigns:recipient:" + id,
 		"email":              addr,
 		"subscriptionStatus": status,
+	}
+}
+
+// senderIdentityRow is one v1:campaigns:senderIdentity as the engine hands it
+// back (memql#4821).
+func senderIdentityRow(id, address, fromName, status string) map[string]any {
+	return map[string]any{
+		"id":          "v1:campaigns:senderIdentity:" + id,
+		"ownerUserId": "v1:identity:user:" + testOwner,
+		"address":     address,
+		"fromName":    fromName,
+		"status":      status,
 	}
 }
 

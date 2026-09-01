@@ -88,9 +88,30 @@ func newReputationCollector(identity, nodeID string) *reputationCollector {
 	}
 }
 
-// observe adds one event for an address's domain. Called on the send path
-// (accepted) and from the feedback path (the three verdicts).
+// observe adds one event for an address's domain under this collector's
+// DEFAULT identity. The feedback path uses it: a provider's bounce report
+// names an address and a verdict and says nothing about which mailbox sent
+// the original message, so attributing it to a specific identity would be an
+// invention.
 func (c *reputationCollector) observe(now time.Time, addr, field string) {
+	if c == nil {
+		return
+	}
+	c.observeAs(now, c.identity, addr, field)
+}
+
+// observeAs adds one event under a NAMED sending identity (memql#4821).
+//
+// The send path uses it, because the send path is the one place that knows
+// which mailbox a message actually left from. Before identities the key was
+// always the deployment's single label, so `sendingIdentity` was a dimension
+// with one member and the per-identity warmup read was a per-identity read of
+// a singular world.
+//
+// An empty identity falls back to the collector's default rather than opening
+// a bucket named "". A counter row keyed on nothing is evidence nobody can
+// find again, and the fallback is exactly what an unnamed identity means.
+func (c *reputationCollector) observeAs(now time.Time, identity, addr, field string) {
 	if c == nil {
 		return
 	}
@@ -98,7 +119,11 @@ func (c *reputationCollector) observe(now time.Time, addr, field string) {
 	if domain == "" {
 		return
 	}
-	key := reputationKey{identity: c.identity, domain: domain, day: now.UTC().Format(time.DateOnly)}
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		identity = c.identity
+	}
+	key := reputationKey{identity: identity, domain: domain, day: now.UTC().Format(time.DateOnly)}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

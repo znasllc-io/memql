@@ -388,10 +388,48 @@ func LoadConfig() Config {
 	return cfg
 }
 
+// SendingIdentityFor is the reputation and warmup key for ONE send
+// (memql#4821, design D8).
+//
+// This is where identity plurality actually arrives. `SendingIdentity` above
+// is the deployment's default label and was, until identities existed, the
+// only value any counter row ever carried -- so `reputationWindow` and
+// `warmupState` were keyed on a dimension with exactly one member, and
+// `warmupStateForIdentity` was a per-identity read of a single-identity
+// world. Passing the RESOLVED address here is what makes those rows mean
+// what their field names say.
+//
+// Normalized through NormalizeEmail, so two spellings of one mailbox cannot
+// split its ramp in half -- a warming ladder counted twice under
+// `News@acme.com` and `news@acme.com` advances neither. An address that does
+// not normalize (an identity row with something unusable in it) falls back to
+// the deployment label rather than becoming a key of its own: a counter
+// bucket named after a malformed value is evidence nobody can find again.
+//
+// Suppression is deliberately NOT keyed this way and stays cluster-wide (P8).
+// One deployment sends from one tenant and shares one reputation with the
+// mailbox providers; a per-identity suppression list would let an address that
+// hard-bounced on one identity be mailed from the next, which is precisely
+// what a shared reputation punishes.
+func (c Config) SendingIdentityFor(address string) string {
+	if normalized := NormalizeEmail(address); normalized != "" {
+		return normalized
+	}
+	if fallback := strings.TrimSpace(c.SendingIdentity); fallback != "" {
+		return fallback
+	}
+	return derivedSendingIdentity()
+}
+
 // derivedSendingIdentity labels the counters with the mailbox they are about,
 // without the operator having to say it twice. The campaign path never picks
-// the From address -- the sender does, from its own credential -- so this
-// reads the same variables the sender reads.
+// the From address from ENV -- the sender does, from its own credential -- so
+// this reads the same variables the sender reads.
+//
+// Since memql#4821 this is the FALLBACK rather than the whole answer: a
+// campaign that names a senderIdentity keys its counters on that identity's
+// address (SendingIdentityFor above), and this value is what a campaign
+// sending from the deployment's one configured mailbox still keys on.
 func derivedSendingIdentity() string {
 	for _, name := range []string{"MEMQL_EMAIL_SENDER", "MAIL_SENDER", "SMTP_FROM_ADDR"} {
 		if v := strings.TrimSpace(os.Getenv(name)); v != "" {

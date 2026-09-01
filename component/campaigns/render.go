@@ -19,24 +19,43 @@ import (
 // relay (Microsoft Graph, or whatever SMTP endpoint is configured) signs
 // with the keys published for the mailbox it authenticated as. What MemQL
 // CAN guarantee is that it never sets a From address the relay did not
-// authenticate as, and it does:
+// authenticate as, and it still does -- but the mechanism CHANGED in
+// memql#4821 and the old statement of it is no longer true, so it is
+// restated exactly:
 //
-//   - the From ADDRESS always comes from the configured sender credential
-//     (MEMQL_EMAIL_SENDER / SMTP_FROM_ADDR), inside the sender
-//     implementation, and is not a parameter of this package;
-//   - v1:campaigns:campaign deliberately has no from-address field. It has
-//     `fromName`, which is the DISPLAY NAME only, and the field doc says
-//     why: the address is bound to the credential and changing it is a
-//     deliverability decision rather than a campaign one;
-//   - `Reply-To` is settable per campaign, and that is the correct escape
-//     valve -- it steers replies without touching the authenticated
-//     identity, so it cannot break alignment.
+//   - The From ADDRESS is never CALLER-SETTABLE. That is the invariant, and
+//     it survives untouched: `integrations/email.Message` has no From field,
+//     the MIME renderer refuses a caller-supplied `From:` header outright,
+//     and no argument to this package's builtins can name one.
+//   - It is NO LONGER true that the address "is not a parameter of this
+//     package". Since sending identities exist, the address is chosen HERE,
+//     from a `v1:campaigns:senderIdentity` row an operator declared and the
+//     campaign explicitly points at -- resolved in identity.go, carried to
+//     the transport as `email.SendAs` beside the message, never inside it.
+//     The distinction that matters is authored-versus-arbitrary, not
+//     present-versus-absent: an identity is a mailbox somebody wrote down in
+//     the graph, not free text a request supplied.
+//   - The SENDER IMPLEMENTATION still owns the header. This package hands
+//     over a mailbox and a display name; Graph builds `/users/{address}/
+//     sendMail` and stamps From from it, SMTP refuses a non-default identity
+//     because AUTH is bound to one mailbox, and nothing here writes a header
+//     line. So the escaping and injection barrier stays in one place.
+//   - `fromName` is the DISPLAY NAME only and reaches the header for the
+//     first time in memql#4821 (design D6): campaign override, else the
+//     identity's, else the transport's own default. It cannot affect
+//     alignment, which is a property of the address.
+//   - `Reply-To` is settable per campaign and now also per identity, and
+//     that is still the correct escape valve -- it steers replies without
+//     touching the authenticated identity.
 //
-// So there is no "alignment check" to run. The only way to misalign this
-// sender is to publish SPF/DKIM records that do not cover the configured
-// mailbox, which is a DNS task on the operator's side. It is written down
-// in docs/public/operate/campaign-sending.md rather than pretended away
-// with a preflight that could only ever guess.
+// So there is still no "alignment check" to run, and there is now a second
+// way to misalign that an operator owns: declaring an identity whose mailbox
+// the Graph application may not send as. No engine preflight can verify that
+// -- it is Exchange ApplicationAccessPolicy state in the operator's tenant --
+// and the honest check is the provider's own 403 landing on the campaign's
+// lastError. Both that and the DNS half are written down in
+// docs/public/operate/campaign-sending.md rather than pretended away with a
+// preflight that could only ever guess.
 //
 // # The unsubscribe surface is TWO things, and both are required
 //
@@ -80,6 +99,22 @@ const (
 // segment (memql#3128).
 const UnsubscribePath = "/unsubscribe"
 
+// RenderOptions carries what a rendered message needs beyond the campaign,
+// template and recipient rows.
+//
+// A struct rather than more positional parameters because every field here is
+// OPTIONAL in the honest sense -- the zero value renders exactly what this
+// package rendered before any of them existed -- and because the alternative
+// grows a five-argument function into an eight-argument one whose call sites
+// nobody can read.
+type RenderOptions struct {
+	// ReplyTo is the resolved Reply-To for this send: the campaign's own
+	// value, else the sending identity's default (memql#4821). Empty falls
+	// back to the campaign row's field, which is what a caller passing a
+	// zero-valued RenderOptions means.
+	ReplyTo string
+}
+
 // renderMessage builds the outgoing message for one recipient.
 //
 // Personalization is exactly ONE substitution: `{{displayName}}`, falling
@@ -88,7 +123,7 @@ const UnsubscribePath = "/unsubscribe"
 // an expression evaluator in that position is an injection surface with a
 // mailing list attached. A single named placeholder covers the one case
 // (a greeting) that actually recurs.
-func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) (email.Message, error) {
+func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string, opts RenderOptions) (email.Message, error) {
 	name := strings.TrimSpace(r.DisplayName)
 	if name == "" {
 		if at := strings.Index(r.Email, "@"); at > 0 {
@@ -140,8 +175,17 @@ func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) (
 		}
 		msg.HTMLBody = substHTML.Replace(t.HTMLBody) + footer
 	}
-	if strings.TrimSpace(c.ReplyTo) != "" {
-		msg.Headers["Reply-To"] = strings.TrimSpace(c.ReplyTo)
+	// The campaign's own Reply-To wins over the identity's default, and
+	// RenderOptions carries the already-resolved answer. The fall-back to
+	// c.ReplyTo is for a caller passing zero options -- a test, or a path
+	// with no identity in scope -- and keeps that caller's behaviour exactly
+	// what it was.
+	replyTo := strings.TrimSpace(opts.ReplyTo)
+	if replyTo == "" {
+		replyTo = strings.TrimSpace(c.ReplyTo)
+	}
+	if replyTo != "" {
+		msg.Headers["Reply-To"] = replyTo
 	}
 	return msg, nil
 }

@@ -314,6 +314,18 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
 	}
 
+	// THE IDENTITY, before anything else about the content (memql#4821).
+	// Refusing at the button is the whole point of a preflight, and this is
+	// the refusal an operator is most likely to hit while looking at the
+	// screen: they picked a mailbox, somebody retired it, and the campaign
+	// still names it. Both arms are an error here -- unlike at fire time,
+	// where an unreadable identity waits -- because a caller pressing the
+	// button is owed an answer now rather than a queued job that may or may
+	// not resolve later.
+	if _, refusal := w.resolveSendIdentity(ctx, campaign); refusal.refused() {
+		return 0, fmt.Errorf("campaigns.%s: %s", op, refusal.Reason)
+	}
+
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
 	if err != nil {
 		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
