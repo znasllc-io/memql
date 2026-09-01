@@ -272,6 +272,107 @@ query site siteById {
   shape   siteFull
 }
 
+// ---- Custom domains (epic memql#4805) ----
+//
+// v1:platform:customDomain is clusterOwner tier, so every read below states
+// `actor.isClusterOwner==true` as a top-level conjunct on top of the declared
+// tier -- what TestRowAuthzEnforcementLandGate requires of an authored query
+// over a tier-declaring concept, and what the edge's synthetic operator actor
+// and the sweep's own satisfy rather than work around.
+//
+// THE EDGE READ IS THE ONE TO BE CAREFUL WITH. `liveCustomDomainByHostname` is
+// what turns a client's own Host header into one of this cluster's sites, so it
+// filters on `status=="live"` and nothing looser: a `pending_dns` row is a
+// hostname somebody typed into a form, and resolving it would let anyone serve
+// a site at any name they could spell. The removal path is covered by the same
+// conjunct -- `removing` and `removed` both stop resolving the moment the
+// status is written, before the Ingress is anywhere near gone.
+
+/// Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one
+/// extra resolution step, asked only after siteByHostname misses.
+///
+/// `status=="live"` is the whole security property of this read. A row reaches `live` only after
+/// both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one
+/// whose owner proved control of the name and whose traffic this cluster can actually terminate
+/// TLS for. Every other status resolves to nothing, which is why a removal takes effect at the
+/// speed of a row write rather than at the speed of an Ingress deletion.
+@cache(30)
+@unbounded("live custom domain by hostname -- bounded to a single row (hostname is cluster-unique)")
+@actor
+query customDomain liveCustomDomainByHostname {
+  args {
+    hostname  string!
+  }
+  filter  hostname==args.hostname && status=="live" && actor.isClusterOwner==true
+  shape   customDomainFull
+}
+
+/// Every custom domain bound to one deployable, including removed ones. What the Domains panel
+/// lists.
+///
+/// REMOVED ROWS ARE INCLUDED DELIBERATELY. The concept's rows survive removal because the history
+/// is the audit, and a list that hid them would make "we un-bound acme.com last Tuesday" a fact
+/// only the database remembers. The panel renders a removed row with its terminal status rather
+/// than dropping it, so the walk somebody watched stays where they watched it.
+@actor
+query customDomain customDomainsForSite {
+  args {
+    siteId  string!
+  }
+  filter    siteId==args.siteId && actor.isClusterOwner==true
+  sort      "hostname", "asc"
+  paginate  100
+  shape     customDomainFull
+}
+
+/// Every custom domain this cluster knows about. The sweep's read, and the panel's live seed.
+///
+/// NO STATUS FILTER, and that is what makes it usable as a live collection's seed: a subscription
+/// delivers every row the concept writes, so a seed narrowed to non-terminal rows would give the
+/// browser a list that grows a `live` row the first time one is touched and never has one on load.
+/// The sweep does its own narrowing in Go, over a set this small enough to be honest about -- one
+/// row per bound hostname, not per request.
+@actor
+query customDomain customDomainsAll {
+  filter    actor.isClusterOwner==true
+  sort      "hostname", "asc"
+  paginate  200
+  shape     customDomainFull
+}
+
+/// Every binding the reconciliation sweep still has work for: everything but `live` and `removed`.
+///
+/// UNPAGINATED, DELIBERATELY, and the narrowing is what makes that defensible. `customDomainsAll`
+/// carries a page size because it backs a list somebody scrolls; a SWEEP that read a page would
+/// silently never reconcile the bindings past it, and the symptom is a domain that verifies for
+/// nobody with nothing in any log to say why. The set here is bounded by how many domains are in
+/// flight at once -- a cluster can serve five hundred and have none of them here -- rather than by
+/// how many it has ever bound.
+///
+/// The two settled statuses are excluded rather than filtered out in Go, so a pass over a cluster
+/// with nothing happening does no DNS lookups and reads almost nothing.
+/// NO `sort`, and the parser is right to insist: a sorted query is a bounded one, and this read is
+/// deliberately unbounded. Order costs nothing here either -- the sweep advances each binding
+/// independently, so no row's outcome depends on which was looked at first.
+@unbounded("custom domains awaiting reconciliation -- an internal sweep that must see all of them, bounded by how many are in flight rather than by how many exist")
+@actor
+query customDomain customDomainsToReconcile {
+  filter  status in ["pending_dns", "verifying", "issuing", "removing"] && actor.isClusterOwner==true
+  shape   customDomainFull
+}
+
+/// One custom domain by its own row id -- the seam the sweep re-reads through and the panel's
+/// gap-recovery read.
+@unbounded("custom domain by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query customDomain customDomainById {
+  args {
+    domainId  string!
+  }
+  filter  row.id==args.domainId && actor.isClusterOwner==true
+  shape   customDomainFull
+}
+
 // ---- The sync runtime's reads (epic memql#4378) ----
 //
 // Every one of these is cluster-owner gated by its concept's declared

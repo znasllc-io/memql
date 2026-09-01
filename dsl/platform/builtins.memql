@@ -26,3 +26,41 @@ builtin sitePublishFromArtifact {
   siteId      string!  @description("The v1:platform:site row to publish to.")
   artifactId  string!  @description("The v1:library:artifact index row of the zip to deploy.")
 }
+
+// ---- Custom domains (epic memql#4805) ----
+//
+// Two capabilities and a sweep. The split between them is the same one
+// sitePublishFromArtifact already draws: a write MemQL cannot express reaches
+// the graph through a builtin, and everything the graph CAN express stays a
+// mutation.
+//
+// AUTHORIZATION IS NOT IN THESE DECLARATIONS. v1:platform:customDomain declares
+// @rowAuthz(clusterOwner), so every read and write below runs against that tier
+// under the CALLER's actor -- an admin who is not a cluster owner resolves zero
+// rows and is refused by name. Design D1 is deliberate about the scope: v1
+// automates what was already owner territory rather than widening it, because
+// certificate issuance and Ingress objects are cluster-level resources with
+// real rate limits.
+
+/// The reachable half of creating a binding: mint the ownership token, prefill the account tie, and
+/// write the row. `createCustomDomain` itself is @serverOnly precisely so this is the only way in --
+/// a caller who chooses their own verification token proves nothing by publishing it.
+@sdk
+@executor("integration.customDomain.add")
+@args(profile="object")
+@description("Bind a client's own domain to one of this cluster's deployables (epic memql#4805). Mints the ownership token the client publishes at TXT _memql-verify.<hostname>, prefills the account tie from the site when one exists, and lands the row `pending_dns`. Three guards refuse before anything is written: a hostname under the cluster's own domain (that is <slug>.<domain> territory and createSite owns it), a collision with a front-door host or an existing site or binding, and a claim past MEMQL_CUSTOM_DOMAIN_MAX_PER_SITE. Nothing is issued until BOTH DNS checks pass -- Let's Encrypt rate limits are real, and a domain that merely points at this cluster must not be claimable by whoever asks first. Returns {domainId, hostname, siteId, token, status, verifyRecordName, pointsToTarget, pointsToKind}.")
+builtin customDomainAdd {
+  siteId    string!  @description("The v1:platform:site row this domain should serve.")
+  hostname  string!  @description("The client's own fully qualified host, e.g. www.acme.com or acme.com.")
+}
+
+/// One reconciliation pass over every non-terminal binding. The scheduled automation's whole body.
+///
+/// It does the DNS half itself and dispatches the Kubernetes half through the capability-script
+/// seam, which is what keeps client-go out of the engine's module graph (design D2). Both are one
+/// builtin because they are one decision: the check's result IS what selects the next action, and
+/// splitting them would put the state machine in two places that could disagree about a row.
+@executor("integration.customDomain.reconcile")
+@args(profile="object")
+@description("Run one custom-domain reconciliation pass (epic memql#4805). For each non-terminal v1:platform:customDomain row: verify the TXT ownership token and the pointing record, promote to `issuing` when both pass, dispatch the idempotent bind capability script for `issuing` rows and the unbind script for `removing` ones, and write back what was seen with a typed failureReason. Retries ride this schedule; there is no manual re-check. Returns {checked, verified, issued, removed, failed}.")
+builtin customDomainReconcile { }

@@ -10,6 +10,7 @@ import { formatMoment } from "../../kit/format";
 import { TICK_TTL_MS } from "../../live/arrival";
 import { STOREFRONT_KIND, kindLabel } from "./concepts";
 import { PublishPicker } from "./actions/PublishPicker";
+import { DomainsPanel } from "./DomainsPanel";
 import {
   bundleForm,
   bundleFormLabel,
@@ -36,11 +37,14 @@ export function SiteDetail({
   site,
   viewerUserId,
   canPublish,
+  clusterDomain = "",
   onAsk,
 }: {
   site: SiteRow;
   viewerUserId: string;
   canPublish: boolean;
+  /** The domain this cluster serves, for composing the record guidance. */
+  clusterDomain?: string;
   /** Opens Ask with this deployable as its context. */
   onAsk?: (tag: string) => void;
 }) {
@@ -52,6 +56,7 @@ export function SiteDetail({
   const tie = useSiteAccount();
 
   return (
+    <>
     <Panel label={`Deployable ${siteName(site)}`}>
       <div className="os-head">
         <Subhead>{siteName(site)}</Subhead>
@@ -190,6 +195,19 @@ export function SiteDetail({
 
       {canPublish ? <PublishPicker site={site} /> : null}
     </Panel>
+    {/* THE SAME GATE PUBLISHING CARRIES, and for the same reason: binding a
+        client's own domain is cluster-owner territory in v1 (design D1),
+        enforced by the concept's clusterOwner tier and the three Go guards.
+        `canPublish` is the admin presentation gate this app already computes
+        once, and reusing it keeps one answer to "is this reader an operator"
+        rather than two that can disagree.
+
+        MOUNTED HERE rather than in the Actions section, for the reason the
+        publish picker is: a domain is a thing you bind TO a deployable you are
+        already looking at, and a picker on another screen would make somebody
+        carry an id across the app. */}
+    {canPublish ? <DomainsPanel site={site} domain={clusterDomain} /> : null}
+    </>
   );
 }
 

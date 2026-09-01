@@ -3312,3 +3312,340 @@ a.os-button {
   gap: 6px;
   margin-top: 10px;
 }
+/* ---- custom domains: the Domains panel (epic memql#4805) ----
+ *
+ * The surface is about TWO DNS RECORDS and what this cluster last saw at them.
+ * Somebody reading it is a tab away from a registrar's form whose fields are
+ * called Type, Name and Value, so a record is drawn as those three parts and
+ * nothing else -- the RECORD STRIP below is the one place this panel spends any
+ * visual budget, and everything around it stays quiet on purpose.
+ *
+ * Every colour is a token, as everywhere else in the OS: a theme restyles this
+ * with no code, and a hard-coded value here would be the one element in the
+ * shell that ignored the theme.
+ */
+
+.os-domain-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+}
+
+.os-domain {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+
+/* The tone rides a LEFT EDGE rather than a background wash. A row whose whole
+ * plate turns amber reads as broken; a domain waiting for DNS is not broken,
+ * it is waiting -- which is most of a domain's life. The edge is enough to
+ * find the row that needs attention in a list of five. */
+.os-domain[data-tone="warn"] {
+  box-shadow: inset 3px 0 0 var(--os-warn);
+}
+
+.os-domain[data-tone="error"] {
+  box-shadow: inset 3px 0 0 var(--os-error);
+}
+
+.os-domain[data-tone="ok"] {
+  box-shadow: inset 3px 0 0 var(--os-accent);
+}
+
+.os-domain[data-tone="muted"] {
+  opacity: 0.72;
+}
+
+.os-domain-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.os-domain-host {
+  margin: 0;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-md);
+  color: var(--os-ink);
+  /* A hostname is the row's identity and can be long. It wraps rather than
+   * truncating: a truncated domain is a different domain, and this is the one
+   * string on the panel somebody is checking character by character. */
+  overflow-wrap: anywhere;
+}
+
+.os-domain-status {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-domain-status[data-tone="ok"] {
+  color: var(--os-accent);
+}
+
+.os-domain-status[data-tone="error"] {
+  color: var(--os-error);
+}
+
+.os-domain-head > :last-child {
+  margin-left: auto;
+}
+
+/* ---- the rail ----
+ *
+ * Four stops, in order, because the walk IS ordered: a binding passes through
+ * each in turn and cannot skip one, so the sequence carries information the
+ * reader needs. `removing` / `removed` are deliberately not on it -- they are a
+ * different journey that can start anywhere, and drawing them as a fifth stop
+ * would say a removed domain had got further than a live one.
+ */
+.os-domain-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.os-domain-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-domain-stop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-domain-stop-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--os-line);
+}
+
+.os-domain-stop[data-state="done"] .os-domain-stop-dot {
+  background: var(--os-accent);
+}
+
+.os-domain-stop[data-state="current"] .os-domain-stop-dot {
+  background: var(--os-accent);
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+
+.os-domain-stop[data-state="blocked"] .os-domain-stop-dot {
+  background: var(--os-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-error) 22%, transparent);
+}
+
+.os-domain-stop[data-state="current"] .os-domain-stop-label,
+.os-domain-stop[data-state="blocked"] .os-domain-stop-label {
+  color: var(--os-ink);
+}
+
+/* Only the CURRENT stop explains itself, and it does so UNDER the rail. Four
+ * blurbs at once is a paragraph nobody reads; one inside its own stop makes
+ * that stop twice as wide as the others and turns an evenly-spaced sequence
+ * into a ragged one. */
+.os-domain-stop-blurb {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* The Type value: read, not copied, so it is not a control. It keeps the
+ * boxed monospace treatment because it is still a literal somebody has to
+ * match in a dropdown. */
+.os-record-kind {
+  align-self: flex-start;
+  padding: 5px 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+}
+
+/* ---- the problem ---- */
+
+.os-domain-problem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  border-left: 2px solid var(--os-error);
+}
+
+/* An UNRECOGNISED reason renders as its own token rather than a sentence this
+ * build invented, and looks different so nobody mistakes a raw value for copy
+ * somebody wrote. */
+.os-domain-problem[data-known="false"] .os-domain-problem-sentence {
+  font-family: var(--os-font-mono);
+}
+
+.os-domain-problem-sentence {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+/* What the cluster ACTUALLY SAW, in the data voice. It sits beneath the
+ * sentence because the two are different facts: one says which record is
+ * wrong, this says what is in it, and somebody editing a zone file needs
+ * both. */
+.os-domain-problem-detail {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the record strip: this panel's one piece of real design ---- */
+
+.os-domain-records {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.os-record {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+}
+
+/* THE ONE THAT IS STILL WRONG, marked. The typed failureReason says which
+ * record it is about, so the panel points at it rather than making somebody
+ * read both and work it out. */
+.os-record[data-faulty="true"] {
+  border-color: var(--os-error);
+}
+
+.os-record-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.os-record-part {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Type is one short word; Name and Value are long and are what somebody
+ * actually copies, so they take the room. */
+.os-record-part[data-grow="true"] {
+  flex: 1 1 220px;
+}
+
+.os-record-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  /* The registrar's own vocabulary, and it reads as a field label rather than
+   * as prose -- which is what makes the mapping to the other tab obvious
+   * without a sentence explaining it. */
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Each part is COPYABLE ON ITS OWN, because the task is three fields in
+ * another application. A single "copy record" button would hand somebody a
+ * line they then have to take apart. */
+.os-record-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--os-duration-fast) var(--os-ease);
+}
+
+.os-record-value:hover {
+  border-color: var(--os-accent);
+}
+
+.os-record-value:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+.os-record-value code {
+  overflow-wrap: anywhere;
+  font-family: inherit;
+}
+
+.os-record-value svg {
+  flex: 0 0 auto;
+  color: var(--os-muted);
+}
+
+.os-record-purpose {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* ---- terminal states and the footer ---- */
+
+.os-domain-terminal {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+.os-domain-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-domain-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-record-value {
+    transition: none;
+  }
+}

@@ -6371,6 +6371,29 @@ QueryClient.prototype.removeAgentFromSpace = function (this: QueryClient, args: 
   return this.executeNamed("removeAgentFromSpace", buildRemoveAgentFromSpace(args), opts);
 };
 
+/** Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind script, and `markCustomDomainRemoved` closes the walk.
+THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["removeCustomDomain"] in generated_concepts.ts).
+export interface RemoveCustomDomainArgs {
+  domainId: string;
+}
+
+export function buildRemoveCustomDomain(args: RemoveCustomDomainArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "mutation removeCustomDomain(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    removeCustomDomain(args: RemoveCustomDomainArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.removeCustomDomain = function (this: QueryClient, args: RemoveCustomDomainArgs = {} as RemoveCustomDomainArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("removeCustomDomain", buildRemoveCustomDomain(args), opts);
+};
+
 /** Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is oblivious -- they point at the id, and the id does not change. */
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["renameLibraryFolder"] in generated_concepts.ts).
 export interface RenameLibraryFolderArgs {

@@ -1067,6 +1067,20 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// Custom-domain guards (epic memql#4805, design D10). Beside the site
+	// policy above and for the same reason: none of the three -- not under
+	// this cluster's own domain, not a collision, not past the env-tunable
+	// per-site maximum -- is expressible in a mutation body, and a UI-only
+	// check is not a check. The concept is clusterOwner tier, so these are the
+	// only thing standing between an operator's typo and a certificate request
+	// for the platform's own sign-in host.
+	// See component/memql/platform_custom_domain_policy.go.
+	if conceptMeta.Name == conceptPlatformCustomDomain {
+		if err := e.validateCustomDomainPolicy(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorHostname, meta.priorStatus); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	createParams := memorynodes.CreateParams{
 		Actor:   actor,
 		ID:      strings.TrimSpace(mutation.ID),

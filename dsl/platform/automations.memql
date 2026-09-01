@@ -41,3 +41,25 @@ automation reconcileMirroredDomains {
     builtin datasyncReconcileDomains ()
   }
 }
+
+// ---- Custom domains (epic memql#4805) ----
+
+/// Walk every non-terminal custom-domain binding: verify its two DNS records, provision the ones
+/// that are ready, and take down the ones being removed.
+///
+/// EVERY TWO MINUTES, and the number is a decision about the person waiting rather than about load.
+/// Somebody has just pasted two records into a registrar and is watching this panel; a propagation
+/// that finished thirty seconds ago should not take ten minutes to be noticed. The cost is bounded
+/// by the population -- one row per bound hostname, not per request -- and a pass over rows with
+/// nothing to do is two status reads and no lookups at all.
+///
+/// THIS IS THE ONLY RETRY. There is deliberately no manual re-check button anywhere in the product
+/// (design D5): a button invites hammering exactly the two things that must not be hammered, a
+/// recursive resolver and an ACME endpoint, and it would make the fastest path to a certificate the
+/// one where somebody clicks fastest.
+@trigger(schedule="0 */2 * * * *")
+automation reconcileCustomDomains {
+  step sweep {
+    builtin customDomainReconcile ()
+  }
+}

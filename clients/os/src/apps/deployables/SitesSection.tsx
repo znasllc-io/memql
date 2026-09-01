@@ -33,6 +33,7 @@ export function SitesSection({
   onSelectSite,
   viewerUserId,
   canPublish,
+  clusterDomain,
   onAsk,
   onReseed,
 }: {
@@ -43,6 +44,8 @@ export function SitesSection({
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
   canPublish: boolean;
+  /** The domain this cluster serves, threaded to the detail's Domains panel. */
+  clusterDomain: string;
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
@@ -91,6 +94,7 @@ export function SitesSection({
           site={open}
           viewerUserId={viewerUserId}
           canPublish={canPublish}
+          clusterDomain={clusterDomain}
           onAsk={onAsk}
         />
       )}

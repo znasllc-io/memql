@@ -94,6 +94,12 @@ function fakeSubscriptions(): FakeSubscriptions {
 export interface FakeSeed {
   sites?: Row[];
   artifacts?: Row[];
+  /** v1:platform:customDomain rows the domains feed seeds with. */
+  domains?: Row[];
+  /** Fails the next `customDomainAdd` with this server message. */
+  addDomainError?: string;
+  /** Fails the next `removeCustomDomain` with this server message. */
+  removeDomainError?: string;
   /** Rows a by-id re-read answers with, keyed by row id. */
   byId?: Record<string, Row>;
   /** Fails the next `createSite` with this server message. */
@@ -121,10 +127,24 @@ export const PUBLISH_RESULT = {
   totalBytes: 2097152,
 };
 
+/** What `customDomainAdd` answers with -- the token is minted server-side. */
+export const ADD_DOMAIN_RESULT = {
+  domainId: "cd-new",
+  siteId: "site-shop",
+  hostname: "www.acme.com",
+  accountId: "",
+  token: "tok-minted-server-side",
+  status: "pending_dns",
+  verifyRecordName: "_memql-verify.www.acme.com",
+  pointsToKind: "CNAME",
+  pointsToTarget: "os.memql.example.com",
+};
+
 export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const calls: string[] = [];
   const sites = seed.sites ?? [];
   const artifacts = seed.artifacts ?? [];
+  const domains = seed.domains ?? [];
 
   const stub = {
     executeNamed: vi.fn(async (_name: string, call: string) => {
@@ -132,6 +152,17 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call === "query sitesAll()") return rowsResult(sites);
       if (call === "query libraryArtifacts()") return rowsResult(artifacts);
+      if (call === "query customDomainsAll()") return rowsResult(domains);
+
+      if (call.startsWith("builtin customDomainAdd(")) {
+        if (seed.addDomainError !== undefined) throw new Error(seed.addDomainError);
+        return rowsResult([ADD_DOMAIN_RESULT as unknown as Row]);
+      }
+
+      if (call.startsWith("mutation removeCustomDomain(")) {
+        if (seed.removeDomainError !== undefined) throw new Error(seed.removeDomainError);
+        return rowsResult([]);
+      }
 
       if (call.startsWith("mutation createSite(")) {
         if (seed.createError !== undefined) throw new Error(seed.createError);
@@ -325,4 +356,26 @@ export async function emit(
   await act(async () => {
     connection.subscriptions.emit(concept, payload, kind);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Custom-domain fixtures (epic memql#4805)
+// ---------------------------------------------------------------------------
+
+export function domainRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    siteId: "site-shop",
+    hostname: "www.acme.com",
+    accountId: "",
+    token: "tok-abcdef0123456789",
+    status: "pending_dns",
+    failureReason: "",
+    failureDetail: "",
+    lastCheckedAt: "",
+    verifiedAt: "",
+    issuedAt: "",
+    removedAt: "",
+    createdAt: "2026-09-01T00:00:00Z",
+    ...over,
+  };
 }

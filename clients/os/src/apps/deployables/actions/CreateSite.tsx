@@ -19,10 +19,14 @@ import { useCreateSite } from "../actions";
 //
 // The form takes a NAME and a KIND. It does not take a hostname: the domain is
 // the one this cluster serves, composed here and previewed so nobody has to
-// guess what they are claiming, and every other hostname shape -- a custom
-// apex, a second domain -- is cluster-owner-only and hand-certified
-// (memql#4224), so offering the field would offer a claim this window cannot
-// complete.
+// guess what they are claiming.
+//
+// A CLIENT'S OWN DOMAIN IS A DIFFERENT FLOW, not a missing field on this one
+// (epic memql#4805). It needs two DNS records the client has to create, a
+// verification loop that waits for them, and an exact-host certificate -- so it
+// lives on the deployable's Domains panel, where the records and their statuses
+// are on the same screen as the thing being served. Offering it here would be a
+// text box that could only ever fail.
 //
 // It does not take an OWNER either: `createSite` stamps `ownerUserId` from the
 // verified actor, so the form has nothing to say about it and sending a field

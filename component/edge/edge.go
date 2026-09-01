@@ -74,6 +74,48 @@ func (e *engineExecutor) SiteByHostname(ctx context.Context, hostname string) (*
 	return siteFromRow(rows[0]), nil
 }
 
+// SiteForCustomDomain resolves a hostname through a LIVE custom-domain binding
+// to the deployable it names (epic memql#4805, design D8).
+//
+// TWO NAMED READS, and the first one carries the whole security property.
+// `liveCustomDomainByHostname` filters `status=="live"`, and a binding reaches
+// `live` only after BOTH DNS checks passed and its certificate came back Ready
+// -- so a hostname answering here is one whose owner proved control of the name
+// and whose traffic this cluster can terminate TLS for. Every other status
+// resolves to nothing, which is why a removal takes effect at the speed of a
+// row write rather than at the speed of an Ingress deletion.
+//
+// A MISS AT EITHER STEP IS (nil, nil). The second step missing is the
+// interesting one: it means a live binding names a site that is deleted, draft
+// or gone, and the honest answer is the same 404 an unknown hostname gets
+// rather than an error page about a row nobody outside this cluster can see.
+func (e *engineExecutor) SiteForCustomDomain(ctx context.Context, hostname string) (*Site, error) {
+	ctx = systemActorContext(ctx)
+	q := fmt.Sprintf("query liveCustomDomainByHostname(hostname: %s)", langparser.QuoteString(hostname))
+	res, err := e.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("edge: query liveCustomDomainByHostname: %w", err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	siteId := memql.BareShortId(rowString(rows[0], "siteId"))
+	if siteId == "" {
+		return nil, nil
+	}
+	sq := fmt.Sprintf("query siteById(siteId: %s)", langparser.QuoteString(siteId))
+	sres, err := e.engine.Execute(ctx, sq)
+	if err != nil {
+		return nil, fmt.Errorf("edge: query siteById for custom domain %q: %w", hostname, err)
+	}
+	srows := memql.MaterializeRows(sres)
+	if len(srows) == 0 {
+		return nil, nil
+	}
+	return siteFromRow(srows[0]), nil
+}
+
 // systemActorContext stamps the synthetic cluster-owner identity onto ctx.
 //
 // It sets the same three surfaces auth.ContextWithUserActor sets for a real

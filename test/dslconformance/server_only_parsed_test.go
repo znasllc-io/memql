@@ -242,6 +242,40 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
 		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
 		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
+		// epic memql#4805. The custom-domain create, plus the six writes its
+		// reconciliation sweep makes on an operator's behalf.
+		//
+		// createCustomDomain is server-only because of the TOKEN. The value it
+		// writes is what a client publishes at `TXT _memql-verify.<hostname>`
+		// to prove control of the name, so a caller who CHOOSES it proves
+		// nothing -- one constant published under a thousand domains would
+		// verify all of them. actor.userId scoping would assert the row belongs
+		// to the caller, which is not the property in question and is not even
+		// expressible: the concept is clusterOwner-tier and carries no owner
+		// field. What must hold is that the token was minted rather than
+		// supplied, and only the Go frame that minted it knows that. The
+		// client-reachable surface is the `customDomainAdd` builtin -- the same
+		// split sitePublishFromArtifact already uses.
+		//
+		// The six sweep writers are the outbox case above, exactly: the caller
+		// is the engine's own reconciliation loop under its operator identity,
+		// so actor.userId is empty for every legitimate caller and a
+		// self-scoped filter matches nothing. What @serverOnly adds over the
+		// tier is the WIRE -- these are the engine's account of what it saw in
+		// DNS and at the API server, and a client-callable version is a way to
+		// tell the Domains panel a domain is `live` without anything having
+		// checked.
+		//
+		// removeCustomDomain is deliberately NOT here. It writes no credential
+		// and decides nothing the tier has not already decided: an operator
+		// asks for a binding to come down, and the sweep does the rest.
+		{Path: "platform/mutations.memql", Name: "createCustomDomain"}:                true,
+		{Path: "platform/mutations.memql", Name: "recordCustomDomainCheck"}:           true,
+		{Path: "platform/mutations.memql", Name: "markCustomDomainVerified"}:          true,
+		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuanceFailure"}: true,
+		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuingProgress"}: true,
+		{Path: "platform/mutations.memql", Name: "markCustomDomainLive"}:              true,
+		{Path: "platform/mutations.memql", Name: "markCustomDomainRemoved"}:           true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

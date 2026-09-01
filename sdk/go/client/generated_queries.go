@@ -2389,6 +2389,88 @@ func CurrentUserBuild(args CurrentUserArgs) string {
 	return "query currentUser()"
 }
 
+// CustomDomainById -- One custom domain by its own row id -- the seam the sweep re-reads through and the panel's gap-recovery read.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainById"] in generated_concepts.go).
+type CustomDomainByIdArgs struct {
+	DomainId string
+}
+
+// CustomDomainById calls the engine query customDomainById.
+func (qc *QueryClient) CustomDomainById(ctx context.Context, args CustomDomainByIdArgs) (*Result, error) {
+	call := CustomDomainByIdBuild(args)
+	return qc.executeNamed(ctx, "customDomainById", call)
+}
+
+func CustomDomainByIdBuild(args CustomDomainByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query customDomainById(")
+	b.WriteString("domainId: ")
+	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CustomDomainsAll -- Every custom domain this cluster knows about. The sweep's read, and the panel's live seed.
+// NO STATUS FILTER, and that is what makes it usable as a live collection's seed: a subscription delivers every row the concept writes, so a seed narrowed to non-terminal rows would give the browser a list that grows a `live` row the first time one is touched and never has one on load. The sweep does its own narrowing in Go, over a set this small enough to be honest about -- one row per bound hostname, not per request.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsAll"] in generated_concepts.go).
+type CustomDomainsAllArgs struct {
+}
+
+// CustomDomainsAll calls the engine query customDomainsAll.
+func (qc *QueryClient) CustomDomainsAll(ctx context.Context, args CustomDomainsAllArgs) (*Result, error) {
+	call := CustomDomainsAllBuild(args)
+	return qc.executeNamed(ctx, "customDomainsAll", call)
+}
+
+func CustomDomainsAllBuild(args CustomDomainsAllArgs) string {
+	_ = args
+	return "query customDomainsAll()"
+}
+
+// CustomDomainsForSite -- Every custom domain bound to one deployable, including removed ones. What the Domains panel lists.
+// REMOVED ROWS ARE INCLUDED DELIBERATELY. The concept's rows survive removal because the history is the audit, and a list that hid them would make "we un-bound acme.com last Tuesday" a fact only the database remembers. The panel renders a removed row with its terminal status rather than dropping it, so the walk somebody watched stays where they watched it.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsForSite"] in generated_concepts.go).
+type CustomDomainsForSiteArgs struct {
+	SiteId string
+}
+
+// CustomDomainsForSite calls the engine query customDomainsForSite.
+func (qc *QueryClient) CustomDomainsForSite(ctx context.Context, args CustomDomainsForSiteArgs) (*Result, error) {
+	call := CustomDomainsForSiteBuild(args)
+	return qc.executeNamed(ctx, "customDomainsForSite", call)
+}
+
+func CustomDomainsForSiteBuild(args CustomDomainsForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("query customDomainsForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CustomDomainsToReconcile -- Every binding the reconciliation sweep still has work for: everything but `live` and `removed`.
+// UNPAGINATED, DELIBERATELY, and the narrowing is what makes that defensible. `customDomainsAll` carries a page size because it backs a list somebody scrolls; a SWEEP that read a page would silently never reconcile the bindings past it, and the symptom is a domain that verifies for nobody with nothing in any log to say why. The set here is bounded by how many domains are in flight at once -- a cluster can serve five hundred and have none of them here -- rather than by how many it has ever bound.
+// The two settled statuses are excluded rather than filtered out in Go, so a pass over a cluster with nothing happening does no DNS lookups and reads almost nothing. NO `sort`, and the parser is right to insist: a sorted query is a bounded one, and this read is deliberately unbounded. Order costs nothing here either -- the sweep advances each binding independently, so no row's outcome depends on which was looked at first.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsToReconcile"] in generated_concepts.go).
+type CustomDomainsToReconcileArgs struct {
+}
+
+// CustomDomainsToReconcile calls the engine query customDomainsToReconcile.
+func (qc *QueryClient) CustomDomainsToReconcile(ctx context.Context, args CustomDomainsToReconcileArgs) (*Result, error) {
+	call := CustomDomainsToReconcileBuild(args)
+	return qc.executeNamed(ctx, "customDomainsToReconcile", call)
+}
+
+func CustomDomainsToReconcileBuild(args CustomDomainsToReconcileArgs) string {
+	_ = args
+	return "query customDomainsToReconcile()"
+}
+
 // CustomerNoteFor -- The internal note on one customer.
 //
 // Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["customerNoteFor"] in generated_concepts.go).
@@ -3930,6 +4012,29 @@ func (qc *QueryClient) LiveAppSessionsForUser(ctx context.Context, args LiveAppS
 func LiveAppSessionsForUserBuild(args LiveAppSessionsForUserArgs) string {
 	_ = args
 	return "query liveAppSessionsForUser()"
+}
+
+// LiveCustomDomainByHostname -- Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one extra resolution step, asked only after siteByHostname misses.
+// `status=="live"` is the whole security property of this read. A row reaches `live` only after both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one whose owner proved control of the name and whose traffic this cluster can actually terminate TLS for. Every other status resolves to nothing, which is why a removal takes effect at the speed of a row write rather than at the speed of an Ingress deletion.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["liveCustomDomainByHostname"] in generated_concepts.go).
+type LiveCustomDomainByHostnameArgs struct {
+	Hostname string
+}
+
+// LiveCustomDomainByHostname calls the engine query liveCustomDomainByHostname.
+func (qc *QueryClient) LiveCustomDomainByHostname(ctx context.Context, args LiveCustomDomainByHostnameArgs) (*Result, error) {
+	call := LiveCustomDomainByHostnameBuild(args)
+	return qc.executeNamed(ctx, "liveCustomDomainByHostname", call)
+}
+
+func LiveCustomDomainByHostnameBuild(args LiveCustomDomainByHostnameArgs) string {
+	var b strings.Builder
+	b.WriteString("query liveCustomDomainByHostname(")
+	b.WriteString("hostname: ")
+	b.WriteString(quoteMemQL(args.Hostname))
+	b.WriteString(")")
+	return b.String()
 }
 
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.

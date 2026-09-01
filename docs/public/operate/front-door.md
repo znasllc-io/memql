@@ -441,11 +441,14 @@ and `*.<domain>` already names it. Locally the mkcert pair is a wildcard and
 always was, so the two targets now agree on this too.
 
 Two things still hold. A hostname **outside** `<domain>` — a customer's own
-apex, a second domain — is not under the wildcard and stays cluster-owner-only
-and hand-certified, one object pair each. And the wildcard covers exactly one
-label, so `shop.<domain>` is certified and `shop.eu.<domain>` is not. The
-portal is the one site whose rule and SAN the generator writes, because it is
-the two sites whose names are known before any row exists.
+apex, a second domain — is not under the wildcard and needs an exact-host
+Ingress and a `Certificate` of its own, one object pair each. It is still
+**cluster-owner-only**; what is no longer true is that somebody applies that
+pair by hand ([the custom-domain regime](#custom-domains-a-clients-own-name),
+epic memql#4805). And the wildcard covers exactly one label, so
+`shop.<domain>` is certified and `shop.eu.<domain>` is not. The portal is the
+one site whose rule and SAN the generator writes, because it is the two sites
+whose names are known before any row exists.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
@@ -463,6 +466,97 @@ Two consequences worth stating plainly:
   developer machine there is no wildcard in `/etc/hosts`, so each name has to
   be listed in the managed block `scripts/install/hosts-entries.sh` owns. That
   is a property of hosts files, not of the front door.
+
+## Custom domains: a client's own name
+
+A client's own domain — `www.acme.com`, `acme.com` — is the one hostname shape
+this page's seven rules do not cover, and cannot: it is in somebody else's
+zone. Serving it needs an **exact-host Ingress** and an **exact-host
+`Certificate`**, which is exactly the object pair the section above calls the
+one explicit exception to "a site is data".
+
+Epic memql#4805 automates that pair. It does not change the count, the roles,
+or the wildcard; it adds a second way for the edge to answer, and a state
+machine that gets the objects created only once the domain has proved it wants
+them.
+
+### The two records, and why both
+
+A binding is a `v1:platform:customDomain` row naming a hostname and a site. It
+does nothing until **two** DNS records check out:
+
+| Record | Shape | What it proves |
+|---|---|---|
+| Ownership | `TXT _memql-verify.<hostname>` = the row's minted token | that whoever asked for this binding controls the NAME |
+| Pointing | `CNAME <hostname>` → `os.<domain>`, or an A/ALIAS record at an apex | that the domain's traffic arrives HERE |
+
+**Neither is redundant.** Pointing proves the DNS owner wants traffic to come
+here; it does not prove the person who typed the hostname into this cluster is
+that owner — and on a shared install, "points at this cluster" is a property
+many unrelated tenants share. Ownership proves the reverse and nothing about
+routing. So `issuing` is reachable from exactly one place in the engine, and
+that place requires both.
+
+Nothing is issued before both pass, and the reason is not tidiness: Let's
+Encrypt's certificates-per-registered-domain limit is **shared across everyone
+under that domain**, so an unverified issuance path is a way to spend somebody
+else's quota.
+
+### Why HTTP-01 works here when it cannot issue `*.<domain>`
+
+The same fact makes both true. HTTP-01 proves control by serving a token at the
+name, which a wildcard has no way to be — hence the exact-host certificate
+this page's whole first half is about. A client's domain, by the time this
+cluster asks for a certificate, is already pointing at it. The challenge is
+servable, so it issues.
+
+### The regime in one paragraph
+
+A scheduled sweep walks every non-terminal binding every two minutes, does the
+two lookups, and writes back what it saw with a typed reason
+(`dns_token_missing`, `dns_not_pointing`, `no_acme_issuer`, `issuance_failed`).
+When both pass it applies the pair; `live` follows only when the certificate's
+Ready condition says so. Removal walks the other way, and the row **survives**
+— what a cluster served, and when, is the audit. There is deliberately **no
+manual re-check**: retries ride the schedule, because a button would invite
+hammering a recursive resolver and an ACME endpoint.
+
+### It is a VALUE that decides whether issuance is possible at all
+
+`MEMQL_CUSTOM_DOMAIN_ACME_ISSUER` names the ClusterIssuer. **Unset is a
+supported state**, not a misconfiguration: the local k3d target's TLS comes
+from an mkcert pair and declares no ACME issuer, so a binding there verifies
+its DNS and then reports `no_acme_issuer` on every pass, forever. That is the
+same flow shape as the cloud, honest about what the target can do — as against
+a `Certificate` with an empty `issuerRef`, which the API server accepts and
+then leaves `Pending` with a condition nobody reads.
+
+The rest are values too, and all have working defaults:
+`MEMQL_CUSTOM_DOMAIN_EDGE_HOST` (derived from `MEMQL_DOMAIN` as `os.<domain>`
+— a host this cluster already serves itself at, so it cannot drift out of
+agreement with where traffic lands), `..._MAX_PER_SITE` (5),
+`..._NAMESPACE`, `..._INGRESS_CLASS`, `..._EDGE_SERVICE`, `..._EDGE_PORT`.
+
+### Where the objects come from
+
+The engine reaches the Kubernetes API directly, with the pod's own
+ServiceAccount and the narrow Role in `deploy/k8s/base/custom-domain-rbac.yaml`
+— two kinds, one namespace, no `ClusterRole`, no grant on `secrets`. That is
+the substrate memql#4257 established for deploy-control and for the same
+reason: the engine image is distroless, so it has no kubectl and no
+`scripts/` tree, and a path that could only shell out would leave every binding
+in `issuing` forever on every deployed cluster. There is **no client-go**
+anywhere in the workspace.
+
+`scripts/deploy/bind-custom-domain.sh` and its unbind mirror apply the
+identical pair and are the operator's path — contract-conformant capability
+scripts, allowlisted, runnable by hand or from the cockpit surface.
+
+### What it deliberately does not do
+
+Self-serve binding (v1 is cluster-owner/admin only; the v2 shape is a
+request-and-approve queue), registrar API integrations, wildcard client
+domains, certificate export, and local-cluster ACME.
 
 ## The media plane is separate, permanently
 

@@ -361,6 +361,14 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "deploy.reportInstanceVersion": "scripts/deploy/report-instance-version.sh",
   "release.engine": "scripts/release/release-engine.sh",
 
+  // Custom domains (epic memql#4805). The pair that applies and removes the
+  // exact-host Ingress + cert-manager Certificate for a client's own domain.
+  // The engine's own sweep reaches them through the Go allowlist
+  // (component/automations/steps.capabilityScriptAllowlist); this twin is what
+  // makes them runnable from the extension's host-side executor.
+  "domain.bind": "scripts/deploy/bind-custom-domain.sh",
+  "domain.unbind": "scripts/deploy/unbind-custom-domain.sh",
+
   // Tenant lifecycle (epic memql#3852, task memql#3853).
   "fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
   "fleet.tenantSuspend": "scripts/fleet/tenant-suspend.sh",

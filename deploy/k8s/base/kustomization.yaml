@@ -62,6 +62,11 @@ resources:
   - identity.yaml
   # RBAC for the deploy console's in-cluster substrate (memql#4257).
   - identity-rbac.yaml
+  # RBAC for custom domains (epic memql#4805): the two object kinds a bound
+  # client domain needs -- an exact-host Ingress and a cert-manager
+  # Certificate -- in this namespace, bound to the memql-engine ServiceAccount
+  # every engine Deployment already runs as.
+  - custom-domain-rbac.yaml
   - cognition.yaml
   - voice.yaml
   - agent.yaml

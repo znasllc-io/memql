@@ -142,6 +142,7 @@ export function DeployablesApp({
         onSelectSite={selectSite}
         viewerUserId={viewerUserId}
         canPublish={canWrite}
+        clusterDomain={config.domain}
         onAsk={askContext}
         onReseed={reseed}
       />
@@ -157,6 +158,7 @@ export function DeployablesApp({
       onSelectSite={selectSite}
       viewerUserId={viewerUserId}
       canPublish={canWrite}
+      clusterDomain={config.domain}
       onAsk={askContext}
       onReseed={reseed}
     />

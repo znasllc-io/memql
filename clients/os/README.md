@@ -286,6 +286,38 @@ authority on.
   fired -- an `updated` tick fires for a rename too, and a marker driven by it
   would announce a publish that did not happen.
 
+### Custom domains: the Domains panel (memql#4805)
+
+`DomainsPanel.tsx` on the deployable detail is a client's own domain bound to a
+site -- the add flow, the two DNS records to create, the live typed status, and
+the remove. Three things about it are worth knowing before touching it.
+
+- **The surface is TWO RECORDS AND WHAT WE SEE AT THEM.** Somebody reading this
+  panel is a tab away from a registrar's form whose fields are called Type, Name
+  and Value, so a record renders as exactly those three parts, in that
+  vocabulary, each separately copyable -- a single "copy record" button would
+  hand them a line they then have to take apart. Beneath it sits the server's
+  `failureDetail` verbatim: the typed reason says WHICH record is wrong and the
+  detail says what is IN it, and somebody editing a zone file needs both. That
+  pairing is the whole design.
+- **`lastCheckedAt` is the heartbeat rule's sharpest case.** The sweep touches
+  every non-terminal binding every two minutes forever, so naming that field in
+  the arrival-cue fingerprint would strobe the list on a two-minute cycle. The
+  fingerprint is `status | failureReason | failureDetail`; the timestamp is
+  displayed continuously instead, which is the right home for something always
+  true and never news. `test/deployables/domains.test.ts` pins both directions.
+- **A STEPPED RAIL IS HONEST HERE, which is unusual.** The four stops are a real
+  sequence a binding cannot skip, so the order carries information -- "the
+  records check out, we are waiting on a certificate" is a different situation
+  from "the records are wrong". `removing` / `removed` are deliberately OFF the
+  rail: they are a different journey that can start anywhere, and a fifth stop
+  would say a removed domain had got further than a live one.
+- **There is no re-check button anywhere, and the panel says why.** Retries ride
+  the sweep's schedule (design D5) -- a button would invite hammering a
+  recursive resolver and an ACME endpoint. An absent control with no account of
+  itself reads as something somebody forgot to build, so the footer says what
+  DOES happen rather than apologising for what does not.
+
 ## Training, the fourth app (memql#4737)
 
 `src/apps/training/` is teaching MemQL from files: a dropzone into the
