@@ -328,6 +328,36 @@ diagnosis (SP3, A11).
 - Verification is `make test` (the module-path form) plus the OS build and
   vitest for T7.
 
+## What landed, and what C4 / C5 still describe
+
+The epic shipped C1, C2, C3, C6, C7, C8, C9, C10, C11 and C12: the declared
+manifest (`integrations/email/configmanifest.go`, generic machinery naming
+email nowhere), the env-first ladder, wholesale lane resolution, the widened
+status report with per-slot reasons, the two axes kept apart, the probe as an
+explicit act, the owner-or-developer set on both sides of the wire, the
+write-only secret, the slot-not-a-name setter (`integration.email.configure`),
+and refuse-at-use rather than refuse-at-boot.
+
+**C4 and C5 did not.** `ManifestEntry` still carries no `runtime` key and
+`LoadManifestFromBytes` still calls plain `yaml.Unmarshal`, so the three
+`secret: true` entries this spec found are still silently discarded. They are
+written here as the design because they are the right design; they are called
+out here as unbuilt because a spec that reads as a description of the code is
+worse than no spec.
+
+Neither is load-bearing for what shipped, which is why they could be left:
+the Settings surface reads `editable` off the STATUS REPORT, where the engine
+computes it from the resolved source, rather than re-deriving the boundary
+from the registry. What C4 buys over that is a boundary a reviewer can see in
+one file instead of a behaviour spread across resolvers.
+
+They were held back rather than rushed for one reason worth recording:
+turning the decoder strict is not additive. The three discarded entries become
+a parse error the moment it is, and a parse error in the env registry fails
+every node's boot validation -- so C5 is a change with its own blast radius
+and its own cleanup, and bundling it into a 143-file epic would have made both
+harder to review and one of them harder to revert.
+
 ## H. Delivery
 
 - **PR 4 -- T6 (#4825), engine:** the config manifest and the shared
