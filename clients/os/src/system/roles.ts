@@ -166,13 +166,15 @@ export function roleAdmits(actorRole: string, requirement?: RoleRequirement): bo
   const actor = roleRank(actorRole);
   if (actor < 0) return false;
   if ("any" in requirement) {
-    // Rank EQUALITY rather than slug equality, so a legacy slug on the actor
-    // (`writer`) and the catalog slug in the set (`user`) name the same rung
-    // and match -- the alias resolution both sides already go through.
-    return requirement.any.some((role) => {
-      const named = roleRank(role);
-      return named >= 0 && named === actor;
-    });
+    // RUNG identity, not rank equality. Both sides resolve through
+    // roleRungOf, so a legacy slug on the actor (`writer`) and the catalog
+    // slug in the set (`user`) name the same rung and match -- while two
+    // DIFFERENT roles that happen to share a rank do not. A cluster may
+    // define one: the ranks are spaced for exactly that, and "these roles"
+    // has to mean these roles.
+    const actorRung = roleRungOf(actorRole);
+    if (actorRung === null) return false;
+    return requirement.any.some((role) => roleRungOf(role)?.slug === actorRung.slug);
   }
   const floor = roleRank(requirement.min);
   if (floor < 0) return false;

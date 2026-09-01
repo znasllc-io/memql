@@ -221,6 +221,30 @@ text above does not imply them.
   cannot be true while a blanket escape returns before any owner is resolved.
   Internal origin and unranked actors keep it (D4).
 
+## F.1 Residuals, recorded rather than closed
+
+Two things an adversarial review surfaced that are LATENT today and become
+actionable the moment a concept declares `rankStrict`. **No concept does**, so
+neither is reachable; both are written down because "nobody declared it yet" is
+a fact about the tree, not a property of the code.
+
+- **D4's flag set is not complete.** `Unranked` / `Synthetic` are set by the
+  four documented constructors plus the campaigns drain worker and the fleet
+  store (the two other synthetic actors carrying `RoleOwner`). Roughly ten more
+  synthetic-actor constructors exist across `component/edge`, `component/mcp`,
+  `component/harness`, `component/datasync`, `integrations/customdomain`,
+  `integrations/planner` and `app/`, and they set neither flag. Under a
+  `rankStrict` concept the `RoleOwner` ones would become peer-writes and their
+  sweeps would stop silently -- the exact failure D4 exists to prevent. The
+  first concept to declare `rankStrict` has to sweep that set; a gate that
+  enumerates synthetic constructors would be the durable answer.
+- **Two readers of `v1:rbac:role` disagree about case.**
+  `lookupRoleRankBySlug` matches with `strings.EqualFold`; `roleLadder.rankOf`
+  is deliberately case-sensitive, matching the shell (whose own test pins
+  `"Owner"` as unrankable). Every slug in play is lowercase cluster data, so
+  the two never diverge in practice -- but they are two answers to one
+  question, which is the shape this epic exists to remove.
+
 ## G. Out of scope, and neighbors
 
 - **The role-authoring surface** (adding a custom role from MemQL OS) -- D5

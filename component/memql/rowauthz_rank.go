@@ -297,7 +297,7 @@ func (e *MemQLEngine) resolveRankScope(ctx context.Context) *rankScope {
 			addOwnerSpellings(scope.writeOwners, id)
 		}
 	}
-	scope.fingerprint = fingerprintOwnerSet(scope.actorRank, scope.readOwners)
+	scope.fingerprint = fingerprintOwnerSet(scope.actorRank, scope.readOwners, ladder)
 	return scope
 }
 
@@ -314,14 +314,29 @@ func addOwnerSpellings(set map[string]struct{}, id string) {
 	set[conceptIdentityUser+":"+BareShortId(id)] = struct{}{}
 }
 
-func fingerprintOwnerSet(actorRank int, set map[string]struct{}) string {
+// fingerprintOwnerSet identifies one resolution, for the plan cache.
+//
+// THE LADDER IS PART OF IT, not just the owner set and the actor's rank. An
+// `unowned="<role>"` floor is answered from the ladder alone -- no owner is
+// involved -- so re-ranking a role that no principal currently holds changes
+// whether cluster-owned rows come back WITHOUT changing either of the other
+// two inputs. Narrow, and exactly the kind of narrow that outlives the person
+// who noticed it.
+func fingerprintOwnerSet(actorRank int, set map[string]struct{}, ladder roleLadder) string {
 	keys := make([]string, 0, len(set))
 	for k := range set {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	rungs := make([]string, 0, len(ladder.ranks))
+	for slug, rank := range ladder.ranks {
+		rungs = append(rungs, slug+"="+strconv.Itoa(rank))
+	}
+	sort.Strings(rungs)
 	h := sha256.New()
 	_, _ = h.Write([]byte(strings.Join(keys, "\x1f")))
+	_, _ = h.Write([]byte("\x1e"))
+	_, _ = h.Write([]byte(strings.Join(rungs, "\x1f")))
 	return hex.EncodeToString(h.Sum(nil))[:16] + ":" + strconv.Itoa(actorRank)
 }
 
