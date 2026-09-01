@@ -656,6 +656,38 @@ rather than repetitions of the six before it.
   with no way to tell. A rule whose bundle failed validation or whose circuit
   breaker tripped renders the ENGINE'S OWN SENTENCE, never a paraphrase.
 
+- **A CLUSTER-WIDE FACT IS A BANNER OVER THE LIST, NEVER A STATUS ON EACH
+  ROW.** `authoredAutomationsEnabled` is a global hard stop: with it off, the
+  scheduler's `GlobalGate` suppresses every firing for every owner on every
+  node, checked before owner-gating and before the breaker -- and NOTHING about
+  a rule row changes. Every rule still reads `active`, which is true: they are
+  active AND inert, all of them at once. Painting "halted" onto each row would
+  claim something about each rule that is not true of any of them, so the fact
+  is stated once, above the thing it applies to. Without it an operator reads a
+  list of active rules that send nothing and has nowhere on screen to find out
+  why, which is the exact silent failure this app exists to remove.
+
+  **ABSENT IS NOT FALSE, and that half is bigger than the banner.** A missing
+  settings row, a shape that stops projecting the field, and a failed read are
+  all *unknown*; only an explicit `false` shows the banner. The SDK's `rowBool`
+  answers `false` for a missing key, so reading the switch through it would put
+  "your rules are halted" on every fresh cluster there is -- `kit`'s `boolOr`
+  with a `true` fallback is the honest read, and it matches what the engine's
+  own gate does with an absent row. A read that FAILED says quietly that it
+  could not check, rather than claiming the switch is on: "we could not check"
+  is a fact about this window, not about the cluster. Three tests pin the
+  silences and one pins the appearance, because the silences are the half that
+  turns a banner into a scare.
+
+- **TWO THINGS WEAR THE STATUS `paused`, AND ONLY ONE IS SOMEBODY'S
+  DECISION.** `setEmailRuleStatus` is the operator's stop button; a rule can
+  also stop after its runs kept failing, and the failure that did it is on
+  `lastError`. Saying "you paused this" over the second case throws away the
+  only diagnostic there is and is wrong about who did it. The reading is made
+  from the EVIDENCE rather than from a mechanism the browser cannot observe --
+  a paused rule carrying a run failure is reported as paused *with* that
+  failure, and the copy never names who stopped it.
+
 ### What it deliberately does not do
 
 **There is no delete anywhere in this app, and every surface says why rather

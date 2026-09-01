@@ -642,6 +642,150 @@ describe("the rules builder", () => {
   });
 });
 
+// ===========================================================================
+// THE CLUSTER-WIDE KILL SWITCH
+// ===========================================================================
+// With `authoredAutomationsEnabled` off, the scheduler's global gate refuses
+// every firing on every node while every rule row still reads `active`. That
+// is the exact silent failure this banner exists to remove -- and the reason
+// the three SILENCES below matter more than the one appearance: a banner that
+// fires on a missing answer is a scare on a cluster where nothing is wrong,
+// and it would fire on every fresh cluster there is.
+
+describe("rules halted across the whole cluster", () => {
+  const RULE = ruleRow({ id: "v1:campaigns:emailRule:r1", status: "active" });
+
+  it("says so OVER THE LIST when the switch is explicitly off", async () => {
+    const conn = fakeConnection({
+      emailRules: [RULE],
+      templates: [],
+      concepts: [],
+      clusterSettings: [{ id: "cluster", authoredAutomationsEnabled: false }],
+    });
+    mount(conn, "rules");
+    expect(
+      await screen.findByText(/Rules are switched off across this whole cluster/),
+    ).toBeTruthy();
+    // ...and it says where to go, because a rule's own controls cannot fix it.
+    expect(screen.getByText(/Settings, under Cluster/)).toBeTruthy();
+
+    // NOT A STATUS ON EACH ROW. The row is untouched -- it still says active,
+    // which is true: it is active AND inert, and only the banner can say the
+    // second half.
+    const row = screen.getByText("Tell the owner about new admins").closest(".os-livelist-row");
+    expect(within(row as HTMLElement).getByText("active")).toBeTruthy();
+  });
+
+  it("stays SILENT when the switch is explicitly on", async () => {
+    const conn = fakeConnection({
+      emailRules: [RULE],
+      templates: [],
+      concepts: [],
+      clusterSettings: [{ id: "cluster", authoredAutomationsEnabled: true }],
+    });
+    mount(conn, "rules");
+    await screen.findByText("Tell the owner about new admins");
+    expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
+  });
+
+  it("stays SILENT when the row does not carry the field -- absent is not false", async () => {
+    // The SDK's rowBool answers `false` for a missing key. Reading the switch
+    // through it would render "every rule here is halted" on a cluster whose
+    // shape simply stopped projecting the field.
+    const conn = fakeConnection({
+      emailRules: [RULE],
+      templates: [],
+      concepts: [],
+      clusterSettings: [{ id: "cluster" }],
+    });
+    mount(conn, "rules");
+    await screen.findByText("Tell the owner about new admins");
+    expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
+  });
+
+  it("stays SILENT when there is no settings row at all -- a fresh cluster is not halted", async () => {
+    // The engine's own gate defaults to enabled for an absent row, and an
+    // unadmitted read returns ZERO ROWS rather than an error, so this is also
+    // the shape a future authz tier's refusal would arrive in.
+    const conn = fakeConnection({
+      emailRules: [RULE],
+      templates: [],
+      concepts: [],
+      clusterSettings: [],
+    });
+    mount(conn, "rules");
+    await screen.findByText("Tell the owner about new admins");
+    expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
+  });
+
+  it("stays SILENT on a failed read, and says quietly that it could not check", async () => {
+    // A REFUSAL IS NOT A ZERO, and it is not an "off" either. It is also not a
+    // clean bill of health: the caption says what this window does not know
+    // rather than claiming the cluster is fine.
+    const conn = fakeConnection({
+      emailRules: [RULE],
+      templates: [],
+      concepts: [],
+      clusterSettings: new Error("reading cluster settings is owner only"),
+    });
+    mount(conn, "rules");
+    await screen.findByText("Tell the owner about new admins");
+    expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
+    expect(
+      await screen.findByText(/did not say whether rules are switched on globally/),
+    ).toBeTruthy();
+  });
+});
+
+describe("a rule that stopped itself", () => {
+  it("does NOT say somebody paused it when the last run failed", async () => {
+    // A rule can be paused by its operator OR stop after its runs kept
+    // failing, and only one of those is somebody's decision. "You paused
+    // this" over the second throws away the only diagnostic there is.
+    const conn = fakeConnection({
+      emailRules: [
+        ruleRow({
+          id: "v1:campaigns:emailRule:r1",
+          status: "paused",
+          constructName: "emailRuleR1OnUserCreated",
+          lastError: "send refused: no sender identity is readable by this rule's author",
+        }),
+      ],
+      templates: [],
+      concepts: [],
+    });
+    mount(conn, "rules");
+    fireEvent.click(screen.getByLabelText("Show paused rules", { selector: "input" }));
+    fireEvent.click(await screen.findByText("Tell the owner about new admins"));
+    expect(await screen.findByText(/Paused, and its last run failed/)).toBeTruthy();
+    // The engine's own sentence is what somebody acts on.
+    expect(
+      screen.getByText("send refused: no sender identity is readable by this rule's author"),
+    ).toBeTruthy();
+  });
+
+  it("says a clean pause was a stop button", async () => {
+    const conn = fakeConnection({
+      emailRules: [
+        ruleRow({
+          id: "v1:campaigns:emailRule:r1",
+          status: "paused",
+          constructName: "emailRuleR1OnUserCreated",
+          lastError: "",
+        }),
+      ],
+      templates: [],
+      concepts: [],
+    });
+    mount(conn, "rules");
+    fireEvent.click(screen.getByLabelText("Show paused rules", { selector: "input" }));
+    fireEvent.click(await screen.findByText("Tell the owner about new admins"));
+    expect(
+      await screen.findByText(/what it generated is still there waiting/),
+    ).toBeTruthy();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The app's own settings
 // ---------------------------------------------------------------------------

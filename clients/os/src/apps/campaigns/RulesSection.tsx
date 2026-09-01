@@ -41,11 +41,12 @@ import {
   recipientModeLabel,
   ruleFingerprint,
   ruleName,
+  pauseReading,
   ruleSentence,
   type EmailRuleRow,
   type RecipientMode,
 } from "./rows";
-import { useTriggerConcepts, type CampaignFeeds } from "./useCampaigns";
+import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "./useCampaigns";
 
 // Rules: "when this happens, email that to those people."
 //
@@ -100,6 +101,7 @@ export function RulesSection({
   const audiences = useProjected(feeds.audiences.snapshot.rows, audienceProjection);
   const senders = useProjected(feeds.senders.snapshot.rows, senderProjection);
   const concepts = useTriggerConcepts();
+  const authored = useAuthoredAutomations();
 
   const open = useMemo(
     () => source?.snapshot.rows.find((r) => r.id === openId) ?? null,
@@ -113,6 +115,8 @@ export function RulesSection({
           <Plus size={14} aria-hidden /> New rule
         </Button>
       </Head>
+
+      <AuthoredAutomationsBanner authored={authored} />
 
       {feeds.rules.snapshot.error ? (
         <Notice
@@ -176,6 +180,64 @@ export function RulesSection({
       )}
     </div>
   );
+}
+
+/**
+ * The cluster-wide kill switch, over the list.
+ *
+ * ===========================================================================
+ * A BANNER OVER THE LIST, NEVER A STATUS ON EACH ROW
+ * ===========================================================================
+ * This is not per-rule state. With the switch off, every rule is
+ * simultaneously "active and inert" -- the rows are untouched, the scheduler's
+ * global gate refuses each firing before it reaches owner-gating or the
+ * breaker, and nothing about any individual rule is different from how it was
+ * yesterday. Painting "halted" onto each row would claim something about each
+ * rule that is not true of any of them; the fact belongs to the cluster, so it
+ * is stated once, above the thing it applies to.
+ *
+ * ONLY AN EXPLICIT `false` SHOWS IT. A missing row, a shape that does not
+ * carry the field, and a read that failed are all "unknown", and rendering
+ * "your rules are halted" from any of them would be inventing a cluster fact
+ * out of a missing one -- a scare on a cluster where nothing is wrong. That
+ * asymmetry is the whole design of `authoredAutomationsFrom`, and
+ * test/campaigns/app.test.tsx pins all three silences.
+ *
+ * A REFUSED READ SAYS SO QUIETLY rather than claiming the switch is on. It is
+ * a caption and not a warning, because "we could not check" is a fact about
+ * this window, not about the cluster.
+ */
+function AuthoredAutomationsBanner({
+  authored,
+}: {
+  authored: ReturnType<typeof useAuthoredAutomations>;
+}) {
+  if (authored.value === "halted") {
+    return (
+      <Notice
+        tone="warn"
+        sentence="Rules are switched off across this whole cluster, so none of them are sending -- including the ones below that say active."
+        next="A cluster-wide switch stops every automated email on every node, whatever an individual rule says. An owner can turn it back on in Settings, under Cluster."
+      >
+        <Caption>
+          Read at {new Date(authored.readAt || Date.now()).toLocaleTimeString()}. This is not live
+          -- reopen this section to check it again.
+        </Caption>
+      </Notice>
+    );
+  }
+  if (authored.state === "error") {
+    // QUIET, and it does not say the switch is on. "We could not check" is a
+    // fact about this window; claiming the cluster is fine would be a fact
+    // about the cluster that nothing here established.
+    return (
+      <Caption>
+        This cluster did not say whether rules are switched on globally, so nothing below can
+        promise it is sending.
+      </Caption>
+    );
+  }
+  return null;
 }
 
 /** Only two statuses carry colour: one that is running and one that broke.
@@ -462,12 +524,30 @@ function ArmingPanel({
   );
 }
 
+/**
+ * What is true of this rule right now.
+ *
+ * THE TWO WAYS A RULE COMES TO BE PAUSED ARE DIFFERENT SITUATIONS, and only
+ * one of them is somebody's decision. `setEmailRuleStatus` is the operator's
+ * stop button; a rule can also stop after its runs kept failing, and the
+ * failure that did it is on `lastError`. "You paused this" over the second
+ * case throws away the only diagnostic there is -- and it is wrong about who
+ * did it.
+ *
+ * The line reports the EVIDENCE and does not name a mechanism this window
+ * cannot observe: paused, and the last run failed. What failed is rendered
+ * verbatim above, which is where somebody acts on it.
+ */
 function runningLine(rule: EmailRuleRow): string {
   switch (rule.status) {
     case "active":
-      return "This rule is running. It sends mail on its own whenever the event happens.";
+      return rule.lastError === ""
+        ? "This rule is running. It sends mail on its own whenever the event happens."
+        : "Running, but its last run failed -- and enough failures in a row stop a rule on their own. What went wrong is above.";
     case "paused":
-      return "Paused. Nothing is sent, and what it generated is still there waiting.";
+      return pauseReading(rule) === "operator"
+        ? "Paused. Nothing is sent, and what it generated is still there waiting."
+        : "Paused, and its last run failed. What went wrong is above -- start it again once that is dealt with.";
     case "failed":
       return "Not running -- the cluster refused it. The reason is above.";
     default:

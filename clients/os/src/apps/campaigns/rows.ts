@@ -1,6 +1,6 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { flatten, stringsOf } from "../../kit/rows";
+import { boolOr, flatten, stringsOf } from "../../kit/rows";
 
 // The wire rows the Campaigns app renders, projected into the shapes its
 // surfaces read.
@@ -1005,4 +1005,66 @@ export function emailReadinessFrom(payload: Row): EmailReadiness {
     detail: rowString(email, "detail"),
     mode: rowString(email, "mode"),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The cluster-wide kill switch for authored automations
+// ---------------------------------------------------------------------------
+
+/**
+ * What `v1:identity:clusterSettings.authoredAutomationsEnabled` says.
+ *
+ * THREE ANSWERS, AND THE THIRD IS THE ONE THAT MATTERS. "unknown" is not a
+ * degenerate case to collapse into one of the other two: the row is a
+ * singleton a fresh cluster has never written, the concept declares no authz
+ * tier today (so a later one would turn every read into zero rows rather than
+ * an error, memql#4309), and a read can simply fail. Every one of those looks
+ * identical from here and NONE of them means the switch is off.
+ */
+export type AuthoredAutomationsState = "running" | "halted" | "unknown";
+
+/**
+ * Read the switch out of a `clusterSettingsCurrent` row.
+ *
+ * ABSENT IS NOT FALSE, and getting that backwards is the whole risk of this
+ * surface. `boolOr` exists precisely because the SDK's `rowBool` answers
+ * `false` for a missing key, which would make a fresh cluster -- or a shape
+ * that stops projecting the field -- render "every rule here is halted" on a
+ * cluster where nothing is wrong. The fallback is `true`, which is both the
+ * concept's own `@default("true")` and what the engine's own gate does with an
+ * absent row ("a fresh cluster has authored automations on",
+ * `app/engine_authored.go`).
+ *
+ * A NULL ROW IS "unknown" RATHER THAN "running", because the two are different
+ * claims: "the cluster told us the switch is on" and "we did not get an
+ * answer". The surface says nothing for either -- but only one of them is
+ * something it could ever be asked to explain.
+ */
+export function authoredAutomationsFrom(row: Row | null): AuthoredAutomationsState {
+  if (row === null) return "unknown";
+  const flat = flatten(row);
+  if (typeof flat["authoredAutomationsEnabled"] !== "boolean") return "unknown";
+  return boolOr(flat, "authoredAutomationsEnabled", true) ? "running" : "halted";
+}
+
+/**
+ * Why a rule is not running, when its row says `paused`.
+ *
+ * TWO THINGS WEAR THE SAME STATUS, and only one of them is somebody's
+ * decision. `setEmailRuleStatus` is the operator's stop button and leaves
+ * `lastError` alone; a run that FAILED writes the engine's sentence there
+ * (`recordEmailRuleFiring`), and enough consecutive failures trip the
+ * per-automation circuit breaker, which stops the automation without anybody
+ * asking. Saying "you paused this" over the second case throws away the only
+ * diagnostic there is.
+ *
+ * So the reading is made from the EVIDENCE rather than from a mechanism this
+ * window cannot observe: a paused rule carrying a run failure is reported as
+ * paused WITH that failure, and the copy does not claim who stopped it. That
+ * is the honest form -- the row records what happened, not who did it.
+ */
+export type PauseReading = "operator" | "after_failure";
+
+export function pauseReading(rule: EmailRuleRow): PauseReading {
+  return rule.lastError.trim() === "" ? "operator" : "after_failure";
 }

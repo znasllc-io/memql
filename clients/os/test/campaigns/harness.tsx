@@ -79,6 +79,14 @@ export interface FakeSeed {
   recipientsForAudience?: Row[] | Error;
   campaignStats?: Row[] | Error;
   campaignsForAccount?: Row[] | Error;
+  /**
+   * The `clusterSettingsCurrent` reply. Absent = a cluster whose authored
+   * automations are ON, because the halted state is the surprising one and a
+   * harness whose default produced it would put a banner on every rules test.
+   * Pass `[]` for a cluster with no settings row, `[{}]` for a row that does
+   * not carry the field, and an Error for a read that failed.
+   */
+  clusterSettings?: Row[] | Error;
   /** The `integrationStatus` reply. Absent = a healthy, configured cluster,
    *  because the "needs configuration" banner is the surprising state and a
    *  harness whose default produced it would put a warning on every test. */
@@ -101,6 +109,9 @@ const HEALTHY_EMAIL: Row = {
   ],
 };
 
+/** A cluster whose authored automations are running. */
+const RUNNING_AUTOMATIONS: Row = { id: "cluster", authoredAutomationsEnabled: true };
+
 export function fakeConnection(seed: FakeSeed = {}) {
   return {
     query: {
@@ -117,6 +128,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignStats: reader(seed.campaignStats),
       campaignsForAccount: reader(seed.campaignsForAccount),
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),
+      clusterSettingsCurrent: reader(seed.clusterSettings ?? [RUNNING_AUTOMATIONS]),
       listConcepts: vi.fn(async () =>
         (seed.concepts ?? []).map((c) => ({
           ...c,

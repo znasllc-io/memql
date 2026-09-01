@@ -10,8 +10,10 @@ import {
   EMAIL_UNKNOWN,
   SENDER_IDENTITY_CONCEPT,
   TEMPLATE_CONCEPT,
+  authoredAutomationsFrom,
   emailReadinessFrom,
   statsFromPayload,
+  type AuthoredAutomationsState,
   type CampaignStats,
   type EmailReadiness,
 } from "./rows";
@@ -405,4 +407,44 @@ export function useAccountCampaignsRollup(accountId: string): Reading<Row[]> {
     };
   }, [query, accountId]);
   return useReading<Row[]>(NO_ROWS, read, [query, accountId]);
+}
+
+/**
+ * Whether authored automations are running at all, cluster-wide.
+ *
+ * ===========================================================================
+ * THE SILENT FAILURE THIS READ EXISTS TO REMOVE
+ * ===========================================================================
+ * `v1:identity:clusterSettings.authoredAutomationsEnabled` is a GLOBAL hard
+ * stop: with it off, `AuthoredScheduler`'s `GlobalGate` suppresses every
+ * firing for every owner on every node, checked before owner-gating and before
+ * the breaker. Nothing about a rule row changes -- each one still reads
+ * `active` -- so an operator sees a list of active rules that send nothing,
+ * with no way anywhere on screen to find out that a cluster-level switch is
+ * the reason.
+ *
+ * ON DEMAND, because `v1:identity:clusterSettings` carries no broadcast
+ * routing rule; the section prints when it looked, the way every other
+ * non-live surface in this app does.
+ *
+ * IT IS READ ONCE, IN THE RULES SECTION. It is not a campaigns fact and it
+ * says nothing about a send, so putting it at the app root would carry a line
+ * about automations onto four surfaces that have none.
+ */
+export function useAuthoredAutomations(): Reading<AuthoredAutomationsState> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null) return null;
+    return async (signal: AbortSignal) => {
+      const result = await query.clusterSettingsCurrent({}, { signal });
+      // A read that comes back with NO ROW is "unknown", not "running". The
+      // concept declares no authz tier today, and the day one is declared an
+      // unadmitted read returns zero rows rather than an error (memql#4309) --
+      // so an empty result is the shape a future refusal will arrive in, and
+      // reading it as "the switch is on" would be inventing the answer.
+      return authoredAutomationsFrom(result.rows()[0] ?? null);
+    };
+  }, [query]);
+  return useReading<AuthoredAutomationsState>("unknown", read, [query]);
 }
