@@ -57,7 +57,15 @@ type fakeLibraryStore struct {
 	artifacts map[string]*LibraryArtifactRow
 	files     map[string]*LibraryFileRow
 	bodies    map[string]*LibraryExportBody
-	ownerOf   map[string]string // artifact id / file ref / body ref -> owner user id
+	ownerOf   map[string]string // artifact id / file ref / body ref / "worker:<id>" -> owner user id
+
+	// workers answers OwnedWorker, gated on the actor like every other read
+	// (memql#4781): the real store runs myWorkersWithStatus under the
+	// caller's own actor, so "not yours" and "not there" are one empty
+	// answer. ownedWorkerN counts the reads so a test can assert an upload
+	// with no claim never pays one.
+	workers      map[string]*LibraryWorkerRef
+	ownedWorkerN int
 
 	// artifactForFile answers ArtifactForFile, but only after promoteAfter
 	// calls -- the promotion is an automation off graph.node.created, so the
@@ -76,7 +84,24 @@ func newFakeLibraryStore() *fakeLibraryStore {
 		bodies:          map[string]*LibraryExportBody{},
 		ownerOf:         map[string]string{},
 		artifactForFile: map[string]string{},
+		workers:         map[string]*LibraryWorkerRef{},
 	}
+}
+
+func (f *fakeLibraryStore) OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ownedWorkerN++
+	if !f.admits(ctx, "worker:"+workerId) {
+		return nil, nil
+	}
+	return f.workers[workerId], nil
+}
+
+func (f *fakeLibraryStore) ownedWorkerCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ownedWorkerN
 }
 
 func actorUserId(ctx context.Context) string {
@@ -194,6 +219,12 @@ func (b *fakeBlob) Upload(_ context.Context, container, objectName string, data 
 	url := "https://example.blob.core.windows.net/" + container + "/" + objectName
 	b.objects[url] = append([]byte(nil), data...)
 	return url, nil
+}
+
+func (b *fakeBlob) objectCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.objects)
 }
 
 func (b *fakeBlob) DownloadURL(_ context.Context, blobURL string) ([]byte, error) {
@@ -1082,6 +1113,23 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 				Source: "uploaded", Format: "markdown", Summary: awkward,
 			})
 		}},
+		{"createLibraryFile with filing + provenance", func() error {
+			// The memql#4781 args, awkward where a string can be: the folder
+			// id, the machine name and the path all have to survive rendering.
+			return store.CreateFile(ctx, LibraryFileCreateParams{
+				FileId: "file-2", Name: "q3.pdf", MimeType: "application/pdf", Size: 9,
+				Sha256: strings.Repeat("cd", 32), BlobUrl: "library/u-1/file-2/q3.pdf",
+				Source: "uploaded", Format: "pdf",
+				FolderId:               "fold-1",
+				UploadedFromWorkerId:   "wrk-1",
+				UploadedFromWorkerName: awkward,
+				UploadedFromPath:       `C:\Users\O'Brien\"q3" é\nreport.pdf`,
+			})
+		}},
+		{"myWorkersWithStatus", func() error {
+			_, err := store.OwnedWorker(ctx, "wrk-1")
+			return err
+		}},
 		{"setLibraryFileStatus ready", func() error {
 			return store.SetFileStatus(ctx, LibraryFileStatusParams{
 				FileId: "file-1", Status: "ready", EmbeddingStatus: "none",
@@ -1152,7 +1200,7 @@ func TestLibraryStoreArgumentsAreDeclared(t *testing.T) {
 	// Mirrors what each store method sends, maximal (every optional field
 	// populated) so an undeclared optional cannot hide behind being omitted.
 	sites := map[string][]string{
-		"createLibraryFile":                 {"fileId", "name", "mimeType", "size", "sha256", "blobUrl", "source", "format", "summary"},
+		"createLibraryFile":                 {"fileId", "name", "mimeType", "size", "sha256", "blobUrl", "source", "format", "summary", "folderId", "uploadedFromWorkerId", "uploadedFromWorkerName", "uploadedFromPath"},
 		"setLibraryFileStatus":              {"fileId", "status", "summary", "embeddingStatus", "failureReason"},
 		"libraryArtifactBySourceConceptRef": {"sourceConceptRef"},
 		"libraryArtifactById":               {"artifactId"},

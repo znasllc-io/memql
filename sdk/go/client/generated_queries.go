@@ -3672,6 +3672,45 @@ func LibraryFilesForOwnerBuild(args LibraryFilesForOwnerArgs) string {
 	return "query libraryFilesForOwner()"
 }
 
+// LibraryFolderById -- Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderById"] in generated_concepts.go).
+type LibraryFolderByIdArgs struct {
+	FolderId string
+}
+
+// LibraryFolderById calls the engine query libraryFolderById.
+func (qc *QueryClient) LibraryFolderById(ctx context.Context, args LibraryFolderByIdArgs) (*Result, error) {
+	call := LibraryFolderByIdBuild(args)
+	return qc.executeNamed(ctx, "libraryFolderById", call)
+}
+
+func LibraryFolderByIdBuild(args LibraryFolderByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryFolderById(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryFolders -- The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolders"] in generated_concepts.go).
+type LibraryFoldersArgs struct {
+}
+
+// LibraryFolders calls the engine query libraryFolders.
+func (qc *QueryClient) LibraryFolders(ctx context.Context, args LibraryFoldersArgs) (*Result, error) {
+	call := LibraryFoldersBuild(args)
+	return qc.executeNamed(ctx, "libraryFolders", call)
+}
+
+func LibraryFoldersBuild(args LibraryFoldersArgs) string {
+	_ = args
+	return "query libraryFolders()"
+}
+
 // LibraryWorkspaceLiveSources -- List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.go).

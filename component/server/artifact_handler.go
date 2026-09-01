@@ -63,6 +63,24 @@ const (
 	// portal's label editor and the agent tool use.
 	libraryFormLabelsKey = "labels"
 
+	// libraryFormFolderKey optionally names the v1:library:folder the upload
+	// is filed under (memql#4781, design B2). The upload route is the writer
+	// that knows the target; the promotion automation forwards it onto the
+	// index row, which is authoritative from then on.
+	libraryFormFolderKey = "folderId"
+
+	// libraryFormWorkerIdKey / libraryFormWorkerNameKey / libraryFormPathKey
+	// carry the upload's machine provenance (memql#4781, design D5): the
+	// worker registration the file came FROM, its display name, and the path
+	// it occupied there. A cockpit push sends them; a browser physically
+	// cannot name a machine and sends none. The id is VERIFIED against the
+	// caller's own fleet before anything else happens -- an unverifiable
+	// claim refuses the whole upload, because a silently-dropped field would
+	// render as "uploaded here", which is a lie.
+	libraryFormWorkerIdKey   = "uploadedFromWorkerId"
+	libraryFormWorkerNameKey = "uploadedFromWorkerName"
+	libraryFormPathKey       = "uploadedFromPath"
+
 	// DefaultLibraryMaxUploadBytes is the cap when MEMQL_LIBRARY_MAX_UPLOAD_BYTES
 	// is unset. 256 MB, sized so a site bundle fits (design 3.4) -- ten times
 	// the attachment cap, because a Library file is not a chat attachment and
@@ -162,6 +180,25 @@ type LibraryFileCreateParams struct {
 	Source   string // uploaded | exported | agent_generated | derived
 	Format   string // markdown | document | pdf | spreadsheet | image | text | conversation | other
 	Summary  string
+	// FolderId is the initial filing (memql#4781, design B2) -- forwarded to
+	// the index by the promotion automation, after which the index copy is
+	// authoritative. Blank = root.
+	FolderId string
+	// UploadedFrom* is the verified machine provenance (design D5). The
+	// handler has already checked the registration belongs to the caller and
+	// resolved the NAME from the registration row itself before these are
+	// set; blank means no claim was made, never a dropped one.
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
+}
+
+// LibraryWorkerRef is the slice of a worker registration the provenance
+// check needs: that it exists in the CALLER's own fleet, and what the fleet
+// calls it.
+type LibraryWorkerRef struct {
+	ID   string
+	Name string
 }
 
 // LibraryFileStatusParams advances a file through the analysis lifecycle.
@@ -242,6 +279,14 @@ type LibraryStore interface {
 	// memory) under the caller's actor. Returns nil when the kind has no
 	// exportable body, or the row is absent or denied.
 	ExportBody(ctx context.Context, kind, sourceConceptRef string) (*LibraryExportBody, error)
+	// OwnedWorker resolves a worker registration IN THE CALLER'S OWN FLEET
+	// (memql#4781, design D5): the read runs under the caller's actor, so
+	// "not yours" and "not there" come back as the same nil -- which is the
+	// whole verification. The returned Name is the fleet's own label for the
+	// machine (displayName when the owner set one, else the reported
+	// hostname), so an upload's provenance label can never disagree with the
+	// fleet page.
+	OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error)
 }
 
 // LibraryAnalysisRequest is the whole of what the analysis pass needs to run.
@@ -458,12 +503,53 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 
+	ctx := r.Context()
+
+	// --- provenance, verified BEFORE any byte is stored (memql#4781, D5) ---
+	//
+	// A claim that fails verification refuses the WHOLE upload: dropping the
+	// field and continuing would store a file that renders as "uploaded
+	// here", which is a lie, and a row written before the refusal would be an
+	// upload the response denies. The check runs under the caller's own
+	// actor, so "not your machine" and "no such machine" are one empty
+	// answer -- deliberately, for the same reason the download route's
+	// refusals are 404s.
+	folderId := strings.TrimSpace(r.FormValue(libraryFormFolderKey))
+	workerId := strings.TrimSpace(r.FormValue(libraryFormWorkerIdKey))
+	workerName := strings.TrimSpace(r.FormValue(libraryFormWorkerNameKey))
+	fromPath := strings.TrimSpace(r.FormValue(libraryFormPathKey))
+	if (fromPath != "" || workerName != "") && workerId == "" {
+		// A path or a machine name with no machine ID is half a claim, and
+		// nothing can verify half a claim.
+		http.Error(w, fmt.Sprintf("%s and %s need %s: machine provenance is anchored on the registration id",
+			libraryFormPathKey, libraryFormWorkerNameKey, libraryFormWorkerIdKey), http.StatusBadRequest)
+		return
+	}
+	if workerId != "" {
+		ref, err := h.store.OwnedWorker(ctx, workerId)
+		if err != nil {
+			h.logger.Error("verify upload provenance", "error", err, "workerId", workerId)
+			http.Error(w, "provenance verification failed", http.StatusInternalServerError)
+			return
+		}
+		if ref == nil {
+			http.Error(w, fmt.Sprintf(
+				"the worker registration %q is not one of your machines, so the upload's provenance claim was refused",
+				workerId), http.StatusForbidden)
+			return
+		}
+		// The fleet's own label for the machine wins over whatever the form
+		// said: the inspector must never disagree with the fleet page about
+		// what a machine is called.
+		if resolved := strings.TrimSpace(ref.Name); resolved != "" {
+			workerName = resolved
+		}
+	}
+
 	fileId := id.NewShortId()
 	// The storage path the concept documents, verbatim:
 	// library/{userId}/{fileId}/{name}.
 	objectName := fmt.Sprintf("library/%s/%s/%s", userId, fileId, name)
-
-	ctx := r.Context()
 
 	// --- the bytes, then the row. Never the other way round. ---
 	//
@@ -503,6 +589,13 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		BlobUrl:  blobUrl,
 		Source:   "uploaded",
 		Format:   format,
+		FolderId: folderId,
+		// workerName is the registration's own label by this point (or the
+		// form's, only when the registration carries none): verified above,
+		// before the bytes moved.
+		UploadedFromWorkerId:   workerId,
+		UploadedFromWorkerName: workerName,
+		UploadedFromPath:       fromPath,
 	}); err != nil {
 		h.logger.Error("create library file row", "error", err, "fileId", fileId)
 		http.Error(w, fmt.Sprintf("failed to create library file: %v", err), http.StatusInternalServerError)
@@ -1040,8 +1133,56 @@ func (s *EngineLibraryStore) CreateFile(ctx context.Context, p LibraryFileCreate
 	if sm := strings.TrimSpace(p.Summary); sm != "" {
 		args["summary"] = sm
 	}
+	if v := strings.TrimSpace(p.FolderId); v != "" {
+		args["folderId"] = v
+	}
+	if v := strings.TrimSpace(p.UploadedFromWorkerId); v != "" {
+		args["uploadedFromWorkerId"] = v
+	}
+	if v := strings.TrimSpace(p.UploadedFromWorkerName); v != "" {
+		args["uploadedFromWorkerName"] = v
+	}
+	if v := strings.TrimSpace(p.UploadedFromPath); v != "" {
+		args["uploadedFromPath"] = v
+	}
 	_, err := s.exec(ctx, "createLibraryFile", args)
 	return err
+}
+
+// libraryWorkerConcept prefixes a canonical worker-registration node id, for
+// tolerant matching in OwnedWorker: the OS sends the bare id (the client
+// contract), while a materialized row's id is canonical.
+const libraryWorkerConcept = "v1:worker:registration"
+
+// OwnedWorker resolves a registration in the caller's own fleet through
+// myWorkersWithStatus -- the SAME read the fleet router runs, chosen over a
+// by-id query because it takes no argument at all: there is no id to widen
+// the row set with, so the ownership check IS the read. The id match
+// tolerates bare and canonical spellings on either side.
+func (s *EngineLibraryStore) OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error) {
+	workerId = strings.TrimSpace(workerId)
+	if workerId == "" {
+		return nil, fmt.Errorf("workerId is required")
+	}
+	res, err := s.exec(ctx, "myWorkersWithStatus", nil)
+	if err != nil {
+		return nil, err
+	}
+	want := strings.TrimPrefix(workerId, libraryWorkerConcept+":")
+	for _, r := range memql.MaterializeRows(res) {
+		got := strings.TrimPrefix(rowString(r, "id"), libraryWorkerConcept+":")
+		if got == "" || got != want {
+			continue
+		}
+		return &LibraryWorkerRef{
+			ID: got,
+			// The fleet's own label: the owner's displayName when set, else
+			// the hostname the cockpit reported -- the same precedence the
+			// fleet page renders.
+			Name: firstNonBlank(rowString(r, "displayName"), rowString(r, "name")),
+		}, nil
+	}
+	return nil, nil
 }
 
 // SetFileStatus runs setLibraryFileStatus. Absent optional fields are omitted

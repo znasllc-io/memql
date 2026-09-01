@@ -468,6 +468,28 @@ QueryClient.prototype.archiveLibraryFile = function (this: QueryClient, args: Ar
   return this.executeNamed("archiveLibraryFile", buildArchiveLibraryFile(args), opts);
 };
 
+/** Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["archiveLibraryFolder"] in generated_concepts.ts).
+export interface ArchiveLibraryFolderArgs {
+  folderId: string;
+}
+
+export function buildArchiveLibraryFolder(args: ArchiveLibraryFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  return "mutation archiveLibraryFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveLibraryFolder(args: ArchiveLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveLibraryFolder = function (this: QueryClient, args: ArchiveLibraryFolderArgs = {} as ArchiveLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveLibraryFolder", buildArchiveLibraryFolder(args), opts);
+};
+
 /** Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.ts).
 export interface AssignResponsibilityArgs {
@@ -1375,6 +1397,7 @@ export interface CreateArtifactArgs {
   scope?: string;
   labels?: string[];
   archived?: boolean;
+  folderId?: string;
   partitionId?: string;
   agentId?: string;
   producedByPlanId?: string;
@@ -1399,6 +1422,7 @@ export function buildCreateArtifact(args: CreateArtifactArgs): string {
   if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
   if (args.labels !== undefined) parts.push("labels: " + renderMemQLValue(args.labels));
   if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));
@@ -2501,6 +2525,10 @@ export interface CreateLibraryFileArgs {
   // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
   format?: string;
   summary?: string;
+  folderId?: string;
+  uploadedFromWorkerId?: string;
+  uploadedFromWorkerName?: string;
+  uploadedFromPath?: string;
 }
 
 export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
@@ -2514,6 +2542,10 @@ export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
   parts.push("source: " + renderMemQLValue(args.source));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.uploadedFromWorkerId !== undefined) parts.push("uploadedFromWorkerId: " + renderMemQLValue(args.uploadedFromWorkerId));
+  if (args.uploadedFromWorkerName !== undefined) parts.push("uploadedFromWorkerName: " + renderMemQLValue(args.uploadedFromWorkerName));
+  if (args.uploadedFromPath !== undefined) parts.push("uploadedFromPath: " + renderMemQLValue(args.uploadedFromPath));
   return "mutation createLibraryFile(" + parts.join(", ") + ")";
 }
 
@@ -2557,6 +2589,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.createLibraryFileChunk = function (this: QueryClient, args: CreateLibraryFileChunkArgs = {} as CreateLibraryFileChunkArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createLibraryFileChunk", buildCreateLibraryFileChunk(args), opts);
+};
+
+/** Create a folder in the caller's Library tree (memql#4781, design B1). Owner-acted: ownerUserId is stamped from actor.userId, so a folder can only ever be created for the person the call runs as. parentFolderId nests it under an existing folder; absent means root. Sibling name duplicates are allowed by design (a folder is a collection, not a namespace), so there is no uniqueness check to refuse a name. The client enforces the depth cap (12) and cycle refusal (design D11); the tree fold tolerates violations defensively either way. archived is stamped false explicitly so every row states its own answer -- the same reasoning createArtifact records. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["createLibraryFolder"] in generated_concepts.ts).
+export interface CreateLibraryFolderArgs {
+  folderId: string;
+  name: string;
+  parentFolderId?: string;
+}
+
+export function buildCreateLibraryFolder(args: CreateLibraryFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.parentFolderId !== undefined) parts.push("parentFolderId: " + renderMemQLValue(args.parentFolderId));
+  return "mutation createLibraryFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createLibraryFolder(args: CreateLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createLibraryFolder = function (this: QueryClient, args: CreateLibraryFolderArgs = {} as CreateLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createLibraryFolder", buildCreateLibraryFolder(args), opts);
 };
 
 /** Create a magic-link request row at issuance time. */
@@ -4856,6 +4914,54 @@ QueryClient.prototype.mintSkill = function (this: QueryClient, args: MintSkillAr
   return this.executeNamed("mintSkill", buildMintSkill(args), opts);
 };
 
+/** Re-file a Library artifact into a folder (memql#4781, design B2) -- the organizational write of the Files app, and deliberately a READ-MERGE update: labels, archived, provenance and every other index field survive a move untouched, which is what makes moving cheap enough to be the only filing operation the tree needs. An absent folderId (or an explicit "") files it at the root -- ?? is blank-coalescing, and no folder's id is "". updatedAt advances because a move IS a change a person made to the row, and the Library's default sort should say so. Works on every content kind (file, document, generated_output); the backing row's own folderId copy is the initial filing only and is deliberately not chased (the index is authoritative after promotion). */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["moveArtifactToFolder"] in generated_concepts.ts).
+export interface MoveArtifactToFolderArgs {
+  artifactId: string;
+  folderId?: string;
+}
+
+export function buildMoveArtifactToFolder(args: MoveArtifactToFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  return "mutation moveArtifactToFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    moveArtifactToFolder(args: MoveArtifactToFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.moveArtifactToFolder = function (this: QueryClient, args: MoveArtifactToFolderArgs = {} as MoveArtifactToFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("moveArtifactToFolder", buildMoveArtifactToFolder(args), opts);
+};
+
+/** Move a folder to a new parent -- one row update, the Drive model's whole cost for a move (design D3). An absent parentFolderId (or an explicit "") moves it to the root: ?? is blank-coalescing, and for a move-target that collapse is exactly the wanted semantics, because no folder's id is "". Cycle prevention is the CLIENT's check in v1 (design D11) -- the engine has no ancestor walk to refuse one with -- and the tree fold renders a folder whose ancestor chain revisits itself at root with a marker, so a race between two movers degrades the picture rather than losing anybody's rows. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["moveLibraryFolder"] in generated_concepts.ts).
+export interface MoveLibraryFolderArgs {
+  folderId: string;
+  parentFolderId?: string;
+}
+
+export function buildMoveLibraryFolder(args: MoveLibraryFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.parentFolderId !== undefined) parts.push("parentFolderId: " + renderMemQLValue(args.parentFolderId));
+  return "mutation moveLibraryFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    moveLibraryFolder(args: MoveLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.moveLibraryFolder = function (this: QueryClient, args: MoveLibraryFolderArgs = {} as MoveLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("moveLibraryFolder", buildMoveLibraryFolder(args), opts);
+};
+
 /** Pause a running send. The delivery ledger is untouched, which is the whole point: a paused campaign resumes exactly where it stopped because "where it stopped" is the set of recipients with no delivery row, not a cursor that could go stale. Owned. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["pauseCampaign"] in generated_concepts.ts).
 export interface PauseCampaignArgs {
@@ -6201,6 +6307,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.removeAgentFromSpace = function (this: QueryClient, args: RemoveAgentFromSpaceArgs = {} as RemoveAgentFromSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("removeAgentFromSpace", buildRemoveAgentFromSpace(args), opts);
+};
+
+/** Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is oblivious -- they point at the id, and the id does not change. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["renameLibraryFolder"] in generated_concepts.ts).
+export interface RenameLibraryFolderArgs {
+  folderId: string;
+  name: string;
+}
+
+export function buildRenameLibraryFolder(args: RenameLibraryFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "mutation renameLibraryFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    renameLibraryFolder(args: RenameLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.renameLibraryFolder = function (this: QueryClient, args: RenameLibraryFolderArgs = {} as RenameLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("renameLibraryFolder", buildRenameLibraryFolder(args), opts);
 };
 
 /** Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched. */

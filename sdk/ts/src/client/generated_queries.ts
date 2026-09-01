@@ -3663,6 +3663,48 @@ QueryClient.prototype.libraryFilesForOwner = function (this: QueryClient, args: 
   return this.executeNamed("libraryFilesForOwner", buildLibraryFilesForOwner(args), opts);
 };
 
+/** Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderById"] in generated_concepts.ts).
+export interface LibraryFolderByIdArgs {
+  folderId: string;
+}
+
+export function buildLibraryFolderById(args: LibraryFolderByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  return "query libraryFolderById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFolderById(args: LibraryFolderByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFolderById = function (this: QueryClient, args: LibraryFolderByIdArgs = {} as LibraryFolderByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFolderById", buildLibraryFolderById(args), opts);
+};
+
+/** The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolders"] in generated_concepts.ts).
+export interface LibraryFoldersArgs {
+}
+
+export function buildLibraryFolders(args: LibraryFoldersArgs): string {
+  void args;
+  return "query libraryFolders()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFolders(args?: LibraryFoldersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFolders = function (this: QueryClient, args: LibraryFoldersArgs = {} as LibraryFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFolders", buildLibraryFolders(args), opts);
+};
+
 /** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.ts).
 export interface LibraryWorkspaceLiveSourcesArgs {
