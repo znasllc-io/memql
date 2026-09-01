@@ -11,8 +11,11 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   their one window.
 - **Desktop items**: files are Library artifact shortcuts with the
   provenance dot (green = reachable, amber = not); open hands off to VS
-  Code. Folders are popovers. Widgets are desk-resident cards; Ask ships
-  first.
+  Code. A desk folder is a SHORTCUT to a `v1:library:folder` (epic
+  memql#4721 amends the foundation's local icon-groups): its popover is a
+  live view the popover itself retains, desk create/rename are Library
+  mutations, and remove-from-desk removes the shortcut and never
+  archives. Widgets are desk-resident cards; Ask ships first.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
@@ -28,9 +31,9 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
-the shared kit in `src/kit/`. Settings, Fleet, Users, Deployables and
-Training are real; the remaining product apps are stubs until their epics
-land (#4721).
+the shared kit in `src/kit/`. Every app is real: Settings, Fleet, Users,
+Deployables, Training and Files (#4721) -- the last stub went with Files,
+and `StubApp` with it.
 
 ## Right-click belongs to the shell
 
@@ -358,3 +361,51 @@ Likewise a domain card is labelled by its `domainId` because
 that is the truth this engine can tell, not a placeholder. Attaching a domain
 to an agent rides `skill.domainIds` and lands with the Agents surface; the
 affordance is present, inert, and says where the feature went.
+
+## Files, the fifth app (memql#4721)
+
+`src/apps/files/` is the Library on the desktop: a live folder tree over the
+content-bearing rows, an inspector that leads with each file's provenance
+story, and production transfers. It replaced the last stub, so `StubApp` and
+the `stub()` helper are gone. Five things about it are new rules rather than
+repetitions of the four apps before it.
+
+- **THE SEED IS PICKED FOR THE FILTER THAT CANNOT BE SERVER-SIDE.** The
+  browse seeds from `libraryArtifactsByLens(lens: "artifact")`, not
+  `libraryArtifacts`, because the default read carries `archived != true` and
+  a show-archived toggle over it could only ever show the rows that flipped
+  while the window was open. The facet read deliberately carries no archive
+  conjunct, and the artifact lens IS this app's population (file / document /
+  generated_output), so one paged seed holds the complete truth and every
+  filter -- archived, kind, source, search, folder scope -- stays a
+  client-side fold. `folderId` filtering must be client-side anyway: a row
+  promoted before folders existed has no member at all, and only the fold
+  reads absence and the empty string as the same answer, the root.
+
+- **ONE UPLOAD PATH, PINNED.** Every surface -- desk drop, upload button,
+  drop-onto-window, drop-onto-folder -- rides `items/edgeUpload.ts`:
+  one-shot at or under 32 MiB, chunked resumable sessions above, resume by
+  re-drop from a 7-day localStorage ledger, refusals verbatim.
+  `test/files/onePath.test.ts` fails the build on a second call site, with
+  the provider itself as the reachable positive.
+
+- **THE DESK POPOVER IS THE APP'S SURFACE, MOUNTED BY THE SHELL.** A desk
+  folder's popover renders a live, folder-scoped view that the popover
+  itself retains -- its own collection, deliberately not the Files window's,
+  because the desk must work with no window open and the app root's feed
+  dies with its window. It lives in `apps/files/DeskFolderPopover.tsx` so the
+  projections and the cue contract stay the app's.
+
+- **AN ACTION THAT ANSWERS COMPUTES BEFORE IT APPLIES.** The desk's
+  `sendFileToDesk` / `sendFolderToDesk` / `placeFolderShortcut` return
+  placed / focused / full, computed from a state ref and then applied. The
+  older "let outcome; set(updater); return outcome" shape reads its answer
+  from React's EAGER updater evaluation, which runs exactly when the fiber's
+  queue is empty -- the first call answers correctly and the second answers
+  "full" against a desk with one file on it.
+
+- **A RAW CONTROL BYTE IN SOURCE MAKES THE FILE INVISIBLE.** The tree
+  walker's path separator (`TREE_PATH_SEP`, uploadTree.ts) is written as the
+  six-character escape for U+001F, never pasted as the byte itself: a
+  literal control byte turned the file binary to grep and to every
+  repo-walking gate while its tests stayed green.

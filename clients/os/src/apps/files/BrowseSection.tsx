@@ -82,6 +82,7 @@ export function BrowseSection({
   const connection = useOsConnection();
   const patch = (p: Partial<FilesFilter>) => setFilter({ ...filter, ...p });
   const pickRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   // A refused DROP (over the file or depth bound) renders here, in surface,
   // with the walker's own sentence.
   const [dropRefusal, setDropRefusal] = useState("");
@@ -214,6 +215,7 @@ export function BrowseSection({
 
   return (
     <div
+      ref={rootRef}
       className="os-files"
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -306,7 +308,17 @@ export function BrowseSection({
               currentId={searching ? null : filter.folderId}
               renamingFolderId={renamingFolderId}
               onScope={(folderId) => patch({ folderId, search: "" })}
-              onMenu={(x, y, menuNode) => setFolderMenu({ x, y, node: menuNode })}
+              onMenu={(x, y, menuNode) => {
+                // The menu positions inside THIS box, so viewport coords
+                // become box coords -- against the window frame they would
+                // open a window-offset away from the click.
+                const rect = rootRef.current?.getBoundingClientRect();
+                setFolderMenu({
+                  x: x - (rect?.left ?? 0),
+                  y: y - (rect?.top ?? 0),
+                  node: menuNode,
+                });
+              }}
               onRename={(folderId, name) => void renameFolder(folderId, name)}
               onCancelRename={() => setRenamingFolderId("")}
             />

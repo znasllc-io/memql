@@ -1402,6 +1402,13 @@ button:not(:disabled):active {
   font: inherit;
   cursor: pointer;
 }
+/* The OPEN row says so in the shell's one selection language, the accent
+ * border -- every app passes `open` to Row and none of them had a visible
+ * answer for it (epic #4721 noticed; the fix is for all of them). */
+.os-row[aria-expanded="true"],
+.os-machine[aria-expanded="true"] {
+  border-color: var(--os-accent);
+}
 .os-row[data-dim],
 .os-machine[data-revoked] {
   opacity: 0.62;
@@ -2690,6 +2697,10 @@ a.os-button {
  * this platform can say about a file that a folder of bytes cannot.
  */
 .os-files {
+  /* The rail's context menu positions absolutely against this box, so the
+   * box must be the positioning context -- without this it anchors to the
+   * window frame and opens a window-offset away from the click. */
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -2797,6 +2808,16 @@ a.os-button {
   font-size: var(--os-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--os-muted);
+}
+/* A displaced folder's marker must not eat its name: the chip compacts and
+ * the name keeps a readable floor. */
+.os-files-node .os-chip {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.os-files-node .os-files-node-name {
+  min-width: 42px;
 }
 .os-files-node:disabled {
   opacity: 0.55;
@@ -2972,6 +2993,15 @@ a.os-button {
   font-size: var(--os-text-sm);
   box-shadow: var(--os-shadow-float);
   z-index: 40;
+}
+
+/* The rail's context menu, INSIDE the app box. `.os-context-menu` is
+ * position: fixed, and fixed inside the desk's transformed plate resolves
+ * against the plate rather than the viewport -- the menu opened a
+ * window-offset away from the click. Absolute against this box (the
+ * positioned ancestor) is the geometry the click handler already computes. */
+.os-files .os-context-menu {
+  position: absolute;
 }
 
 /* The desk folder popover carries a LiveList now (a live view of the

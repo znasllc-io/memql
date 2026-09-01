@@ -291,6 +291,7 @@ export function Inspector({
       ) : null}
 
       <div className="os-files-move">
+        <p className="os-caption">Move to folder</p>
         <Select
           id={`files-move-${row.id}`}
           label="Move to folder"
