@@ -15,6 +15,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -507,14 +508,19 @@ func getString(m map[string]any, key string) string {
 	return ""
 }
 
+// getInt reads an outbound delivery row's numeric field.
+//
+// SATURATES out of range (memql#4779). Its one caller is `Attempts`, which
+// feeds the retry backoff: a wrapped negative reads as a delivery that has
+// never been tried and retries it forever.
 func getInt(m map[string]any, key string) int {
 	switch v := m[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case string:
 		var n int
 		_, _ = fmt.Sscanf(v, "%d", &n)

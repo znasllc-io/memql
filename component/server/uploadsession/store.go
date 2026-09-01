@@ -30,6 +30,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Executor is the one engine capability this store needs. Declared here so
@@ -239,7 +240,11 @@ func fieldInt64(row map[string]any, key string) int64 {
 	case int64:
 		return v
 	case float64:
-		return int64(v)
+		// narrowing: SATURATE -- these are chunk counts and BYTE SIZES, summed
+		// against a declared total at `complete`. A bare conversion is
+		// implementation-defined out of range (memql#4779), and a negative size
+		// would credit the sum rather than fail the verification.
+		return num.ClampFloat64ToInt64(v)
 	case json.Number:
 		if n, err := v.Int64(); err == nil {
 			return n

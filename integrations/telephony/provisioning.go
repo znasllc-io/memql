@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // provisioningCapabilities are the owner/admin-gated DID lifecycle operations
@@ -189,14 +190,18 @@ func orType(t NumberType) NumberType {
 }
 
 // asInt coerces a tool/builtin arg to an int (handles float64 from JSON).
+//
+// SATURATES out of range (memql#4779). Its one caller is the page size on a
+// number search sent to the carrier's API, where a negative is a 400 naming
+// the wrong field and a saturated value is a 400 naming the right one.
 func asInt(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return num.ClampInt64(n)
 	case float64:
-		return int(n)
+		return num.ClampFloat64(n)
 	case string:
 		i, _ := strconv.Atoi(n)
 		return i

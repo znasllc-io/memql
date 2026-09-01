@@ -67,6 +67,13 @@ type fakeLibraryStore struct {
 	workers      map[string]*LibraryWorkerRef
 	ownedWorkerN int
 
+	// linkStates records what SetFileLinkState was told, by file id (epic
+	// memql#4783). fileByUploadedFromErr makes the (machine, path) resolve
+	// fail, which is the one condition under which a keyed re-push must
+	// refuse rather than quietly become a new file.
+	linkStates            map[string]string
+	fileByUploadedFromErr error
+
 	// fileBytes / versionBytes / sessionBytes answer StorageFootprint -- the
 	// three halves of the quota sum (memql#4782, epic memql#4806): stored
 	// files (archived included), every superseded version's bytes, and open
@@ -276,6 +283,47 @@ func (f *fakeLibraryStore) File(ctx context.Context, fileRef string) (*LibraryFi
 	return f.files[fileRef], nil
 }
 
+// FileByUploadedFrom scans the fake's own rows for the (machine, path) key
+// (epic memql#4783), through the SAME admission check every other read here
+// runs -- the real query is owner-filtered, so a fake that skipped it would
+// let a test pass that the engine would refuse.
+func (f *fakeLibraryStore) FileByUploadedFrom(ctx context.Context, workerId, path string) (*LibraryFileRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fileByUploadedFromErr != nil {
+		return nil, f.fileByUploadedFromErr
+	}
+	if strings.TrimSpace(workerId) == "" || strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	for ref, row := range f.files {
+		if row == nil || row.UploadedFromWorkerId != workerId || row.UploadedFromPath != path {
+			continue
+		}
+		// The query's own `archived != true` conjunct, mirrored rather than
+		// approximated: the key names the LIVE copy, and a fake that returned
+		// an archived row would let a test pass that the engine refuses.
+		if row.Archived || !f.admits(ctx, ref) {
+			continue
+		}
+		return row, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeLibraryStore) SetFileLinkState(ctx context.Context, fileId, state string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.linkStates == nil {
+		f.linkStates = map[string]string{}
+	}
+	f.linkStates[fileId] = state
+	if row := f.files[libraryFileConcept+":"+fileId]; row != nil {
+		row.LinkState = state
+	}
+	return nil
+}
+
 func (f *fakeLibraryStore) ExportBody(ctx context.Context, kind, ref string) (*LibraryExportBody, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -288,6 +336,12 @@ func (f *fakeLibraryStore) ExportBody(ctx context.Context, kind, ref string) (*L
 		return nil, nil
 	}
 	return f.bodies[ref], nil
+}
+
+func (f *fakeLibraryStore) linkStateOf(fileId string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.linkStates[fileId]
 }
 
 func (f *fakeLibraryStore) snapshotCreated() []LibraryFileCreateParams {

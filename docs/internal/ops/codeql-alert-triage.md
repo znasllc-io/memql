@@ -140,6 +140,54 @@ and not "did the scan stay green" -- it is that a bare `int(x)` in a `float64`
 or `int64` arm is the defect, whatever the field means and whoever can prove
 the value's provenance.
 
+#### Round five closed the class, and became a gate (memql#4779)
+
+Re-measured 2026-09-01: still exactly **22 files, 47 arms**. All 47 are swept,
+and so are 5 `case json.Number:` arms that dropped `.Int64()`'s error and
+converted anyway -- the same defect one level down, which the grep above cannot
+see at all.
+
+The seven copies became one: [`core/num`](../../../core/num/num.go), which
+offers the three answers as NAMED choices (`Clamp*` saturates, `*OrZero`
+returns 0, `*Or` returns the caller's default) because forcing one semantic
+would have silently changed behaviour at four of the seven. Every collapsed
+site keeps the answer it had. What did change is the BOUND: three of them
+clamped at `math.MaxInt32` and called it "the worst-case int width", which is a
+portability proxy rather than a domain rule -- on the only platforms this
+repository builds for it protected nothing and truncated a legitimate 5 GB size
+to 2147483647.
+
+The gate is `TestEveryPayloadNarrowingCarriesAnAnswer`
+(`numeric_narrowing_test.go`, root package). It parses every tracked non-test
+Go file and fails on a `float64` / `int64` / `json.Number` arm that narrows the
+arm's own value without declaring an answer, in a closed vocabulary
+(`SATURATE` / `ZERO` / `DEFAULT` / `GUARDED`). It sweeps wider than the grep in
+two ways that mattered: it follows the value one hop (`n, _ := v.Int64()`), and
+it counts `float64 -> int64` as a narrowing, which found 33 further sites --
+among them seven files whose integrality test was `float64(int64(n)) == n`, an
+expression whose result is UNDEFINED for an out-of-range `n`. On amd64 it
+answered "not a whole number", which is the safe direction and is why nobody
+noticed; `num.WholeInt64` is exact, total, and converts nothing.
+
+Two of those 33 were not merely undefined but wrong in output.
+`component/language/compiler/automation_generator.go` rendered a whole float
+too large for an `int` as `%d.0` of the integer indefinite value, so a `1e30`
+literal compiled into generated MemQL source as `-9223372036854775808.0`. And
+`integrations/workbench/dispatch.go` clamped `maxBytes` at the top and not the
+bottom, so a negative one reached `make([]byte, cap+1)` and panicked the
+dispatcher -- reachable from a tool argument, with no narrowing required.
+
+**Honest limits of the gate**, since a checker that hides what it could not
+examine makes its own pass a claim about the tool: it is syntactic and sees one
+shape. A value that reached a local variable outside its case clause, a
+`case int:` arm, a bare `v.(float64)` assertion, and
+`uint32(x.GetNumberValue())` with no case clause near it are all invisible to
+it. The sharpest of those is
+`component/identity/webauthn/store.go`'s `signCount`, a replay-detection
+counter narrowed `float64 -> uint32`; it is recorded here rather than gated,
+because a detector wide enough to catch it also catches every protobuf field
+width in the tree.
+
 `factory.go`'s value is `maxSkills`, a per-role cap handed to the
 `agentFactoryAnalyze` prompt, and it makes the cost of the wrong saturation
 concrete. Truncation there does not merely lose magnitude, it INVERTS the

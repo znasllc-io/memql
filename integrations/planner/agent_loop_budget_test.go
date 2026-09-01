@@ -9,8 +9,13 @@ import (
 )
 
 // TestAsInt_ClampsAndCoerces guards the go/incorrect-integer-conversion
-// fix: every numeric JSON shape narrows to int through the bounded sink,
-// so an out-of-int32-range or NaN value can never wrap silently.
+// fix: every numeric JSON shape narrows to int through core/num, so an
+// out-of-range or NaN value can never wrap silently.
+//
+// The bound moved from math.MaxInt32 to the exact platform int in memql#4779 --
+// the int32 one was a portability proxy that truncated real values on the only
+// platforms this builds for. THE ANSWER is unchanged and is what this site
+// actually depends on: zero, which its `> 0` callers read as unset.
 func TestAsInt_ClampsAndCoerces(t *testing.T) {
 	cases := []struct {
 		name string
@@ -24,8 +29,14 @@ func TestAsInt_ClampsAndCoerces(t *testing.T) {
 		{"json.Number", json.Number("13"), 13},
 		{"string", "21", 21},
 		{"bad string", "nope", 0},
-		{"int64 overflow", int64(math.MaxInt32) + 1, 0},
-		{"float64 overflow", float64(math.MaxInt32) + 1, 0},
+		{"past int32 is carried", int64(math.MaxInt32) + 1, math.MaxInt32 + 1},
+		// NO int64-overflow case, and its absence is the honest reading: on a
+		// 64-bit build int IS int64, so no int64 value is out of range and the
+		// arm cannot be exercised here at all. The float arm is where an
+		// out-of-range value can actually arrive, because a JSON number decodes
+		// as float64.
+		{"float64 overflow", 1e30, 0},
+		{"float64 overflow low", -1e30, 0},
 		{"float64 NaN", math.NaN(), 0},
 		{"float64 -Inf", math.Inf(-1), 0},
 	}

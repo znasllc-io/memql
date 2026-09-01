@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // bareDottedIdentifier returns true when s looks like a dotted reference
@@ -1184,8 +1185,17 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 			// int64 and collapses `* 1.0` to integer division (#2542). Emit
 			// a decimal marker for the whole-number case; non-whole floats
 			// already carry a `.` under %v.
-			if float64(int(v)) == v {
-				return fmt.Sprintf("%d.0", int(v))
+			//
+			// narrowing: GUARDED -- num.WholeInt64 IS the guard, and it
+			// replaces `float64(int(v)) == v`, whose result is undefined for a
+			// v outside int (memql#4779). The stakes here are the generated
+			// source: a whole float that did not fit rendered `%d.0` of the
+			// integer indefinite value, so `1e30` compiled to
+			// `-9223372036854775808.0`. It now falls to %v, which prints an
+			// exponent and therefore still re-parses as a float -- which is
+			// the whole point of this branch.
+			if whole, ok := num.WholeInt64(v); ok {
+				return fmt.Sprintf("%d.0", whole)
 			}
 			return fmt.Sprintf("%v", v)
 		default:
@@ -2173,14 +2183,17 @@ func (c *Compiler) valueToString(v any) string {
 		}
 		return parser.QuoteString(val)
 	case float64:
-		if float64(int(val)) == val {
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
+		// `float64(int(val)) == val`, whose result is undefined for a val
+		// outside int (memql#4779).
+		if whole, ok := num.WholeInt64(val); ok {
 			// Keep an explicit decimal marker so a whole-valued float
 			// (1.0, 100.0) round-trips as a FLOAT literal across the
 			// serialize/re-parse boundary. Rendering it as `1` makes
 			// ParseNumericLiteral decode int64 on re-parse, silently
 			// switching arithmetic to integer division -- the #2542
 			// `... * 1.0` fractional-ratio idiom collapsing to `... * 1`.
-			return fmt.Sprintf("%d.0", int(val))
+			return fmt.Sprintf("%d.0", whole)
 		}
 		return fmt.Sprintf("%f", val)
 	case bool:

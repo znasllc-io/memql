@@ -40,8 +40,21 @@ export function movePin(dock: DockState, appId: AppId, toIndex: number): DockSta
 /**
  * The dock's center strip: pins in pinned order, then running-but-unpinned
  * apps in the order given (open order). Pins render whether running or not.
+ *
+ * `fixtures` are FILTERED OUT of both halves (memql#4784). A dock fixture has
+ * its own slot at the trailing end, and one that also appeared here would be
+ * drawn twice the moment somebody opened it -- once as a running app and once
+ * as the fixture. It is excluded from the PIN list too, because a stored
+ * document written before the app was a fixture may still name it, and a
+ * fixture that is also a pin can be dragged out of the strip and lost.
  */
-export function dockOrder(dock: DockState, runningAppIds: AppId[]): AppId[] {
-  const extras = runningAppIds.filter((id) => !isPinned(dock, id));
-  return [...dock.pinned, ...extras];
+export function dockOrder(
+  dock: DockState,
+  runningAppIds: AppId[],
+  fixtures: readonly AppId[] = [],
+): AppId[] {
+  const isFixture = (id: AppId) => fixtures.includes(id);
+  const pinned = dock.pinned.filter((id) => !isFixture(id));
+  const extras = runningAppIds.filter((id) => !isPinned(dock, id) && !isFixture(id));
+  return [...pinned, ...extras];
 }

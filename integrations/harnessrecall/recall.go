@@ -51,6 +51,7 @@ import (
 	componentAuth "github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -399,18 +400,23 @@ func recallSQLArgs(p recallParams, vecLiteral string) []any {
 
 // --- helpers -------------------------------------------------------------
 
+// toInt reads a numeric tool arg.
+//
+// SATURATES out of range (memql#4779). Its one caller is `k`, the top-k recall
+// count, read through `ok && k > 0` -- the same shape and the same reasoning
+// as actionsearch's twin of this function.
 func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
 	case int64:
-		return int(n), true
+		return num.ClampInt64(n), true
 	case int32:
 		return int(n), true
 	case float64:
-		return int(n), true
+		return num.ClampFloat64(n), true
 	case float32:
-		return int(n), true
+		return num.ClampFloat64(float64(n)), true
 	}
 	return 0, false
 }

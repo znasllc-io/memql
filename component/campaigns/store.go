@@ -9,6 +9,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // store.go -- the engine seam.
@@ -803,14 +804,21 @@ func str(m map[string]any, key string) string {
 	return ""
 }
 
+// integer reads a campaign row's numeric field.
+//
+// SATURATES out of range (memql#4779). Every value read through here is a
+// count or a rate -- sentCount, attempts, ratePerMinute, the deliverability
+// tallies -- and two of the readings depend on the order: `sentCount > 0` is
+// the guard that stops a campaign being sent twice, and a wrapped negative
+// would answer "nothing sent yet".
 func integer(m map[string]any, key string) int {
 	switch v := m[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case string:
 		var n int
 		_, _ = fmt.Sscanf(v, "%d", &n)

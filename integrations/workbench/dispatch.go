@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Default limits. Configurable per-call via args when the LLM has a
@@ -167,8 +169,12 @@ func (i *Integration) handleFSRead(_ context.Context, ws *workspace, args map[st
 	if err != nil {
 		return errResult("fs_read", "invalid_path", err.Error())
 	}
+	// BOTH ENDS, and the lower one is not symmetry for its own sake: `cap`
+	// reaches `make([]byte, cap+1)` a few lines down, so a negative maxBytes
+	// -- which an agent can simply pass, no narrowing required -- panics the
+	// dispatcher. The upper clamp was here; the lower one was not.
 	cap := intArg(args["maxBytes"], maxFSReadBytes)
-	if cap > maxFSReadBytes {
+	if cap > maxFSReadBytes || cap <= 0 {
 		cap = maxFSReadBytes
 	}
 	f, err := os.Open(abs)
@@ -439,14 +445,20 @@ func pickTimeout(arg any, def, max time.Duration) time.Duration {
 	return d
 }
 
+// intArg reads a numeric dispatch arg.
+//
+// THE CALLER'S DEFAULT, out of range (memql#4779). Its caller is `maxBytes`
+// on fs_read, which becomes `make([]byte, cap+1)`: MaxInt is an allocation no
+// machine can serve and zero truncates every read to nothing, while the
+// default is the cap the surface already enforces.
 func intArg(arg any, def int) int {
 	switch v := arg.(type) {
 	case float64:
-		return int(v)
+		return num.Float64Or(v, def)
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.Int64Or(v, def)
 	default:
 		return def
 	}

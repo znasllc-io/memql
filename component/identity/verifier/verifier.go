@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity/pat"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Source identifies which credential family produced the claims.
@@ -325,7 +326,13 @@ func int64Claim(m map[string]any, key string) int64 {
 	}
 	switch v := m[key].(type) {
 	case float64:
-		return int64(v)
+		// narrowing: SATURATE -- a JWT is attacker-supplied JSON, so `exp`
+		// arrives as a float64 the issuer chose. A bare conversion is
+		// implementation-defined out of range and answers with the integer
+		// indefinite value, which is a timestamp in 1754 -- fail-closed by
+		// accident rather than by construction (memql#4779). Saturating keeps
+		// the ordering every claim check reads.
+		return num.ClampFloat64ToInt64(v)
 	case int64:
 		return v
 	case int:
@@ -342,7 +349,9 @@ func numericDate(m map[string]any, key string) (time.Time, bool) {
 	}
 	switch v := m[key].(type) {
 	case float64:
-		return time.Unix(int64(v), 0).UTC(), true
+		// narrowing: SATURATE -- see int64Claim above; this is the same
+		// attacker-supplied claim on its way to a time.Time.
+		return time.Unix(num.ClampFloat64ToInt64(v), 0).UTC(), true
 	case int64:
 		return time.Unix(v, 0).UTC(), true
 	case int:

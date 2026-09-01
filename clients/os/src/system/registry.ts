@@ -42,6 +42,21 @@ export interface OsAppManifest {
    * `test/system/settingsContract.test.ts` runs it over the real registry.
    */
   settingsSection: string;
+  /**
+   * A DOCK FIXTURE is always in the dock and cannot be taken out of it
+   * (memql#4784). The Bin is the only one, and it is the reason the flag
+   * exists rather than a general capability: a trash can that a person can
+   * unpin is one they can lose, and then archiving becomes a thing with no
+   * visible destination.
+   *
+   * A fixture is deliberately NOT a pin. Pins live in `DesktopStore` and roam
+   * with the desktop; a fixture is a property of the SHELL, so it is here on
+   * the manifest, it is never written to storage, and no upgrade path or
+   * corrupt document can leave somebody without one. `dockOrder` excludes it
+   * from the pin strip and the dock renders it in its own slot; the context
+   * menu offers no pin or unpin for it, because neither would do anything.
+   */
+  dockFixture?: boolean;
   component: ComponentType<OsAppProps>;
 }
 
@@ -62,6 +77,17 @@ export interface OsRegistry {
 
 export function appById(registry: OsRegistry, id: string): OsAppManifest | undefined {
   return registry.apps.find((a) => a.id === id);
+}
+
+/** The always-docked apps the actor may see, in registry order. */
+export function fixturesForRole(registry: OsRegistry, actorRole: string): OsAppManifest[] {
+  return registry.apps.filter((a) => a.dockFixture === true && roleAdmits(actorRole, a.roles));
+}
+
+/** Whether an app is a dock fixture -- what the pin menu and the pin strip
+ *  both ask before offering anything. */
+export function isDockFixture(registry: OsRegistry, appId: string): boolean {
+  return appById(registry, appId)?.dockFixture === true;
 }
 
 export function widgetById(registry: OsRegistry, id: string): OsWidgetManifest | undefined {

@@ -42,6 +42,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/grpctls"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
 
@@ -1569,7 +1570,10 @@ func badgeExpiryFromClaims(claims map[string]any) time.Time {
 	}
 	switch exp := claims["exp"].(type) {
 	case float64:
-		return time.Unix(int64(exp), 0)
+		// narrowing: SATURATE -- `exp` is whatever JSON the token carried, and
+		// a bare conversion is implementation-defined out of range
+		// (memql#4779). Saturating keeps the expiry comparison's ordering.
+		return time.Unix(num.ClampFloat64ToInt64(exp), 0)
 	case int64:
 		return time.Unix(exp, 0)
 	case json.Number:

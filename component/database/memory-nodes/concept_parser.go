@@ -22,6 +22,7 @@ import (
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // ParseConceptMemQL parses a concept.memql file into a *Concept using
@@ -1353,7 +1354,11 @@ func toInt64(v any) (int64, error) {
 	case int64:
 		return t, nil
 	case float64:
-		return int64(t), nil
+		// narrowing: SATURATE -- a concept's numeric field arrives as JSON, and
+		// a bare conversion is implementation-defined out of range
+		// (memql#4779). This is a magnitude, so saturation is the answer that
+		// keeps its order.
+		return num.ClampFloat64ToInt64(t), nil
 	case string:
 		return strconv.ParseInt(t, 10, 64)
 	default:

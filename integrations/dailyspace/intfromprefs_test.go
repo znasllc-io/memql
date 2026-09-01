@@ -39,13 +39,24 @@ func TestIntFromPrefs_ReadsEachNumericType(t *testing.T) {
 	}
 }
 
-func TestClampInt64_GuardsNarrowing(t *testing.T) {
-	// In-range values are returned verbatim; the out-of-range cases only
-	// differ from int(v) on a 32-bit build, but the boundary values must
-	// still round-trip on every platform.
-	for _, v := range []int64{0, 1, -1, math.MaxInt32, math.MinInt32, math.MaxInt, math.MinInt} {
-		if got := clampInt64(v); int64(got) != v {
-			t.Fatalf("clampInt64(%d) = %d, want %d (in-range value must pass through)", v, got, v)
+// TestIntFromPrefsAnswersZeroOutOfRange pins THIS site's answer, which is the
+// one that differs from the rest of the tree.
+//
+// Zero is deliberate here and documented on the decoder: every caller reads 0
+// as "unset" through its own `> 0` guard, so an absurd preference lands on the
+// same path an absent one does. Saturating instead would hand a `> 0` guard a
+// true and run a sweep with a cap of 2^63.
+func TestIntFromPrefsAnswersZeroOutOfRange(t *testing.T) {
+	for _, v := range []any{1e30, -1e30, math.NaN()} {
+		if got := intFromPrefs(map[string]any{"k": v}, "k"); got != 0 {
+			t.Fatalf("intFromPrefs(%v) = %d, want 0", v, got)
+		}
+	}
+	// The floor under that: ordinary values are untouched, or the assertion
+	// above would pass on a decoder that had simply stopped working.
+	for _, v := range []int64{0, 1, -1, math.MaxInt32, math.MinInt32} {
+		if got := intFromPrefs(map[string]any{"k": v}, "k"); int64(got) != v {
+			t.Fatalf("intFromPrefs(%d) = %d, want %d (in-range value must pass through)", v, got, v)
 		}
 	}
 }

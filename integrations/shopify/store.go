@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	stdsync "sync"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Store is one configured Shopify store, as the connector needs it.
@@ -372,42 +372,9 @@ func mapInt(m map[string]any, key string) int {
 	case int:
 		return v
 	case int64:
-		return clampInt64ToInt(v)
+		return num.ClampInt64(v)
 	case float64:
-		return clampFloat64ToInt(v)
+		return num.ClampFloat64(v)
 	}
 	return 0
-}
-
-// clampInt64ToInt narrows an int64 to int without wrapping. Exact on a
-// 64-bit build, where int is already 64 bits; saturating on a 32-bit one.
-func clampInt64ToInt(v int64) int {
-	if v > math.MaxInt {
-		return math.MaxInt
-	}
-	if v < math.MinInt {
-		return math.MinInt
-	}
-	return int(v)
-}
-
-// clampFloat64ToInt narrows a float64 to int without wrapping. NaN has no
-// ordering and so no clamp: it becomes the same zero an absent field does.
-//
-// The last step goes through clampInt64ToInt rather than a bare int(v)
-// because the float comparisons above CANNOT be exact: float64 has no
-// representation of math.MaxInt and rounds it up to 2^63, so a value in the
-// gap passes the guard and then converts. Narrowing in the integer domain,
-// where the bound is exact, is the step that is actually provable -- to a
-// reader and to a static analyser alike.
-func clampFloat64ToInt(v float64) int {
-	switch {
-	case math.IsNaN(v):
-		return 0
-	case v >= math.MaxInt:
-		return math.MaxInt
-	case v <= math.MinInt:
-		return math.MinInt
-	}
-	return clampInt64ToInt(int64(v))
 }
