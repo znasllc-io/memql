@@ -4883,15 +4883,32 @@ a.os-button {
 }
 
 /* An address that cannot be mailed keeps its facts and loses its ink -- the
- * same `current` / `dim` split the shared row uses. */
+ * same `current` / `dim` split the shared row uses.
+ *
+ * The rule is drawn in the MUTED ink rather than the hairline: `--os-line` is
+ * a border colour and over text it is close to invisible, which makes the
+ * strikethrough decorative rather than legible. Colour is not the only channel
+ * either -- the state control on the same row says "Unsubscribed" in words,
+ * which is what a reader who cannot see the difference gets. */
 .os-campaign-roster-row:not([data-sendable]) .os-campaign-roster-address {
   color: var(--os-muted);
   text-decoration: line-through;
-  text-decoration-color: var(--os-line);
+  text-decoration-color: var(--os-muted);
 }
 
 .os-campaign-roster-name {
   color: var(--os-muted);
+}
+
+/* The state control sits at the TRAILING EDGE and takes its own width. The
+ * shared `.os-select` is `flex: 1 1 12ch`, which is right in a form where a
+ * select IS the field -- and wrong in a list row, where it stretched to half
+ * the width and made "can be mailed" look like the row's headline instead of
+ * the address. Found by looking at it in a browser; jsdom has no CSS engine
+ * and every test passed either way. */
+.os-campaign-roster-row .os-select {
+  flex: 0 0 auto;
+  min-width: 15ch;
 }
 
 /* ---- the import report ----
@@ -4921,8 +4938,13 @@ a.os-button {
   min-width: 0;
 }
 
+/* THE THREE PARTS OF A BAD LINE STAY TOGETHER. The offending text does NOT
+ * grow: letting it fill the row pushed the reason to the far right edge, so a
+ * reader had to track across the panel to pair "no @" with the line it
+ * describes -- which is exactly the pairing this panel exists to show. It
+ * still truncates, because a CSV line can be any length. */
 .os-campaign-import-lines li > .os-mono {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5080,6 +5102,18 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
   margin: 8px 0;
+}
+
+/* THE CHOICE NAMES HERE ARE PROSE, NOT ENUM MEMBERS. The kit's ChoiceStack
+ * renders its option name in the mono face, and that is right where it was
+ * born -- a routing strategy is `leastLoaded`, a value somebody types
+ * elsewhere, and the mono face says so. "People in this cluster" is an answer
+ * to a question, and setting it in mono makes it read as a code identifier the
+ * reader is expected to recognise. The one place in this app that overrides a
+ * kit appearance, and it does so because the CONTENT is a different kind of
+ * thing, not because the look was disliked. */
+.os-campaign-who .os-choice-card-name.os-mono {
+  font-family: var(--os-font);
 }
 
 .os-campaign-roles {
