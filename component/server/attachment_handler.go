@@ -180,6 +180,12 @@ func NewAttachmentHandler(opts AttachmentHandlerOptions) *AttachmentHandler {
 //
 // Route must be registered on a ServeMux with a prefix that captures {partitionId}.
 func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Resolve the caller's AccessContext from the verified claims the HTTP
+	// middleware attached (memql#4843) -- see http_access.go. CallerOwnsSpace
+	// and every other store read on both branches below bind actor.userId
+	// from it; without it the engine envelope denies and the owner's own
+	// space reads as not-there.
+	r = requestWithResolvedAccess(r)
 	if r.Method == http.MethodGet {
 		h.handleDownload(w, r)
 		return
