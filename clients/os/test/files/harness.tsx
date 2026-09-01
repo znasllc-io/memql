@@ -50,7 +50,8 @@ export interface FakeEvent {
 export interface FakeSubscriptions {
   subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
   emit: (concept: string, payload: Row, kind?: string) => void;
-  /** Live handler count per concept -- what the popover lifecycle asserts. */
+  /** Live handler count per concept -- what the desk's subscription-free
+   *  contract asserts. */
   activeCount: (concept: string) => number;
 }
 

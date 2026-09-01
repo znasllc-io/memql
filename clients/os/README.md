@@ -10,12 +10,15 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   minimize to the dock, full-screen, close; apps navigate sections inside
   their one window.
 - **Desktop items**: files are Library artifact shortcuts with the
-  provenance dot (green = reachable, amber = not); open hands off to VS
-  Code. A desk folder is a SHORTCUT to a `v1:library:folder` (epic
-  memql#4721 amends the foundation's local icon-groups): its popover is a
-  live view the popover itself retains, desk create/rename are Library
-  mutations, and remove-from-desk removes the shortcut and never
-  archives. Widgets are desk-resident cards; Ask ships first.
+  provenance dot (green = reachable, amber = not). Every icon behaves like
+  a desktop icon (epic memql#4842): single click SELECTS, double-click or
+  Enter OPENS -- a file hands off to VS Code, a folder opens the Files app
+  scoped to it under the Desktop place. A desk folder is a SHORTCUT to a
+  `v1:library:folder`: desk create/rename are Library mutations (rename
+  from the item's context menu), and remove-from-desk removes the shortcut
+  and never archives. The under-icon folder popover the foundation shipped
+  is gone -- the Files window is the one folder surface. Widgets are
+  desk-resident cards; Ask ships first.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening.
@@ -437,12 +440,13 @@ repetitions of the four apps before it.
   `test/files/onePath.test.ts` fails the build on a second call site, with
   the provider itself as the reachable positive.
 
-- **THE DESK POPOVER IS THE APP'S SURFACE, MOUNTED BY THE SHELL.** A desk
-  folder's popover renders a live, folder-scoped view that the popover
-  itself retains -- its own collection, deliberately not the Files window's,
-  because the desk must work with no window open and the app root's feed
-  dies with its window. It lives in `apps/files/DeskFolderPopover.tsx` so the
-  projections and the cue contract stay the app's.
+- **OPENING A DESK FOLDER IS OPENING THE FILES APP** (epic memql#4842,
+  reversing the foundation's under-icon popover). Double-click, Enter, or
+  the menu's "Open in Files" lands the window on that folder under the
+  Desktop place, carried by the shell's open intent -- fresh window and
+  already-open window alike. The desk stays subscription-free by
+  construction now: no desk gesture opens a feed, and the one folder
+  surface is the app, so the projections and the cue contract cannot fork.
 
 - **AN ACTION THAT ANSWERS COMPUTES BEFORE IT APPLIES.** The desk's
   `sendFileToDesk` / `sendFolderToDesk` / `placeFolderShortcut` return

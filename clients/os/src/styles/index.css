@@ -255,6 +255,7 @@ button:not(:disabled):active {
   cursor: default;
 }
 .os-file[data-selected] .os-file-button,
+.os-folder[data-selected] .os-file-button,
 .os-file-button:hover {
   background: var(--os-accent-soft);
 }

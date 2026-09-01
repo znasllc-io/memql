@@ -16,9 +16,11 @@ import type { UploadProvider } from "../../src/items/upload";
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, fakeConnection, renderFiles } from "./harness";
 
-// The desk half of the unification (epic #4723): the popover is a live view
-// the popover itself retains, a host drop on a folder lands in that folder
-// exactly once, and send-to-desktop dedupes by focusing.
+// The desk half of the unification (epic #4723, reshaped by epic memql#4842):
+// a desk folder is a real desktop icon -- click selects, double-click opens
+// the Files app at that folder under the Desktop place -- a host drop on a
+// folder lands in that folder exactly once, and send-to-desktop dedupes by
+// focusing.
 
 const CONFIG: OsRuntimeConfig = {
   identityUrl: "https://identity.example.test",
@@ -74,8 +76,24 @@ beforeEach(() => {
   h.connection = null;
 });
 
-describe("the desk folder popover", () => {
-  it("retains its own live view while open and releases it on close", async () => {
+describe("a desk folder is a desktop icon (epic memql#4842, #4847)", () => {
+  const FOLDER_NAME = "Client videos, folder -- opens in Files";
+
+  it("single click selects -- nothing opens, nothing subscribes", async () => {
+    const connection = fakeConnection({ artifacts: [] });
+    h.connection = connection;
+    renderShellWithFolder();
+
+    fireEvent.click(screen.getByRole("button", { name: FOLDER_NAME }));
+    await act(async () => {});
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The desk stays subscription-free: selection is shell state, not a feed.
+    expect(connection.subscriptions.activeCount(ARTIFACT_CONCEPT)).toBe(0);
+    const icon = screen.getByRole("button", { name: FOLDER_NAME }).closest(".os-folder");
+    expect(icon?.getAttribute("data-selected")).not.toBeNull();
+  });
+
+  it("double-click opens the Files window on this folder under the Desktop place", async () => {
     const connection = fakeConnection({
       artifacts: [
         artifactRow({ id: "a-in", title: "inside.mp4", folderId: "f-lib" }),
@@ -83,31 +101,23 @@ describe("the desk folder popover", () => {
       ],
     });
     h.connection = connection;
-    vi.useFakeTimers();
-    try {
-      renderShellWithFolder();
-      expect(connection.subscriptions.activeCount(ARTIFACT_CONCEPT)).toBe(0);
+    renderShellWithFolder();
 
-      fireEvent.click(screen.getByRole("button", { name: "Client videos, folder" }));
-      await act(async () => {
-        await vi.runOnlyPendingTimersAsync();
-      });
-      // The popover's collection is live, folder-scoped, and its own.
-      expect(connection.subscriptions.activeCount(ARTIFACT_CONCEPT)).toBe(1);
-      const popover = screen.getByRole("group", { name: "Folder contents" });
-      expect(within(popover).getByText("inside.mp4")).toBeTruthy();
-      expect(within(popover).queryByText("outside.txt")).toBeNull();
+    fireEvent.doubleClick(screen.getByRole("button", { name: FOLDER_NAME }));
+    await act(async () => {});
+    const window = screen.getByRole("dialog", { name: "Files" });
+    // The Head names the scope once: the folder, inside the Desktop place.
+    expect(within(window).getByRole("heading", { name: "Client videos" })).toBeTruthy();
+    expect(within(window).getByText(/inside\.mp4/)).toBeTruthy();
+    expect(within(window).queryByText(/outside\.txt/)).toBeNull();
+  });
 
-      // Close: the subscription unmounts (after the release linger that
-      // absorbs a close-and-reopen).
-      fireEvent.click(screen.getByRole("button", { name: "Client videos, folder" }));
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(6_000);
-      });
-      expect(connection.subscriptions.activeCount(ARTIFACT_CONCEPT)).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("Enter opens it too -- the keyboard is not second class", async () => {
+    h.connection = fakeConnection({ artifacts: [] });
+    renderShellWithFolder();
+    fireEvent.keyDown(screen.getByRole("button", { name: FOLDER_NAME }), { key: "Enter" });
+    await act(async () => {});
+    expect(screen.getByRole("dialog", { name: "Files" })).toBeTruthy();
   });
 });
 
@@ -124,7 +134,7 @@ describe("a host file dropped on a desk folder", () => {
       },
     };
     renderShellWithFolder(provider);
-    const icon = screen.getByRole("button", { name: "Client videos, folder" });
+    const icon = screen.getByRole("button", { name: "Client videos, folder -- opens in Files" });
     const target = icon.closest(".os-surface-item") as HTMLElement;
     const file = new File(["x"], "clip.mp4");
     await act(async () => {
@@ -133,8 +143,8 @@ describe("a host file dropped on a desk folder", () => {
       });
     });
     expect(uploads).toEqual([{ name: "clip.mp4", folderId: "f-lib" }]);
-    // No desk icon was minted for it: the folder's popover is where it
-    // appears, live.
+    // No desk icon was minted for it: the folder's contents live in the
+    // Files app, one double-click away.
     expect(screen.queryByRole("button", { name: /clip\.mp4/ })).toBeNull();
   });
 });
