@@ -174,22 +174,31 @@ describe("what the domain's status does not say", () => {
     await screen.findByText(/This deployable is disabled, so nothing is served/i);
   });
 
-  // NAMED BY WHAT SERVES. `live` is the one status that serves, so a value this
-  // build has never seen gets the notice by construction -- the same inversion
-  // the edge's own switch carries, and the reason a future enum addition
-  // cannot silently start claiming to serve.
-  //
-  // IT SAYS "not live" RATHER THAN NAMING THE VALUE, and that is not this
-  // panel's doing: `siteFromRow` (rows.ts) normalises any status outside
-  // draft/live/disabled to the EMPTY STRING, so an unrecognised value never
-  // reaches this component at all. That ternary is inert while the enum has
-  // exactly those three members and becomes a real defect the moment a fourth
-  // arrives -- the whole Deployables surface would render such a site with a
-  // blank status. The notice is still correct and still fires, which is the
-  // property being pinned here; naming the value is the projection's to fix.
-  it("covers a status this build does not recognise", async () => {
+  // NAMED BY WHAT SERVES, and this is the case that pays for it. `archived`
+  // arrived with the packages epic (memql#4794) AFTER this notice was written,
+  // and the notice covered it with no edit: `live` is the one status that
+  // serves, so every value added later is on the warned side by construction.
+  // That is the same inversion component/edge's own switch carries, and the
+  // reason a future enum addition cannot silently start claiming to serve.
+  it("names a status added after this notice was written", async () => {
     const connection = fakeConnection({
       sites: [siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "archived" })],
+      domains: [domainRow({ id: "cd-1", status: "live" })],
+    });
+    await openShop(connection);
+
+    await screen.findByText(/This deployable is archived, so nothing is served/i);
+  });
+
+  // AND A VALUE THIS BUILD HAS NEVER SEEN still gets the notice, unnamed.
+  // `siteFromRow` (rows.ts) narrows the wire string through SITE_STATUSES and
+  // normalises anything outside it to the EMPTY STRING, so an undeclared value
+  // reaches this component as "". The notice is what a person needs either way
+  // -- nothing is served -- and it says "not live" rather than inventing a word
+  // for a status the build cannot describe.
+  it("covers a status this build does not recognise", async () => {
+    const connection = fakeConnection({
+      sites: [siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "quarantined" })],
       domains: [domainRow({ id: "cd-1", status: "live" })],
     });
     await openShop(connection);

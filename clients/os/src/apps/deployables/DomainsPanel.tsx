@@ -103,7 +103,7 @@ export function DomainsPanel({ site, domain }: { site: SiteRow; domain: string }
           status gate in component/edge/handler.go before any file is looked at.
           The two are independent, and a panel that showed only the first would
           say "serving" about a hostname the internet 404s.
-          
+
           NAMED BY WHAT SERVES, not by listing what does not -- the same
           inversion the edge's own switch carries. `live` is the one status that
           serves, so every other value, including any added later, gets this
