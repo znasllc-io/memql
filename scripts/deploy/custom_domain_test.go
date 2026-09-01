@@ -208,14 +208,17 @@ func TestScriptCapabilityIdsMatchTheAllowlist(t *testing.T) {
 // The rendered objects
 // ===========================================================================
 
-// A dry run renders and validates without touching a cluster, which is what
-// lets the object SHAPE be checked in CI. It needs kubectl on PATH -- the
-// validation is kubectl's -- and skips honestly when there is none, rather
-// than passing on an assertion it could not make.
+// A dry run renders and checks WITHOUT touching a cluster, and without kubectl.
+//
+// It used to shell out to `kubectl apply --dry-run=client`, which passed here
+// (a k3d cluster was up) and failed on every CI runner: a "client" dry run
+// still fetches the API server's OpenAPI schema, and `--validate=false` does
+// not help because `apply` needs discovery to map a kind to a resource either
+// way. So the test was measuring the developer's cluster rather than the
+// script. The check is now the one every machine can make -- the render
+// carries both documents and the hostname -- and this test needs no
+// prerequisite at all.
 func TestBindDryRunRendersValidObjects(t *testing.T) {
-	if _, err := exec.LookPath("kubectl"); err != nil {
-		t.Skip("kubectl not available -- the dry run validates through it, so there is nothing to assert here")
-	}
 	env, code := envelopeFrom(t, bindScript,
 		"--hostname=www.acme.com", "--domainId=d1", "--siteId=site1",
 		"--issuer=letsencrypt-prod", "--dryRun=true")

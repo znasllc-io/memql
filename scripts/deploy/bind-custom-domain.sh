@@ -106,11 +106,14 @@ function check_params() {
 }
 
 function check_prereqs() {
-    command -v kubectl &>/dev/null \
-        || cap_fail 4 "kubectl is not installed or not on PATH. This capability applies Kubernetes objects; there is no other way for it to do its job."
+    # A DRY RUN NEEDS NEITHER, because it reaches no cluster -- see apply_objects.
+    # Requiring kubectl for it would make the one mode that exists to work
+    # without a cluster refuse on a machine that has no reason to have one.
     if [[ "$DRY_RUN" == "true" ]]; then
         return 0
     fi
+    command -v kubectl &>/dev/null \
+        || cap_fail 4 "kubectl is not installed or not on PATH. This capability applies Kubernetes objects; there is no other way for it to do its job."
     kubectl cluster-info &>/dev/null \
         || cap_fail 4 "no reachable Kubernetes API -- fetch a kubeconfig first"
     return 0
@@ -190,11 +193,42 @@ YAML
 function apply_objects() {
     local out
     if [[ "$DRY_RUN" == "true" ]]; then
-        # --dry-run=client so a render can be validated with no cluster at all,
-        # which is what makes this script's shape testable in CI without one.
-        if ! out="$(render_objects | kubectl apply --dry-run=client -f - 2>&1)"; then
-            cap_fail 5 "the rendered objects did not validate: ${out}"
+        # A DRY RUN TOUCHES NO CLUSTER, and getting there took two wrong turns
+        # worth recording. `kubectl apply --dry-run=client` fetches the API
+        # server's OpenAPI schema, so it fails with a connection refused
+        # wherever there is no cluster -- which is every CI runner. Adding
+        # `--validate=false` does not fix it either: `apply` still needs
+        # discovery to map a kind to a resource, so it reaches the server
+        # regardless. Only `--dry-run=server` is honestly a cluster operation,
+        # and it is the opposite of what this flag is for.
+        #
+        # So the check is what a machine with no cluster can actually make:
+        # the rendered documents PARSE, and they are the two objects this
+        # script exists to apply. That is a real check -- it catches a
+        # quoting bug in a hostname or a token, which is the failure this
+        # rendering can plausibly have -- and it is honest about its limit,
+        # which schema validation against a live server is not a substitute
+        # for anyway.
+        # NO PARSER DEPENDENCY. PyYAML is not stdlib and is not guaranteed on
+        # a runner, so the check is the one every machine can make: the render
+        # carries exactly the two documents this script exists to apply, the
+        # separator between them, and the hostname in both. That catches the
+        # failure this rendering can plausibly have -- a quoting bug in a
+        # hostname or a token that swallows a line -- without importing
+        # anything.
+        local rendered kinds
+        rendered="$(render_objects)"
+        kinds="$(printf '%s\n' "$rendered" | grep -c '^kind: ')"
+        if [[ "$kinds" != "2" ]]; then
+            cap_fail 5 "the rendered objects did not validate: expected 2 documents, found ${kinds}"
         fi
+        printf '%s\n' "$rendered" | grep -q '^kind: Ingress$' \
+            || cap_fail 5 "the rendered objects did not validate: no Ingress document"
+        printf '%s\n' "$rendered" | grep -q '^kind: Certificate$' \
+            || cap_fail 5 "the rendered objects did not validate: no Certificate document"
+        printf '%s\n' "$rendered" | grep -q -- "- ${HOSTNAME_ARG}$" \
+            || cap_fail 5 "the rendered objects did not validate: ${HOSTNAME_ARG} is in neither document's host list"
+        out="parsed 2 document(s): Ingress, Certificate"
         cap_info "dry run: ${out}"
         return 0
     fi
