@@ -96,6 +96,16 @@ That is the single wire T10 adds, and it is why the activation builtin is
 part of this phase rather than an infrastructure follow-up. The rest of
 this spec would be a feature that works after `kubectl rollout restart`.
 
+**Landed.** `component/emailrules`' `Activator.Activate` is that caller, and
+it is the first one the tree has ever had. The paragraph above is written in
+the present tense because it is the state this design was written against;
+read it as the finding, not as a description of the branch it landed on.
+Anything else that needs durable activation can now follow the same five
+steps -- generate, `ValidateBundle`, write the bundle and both gate verdicts,
+`ActivateApprovedBundle`, record -- rather than writing the bundle straight to
+`active` and waiting for a restart, which is what the one existing durable
+path (the cockpit's promote store) does and why the gap survived this long.
+
 ## B. The generator
 
 `campaignActivateEmailRule(emailRuleId)` is the whole activation verb. It

@@ -371,6 +371,30 @@ query consentEvent consentStatus {
 // Sender identities (memql#4821)
 // ---------------------------------------------------------------------------
 
+/// One recipient by id.
+///
+/// IT EXISTS TO REMOVE A SCAN FROM A SEND PATH (memql#4829). Every other read of
+/// this concept is audience-scoped, which is right for a roster and wrong for
+/// the single-recipient send the marketing lane makes: that path holds a
+/// recipient id and needs the row, and without this query it had to find the
+/// audience first -- from the rule when one named it, and otherwise by walking
+/// the caller's audiences and refusing past a bound rather than answering "not
+/// found". A bounded scan standing in for a by-id read is a correct answer
+/// that gets slower as an operator succeeds, and it refuses at exactly the
+/// point somebody has enough audiences to care.
+///
+/// The tier conjunct is what keeps it safe to expose an unscoped by-id read:
+/// an id is not a capability here, and a recipient the caller does not own is
+/// simply not found -- the same answer campaignById gives.
+@actor
+query recipient recipientById {
+  args {
+    recipientId  string!
+  }
+  filter  row.id==args.recipientId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   recipientFull
+}
+
 /// Every sending identity the caller may use, newest first. Backs the identity picker on the
 /// campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees
 /// every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
