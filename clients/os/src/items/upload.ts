@@ -13,8 +13,22 @@ export interface UploadResult {
   source: string;
 }
 
-export interface UploadHandle {
-  done: Promise<UploadResult>;
+/**
+ * One upload in flight: a promise for its result and a way to stop it.
+ *
+ * GENERIC OVER THE RESULT, because the second consumer landed (memql#4738).
+ * The desk's file drops go to the Library and get an artifact back; the
+ * Training app's dropzone goes to the space attachment route and gets an
+ * attachment back. What they SHARE is this shape -- an abortable promise --
+ * and it is the shape the whole progress / in-surface failure / retry UI is
+ * written against, so the alternative to a type parameter was a second copy of
+ * that UI beside a second copy of this interface.
+ *
+ * The parameter DEFAULTS to `UploadResult` so every existing spelling of
+ * `UploadHandle` still means what it did.
+ */
+export interface UploadHandle<T = UploadResult> {
+  done: Promise<T>;
   abort: () => void;
 }
 

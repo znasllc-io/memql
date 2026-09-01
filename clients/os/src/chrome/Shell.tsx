@@ -6,6 +6,7 @@ import { AskSheet } from "../ask/AskSheet";
 import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
+import { AuthSourceProvider } from "../auth/context";
 import type { OsAuthSource } from "../auth/source";
 import type { OsRuntimeConfig } from "../cluster/config";
 import { EdgeUploadProvider } from "../items/edgeUpload";
@@ -73,6 +74,12 @@ export function Shell({
 
   return (
     <SessionProvider value={{ access, config }}>
+      {/* The credential seam, reachable from inside an app. An app that
+          uploads somewhere the shell's own provider does not point at -- the
+          Training app posts to the space attachment route rather than to the
+          Library -- builds its own provider from this, and gets `bearer()`
+          rather than the token. */}
+      <AuthSourceProvider source={source}>
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
@@ -101,6 +108,7 @@ export function Shell({
           </ShellTransports>
         </MachinesProvider>
       </OsConnectionProvider>
+      </AuthSourceProvider>
     </SessionProvider>
   );
 }
