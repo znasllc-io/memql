@@ -605,6 +605,7 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 | **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | A CI job hands over an arbitrary tree of files -- unknown paths, count and content types -- which is what multipart exists to carry and a fixed protobuf schema does not (memql#3713). `component/edge.Publisher` makes it atomic: the bundle lands under a content-addressed version prefix and only then does the site row's `bundleRef` flip. Authorization is a `class="service_account"` JWT; declared in `HandlerAuthorizedPaths()`, never `PublicPaths()`. Served by the bff, never the edge |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US and will POST to a URL and nothing else (memql#2957). Deny-by-default source allowlist + per-source HMAC; `HandlerAuthorizedPaths()`. [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348); RFC 8058 is a contract with Gmail / Outlook / Yahoo. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` |
+| **Campaign open/click tracking** | `GET /t/o/{token}`, `GET /t/c/{token}` (bff only) | The same third party as `/unsubscribe`, one row above: the RECIPIENT'S MAIL CLIENT (memql#4823, owner-approved under program P3). A pixel is an `<img src>` a mail client fetches and a tracked link is one a reader follows -- neither has a gRPC form, and both are GETs because that is what the client will issue. Authorization is an HMAC over the same key ring the unsubscribe token uses under a DIFFERENT context string, so neither token verifies as the other. The click destination lives INSIDE the signed payload rather than in a query parameter, which is what makes the redirect open-redirect-proof. Neither ever shows a human a failure: the pixel always answers the 1x1 GIF and records only on a valid signature, and a bad click token renders the same "link is not valid" page an unknown-key unsubscribe link gets, never a 500 or a redirect. **The token must be a SINGLE PATH SEGMENT** -- `SelfAuthenticatedPaths()`' exemption is bounded to one segment under the mount, so a token containing `/` is 401'd before the handler runs (base64url or the dot-delimited unsubscribe shape; standard base64 is not safe here). `server.TrackingPaths()` -> `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`; the literals must agree with `campaigns.TrackingOpenPath` / `TrackingClickPath` or the front door routes a path no mail client fetches |
 | **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content`, plus the chunked-session family `POST /artifacts/uploads`, `GET /artifacts/uploads/{id}`, `PUT /artifacts/uploads/{id}/chunks/{n}`, `POST /artifacts/uploads/{id}/complete` (bff only) | Upload is the multipart reasoning already recorded for attachments (memql#4341, D1). The session family (memql#4782, owner-approved in that design session) is the same file-transfer exception grown production-grade: files past the one-shot threshold arrive as 16 MiB chunks staged against Azure block blobs -- replica-agnostic by construction, resumable via the inventory `GET`, verified at `complete` (staged bytes must equal the declared size) -- which is byte transport and exactly what HTTP is for. `GET .../content` STREAMS through the bff after re-resolving the row under the caller's actor, now honoring single-range `Range` (206) -- never a redirect, because there are no signed URLs here and a redirect would move authorization from the graph to whoever holds a URL. All are ordinary AUTHENTICATED routes, so they appear in none of the three aggregates; `server.ArtifactPaths()` routes them (the session paths live under the `/artifacts` prefix). Caps: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4 GiB, per file) and `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 100 GiB, per user) |
 
 ### The front door's HOST set is generated too (memql#3767)
@@ -2152,11 +2153,35 @@ weight that an undeclared-argument DISCARD hides.
 ### Email campaigns + the sending engine
 
 Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
-(memql#3348). Ten concepts under `dsl/campaigns/`: six operator-facing and
-owned-tier (`audience`, `recipient`, `template`, `campaign`, `delivery`,
-`consentEvent`), four engine-owned and clusterOwner-tier (`sendJob`,
-`suppression`, `reputationWindow`, `warmupState`). Runbook:
+(memql#3348). **Thirteen** concepts under `dsl/campaigns/`: nine
+operator-facing on the COMPOSITE tier `@rowAuthz(owner="ownerUserId",
+clusterOwner)` (`audience`, `recipient`, `template`, `senderIdentity`,
+`campaign`, `delivery`, `consentEvent`, `engagementEvent`, `emailRule`), four
+engine-owned and clusterOwner-tier (`sendJob`, `suppression`,
+`reputationWindow`, `warmupState`). Runbook:
 [campaign-sending.md](docs/public/operate/campaign-sending.md).
+
+**The composite tier is oversight, not sharing.** A cluster owner READS every
+operator's campaigns and drives the builtins on them (their gate is "can the
+caller read the campaign row") and CANNOT rewrite the rows -- the write guard
+ignores the second argument (memql#4312). A plain owner tier has no
+cluster-owner escape on the READ path, so operator oversight would not merely
+be unimplemented, it would not be EXPRESSIBLE, and every fleet-wide campaigns
+view would silently render one person's subset.
+
+**The account tie is a record, never a visibility scope** (accounts D1).
+`accountId` + a `forAccount` relationship on `campaign` / `audience` /
+`template` / `senderIdentity` / `emailRule`; recipients inherit through their
+audience; `campaignsForAccount` is the rollup. **No query narrows a read
+because of it.** Requiring one at create is APP behaviour, not schema.
+
+**A `senderIdentity` is a mailbox declaration with NO secret material.**
+Authentication stays the cluster's one Graph credential. Resolution is
+`campaign.senderIdentityId` -> else the env default, and **the engine never
+infers an identity from `accountId`** -- prefill is UX, resolution is
+explicit. A missing or `disabled` identity is REFUSED, never defaulted: a
+silent fallback mails a client's list from the wrong mailbox under the wrong
+SPF/DKIM and the send looks successful.
 
 **The two identities is the design.** A send touches rows belonging to somebody
 else, and the engine BORROWS the owner's authority rather than out-ranking it:
@@ -2194,11 +2219,50 @@ NOT a migration window: unsubscribe links never expire, so **the window is
 counted in rotations, not days** -- rotate at most once for any reason short of
 key compromise.
 
+**Open/click tracking rides the SAME key ring under a different context
+string**, so an unsubscribe token can never verify as a tracking one or the
+reverse. `GET /t/o/{token}` and `GET /t/c/{token}` are owner-approved HTTP
+exceptions for the `/unsubscribe` reason (the mail client dictates the wire);
+the destination URL is INSIDE the signed payload rather than in a query
+parameter, which is what makes the redirect open-redirect-proof. The token
+must be a SINGLE PATH SEGMENT -- the self-authenticated exemption is bounded
+to one segment under the mount, so a token containing `/` is 401'd before the
+handler runs. Hits land on `v1:campaigns:engagementEvent`, unique by DELIVERY
+rather than by address.
+
+**Two figures `campaignStats` refuses to invent.** A unique open/click count
+folded from a bounded read that came back AT its bound reports `unmeasured`
+rather than a floor dressed as a total; there is no per-campaign soft-bounce
+figure at all, because nothing measures one. An absent figure and a zero are
+different answers.
+
+**An event-email rule is a FORM; a generated authored automation is the
+MECHANISM** (memql#4829). `v1:campaigns:emailRule` is what the app lists and
+edits; `campaignActivateEmailRule` renders a construct DETERMINISTICALLY from
+it (the LLM `authoringEmit` path stays off) and arms it through the runtime
+authoring pipeline. A shipped automation plus a lookup table cannot express
+this: an automation's `@trigger` names ONE concept at load time. **Two lanes,
+chosen by who receives** -- cluster roles ride `stageOutboundRequest`
+(allowlist, no unsubscribe, suppression NEITHER consulted nor written);
+audience and row-address recipients ride `campaignSendToRecipient`. **The
+actor trap applies:** the generated construct runs under `AuthorContext`
+(the author's userId, role writer, origin CLIENT), so owned rows are the
+author's or invisible, no `@serverOnly` construct is reachable, and
+cluster-wide questions must be asked from Go.
+
 The scheduler (`campaignScheduleSend`), the evidence-driven warming ramp, and
 bounce/complaint feedback ingestion are all built -- the runbook is current.
-The multi-account campaigns program (account ties, per-account sender
-identities, import, stats, tracking, the OS app, event emails) is specced in
-[2026-09-01-email-campaigns-program-design.md](docs/superpowers/specs/2026-09-01-email-campaigns-program-design.md).
+On Graph, nothing dials us: the mailbox reader
+(`MEMQL_EMAIL_NDR_POLL_SECONDS`) stages DSNs from the sending mailbox, and
+they are acted on only once `graph-mailbox=rfc3464` is in
+`MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`. The multi-account campaigns program is
+specced in
+[2026-09-01-email-campaigns-program-design.md](docs/superpowers/specs/2026-09-01-email-campaigns-program-design.md),
+with a record per sub-project:
+[the campaigns backend](docs/superpowers/specs/2026-09-01-campaigns-backend-design.md),
+[integration config](docs/superpowers/specs/2026-09-01-integration-config-design.md),
+[the Campaigns OS app](docs/superpowers/specs/2026-09-01-campaigns-os-app-design.md),
+[event emails](docs/superpowers/specs/2026-09-01-event-emails-design.md).
 
 ### Planner / Knowledge / Validation
 
